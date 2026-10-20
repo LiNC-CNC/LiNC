@@ -333,6 +333,8 @@ Program rules:
 - Current axis values and distance-to-go.
 - Read-only while running; blocked when program protect is active.
 - Edits validated against LinuxCNC limits and units.
+- A `PROBE` action opens the Touch Probe page; probing results can update the
+  selected work offset only after an explicit `APPLY RESULT`.
 
 ### 6.4 Tools
 
@@ -412,7 +414,36 @@ previous page.
   loaded program.
 - Delete, rename, format and folder-copy are intentionally out of scope for v1.
 
-### 6.8 Settings
+### 6.8 Touch Probe
+
+Mill-variant interface for touch probing, opened from Offsets. It reuses the
+existing Probe Basic G-code subroutines and math; the HMI is a parameter/result
+front-end, not a reimplementation.
+
+- Routine groups: edge (X±, Y±, Z surface), corner (outside/inside, edge angle),
+  pocket/boss (round/rect), ridge/valley (X/Y), and calibration
+  (round/square, reset).
+- Parameters mirror `touch_probe_param_update.ngc`: probe tool number,
+  fast/slow/traverse feed, max XY/Z distance, XY/Z clearance, extra depth, step
+  off width, edge width, diameter hints, probe mode, WCS rotation, calibration
+  offset/diameter and square-calibration axis.
+- Work-offset selector G54–G59. `MEASURE ONLY` must be available in addition to
+  applying the result to the selected offset.
+- `PREPARE MDI` builds/queues the selected `o<probe_...> call` and its argument
+  values. It does not move the machine. The operator must press the physical
+  CYCLE START key.
+- Probe motion requires: MDI mode, homed axes, probe tool T99 in the spindle,
+  no active program, and valid parameters. Errors keep the previous result and
+  show the failing condition.
+- Read results from the subroutine outputs (`#1001`–`#1009`) and show measured
+  value, error, selected WCS, and history.
+- `APPLY RESULT` writes the selected work offset only when idle and program
+  protect is off. Calibration routines update the probe calibration offset;
+  `RESET CAL` clears it through `probe_cal_reset.ngc`.
+- The page has no cycle-start, jog, override or E-stop controls. The physical
+  panel remains the only motion command source.
+
+### 6.9 Settings
 
 - Theme/units/display density.
 - Keyboard reference.
@@ -491,6 +522,7 @@ Implementation:
 - `WIN`: Diagnostics.
 - `HELP` action: G-code Help; no dedicated function key.
 - `LOAD` / `Ctrl+O`: Files, when idle and allowed.
+- `PROBE` action: Touch Probe from Offsets; prepare only, never start motion.
 - `ESC`: back/cancel; on Help, clear search or return from detail history.
 - Arrows: focus/list/scroll.
 - `/`: focus G-code Help search when Help is active.
@@ -587,6 +619,8 @@ serial counters and raw bitmaps; those must be added for Diagnostics.
 - A software E-stop button is forbidden.
 - No direct HAL writes for machine actions; use LinuxCNC commands/halui.
 - Validate mode/state before MDI and program/offset/tool writes.
+- Probing routines are prepared as MDI; only the physical CYCLE START key may
+  start probe motion. Never auto-start a probe routine.
 - Respect program protect and running state.
 - Do not hide alarms behind tabs; persistent banner plus Diagnostics.
 - HMI crash must not stop the machine or remove panel control.
@@ -604,6 +638,9 @@ For this design repository:
 - Mill layout supports a 3-axis default and optional 4/5-axis expansion.
 - Lathe layout represents X/Z, optional C/Y, live tooling and a power turret.
 - The simulation-only SZGH-1080 panel is represented separately from the HMI.
+- The Touch Probe screen represents routine selection, WCS/parameters,
+  prepared-MDI state, results/apply and calibration without a software
+  cycle-start control.
 - Hardware constraints for the QMK keyboard and SZGH panel are documented.
 - No SVG shows an on-screen machine control panel.
 - G-code mockups show token-level syntax highlighting.
@@ -685,6 +722,11 @@ For the future implementation:
     validate optional-axis hiding at runtime.
 22. Add a lathe-specific simulator panel mockup with turret/live-tool controls;
     `svg/sim-panel.svg` is the mill SZGH-1080 panel.
+23. Port the Probe Basic parameter contract (`#3014`–`#3036`) and result contract
+    (`#1001`–`#1009`), map every routine to its G-code call, and verify that
+    HMI-prepared MDI runs only after physical CYCLE START.
+24. Decide lathe touch-probe/tool-setter support separately; the first Touch
+    Probe page is mill-oriented (X/Y/Z and WCS).
 
 ## 14. Accepted SVG manifest
 
@@ -699,6 +741,7 @@ Only the accepted versions are included.
 | `svg/gcode-help.svg` | G-code Help: offline quick-reference index, code search, detail pane, parameter tables, figures and related codes |
 | `svg/files.svg` | Files: USB and `NC_FILES` panes, mount/eject status, file listing and explicit copy/load actions |
 | `svg/lathe-dashboard.svg` | Lathe dashboard: X/Z/C/Y cards, XZ toolpath, power turret/live-tool card, spindle load and machine health |
+| `svg/probe.svg` | Touch Probe: routine list, probe diagram, WCS/parameters, prepared-MDI state, result/apply and calibration |
 | `svg/sim-panel.svg` | Simulation-only SZGH-1080 panel window: power, E-stop, mode, overrides, lamps, displays and key matrix |
 
 Superseded vendor-style studies, intermediate layout explorations, and

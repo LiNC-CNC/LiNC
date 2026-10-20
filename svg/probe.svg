@@ -1,0 +1,231 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640">
+  <rect x="4" y="4" width="992" height="632" rx="8" fill="none" stroke="var(--border)"/>
+
+  <!-- Top status -->
+  <line x1="4" y1="54" x2="996" y2="54" stroke="var(--border)"/>
+  <text x="16" y="33" fill="var(--fg)" font-size="16" font-family="sans-serif" font-weight="700">VMC-01</text>
+  <rect x="92" y="12" width="66" height="26" rx="4" fill="var(--accent)"/>
+  <text x="104" y="30" fill="var(--surface)" font-size="12" font-family="monospace" font-weight="700">MDI</text>
+  <text x="176" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">PROGRAM</text>
+  <text x="176" y="34" fill="var(--fg)" font-size="13" font-family="monospace">PROBE</text>
+  <text x="246" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">TOOL</text>
+  <text x="246" y="34" fill="var(--fg)" font-size="13" font-family="monospace">T99</text>
+  <text x="300" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">PROBE</text>
+  <text x="300" y="34" fill="var(--success)" font-size="13" font-family="monospace">READY</text>
+  <text x="390" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">WCS</text>
+  <text x="390" y="34" fill="var(--fg)" font-size="13" font-family="monospace">G54</text>
+  <circle cx="460" cy="24" r="4" fill="var(--success)"/>
+  <text x="472" y="29" fill="var(--success)" font-size="11" font-family="sans-serif" font-weight="700">PANEL ONLINE</text>
+  <circle cx="600" cy="24" r="4" fill="var(--success)"/>
+  <text x="612" y="29" fill="var(--fg)" font-size="11" font-family="monospace">ALARM 0</text>
+  <rect x="700" y="12" width="182" height="26" rx="4" fill="var(--warning)" opacity="0.18"/>
+  <text x="712" y="29" fill="var(--warning)" font-size="9" font-family="sans-serif" font-weight="700">PREPARE MDI - START ON PANEL</text>
+  <text x="906" y="30" fill="var(--muted)" font-size="12" font-family="monospace">14:32:05</text>
+
+  <!-- Left navigation -->
+  <rect x="8" y="62" width="142" height="508" rx="6" fill="var(--surface)" stroke="var(--border)"/>
+  <rect x="20" y="88" width="20" height="20" rx="3" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
+  <line x1="24" y1="98" x2="36" y2="98" stroke="var(--muted)" stroke-width="1.6"/>
+  <circle cx="30" cy="94" r="3" fill="none" stroke="var(--muted)" stroke-width="1.4"/>
+  <text x="48" y="96" fill="var(--muted)" font-size="12" font-family="sans-serif">MACHINE</text>
+  <text x="48" y="112" fill="var(--muted)" font-size="9" font-family="monospace">MAIN</text>
+
+  <rect x="20" y="132" width="18" height="20" rx="2" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
+  <line x1="24" y1="138" x2="34" y2="138" stroke="var(--muted)" stroke-width="1.2"/>
+  <line x1="24" y1="143" x2="34" y2="143" stroke="var(--muted)" stroke-width="1.2"/>
+  <line x1="24" y1="148" x2="31" y2="148" stroke="var(--muted)" stroke-width="1.2"/>
+  <text x="48" y="147" fill="var(--muted)" font-size="12" font-family="sans-serif">PROGRAM</text>
+  <text x="48" y="163" fill="var(--muted)" font-size="9" font-family="monospace">FILE</text>
+
+  <rect x="8" y="180" width="4" height="42" fill="var(--accent)"/>
+  <circle cx="29" cy="194" r="9" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+  <line x1="29" y1="180" x2="29" y2="185" stroke="var(--accent)" stroke-width="1.4"/>
+  <line x1="29" y1="203" x2="29" y2="208" stroke="var(--accent)" stroke-width="1.4"/>
+  <line x1="15" y1="194" x2="20" y2="194" stroke="var(--accent)" stroke-width="1.4"/>
+  <line x1="38" y1="194" x2="43" y2="194" stroke="var(--accent)" stroke-width="1.4"/>
+  <text x="48" y="198" fill="var(--accent)" font-size="12" font-family="sans-serif" font-weight="700">OFFSETS</text>
+  <text x="48" y="214" fill="var(--muted)" font-size="9" font-family="monospace">PROBE</text>
+
+  <path d="M20 250 L28 250 L31 244 L34 256 L38 238 L42 250 L48 250" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
+  <text x="56" y="251" fill="var(--muted)" font-size="12" font-family="sans-serif">TOOLS</text>
+  <text x="56" y="267" fill="var(--muted)" font-size="9" font-family="monospace">TOOL</text>
+
+  <path d="M20 306 L20 300 L25 300 L25 312 L37 312 L37 306 L43 306" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
+  <text x="52" y="310" fill="var(--muted)" font-size="12" font-family="sans-serif">DIAGNOSTICS</text>
+  <text x="52" y="326" fill="var(--muted)" font-size="9" font-family="monospace">WIN</text>
+
+  <line x1="20" y1="350" x2="138" y2="350" stroke="var(--border)"/>
+  <text x="20" y="374" fill="var(--muted)" font-size="9" font-family="sans-serif">FOCUS / NAVIGATION</text>
+  <text x="20" y="394" fill="var(--muted)" font-size="9" font-family="monospace">ARROWS MOVE</text>
+  <text x="20" y="410" fill="var(--muted)" font-size="9" font-family="monospace">ENTER SELECT</text>
+  <text x="20" y="426" fill="var(--muted)" font-size="9" font-family="monospace">ESC BACK</text>
+  <text x="20" y="442" fill="var(--muted)" font-size="9" font-family="monospace">PGUP / PGDN</text>
+  <text x="20" y="458" fill="var(--muted)" font-size="9" font-family="monospace">HOME / END</text>
+  <text x="20" y="486" fill="var(--muted)" font-size="9" font-family="sans-serif">CYCLE START</text>
+  <text x="20" y="502" fill="var(--warning)" font-size="9" font-family="monospace">PHYSICAL ONLY</text>
+  <text x="20" y="530" fill="var(--muted)" font-size="9" font-family="sans-serif">NO ON-SCREEN</text>
+  <text x="20" y="544" fill="var(--muted)" font-size="9" font-family="sans-serif">MACHINE CONTROLS</text>
+
+  <!-- Header -->
+  <text x="158" y="78" fill="var(--fg)" font-size="15" font-family="sans-serif" font-weight="700">TOUCH PROBE</text>
+  <text x="276" y="78" fill="var(--muted)" font-size="10" font-family="monospace">G38.2 / LINUXCNC SUBROUTINES</text>
+  <text x="700" y="78" fill="var(--success)" font-size="9" font-family="monospace">PROBE INPUT READY</text>
+  <text x="840" y="78" fill="var(--warning)" font-size="9" font-family="monospace">START ON PANEL</text>
+  <line x1="158" y1="90" x2="984" y2="90" stroke="var(--border)"/>
+
+  <!-- Routine list -->
+  <rect x="158" y="98" width="230" height="460" rx="5" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="170" y="120" fill="var(--fg)" font-size="11" font-family="sans-serif" font-weight="700">ROUTINES</text>
+  <line x1="170" y1="130" x2="376" y2="130" stroke="var(--border)"/>
+  <text x="170" y="148" fill="var(--muted)" font-size="8" font-family="sans-serif" font-weight="700">EDGE</text>
+  <rect x="164" y="156" width="218" height="24" fill="var(--accent)" opacity="0.16"/>
+  <rect x="164" y="156" width="3" height="24" fill="var(--accent)"/>
+  <text x="174" y="172" fill="var(--accent)" font-size="10" font-family="monospace" font-weight="700">X+ EDGE</text>
+  <text x="320" y="172" fill="var(--muted)" font-size="9" font-family="monospace">G54 X</text>
+  <text x="174" y="194" fill="var(--fg)" font-size="10" font-family="monospace">X- EDGE</text>
+  <text x="174" y="214" fill="var(--fg)" font-size="10" font-family="monospace">Y+ EDGE</text>
+  <text x="174" y="234" fill="var(--fg)" font-size="10" font-family="monospace">Y- EDGE</text>
+  <text x="174" y="254" fill="var(--fg)" font-size="10" font-family="monospace">Z- SURFACE</text>
+
+  <text x="170" y="278" fill="var(--muted)" font-size="8" font-family="sans-serif" font-weight="700">CORNER</text>
+  <text x="174" y="296" fill="var(--fg)" font-size="10" font-family="monospace">FRONT LEFT TOP</text>
+  <text x="174" y="316" fill="var(--fg)" font-size="10" font-family="monospace">FRONT RIGHT TOP</text>
+  <text x="174" y="336" fill="var(--fg)" font-size="10" font-family="monospace">BACK LEFT TOP</text>
+  <text x="174" y="356" fill="var(--fg)" font-size="10" font-family="monospace">BACK RIGHT TOP</text>
+  <text x="174" y="376" fill="var(--fg)" font-size="10" font-family="monospace">INSIDE CORNERS</text>
+
+  <text x="170" y="400" fill="var(--muted)" font-size="8" font-family="sans-serif" font-weight="700">POCKET / BOSS</text>
+  <text x="174" y="418" fill="var(--fg)" font-size="10" font-family="monospace">ROUND BOSS</text>
+  <text x="174" y="438" fill="var(--fg)" font-size="10" font-family="monospace">ROUND POCKET</text>
+  <text x="174" y="458" fill="var(--fg)" font-size="10" font-family="monospace">RECT BOSS</text>
+  <text x="174" y="478" fill="var(--fg)" font-size="10" font-family="monospace">RECT POCKET</text>
+
+  <text x="170" y="502" fill="var(--muted)" font-size="8" font-family="sans-serif" font-weight="700">CALIBRATION</text>
+  <text x="174" y="520" fill="var(--fg)" font-size="10" font-family="monospace">ROUND BOSS CAL</text>
+  <text x="174" y="540" fill="var(--fg)" font-size="10" font-family="monospace">SQUARE POCKET CAL</text>
+  <rect x="372" y="140" width="4" height="380" rx="2" fill="var(--border)"/>
+  <rect x="372" y="140" width="4" height="96" rx="2" fill="var(--muted)"/>
+
+  <!-- Routine detail -->
+  <rect x="398" y="98" width="366" height="460" rx="5" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="410" y="120" fill="var(--fg)" font-size="11" font-family="sans-serif" font-weight="700">X+ EDGE</text>
+  <text x="480" y="120" fill="var(--muted)" font-size="9" font-family="monospace">PROBE X+ / SET G54 X</text>
+  <line x1="410" y1="130" x2="752" y2="130" stroke="var(--border)"/>
+
+  <!-- probe diagram -->
+  <rect x="410" y="142" width="342" height="150" rx="4" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="422" y="160" fill="var(--muted)" font-size="8" font-family="monospace">APPROACH / X+</text>
+  <rect x="520" y="214" width="190" height="58" fill="var(--surface)" fill-opacity="0.35" stroke="var(--border)"/>
+  <rect x="520" y="214" width="190" height="58" fill="none" stroke="var(--muted)" stroke-dasharray="3 3"/>
+  <line x1="520" y1="244" x2="450" y2="244" stroke="var(--accent)" stroke-width="2"/>
+  <path d="M466 232 L450 244 L466 256" fill="none" stroke="var(--accent)" stroke-width="2"/>
+  <rect x="456" y="198" width="18" height="40" rx="4" fill="var(--surface)" stroke="var(--warning)" stroke-width="2"/>
+  <path d="M465 238 L465 252 L459 260 L471 260 Z" fill="none" stroke="var(--warning)" stroke-width="1.5"/>
+  <text x="430" y="206" fill="var(--warning)" font-size="8" font-family="monospace">T99</text>
+  <text x="530" y="236" fill="var(--muted)" font-size="8" font-family="monospace">WORKPIECE</text>
+  <text x="530" y="250" fill="var(--muted)" font-size="8" font-family="monospace">EDGE X+</text>
+  <text x="612" y="290" fill="var(--muted)" font-size="8" font-family="monospace">PROBE &#216;4.000</text>
+
+  <!-- WCS -->
+  <text x="410" y="314" fill="var(--muted)" font-size="8" font-family="sans-serif" font-weight="700">WORK OFFSET</text>
+  <rect x="410" y="322" width="44" height="22" rx="3" fill="var(--accent)"/>
+  <text x="422" y="337" fill="var(--surface)" font-size="9" font-family="monospace" font-weight="700">G54</text>
+  <text x="464" y="337" fill="var(--muted)" font-size="9" font-family="monospace">G55</text>
+  <text x="500" y="337" fill="var(--muted)" font-size="9" font-family="monospace">G56</text>
+  <text x="536" y="337" fill="var(--muted)" font-size="9" font-family="monospace">G57</text>
+  <text x="572" y="337" fill="var(--muted)" font-size="9" font-family="monospace">G58</text>
+  <text x="608" y="337" fill="var(--muted)" font-size="9" font-family="monospace">G59</text>
+
+  <!-- parameters -->
+  <text x="410" y="366" fill="var(--muted)" font-size="8" font-family="sans-serif" font-weight="700">PROBE PARAMETERS</text>
+  <text x="410" y="384" fill="var(--muted)" font-size="9" font-family="monospace">CLEARANCE</text>
+  <rect x="510" y="372" width="92" height="20" rx="3" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="518" y="386" fill="var(--fg)" font-size="9" font-family="monospace">5.000 mm</text>
+  <text x="614" y="384" fill="var(--muted)" font-size="9" font-family="monospace">DEPTH</text>
+  <rect x="662" y="372" width="90" height="20" rx="3" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="670" y="386" fill="var(--fg)" font-size="9" font-family="monospace">10.000 mm</text>
+
+  <text x="410" y="410" fill="var(--muted)" font-size="9" font-family="monospace">FAST FEED</text>
+  <rect x="510" y="398" width="92" height="20" rx="3" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="518" y="412" fill="var(--fg)" font-size="9" font-family="monospace">500 mm/min</text>
+  <text x="614" y="410" fill="var(--muted)" font-size="9" font-family="monospace">SLOW</text>
+  <rect x="662" y="398" width="90" height="20" rx="3" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="670" y="412" fill="var(--fg)" font-size="9" font-family="monospace">50 mm/min</text>
+
+  <text x="410" y="436" fill="var(--muted)" font-size="9" font-family="monospace">PROBE &#216;</text>
+  <rect x="510" y="424" width="92" height="20" rx="3" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="518" y="438" fill="var(--fg)" font-size="9" font-family="monospace">4.000 mm</text>
+  <text x="614" y="436" fill="var(--muted)" font-size="9" font-family="monospace">EXTRA DEPTH</text>
+  <rect x="662" y="424" width="90" height="20" rx="3" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="670" y="438" fill="var(--fg)" font-size="9" font-family="monospace">0.000 mm</text>
+
+  <text x="410" y="462" fill="var(--muted)" font-size="9" font-family="monospace">CAL OFFSET</text>
+  <rect x="510" y="450" width="92" height="20" rx="3" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="518" y="464" fill="var(--fg)" font-size="9" font-family="monospace">0.000 mm</text>
+  <text x="614" y="462" fill="var(--muted)" font-size="9" font-family="monospace">MAX TRAVEL</text>
+  <rect x="662" y="450" width="90" height="20" rx="3" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="670" y="464" fill="var(--fg)" font-size="9" font-family="monospace">10.000 mm</text>
+
+  <rect x="410" y="486" width="156" height="28" rx="4" fill="var(--accent)"/>
+  <text x="424" y="504" fill="var(--surface)" font-size="10" font-family="sans-serif" font-weight="700">PREPARE MDI</text>
+  <text x="582" y="504" fill="var(--muted)" font-size="9" font-family="monospace">CANCEL</text>
+  <text x="410" y="530" fill="var(--warning)" font-size="9" font-family="sans-serif">Press physical CYCLE START to run. No motion from this button.</text>
+  <text x="410" y="546" fill="var(--muted)" font-size="8" font-family="monospace">Requires MDI mode, homed axes, probe tool T99, no active program.</text>
+
+  <!-- Result / status -->
+  <rect x="776" y="98" width="208" height="460" rx="5" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="788" y="120" fill="var(--fg)" font-size="11" font-family="sans-serif" font-weight="700">PROBE STATUS</text>
+  <line x1="788" y1="130" x2="972" y2="130" stroke="var(--border)"/>
+  <circle cx="792" cy="148" r="4" fill="var(--success)"/>
+  <text x="802" y="152" fill="var(--success)" font-size="9" font-family="monospace">INPUT READY</text>
+  <text x="788" y="172" fill="var(--muted)" font-size="9" font-family="sans-serif">TOOL</text>
+  <text x="838" y="172" fill="var(--fg)" font-size="10" font-family="monospace">T99 / PROBE</text>
+  <text x="788" y="192" fill="var(--muted)" font-size="9" font-family="sans-serif">WCS</text>
+  <text x="838" y="192" fill="var(--fg)" font-size="10" font-family="monospace">G54</text>
+
+  <line x1="788" y1="206" x2="972" y2="206" stroke="var(--border)"/>
+  <text x="788" y="226" fill="var(--muted)" font-size="9" font-family="sans-serif">LAST RESULT</text>
+  <text x="788" y="246" fill="var(--fg)" font-size="18" font-family="monospace" font-weight="700">X +12.345</text>
+  <text x="788" y="262" fill="var(--muted)" font-size="9" font-family="monospace">ERR 0.002 / G54 X</text>
+  <rect x="788" y="274" width="168" height="24" rx="3" fill="var(--surface)" stroke="var(--accent)"/>
+  <text x="804" y="290" fill="var(--accent)" font-size="9" font-family="monospace" font-weight="700">APPLY RESULT</text>
+
+  <line x1="788" y1="310" x2="972" y2="310" stroke="var(--border)"/>
+  <text x="788" y="330" fill="var(--muted)" font-size="9" font-family="sans-serif">CALIBRATION</text>
+  <text x="788" y="348" fill="var(--fg)" font-size="9" font-family="monospace">TIP &#216; 4.000 mm</text>
+  <text x="788" y="364" fill="var(--fg)" font-size="9" font-family="monospace">CAL OFFSET 0.000</text>
+  <text x="788" y="380" fill="var(--muted)" font-size="9" font-family="monospace">LAST CAL 10-18 16:02</text>
+
+  <line x1="788" y1="394" x2="972" y2="394" stroke="var(--border)"/>
+  <text x="788" y="414" fill="var(--muted)" font-size="9" font-family="sans-serif">HISTORY</text>
+  <text x="788" y="432" fill="var(--muted)" font-size="8" font-family="monospace">X+ EDGE  +12.345  0.002</text>
+  <text x="788" y="448" fill="var(--muted)" font-size="8" font-family="monospace">Z- SURF   -45.670  0.001</text>
+  <text x="788" y="464" fill="var(--muted)" font-size="8" font-family="monospace">ROUND BOSS  O20.004 0.003</text>
+  <text x="788" y="480" fill="var(--muted)" font-size="8" font-family="monospace">Y- EDGE  -78.900  0.002</text>
+
+  <text x="788" y="510" fill="var(--muted)" font-size="8" font-family="monospace">RESULTS FROM #1001-#1009</text>
+  <text x="788" y="526" fill="var(--muted)" font-size="8" font-family="monospace">APPLY ONLY WHEN IDLE</text>
+  <text x="788" y="542" fill="var(--muted)" font-size="8" font-family="monospace">PROBE PROTECT / T99 CHECK</text>
+
+  <!-- Bottom action bar -->
+  <line x1="4" y1="578" x2="996" y2="578" stroke="var(--border)"/>
+  <text x="16" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ESC BACK</text>
+  <text x="92" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ARROWS</text>
+  <text x="154" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ENTER SELECT</text>
+  <line x1="250" y1="584" x2="250" y2="606" stroke="var(--border)"/>
+  <rect x="266" y="584" width="104" height="22" rx="3" fill="var(--accent)"/>
+  <text x="278" y="599" fill="var(--surface)" font-size="9" font-family="monospace" font-weight="700">PREPARE MDI</text>
+  <text x="384" y="599" fill="var(--muted)" font-size="9" font-family="monospace">APPLY</text>
+  <text x="440" y="599" fill="var(--muted)" font-size="9" font-family="monospace">CALIBRATE</text>
+  <text x="520" y="599" fill="var(--muted)" font-size="9" font-family="monospace">HELP</text>
+  <text x="720" y="599" fill="var(--warning)" font-size="9" font-family="monospace">CYCLE START = PHYSICAL PANEL</text>
+
+  <!-- Status line -->
+  <line x1="4" y1="612" x2="996" y2="612" stroke="var(--border)"/>
+  <text x="16" y="628" fill="var(--muted)" font-size="9" font-family="monospace">PROBE T99 READY  G54  MDI  NO PROGRAM</text>
+  <text x="390" y="628" fill="var(--muted)" font-size="9" font-family="monospace">ROUTINE PREPARED / NOT RUN</text>
+  <text x="610" y="628" fill="var(--success)" font-size="9" font-family="monospace">PROTECT OFF</text>
+  <text x="700" y="628" fill="var(--success)" font-size="9" font-family="monospace">E-STOP OK</text>
+  <text x="790" y="628" fill="var(--success)" font-size="9" font-family="monospace">ALARM 0</text>
+  <text x="900" y="628" fill="var(--muted)" font-size="9" font-family="monospace">14:32:05</text>
+</svg>

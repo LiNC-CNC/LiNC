@@ -40,6 +40,21 @@ load_extensions = [".ngc", ".nc", ".tap", ".txt"]
 overwrite = "confirm"
 copy_while_running = false
 
+[probe]
+enabled = true
+tool_number = 99
+wcs = "G54"
+# Use the LinuxCNC INI SUBROUTINE_PATH; do not duplicate it here.
+subroutines = "ini"
+clearance = 5.0
+probe_depth = 10.0
+fast_feed = 500.0
+slow_feed = 50.0
+probe_diameter = 4.0
+max_travel = 10.0
+calibration_diameter = 50.0
+prepare_only = true
+
 [toolpath]
 show_grid = false
 show_program_bounds = true

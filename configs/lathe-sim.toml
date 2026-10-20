@@ -15,6 +15,9 @@ kind = "sim"
 gui = "lathe"
 linuxcnc_ini = "../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini"
 
+[probe]
+enabled = false
+
 [lathe]
 turret_stations = 12
 power_turret = true
