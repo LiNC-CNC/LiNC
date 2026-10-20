@@ -18,7 +18,7 @@ linuxcnc_ini = "../../baiermill_sim/probe_basic.ini"
 max_axes = 5
 
 [ui]
-window_title = "CNC HMI - BaierMill Simulation"
+window_title = "LiNC - BaierMill Simulation"
 
 [panel]
 kind = "simulated"

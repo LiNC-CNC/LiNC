@@ -1,7 +1,7 @@
-# HMI Configuration
+# LiNC Configuration
 
-Status: design contract for the Rust HMI. The HMI binary and its loader do not
-exist yet; these profiles define how they must behave.
+Status: design contract for LiNC. The `linc` binary and its loader do not exist
+yet; these profiles define how they must behave.
 
 ## 1. Rules
 
@@ -18,7 +18,7 @@ exist yet; these profiles define how they must behave.
 5. **Safety policy is not a preference.** A profile cannot enable software
    E-stop, cycle control, jog, spindle, coolant or overrides.
 6. **User preferences are separate.** Window geometry, last page, view angle
-   and recent files live under `~/.config/cnc-hmi/`, not in the machine profile.
+   and recent files live under `~/.config/linc/`, not in the machine profile.
 7. **Unknown keys are errors.** This catches typos and prevents a machine
    profile from silently not applying a setting.
 
@@ -47,11 +47,11 @@ profile are resolved relative to that profile file; `~` is expanded.
 Intended command line:
 
 ```sh
-cnc-hmi --config configs/sim.toml
-cnc-hmi --config configs/baiermill.toml
+linc --config configs/sim.toml
+linc --config configs/baiermill.toml
 ```
 
-`--config` or the `CNC_HMI_CONFIG` environment variable is required. There is
+`--config` or the `LINC_CONFIG` environment variable is required. There is
 no default profile: starting with the real machine selected by accident is
 worse than printing a usage error.
 
@@ -67,17 +67,17 @@ Real machine:
 
 ```ini
 [DISPLAY]
-DISPLAY = cnc-hmi --config /home/jack/CNC/cnc-hmi-design/configs/baiermill.toml
+DISPLAY = linc --config /home/jack/CNC/LiNC/configs/baiermill.toml
 ```
 
 Simulation:
 
 ```ini
 [DISPLAY]
-DISPLAY = cnc-hmi --config /home/jack/CNC/cnc-hmi-design/configs/sim.toml
+DISPLAY = linc --config /home/jack/CNC/LiNC/configs/sim.toml
 ```
 
-Do not change the existing `probe_basic.ini` until the `cnc-hmi` executable is
+Do not change the existing `probe_basic.ini` until the `linc` executable is
 installed; Probe Basic remains the current display.
 
 ## 4. Merge and validation contract
@@ -179,7 +179,7 @@ and ATC values as the machine; only the HAL stack and paths differ.
 Launch:
 
 ```sh
-cnc-hmi --config configs/sim.toml
+linc --config configs/sim.toml
 ```
 
 This profile must never be used to command real hardware.
@@ -204,7 +204,7 @@ This profile must never be used to command real hardware.
 Launch:
 
 ```sh
-cnc-hmi --config configs/baiermill.toml
+linc --config configs/baiermill.toml
 ```
 
 ## 8. Safety policy
@@ -239,7 +239,7 @@ not quit while the machine is moving or a program is running.
 Runtime UI state is stored separately:
 
 ```text
-~/.config/cnc-hmi/<profile>.preferences.toml
+~/.config/linc/<profile>.preferences.toml
 ```
 
 Allowed preference keys include window geometry, last page, program view,
@@ -318,7 +318,7 @@ For this design repository:
 
 ## 12. Open issues
 
-1. The `cnc-hmi` binary and config loader do not exist yet. `--check-config`
+1. The `linc` binary and config loader do not exist yet. `--check-config`
    and the merge rules in this document are the implementation contract.
 2. The panel driver currently hard-codes `/dev/ttyUSB0` and gets its cycle time
    from `hallib/szgh_panel.hal` (`-c 0.01`). The profile's `[panel.link]`

@@ -1,4 +1,4 @@
-# Shared defaults for all CNC HMI machine profiles.
+# Shared defaults for all LiNC machine profiles.
 #
 # Do not launch the HMI with this file directly. It has no machine profile.
 # A machine profile loads this file via `extends` and then overrides fields.
@@ -12,7 +12,7 @@ schema_version = 1
 [ui]
 theme = "graphite-blue"
 start_page = "machine"
-window_title = "CNC HMI"
+window_title = "LiNC"
 scale = "auto"
 axis_order = ["X", "Y", "Z"]
 pages = ["machine", "program", "offsets", "tools", "diagnostics", "help"]
@@ -172,7 +172,7 @@ read_only = true
 [preferences]
 # Runtime-only UI state lives here, never in the machine profile.
 # {profile} expands to the selected profile name.
-file = "~/.config/cnc-hmi/{profile}.preferences.toml"
+file = "~/.config/linc/{profile}.preferences.toml"
 
 [diagnostics]
 event_log_capacity = 1000

@@ -1,4 +1,4 @@
-# CNC HMI Specification
+# LiNC Specification
 
 Status: design reference  
 Scope: Rust `egui` HMI for LinuxCNC with SZGH-1080 physical panel and QMK CNC keyboard  
@@ -8,7 +8,7 @@ Canonical visual: `svg/machine-dashboard.svg`
 
 ## 1. Goals
 
-Build a focused, operator-grade CNC HMI that:
+Build LiNC, a focused, operator-grade HMI that:
 
 - puts all machine control on the **physical SZGH panel**
 - uses the **QMK CNC keyboard** for text entry, navigation, and screen selection
@@ -103,7 +103,7 @@ Panel ownership rules:
 - The panel component and HMI are separate processes. The HMI crashing must not
   remove the panel's ability to stop the machine.
 - Existing HAL glue must be migrated from `qtpyvcp.*` pins to `halui` and/or a
-  small `cnc_hmi` HAL component.
+  small `linc` HAL component.
 
 Special cases:
 
@@ -141,31 +141,31 @@ Allowed on screen:
 
 ```text
 SZGH panel --RS-485--> szgh-panel-hal (Rust HAL component) --> HAL --> halui/LinuxCNC
-QMK keyboard --USB--> cnchmi (Rust egui) --NML or PyO3--> LinuxCNC
-LinuxCNC status --------------------------------> cnchmi
-szgh_panel.* HAL pins ---------------------------> cnchmi (read-only)
+QMK keyboard --USB--> linc (Rust egui) --NML or PyO3--> LinuxCNC
+LinuxCNC status --------------------------------> linc
+szgh_panel.* HAL pins ---------------------------> linc (read-only)
 ```
 
 ### 4.1 Processes
 
 - `szgh-panel-hal`: owns the serial port, produces button/mode/override pins,
   consumes LED/7-segment/velocity pins. Separate process from the HMI.
-- `cnchmi`: Rust `egui` application. Owns no machine-control hardware.
+- `linc`: Rust `egui` application. Owns no machine-control hardware.
 - `linuxcnc`: task/motion/IO. Authoritative machine state.
-- HAL glue: standard `halui` plus a small `cnc_hmi` component for
+- HAL glue: standard `halui` plus a small `linc` component for
   app-specific inputs/snapshots.
 
 ### 4.2 Rust workspace
 
 ```text
-cnc-hmi/
+LiNC/
   crates/
-    cnc-core/        # state, commands, backend trait, validation
-    cnc-linuxcnc/    # PyO3 official module; optional C++ NML bridge
-    cnc-hal/         # panel-state snapshot, HAL FFI, cnc_hmi pins
-    cnc-ui/          # egui shell, theme, screens, widgets
-    cnc-view/        # 2D/3D toolpath and sparklines
-    cnc-app/         # main, config, logging
+    linc-core/        # state, commands, backend trait, validation
+    linc-linuxcnc/    # PyO3 official module; optional C++ NML bridge
+    linc-hal/         # panel-state snapshot, HAL FFI, linc pins
+    linc-ui/          # egui shell, theme, screens, widgets
+    linc-view/        # 2D/3D toolpath and sparklines
+    linc-app/         # main, config, logging
 ```
 
 ### 4.3 Backend boundary
@@ -790,7 +790,7 @@ For the future implementation:
    required.
 10. Verify theme contrast and color-blind distinguishability on the target
     display.
-11. Implement the layered config loader and `cnc-hmi --check-config`;
+11. Implement the layered config loader and `linc --check-config`;
     `configs/*.toml` currently define the contract only.
 12. Unify the real panel driver's serial port and cycle time with
     `configs/baiermill.toml`; today they are hard-coded in the driver and
@@ -895,8 +895,8 @@ Rules:
 5. Safety flags are immutable from profiles: panel-only machine control, no
    software E-stop/cycle/jog/spindle/coolant/overrides.
 6. Runtime UI state is stored separately under
-   `~/.config/cnc-hmi/<profile>.preferences.toml`.
+   `~/.config/linc/<profile>.preferences.toml`.
 
-`cnc-hmi --check-config` must validate the merge and path resolution without
+`linc --check-config` must validate the merge and path resolution without
 connecting to LinuxCNC or HAL. The full schema, launch snippets and validation
 contract are in `CONFIGURATION.md`.

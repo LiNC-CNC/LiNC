@@ -1,6 +1,6 @@
-# CNC HMI Design
+# LiNC
 
-Design reference for a Rust `egui` HMI on top of LinuxCNC, for a machine with:
+LiNC is a Rust `egui` HMI for LinuxCNC, designed for a machine with:
 
 - a **SZGH-1080 physical control panel** connected over RS-485, driven by the
   Rust HAL component in `../szgh-panel-rust/`
@@ -10,8 +10,10 @@ Design reference for a Rust `egui` HMI on top of LinuxCNC, for a machine with:
 - FANUC / SYNTEC / Siemens-inspired information architecture, without copying
   any vendor's proprietary artwork
 
-This repository is design-only. It contains the specification and the accepted
-SVG mockups; it does not yet contain the Rust HMI implementation.
+The product name is **LiNC**; the executable, Rust workspace crates and HAL
+component use the lowercase identifier `linc`. This repository is design-only.
+It contains the specification and the accepted SVG mockups; it does not yet
+contain the Rust HMI implementation.
 
 ## Accepted references
 
@@ -53,9 +55,9 @@ travel, velocities, units, spindle/ATC data and the tool table. The HMI never
 owns the panel serial port; it reads the `szgh_panel.*` HAL pins.
 
 ```sh
-cnc-hmi --config configs/sim.toml
-cnc-hmi --config configs/lathe-sim.toml
-cnc-hmi --config configs/baiermill.toml
+linc --config configs/sim.toml
+linc --config configs/lathe-sim.toml
+linc --config configs/baiermill.toml
 ```
 
 See [`CONFIGURATION.md`](CONFIGURATION.md) for the merge rules, schema, safety
@@ -126,7 +128,7 @@ policy and launch integration.
 ## Repository layout
 
 ```text
-cnc-hmi-design/
+LiNC/
 ├── README.md
 ├── CONFIGURATION.md
 ├── SPEC.md

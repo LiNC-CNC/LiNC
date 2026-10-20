@@ -34,7 +34,7 @@ y_axis = false
 sub_spindle = false
 
 [ui]
-window_title = "CNC HMI - Smartlathe SL36 Simulation"
+window_title = "LiNC - Smartlathe SL36 Simulation"
 
 [panel]
 kind = "simulated"
