@@ -5,7 +5,7 @@
   <line x1="4" y1="54" x2="996" y2="54" stroke="var(--border)"/>
   <text x="16" y="33" fill="var(--fg)" font-size="16" font-family="sans-serif" font-weight="700">VMC-01</text>
   <rect x="92" y="12" width="66" height="26" rx="4" fill="var(--accent)"/>
-  <text x="104" y="30" fill="var(--surface)" font-size="12" font-family="monospace" font-weight="700">AUTO</text>
+  <text x="104" y="30" fill="var(--surface)" font-size="12" font-family="monospace" font-weight="700">EDIT</text>
   <text x="176" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">PROGRAM</text>
   <text x="176" y="34" fill="var(--fg)" font-size="13" font-family="monospace">O1001</text>
   <text x="246" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">TOOL</text>
@@ -72,19 +72,22 @@
   <text x="158" y="78" fill="var(--fg)" font-size="15" font-family="sans-serif" font-weight="700">PROGRAM</text>
   <text x="242" y="78" fill="var(--muted)" font-size="11" font-family="monospace">DEMO.NC</text>
   <text x="330" y="78" fill="var(--muted)" font-size="10" font-family="monospace">LN 8/22</text>
+  <circle cx="392" cy="72" r="3" fill="var(--warning)"/>
+  <text x="400" y="76" fill="var(--warning)" font-size="9" font-family="monospace">UNSAVED</text>
   <rect x="790" y="62" width="58" height="20" rx="3" fill="var(--surface)" stroke="var(--border)"/>
   <text x="800" y="76" fill="var(--muted)" font-size="9" font-family="monospace">SPLIT</text>
   <rect x="854" y="62" width="52" height="20" rx="3" fill="var(--accent)"/>
   <text x="864" y="76" fill="var(--surface)" font-size="9" font-family="monospace" font-weight="700">CODE</text>
-  <circle cx="930" cy="72" r="3" fill="var(--success)"/>
-  <text x="940" y="76" fill="var(--success)" font-size="9" font-family="monospace">LIVE</text>
+  <circle cx="930" cy="72" r="3" fill="var(--muted)"/>
+  <text x="940" y="76" fill="var(--muted)" font-size="9" font-family="monospace">PREVIEW</text>
   <line x1="158" y1="90" x2="984" y2="90" stroke="var(--border)"/>
 
   <!-- G-code editor -->
   <rect x="158" y="98" width="650" height="472" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="170" y="120" fill="var(--fg)" font-size="12" font-family="sans-serif" font-weight="700">G-CODE / CODE FOCUS</text>
+  <text x="170" y="120" fill="var(--fg)" font-size="12" font-family="sans-serif" font-weight="700">G-CODE EDITOR</text>
   <text x="320" y="120" fill="var(--muted)" font-size="10" font-family="monospace">DEMO.NC</text>
-  <text x="760" y="120" fill="var(--muted)" font-size="9" font-family="monospace">EDIT</text>
+  <circle cx="748" cy="116" r="3" fill="var(--warning)"/>
+  <text x="756" y="120" fill="var(--warning)" font-size="9" font-family="monospace">UNSAVED</text>
   <line x1="170" y1="130" x2="796" y2="130" stroke="var(--border)"/>
 
   <text x="170" y="150" fill="var(--muted)" font-size="10" font-family="monospace">0001</text>
@@ -101,8 +104,11 @@
   <text x="214" y="240" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G0</tspan> <tspan fill="var(--c3)">X</tspan> <tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c3)">Y</tspan> <tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c3)">Z</tspan> <tspan fill="var(--fg)">50</tspan></text>
   <text x="170" y="258" fill="var(--muted)" font-size="10" font-family="monospace">0007</text>
   <text x="214" y="258" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G1</tspan> <tspan fill="var(--c3)">Z</tspan> <tspan fill="var(--fg)">-2</tspan> <tspan fill="var(--c4)">F300</tspan></text>
+  <rect x="170" y="262" width="626" height="20" fill="var(--accent)" opacity="0.10"/>
+  <rect x="170" y="262" width="2" height="20" fill="var(--accent)"/>
   <text x="170" y="276" fill="var(--muted)" font-size="10" font-family="monospace">0008</text>
   <text x="214" y="276" font-size="11" font-family="monospace" font-weight="700" xml:space="preserve"><tspan fill="var(--c1)">G1</tspan> <tspan fill="var(--c3)">X</tspan> <tspan fill="var(--fg)">80</tspan> <tspan fill="var(--c3)">Y</tspan> <tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c4)">F850</tspan></text>
+  <rect x="308" y="264" width="2" height="15" fill="var(--accent)"/>
   <text x="170" y="294" fill="var(--muted)" font-size="10" font-family="monospace">0009</text>
   <text x="214" y="294" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G2</tspan> <tspan fill="var(--c3)">X</tspan> <tspan fill="var(--fg)">80</tspan> <tspan fill="var(--c3)">Y</tspan> <tspan fill="var(--fg)">60</tspan> <tspan fill="var(--c6)">R30</tspan></text>
   <text x="170" y="312" fill="var(--muted)" font-size="10" font-family="monospace">0010</text>
@@ -133,7 +139,8 @@
   <text x="214" y="528" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c2)">M30</tspan></text>
 
   <line x1="170" y1="546" x2="796" y2="546" stroke="var(--border)"/>
-  <text x="170" y="562" fill="var(--success)" font-size="9" font-family="monospace">EDIT ENABLED / PROTECT OFF / AUTO-SCROLL ON</text>
+  <text x="170" y="562" fill="var(--warning)" font-size="9" font-family="monospace">EDIT ENABLED / PROTECT OFF / UNSAVED</text>
+  <text x="460" y="562" fill="var(--muted)" font-size="9" font-family="monospace">CTRL+S SAVE / CTRL+Z UNDO / CTRL+F FIND</text>
 
   <!-- Mini graph -->
   <rect x="816" y="98" width="168" height="220" rx="5" fill="var(--surface)" stroke="var(--border)"/>
@@ -146,7 +153,7 @@
   <path d="M850 238 L900 214 L930 224 L950 202" fill="none" stroke="var(--accent)" stroke-width="2"/>
   <circle cx="900" cy="214" r="4" fill="var(--surface)" stroke="var(--warning)" stroke-width="2"/>
   <text x="828" y="276" fill="var(--muted)" font-size="9" font-family="monospace">T12 / F850</text>
-  <text x="828" y="292" fill="var(--muted)" font-size="9" font-family="monospace">LINE 8</text>
+  <text x="828" y="292" fill="var(--muted)" font-size="9" font-family="monospace">CURSOR 8</text>
   <text x="828" y="308" fill="var(--muted)" font-size="9" font-family="monospace">ZOOM 0.6x</text>
 
   <!-- Program info -->
@@ -162,10 +169,10 @@
   <text x="828" y="478" fill="var(--muted)" font-size="9" font-family="monospace">G00 G17 G40</text>
   <text x="828" y="492" fill="var(--muted)" font-size="9" font-family="monospace">G54 G80 G90</text>
   <text x="828" y="506" fill="var(--muted)" font-size="9" font-family="monospace">G21 G94</text>
-  <text x="828" y="526" fill="var(--muted)" font-size="9" font-family="sans-serif">PROGRESS</text>
+  <text x="828" y="526" fill="var(--muted)" font-size="9" font-family="sans-serif">BUFFER</text>
   <rect x="828" y="534" width="144" height="5" rx="2" fill="var(--border)"/>
-  <rect x="828" y="534" width="52" height="5" rx="2" fill="var(--accent)"/>
-  <text x="828" y="554" fill="var(--muted)" font-size="9" font-family="monospace">LN 8/22  00:42</text>
+  <rect x="828" y="534" width="72" height="5" rx="2" fill="var(--warning)"/>
+  <text x="828" y="554" fill="var(--warning)" font-size="9" font-family="monospace">LN 8/22  UNSAVED</text>
   <text x="828" y="566" fill="var(--muted)" font-size="8" font-family="monospace">FILE cycles SPLIT/CODE</text>
 
   <!-- Bottom action bar -->
@@ -179,7 +186,7 @@
   <text x="280" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ESC</text>
   <line x1="320" y1="584" x2="320" y2="606" stroke="var(--border)"/>
   <text x="336" y="599" fill="var(--muted)" font-size="9" font-family="monospace">LOAD</text>
-  <text x="386" y="599" fill="var(--muted)" font-size="9" font-family="monospace">SAVE</text>
+  <text x="386" y="599" fill="var(--accent)" font-size="9" font-family="monospace" font-weight="700">SAVE</text>
   <text x="436" y="599" fill="var(--muted)" font-size="9" font-family="monospace">SEARCH</text>
   <text x="504" y="599" fill="var(--muted)" font-size="9" font-family="monospace">SIMULATE</text>
   <text x="580" y="599" fill="var(--muted)" font-size="9" font-family="monospace">LAYOUT</text>
@@ -187,7 +194,7 @@
 
   <!-- Status line -->
   <line x1="4" y1="612" x2="996" y2="612" stroke="var(--border)"/>
-  <text x="16" y="628" fill="var(--muted)" font-size="9" font-family="monospace">AUTO  O1001  LN 8/22  G54  T12  S4200  F850</text>
+  <text x="16" y="628" fill="var(--muted)" font-size="9" font-family="monospace">EDIT  O1001  LN 8/22  G54  T12  S4200  F850</text>
   <text x="500" y="628" fill="var(--muted)" font-size="9" font-family="monospace">OVR F100 S100 R100</text>
   <text x="650" y="628" fill="var(--success)" font-size="9" font-family="monospace">PROTECT OFF</text>
   <text x="740" y="628" fill="var(--success)" font-size="9" font-family="monospace">E-STOP OK</text>

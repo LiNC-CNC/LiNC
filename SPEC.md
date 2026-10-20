@@ -237,16 +237,43 @@ Two layouts, selected by the header toggle or `FILE`:
 
 - G-code editor dominant (~80%).
 - Mini XY graph top-right.
-- Program info card below the mini graph: current, next, modal, progress.
+- Program info card below the mini graph: cursor/current block, next block,
+  modal summary, buffer state and line count.
 - Current line synchronized with the mini graph.
+- The CODE layout is reused for editing; there is no separate editor window.
+
+#### EDIT state
+
+The physical panel's `EDIT` position selects Program, switches to the CODE
+layout and focuses the editor. The layout and graph stay the same; the buffer
+becomes editable.
+
+- Editor buffer with cursor, selection, line numbers, current-line highlight and
+  live token highlighting.
+- Dirty marker in the header and buffer card; `SAVE` is accented until saved.
+- `Ctrl+S` saves; `Ctrl+Z`/`Ctrl+Y` undo/redo; `Ctrl+F` searches;
+  `Ctrl+O` opens; `Ctrl+A/C/X/V` select/cut/copy/paste.
+- No `Tab`, `Shift` or `Delete` key: use spaces, the mouse layer for selection,
+  Backspace, and cut/paste. Line-based operations are required.
+- The mini graph updates from a separate debounced preview parser; invalid
+  G-code keeps the last valid graph and marks the line. Preview never moves the
+  machine.
+- Saving is explicit; no autosave. Save writes the loaded file, clears the dirty
+  marker and must not run while a program is active.
+- Unsaved changes must be confirmed before leaving Program, opening another
+  file, or quitting.
+- G/M/axis words are displayed uppercase; comments retain their case and the
+  lexer is case-insensitive.
 
 Program rules:
 
 - G-code is token-highlighted (see §7.3).
 - Current line uses an accent background and left bar; token colours remain.
 - While running, the editor is read-only and auto-scrolls to the current line.
-- Edits are allowed only when stopped and `program_protect` is off.
-- `FILE` enters Program; pressing `FILE` again cycles `SPLIT`/`CODE`.
+- Edits and saves are allowed only when stopped, `program_protect` is off and
+  the panel is in `EDIT`.
+- `FILE` enters Program; outside EDIT it cycles `SPLIT`/`CODE`; in EDIT it
+  selects CODE.
 - The header segmented control is also focusable.
 - No on-screen cycle start; loading a program does not start it.
 
@@ -487,6 +514,8 @@ For this design repository:
 - Hardware constraints for the QMK keyboard and SZGH panel are documented.
 - No SVG shows an on-screen machine control panel.
 - G-code mockups show token-level syntax highlighting.
+- The Program CODE screen shows an editable buffer state: cursor, dirty marker,
+  save action and mini-graph preview.
 - Layered config profiles exist for the simulation and the physical BaierMill.
 - The profiles reference the LinuxCNC INI as the source of machine data rather
   than duplicating limits, velocities, units, spindle/ATC data or tooling.
@@ -531,6 +560,15 @@ For the future implementation:
     (`../baiermill_pb/user_tabs/gcode_help/gcode_docs.py`) into a Rust-friendly
     bundle (JSON/TOML), pin the LinuxCNC docs version, and preserve
     documentation/image attribution.
+14. Implement the G-code editor: `ropey` buffer, cursor/selection, undo/redo,
+    find, atomic save, external-change detection, unsaved-change confirmation
+    and a debounced preview parser. The preview must not use the machine
+    interpreter or move the machine.
+15. Verify editor usability with no `Shift`, `Tab` or `Delete`: mouse-layer
+    selection, Backspace, cut/paste and line-based operations.
+16. The panel mode pins are 0.5 s pulses, not a persistent mode index. The HMI
+    must latch them to know when the selector is in `EDIT`; preferably the
+    panel driver should expose a persistent mode state as well.
 
 ## 14. Accepted SVG manifest
 
@@ -540,7 +578,7 @@ Only the accepted versions are included.
 |---|---|
 | `svg/machine-dashboard.svg` | Machine dashboard: dark graphite + blue, axis cards, 3D toolpath, program card, feed/spindle-load gauges, machine health, alarms |
 | `svg/program-split.svg` | Program `SPLIT`: syntax-highlighted G-code alongside the 3D toolpath |
-| `svg/program-code.svg` | Program `CODE`: syntax-highlighted G-code dominant, with mini XY graph and program-info card |
+| `svg/program-code.svg` | Program `CODE`: editable syntax-highlighted G-code, cursor/dirty state, mini XY preview graph and program-info card; entered by panel `EDIT` |
 | `svg/diagnostics.svg` | Diagnostics overview: health cards, alarms/messages, panel link detail, motion health, event log |
 | `svg/gcode-help.svg` | G-code Help: offline quick-reference index, code search, detail pane, parameter tables, figures and related codes |
 

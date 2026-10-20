@@ -20,8 +20,13 @@ pages = ["machine", "program", "offsets", "tools", "diagnostics", "help"]
 [program]
 default_view = "split"
 views = ["split", "code"]
+edit_view = "code"
 line_numbers = true
 highlight_current_line = true
+autosave = false
+live_preview = true
+preview_debounce_ms = 250
+tab_width = 4
 
 [toolpath]
 show_grid = false
@@ -47,6 +52,11 @@ focus_next = "Down"
 focus_prev = "Up"
 activate = "Enter"
 open = "Ctrl+O"
+save = "Ctrl+S"
+undo = "Ctrl+Z"
+redo = "Ctrl+Y"
+find = "Ctrl+F"
+select_all = "Ctrl+A"
 help_search = "/"
 
 [help]
@@ -68,6 +78,8 @@ software_coolant = false
 software_overrides = false
 program_edit_while_running = "read-only"
 program_protect = "panel"
+save_requires_idle = true
+confirm_discard = true
 mdi_requires_mode = "mdi"
 quit_requires_idle = true
 confirm_quit = true
@@ -82,6 +94,9 @@ connect_timeout_ms = 3000
 [hal]
 read_only = true
 panel_component = "szgh_panel"
+# Mode pins are 0.5 s pulses, not a persistent mode index. The HMI latches them
+# to track the physical selector, including EDIT.
+panel_mode_prefix = "szgh_panel.mode_"
 
 [hal.pins]
 panel_connected = "szgh_panel.panel_connected"

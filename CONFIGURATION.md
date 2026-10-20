@@ -244,13 +244,13 @@ written while running.
 | top level | `schema_version`, `profile`, `extends` |
 | `[machine]` | `name`, `kind`, `linuxcnc_ini` |
 | `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages` |
-| `[program]` | `default_view`, `views`, `line_numbers`, `highlight_current_line` |
+| `[program]` | `default_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_debounce_ms`, `tab_width` |
 | `[toolpath]` | `show_grid`, `show_program_bounds`, `show_machine_bounds`, `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors` |
-| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `help_search` |
+| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `help_search` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
-| `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `mdi_requires_mode`, `quit_requires_idle`, `confirm_quit` |
+| `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_requires_mode`, `quit_requires_idle`, `confirm_quit` |
 | `[backend]` | `kind`, `transport`, `status_hz`, `hal_hz`, `connect_timeout_ms` |
-| `[hal]` | `read_only`, `panel_component` |
+| `[hal]` | `read_only`, `panel_component`, `panel_mode_prefix` |
 | `[hal.pins]` | `panel_connected`, `panel_error`, `program_protect`, `feed_override`, `rapid_override`, `spindle_override`, `spindle_load`, `spindle_speed` |
 | `[panel]` | `owner`, `kind`, `read_only` |
 | `[panel.link]` | `read_only`, `kind`, optional `port`, `baud`, `data_bits`, `parity`, `stop_bits`, `cycle_time_ms` |
@@ -300,3 +300,11 @@ For this design repository:
    `svg/gcode-help.svg`, but the HMI still needs a Rust-friendly generated
    format (JSON or TOML), a pinned LinuxCNC docs version, and preserved
    documentation/image attribution.
+7. The G-code editor is design-only. Still to implement: the `ropey` buffer,
+   atomic save, external-change detection, unsaved-change dialog, search,
+   undo/redo, and a preview parser that cannot disturb the running interpreter.
+   The QMK keyboard has no `Shift`, `Tab` or `Delete`; selection must use the
+   mouse layer and line-based operations.
+8. Panel mode pins are pulse outputs. The HMI latches
+   `szgh_panel.mode_*` to track `EDIT`; a persistent mode index from the panel
+   driver would be more robust across HMI restarts.

@@ -19,7 +19,7 @@ SVG mockups; it does not yet contain the Rust HMI implementation.
 |---|---|
 | Machine dashboard | `svg/machine-dashboard.svg` |
 | Program — G-code and graph side by side | `svg/program-split.svg` |
-| Program — code-focused with mini graph | `svg/program-code.svg` |
+| Program — editable code-focused editor with mini graph | `svg/program-code.svg` |
 | Diagnostics | `svg/diagnostics.svg` |
 | G-code Help | `svg/gcode-help.svg` |
 
@@ -66,6 +66,10 @@ policy and launch integration.
   focusable with arrows/Enter.
 - **Program has two layouts**: `SPLIT` (G-code + graph) and `CODE`
   (G-code dominant + mini graph). `FILE` enters Program and cycles the layout.
+- **Program `CODE` is also the G-code editor.** The physical panel's `EDIT`
+  position opens it with focus, dirty/save state, undo/redo, find and a
+  debounced live preview. Edits and saves are gated by idle state and program
+  protect; running programs stay read-only.
 - **G-code is token-highlighted** with a rich but restrained palette:
   G-codes, M-codes, axis letters, numbers, feed/speed, tools, parameters,
   comments, and line numbers each have a distinct treatment.
@@ -111,7 +115,7 @@ rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
    screen.
 3. Implement the Rust `egui` shell, theme tokens, and the layered config loader.
 4. Implement the Machine dashboard.
-5. Implement the Program `SPLIT`/`CODE` views with the G-code highlighter.
+5. Implement the Program `SPLIT`/`CODE` views, G-code highlighter and editor.
 6. Implement Offsets, Tools, Diagnostics, Settings, and the G-code Help
    reference browser.
 7. Integrate LinuxCNC via PyO3 first, with a `MachineBackend` boundary that can
