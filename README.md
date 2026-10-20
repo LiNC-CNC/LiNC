@@ -27,6 +27,7 @@ SVG mockups; it does not yet contain the Rust HMI implementation.
 | Touch probe interface | `svg/probe.svg` |
 | MDI screen | `svg/mdi.svg` |
 | Homing screen | `svg/homing.svg` |
+| Tools / tool change | `svg/tools.svg` |
 | Simulator panel (separate window) | `svg/sim-panel.svg` |
 
 Only the accepted versions are included. The earlier vendor-style studies and
@@ -102,6 +103,10 @@ policy and launch integration.
   `issue_mdi` behavior: `RAPID` sends `G0 X0Y0Z0`, axis keys send `G0 X0/Y0/Z0`
   in the current WCS, X/Y/Z only. The HMI neither stages nor intercepts these
   panel actions.
+- **Tools is the quick-change surface.** Select a table row or type a target
+  tool and `STAGE CHANGE`; the HMI stages `Tn M6` without opening MDI, and the
+  physical CYCLE START runs it. Manual changes get an install/confirm prompt;
+  ATC/turret support reuses the existing `M6` G-code and is optional.
 - **G-code is token-highlighted** with a rich but restrained palette:
   G-codes, M-codes, axis letters, numbers, feed/speed, tools, parameters,
   comments, and line numbers each have a distinct treatment.
@@ -141,6 +146,7 @@ cnc-hmi-design/
     ├── probe.svg
     ├── mdi.svg
     ├── homing.svg
+    ├── tools.svg
     └── sim-panel.svg
 ```
 
@@ -163,8 +169,8 @@ rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
 6. Implement the mill and lathe variants, including dynamic 3–5 axis cards,
    lathe live-tool/power-turret state, Offsets, Tools, Diagnostics, Settings,
    the G-code Help reference browser, the Files/USB transfer page, the Touch
-   Probe interface, the mode-driven MDI screen, and the panel-only Homing
-   screen.
+   Probe interface, the mode-driven MDI screen, the panel-only Homing screen,
+   and the Tools/tool-change page.
 7. Integrate LinuxCNC via PyO3 first, with a `MachineBackend` boundary that can
    later be replaced by a C++ NML bridge.
 8. Verify keyboard-only navigation, panel disconnect handling, program

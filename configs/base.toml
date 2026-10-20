@@ -55,6 +55,12 @@ max_travel = 10.0
 calibration_diameter = 50.0
 prepare_only = true
 
+[tools]
+changer = "manual"          # manual | atc | turret
+atc_pockets = "ini"         # derive from [ATC] POCKETS
+tool_change_stage = true    # stage Tn M6; never auto-run
+manual_confirm = true
+
 [homing]
 # Panel mode HOME/PROG.HOME drives this page. The HMI never homes an axis.
 auto_open = true

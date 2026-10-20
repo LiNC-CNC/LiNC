@@ -118,8 +118,9 @@ Required profile fields:
 | Velocities and acceleration | INI `[AXIS_*]` / `[JOINT_*]` |
 | Units | INI `[TRAJ] LINEAR_UNITS`, `ANGULAR_UNITS` |
 | Spindle count / maximum speed | INI `[TRAJ] SPINDLES`, `[DISPLAY] MAX_SPINDLE_SPEED` |
-| ATC pockets and heights | INI `[ATC]` |
 | Tool table | INI `[EMCIO] TOOL_TABLE` |
+| ATC pockets / tool-change heights | INI `[ATC]`; `[tools] atc_pockets = "ini"` |
+| Tool-change motion | Existing `M6` remap / `toolchange.ngc`; HMI stages only |
 | Program prefix / open file | INI `[DISPLAY] PROGRAM_PREFIX`, `OPEN_FILE` |
 | `NC_FILES` root | INI `PROGRAM_PREFIX`; `[files] nc_files = "ini"` |
 | Machine graph bounds | INI travel limits / kinematics |
@@ -261,6 +262,7 @@ written while running.
 | `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width` |
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running` |
 | `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter`, `prepare_only` |
+| `[tools]` | `changer`, `atc_pockets`, `tool_change_stage`, `manual_confirm` |
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
 | `[mdi]` | `stage_only`, `auto_focus`, `history_limit`, `max_command_length`, `quick_commands` |
 | `[toolpath]` | `show_grid`, `show_program_bounds`, `show_machine_bounds`, `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
@@ -280,6 +282,7 @@ Enums:
 
 - `machine.kind`: `sim`, `real`
 - `machine.gui`: `mill`, `lathe`
+- `tools.changer`: `manual`, `atc`, `turret`
 - `panel.kind`: `simulated`, `physical`, `external`
 - `panel.link.kind`: `virtual`, `rs485`
 - `diagnostics.panel_link_stats`: `none`, `optional`, `required`
@@ -309,6 +312,8 @@ For this design repository:
 - `[mdi] stage_only` is `true` in every profile;
 - `[homing] auto_open` is `true` for mode-driven screens;
 - the Homing screen exposes no software home/unhome controls;
+- `[tools] tool_change_stage` and `manual_confirm` are `true`;
+- the lathe profile uses `tools.changer = "turret"`;
 - `base.toml` cannot be loaded as a runnable profile.
 
 ## 12. Open issues
@@ -360,3 +365,6 @@ For this design repository:
 16. Preserve PROG.HOME's direct `issue_mdi` behavior exactly: panel keys send
     `G0 X0Y0Z0` / `G0 X0` / `G0 Y0` / `G0 Z0` in the current WCS, X/Y/Z only,
     without HMI staging or an added cycle-start gate.
+17. Implement tool-change staging and manual confirmation through a narrow
+    backend/output path; defer ATC/turret and reuse the existing `M6` remap
+    rather than duplicating toolchange motion in the HMI.

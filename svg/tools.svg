@@ -1,0 +1,212 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640">
+  <rect x="4" y="4" width="992" height="632" rx="8" fill="none" stroke="var(--border)"/>
+
+  <!-- Top status -->
+  <line x1="4" y1="54" x2="996" y2="54" stroke="var(--border)"/>
+  <text x="16" y="33" fill="var(--fg)" font-size="16" font-family="sans-serif" font-weight="700">VMC-01</text>
+  <rect x="92" y="12" width="66" height="26" rx="4" fill="var(--accent)"/>
+  <text x="104" y="30" fill="var(--surface)" font-size="12" font-family="monospace" font-weight="700">AUTO</text>
+  <text x="176" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">PROGRAM</text>
+  <text x="176" y="34" fill="var(--fg)" font-size="13" font-family="monospace">O1001</text>
+  <text x="246" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">CURRENT</text>
+  <text x="246" y="34" fill="var(--fg)" font-size="13" font-family="monospace">T12</text>
+  <text x="318" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">NEXT</text>
+  <text x="318" y="34" fill="var(--accent)" font-size="13" font-family="monospace">T13</text>
+  <text x="390" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">SPINDLE</text>
+  <text x="390" y="34" fill="var(--fg)" font-size="13" font-family="monospace">S 4200</text>
+  <text x="480" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">FEED</text>
+  <text x="480" y="34" fill="var(--fg)" font-size="13" font-family="monospace">F 850</text>
+  <circle cx="560" cy="24" r="4" fill="var(--success)"/>
+  <text x="572" y="29" fill="var(--success)" font-size="11" font-family="sans-serif" font-weight="700">PANEL ONLINE</text>
+  <circle cx="708" cy="24" r="4" fill="var(--success)"/>
+  <text x="720" y="29" fill="var(--fg)" font-size="11" font-family="monospace">ALARM 0</text>
+  <circle cx="810" cy="24" r="4" fill="var(--warning)"/>
+  <text x="822" y="29" fill="var(--fg)" font-size="11" font-family="monospace">MSG 1</text>
+  <text x="910" y="30" fill="var(--muted)" font-size="12" font-family="monospace">14:32:05</text>
+
+  <!-- Left navigation -->
+  <rect x="8" y="62" width="142" height="508" rx="6" fill="var(--surface)" stroke="var(--border)"/>
+  <rect x="20" y="88" width="20" height="20" rx="3" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
+  <line x1="24" y1="98" x2="36" y2="98" stroke="var(--muted)" stroke-width="1.6"/>
+  <circle cx="30" cy="94" r="3" fill="none" stroke="var(--muted)" stroke-width="1.4"/>
+  <text x="48" y="96" fill="var(--muted)" font-size="12" font-family="sans-serif">MACHINE</text>
+  <text x="48" y="112" fill="var(--muted)" font-size="9" font-family="monospace">MAIN</text>
+
+  <rect x="20" y="132" width="18" height="20" rx="2" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
+  <line x1="24" y1="138" x2="34" y2="138" stroke="var(--muted)" stroke-width="1.2"/>
+  <line x1="24" y1="143" x2="34" y2="143" stroke="var(--muted)" stroke-width="1.2"/>
+  <line x1="24" y1="148" x2="31" y2="148" stroke="var(--muted)" stroke-width="1.2"/>
+  <text x="48" y="147" fill="var(--muted)" font-size="12" font-family="sans-serif">PROGRAM</text>
+  <text x="48" y="163" fill="var(--muted)" font-size="9" font-family="monospace">FILE</text>
+
+  <circle cx="29" cy="194" r="9" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
+  <line x1="29" y1="180" x2="29" y2="185" stroke="var(--muted)" stroke-width="1.4"/>
+  <line x1="29" y1="203" x2="29" y2="208" stroke="var(--muted)" stroke-width="1.4"/>
+  <line x1="15" y1="194" x2="20" y2="194" stroke="var(--muted)" stroke-width="1.4"/>
+  <line x1="38" y1="194" x2="43" y2="194" stroke="var(--muted)" stroke-width="1.4"/>
+  <text x="48" y="198" fill="var(--muted)" font-size="12" font-family="sans-serif">OFFSETS</text>
+  <text x="48" y="214" fill="var(--muted)" font-size="9" font-family="monospace">OFFSET</text>
+
+  <rect x="8" y="238" width="4" height="44" fill="var(--accent)"/>
+  <path d="M20 250 L28 250 L31 244 L34 256 L38 238 L42 250 L48 250" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+  <text x="56" y="251" fill="var(--accent)" font-size="12" font-family="sans-serif" font-weight="700">TOOLS</text>
+  <text x="56" y="267" fill="var(--muted)" font-size="9" font-family="monospace">TOOL</text>
+
+  <path d="M20 306 L20 300 L25 300 L25 312 L37 312 L37 306 L43 306" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
+  <text x="52" y="310" fill="var(--muted)" font-size="12" font-family="sans-serif">DIAGNOSTICS</text>
+  <text x="52" y="326" fill="var(--muted)" font-size="9" font-family="monospace">WIN</text>
+
+  <line x1="20" y1="350" x2="138" y2="350" stroke="var(--border)"/>
+  <text x="20" y="374" fill="var(--muted)" font-size="9" font-family="sans-serif">FOCUS / NAVIGATION</text>
+  <text x="20" y="394" fill="var(--muted)" font-size="9" font-family="monospace">ARROWS MOVE</text>
+  <text x="20" y="410" fill="var(--muted)" font-size="9" font-family="monospace">ENTER SELECT</text>
+  <text x="20" y="426" fill="var(--muted)" font-size="9" font-family="monospace">ESC BACK</text>
+  <text x="20" y="442" fill="var(--muted)" font-size="9" font-family="monospace">PGUP / PGDN</text>
+  <text x="20" y="458" fill="var(--muted)" font-size="9" font-family="monospace">HOME / END</text>
+  <text x="20" y="486" fill="var(--muted)" font-size="9" font-family="sans-serif">TOOL CHANGE</text>
+  <text x="20" y="502" fill="var(--warning)" font-size="9" font-family="monospace">STAGE / START</text>
+  <text x="20" y="530" fill="var(--muted)" font-size="9" font-family="sans-serif">NO ON-SCREEN</text>
+  <text x="20" y="544" fill="var(--muted)" font-size="9" font-family="sans-serif">MACHINE CONTROLS</text>
+
+  <!-- Header -->
+  <text x="158" y="78" fill="var(--fg)" font-size="15" font-family="sans-serif" font-weight="700">TOOLS</text>
+  <text x="220" y="78" fill="var(--muted)" font-size="10" font-family="sans-serif">TOOL CHANGE / TABLE</text>
+  <rect x="500" y="64" width="116" height="20" rx="3" fill="var(--success)" opacity="0.18"/>
+  <circle cx="512" cy="74" r="3" fill="var(--success)"/>
+  <text x="520" y="77" fill="var(--success)" font-size="8" font-family="monospace">MANUAL CHANGER</text>
+  <text x="820" y="78" fill="var(--warning)" font-size="9" font-family="monospace">CYCLE START ON PANEL</text>
+  <line x1="158" y1="90" x2="984" y2="90" stroke="var(--border)"/>
+
+  <!-- Tool table -->
+  <rect x="158" y="98" width="526" height="390" rx="5" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="170" y="120" fill="var(--fg)" font-size="11" font-family="sans-serif" font-weight="700">TOOL TABLE</text>
+  <text x="280" y="120" fill="var(--muted)" font-size="9" font-family="monospace">T / Z / D / R</text>
+  <line x1="170" y1="130" x2="672" y2="130" stroke="var(--border)"/>
+  <text x="174" y="148" fill="var(--muted)" font-size="8" font-family="sans-serif">T</text>
+  <text x="216" y="148" fill="var(--muted)" font-size="8" font-family="sans-serif">DESCRIPTION</text>
+  <text x="420" y="148" fill="var(--muted)" font-size="8" font-family="sans-serif">&#216;</text>
+  <text x="470" y="148" fill="var(--muted)" font-size="8" font-family="sans-serif">LENGTH</text>
+  <text x="540" y="148" fill="var(--muted)" font-size="8" font-family="sans-serif">POCKET</text>
+  <text x="604" y="148" fill="var(--muted)" font-size="8" font-family="sans-serif">TYPE</text>
+
+  <text x="174" y="172" fill="var(--c5)" font-size="10" font-family="monospace">T1</text>
+  <text x="216" y="172" fill="var(--fg)" font-size="9" font-family="sans-serif">Face mill</text>
+  <text x="420" y="172" fill="var(--muted)" font-size="9" font-family="monospace">50.0</text>
+  <text x="470" y="172" fill="var(--muted)" font-size="9" font-family="monospace">40.0</text>
+  <text x="540" y="172" fill="var(--muted)" font-size="9" font-family="monospace">1</text>
+  <text x="604" y="172" fill="var(--muted)" font-size="9" font-family="monospace">MILL</text>
+
+  <text x="174" y="196" fill="var(--c5)" font-size="10" font-family="monospace">T2</text>
+  <text x="216" y="196" fill="var(--fg)" font-size="9" font-family="sans-serif">End mill</text>
+  <text x="420" y="196" fill="var(--muted)" font-size="9" font-family="monospace">12.0</text>
+  <text x="470" y="196" fill="var(--muted)" font-size="9" font-family="monospace">35.0</text>
+  <text x="540" y="196" fill="var(--muted)" font-size="9" font-family="monospace">2</text>
+  <text x="604" y="196" fill="var(--muted)" font-size="9" font-family="monospace">MILL</text>
+
+  <text x="174" y="220" fill="var(--c5)" font-size="10" font-family="monospace">T3</text>
+  <text x="216" y="220" fill="var(--fg)" font-size="9" font-family="sans-serif">Drill 8.0</text>
+  <text x="420" y="220" fill="var(--muted)" font-size="9" font-family="monospace">8.0</text>
+  <text x="470" y="220" fill="var(--muted)" font-size="9" font-family="monospace">45.0</text>
+  <text x="540" y="220" fill="var(--muted)" font-size="9" font-family="monospace">3</text>
+  <text x="604" y="220" fill="var(--muted)" font-size="9" font-family="monospace">DRILL</text>
+
+  <text x="174" y="244" fill="var(--c5)" font-size="10" font-family="monospace">T12</text>
+  <text x="216" y="244" fill="var(--fg)" font-size="9" font-family="sans-serif">End mill current</text>
+  <text x="420" y="244" fill="var(--muted)" font-size="9" font-family="monospace">10.0</text>
+  <text x="470" y="244" fill="var(--muted)" font-size="9" font-family="monospace">38.0</text>
+  <text x="540" y="244" fill="var(--muted)" font-size="9" font-family="monospace">12</text>
+  <text x="604" y="244" fill="var(--accent)" font-size="9" font-family="monospace">CURRENT</text>
+
+  <rect x="170" y="254" width="496" height="24" fill="var(--accent)" opacity="0.16"/>
+  <rect x="170" y="254" width="3" height="24" fill="var(--accent)"/>
+  <text x="174" y="270" fill="var(--c5)" font-size="10" font-family="monospace" font-weight="700">T13</text>
+  <text x="216" y="270" fill="var(--fg)" font-size="9" font-family="sans-serif">Ball mill</text>
+  <text x="420" y="270" fill="var(--muted)" font-size="9" font-family="monospace">6.0</text>
+  <text x="470" y="270" fill="var(--muted)" font-size="9" font-family="monospace">30.0</text>
+  <text x="540" y="270" fill="var(--muted)" font-size="9" font-family="monospace">13</text>
+  <text x="604" y="270" fill="var(--accent)" font-size="9" font-family="monospace">SELECTED</text>
+
+  <text x="174" y="294" fill="var(--c5)" font-size="10" font-family="monospace">T99</text>
+  <text x="216" y="294" fill="var(--fg)" font-size="9" font-family="sans-serif">Touch probe</text>
+  <text x="420" y="294" fill="var(--muted)" font-size="9" font-family="monospace">4.0</text>
+  <text x="470" y="294" fill="var(--muted)" font-size="9" font-family="monospace">50.0</text>
+  <text x="540" y="294" fill="var(--muted)" font-size="9" font-family="monospace">99</text>
+  <text x="604" y="294" fill="var(--muted)" font-size="9" font-family="monospace">PROBE</text>
+
+  <line x1="170" y1="310" x2="672" y2="310" stroke="var(--border)"/>
+  <text x="170" y="330" fill="var(--muted)" font-size="9" font-family="sans-serif">SELECTED TOOL</text>
+  <text x="170" y="350" fill="var(--fg)" font-size="12" font-family="monospace" font-weight="700">T13 / BALL MILL</text>
+  <text x="340" y="350" fill="var(--muted)" font-size="9" font-family="monospace">&#216;6.0 / L30.0 / POCKET 13</text>
+  <text x="170" y="370" fill="var(--muted)" font-size="9" font-family="monospace">TOOL CHANGE WILL STAGE T13 M6</text>
+
+  <rect x="170" y="386" width="112" height="26" rx="4" fill="var(--accent)"/>
+  <text x="182" y="403" fill="var(--surface)" font-size="9" font-family="sans-serif" font-weight="700">LOAD TOOL</text>
+  <rect x="292" y="386" width="100" height="26" rx="4" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="306" y="403" fill="var(--muted)" font-size="9" font-family="monospace">UNLOAD T0</text>
+  <rect x="402" y="386" width="112" height="26" rx="4" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="416" y="403" fill="var(--muted)" font-size="9" font-family="monospace">SET CURRENT</text>
+  <text x="170" y="430" fill="var(--muted)" font-size="8" font-family="monospace">PREPARE ONLY / NO MOTION UNTIL PHYSICAL CYCLE START</text>
+  <text x="170" y="448" fill="var(--muted)" font-size="8" font-family="monospace">TOOL TABLE WRITES: IDLE + PROTECT OFF</text>
+  <text x="170" y="466" fill="var(--muted)" font-size="8" font-family="monospace">M61 Qn IS NOT A TOOL CHANGE</text>
+
+  <!-- Tool change panel -->
+  <rect x="696" y="98" width="288" height="202" rx="5" fill="var(--surface)" stroke="var(--accent)"/>
+  <text x="708" y="120" fill="var(--fg)" font-size="11" font-family="sans-serif" font-weight="700">CHANGE TOOL</text>
+  <text x="886" y="120" fill="var(--success)" font-size="8" font-family="monospace">STAGED</text>
+  <line x1="708" y1="130" x2="972" y2="130" stroke="var(--border)"/>
+  <text x="708" y="150" fill="var(--muted)" font-size="8" font-family="sans-serif">CURRENT</text>
+  <text x="790" y="150" fill="var(--muted)" font-size="8" font-family="sans-serif">TARGET</text>
+  <text x="708" y="170" fill="var(--fg)" font-size="18" font-family="monospace" font-weight="700">T12</text>
+  <text x="790" y="170" fill="var(--accent)" font-size="18" font-family="monospace" font-weight="700">T13</text>
+  <text x="708" y="188" fill="var(--muted)" font-size="8" font-family="monospace">END MILL 10.0</text>
+  <text x="790" y="188" fill="var(--muted)" font-size="8" font-family="monospace">BALL MILL 6.0</text>
+  <line x1="708" y1="198" x2="972" y2="198" stroke="var(--border)"/>
+  <text x="708" y="216" fill="var(--muted)" font-size="8" font-family="sans-serif">TARGET TOOL NUMBER</text>
+  <rect x="820" y="204" width="72" height="22" rx="3" fill="var(--surface)" stroke="var(--accent)"/>
+  <text x="830" y="219" fill="var(--fg)" font-size="11" font-family="monospace">T13</text>
+  <rect x="708" y="232" width="110" height="24" rx="3" fill="var(--accent)"/>
+  <text x="720" y="248" fill="var(--surface)" font-size="9" font-family="sans-serif" font-weight="700">STAGE CHANGE</text>
+  <text x="830" y="248" fill="var(--muted)" font-size="9" font-family="monospace">CANCEL</text>
+  <text x="708" y="270" fill="var(--warning)" font-size="8" font-family="monospace">WAITING FOR PHYSICAL CYCLE START</text>
+  <text x="708" y="284" fill="var(--muted)" font-size="8" font-family="monospace">NO MDI ENTRY / NO AUTO-RUN</text>
+
+  <!-- ATC optional -->
+  <rect x="696" y="314" width="288" height="174" rx="5" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="708" y="336" fill="var(--fg)" font-size="11" font-family="sans-serif" font-weight="700">ATC / CAROUSEL</text>
+  <rect x="890" y="322" width="82" height="18" rx="2" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="898" y="334" fill="var(--muted)" font-size="7" font-family="monospace">ATC OPTIONAL</text>
+  <line x1="708" y1="346" x2="972" y2="346" stroke="var(--border)"/>
+  <text x="708" y="364" fill="var(--muted)" font-size="8" font-family="sans-serif">12 POCKETS / CURRENT TOOL IN POCKET 12</text>
+  <g fill="var(--surface)" stroke="var(--border)">
+    <rect x="708" y="374" width="24" height="20" rx="2"/><rect x="736" y="374" width="24" height="20" rx="2"/><rect x="764" y="374" width="24" height="20" rx="2"/><rect x="792" y="374" width="24" height="20" rx="2"/><rect x="820" y="374" width="24" height="20" rx="2"/><rect x="848" y="374" width="24" height="20" rx="2"/><rect x="876" y="374" width="24" height="20" rx="2"/><rect x="904" y="374" width="24" height="20" rx="2"/><rect x="932" y="374" width="24" height="20" rx="2"/><rect x="960" y="374" width="24" height="20" rx="2"/>
+  </g>
+  <text x="714" y="388" fill="var(--muted)" font-size="7" font-family="monospace">1</text><text x="742" y="388" fill="var(--muted)" font-size="7" font-family="monospace">2</text><text x="770" y="388" fill="var(--muted)" font-size="7" font-family="monospace">3</text><text x="798" y="388" fill="var(--muted)" font-size="7" font-family="monospace">4</text><text x="826" y="388" fill="var(--muted)" font-size="7" font-family="monospace">5</text><text x="854" y="388" fill="var(--muted)" font-size="7" font-family="monospace">6</text><text x="882" y="388" fill="var(--muted)" font-size="7" font-family="monospace">7</text><text x="910" y="388" fill="var(--muted)" font-size="7" font-family="monospace">8</text><text x="938" y="388" fill="var(--muted)" font-size="7" font-family="monospace">9</text><text x="962" y="388" fill="var(--muted)" font-size="7" font-family="monospace">10</text>
+  <rect x="708" y="404" width="24" height="20" rx="2" fill="var(--surface)" stroke="var(--border)"/><rect x="736" y="404" width="24" height="20" rx="2" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="714" y="418" fill="var(--muted)" font-size="7" font-family="monospace">11</text><text x="742" y="418" fill="var(--muted)" font-size="7" font-family="monospace">12</text>
+  <text x="768" y="418" fill="var(--muted)" font-size="8" font-family="monospace">ATC HOME / OUT / CLAMP</text>
+  <text x="768" y="432" fill="var(--muted)" font-size="8" font-family="monospace">NOT EXPOSED YET</text>
+  <line x1="708" y1="446" x2="972" y2="446" stroke="var(--border)"/>
+  <text x="708" y="464" fill="var(--muted)" font-size="8" font-family="sans-serif">ATC SUPPORT IS OPTIONAL</text>
+  <text x="708" y="480" fill="var(--muted)" font-size="8" font-family="monospace">SAME M6 PATH / NO DUPLICATE LOGIC</text>
+
+  <!-- Bottom action bar -->
+  <line x1="4" y1="578" x2="996" y2="578" stroke="var(--border)"/>
+  <text x="16" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ESC BACK</text>
+  <text x="92" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ENTER SELECT</text>
+  <text x="200" y="599" fill="var(--muted)" font-size="9" font-family="monospace">LOAD TOOL</text>
+  <text x="300" y="599" fill="var(--muted)" font-size="9" font-family="monospace">UNLOAD T0</text>
+  <text x="392" y="599" fill="var(--muted)" font-size="9" font-family="monospace">CONFIRM INSTALL</text>
+  <text x="530" y="599" fill="var(--muted)" font-size="9" font-family="monospace">CANCEL</text>
+  <text x="610" y="599" fill="var(--muted)" font-size="9" font-family="monospace">EDIT TABLE</text>
+  <text x="714" y="599" fill="var(--muted)" font-size="9" font-family="monospace">SAVE / RELOAD</text>
+  <text x="840" y="599" fill="var(--warning)" font-size="9" font-family="monospace">CYCLE START = PANEL</text>
+
+  <!-- Status line -->
+  <line x1="4" y1="612" x2="996" y2="612" stroke="var(--border)"/>
+  <text x="16" y="628" fill="var(--muted)" font-size="9" font-family="monospace">TOOLS  MANUAL CHANGER  T12 / NEXT T13  CHANGE STAGED</text>
+  <text x="520" y="628" fill="var(--muted)" font-size="9" font-family="monospace">TOOL TABLE 5 / 24</text>
+  <text x="680" y="628" fill="var(--success)" font-size="9" font-family="monospace">PROTECT OFF</text>
+  <text x="770" y="628" fill="var(--success)" font-size="9" font-family="monospace">E-STOP OK</text>
+  <text x="850" y="628" fill="var(--success)" font-size="9" font-family="monospace">ALARM 0</text>
+  <text x="920" y="628" fill="var(--muted)" font-size="9" font-family="monospace">14:32:05</text>
+</svg>

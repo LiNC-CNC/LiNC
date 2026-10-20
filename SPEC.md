@@ -338,14 +338,28 @@ Program rules:
 
 ### 6.4 Tools
 
-- Mill: tool table with number, description, diameter, length, pocket and ATC
-  state.
-- Lathe: turret station grid with station number, tool description, X/Z
-  geometry/wear, nose radius, tip orientation, axial/radial live-tool flag,
-  live-tool RPM range/direction and driven-tool state.
-- Current tool and next tool.
-- ATC/turret state when available.
-- Read-only while running; program protect blocks writes.
+Primary quick tool-change surface; no MDI entry required.
+
+- Tool table: number, description, diameter/length or lathe geometry/wear,
+  pocket/station and type. Selected row or a typed target number becomes the
+  target tool.
+- Current tool, next/prepared tool and spindle state are always visible.
+- `STAGE CHANGE` prepares `Tn M6` through the internal command path and shows
+  `WAITING FOR PHYSICAL CYCLE START`. It never executes the change.
+- `T0` unload and manual-change confirmation are supported. `SET CURRENT`
+  (`M61 Qn`) is available for a tool already in the spindle but is explicitly
+  labeled as not a tool change.
+- Manual changer: after CYCLE START, show `REMOVE current / INSTALL target` and
+  a `CONFIRM INSTALLED` action. Confirmation uses the dedicated tool-change
+  backend/HAL output, not an arbitrary HAL write.
+- ATC/turret: optional and lower priority. Use the existing `toolchange.ngc`
+  and `m6_tool_call_*` routines; the HMI only stages the `M6` and renders state.
+  Show carousel/rack pockets, current pocket, clamp/unclamp and faults when
+  exposed. ATC disabled/unavailable states are explicit.
+- Lathe: power-turret station grid, axial/radial live-tool flag, live-tool RPM
+  range/direction and driven-tool state.
+- Tool table writes and staging require idle; table writes also require program
+  protect off. Running programs leave the page read-only.
 
 ### 6.5 Diagnostics
 
@@ -727,6 +741,9 @@ For this design repository:
   home controls.
 - PROG.HOME retains the current machine's `issue_mdi` behavior: RAPID sends
   `G0 X0Y0Z0`, axis keys send `G0 X0/Y0/Z0`, in the current WCS, X/Y/Z only.
+- The Tools screen represents the tool table, current/next tool, a staged
+  `Tn M6` change, manual confirmation and an explicit optional ATC/turret
+  section, without requiring MDI entry.
 - Hardware constraints for the QMK keyboard and SZGH panel are documented.
 - No SVG shows an on-screen machine control panel.
 - G-code mockups show token-level syntax highlighting.
@@ -821,6 +838,12 @@ For the future implementation:
 27. Preserve the PROG.HOME direct `issue_mdi` path exactly (immediate panel
     action, X/Y/Z only, current WCS, no HMI staging); document the intentional
     exception to the HMI MDI staging rule.
+28. Implement the manual tool-change acknowledgement path without arbitrary HAL
+    writes; verify the existing manual-change prompt/confirm and `M61` set-current
+    semantics.
+29. Defer ATC/turret implementation. When added, reuse the existing `M6` remap
+    and carousel/turret routines, expose real clamp/index state and never
+    duplicate toolchange motion logic in the HMI.
 
 ## 14. Accepted SVG manifest
 
@@ -838,6 +861,7 @@ Only the accepted versions are included.
 | `svg/probe.svg` | Touch Probe: Probe Basic-style category strip and illustrated operation cards, WCS/parameters, prepared-MDI state, result/apply and calibration |
 | `svg/mdi.svg` | MDI: single-block command, quick inserts, DRO/modal, staged state, history and physical-cycle-start gating |
 | `svg/homing.svg` | Homing: per-axis/sequence state, HOME/PROG.HOME physical-key mapping and machine position; no software home controls |
+| `svg/tools.svg` | Tools: tool table, current/next tool, staged quick change, manual confirm, optional ATC/turret state |
 | `svg/sim-panel.svg` | Simulation-only SZGH-1080 panel window: power, E-stop, mode, overrides, lamps, displays and key matrix |
 
 Superseded vendor-style studies, intermediate layout explorations, and
