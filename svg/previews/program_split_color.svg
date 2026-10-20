@@ -1,0 +1,198 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640">
+  <rect x="4" y="4" width="992" height="632" rx="8" fill="none" stroke="#30353a"/>
+
+  <!-- Top status -->
+  <line x1="4" y1="54" x2="996" y2="54" stroke="#30353a"/>
+  <text x="16" y="33" fill="#e8eaed" font-size="16" font-family="sans-serif" font-weight="700">VMC-01</text>
+  <rect x="92" y="12" width="66" height="26" rx="4" fill="#4da3ff"/>
+  <text x="104" y="30" fill="#141619" font-size="12" font-family="monospace" font-weight="700">AUTO</text>
+  <text x="176" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">PROGRAM</text>
+  <text x="176" y="34" fill="#e8eaed" font-size="13" font-family="monospace">O1001</text>
+  <text x="246" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">TOOL</text>
+  <text x="246" y="34" fill="#e8eaed" font-size="13" font-family="monospace">T12</text>
+  <text x="300" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">SPINDLE</text>
+  <text x="300" y="34" fill="#e8eaed" font-size="13" font-family="monospace">S 4200</text>
+  <text x="390" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">FEED</text>
+  <text x="390" y="34" fill="#e8eaed" font-size="13" font-family="monospace">F 850</text>
+  <text x="460" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">WORK</text>
+  <text x="460" y="34" fill="#e8eaed" font-size="13" font-family="monospace">G54</text>
+  <circle cx="548" cy="24" r="4" fill="#3ddc84"/>
+  <text x="560" y="29" fill="#3ddc84" font-size="11" font-family="sans-serif" font-weight="700">PANEL ONLINE</text>
+  <circle cx="686" cy="24" r="4" fill="#3ddc84"/>
+  <text x="698" y="29" fill="#e8eaed" font-size="11" font-family="monospace">ALARM 0</text>
+  <circle cx="778" cy="24" r="4" fill="#ffb020"/>
+  <text x="790" y="29" fill="#e8eaed" font-size="11" font-family="monospace">MSG 2</text>
+  <text x="892" y="30" fill="#9aa0a6" font-size="12" font-family="monospace">14:32:05</text>
+
+  <!-- Left navigation -->
+  <rect x="8" y="62" width="142" height="508" rx="6" fill="#141619" stroke="#30353a"/>
+  <rect x="20" y="88" width="20" height="20" rx="3" fill="none" stroke="#9aa0a6" stroke-width="1.6"/>
+  <line x1="24" y1="98" x2="36" y2="98" stroke="#9aa0a6" stroke-width="1.6"/>
+  <circle cx="30" cy="94" r="3" fill="none" stroke="#9aa0a6" stroke-width="1.4"/>
+  <text x="48" y="96" fill="#9aa0a6" font-size="12" font-family="sans-serif">MACHINE</text>
+  <text x="48" y="112" fill="#9aa0a6" font-size="9" font-family="monospace">MAIN</text>
+
+  <rect x="8" y="126" width="4" height="42" fill="#4da3ff"/>
+  <rect x="20" y="132" width="18" height="20" rx="2" fill="none" stroke="#4da3ff" stroke-width="1.5"/>
+  <line x1="24" y1="138" x2="34" y2="138" stroke="#4da3ff" stroke-width="1.2"/>
+  <line x1="24" y1="143" x2="34" y2="143" stroke="#4da3ff" stroke-width="1.2"/>
+  <line x1="24" y1="148" x2="31" y2="148" stroke="#4da3ff" stroke-width="1.2"/>
+  <text x="48" y="147" fill="#4da3ff" font-size="12" font-family="sans-serif" font-weight="700">PROGRAM</text>
+  <text x="48" y="163" fill="#9aa0a6" font-size="9" font-family="monospace">FILE</text>
+
+  <circle cx="29" cy="194" r="9" fill="none" stroke="#9aa0a6" stroke-width="1.5"/>
+  <line x1="29" y1="180" x2="29" y2="185" stroke="#9aa0a6" stroke-width="1.4"/>
+  <line x1="29" y1="203" x2="29" y2="208" stroke="#9aa0a6" stroke-width="1.4"/>
+  <line x1="15" y1="194" x2="20" y2="194" stroke="#9aa0a6" stroke-width="1.4"/>
+  <line x1="38" y1="194" x2="43" y2="194" stroke="#9aa0a6" stroke-width="1.4"/>
+  <text x="48" y="198" fill="#9aa0a6" font-size="12" font-family="sans-serif">OFFSETS</text>
+  <text x="48" y="214" fill="#9aa0a6" font-size="9" font-family="monospace">OFFSET</text>
+
+  <path d="M20 250 L28 250 L31 244 L34 256 L38 238 L42 250 L48 250" fill="none" stroke="#9aa0a6" stroke-width="1.6"/>
+  <text x="56" y="251" fill="#9aa0a6" font-size="12" font-family="sans-serif">TOOLS</text>
+  <text x="56" y="267" fill="#9aa0a6" font-size="9" font-family="monospace">TOOL</text>
+
+  <path d="M20 306 L20 300 L25 300 L25 312 L37 312 L37 306 L43 306" fill="none" stroke="#9aa0a6" stroke-width="1.6"/>
+  <text x="52" y="310" fill="#9aa0a6" font-size="12" font-family="sans-serif">DIAGNOSTICS</text>
+  <text x="52" y="326" fill="#9aa0a6" font-size="9" font-family="monospace">WIN</text>
+
+  <line x1="20" y1="350" x2="138" y2="350" stroke="#30353a"/>
+  <text x="20" y="374" fill="#9aa0a6" font-size="9" font-family="sans-serif">FOCUS / NAVIGATION</text>
+  <text x="20" y="394" fill="#9aa0a6" font-size="9" font-family="monospace">ARROWS MOVE</text>
+  <text x="20" y="410" fill="#9aa0a6" font-size="9" font-family="monospace">ENTER SELECT</text>
+  <text x="20" y="426" fill="#9aa0a6" font-size="9" font-family="monospace">ESC BACK</text>
+  <text x="20" y="442" fill="#9aa0a6" font-size="9" font-family="monospace">PGUP / PGDN</text>
+  <text x="20" y="458" fill="#9aa0a6" font-size="9" font-family="monospace">HOME / END</text>
+  <text x="20" y="486" fill="#9aa0a6" font-size="9" font-family="sans-serif">SYMBOL LAYER</text>
+  <text x="20" y="502" fill="#9aa0a6" font-size="9" font-family="monospace">MO(1) + KEY</text>
+  <text x="20" y="530" fill="#9aa0a6" font-size="9" font-family="sans-serif">NO ON-SCREEN</text>
+  <text x="20" y="544" fill="#9aa0a6" font-size="9" font-family="sans-serif">MACHINE CONTROLS</text>
+
+  <!-- Header / view selector -->
+  <text x="158" y="78" fill="#e8eaed" font-size="15" font-family="sans-serif" font-weight="700">PROGRAM</text>
+  <text x="242" y="78" fill="#9aa0a6" font-size="11" font-family="monospace">DEMO.NC</text>
+  <text x="330" y="78" fill="#9aa0a6" font-size="10" font-family="monospace">LN 8/14</text>
+  <rect x="790" y="62" width="58" height="20" rx="3" fill="#4da3ff"/>
+  <text x="800" y="76" fill="#141619" font-size="9" font-family="monospace" font-weight="700">SPLIT</text>
+  <rect x="854" y="62" width="52" height="20" rx="3" fill="#141619" stroke="#30353a"/>
+  <text x="864" y="76" fill="#9aa0a6" font-size="9" font-family="monospace">CODE</text>
+  <circle cx="930" cy="72" r="3" fill="#3ddc84"/>
+  <text x="940" y="76" fill="#3ddc84" font-size="9" font-family="monospace">LIVE</text>
+  <line x1="158" y1="90" x2="984" y2="90" stroke="#30353a"/>
+
+  <!-- G-code editor -->
+  <rect x="158" y="98" width="480" height="472" rx="5" fill="#141619" stroke="#30353a"/>
+  <text x="170" y="120" fill="#e8eaed" font-size="12" font-family="sans-serif" font-weight="700">G-CODE</text>
+  <text x="230" y="120" fill="#9aa0a6" font-size="10" font-family="monospace">DEMO.NC</text>
+  <text x="540" y="120" fill="#9aa0a6" font-size="9" font-family="monospace">EDIT</text>
+  <line x1="170" y1="130" x2="626" y2="130" stroke="#30353a"/>
+
+  <text x="170" y="150" fill="#9aa0a6" font-size="10" font-family="monospace">0001</text>
+  <text x="214" y="150" fill="#9aa0a6" font-size="11" font-family="monospace">O1001 (DEMO)</text>
+  <text x="170" y="168" fill="#9aa0a6" font-size="10" font-family="monospace">0002</text>
+  <text x="214" y="168" fill="#9aa0a6" font-size="11" font-family="monospace">(ROUGHING)</text>
+  <text x="170" y="186" fill="#9aa0a6" font-size="10" font-family="monospace">0003</text>
+  <text x="214" y="186" fill="#4da3ff" font-size="11" font-family="monospace">G21 G90 G54</text>
+  <text x="170" y="204" fill="#9aa0a6" font-size="10" font-family="monospace">0004</text>
+  <text x="214" y="204" fill="#e8eaed" font-size="11" font-family="monospace">T12 M6</text>
+  <text x="170" y="222" fill="#9aa0a6" font-size="10" font-family="monospace">0005</text>
+  <text x="214" y="222" fill="#e8eaed" font-size="11" font-family="monospace">S4200 M3</text>
+  <text x="170" y="240" fill="#9aa0a6" font-size="10" font-family="monospace">0006</text>
+  <text x="214" y="240" fill="#4da3ff" font-size="11" font-family="monospace">G0 X0 Y0 Z50</text>
+  <text x="170" y="258" fill="#9aa0a6" font-size="10" font-family="monospace">0007</text>
+  <text x="214" y="258" fill="#4da3ff" font-size="11" font-family="monospace">G1 Z-2 F300</text>
+  <rect x="158" y="266" width="480" height="20" fill="#4da3ff" opacity="0.16"/>
+  <rect x="158" y="266" width="3" height="20" fill="#4da3ff"/>
+  <text x="170" y="280" fill="#e8eaed" font-size="10" font-family="monospace" font-weight="700">0008</text>
+  <text x="214" y="280" fill="#e8eaed" font-size="11" font-family="monospace" font-weight="700">G1 X80 Y0 F850</text>
+  <text x="170" y="298" fill="#9aa0a6" font-size="10" font-family="monospace">0009</text>
+  <text x="214" y="298" fill="#4da3ff" font-size="11" font-family="monospace">G2 X80 Y60 R30</text>
+  <text x="170" y="316" fill="#9aa0a6" font-size="10" font-family="monospace">0010</text>
+  <text x="214" y="316" fill="#4da3ff" font-size="11" font-family="monospace">G1 X0 Y60</text>
+  <text x="170" y="334" fill="#9aa0a6" font-size="10" font-family="monospace">0011</text>
+  <text x="214" y="334" fill="#4da3ff" font-size="11" font-family="monospace">G1 X0 Y0</text>
+  <text x="170" y="352" fill="#9aa0a6" font-size="10" font-family="monospace">0012</text>
+  <text x="214" y="352" fill="#4da3ff" font-size="11" font-family="monospace">G0 Z50</text>
+  <text x="170" y="370" fill="#9aa0a6" font-size="10" font-family="monospace">0013</text>
+  <text x="214" y="370" fill="#9aa0a6" font-size="11" font-family="monospace">(FINISHING)</text>
+  <text x="170" y="388" fill="#9aa0a6" font-size="10" font-family="monospace">0014</text>
+  <text x="214" y="388" fill="#e8eaed" font-size="11" font-family="monospace">T13 M6</text>
+  <text x="170" y="406" fill="#9aa0a6" font-size="10" font-family="monospace">0015</text>
+  <text x="214" y="406" fill="#e8eaed" font-size="11" font-family="monospace">S5200 M3</text>
+  <text x="170" y="424" fill="#9aa0a6" font-size="10" font-family="monospace">0016</text>
+  <text x="214" y="424" fill="#4da3ff" font-size="11" font-family="monospace">G0 X0 Y0 Z50</text>
+  <text x="170" y="442" fill="#9aa0a6" font-size="10" font-family="monospace">0017</text>
+  <text x="214" y="442" fill="#4da3ff" font-size="11" font-family="monospace">G1 Z-1 F250</text>
+  <text x="170" y="460" fill="#9aa0a6" font-size="10" font-family="monospace">0018</text>
+  <text x="214" y="460" fill="#4da3ff" font-size="11" font-family="monospace">G1 X80 Y0 F700</text>
+
+  <line x1="170" y1="474" x2="626" y2="474" stroke="#30353a"/>
+  <text x="170" y="492" fill="#9aa0a6" font-size="9" font-family="sans-serif">CURRENT</text>
+  <text x="232" y="492" fill="#e8eaed" font-size="10" font-family="monospace">G1 X80 Y0 F850</text>
+  <text x="170" y="510" fill="#9aa0a6" font-size="9" font-family="sans-serif">NEXT</text>
+  <text x="232" y="510" fill="#9aa0a6" font-size="10" font-family="monospace">G2 X80 Y60 R30</text>
+  <text x="170" y="530" fill="#9aa0a6" font-size="9" font-family="sans-serif">MODAL</text>
+  <text x="232" y="530" fill="#9aa0a6" font-size="9" font-family="monospace">G00 G17 G40 G54 G80 G90 G21</text>
+  <text x="170" y="552" fill="#3ddc84" font-size="9" font-family="monospace">EDIT ENABLED / PROTECT OFF</text>
+
+  <!-- Toolpath graph -->
+  <rect x="646" y="98" width="338" height="472" rx="5" fill="#141619" stroke="#30353a"/>
+  <text x="658" y="120" fill="#e8eaed" font-size="12" font-family="sans-serif" font-weight="700">TOOLPATH</text>
+  <text x="728" y="120" fill="#9aa0a6" font-size="9" font-family="monospace">3D / ISO</text>
+  <text x="900" y="120" fill="#9aa0a6" font-size="9" font-family="monospace">ZOOM 1.0x</text>
+  <line x1="658" y1="130" x2="972" y2="130" stroke="#30353a"/>
+
+  <polygon points="700,300 780,270 900,304 820,340" fill="#141619" fill-opacity="0.35" stroke="#30353a" stroke-width="1.3"/>
+  <polygon points="700,300 820,340 820,436 700,392" fill="none" stroke="#30353a" stroke-width="1.3"/>
+  <polygon points="820,340 900,304 900,400 820,436" fill="none" stroke="#30353a" stroke-width="1.3"/>
+
+  <path d="M720 330 L770 312 L790 322 L830 300 L880 318" fill="none" stroke="#4da3ff" stroke-width="2.2"/>
+  <path d="M770 312 L770 380 L830 360" fill="none" stroke="#4da3ff" stroke-width="2.2"/>
+  <path d="M830 300 A26 26 0 0 1 880 318" fill="none" stroke="#4da3ff" stroke-width="2.2"/>
+  <path d="M830 300 L830 370" fill="none" stroke="#4da3ff" stroke-width="2.2"/>
+  <path d="M770 380 L830 360" fill="none" stroke="#4da3ff" stroke-width="2.2"/>
+  <path d="M720 330 L680 348" fill="none" stroke="#9aa0a6" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <path d="M880 318 L920 330" fill="none" stroke="#9aa0a6" stroke-width="1.2" stroke-dasharray="4 4"/>
+
+  <circle cx="830" cy="300" r="5" fill="#141619" stroke="#ffb020" stroke-width="2"/>
+  <path d="M830 300 L830 282 L824 272 L836 272 Z" fill="none" stroke="#ffb020" stroke-width="1.4"/>
+
+  <line x1="670" y1="450" x2="710" y2="450" stroke="#9aa0a6" stroke-width="1.2"/>
+  <line x1="670" y1="450" x2="688" y2="432" stroke="#9aa0a6" stroke-width="1.2"/>
+  <line x1="670" y1="450" x2="670" y2="406" stroke="#9aa0a6" stroke-width="1.2"/>
+  <text x="712" y="454" fill="#9aa0a6" font-size="9" font-family="monospace">X</text>
+  <text x="686" y="428" fill="#9aa0a6" font-size="9" font-family="monospace">Y</text>
+  <text x="660" y="402" fill="#9aa0a6" font-size="9" font-family="monospace">Z</text>
+
+  <line x1="658" y1="470" x2="972" y2="470" stroke="#30353a"/>
+  <text x="658" y="490" fill="#9aa0a6" font-size="9" font-family="sans-serif">CURRENT BLOCK</text>
+  <text x="658" y="508" fill="#e8eaed" font-size="11" font-family="monospace" font-weight="700">G1 X80 Y0 F850</text>
+  <text x="658" y="530" fill="#9aa0a6" font-size="9" font-family="monospace">TOOL T12 / NEXT T13</text>
+  <text x="658" y="548" fill="#9aa0a6" font-size="9" font-family="monospace">F 850 / S 4200</text>
+
+  <!-- Bottom action bar -->
+  <line x1="4" y1="578" x2="996" y2="578" stroke="#30353a"/>
+  <text x="27" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">MAIN</text>
+  <rect x="68" y="584" width="44" height="22" rx="3" fill="#4da3ff"/>
+  <text x="76" y="599" fill="#141619" font-size="9" font-family="monospace" font-weight="700">FILE</text>
+  <text x="124" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">OFFSET</text>
+  <text x="188" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">TOOL</text>
+  <text x="236" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">WIN</text>
+  <text x="280" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">ESC</text>
+  <line x1="320" y1="584" x2="320" y2="606" stroke="#30353a"/>
+  <text x="336" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">LOAD</text>
+  <text x="386" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">SAVE</text>
+  <text x="436" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">SEARCH</text>
+  <text x="504" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">SIMULATE</text>
+  <text x="580" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">LAYOUT</text>
+  <text x="636" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">HELP</text>
+
+  <!-- Status line -->
+  <line x1="4" y1="612" x2="996" y2="612" stroke="#30353a"/>
+  <text x="16" y="628" fill="#9aa0a6" font-size="9" font-family="monospace">AUTO  O1001  LN 8/14  G54  T12  S4200  F850</text>
+  <text x="500" y="628" fill="#9aa0a6" font-size="9" font-family="monospace">OVR F100 S100 R100</text>
+  <text x="650" y="628" fill="#3ddc84" font-size="9" font-family="monospace">PROTECT OFF</text>
+  <text x="740" y="628" fill="#3ddc84" font-size="9" font-family="monospace">E-STOP OK</text>
+  <text x="820" y="628" fill="#3ddc84" font-size="9" font-family="monospace">ALARM 0</text>
+  <text x="900" y="628" fill="#9aa0a6" font-size="9" font-family="monospace">14:32:05</text>
+</svg>

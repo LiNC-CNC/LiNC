@@ -1,0 +1,273 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640">
+  <rect x="4" y="4" width="992" height="632" rx="8" fill="none" stroke="var(--border)"/>
+
+  <!-- Top status -->
+  <line x1="4" y1="54" x2="996" y2="54" stroke="var(--border)"/>
+  <text x="16" y="33" fill="var(--fg)" font-size="16" font-family="sans-serif" font-weight="700">VMC-01</text>
+  <rect x="92" y="12" width="66" height="26" rx="4" fill="var(--accent)"/>
+  <text x="104" y="30" fill="var(--fg)" font-size="12" font-family="monospace" font-weight="700">AUTO</text>
+  <text x="176" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">PROGRAM</text>
+  <text x="176" y="34" fill="var(--fg)" font-size="13" font-family="monospace">O1001</text>
+  <text x="246" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">TOOL</text>
+  <text x="246" y="34" fill="var(--fg)" font-size="13" font-family="monospace">T12</text>
+  <text x="300" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">SPINDLE</text>
+  <text x="300" y="34" fill="var(--fg)" font-size="13" font-family="monospace">S 4200</text>
+  <text x="390" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">FEED</text>
+  <text x="390" y="34" fill="var(--fg)" font-size="13" font-family="monospace">F 850</text>
+  <text x="460" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">WORK</text>
+  <text x="460" y="34" fill="var(--fg)" font-size="13" font-family="monospace">G54</text>
+  <circle cx="548" cy="24" r="4" fill="var(--success)"/>
+  <text x="560" y="29" fill="var(--success)" font-size="11" font-family="sans-serif" font-weight="700">PANEL ONLINE</text>
+  <circle cx="686" cy="24" r="4" fill="var(--success)"/>
+  <text x="698" y="29" fill="var(--fg)" font-size="11" font-family="monospace">ALARM 0</text>
+  <circle cx="778" cy="24" r="4" fill="var(--warning)"/>
+  <text x="790" y="29" fill="var(--fg)" font-size="11" font-family="monospace">MSG 2</text>
+  <text x="892" y="30" fill="var(--muted)" font-size="12" font-family="monospace">14:32:05</text>
+
+  <!-- Left navigation -->
+  <rect x="8" y="62" width="142" height="508" rx="6" fill="var(--surface)" stroke="var(--border)"/>
+  <rect x="8" y="78" width="4" height="42" fill="var(--accent)"/>
+  <rect x="20" y="88" width="20" height="20" rx="3" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+  <line x1="24" y1="98" x2="36" y2="98" stroke="var(--accent)" stroke-width="1.6"/>
+  <circle cx="30" cy="94" r="3" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
+  <text x="48" y="96" fill="var(--accent)" font-size="12" font-family="sans-serif" font-weight="700">MACHINE</text>
+  <text x="48" y="112" fill="var(--muted)" font-size="9" font-family="monospace">MAIN</text>
+
+  <rect x="20" y="132" width="18" height="20" rx="2" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
+  <line x1="24" y1="138" x2="34" y2="138" stroke="var(--muted)" stroke-width="1.2"/>
+  <line x1="24" y1="143" x2="34" y2="143" stroke="var(--muted)" stroke-width="1.2"/>
+  <line x1="24" y1="148" x2="31" y2="148" stroke="var(--muted)" stroke-width="1.2"/>
+  <text x="48" y="147" fill="var(--fg)" font-size="12" font-family="sans-serif">PROGRAM</text>
+  <text x="48" y="163" fill="var(--muted)" font-size="9" font-family="monospace">FILE</text>
+
+  <circle cx="29" cy="194" r="9" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
+  <line x1="29" y1="180" x2="29" y2="185" stroke="var(--muted)" stroke-width="1.4"/>
+  <line x1="29" y1="203" x2="29" y2="208" stroke="var(--muted)" stroke-width="1.4"/>
+  <line x1="15" y1="194" x2="20" y2="194" stroke="var(--muted)" stroke-width="1.4"/>
+  <line x1="38" y1="194" x2="43" y2="194" stroke="var(--muted)" stroke-width="1.4"/>
+  <text x="48" y="198" fill="var(--fg)" font-size="12" font-family="sans-serif">OFFSETS</text>
+  <text x="48" y="214" fill="var(--muted)" font-size="9" font-family="monospace">OFFSET</text>
+
+  <path d="M20 250 L28 250 L31 244 L34 256 L38 238 L42 250 L48 250" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
+  <text x="56" y="251" fill="var(--fg)" font-size="12" font-family="sans-serif">TOOLS</text>
+  <text x="56" y="267" fill="var(--muted)" font-size="9" font-family="monospace">TOOL</text>
+
+  <path d="M20 306 L20 300 L25 300 L25 312 L37 312 L37 306 L43 306" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
+  <text x="52" y="310" fill="var(--fg)" font-size="12" font-family="sans-serif">DIAGNOSTICS</text>
+  <text x="52" y="326" fill="var(--muted)" font-size="9" font-family="monospace">WIN</text>
+
+  <line x1="20" y1="350" x2="138" y2="350" stroke="var(--border)"/>
+  <text x="20" y="374" fill="var(--muted)" font-size="9" font-family="sans-serif">PHYSICAL PANEL</text>
+  <circle cx="22" cy="392" r="3" fill="var(--success)"/>
+  <text x="34" y="396" fill="var(--success)" font-size="10" font-family="monospace">ONLINE</text>
+  <text x="20" y="416" fill="var(--muted)" font-size="9" font-family="sans-serif">MODE</text>
+  <text x="70" y="416" fill="var(--fg)" font-size="10" font-family="monospace">AUTO</text>
+  <text x="20" y="436" fill="var(--muted)" font-size="9" font-family="sans-serif">PROTECT</text>
+  <text x="82" y="436" fill="var(--success)" font-size="10" font-family="monospace">OFF</text>
+  <text x="20" y="456" fill="var(--muted)" font-size="9" font-family="sans-serif">E-STOP</text>
+  <text x="82" y="456" fill="var(--success)" font-size="10" font-family="monospace">OK</text>
+  <text x="20" y="496" fill="var(--muted)" font-size="9" font-family="sans-serif">KEYBOARD</text>
+  <text x="20" y="512" fill="var(--muted)" font-size="9" font-family="monospace">MAIN FILE</text>
+  <text x="20" y="526" fill="var(--muted)" font-size="9" font-family="monospace">OFFSET TOOL</text>
+  <text x="20" y="540" fill="var(--muted)" font-size="9" font-family="monospace">WIN  ESC</text>
+
+  <!-- Axis cards -->
+  <rect x="158" y="70" width="143" height="82" rx="5" fill="var(--surface)" stroke="var(--accent)"/>
+  <text x="170" y="90" fill="var(--muted)" font-size="10" font-family="sans-serif">X</text>
+  <text x="170" y="118" fill="var(--fg)" font-size="20" font-family="monospace" font-weight="700">+123.456</text>
+  <text x="170" y="138" fill="var(--muted)" font-size="9" font-family="monospace">DTG 0.000 mm</text>
+  <rect x="170" y="144" width="118" height="3" rx="1" fill="var(--border)"/>
+  <rect x="170" y="144" width="68" height="3" rx="1" fill="var(--accent)"/>
+
+  <rect x="309" y="70" width="143" height="82" rx="5" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="321" y="90" fill="var(--muted)" font-size="10" font-family="sans-serif">Y</text>
+  <text x="321" y="118" fill="var(--fg)" font-size="20" font-family="monospace" font-weight="700">+78.900</text>
+  <text x="321" y="138" fill="var(--muted)" font-size="9" font-family="monospace">DTG 0.000 mm</text>
+  <rect x="321" y="144" width="118" height="3" rx="1" fill="var(--border)"/>
+  <rect x="321" y="144" width="44" height="3" rx="1" fill="var(--accent)"/>
+
+  <rect x="460" y="70" width="143" height="82" rx="5" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="472" y="90" fill="var(--muted)" font-size="10" font-family="sans-serif">Z</text>
+  <text x="472" y="118" fill="var(--fg)" font-size="20" font-family="monospace" font-weight="700">-2.000</text>
+  <text x="472" y="138" fill="var(--muted)" font-size="9" font-family="monospace">DTG 0.000 mm</text>
+  <rect x="472" y="144" width="118" height="3" rx="1" fill="var(--border)"/>
+  <rect x="472" y="144" width="22" height="3" rx="1" fill="var(--accent)"/>
+
+  <rect x="611" y="70" width="143" height="82" rx="5" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="623" y="90" fill="var(--muted)" font-size="10" font-family="sans-serif">A</text>
+  <text x="623" y="118" fill="var(--fg)" font-size="20" font-family="monospace" font-weight="700">0.000</text>
+  <text x="623" y="138" fill="var(--muted)" font-size="9" font-family="monospace">DTG 0.000 deg</text>
+  <rect x="623" y="144" width="118" height="3" rx="1" fill="var(--border)"/>
+  <rect x="623" y="144" width="0" height="3" rx="1" fill="var(--accent)"/>
+
+  <!-- 3D toolpath -->
+  <rect x="158" y="160" width="440" height="270" rx="5" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="170" y="182" fill="var(--fg)" font-size="12" font-family="sans-serif" font-weight="700">TOOLPATH</text>
+  <text x="240" y="182" fill="var(--muted)" font-size="10" font-family="monospace">3D / ISO</text>
+  <text x="520" y="182" fill="var(--muted)" font-size="10" font-family="monospace">ZOOM 1.0x</text>
+  <line x1="170" y1="192" x2="586" y2="192" stroke="var(--border)"/>
+
+  <!-- isometric stock -->
+  <polygon points="250,270 360,236 490,274 380,310" fill="none" stroke="var(--border)" stroke-width="1.4"/>
+  <polygon points="250,270 380,310 380,390 250,348" fill="none" stroke="var(--border)" stroke-width="1.4"/>
+  <polygon points="380,310 490,274 490,354 380,390" fill="none" stroke="var(--border)" stroke-width="1.4"/>
+
+  <!-- toolpath -->
+  <path d="M270 300 L330 280 L360 292 L400 270 L452 288" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+  <path d="M330 280 L330 340 L400 320" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+  <path d="M400 270 A28 28 0 0 1 452 288" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+  <path d="M400 270 L400 330" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+  <path d="M330 340 L400 320" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+  <!-- rapid moves -->
+  <path d="M270 300 L240 320" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <path d="M452 288 L500 300" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <!-- tool -->
+  <circle cx="400" cy="270" r="6" fill="var(--surface)" stroke="var(--warning)" stroke-width="2"/>
+  <path d="M400 270 L400 250 L394 240 L406 240 Z" fill="none" stroke="var(--warning)" stroke-width="1.5"/>
+  <!-- axes -->
+  <line x1="184" y1="402" x2="236" y2="402" stroke="var(--muted)" stroke-width="1.2"/>
+  <line x1="184" y1="402" x2="206" y2="382" stroke="var(--muted)" stroke-width="1.2"/>
+  <line x1="184" y1="402" x2="184" y2="350" stroke="var(--muted)" stroke-width="1.2"/>
+  <text x="238" y="406" fill="var(--muted)" font-size="10" font-family="monospace">X</text>
+  <text x="204" y="378" fill="var(--muted)" font-size="10" font-family="monospace">Y</text>
+  <text x="174" y="346" fill="var(--muted)" font-size="10" font-family="monospace">Z</text>
+
+  <text x="170" y="416" fill="var(--muted)" font-size="10" font-family="monospace">O1001 / DEMO.NC</text>
+  <text x="470" y="416" fill="var(--muted)" font-size="10" font-family="monospace">F 850 / S 4200</text>
+
+  <!-- Program card -->
+  <rect x="608" y="160" width="152" height="270" rx="5" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="620" y="182" fill="var(--fg)" font-size="12" font-family="sans-serif" font-weight="700">PROGRAM</text>
+  <text x="620" y="200" fill="var(--muted)" font-size="9" font-family="monospace">O1001 / DEMO.NC</text>
+  <line x1="620" y1="208" x2="748" y2="208" stroke="var(--border)"/>
+  <text x="620" y="228" fill="var(--muted)" font-size="9" font-family="sans-serif">CURRENT</text>
+  <rect x="608" y="234" width="152" height="20" fill="var(--accent)" opacity="0.16"/>
+  <text x="620" y="248" fill="var(--fg)" font-size="10" font-family="monospace" font-weight="700">▶ G1 X80 Y0 F850</text>
+  <text x="620" y="270" fill="var(--muted)" font-size="9" font-family="sans-serif">NEXT</text>
+  <text x="620" y="286" fill="var(--muted)" font-size="10" font-family="monospace">G2 X80 Y60 R30</text>
+  <line x1="620" y1="298" x2="748" y2="298" stroke="var(--border)"/>
+  <text x="620" y="316" fill="var(--muted)" font-size="9" font-family="sans-serif">MODAL</text>
+  <text x="620" y="332" fill="var(--muted)" font-size="10" font-family="monospace">G00 G17 G40</text>
+  <text x="620" y="348" fill="var(--muted)" font-size="10" font-family="monospace">G54 G80 G90</text>
+  <text x="620" y="364" fill="var(--muted)" font-size="10" font-family="monospace">G21 G94</text>
+  <text x="620" y="386" fill="var(--muted)" font-size="9" font-family="sans-serif">PROGRESS</text>
+  <rect x="620" y="394" width="128" height="6" rx="3" fill="var(--border)"/>
+  <rect x="620" y="394" width="78" height="6" rx="3" fill="var(--accent)"/>
+  <text x="620" y="414" fill="var(--muted)" font-size="9" font-family="monospace">LN 7/11  00:42</text>
+
+  <!-- Bottom cards -->
+  <rect x="158" y="438" width="168" height="132" rx="5" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="170" y="458" fill="var(--muted)" font-size="9" font-family="sans-serif">FEED / SPINDLE</text>
+  <circle cx="204" cy="500" r="27" fill="none" stroke="var(--border)" stroke-width="6" pathLength="100"/>
+  <circle cx="204" cy="500" r="27" fill="none" stroke="var(--accent)" stroke-width="6" pathLength="100" stroke-dasharray="100 100" transform="rotate(-90 204 500)"/>
+  <text x="188" y="504" fill="var(--fg)" font-size="13" font-family="monospace" font-weight="700">100%</text>
+  <text x="188" y="538" fill="var(--muted)" font-size="9" font-family="sans-serif">FEED</text>
+  <text x="188" y="550" fill="var(--muted)" font-size="9" font-family="monospace">850 mm/min</text>
+
+  <circle cx="290" cy="500" r="27" fill="none" stroke="var(--border)" stroke-width="6" pathLength="100"/>
+  <circle cx="290" cy="500" r="27" fill="none" stroke="var(--accent)" stroke-width="6" pathLength="100" stroke-dasharray="72 100" transform="rotate(-90 290 500)"/>
+  <text x="274" y="504" fill="var(--fg)" font-size="13" font-family="monospace" font-weight="700">72%</text>
+  <text x="274" y="538" fill="var(--muted)" font-size="9" font-family="sans-serif">SPINDLE</text>
+  <text x="274" y="550" fill="var(--muted)" font-size="9" font-family="monospace">4200 rpm</text>
+
+  <rect x="338" y="438" width="178" height="132" rx="5" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="350" y="458" fill="var(--muted)" font-size="9" font-family="sans-serif">MACHINE HEALTH</text>
+  <text x="350" y="478" fill="var(--muted)" font-size="9" font-family="sans-serif">SERVO LOAD</text>
+  <text x="350" y="494" fill="var(--fg)" font-size="9" font-family="monospace">X</text>
+  <rect x="366" y="487" width="74" height="6" rx="3" fill="var(--border)"/>
+  <rect x="366" y="487" width="52" height="6" rx="3" fill="var(--accent)"/>
+  <text x="450" y="494" fill="var(--muted)" font-size="9" font-family="monospace">32%</text>
+  <text x="350" y="510" fill="var(--fg)" font-size="9" font-family="monospace">Y</text>
+  <rect x="366" y="503" width="74" height="6" rx="3" fill="var(--border)"/>
+  <rect x="366" y="503" width="30" height="6" rx="3" fill="var(--accent)"/>
+  <text x="450" y="510" fill="var(--muted)" font-size="9" font-family="monospace">18%</text>
+  <text x="350" y="526" fill="var(--fg)" font-size="9" font-family="monospace">Z</text>
+  <rect x="366" y="519" width="74" height="6" rx="3" fill="var(--border)"/>
+  <rect x="366" y="519" width="20" height="6" rx="3" fill="var(--accent)"/>
+  <text x="450" y="526" fill="var(--muted)" font-size="9" font-family="monospace">12%</text>
+  <text x="350" y="548" fill="var(--muted)" font-size="9" font-family="monospace">COOLANT OFF / LUBE OK</text>
+
+  <rect x="528" y="438" width="232" height="132" rx="5" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="540" y="458" fill="var(--muted)" font-size="9" font-family="sans-serif">ALARMS / MESSAGES</text>
+  <circle cx="544" cy="480" r="3" fill="var(--success)"/>
+  <text x="554" y="484" fill="var(--fg)" font-size="10" font-family="monospace">NO ACTIVE ALARMS</text>
+  <circle cx="544" cy="504" r="3" fill="var(--warning)"/>
+  <text x="554" y="508" fill="var(--muted)" font-size="10" font-family="monospace">MSG 2 / READY</text>
+  <line x1="540" y1="518" x2="748" y2="518" stroke="var(--border)"/>
+  <text x="540" y="536" fill="var(--muted)" font-size="9" font-family="monospace">14:31:58  PANEL ONLINE</text>
+  <text x="540" y="550" fill="var(--muted)" font-size="9" font-family="monospace">14:31:42  PROGRAM READY</text>
+
+  <!-- Right panel status (read-only) -->
+  <rect x="768" y="62" width="224" height="508" rx="6" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="780" y="86" fill="var(--fg)" font-size="13" font-family="sans-serif" font-weight="700">PANEL STATUS</text>
+  <text x="780" y="102" fill="var(--muted)" font-size="9" font-family="sans-serif">PHYSICAL CONTROL / READ ONLY</text>
+  <line x1="780" y1="112" x2="980" y2="112" stroke="var(--border)"/>
+
+  <circle cx="786" cy="132" r="4" fill="var(--success)"/>
+  <text x="798" y="136" fill="var(--success)" font-size="10" font-family="monospace" font-weight="700">ONLINE</text>
+  <text x="900" y="136" fill="var(--muted)" font-size="9" font-family="monospace">50 ms</text>
+
+  <text x="780" y="162" fill="var(--muted)" font-size="9" font-family="sans-serif">MODE</text>
+  <text x="780" y="182" fill="var(--accent)" font-size="18" font-family="monospace" font-weight="700">AUTO</text>
+  <text x="870" y="182" fill="var(--muted)" font-size="9" font-family="sans-serif">TASK</text>
+  <text x="870" y="198" fill="var(--fg)" font-size="10" font-family="monospace">AUTO</text>
+
+  <text x="780" y="226" fill="var(--muted)" font-size="9" font-family="sans-serif">FEED OVERRIDE</text>
+  <text x="950" y="226" fill="var(--fg)" font-size="10" font-family="monospace">100%</text>
+  <rect x="780" y="234" width="190" height="6" rx="3" fill="var(--border)"/>
+  <rect x="780" y="234" width="190" height="6" rx="3" fill="var(--accent)"/>
+  <text x="780" y="258" fill="var(--muted)" font-size="9" font-family="sans-serif">SPINDLE OVERRIDE</text>
+  <text x="950" y="258" fill="var(--fg)" font-size="10" font-family="monospace">100%</text>
+  <rect x="780" y="266" width="190" height="6" rx="3" fill="var(--border)"/>
+  <rect x="780" y="266" width="190" height="6" rx="3" fill="var(--accent)"/>
+  <text x="780" y="290" fill="var(--muted)" font-size="9" font-family="sans-serif">RAPID OVERRIDE</text>
+  <text x="950" y="290" fill="var(--fg)" font-size="10" font-family="monospace">100%</text>
+  <rect x="780" y="298" width="190" height="6" rx="3" fill="var(--border)"/>
+  <rect x="780" y="298" width="190" height="6" rx="3" fill="var(--accent)"/>
+
+  <line x1="780" y1="318" x2="980" y2="318" stroke="var(--border)"/>
+  <text x="780" y="338" fill="var(--muted)" font-size="9" font-family="sans-serif">ACTIVE SWITCHES</text>
+  <text x="780" y="358" fill="var(--muted)" font-size="9" font-family="monospace">SINGLE BLOCK</text>
+  <text x="950" y="358" fill="var(--muted)" font-size="9" font-family="monospace">OFF</text>
+  <text x="780" y="376" fill="var(--muted)" font-size="9" font-family="monospace">OPT. STOP</text>
+  <text x="950" y="376" fill="var(--muted)" font-size="9" font-family="monospace">OFF</text>
+  <text x="780" y="394" fill="var(--muted)" font-size="9" font-family="monospace">BLOCK DELETE</text>
+  <text x="950" y="394" fill="var(--muted)" font-size="9" font-family="monospace">OFF</text>
+  <text x="780" y="412" fill="var(--muted)" font-size="9" font-family="monospace">DRY RUN</text>
+  <text x="950" y="412" fill="var(--muted)" font-size="9" font-family="monospace">OFF</text>
+
+  <line x1="780" y1="432" x2="980" y2="432" stroke="var(--border)"/>
+  <text x="780" y="452" fill="var(--muted)" font-size="9" font-family="sans-serif">TOOL DISPLAY</text>
+  <text x="780" y="478" fill="var(--fg)" font-size="22" font-family="monospace" font-weight="700">T12</text>
+  <text x="880" y="478" fill="var(--muted)" font-size="10" font-family="monospace">NEXT T13</text>
+  <text x="780" y="500" fill="var(--muted)" font-size="9" font-family="sans-serif">PROGRAM PROTECT</text>
+  <text x="950" y="500" fill="var(--success)" font-size="10" font-family="monospace">OFF</text>
+  <text x="780" y="520" fill="var(--muted)" font-size="9" font-family="sans-serif">E-STOP</text>
+  <text x="950" y="520" fill="var(--success)" font-size="10" font-family="monospace">OK</text>
+  <text x="780" y="546" fill="var(--muted)" font-size="9" font-family="sans-serif">HARDWARE PANEL OWNS:</text>
+  <text x="780" y="560" fill="var(--muted)" font-size="8" font-family="monospace">MODE / CYCLE / JOG / OVERRIDE</text>
+
+  <!-- Bottom action bar -->
+  <line x1="4" y1="578" x2="996" y2="578" stroke="var(--border)"/>
+  <rect x="16" y="584" width="54" height="22" rx="3" fill="var(--accent)"/>
+  <text x="27" y="599" fill="var(--fg)" font-size="9" font-family="monospace" font-weight="700">MAIN</text>
+  <text x="80" y="599" fill="var(--muted)" font-size="9" font-family="monospace">FILE</text>
+  <text x="124" y="599" fill="var(--muted)" font-size="9" font-family="monospace">OFFSET</text>
+  <text x="188" y="599" fill="var(--muted)" font-size="9" font-family="monospace">TOOL</text>
+  <text x="236" y="599" fill="var(--muted)" font-size="9" font-family="monospace">WIN</text>
+  <text x="280" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ESC</text>
+  <line x1="320" y1="584" x2="320" y2="606" stroke="var(--border)"/>
+  <text x="336" y="599" fill="var(--muted)" font-size="9" font-family="monospace">LOAD</text>
+  <text x="386" y="599" fill="var(--muted)" font-size="9" font-family="monospace">EDIT</text>
+  <text x="436" y="599" fill="var(--muted)" font-size="9" font-family="monospace">SEARCH</text>
+  <text x="504" y="599" fill="var(--muted)" font-size="9" font-family="monospace">SIMULATE</text>
+  <text x="580" y="599" fill="var(--muted)" font-size="9" font-family="monospace">FIT</text>
+  <text x="620" y="599" fill="var(--muted)" font-size="9" font-family="monospace">HELP</text>
+
+  <!-- Status line -->
+  <line x1="4" y1="612" x2="996" y2="612" stroke="var(--border)"/>
+  <text x="16" y="628" fill="var(--muted)" font-size="9" font-family="monospace">AUTO  O1001  LN 7/11  G54  T12  S4200  F850</text>
+  <text x="720" y="628" fill="var(--success)" font-size="9" font-family="monospace">PANEL ONLINE</text>
+  <text x="820" y="628" fill="var(--success)" font-size="9" font-family="monospace">ALARM 0</text>
+  <text x="900" y="628" fill="var(--muted)" font-size="9" font-family="monospace">14:32:05</text>
+</svg>
