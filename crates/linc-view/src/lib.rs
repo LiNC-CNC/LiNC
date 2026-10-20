@@ -62,6 +62,7 @@ pub struct TrajectoryView<'a> {
     pub show_program_bounds: bool,
     pub show_machine_bounds: bool,
     pub show_selected_line: bool,
+    pub show_legend: bool,
     pub selected_line_color: Color32,
     pub height: f32,
     pub fit: bool,
@@ -90,6 +91,7 @@ impl<'a> TrajectoryView<'a> {
             show_program_bounds: true,
             show_machine_bounds: true,
             show_selected_line: true,
+            show_legend: true,
             selected_line_color: theme::ACCENT,
             height: 400.0,
             fit: false,
@@ -396,57 +398,59 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         }
     }
 
-    // Legend.
-    let legend_rect = Rect::from_min_size(
-        rect.left_top() + Vec2::new(12.0, 12.0),
-        Vec2::new(214.0, 54.0),
-    );
-    painter.rect_filled(
-        legend_rect,
-        CornerRadius::same(4),
-        Color32::from_rgb(0x1b, 0x1e, 0x22),
-    );
-    painter.rect_stroke(
-        legend_rect,
-        CornerRadius::same(4),
-        Stroke::new(1.0, theme::BORDER),
-        StrokeKind::Inside,
-    );
-    painter.line_segment(
-        [
-            legend_rect.left_top() + Vec2::new(10.0, 17.0),
-            legend_rect.left_top() + Vec2::new(32.0, 17.0),
-        ],
-        Stroke::new(2.0, theme::ACCENT),
-    );
-    painter.text(
-        legend_rect.left_top() + Vec2::new(40.0, 11.0),
-        Align2::LEFT_TOP,
-        "PROGRAM CUT",
-        FontId::monospace(10.0 * FONT_SCALE),
-        theme::FG,
-    );
-    painter.line_segment(
-        [
-            legend_rect.left_top() + Vec2::new(10.0, 31.0),
-            legend_rect.left_top() + Vec2::new(32.0, 31.0),
-        ],
-        Stroke::new(2.0, theme::SUCCESS),
-    );
-    painter.text(
-        legend_rect.left_top() + Vec2::new(40.0, 25.0),
-        Align2::LEFT_TOP,
-        "LIVE TOOLPATH",
-        FontId::monospace(10.0 * FONT_SCALE),
-        theme::FG,
-    );
-    painter.text(
-        legend_rect.left_top() + Vec2::new(10.0, 40.0),
-        Align2::LEFT_TOP,
-        format!("{}  •  ZOOM {:.1}x", view.view.label(), view.zoom),
-        FontId::monospace(9.0 * FONT_SCALE),
-        theme::MUTED,
-    );
+    if view.show_legend {
+        // Legend.
+        let legend_rect = Rect::from_min_size(
+            rect.left_top() + Vec2::new(12.0, 12.0),
+            Vec2::new(214.0, 54.0),
+        );
+        painter.rect_filled(
+            legend_rect,
+            CornerRadius::same(4),
+            Color32::from_rgb(0x1b, 0x1e, 0x22),
+        );
+        painter.rect_stroke(
+            legend_rect,
+            CornerRadius::same(4),
+            Stroke::new(1.0, theme::BORDER),
+            StrokeKind::Inside,
+        );
+        painter.line_segment(
+            [
+                legend_rect.left_top() + Vec2::new(10.0, 17.0),
+                legend_rect.left_top() + Vec2::new(32.0, 17.0),
+            ],
+            Stroke::new(2.0, theme::ACCENT),
+        );
+        painter.text(
+            legend_rect.left_top() + Vec2::new(40.0, 11.0),
+            Align2::LEFT_TOP,
+            "PROGRAM CUT",
+            FontId::monospace(10.0 * FONT_SCALE),
+            theme::FG,
+        );
+        painter.line_segment(
+            [
+                legend_rect.left_top() + Vec2::new(10.0, 31.0),
+                legend_rect.left_top() + Vec2::new(32.0, 31.0),
+            ],
+            Stroke::new(2.0, theme::SUCCESS),
+        );
+        painter.text(
+            legend_rect.left_top() + Vec2::new(40.0, 25.0),
+            Align2::LEFT_TOP,
+            "LIVE TOOLPATH",
+            FontId::monospace(10.0 * FONT_SCALE),
+            theme::FG,
+        );
+        painter.text(
+            legend_rect.left_top() + Vec2::new(10.0, 40.0),
+            Align2::LEFT_TOP,
+            format!("{}  •  ZOOM {:.1}x", view.view.label(), view.zoom),
+            FontId::monospace(9.0 * FONT_SCALE),
+            theme::MUTED,
+        );
+    }
 
     if !has_data {
         painter.text(

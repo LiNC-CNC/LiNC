@@ -22,13 +22,16 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         }
     });
     ui.add_space(4.0);
-    match app.settings.page {
-        0 => display(app, ui),
-        1 => keyboard(app, ui),
-        2 => machine(app, ui),
-        3 => panel(app, ui),
-        _ => about(app, ui),
-    }
+    egui::ScrollArea::vertical()
+        .id_salt("settings-body")
+        .max_height(ui.available_height())
+        .show(ui, |ui| match app.settings.page {
+            0 => display(app, ui),
+            1 => keyboard(app, ui),
+            2 => machine(app, ui),
+            3 => panel(app, ui),
+            _ => about(app, ui),
+        });
 }
 
 fn display(app: &mut LincApp, ui: &mut Ui) {

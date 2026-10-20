@@ -86,6 +86,14 @@ pub fn current_next_cards(app: &LincApp, ui: &mut Ui) {
     });
 }
 
+pub fn modal_text(key: &str, value: &str) -> String {
+    if value.is_empty() {
+        key.to_string()
+    } else {
+        format!("{key} {value}")
+    }
+}
+
 pub fn modal_summary(app: &LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
         ui.label(
@@ -101,7 +109,7 @@ pub fn modal_summary(app: &LincApp, ui: &mut Ui) {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 for (key, value) in &app.snapshot.program.modal {
                     ui.label(
-                        RichText::new(format!("{key} {value}"))
+                        RichText::new(modal_text(key, value))
                             .monospace()
                             .size(theme::font_size(11.0))
                             .color(theme::FG),
@@ -119,13 +127,13 @@ pub fn axis_cards(app: &LincApp, ui: &mut Ui) {
     let gap = 8.0;
     let width =
         ((ui.available_width() - gap * (count.saturating_sub(1)) as f32) / count as f32).max(120.0);
-    let height = if compact { 76.0 } else { 96.0 };
+    let height = if compact { 72.0 } else { 92.0 };
     let mut rects = Vec::new();
     ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
         for axis in axes.iter().take(count) {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
             rects.push((axis.clone(), rect));
-            ui.add_space(gap);
         }
     });
     for (axis, rect) in rects {
@@ -146,13 +154,20 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
         .as_deref()
         .map(|name| name == axis)
         .unwrap_or(false);
-    let homed = app
-        .snapshot
-        .machine
-        .homed
-        .get(axis)
-        .copied()
-        .unwrap_or(false);
+    let range = app
+        .profile
+        .machine_ini
+        .axes
+        .iter()
+        .find(|axis_config| axis_config.name == axis);
+    let fraction = range
+        .map(|axis_config| {
+            let span = (axis_config.max_limit - axis_config.min_limit)
+                .abs()
+                .max(0.001);
+            ((machine - axis_config.min_limit) / span).clamp(0.0, 1.0)
+        })
+        .unwrap_or(0.0);
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 6, theme::PANEL);
     painter.rect_stroke(
@@ -162,58 +177,47 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
         egui::StrokeKind::Inside,
     );
     painter.text(
-        rect.left_top() + Vec2::new(14.0, 12.0),
+        rect.left_top() + Vec2::new(14.0, 10.0),
         egui::Align2::LEFT_TOP,
         axis,
-        FontId::proportional(theme::font_size(15.0)),
+        FontId::proportional(theme::font_size(13.0)),
         theme::C3,
     );
-    if active {
-        painter.text(
-            rect.left_top() + Vec2::new(38.0, 14.0),
-            egui::Align2::LEFT_TOP,
-            "ACTIVE",
-            FontId::monospace(theme::font_size(8.5)),
-            theme::ACCENT,
-        );
-    }
     painter.text(
-        rect.right_top() + Vec2::new(-14.0, 12.0),
-        egui::Align2::RIGHT_TOP,
-        if homed { "HOMED" } else { "NOT HOMED" },
-        FontId::monospace(theme::font_size(9.0)),
-        if homed {
-            theme::SUCCESS
-        } else {
-            theme::WARNING
-        },
-    );
-    painter.text(
-        rect.left_top() + Vec2::new(14.0, 38.0),
+        rect.left_top() + Vec2::new(14.0, 35.0),
         egui::Align2::LEFT_CENTER,
         crate::theme::format_position(work, 3),
-        FontId::monospace(if compact { 22.0 } else { 30.0 }),
+        FontId::monospace(if compact { 19.0 } else { 23.0 }),
         theme::FG,
     );
     painter.text(
-        rect.left_bottom() + Vec2::new(14.0, -12.0),
+        rect.left_bottom() + Vec2::new(14.0, -15.0),
         egui::Align2::LEFT_BOTTOM,
-        format!("M {machine:+.3}"),
-        FontId::monospace(theme::font_size(9.5)),
-        theme::MUTED,
-    );
-    painter.text(
-        rect.right_bottom() + Vec2::new(-14.0, -12.0),
-        egui::Align2::RIGHT_BOTTOM,
         format!("DTG {dtg:.3}"),
-        FontId::monospace(theme::font_size(9.5)),
+        FontId::monospace(theme::font_size(9.0)),
         theme::MUTED,
     );
+    let track = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 14.0, rect.bottom() - 9.0),
+        egui::pos2(rect.right() - 14.0, rect.bottom() - 5.0),
+    );
+    painter.rect_filled(track, 2, theme::BORDER);
+    if fraction > 0.0 {
+        let fill = egui::Rect::from_min_size(
+            track.min,
+            Vec2::new(track.width() * fraction as f32, track.height()),
+        );
+        painter.rect_filled(fill, 2, theme::ACCENT);
+    }
 }
 
-pub fn health_card(app: &LincApp, ui: &mut Ui) {
+pub fn health_card(app: &LincApp, ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
-        theme::section_header(ui, "MACHINE HEALTH");
+        ui.set_min_height((height - 21.0).max(0.0));
+        ui.set_max_height((height - 21.0).max(0.0));
+        ui.set_min_width(ui.available_width());
+        ui.spacing_mut().interact_size.y = 22.0;
+        theme::section_header(ui, "SERVO LOAD");
         for axis in app.axes().iter().take(5) {
             let load = app
                 .snapshot
@@ -230,49 +234,16 @@ pub fn health_card(app: &LincApp, ui: &mut Ui) {
                 theme::pressure_color(load / 100.0),
             );
         }
-        theme::separator(ui);
-        theme::kv_row(
-            ui,
-            "COOLANT",
-            if app.snapshot.machine.coolant_flood {
-                "FLOOD"
-            } else if app.snapshot.machine.coolant_mist {
-                "MIST"
-            } else {
-                "OFF"
-            },
-        );
-        theme::kv_row(
-            ui,
-            "LUBE",
-            if app.snapshot.machine.lube {
-                "ON"
-            } else {
-                "OFF"
-            },
-        );
-        theme::kv_row(
-            ui,
-            "PANEL",
-            if app.snapshot.panel.connected {
-                "ONLINE"
-            } else {
-                "OFFLINE"
-            },
-        );
-        theme::kv_row(
-            ui,
-            "PROTECT",
-            if app.program_protected() { "ON" } else { "OFF" },
-        );
     });
 }
 
 pub fn alarm_card(app: &LincApp, ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
-        ui.set_min_height(height);
+        ui.set_min_height((height - 21.0).max(0.0));
+        ui.set_max_height((height - 21.0).max(0.0));
+        ui.set_min_width(ui.available_width());
         ui.horizontal(|ui| {
-            theme::section_header(ui, "ALARMS / MESSAGES");
+            theme::section_header(ui, "MESSAGES");
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
                     RichText::new(format!(
@@ -345,129 +316,197 @@ fn truncate(text: &str, max_chars: usize) -> String {
 }
 
 pub fn program_card(app: &LincApp, ui: &mut Ui) {
+    program_card_sized(app, ui, ui.available_height());
+}
+
+pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
-        ui.horizontal(|ui| {
-            theme::section_header(ui, "PROGRAM");
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(
-                    RichText::new(crate::theme::format_position(
-                        app.snapshot.program.progress as f64 * 100.0,
-                        0,
-                    ))
-                    .monospace()
-                    .size(theme::font_size(10.0))
-                    .color(theme::MUTED),
-                );
-            });
-        });
-        let name = if app.snapshot.program.display_name.is_empty() {
-            "NO PROGRAM".to_string()
-        } else {
-            app.snapshot.program.display_name.clone()
-        };
-        ui.label(
-            RichText::new(name)
-                .monospace()
-                .size(theme::font_size(13.0))
-                .color(theme::FG),
-        );
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(format!(
-                    "LN {}/{}  {:.0}%",
-                    app.snapshot.program.current_line,
-                    app.snapshot.program.line_count,
-                    app.snapshot.program.progress * 100.0
-                ))
-                .monospace()
-                .size(theme::font_size(10.0))
-                .color(theme::MUTED),
-            );
-            ui.label(
-                RichText::new(if app.snapshot.task.running {
-                    "RUN"
+        ui.set_min_height((height - 24.0).max(0.0));
+        ui.set_max_height((height - 24.0).max(0.0));
+        ui.set_min_width(ui.available_width());
+        ui.set_max_width(ui.available_width());
+        ui.spacing_mut().interact_size.y = 18.0;
+        ui.spacing_mut().item_spacing.y = 2.0;
+        let card_width = ui.available_width();
+        ui.allocate_ui_with_layout(
+            Vec2::new(card_width, (height - 24.0).max(0.0)),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                theme::section_header(ui, "PROGRAM");
+                let name = if app.snapshot.program.display_name.is_empty() {
+                    "NO PROGRAM".to_string()
                 } else {
-                    "STOP"
-                })
-                .monospace()
-                .size(theme::font_size(10.0))
-                .color(if app.snapshot.task.running {
-                    theme::SUCCESS
-                } else {
-                    theme::MUTED
-                }),
-            );
-        });
-        token_ui(ui, &truncate(&app.snapshot.program.current_block, 44), 12.0);
-        if let Some(next) = &app.snapshot.program.next_line {
-            ui.label(
-                RichText::new("NEXT")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-            token_ui(ui, &truncate(next, 44), 11.0);
-        }
-        if !app.snapshot.program.modal.is_empty() {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
+                    app.snapshot.program.display_name.clone()
+                };
                 ui.label(
-                    RichText::new("MODAL")
-                        .size(theme::font_size(8.5))
-                        .color(theme::MUTED),
+                    RichText::new(name)
+                        .monospace()
+                        .size(theme::font_size(13.0))
+                        .color(theme::FG),
                 );
-                for (key, value) in app.snapshot.program.modal.iter().take(6) {
+                ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(format!("{key}{value}"))
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::FG),
+                        RichText::new(format!(
+                            "LN {}/{}  {:.0}%",
+                            app.snapshot.program.current_line,
+                            app.snapshot.program.line_count,
+                            app.snapshot.program.progress * 100.0
+                        ))
+                        .monospace()
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
                     );
+                    ui.label(
+                        RichText::new(if app.snapshot.task.running {
+                            "RUN"
+                        } else {
+                            "STOP"
+                        })
+                        .monospace()
+                        .size(theme::font_size(10.0))
+                        .color(if app.snapshot.task.running {
+                            theme::SUCCESS
+                        } else {
+                            theme::MUTED
+                        }),
+                    );
+                });
+                token_ui(ui, &truncate(&app.snapshot.program.current_block, 44), 12.0);
+                if let Some(next) = &app.snapshot.program.next_line {
+                    ui.label(
+                        RichText::new("NEXT")
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
+                    token_ui(ui, &truncate(next, 44), 11.0);
                 }
-            });
-        }
+                if !app.snapshot.program.modal.is_empty() {
+                    ui.label(
+                        RichText::new("MODAL")
+                            .size(theme::font_size(8.5))
+                            .color(theme::MUTED),
+                    );
+                    let codes = app
+                        .snapshot
+                        .program
+                        .modal
+                        .iter()
+                        .filter(|(key, _)| key.starts_with('G'))
+                        .map(|(key, value)| modal_text(key, value))
+                        .collect::<Vec<_>>();
+                    for chunk in codes.chunks(2) {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            for code in chunk {
+                                ui.label(
+                                    RichText::new(code)
+                                        .monospace()
+                                        .size(theme::font_size(9.0))
+                                        .color(theme::FG),
+                                );
+                            }
+                        });
+                    }
+                }
+            },
+        );
     });
 }
 
-pub fn feed_spindle_card(app: &LincApp, ui: &mut Ui) {
+pub fn feed_spindle_card(app: &LincApp, ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
+        ui.set_min_height((height - 24.0).max(0.0));
+        ui.set_max_height((height - 24.0).max(0.0));
+        ui.set_min_width(ui.available_width());
         theme::section_header(ui, "FEED / SPINDLE LOAD");
-        theme::meter(
-            ui,
-            "FEED OVR",
-            app.snapshot.feed.feed_override / 2.0,
-            format!("{:.0}%", app.snapshot.feed.feed_override * 100.0),
-            theme::ACCENT,
-        );
-        ui.label(
-            RichText::new(format!(
-                "F {:.0} {} / MIN",
-                app.snapshot.feed.feed, app.snapshot.feed.units
-            ))
-            .monospace()
-            .size(theme::font_size(10.0))
-            .color(theme::MUTED),
-        );
-        for spindle in app.snapshot.spindles.iter().take(2) {
-            let load = spindle.load.unwrap_or(0.0);
-            theme::meter(
+        ui.horizontal_top(|ui| {
+            let (load, speed, override_factor) = app
+                .snapshot
+                .spindles
+                .first()
+                .map(|spindle| {
+                    (
+                        spindle.load.unwrap_or(0.0) / 100.0,
+                        spindle.actual_speed,
+                        spindle.override_factor * 100.0,
+                    )
+                })
+                .unwrap_or((0.0, 0.0, 0.0));
+            donut_gauge(
                 ui,
-                &spindle.label(),
-                load / 100.0,
-                format!("{:.0}%", load),
-                theme::pressure_color(load / 100.0),
+                "FEED OVR",
+                app.snapshot.feed.feed_override,
+                format!("{:.0}%", app.snapshot.feed.feed_override * 100.0),
+                &format!(
+                    "{:.0} {} / MIN",
+                    app.snapshot.feed.feed, app.snapshot.feed.units
+                ),
+                theme::ACCENT,
             );
-            ui.label(
-                RichText::new(format!(
-                    "S {:.0} RPM / OVR {:.0}%",
-                    spindle.actual_speed,
-                    spindle.override_factor * 100.0
-                ))
-                .monospace()
-                .size(theme::font_size(10.0))
-                .color(theme::MUTED),
+            ui.add_space(16.0);
+            donut_gauge(
+                ui,
+                "SPINDLE LOAD",
+                load,
+                format!("{:.0}%", load * 100.0),
+                &format!("{speed:.0} RPM / {override_factor:.0}%"),
+                theme::pressure_color(load),
+            );
+        });
+    });
+}
+
+fn donut_gauge(
+    ui: &mut Ui,
+    label: &str,
+    value: f64,
+    text: String,
+    detail: &str,
+    color: egui::Color32,
+) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(102.0, 104.0), Sense::hover());
+    let painter = ui.painter_at(rect);
+    let diameter = 66.0;
+    let center = egui::pos2(rect.center().x, rect.top() + diameter * 0.5);
+    let radius = diameter * 0.5 - 5.0;
+    painter.circle_stroke(center, radius, egui::Stroke::new(6.0, theme::BORDER));
+    let fraction = value.clamp(0.0, 1.0) as f32;
+    if fraction > 0.001 {
+        let steps = (fraction * 48.0).ceil() as usize;
+        for step in 0..steps {
+            let a0 = -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * step as f32 / 48.0;
+            let a1 =
+                -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * (step + 1) as f32 / 48.0;
+            painter.line_segment(
+                [
+                    center + Vec2::new(a0.cos(), a0.sin()) * radius,
+                    center + Vec2::new(a1.cos(), a1.sin()) * radius,
+                ],
+                egui::Stroke::new(6.0, color),
             );
         }
-    });
+    }
+    painter.text(
+        center,
+        egui::Align2::CENTER_CENTER,
+        text,
+        FontId::monospace(theme::font_size(11.0)),
+        theme::FG,
+    );
+    painter.text(
+        egui::pos2(rect.center().x, rect.top() + diameter + 4.0),
+        egui::Align2::CENTER_TOP,
+        label,
+        FontId::proportional(theme::font_size(9.0)),
+        theme::MUTED,
+    );
+    painter.text(
+        egui::pos2(rect.center().x, rect.top() + diameter + 18.0),
+        egui::Align2::CENTER_TOP,
+        detail,
+        FontId::monospace(theme::font_size(8.5)),
+        theme::MUTED,
+    );
 }
 
 pub fn turret_card(app: &LincApp, ui: &mut Ui) {
@@ -650,7 +689,7 @@ pub fn page_header(ui: &mut Ui, title: &str, subtitle: &str) {
         ui.vertical(|ui| {
             let title_response = ui.label(
                 RichText::new(title)
-                    .size(theme::font_size(24.0))
+                    .size(theme::font_size(14.0))
                     .strong()
                     .color(theme::FG),
             );

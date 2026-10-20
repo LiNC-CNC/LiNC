@@ -103,19 +103,17 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "PANEL MAPPING");
                     egui::Grid::new("panel-mapping")
-                        .num_columns(5)
+                        .num_columns(3)
                         .striped(true)
-                        .spacing([8.0, 3.0])
+                        .spacing([12.0, 3.0])
                         .show(ui, |ui| {
-                            for header in ["KEY", "HOME PIN", "HOME ACTION", "PROG.HOME PIN", "PROG.HOME MDI"] {
+                            for header in ["KEY", "HOME ACTION", "PROG.HOME MDI"] {
                                 ui.label(RichText::new(header).size(theme::font_size(8.5)).strong().color(theme::MUTED));
                             }
                             ui.end_row();
                             for mapping in MAPPINGS {
                                 ui.label(RichText::new(mapping.key.label()).monospace().size(theme::font_size(10.0)).color(theme::C3));
-                                ui.label(RichText::new(mapping.home_pin).monospace().size(theme::font_size(8.0)).color(theme::MUTED));
                                 ui.label(RichText::new(mapping.home_action).monospace().size(theme::font_size(9.0)).color(theme::FG));
-                                ui.label(RichText::new(mapping.proghome_pin).monospace().size(theme::font_size(8.0)).color(theme::MUTED));
                                 ui.label(RichText::new(mapping.proghome_mdi).monospace().size(theme::font_size(9.0)).color(theme::SUCCESS));
                                 ui.end_row();
                             }

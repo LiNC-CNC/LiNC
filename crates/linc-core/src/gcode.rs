@@ -436,28 +436,12 @@ pub struct ModalSummary {
 impl ModalSummary {
     pub fn lines(&self) -> Vec<(String, String)> {
         let mut lines = Vec::new();
-        let g = self
-            .gcodes
-            .iter()
-            .map(|g| g.to_ascii_uppercase())
-            .collect::<Vec<_>>()
-            .join(" ");
-        if !g.is_empty() {
-            lines.push(("G".into(), g));
+        for gcode in &self.gcodes {
+            lines.push((gcode.to_ascii_uppercase(), String::new()));
         }
-        if let Some(feed) = self.feed {
-            lines.push(("F".into(), format!("{feed}")));
+        for mcode in &self.mcodes {
+            lines.push((mcode.to_ascii_uppercase(), String::new()));
         }
-        if let Some(speed) = self.speed {
-            lines.push(("S".into(), format!("{speed}")));
-        }
-        if let Some(tool) = self.tool {
-            lines.push(("T".into(), format!("{tool}")));
-        }
-        lines.push(("WCS".into(), self.wcs.clone()));
-        lines.push(("UNITS".into(), self.units.clone()));
-        lines.push(("PLANE".into(), self.plane.clone()));
-        lines.push(("DIST".into(), self.distance_mode.clone()));
         lines
     }
 }

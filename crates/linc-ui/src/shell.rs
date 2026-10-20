@@ -558,20 +558,10 @@ impl LincApp {
         }
 
         if self.snapshot.panel.connected != self.last_connection.unwrap_or(false) {
-            if self.snapshot.panel.connected {
-                self.toast("panel online", theme::SUCCESS);
-            } else {
-                self.toast("PANEL OFFLINE — machine actions blocked", theme::ERROR);
-            }
             self.last_connection = Some(self.snapshot.panel.connected);
         }
         let protect = self.snapshot.panel.protect_effective();
         if self.last_protect != Some(protect) {
-            if protect {
-                self.toast("PROTECT ON — editing locked", theme::WARNING);
-            } else {
-                self.toast("protect off", theme::SUCCESS);
-            }
             self.last_protect = Some(protect);
         }
 
@@ -715,19 +705,16 @@ impl LincApp {
             return;
         }
         self.offsets.revision_seen = self.snapshot.offsets.revision;
-        if let Some(offset) = self
-            .snapshot
-            .offsets
-            .offsets
-            .iter()
-            .find(|offset| offset.index == self.offsets.selected)
-        {
-            self.offsets.values = offset
-                .values
-                .iter()
-                .map(|(_, value)| format!("{value:.4}"))
-                .collect();
-            self.offsets.rotation = offset.rotation.unwrap_or(0.0).to_string();
+        self.offsets.rows.clear();
+        for offset in &self.snapshot.offsets.offsets {
+            let mut draft = crate::state::OffsetDraft {
+                values: std::collections::HashMap::new(),
+                rotation: format!("{:.4}", offset.rotation.unwrap_or(0.0)),
+            };
+            for (axis, value) in offset.values.iter() {
+                draft.values.insert(axis.to_string(), format!("{value:.4}"));
+            }
+            self.offsets.rows.insert(offset.index, draft);
         }
         self.offsets.g92 = self
             .snapshot
@@ -747,6 +734,12 @@ impl LincApp {
             .tools
             .selected_row
             .min(self.snapshot.tool_table.rows.len().saturating_sub(1));
+        self.tools.drafts.clear();
+        for row in &self.snapshot.tool_table.rows {
+            self.tools
+                .drafts
+                .insert(row.tool, crate::state::ToolDraft::from_row(row));
+        }
         if let Some(token) = self.snapshot.tool_change.token.clone() {
             self.confirm_token = Some(token);
         }
@@ -859,13 +852,21 @@ impl LincApp {
         let mut redo = false;
         let mut find = false;
         let mut refresh = false;
+        let mut duplicate_line = false;
+        let mut delete_line = false;
+        let mut move_line_up = false;
+        let mut move_line_down = false;
 
         ui.input_mut(|input| {
             if input.consume_key(egui::Modifiers::NONE, egui::Key::F5) {
                 nav_page = Some(Page::Machine);
             }
             if input.consume_key(egui::Modifiers::NONE, egui::Key::F6) {
-                cycle_view = true;
+                if self.page == Page::Program {
+                    cycle_view = true;
+                } else {
+                    nav_page = Some(Page::Program);
+                }
             }
             if input.consume_key(egui::Modifiers::NONE, egui::Key::F7) {
                 nav_page = Some(Page::Tools);
@@ -887,6 +888,18 @@ impl LincApp {
             }
             if input.consume_key(egui::Modifiers::CTRL, egui::Key::F) {
                 find = true;
+            }
+            if input.consume_key(egui::Modifiers::CTRL, egui::Key::D) {
+                duplicate_line = true;
+            }
+            if input.consume_key(egui::Modifiers::CTRL, egui::Key::K) {
+                delete_line = true;
+            }
+            if input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowUp) {
+                move_line_up = true;
+            }
+            if input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowDown) {
+                move_line_down = true;
             }
             if input.consume_key(egui::Modifiers::CTRL, egui::Key::R) {
                 refresh = true;
@@ -948,6 +961,37 @@ impl LincApp {
         }
         if refresh && self.page == Page::Files {
             self.files.refresh();
+        }
+        if self.page == Page::Program {
+            let selected = self.program.selected_line;
+            if duplicate_line && self.editing_allowed() {
+                if let Some(line) = self.program.editor.duplicate_line(selected) {
+                    self.program.selected_line = line;
+                    self.program.code_scroll_to_line = Some(line);
+                    self.mark_editor_changed();
+                }
+            }
+            if delete_line && self.editing_allowed() {
+                if let Some(line) = self.program.editor.delete_line(selected) {
+                    self.program.selected_line = line;
+                    self.program.code_scroll_to_line = Some(line);
+                    self.mark_editor_changed();
+                }
+            }
+            if move_line_up && self.editing_allowed() {
+                if let Some(line) = self.program.editor.move_line_up(selected) {
+                    self.program.selected_line = line;
+                    self.program.code_scroll_to_line = Some(line);
+                    self.mark_editor_changed();
+                }
+            }
+            if move_line_down && self.editing_allowed() {
+                if let Some(line) = self.program.editor.move_line_down(selected) {
+                    self.program.selected_line = line;
+                    self.program.code_scroll_to_line = Some(line);
+                    self.mark_editor_changed();
+                }
+            }
         }
         if undo && self.page == Page::Program && self.program.focus_editor {
             if self.program.editor.undo() {
@@ -1034,7 +1078,6 @@ impl LincApp {
                 } else {
                     self.offsets.selected - 1
                 };
-                self.sync_offsets_from_snapshot(true);
             }
             Page::Probe => screens::probe::category_step(self, false),
             _ => {}
@@ -1056,7 +1099,6 @@ impl LincApp {
                 } else {
                     self.offsets.selected + 1
                 };
-                self.sync_offsets_from_snapshot(true);
             }
             Page::Probe => screens::probe::category_step(self, true),
             _ => {}
@@ -1135,20 +1177,28 @@ impl LincApp {
                     self.page_focus_requested = false;
                 }
                 self.banners(ui);
-                match self.page {
-                    Page::Machine => screens::machine::show(self, ui),
-                    Page::Program => screens::program::show(self, ui),
-                    Page::Offsets => screens::offsets::show(self, ui),
-                    Page::Tools => screens::tools::show(self, ui),
-                    Page::Diagnostics => screens::diagnostics::show(self, ui),
-                    Page::Help => screens::help::show(self, ui),
-                    Page::Files => screens::files::show(self, ui),
-                    Page::Probe => screens::probe::show(self, ui),
-                    Page::Mdi => screens::mdi::show(self, ui),
-                    Page::Homing => screens::homing::show(self, ui),
-                    Page::Manual => screens::manual::show(self, ui),
-                    Page::Settings => screens::settings::show(self, ui),
-                }
+                // The central page must end above the fixed bottom action bar.
+                let page_bottom = ui.ctx().input(|input| input.viewport_rect().bottom())
+                    - theme::BOTTOM_BAR_HEIGHT;
+                let page_height = (page_bottom - ui.cursor().min.y).max(120.0);
+                ui.allocate_ui_with_layout(
+                    Vec2::new(ui.available_width(), page_height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| match self.page {
+                        Page::Machine => screens::machine::show(self, ui),
+                        Page::Program => screens::program::show(self, ui),
+                        Page::Offsets => screens::offsets::show(self, ui),
+                        Page::Tools => screens::tools::show(self, ui),
+                        Page::Diagnostics => screens::diagnostics::show(self, ui),
+                        Page::Help => screens::help::show(self, ui),
+                        Page::Files => screens::files::show(self, ui),
+                        Page::Probe => screens::probe::show(self, ui),
+                        Page::Mdi => screens::mdi::show(self, ui),
+                        Page::Homing => screens::homing::show(self, ui),
+                        Page::Manual => screens::manual::show(self, ui),
+                        Page::Settings => screens::settings::show(self, ui),
+                    },
+                );
             });
         self.draw_modal(ui.ctx());
         self.draw_toasts(ui.ctx());
@@ -1164,7 +1214,7 @@ impl LincApp {
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new("LiNC")
-                            .size(theme::font_size(22.0))
+                            .size(theme::font_size(16.0))
                             .strong()
                             .color(theme::FG),
                     );
@@ -1183,14 +1233,14 @@ impl LincApp {
                     }
                     ui.label(
                         RichText::new(self.profile.config.machine.name.clone())
-                            .size(theme::font_size(12.0))
+                            .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
                     ui.add_space(8.0);
                     ui.label(
                         RichText::new(format!("PANEL {}", self.snapshot.panel.mode.label()))
                             .monospace()
-                            .size(theme::font_size(10.0))
+                            .size(theme::font_size(9.0))
                             .color(if self.snapshot.panel.mode.is_valid() {
                                 theme::ACCENT
                             } else {
@@ -1200,7 +1250,7 @@ impl LincApp {
                     ui.label(
                         RichText::new(format!("TASK {}", self.snapshot.task.mode.label()))
                             .monospace()
-                            .size(theme::font_size(10.0))
+                            .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
                 });
@@ -1321,11 +1371,25 @@ impl LincApp {
                     StrokeKind::Outside,
                 );
             }
+            let icon_color = if selected {
+                Color32::from_rgb(0x0b, 0x17, 0x22)
+            } else {
+                theme::MUTED
+            };
+            draw_nav_icon(
+                painter,
+                egui::Rect::from_min_size(
+                    egui::pos2(rect.left() + 8.0, rect.center().y - 9.0),
+                    Vec2::splat(18.0),
+                ),
+                *page,
+                icon_color,
+            );
             painter.text(
-                egui::pos2(rect.left() + 10.0, rect.center().y),
+                egui::pos2(rect.left() + 34.0, rect.center().y - 7.0),
                 Align2::LEFT_CENTER,
                 *label,
-                FontId::proportional(theme::font_size(12.5)),
+                FontId::proportional(theme::font_size(11.0)),
                 if selected {
                     Color32::from_rgb(0x0b, 0x17, 0x22)
                 } else {
@@ -1334,8 +1398,8 @@ impl LincApp {
             );
             if !keycap.is_empty() {
                 painter.text(
-                    egui::pos2(rect.right() - 8.0, rect.center().y),
-                    Align2::RIGHT_CENTER,
+                    egui::pos2(rect.left() + 34.0, rect.center().y + 8.0),
+                    Align2::LEFT_CENTER,
                     *keycap,
                     FontId::monospace(theme::font_size(8.5)),
                     if selected {
@@ -1354,22 +1418,6 @@ impl LincApp {
         ui.add_space(10.0);
         theme::separator(ui);
         ui.add_space(8.0);
-        ui.label(
-            RichText::new("VIEW")
-                .size(theme::font_size(10.0))
-                .color(theme::MUTED),
-        );
-        let settings_selected = self.page == Page::Settings;
-        if ui
-            .add_sized(
-                [theme::NAV_WIDTH - 20.0, 36.0],
-                egui::Button::new("SETTINGS").selected(settings_selected),
-            )
-            .clicked()
-        {
-            self.request_page(Page::Settings);
-        }
-        ui.add_space(10.0);
         Frame::new()
             .fill(theme::PANEL)
             .stroke(Stroke::new(1.0, theme::BORDER))
@@ -1424,35 +1472,6 @@ impl LincApp {
 
     fn bottom_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            let mut esc = false;
-            if theme::keycap(ui, "MAIN", self.page == Page::Machine).clicked() {
-                self.request_page(Page::Machine);
-            }
-            if theme::keycap(ui, "FILE", self.page == Page::Program).clicked() {
-                if self.page == Page::Program {
-                    self.cycle_program_view();
-                } else {
-                    self.request_page(Page::Program);
-                }
-            }
-            if theme::keycap(ui, "OFFSET", self.page == Page::Offsets).clicked() {
-                self.request_page(Page::Offsets);
-            }
-            if theme::keycap(ui, "TOOL", self.page == Page::Tools).clicked() {
-                self.request_page(Page::Tools);
-            }
-            if theme::keycap(ui, "WIN", self.page == Page::Diagnostics).clicked() {
-                self.request_page(Page::Diagnostics);
-            }
-            if theme::keycap(ui, "ESC", false).clicked() {
-                esc = true;
-            }
-            if esc {
-                self.escape();
-            }
-            ui.add_space(12.0);
-            ui.separator();
-            ui.add_space(8.0);
             self.context_actions(ui);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
@@ -1482,6 +1501,26 @@ impl LincApp {
                     }),
                 );
                 ui.add_space(12.0);
+                let axes_homed = self
+                    .snapshot
+                    .machine
+                    .homed
+                    .values()
+                    .iter()
+                    .all(|homed| *homed);
+                if !self.snapshot.machine.homed.is_empty() {
+                    ui.label(
+                        RichText::new(if axes_homed { "HOMED" } else { "NOT HOMED" })
+                            .monospace()
+                            .size(theme::font_size(11.0))
+                            .color(if axes_homed {
+                                theme::MUTED
+                            } else {
+                                theme::WARNING
+                            }),
+                    );
+                    ui.add_space(12.0);
+                }
                 ui.label(
                     RichText::new(if self.snapshot.machine.estop {
                         "E-STOP ACTIVE"
@@ -1513,137 +1552,119 @@ impl LincApp {
 
     fn context_actions(&mut self, ui: &mut egui::Ui) {
         match self.page {
-            Page::Machine => {
-                if theme::action_button(ui, "CLEAR TRAIL", self.graph_style.show_live_trail)
-                    .clicked()
-                {
-                    self.clear_trail();
-                }
-                if theme::action_button(ui, "HELP", true).clicked() {
-                    self.request_page(Page::Help);
-                }
-            }
+            Page::Machine => {}
             Page::Program => {
-                if theme::action_button(ui, "LOAD", !self.snapshot.task.running).clicked() {
+                if context_key(ui, "LOAD", !self.snapshot.task.running, false) {
                     self.request_files();
                 }
-                if theme::action_button(
+                if context_key(
                     ui,
                     "SAVE",
                     self.program.editor.dirty && self.editing_allowed(),
-                )
-                .clicked()
-                {
+                    false,
+                ) {
                     self.save_program();
                 }
-                if theme::action_button(ui, "EDIT", self.editing_allowed()).clicked() {
-                    self.program.view = ProgramView::Code;
-                    self.program.focus_editor = true;
-                }
-                if theme::action_button(ui, "SEARCH", true).clicked() {
+                if context_key(ui, "FIND", true, false) {
                     self.program.search_open = true;
                     self.program.focus_editor = true;
                 }
-                if theme::action_button(ui, "HELP", true).clicked() {
+                if context_key(ui, "HELP", true, false) {
                     self.request_page(Page::Help);
                 }
             }
             Page::Offsets => {
-                if theme::action_button(
+                if context_key(
                     ui,
                     "PROBE",
                     self.snapshot.probe.enabled && !self.snapshot.task.running,
-                )
-                .clicked()
-                {
+                    false,
+                ) {
                     self.set_page(Page::Probe);
                 }
-                if theme::action_button(ui, "HELP", true).clicked() {
+                if context_key(ui, "HELP", true, false) {
                     self.request_page(Page::Help);
                 }
             }
             Page::Tools => {
-                if theme::action_button(ui, "CHANGE TOOL", self.snapshot.issue_allowed().is_ok())
-                    .clicked()
-                {
+                if context_key(ui, "CHANGE", self.snapshot.issue_allowed().is_ok(), false) {
                     screens::tools::issue_change(self);
                 }
-                if theme::action_button(ui, "HELP", true).clicked() {
+                if context_key(ui, "HELP", true, false) {
                     self.request_page(Page::Help);
                 }
             }
             Page::Diagnostics => {
-                if theme::action_button(ui, "CLEAR VIEW", true).clicked() {
+                if context_key(ui, "CLEAR", true, false) {
                     self.diagnostics_clear_view = true;
                     self.ui_log.clear();
                 }
-                if theme::action_button(ui, "COPY LOG", true).clicked() {
+                if context_key(ui, "COPY", true, false) {
                     screens::diagnostics::copy_log(self, ui);
                 }
-                if theme::action_button(ui, "HELP", true).clicked() {
+                if context_key(ui, "HELP", true, false) {
                     self.request_page(Page::Help);
                 }
             }
             Page::Help => {
-                if theme::action_button(ui, "BACK", !self.help.history.is_empty()).clicked() {
+                if context_key(ui, "BACK", !self.help.history.is_empty(), false) {
                     self.help.back();
                 }
-                if theme::action_button(ui, "MACHINE", true).clicked() {
+                if context_key(ui, "MACHINE", true, false) {
                     self.request_page(Page::Machine);
                 }
             }
             Page::Files => {
-                if theme::action_button(ui, "REFRESH", true).clicked() {
+                if context_key(ui, "REFRESH", true, false) {
                     self.files.refresh();
                 }
-                if theme::action_button(ui, "ESC BACK", true).clicked() {
+                if context_key(ui, "BACK", true, false) {
                     self.set_page(self.files_return_page);
                 }
             }
             Page::Probe => {
-                if theme::accent_button(ui, "RUN PROBE", true).clicked() {
+                if context_key(ui, "RUN PROBE", true, true) {
                     screens::probe::run(self);
                 }
-                if theme::action_button(
+                if context_key(
                     ui,
-                    "APPLY RESULT",
+                    "APPLY",
                     self.snapshot.probe.last_result.is_some(),
-                )
-                .clicked()
-                {
+                    false,
+                ) {
                     screens::probe::apply(self);
                 }
-                if theme::action_button(ui, "ESC BACK", true).clicked() {
+                if context_key(ui, "BACK", true, false) {
                     self.set_page(Page::Offsets);
                 }
             }
             Page::Mdi => {
-                if theme::accent_button(ui, "ISSUE MDI", true).clicked() {
+                if context_key(ui, "ISSUE", true, true) {
                     screens::mdi::issue(self);
                 }
-                if theme::action_button(ui, "CLEAR", true).clicked() {
+                if context_key(ui, "CLEAR", true, false) {
                     self.mdi.input.clear();
                     self.mdi.last_error = None;
                 }
-                if theme::action_button(ui, "ESC", true).clicked() {
+                if context_key(ui, "ESC", true, false) {
                     self.escape();
                 }
             }
             Page::Homing => {
-                if theme::action_button(ui, "BACK", true).clicked() {
+                if context_key(ui, "BACK", true, false) {
                     self.set_page(self.homing_return_page);
                 }
             }
             Page::Manual => {
-                if theme::action_button(ui, "CLEAR TRAIL", true).clicked() {
+                if context_key(ui, "TRAIL", true, false) {
                     self.clear_trail();
                 }
-                if theme::action_button(ui, "FIT", true).clicked() {
+                if context_key(ui, "FIT", true, false) {
                     self.manual.fit = true;
                 }
             }
             Page::Settings => {
-                if theme::action_button(ui, "HELP", true).clicked() {
+                if context_key(ui, "HELP", true, false) {
                     self.request_page(Page::Help);
                 }
             }
@@ -1676,24 +1697,6 @@ impl LincApp {
                 ui,
                 theme::WARNING,
                 "PROGRAM CHANGED EXTERNALLY — unsaved buffer preserved. Save will use the current revision.",
-            );
-            ui.add_space(4.0);
-        }
-        if self.snapshot.machine.estop && !self.panel_offline() {
-            theme::banner(
-                ui,
-                theme::ERROR,
-                "E-STOP ACTIVE — hardware safety chain engaged",
-            );
-            ui.add_space(4.0);
-        }
-        if !self.snapshot.machine.homed.is_empty()
-            && !self.snapshot.machine.homed.iter().all(|(_, homed)| *homed)
-        {
-            theme::banner(
-                ui,
-                theme::WARNING,
-                "NOT ALL AXES HOMED — MDI/probe/tool issue is blocked",
             );
             ui.add_space(4.0);
         }
@@ -1842,6 +1845,107 @@ impl LincApp {
             }
         });
     }
+}
+
+fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Page, color: Color32) {
+    let s = egui::Stroke::new(1.5, color);
+    let c = rect.center();
+    match page {
+        Page::Machine => {
+            painter.rect_stroke(rect.shrink(2.0), 3.0, s, StrokeKind::Inside);
+            painter.circle_stroke(c, 3.0, s);
+            painter.line_segment(
+                [
+                    egui::pos2(rect.left() + 2.0, c.y),
+                    egui::pos2(rect.right() - 2.0, c.y),
+                ],
+                s,
+            );
+        }
+        Page::Program => {
+            painter.rect_stroke(
+                rect.shrink2(Vec2::new(2.0, 1.0)),
+                2.0,
+                s,
+                StrokeKind::Inside,
+            );
+            for offset in [-3.0, 0.0, 3.0] {
+                painter.line_segment(
+                    [
+                        egui::pos2(rect.left() + 5.0, c.y + offset),
+                        egui::pos2(rect.right() - 5.0, c.y + offset),
+                    ],
+                    s,
+                );
+            }
+        }
+        Page::Offsets => {
+            painter.circle_stroke(c, 7.0, s);
+            painter.line_segment(
+                [
+                    egui::pos2(c.x, rect.top() + 1.0),
+                    egui::pos2(c.x, rect.top() + 5.0),
+                ],
+                s,
+            );
+            painter.line_segment(
+                [
+                    egui::pos2(c.x, rect.bottom() - 5.0),
+                    egui::pos2(c.x, rect.bottom() - 1.0),
+                ],
+                s,
+            );
+            painter.line_segment(
+                [
+                    egui::pos2(rect.left() + 1.0, c.y),
+                    egui::pos2(rect.left() + 5.0, c.y),
+                ],
+                s,
+            );
+            painter.line_segment(
+                [
+                    egui::pos2(rect.right() - 5.0, c.y),
+                    egui::pos2(rect.right() - 1.0, c.y),
+                ],
+                s,
+            );
+        }
+        Page::Tools => {
+            let points = [
+                egui::pos2(rect.left() + 2.0, c.y),
+                egui::pos2(rect.left() + 6.0, c.y),
+                egui::pos2(rect.left() + 8.0, rect.top() + 5.0),
+                egui::pos2(rect.left() + 11.0, rect.bottom() - 4.0),
+                egui::pos2(rect.left() + 14.0, c.y),
+                egui::pos2(rect.right() - 2.0, c.y),
+            ];
+            for pair in points.windows(2) {
+                painter.line_segment([pair[0], pair[1]], s);
+            }
+        }
+        Page::Diagnostics | Page::Settings => {
+            painter.circle_stroke(c, 7.0, s);
+            painter.circle_filled(c, 2.0, color);
+        }
+        Page::Help => {
+            painter.text(
+                c,
+                Align2::CENTER_CENTER,
+                "?",
+                FontId::proportional(15.0),
+                color,
+            );
+        }
+        Page::Files | Page::Probe | Page::Mdi | Page::Homing | Page::Manual => {
+            painter.rect_stroke(rect.shrink(3.0), 2.0, s, StrokeKind::Inside);
+        }
+    }
+}
+
+fn context_key(ui: &mut egui::Ui, label: &str, enabled: bool, accent: bool) -> bool {
+    ui.add_enabled_ui(enabled, |ui| theme::keycap(ui, label, accent))
+        .inner
+        .clicked()
 }
 
 impl eframe::App for LincApp {

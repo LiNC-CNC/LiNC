@@ -1,12 +1,12 @@
 //! Tools page: standard LinuxCNC tool table, quick change and manual confirm.
 
 use egui::{RichText, Ui};
-use linc_core::command::{MachineCommand, MdiOrigin};
-use linc_core::model::{MachineVariant, ToolChangeStatus, ToolChangerKind, ToolGeometry, ToolRow};
+use linc_core::command::MachineCommand;
+use linc_core::model::{MachineVariant, ToolChangeStatus, ToolChangerKind};
 
 use crate::screens::common;
 use crate::shell::LincApp;
-use crate::state::ToolsUi;
+use crate::state::ToolDraft;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
@@ -39,50 +39,85 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     });
     ui.add_space(4.0);
     let available = ui.available_width();
+    let content_height = (ui.available_height() - 8.0).max(240.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
-            egui::Vec2::new(available * 0.64, 470.0),
+            egui::Vec2::new(available * 0.64, content_height),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| table_card(app, ui),
+            |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("tools-table-column")
+                    .max_height(content_height - 4.0)
+                    .show(ui, |ui| table_card(app, ui));
+            },
         );
         ui.add_space(8.0);
         ui.allocate_ui_with_layout(
-            egui::Vec2::new((available - available * 0.64 - 8.0).max(300.0), 470.0),
+            egui::Vec2::new(
+                (available - available * 0.64 - 8.0).max(300.0),
+                content_height,
+            ),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                change_card(app, ui);
-                edit_card(app, ui);
-                if let Some(atc) = app.snapshot.atc.as_ref() {
-                    theme::card(ui, |ui| {
-                        theme::section_header(ui, app.profile.changer.label());
-                        theme::kv_row(ui, "POCKETS", atc.pockets.to_string());
-                        theme::kv_row(
-                            ui,
-                            "CURRENT",
-                            atc.current_pocket
-                                .map(|p| format!("P{p}"))
-                                .unwrap_or_else(|| "—".into()),
+                egui::ScrollArea::vertical()
+                    .id_salt("tools-right-column")
+                    .max_height(content_height - 4.0)
+                    .show(ui, |ui| {
+                        change_card(app, ui);
+                        if let Some(atc) = app.snapshot.atc.as_ref() {
+                            theme::card(ui, |ui| {
+                                theme::section_header(ui, app.profile.changer.label());
+                                theme::kv_row(ui, "POCKETS", atc.pockets.to_string());
+                                theme::kv_row(
+                                    ui,
+                                    "CURRENT",
+                                    atc.current_pocket
+                                        .map(|p| format!("P{p}"))
+                                        .unwrap_or_else(|| "—".into()),
+                                );
+                                theme::kv_row(
+                                    ui,
+                                    "PREPARED",
+                                    atc.prepared_pocket
+                                        .map(|p| format!("P{p}"))
+                                        .unwrap_or_else(|| "—".into()),
+                                );
+                                theme::kv_row(
+                                    ui,
+                                    "CLAMP",
+                                    atc.clamped
+                                        .map(|c| if c { "CLAMPED" } else { "UNCLAMPED" })
+                                        .unwrap_or("UNKNOWN"),
+                                );
+                                theme::kv_row(
+                                    ui,
+                                    "INDEX",
+                                    if atc.indexing { "INDEXING" } else { "READY" },
+                                );
+                                if let Some(fault) = &atc.fault {
+                                    ui.label(RichText::new(fault).color(theme::ERROR));
+                                }
+                            });
+                        } else {
+                            theme::card(ui, |ui| {
+                                theme::section_header(ui, "TOOL CHANGER");
+                                ui.label(
+                                    RichText::new("NO ATC / CAROUSEL CONFIGURED")
+                                        .size(theme::font_size(9.0))
+                                        .color(theme::MUTED),
+                                );
+                                theme::kv_row(ui, "MODE", app.profile.changer.label());
+                                theme::kv_row(ui, "POCKET COLUMN", "HIDDEN");
+                                ui.label(
+                            RichText::new(
+                                "Manual change uses CHANGE TOOL and the install confirmation.",
+                            )
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
                         );
-                        theme::kv_row(
-                            ui,
-                            "PREPARED",
-                            atc.prepared_pocket
-                                .map(|p| format!("P{p}"))
-                                .unwrap_or_else(|| "—".into()),
-                        );
-                        theme::kv_row(
-                            ui,
-                            "CLAMP",
-                            atc.clamped
-                                .map(|c| if c { "CLAMPED" } else { "UNCLAMPED" })
-                                .unwrap_or("UNKNOWN"),
-                        );
-                        theme::kv_row(ui, "INDEX", if atc.indexing { "INDEXING" } else { "READY" });
-                        if let Some(fault) = &atc.fault {
-                            ui.label(RichText::new(fault).color(theme::ERROR));
+                            });
                         }
                     });
-                }
             },
         );
     });
@@ -91,15 +126,18 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 fn table_card(app: &mut LincApp, ui: &mut Ui) {
     let pocket = app.profile.changer.uses_pockets();
     let lathe = app.profile.variant == MachineVariant::Lathe;
+    let writable = app.snapshot.writes_allowed();
+    let rows = app.snapshot.tool_table.rows.clone();
+    let current_tool = app.snapshot.tool_change.current_tool;
+    let mut write_tool = None;
     theme::card(ui, |ui| {
         ui.horizontal(|ui| {
             theme::section_header(ui, "TOOL TABLE");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
                     RichText::new(format!(
-                        "REV {}   {}",
-                        app.snapshot.tool_table.revision,
-                        app.snapshot.tool_table.path.display()
+                        "DIRECT CELL EDIT · REV {}",
+                        app.snapshot.tool_table.revision
                     ))
                     .monospace()
                     .size(theme::font_size(9.0))
@@ -110,153 +148,198 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
         if let Some(error) = &app.snapshot.tool_table.error {
             ui.label(RichText::new(error).color(theme::ERROR));
         }
-        egui::ScrollArea::vertical()
-            .id_salt("tool-table-scroll")
-            .max_height(360.0)
-            .show(ui, |ui| {
-                egui::Grid::new("tool-table")
-                    .num_columns(if pocket { 7 } else { 6 })
-                    .striped(true)
-                    .spacing([14.0, 5.0])
-                    .show(ui, |ui| {
-                        for header in ["T", "DESCRIPTION"] {
-                            ui.label(
-                                RichText::new(header)
-                                    .size(theme::font_size(9.0))
-                                    .strong()
-                                    .color(theme::MUTED),
-                            );
+        {
+            let columns = 3 + if lathe { 4 } else { 3 } + usize::from(pocket);
+            egui::Grid::new("tool-table-direct")
+                .num_columns(columns)
+                .striped(true)
+                .spacing([8.0, 5.0])
+                .show(ui, |ui| {
+                    header_label(ui, "T", 30.0);
+                    header_label(ui, "DESCRIPTION", 190.0);
+                    if lathe {
+                        header_label(ui, "X", 72.0);
+                        header_label(ui, "Z", 72.0);
+                        header_label(ui, "NOSE R", 66.0);
+                        header_label(ui, "ORIENT", 56.0);
+                    } else {
+                        header_label(ui, "Ø", 72.0);
+                        header_label(ui, "LENGTH", 76.0);
+                        header_label(ui, "TYPE", 44.0);
+                    }
+                    if pocket {
+                        header_label(ui, if lathe { "STATION" } else { "POCKET" }, 54.0);
+                    }
+                    header_label(ui, "WRITE", 58.0);
+                    ui.end_row();
+
+                    for (index, row) in rows.iter().enumerate() {
+                        let selected = app.tools.selected_row == index;
+                        let current = row.tool == current_tool;
+                        let response = ui.selectable_label(
+                            selected,
+                            RichText::new(format!("T{}", row.tool))
+                                .monospace()
+                                .size(theme::font_size(12.0))
+                                .color(if current { theme::SUCCESS } else { theme::FG }),
+                        );
+                        if response.clicked() {
+                            app.tools.selected_row = index;
                         }
+                        let draft = app
+                            .tools
+                            .drafts
+                            .entry(row.tool)
+                            .or_insert_with(|| ToolDraft::from_row(row));
+                        text_cell(ui, writable, &mut draft.description, 190.0);
                         if lathe {
-                            for header in ["X", "Z", "NOSE R", "ORIENT"] {
-                                ui.label(
-                                    RichText::new(header)
-                                        .size(theme::font_size(9.0))
-                                        .strong()
-                                        .color(theme::MUTED),
-                                );
+                            for axis in ["X", "Z"] {
+                                let text = draft.axes.entry(axis.into()).or_default();
+                                number_cell(ui, writable, text, 72.0);
                             }
+                            number_cell(ui, writable, &mut draft.nose_radius, 66.0);
+                            number_cell(ui, writable, &mut draft.orientation, 56.0);
                         } else {
-                            for header in ["Ø", "LENGTH", "TYPE"] {
-                                ui.label(
-                                    RichText::new(header)
-                                        .size(theme::font_size(9.0))
-                                        .strong()
-                                        .color(theme::MUTED),
-                                );
-                            }
+                            number_cell(ui, writable, &mut draft.diameter, 72.0);
+                            number_cell(ui, writable, &mut draft.length, 76.0);
+                            ui.add_sized(
+                                [44.0, 24.0],
+                                egui::Label::new(
+                                    RichText::new(if row.kind.is_empty() {
+                                        "—"
+                                    } else {
+                                        &row.kind
+                                    })
+                                    .size(theme::font_size(9.0))
+                                    .color(theme::MUTED),
+                                ),
+                            );
                         }
                         if pocket {
-                            ui.label(
-                                RichText::new(if lathe { "STATION" } else { "POCKET" })
-                                    .size(theme::font_size(9.0))
-                                    .strong()
-                                    .color(theme::MUTED),
-                            );
+                            number_cell(ui, writable, &mut draft.pocket, 54.0);
+                        }
+                        if theme::action_button(ui, "WRITE", writable).clicked() {
+                            write_tool = Some(row.tool);
                         }
                         ui.end_row();
-                        let rows = app.snapshot.tool_table.rows.clone();
-                        for (index, row) in rows.iter().enumerate() {
-                            let selected = app.tools.selected_row == index;
-                            let current = row.tool == app.snapshot.tool_change.current_tool;
-                            let response = ui.selectable_label(
-                                selected,
-                                RichText::new(format!("T{}", row.tool))
-                                    .monospace()
-                                    .size(theme::font_size(12.0))
-                                    .color(if current { theme::SUCCESS } else { theme::FG }),
-                            );
-                            if response.clicked() {
-                                app.tools.selected_row = index;
-                                app.tools.edit_row = None;
-                            }
-                            ui.label(
-                                RichText::new(if row.description.is_empty() {
-                                    "—"
-                                } else {
-                                    &row.description
-                                })
-                                .size(theme::font_size(11.0))
-                                .color(if selected {
-                                    theme::FG
-                                } else {
-                                    theme::MUTED
-                                }),
-                            );
-                            if lathe {
-                                for axis in ["X", "Z"] {
-                                    ui.label(
-                                        RichText::new(format!(
-                                            "{:+.3}",
-                                            row.geometry.values.get(axis).copied().unwrap_or(0.0)
-                                        ))
-                                        .monospace()
-                                        .size(theme::font_size(10.0)),
-                                    );
-                                }
-                                ui.label(
-                                    RichText::new(
-                                        row.geometry
-                                            .nose_radius
-                                            .map(|v| format!("{v:.3}"))
-                                            .unwrap_or_else(|| "—".into()),
-                                    )
-                                    .monospace()
-                                    .size(theme::font_size(10.0)),
-                                );
-                                ui.label(
-                                    RichText::new(
-                                        row.geometry
-                                            .orientation
-                                            .map(|v| v.to_string())
-                                            .unwrap_or_else(|| "—".into()),
-                                    )
-                                    .monospace()
-                                    .size(theme::font_size(10.0)),
-                                );
-                            } else {
-                                ui.label(
-                                    RichText::new(
-                                        row.geometry
-                                            .diameter
-                                            .map(|v| format!("{v:.3}"))
-                                            .unwrap_or_else(|| "—".into()),
-                                    )
-                                    .monospace()
-                                    .size(theme::font_size(10.0)),
-                                );
-                                ui.label(
-                                    RichText::new(
-                                        row.geometry
-                                            .length
-                                            .map(|v| format!("{v:+.3}"))
-                                            .unwrap_or_else(|| "—".into()),
-                                    )
-                                    .monospace()
-                                    .size(theme::font_size(10.0)),
-                                );
-                                ui.label(
-                                    RichText::new(&row.kind)
-                                        .size(theme::font_size(9.0))
-                                        .color(theme::MUTED),
-                                );
-                            }
-                            if pocket {
-                                ui.label(
-                                    RichText::new(
-                                        row.pocket
-                                            .map(|p| format!("P{p}"))
-                                            .unwrap_or_else(|| "—".into()),
-                                    )
-                                    .monospace()
-                                    .size(theme::font_size(10.0)),
-                                );
-                            }
-                            ui.end_row();
-                        }
-                    });
-            });
+                    }
+                });
+        }
+        if let Some(error) = &app.tools.error {
+            ui.label(RichText::new(error).color(theme::ERROR));
+        }
     });
+    if let Some(tool) = write_tool {
+        save_tool_row(app, tool);
+    }
+}
+
+fn header_label(ui: &mut Ui, text: &str, width: f32) {
+    ui.allocate_ui_with_layout(
+        egui::Vec2::new(width, 16.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.label(
+                RichText::new(text)
+                    .size(theme::font_size(9.0))
+                    .strong()
+                    .color(theme::MUTED),
+            );
+        },
+    );
+}
+
+fn text_cell(ui: &mut Ui, writable: bool, text: &mut String, width: f32) {
+    ui.add_enabled_ui(writable, |ui| {
+        ui.add_sized(
+            [width, 24.0],
+            egui::TextEdit::singleline(text)
+                .font(egui::TextStyle::Monospace)
+                .margin(egui::Margin::symmetric(4, 1)),
+        );
+    });
+}
+
+fn number_cell(ui: &mut Ui, writable: bool, text: &mut String, width: f32) {
+    text_cell(ui, writable, text, width);
+}
+
+fn parse_number(text: &str, label: &str) -> Result<Option<f64>, String> {
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    text.trim()
+        .parse::<f64>()
+        .map(Some)
+        .map_err(|_| format!("{label}: invalid number {text:?}"))
+}
+
+fn save_tool_row(app: &mut LincApp, tool: u16) {
+    let Some(mut row) = app
+        .snapshot
+        .tool_table
+        .rows
+        .iter()
+        .find(|row| row.tool == tool)
+        .cloned()
+    else {
+        app.tools.error = Some(format!("T{tool}: row no longer exists"));
+        return;
+    };
+    let Some(draft) = app.tools.drafts.get(&tool).cloned() else {
+        app.tools.error = Some(format!("T{tool}: no editable draft"));
+        return;
+    };
+    let result = (|| -> Result<(), String> {
+        row.description = draft.description.clone();
+        row.geometry.diameter = parse_number(&draft.diameter, "diameter")?;
+        row.geometry.length = parse_number(&draft.length, "length")?;
+        row.geometry.nose_radius = parse_number(&draft.nose_radius, "nose radius")?;
+        row.geometry.orientation = parse_number(&draft.orientation, "orientation")?
+            .map(|value| value.clamp(0.0, 9.0) as u8);
+        row.pocket = parse_number(&draft.pocket, "pocket")?.map(|value| value as u16);
+        for axis in ["X", "Z", "I", "J"] {
+            let text = draft.axes.get(axis).cloned().unwrap_or_default();
+            match parse_number(&text, axis)? {
+                Some(value) => {
+                    row.geometry.values.insert(axis.to_string(), value);
+                    match axis {
+                        "I" => row.geometry.front_angle = Some(value),
+                        "J" => row.geometry.back_angle = Some(value),
+                        _ => {}
+                    }
+                }
+                None => {
+                    let remaining = row
+                        .geometry
+                        .values
+                        .iter()
+                        .filter(|(name, _)| *name != axis)
+                        .map(|(name, value)| (name.to_string(), *value))
+                        .collect::<Vec<_>>();
+                    row.geometry.values = linc_core::model::AxisMap::from_entries(remaining);
+                }
+            }
+        }
+        row.kind = if app.profile.variant == MachineVariant::Lathe {
+            "TURN".into()
+        } else if row.geometry.diameter.unwrap_or(0.0) <= 0.5 {
+            "DRILL".into()
+        } else {
+            "MILL".into()
+        };
+        Ok(())
+    })();
+    if let Err(error) = result {
+        app.tools.error = Some(error);
+        return;
+    }
+    app.tools.error = None;
+    app.send(MachineCommand::SetToolTableRow {
+        row,
+        expected_revision: app.snapshot.tool_table.revision,
+    });
+    app.toast(format!("T{tool} tool table write queued"), theme::ACCENT);
 }
 
 fn change_card(app: &mut LincApp, ui: &mut Ui) {
@@ -392,191 +475,7 @@ pub fn issue_change(app: &mut LincApp) {
     app.send(MachineCommand::IssueToolChange { tool });
 }
 
-fn edit_card(app: &mut LincApp, ui: &mut Ui) {
-    theme::card(ui, |ui| {
-        theme::section_header(ui, "EDIT SELECTED ROW");
-        let writable = app.snapshot.writes_allowed();
-        let selected = selected_tool(app);
-        if app.tools.edit_row.is_none() {
-            if theme::action_button(ui, "EDIT SELECTED", writable && selected != 0).clicked() {
-                load_edit_row(app);
-            }
-            ui.label(
-                RichText::new("Table writes require idle, machine ON and PROTECT OFF.")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-            return;
-        }
-        let lathe = app.profile.variant == MachineVariant::Lathe;
-        egui::Grid::new("tool-edit")
-            .num_columns(2)
-            .spacing([10.0, 4.0])
-            .show(ui, |ui| {
-                for (key, label) in [
-                    ("description", "DESCRIPTION"),
-                    ("diameter", if lathe { "D" } else { "Ø" }),
-                    ("length", if lathe { "Z" } else { "LENGTH" }),
-                    ("nose_radius", "NOSE R"),
-                    ("orientation", "ORIENT"),
-                    ("X", "X"),
-                    ("I", "I"),
-                    ("J", "J"),
-                    ("pocket", "POCKET"),
-                ] {
-                    if !lathe && matches!(key, "X" | "I" | "J" | "nose_radius" | "orientation") {
-                        continue;
-                    }
-                    if lathe && key == "length" {
-                        continue;
-                    }
-                    if key == "pocket" && !app.profile.changer.uses_pockets() {
-                        continue;
-                    }
-                    ui.label(
-                        RichText::new(label)
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
-                    );
-                    let field = app.tools.edit_fields.entry(key.to_string()).or_default();
-                    ui.add_enabled(
-                        writable,
-                        egui::TextEdit::singleline(field)
-                            .desired_width(120.0)
-                            .font(egui::TextStyle::Monospace),
-                    );
-                    ui.end_row();
-                }
-            });
-        if theme::accent_button(ui, "SAVE ROW", writable).clicked() {
-            save_row(app);
-        }
-        if theme::action_button(ui, "CANCEL", true).clicked() {
-            app.tools.edit_row = None;
-            app.tools.edit_fields.clear();
-        }
-        if let Some(error) = &app.tools.error {
-            ui.label(RichText::new(error).color(theme::ERROR));
-        }
-    });
-}
-
-fn load_edit_row(app: &mut LincApp) {
-    let index = app.tools.selected_row;
-    let Some(row) = app.snapshot.tool_table.rows.get(index).cloned() else {
-        return;
-    };
-    let mut fields = std::collections::HashMap::new();
-    fields.insert("description".into(), row.description.clone());
-    fields.insert(
-        "diameter".into(),
-        row.geometry
-            .diameter
-            .map(|v| v.to_string())
-            .unwrap_or_default(),
-    );
-    fields.insert(
-        "length".into(),
-        row.geometry
-            .length
-            .map(|v| v.to_string())
-            .unwrap_or_default(),
-    );
-    fields.insert(
-        "nose_radius".into(),
-        row.geometry
-            .nose_radius
-            .map(|v| v.to_string())
-            .unwrap_or_default(),
-    );
-    fields.insert(
-        "orientation".into(),
-        row.geometry
-            .orientation
-            .map(|v| v.to_string())
-            .unwrap_or_default(),
-    );
-    fields.insert(
-        "pocket".into(),
-        row.pocket.map(|v| v.to_string()).unwrap_or_default(),
-    );
-    for axis in ["X", "Z", "I", "J"] {
-        fields.insert(
-            axis.into(),
-            row.geometry
-                .values
-                .get(axis)
-                .map(|v| v.to_string())
-                .unwrap_or_default(),
-        );
-    }
-    app.tools.edit_row = Some(row);
-    app.tools.edit_fields = fields;
-}
-
-fn field(app: &ToolsUi, key: &str) -> String {
-    app.edit_fields.get(key).cloned().unwrap_or_default()
-}
-
-fn parse_optional(app: &ToolsUi, key: &str) -> Result<Option<f64>, String> {
-    let value = field(app, key);
-    if value.trim().is_empty() {
-        return Ok(None);
-    }
-    value
-        .trim()
-        .parse::<f64>()
-        .map(Some)
-        .map_err(|_| format!("{key}: invalid number"))
-}
-
-fn save_row(app: &mut LincApp) {
-    let Some(mut row) = app.tools.edit_row.clone() else {
-        return;
-    };
-    let result = (|| -> Result<(), String> {
-        row.description = field(&app.tools, "description");
-        row.geometry.diameter = parse_optional(&app.tools, "diameter")?;
-        row.geometry.length = parse_optional(&app.tools, "length")?;
-        row.geometry.nose_radius = parse_optional(&app.tools, "nose_radius")?;
-        row.geometry.orientation = parse_optional(&app.tools, "orientation")?.map(|v| v as u8);
-        row.pocket = parse_optional(&app.tools, "pocket")?.map(|v| v as u16);
-        for axis in ["X", "Z", "I", "J"] {
-            if let Some(value) = parse_optional(&app.tools, axis)? {
-                row.geometry.values.insert(axis, value);
-                match axis {
-                    "I" => row.geometry.front_angle = Some(value),
-                    "J" => row.geometry.back_angle = Some(value),
-                    _ => {}
-                }
-            }
-        }
-        row.kind = if app.profile.variant == MachineVariant::Lathe {
-            "TURN".into()
-        } else if row.geometry.diameter.unwrap_or(0.0) <= 0.5 {
-            "DRILL".into()
-        } else {
-            "MILL".into()
-        };
-        Ok(())
-    })();
-    if let Err(error) = result {
-        app.tools.error = Some(error);
-        return;
-    }
-    app.tools.error = None;
-    app.send(MachineCommand::SetToolTableRow {
-        row,
-        expected_revision: app.snapshot.tool_table.revision,
-    });
-    app.tools.edit_row = None;
-    app.tools.edit_fields.clear();
-    app.toast("tool table row write queued", theme::ACCENT);
-}
-
 pub fn set_current(app: &mut LincApp) {
     let tool = selected_tool(app);
     app.send(MachineCommand::SetCurrentTool { tool });
 }
-
-pub fn _unused(_: MdiOrigin, _: ToolGeometry, _: ToolRow) {}

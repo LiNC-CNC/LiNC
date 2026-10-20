@@ -26,8 +26,8 @@ pub const COMMENT: Color32 = Color32::from_rgb(0x94, 0xa3, 0xb8);
 pub const LINE_NUMBER: Color32 = Color32::from_rgb(0x6b, 0x72, 0x80);
 pub const CURRENT_BLOCK_BG: Color32 = Color32::from_rgba_premultiplied(0x4d, 0xa3, 0xff, 0x29);
 
-pub const TOP_BAR_HEIGHT: f32 = 72.0;
-pub const BOTTOM_BAR_HEIGHT: f32 = 70.0;
+pub const TOP_BAR_HEIGHT: f32 = 48.0;
+pub const BOTTOM_BAR_HEIGHT: f32 = 44.0;
 pub const NAV_WIDTH: f32 = 172.0;
 pub const MIN_TARGET: f32 = 44.0;
 /// Baseline layout is 1280x720. Text is enlarged slightly relative to the
@@ -111,19 +111,19 @@ pub fn apply(ctx: &egui::Context) {
         style.spacing.indent = 14.0;
         style
             .text_styles
-            .insert(TextStyle::Small, FontId::proportional(font_size(11.0)));
+            .insert(TextStyle::Small, FontId::proportional(font_size(9.0)));
         style
             .text_styles
-            .insert(TextStyle::Body, FontId::proportional(font_size(14.0)));
+            .insert(TextStyle::Body, FontId::proportional(font_size(12.0)));
         style
             .text_styles
-            .insert(TextStyle::Button, FontId::proportional(font_size(14.0)));
+            .insert(TextStyle::Button, FontId::proportional(font_size(12.0)));
         style
             .text_styles
-            .insert(TextStyle::Heading, FontId::proportional(font_size(20.0)));
+            .insert(TextStyle::Heading, FontId::proportional(font_size(16.0)));
         style
             .text_styles
-            .insert(TextStyle::Monospace, FontId::monospace(font_size(14.0)));
+            .insert(TextStyle::Monospace, FontId::monospace(font_size(11.0)));
     });
 }
 
@@ -162,14 +162,14 @@ pub fn mono(text: impl Into<String>, size: f32) -> RichText {
 
 pub fn label_value(ui: &mut Ui, label: &str, value: impl Into<String>, size: f32) {
     ui.vertical(|ui| {
-        ui.label(RichText::new(label).size(font_size(11.0)).color(MUTED));
+        ui.label(RichText::new(label).size(font_size(9.0)).color(MUTED));
         ui.label(mono(value, size));
     });
 }
 
 pub fn chip(ui: &mut Ui, text: impl Into<String>, active: bool) -> Response {
     let text = text.into();
-    let button = egui::Button::new(RichText::new(text).size(font_size(12.0)).strong().color(
+    let button = egui::Button::new(RichText::new(text).size(font_size(10.0)).strong().color(
         if active {
             Color32::from_rgb(0x0b, 0x17, 0x22)
         } else {
@@ -187,7 +187,7 @@ pub fn keycap(ui: &mut Ui, label: &str, active: bool) -> Response {
     let response =
         ui.add_sized(
             [58.0, 32.0],
-            egui::Button::new(RichText::new(label).size(font_size(11.0)).strong().color(
+            egui::Button::new(RichText::new(label).size(font_size(9.0)).strong().color(
                 if active {
                     Color32::from_rgb(0x0b, 0x17, 0x22)
                 } else {
@@ -285,7 +285,7 @@ pub fn status_dot(ui: &mut Ui, color: Color32, text: &str) {
 pub fn meter(ui: &mut Ui, label: &str, value: f64, text: impl Into<String>, color: Color32) {
     let text = text.into();
     ui.horizontal(|ui| {
-        ui.label(RichText::new(label).size(font_size(11.0)).color(MUTED));
+        ui.label(RichText::new(label).size(font_size(9.0)).color(MUTED));
         let width = (ui.available_width() - 74.0).max(60.0);
         let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 12.0), Sense::hover());
         let painter = ui.painter();

@@ -28,26 +28,31 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     category_strip(app, ui);
     ui.add_space(4.0);
     let available = ui.available_width();
-    ui.horizontal_top(|ui| {
-        ui.allocate_ui_with_layout(
-            Vec2::new((available * 0.62).max(540.0), 520.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                operation_grid(app, ui);
-                selected_operation_card(app, ui);
-                result_card(app, ui);
-            },
-        );
-        ui.add_space(8.0);
-        ui.allocate_ui_with_layout(
-            Vec2::new(
-                (available - (available * 0.62).max(540.0) - 8.0).max(340.0),
-                520.0,
-            ),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| setup_card(app, ui),
-        );
-    });
+    egui::ScrollArea::vertical()
+        .id_salt("probe-body")
+        .max_height(ui.available_height())
+        .show(ui, |ui| {
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    Vec2::new((available * 0.62).max(540.0), 520.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        operation_grid(app, ui);
+                        selected_operation_card(app, ui);
+                        result_card(app, ui);
+                    },
+                );
+                ui.add_space(8.0);
+                ui.allocate_ui_with_layout(
+                    Vec2::new(
+                        (available - (available * 0.62).max(540.0) - 8.0).max(340.0),
+                        520.0,
+                    ),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| setup_card(app, ui),
+                );
+            });
+        });
 }
 
 fn category_strip(app: &mut LincApp, ui: &mut Ui) {

@@ -1525,36 +1525,32 @@ fn parse_panel_mode(name: &str) -> Option<PanelMode> {
 }
 
 fn modal_lines(gcodes: &[f64], mcodes: &[f64]) -> Vec<(String, String)> {
-    let mut lines = Vec::new();
-    if !gcodes.is_empty() {
-        lines.push((
-            "G".into(),
-            gcodes
-                .iter()
-                .map(|value| format_gcode(*value))
-                .collect::<Vec<_>>()
-                .join(" "),
-        ));
+    // Match Probe Basic/QtPyVCP `status:gcodes?text` and
+    // `status:mcodes?text`: the first slot is not part of the modal display,
+    // G-codes are encoded as 10x their printed value, and -1 slots are empty.
+    let mut entries = Vec::new();
+    let mut gs = gcodes
+        .iter()
+        .skip(1)
+        .filter(|value| **value != -1.0 && value.is_finite())
+        .map(|value| *value as i64)
+        .collect::<Vec<_>>();
+    gs.sort_unstable();
+    for raw in gs {
+        let value = raw as f64 / 10.0;
+        entries.push((format!("G{value}"), String::new()));
     }
-    if !mcodes.is_empty() {
-        lines.push((
-            "M".into(),
-            mcodes
-                .iter()
-                .map(|value| format!("M{}", *value as i64))
-                .collect::<Vec<_>>()
-                .join(" "),
-        ));
+    let mut ms = mcodes
+        .iter()
+        .skip(1)
+        .filter(|value| **value != -1.0 && value.is_finite())
+        .map(|value| *value as i64)
+        .collect::<Vec<_>>();
+    ms.sort_unstable();
+    for raw in ms {
+        entries.push((format!("M{raw}"), String::new()));
     }
-    lines
-}
-
-fn format_gcode(value: f64) -> String {
-    if (value - value.round()).abs() < 1e-9 {
-        format!("G{}", value as i64)
-    } else {
-        format!("G{value}")
-    }
+    entries
 }
 
 fn profile_capabilities(profile: &Profile) -> PanelCapabilities {
@@ -1579,6 +1575,23 @@ fn profile_capabilities(profile: &Profile) -> PanelCapabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_gcodes_match_probe_basic_text() {
+        let gcodes = [
+            0.0, 800.0, -1.0, 170.0, 400.0, 210.0, 900.0, 940.0, 540.0, 80.0,
+        ];
+        let mcodes = [0.0, -1.0, 5.0, -1.0, 9.0];
+        let lines = modal_lines(&gcodes, &mcodes);
+        let text = lines
+            .iter()
+            .map(|(key, value)| format!("{key}{value}"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            text,
+            vec!["G8", "G17", "G21", "G40", "G54", "G80", "G90", "G94", "M5", "M9"]
+        );
+    }
 
     #[test]
     fn maps_valid_and_invalid_panel_modes() {

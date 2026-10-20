@@ -655,14 +655,35 @@ fn mode_index(mode: PanelMode) -> usize {
 }
 
 fn mode_angle(index: usize) -> f32 {
-    // Angles match the printed labels around the rotary.
-    const ANGLES: [f32; 8] = [110.0, 135.0, 180.0, -115.0, 0.0, -65.0, 45.0, 80.0];
+    // Angles point at the printed label for each detent.
+    const ANGLES: [f32; 8] = [119.0, 143.0, 180.0, -126.0, 0.0, -54.0, 37.0, 61.0];
     ANGLES[index.min(7)].to_radians()
+}
+
+fn mode_from_angle(degrees: f32) -> PanelMode {
+    let mut best = (f32::INFINITY, PanelMode::Auto);
+    for mode in PanelMode::ALL {
+        let label = mode_angle(mode_index(mode)).to_degrees();
+        let mut delta = (degrees - label + 540.0) % 360.0 - 180.0;
+        if delta < -180.0 {
+            delta += 360.0;
+        }
+        if delta.abs() < best.0 {
+            best = (delta.abs(), mode);
+        }
+    }
+    best.1
 }
 
 fn draw_mode_knob(ui: &egui::Ui, l: &PanelLayout, state: &SimPanelState) {
     let (cx, cy, r) = (510.0, 145.0, 72.0);
     let center = l.p(cx, cy);
+    let knob_rect = Rect::from_center_size(center, Vec2::splat(r * 2.0 * l.k));
+    let knob = ui.interact(
+        knob_rect,
+        ui.scope_id().with("mode-knob"),
+        Sense::click_and_drag(),
+    );
     ui.painter()
         .circle_filled(center, r * l.k, Color32::from_rgb(0x20, 0x23, 0x24));
     ui.painter().circle_stroke(
@@ -686,6 +707,39 @@ fn draw_mode_knob(ui: &egui::Ui, l: &PanelLayout, state: &SimPanelState) {
     ui.painter()
         .circle_filled(center, 7.0 * l.k, Color32::from_rgb(0x0c, 0x0e, 0x0f));
 
+    if knob.dragged() || knob.clicked() {
+        if let Some(pointer) = ui.ctx().pointer_interact_pos() {
+            let offset = pointer - center;
+            let mode = if knob.clicked() {
+                // Clicking the knob advances one detent; dragging selects by
+                // angle. This keeps the dial usable at every size.
+                let next = (mode_index(state.mode) + 1) % PanelMode::ALL.len();
+                PanelMode::ALL[next]
+            } else {
+                mode_from_angle(offset.y.atan2(offset.x).to_degrees())
+            };
+            if mode != state.mode {
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(ui.scope_id().with("linc-panel-mode"), Some(mode))
+                });
+                ui.ctx().request_repaint();
+            }
+        }
+    }
+    if knob.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        let scroll = ui.input(|input| input.smooth_scroll_delta.y);
+        if scroll.abs() > 0.0 {
+            let step = if scroll > 0.0 { 1 } else { -1 };
+            let index = (mode_index(state.mode) as i32 + step).rem_euclid(8) as usize;
+            let mode = PanelMode::ALL[index];
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(ui.scope_id().with("linc-panel-mode"), Some(mode))
+            });
+            ui.ctx().request_repaint();
+        }
+    }
+
     let modes = [
         (PanelMode::Jog, "JOG", 450.0, 64.0),
         (PanelMode::Mpg, "MPG", 570.0, 64.0),
@@ -708,7 +762,7 @@ fn draw_mode_knob(ui: &egui::Ui, l: &PanelLayout, state: &SimPanelState) {
             if active { BLUE } else { TEXT },
             Align2::CENTER_CENTER,
         );
-        let hit = l.r(x - 38.0, y - 10.0, 76.0, 20.0);
+        let hit = l.r(x - 44.0, y - 12.0, 88.0, 24.0);
         if ui
             .interact(
                 hit,
@@ -891,17 +945,17 @@ fn draw_display(
     } else {
         "--".into()
     };
-    let digit_w = h * 0.46;
-    let gap = h * 0.12;
+    let digit_w = h * 0.46 * l.k;
+    let gap = h * 0.12 * l.k;
     let total = digit_w * 2.0 + gap;
     let start = rect.center().x - total * 0.5;
     for (index, ch) in text.chars().take(2).enumerate() {
         let digit = Rect::from_min_size(
             Pos2::new(
                 start + index as f32 * (digit_w + gap),
-                rect.top() + h * 0.10,
+                rect.top() + h * 0.10 * l.k,
             ),
-            Vec2::new(digit_w, h * 0.80),
+            Vec2::new(digit_w, h * 0.80 * l.k),
         );
         draw_7seg_digit(painter, l, digit, ch, Color32::from_rgb(0xff, 0x2b, 0x2b));
     }
@@ -1502,5 +1556,19 @@ mod tests {
         let state = handle.snapshot();
         assert_eq!(state.leds, 0b101);
         assert_eq!(state.sseg_status, 55);
+    }
+}
+
+#[cfg(test)]
+mod dial_tests {
+    use super::{mode_angle, mode_from_angle, mode_index};
+    use linc_core::model::PanelMode;
+
+    #[test]
+    fn dial_angles_map_to_their_own_detent() {
+        for mode in PanelMode::ALL {
+            let angle = mode_angle(mode_index(mode)).to_degrees();
+            assert_eq!(mode_from_angle(angle), mode, "{mode:?} at {angle}");
+        }
     }
 }

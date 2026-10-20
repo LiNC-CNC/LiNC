@@ -527,10 +527,15 @@ impl Default for ProgramUi {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct OffsetDraft {
+    pub values: HashMap<String, String>,
+    pub rotation: String,
+}
+
 pub struct OffsetsUi {
     pub selected: u8,
-    pub values: Vec<String>,
-    pub rotation: String,
+    pub rows: HashMap<u8, OffsetDraft>,
     pub g92: Vec<String>,
     pub editing: bool,
     pub error: Option<String>,
@@ -541,8 +546,7 @@ impl Default for OffsetsUi {
     fn default() -> Self {
         Self {
             selected: 1,
-            values: Vec::new(),
-            rotation: "0.000".into(),
+            rows: HashMap::new(),
             g92: Vec::new(),
             editing: false,
             error: None,
@@ -551,11 +555,63 @@ impl Default for OffsetsUi {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct ToolDraft {
+    pub description: String,
+    pub diameter: String,
+    pub length: String,
+    pub nose_radius: String,
+    pub orientation: String,
+    pub pocket: String,
+    pub axes: HashMap<String, String>,
+}
+
+impl ToolDraft {
+    pub fn from_row(row: &linc_core::model::ToolRow) -> Self {
+        Self {
+            description: row.description.clone(),
+            diameter: row
+                .geometry
+                .diameter
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+            length: row
+                .geometry
+                .length
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+            nose_radius: row
+                .geometry
+                .nose_radius
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+            orientation: row
+                .geometry
+                .orientation
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+            pocket: row.pocket.map(|v| v.to_string()).unwrap_or_default(),
+            axes: ["X", "Z", "I", "J"]
+                .into_iter()
+                .map(|axis| {
+                    (
+                        axis.to_string(),
+                        row.geometry
+                            .values
+                            .get(axis)
+                            .map(|v| v.to_string())
+                            .unwrap_or_default(),
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
 pub struct ToolsUi {
     pub target: String,
     pub selected_row: usize,
-    pub edit_row: Option<linc_core::model::ToolRow>,
-    pub edit_fields: HashMap<String, String>,
+    pub drafts: HashMap<u16, ToolDraft>,
     pub error: Option<String>,
     pub revision_seen: u64,
     pub confirm_token: Option<linc_core::model::ToolChangeToken>,
@@ -566,8 +622,7 @@ impl Default for ToolsUi {
         Self {
             target: "1".into(),
             selected_row: 0,
-            edit_row: None,
-            edit_fields: HashMap::new(),
+            drafts: HashMap::new(),
             error: None,
             revision_seen: 0,
             confirm_token: None,
@@ -693,6 +748,7 @@ pub struct GraphStyle {
     pub show_program_bounds: bool,
     pub show_machine_bounds: bool,
     pub highlight_selected_line: bool,
+    pub show_legend: bool,
     pub trail_max_points: usize,
     pub perspective: bool,
 }
@@ -709,6 +765,7 @@ impl GraphStyle {
         view.show_program_bounds = self.show_program_bounds;
         view.show_machine_bounds = self.show_machine_bounds;
         view.show_selected_line = self.highlight_selected_line;
+        view.show_legend = self.show_legend;
         view.selected_line = selected_line;
         view.current_line = current_line;
     }
@@ -761,6 +818,7 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
         show_program_bounds: profile.config.toolpath.show_program_bounds,
         show_machine_bounds: profile.config.toolpath.show_machine_bounds,
         highlight_selected_line: profile.config.toolpath.highlight_selected_line,
+        show_legend: false,
         trail_max_points: profile.config.toolpath.trail_max_points,
         perspective: profile.config.toolpath.perspective,
     }

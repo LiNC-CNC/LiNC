@@ -32,8 +32,6 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     }
     header(app, ui);
     ui.add_space(4.0);
-    toolbar(app, ui);
-    ui.add_space(4.0);
     match app.program.view {
         ProgramView::Split => split(app, ui),
         ProgramView::Code => code(app, ui),
@@ -45,7 +43,7 @@ fn header(app: &mut LincApp, ui: &mut Ui) {
         ui.vertical(|ui| {
             let title_response = ui.label(
                 RichText::new("PROGRAM")
-                    .size(theme::font_size(24.0))
+                    .size(theme::font_size(14.0))
                     .strong()
                     .color(theme::FG),
             );
@@ -143,77 +141,6 @@ fn header(app: &mut LincApp, ui: &mut Ui) {
     });
 }
 
-fn toolbar(app: &mut LincApp, ui: &mut Ui) {
-    let editable = app.editing_allowed();
-    let selected = app.program.selected_line;
-    let running = app.snapshot.task.running;
-    ui.horizontal(|ui| {
-        if theme::action_button(ui, "LOAD", !running).clicked() {
-            app.request_files();
-        }
-        if theme::accent_button(
-            ui,
-            "SAVE",
-            app.program.editor.dirty && app.editing_allowed(),
-        )
-        .clicked()
-        {
-            app.save_program();
-        }
-        if theme::action_button(ui, "EDIT", editable).clicked() {
-            app.program.view = ProgramView::Code;
-            app.program.focus_editor = true;
-        }
-        ui.add_space(6.0);
-        if theme::action_button(ui, "UNDO", editable && app.program.editor.can_undo()).clicked() {
-            if app.program.editor.undo() {
-                app.mark_editor_changed();
-            }
-        }
-        if theme::action_button(ui, "REDO", editable && app.program.editor.can_redo()).clicked() {
-            if app.program.editor.redo() {
-                app.mark_editor_changed();
-            }
-        }
-        if theme::action_button(ui, "FIND", true).clicked() {
-            app.program.search_open = true;
-            app.program.focus_editor = true;
-        }
-        ui.add_space(6.0);
-        if theme::action_button(ui, "DUP LINE", editable).clicked() {
-            if let Some(line) = app.program.editor.duplicate_line(selected) {
-                app.program.selected_line = line;
-                app.program.code_scroll_to_line = Some(line);
-                app.mark_editor_changed();
-            }
-        }
-        if theme::action_button(ui, "DEL LINE", editable).clicked() {
-            if let Some(line) = app.program.editor.delete_line(selected) {
-                app.program.selected_line = line;
-                app.program.code_scroll_to_line = Some(line);
-                app.mark_editor_changed();
-            }
-        }
-        if theme::action_button(ui, "MOVE UP", editable).clicked() {
-            if let Some(line) = app.program.editor.move_line_up(selected) {
-                app.program.selected_line = line;
-                app.program.code_scroll_to_line = Some(line);
-                app.mark_editor_changed();
-            }
-        }
-        if theme::action_button(ui, "MOVE DOWN", editable).clicked() {
-            if let Some(line) = app.program.editor.move_line_down(selected) {
-                app.program.selected_line = line;
-                app.program.code_scroll_to_line = Some(line);
-                app.mark_editor_changed();
-            }
-        }
-    });
-    if app.program.search_open {
-        search_bar(app, ui);
-    }
-}
-
 fn search_bar(app: &mut LincApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.label(
@@ -275,7 +202,7 @@ fn search_bar(app: &mut LincApp, ui: &mut Ui) {
 
 fn split(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
-    let main_height = (available.y - 158.0).max(300.0);
+    let main_height = (available.y - 88.0).max(220.0);
     let editor_width = (available.x * 0.58).max(480.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
@@ -311,7 +238,7 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
 
 fn code(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
-    let editor_width = (available.x * 0.78).max(620.0);
+    let editor_width = (available.x * 0.75).max(620.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
             Vec2::new(editor_width, available.y),
@@ -323,8 +250,11 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
             Vec2::new((available.x - editor_width - 8.0).max(250.0), available.y),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                graph_card(app, ui, 240.0, ViewKind::MiniXy);
-                info_card(app, ui);
+                graph_card(app, ui, 150.0, ViewKind::MiniXy);
+                egui::ScrollArea::vertical()
+                    .id_salt("program-info-scroll")
+                    .max_height((available.y - 178.0).max(120.0))
+                    .show(ui, |ui| info_card(app, ui));
             },
         );
     });
@@ -340,9 +270,21 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, height: f32, kind: ViewKind) {
     let preview = app.program.last_valid_preview.clone();
     theme::card(ui, |ui| {
         ui.horizontal(|ui| {
-            theme::section_header(ui, "TOOLPATH");
+            theme::section_header(
+                ui,
+                if matches!(kind, ViewKind::MiniXy) {
+                    "PATH"
+                } else {
+                    "TOOLPATH"
+                },
+            );
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                if theme::action_button(ui, "CLEAR TRAIL", true).clicked() {
+                let clear_label = if matches!(kind, ViewKind::MiniXy) {
+                    "CLEAR"
+                } else {
+                    "CLEAR TRAIL"
+                };
+                if theme::action_button(ui, clear_label, true).clicked() {
                     app.clear_trail();
                 }
                 if theme::action_button(ui, "FIT", true).clicked() {
@@ -350,16 +292,18 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, height: f32, kind: ViewKind) {
                     app.program.graph_pan = Vec2::ZERO;
                     app.program.fit_requested = true;
                 }
-                ui.label(
-                    RichText::new(if app.program.preview.error.is_some() {
-                        "LAST VALID"
-                    } else {
-                        "PROGRAM + LIVE"
-                    })
-                    .monospace()
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-                );
+                if !matches!(kind, ViewKind::MiniXy) {
+                    ui.label(
+                        RichText::new(if app.program.preview.error.is_some() {
+                            "LAST VALID"
+                        } else {
+                            "PROGRAM + LIVE"
+                        })
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                    );
+                }
             });
         });
         let view = match kind {
@@ -510,7 +454,7 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
             });
         });
         theme::separator(ui);
-        scroll_editor(app, ui, height - 70.0, editable);
+        scroll_editor(app, ui, height - 92.0, editable);
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(format!(
@@ -535,9 +479,9 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                         .color(theme::MUTED),
                 );
             } else {
-                for (key, value) in app.snapshot.program.modal.iter().take(8) {
+                for (key, value) in app.snapshot.program.modal.iter() {
                     ui.label(
-                        RichText::new(format!("{key} {value}"))
+                        RichText::new(common::modal_text(key, value))
                             .monospace()
                             .size(theme::font_size(9.0))
                             .color(theme::FG),

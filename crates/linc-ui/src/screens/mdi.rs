@@ -21,7 +21,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         ui.label(
             RichText::new(format!("PANEL MODE: {}", common::mode_label(app)))
                 .monospace()
-                .size(theme::font_size(13.0))
+                .size(theme::font_size(12.0))
                 .color(if in_mdi {
                     theme::ACCENT
                 } else {
@@ -36,7 +36,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                     "MDI SCREEN INACTIVE"
                 })
                 .monospace()
-                .size(theme::font_size(10.0))
+                .size(theme::font_size(9.0))
                 .color(if in_mdi {
                     theme::SUCCESS
                 } else {
@@ -54,31 +54,56 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         ui.add_space(4.0);
     }
     ui.add_space(4.0);
-    let available = ui.available_width();
-    let main_height = (ui.available_height() - 12.0).max(320.0);
+    let available = ui.available_size();
+    let top_height = (available.y - 118.0).max(250.0);
+    let bottom_height = (available.y - top_height - 14.0).max(112.0);
+    let left_width = (available.x * 0.64).max(560.0);
+    let right_width = (available.x - left_width - 8.0).max(280.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
-            Vec2::new((available * 0.64).max(600.0), main_height),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| command_card(app, ui, in_mdi),
-        );
-        ui.add_space(8.0);
-        ui.allocate_ui_with_layout(
-            Vec2::new(
-                (available - (available * 0.64).max(600.0) - 8.0).max(300.0),
-                main_height,
-            ),
+            Vec2::new(left_width, top_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 egui::ScrollArea::vertical()
+                    .id_salt("mdi-command")
+                    .max_height(top_height)
+                    .show(ui, |ui| command_card(app, ui, in_mdi));
+            },
+        );
+        ui.add_space(8.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(right_width, top_height),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_max_width((right_width - 24.0).max(220.0));
+                egui::ScrollArea::vertical()
                     .id_salt("mdi-right")
-                    .max_height(main_height)
+                    .max_height(top_height)
                     .show(ui, |ui| {
-                        last_result_card(app, ui);
-                        common::positions_table(app, ui);
-                        modal_card(app, ui);
-                        history_card(app, ui);
+                        mdi_telemetry(app, ui);
                     });
+            },
+        );
+    });
+    ui.add_space(6.0);
+    ui.horizontal_top(|ui| {
+        ui.allocate_ui_with_layout(
+            Vec2::new(left_width, bottom_height),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("mdi-result")
+                    .max_height(bottom_height)
+                    .show(ui, |ui| last_result_card(app, ui));
+            },
+        );
+        ui.add_space(8.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(right_width, bottom_height),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_max_width((right_width - 24.0).max(220.0));
+                history_card(app, ui);
             },
         );
     });
@@ -304,18 +329,76 @@ fn last_result_card(app: &LincApp, ui: &mut Ui) {
     });
 }
 
-fn modal_card(app: &LincApp, ui: &mut Ui) {
+fn mdi_telemetry(app: &LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
-        theme::section_header(ui, "MODAL");
-        if app.snapshot.program.modal.is_empty() {
-            ui.label(RichText::new("—").color(theme::MUTED));
-        } else {
-            for (key, value) in &app.snapshot.program.modal {
-                theme::kv_row(ui, key, value);
+        theme::section_header(ui, "POSITION / MODAL");
+        ui.spacing_mut().interact_size.y = 22.0;
+        egui::Grid::new("mdi-positions")
+            .num_columns(4)
+            .spacing([10.0, 2.0])
+            .show(ui, |ui| {
+                for header in ["AXIS", "WORK", "MACHINE", "DTG"] {
+                    ui.label(
+                        RichText::new(header)
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
+                }
+                ui.end_row();
+                for axis in app.axes() {
+                    let position = app.snapshot.positions.axes.get(&axis);
+                    ui.label(
+                        RichText::new(&axis)
+                            .monospace()
+                            .size(theme::font_size(11.0))
+                            .color(theme::C3),
+                    );
+                    ui.label(
+                        RichText::new(format!("{:+.3}", position.map(|p| p.work).unwrap_or(0.0)))
+                            .monospace()
+                            .size(theme::font_size(10.0))
+                            .color(theme::FG),
+                    );
+                    ui.label(
+                        RichText::new(format!(
+                            "{:+.3}",
+                            position.map(|p| p.machine).unwrap_or(0.0)
+                        ))
+                        .monospace()
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
+                    );
+                    ui.label(
+                        RichText::new(format!("{:.3}", position.map(|p| p.dtg).unwrap_or(0.0)))
+                            .monospace()
+                            .size(theme::font_size(10.0))
+                            .color(theme::MUTED),
+                    );
+                    ui.end_row();
+                }
+            });
+        theme::separator(ui);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            if app.snapshot.program.modal.is_empty() {
+                ui.label(RichText::new("NO MODAL STATE").color(theme::MUTED));
+            } else {
+                for (key, value) in &app.snapshot.program.modal {
+                    ui.label(
+                        RichText::new(common::modal_text(key, value))
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::FG),
+                    );
+                }
             }
-        }
-        theme::kv_row(ui, "FEED", format!("{:.1}", app.snapshot.feed.feed));
-        theme::kv_row(ui, "WCS", app.active_wcs_label());
+            ui.label(
+                RichText::new(format!("WCS {}", app.active_wcs_label()))
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::ACCENT),
+            );
+        });
     });
 }
 

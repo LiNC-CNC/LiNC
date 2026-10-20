@@ -33,15 +33,18 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         });
     });
     ui.add_space(4.0);
-    match app.diagnostics_tab {
-        DiagnosticsTab::Overview => overview(app, ui),
-        DiagnosticsTab::PanelLink => panel_link(app, ui),
-        DiagnosticsTab::HalNml => hal_nml(app, ui),
-        DiagnosticsTab::Motion => motion(app, ui),
-        DiagnosticsTab::Turret => turret(app, ui),
-        DiagnosticsTab::Io => io(app, ui),
-        DiagnosticsTab::Logs => logs(app, ui),
-    }
+    egui::ScrollArea::vertical()
+        .id_salt("diagnostics-body")
+        .max_height(ui.available_height())
+        .show(ui, |ui| match app.diagnostics_tab {
+            DiagnosticsTab::Overview => overview(app, ui),
+            DiagnosticsTab::PanelLink => panel_link(app, ui),
+            DiagnosticsTab::HalNml => hal_nml(app, ui),
+            DiagnosticsTab::Motion => motion(app, ui),
+            DiagnosticsTab::Turret => turret(app, ui),
+            DiagnosticsTab::Io => io(app, ui),
+            DiagnosticsTab::Logs => logs(app, ui),
+        });
 }
 
 fn overview(app: &mut LincApp, ui: &mut Ui) {

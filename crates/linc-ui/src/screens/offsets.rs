@@ -13,7 +13,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     common::page_header(
         ui,
         "OFFSETS",
-        "Work offsets G54–G59, G92 and tool offsets. Read-only while running or protected.",
+        "Directly editable G54–G59, G92 and tool offsets. Read-only while running or protected.",
     );
     let writable = app.snapshot.writes_allowed();
     if !writable {
@@ -28,143 +28,223 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         };
         common::read_only_hint(ui, reason);
     }
-    ui.horizontal(|ui| {
-        for index in 1..=6u8 {
-            let label = format!("G{}", 53 + index);
-            if common::page_tab(ui, &label, app.offsets.selected == index).clicked() {
-                app.offsets.selected = index;
-                app.sync_offsets_from_snapshot(true);
-            }
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+    ui.add_space(2.0);
+    egui::ScrollArea::vertical()
+        .id_salt("offsets-body")
+        .max_height(ui.available_height())
+        .show(ui, |ui| {
+            work_offsets_card(app, ui, writable);
+            ui.add_space(6.0);
+            let available = ui.available_width();
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::Vec2::new(available * 0.58, 230.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        common::positions_table(app, ui);
+                    },
+                );
+                ui.add_space(8.0);
+                ui.allocate_ui_with_layout(
+                    egui::Vec2::new((available - available * 0.58 - 8.0).max(300.0), 230.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        tool_offset_card(app, ui);
+                    },
+                );
+            });
+            ui.add_space(4.0);
             ui.label(
-                RichText::new(format!("ACTIVE {}", app.active_wcs_label()))
-                    .monospace()
-                    .size(theme::font_size(11.0))
-                    .color(theme::ACCENT),
+                RichText::new(
+                    "Offset writes are validated against INI travel and rechecked by the backend.",
+                )
+                .size(theme::font_size(10.0))
+                .color(theme::MUTED),
             );
         });
-    });
-    ui.add_space(4.0);
-    let available = ui.available_width();
-    ui.horizontal_top(|ui| {
-        ui.allocate_ui_with_layout(
-            egui::Vec2::new(available * 0.58, 470.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                work_offset_card(app, ui, writable);
-                g92_card(app, ui, writable);
-            },
-        );
-        ui.add_space(8.0);
-        ui.allocate_ui_with_layout(
-            egui::Vec2::new((available - available * 0.58 - 8.0).max(300.0), 320.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                common::positions_table(app, ui);
-                tool_offset_card(app, ui);
-            },
-        );
-    });
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        if theme::action_button(ui, "PROBE", app.snapshot.probe.enabled).clicked() {
-            app.set_page(Page::Probe);
-        }
-        if theme::action_button(ui, "TOOLS", true).clicked() {
-            app.set_page(Page::Tools);
-        }
-        ui.label(
-            RichText::new(
-                "Offset writes are validated against INI travel and rechecked by the backend.",
-            )
-            .size(theme::font_size(10.0))
-            .color(theme::MUTED),
-        );
-    });
 }
 
-fn work_offset_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
+fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     let axes = app.axes();
+    let offsets = app.snapshot.offsets.offsets.clone();
+    let active_index = app.snapshot.offsets.active_index;
+    let mut selected = app.offsets.selected;
+    let mut write_row = None;
+    let mut apply_g92 = false;
     theme::card(ui, |ui| {
-        ui.set_max_height(280.0);
         ui.horizontal(|ui| {
-            theme::section_header(ui, &format!("WORK OFFSET G{}", 53 + app.offsets.selected));
+            theme::section_header(ui, "WORK OFFSETS");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
-                    RichText::new(
-                        if app.snapshot.offsets.active_index == Some(app.offsets.selected) {
-                            "ACTIVE"
-                        } else {
-                            "STORED"
-                        },
-                    )
-                    .monospace()
-                    .size(theme::font_size(10.0))
-                    .color(
-                        if app.snapshot.offsets.active_index == Some(app.offsets.selected) {
-                            theme::SUCCESS
-                        } else {
-                            theme::MUTED
-                        },
-                    ),
-                );
-            });
-        });
-        if app.offsets.values.len() != axes.len() {
-            app.offsets.values = vec!["0.0000".into(); axes.len()];
-        }
-        ui.horizontal_wrapped(|ui| {
-            for (index, axis) in axes.iter().enumerate() {
-                ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(axis)
-                            .size(theme::font_size(9.0))
-                            .monospace()
-                            .color(theme::C3),
-                    );
-                    ui.add_enabled(
-                        writable,
-                        egui::TextEdit::singleline(&mut app.offsets.values[index])
-                            .desired_width(120.0)
-                            .font(egui::TextStyle::Monospace)
-                            .min_size(egui::Vec2::new(120.0, 32.0)),
-                    );
-                });
-            }
-            ui.vertical(|ui| {
-                ui.label(
-                    RichText::new("ROT")
-                        .size(theme::font_size(9.0))
+                    RichText::new("DIRECT CELL EDIT")
                         .monospace()
-                        .color(theme::C3),
-                );
-                ui.add_enabled(
-                    writable,
-                    egui::TextEdit::singleline(&mut app.offsets.rotation)
-                        .desired_width(110.0)
-                        .font(egui::TextStyle::Monospace)
-                        .min_size(egui::Vec2::new(110.0, 32.0)),
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
                 );
             });
         });
-        ui.add_space(6.0);
+        if app.offsets.g92.len() != axes.len() {
+            let mut values = vec!["0.0000".into(); axes.len()];
+            for (index, value) in app.offsets.g92.iter().take(values.len()).enumerate() {
+                values[index] = value.clone();
+            }
+            app.offsets.g92 = values;
+        }
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            ui.spacing_mut().interact_size.y = 24.0;
+            egui::Grid::new("work-offsets-direct")
+                .num_columns(axes.len() + 4)
+                .striped(true)
+                .spacing([8.0, 2.0])
+                .show(ui, |ui| {
+                    ui.label(
+                        RichText::new("WCS")
+                            .size(theme::font_size(9.0))
+                            .strong()
+                            .color(theme::MUTED),
+                    );
+                    for axis in &axes {
+                        ui.label(
+                            RichText::new(axis)
+                                .size(theme::font_size(9.0))
+                                .strong()
+                                .color(theme::C3),
+                        );
+                    }
+                    ui.label(
+                        RichText::new("ROTATION")
+                            .size(theme::font_size(9.0))
+                            .strong()
+                            .color(theme::MUTED),
+                    );
+                    ui.label(
+                        RichText::new("STATE")
+                            .size(theme::font_size(9.0))
+                            .strong()
+                            .color(theme::MUTED),
+                    );
+                    ui.label(
+                        RichText::new("WRITE")
+                            .size(theme::font_size(9.0))
+                            .strong()
+                            .color(theme::MUTED),
+                    );
+                    ui.end_row();
+
+                    for offset in &offsets {
+                        let index = offset.index;
+                        let is_active = active_index == Some(index);
+                        let is_selected = selected == index;
+                        let label = format!("G{}", 53 + index);
+                        let response = ui.selectable_label(
+                            is_selected,
+                            RichText::new(label)
+                                .monospace()
+                                .size(theme::font_size(12.0))
+                                .color(if is_active { theme::SUCCESS } else { theme::FG }),
+                        );
+                        if response.clicked() {
+                            selected = index;
+                        }
+                        let draft = app
+                            .offsets
+                            .rows
+                            .entry(index)
+                            .or_insert_with(crate::state::OffsetDraft::default);
+                        for axis in &axes {
+                            let text = draft
+                                .values
+                                .entry(axis.clone())
+                                .or_insert_with(|| "0.0000".into());
+                            ui.add_enabled(
+                                writable,
+                                egui::TextEdit::singleline(text)
+                                    .desired_width(82.0)
+                                    .font(egui::TextStyle::Monospace)
+                                    .margin(egui::Margin::symmetric(4, 1))
+                                    .min_size(egui::Vec2::new(82.0, 22.0)),
+                            );
+                        }
+                        ui.add_enabled(
+                            writable,
+                            egui::TextEdit::singleline(&mut draft.rotation)
+                                .desired_width(82.0)
+                                .font(egui::TextStyle::Monospace)
+                                .margin(egui::Margin::symmetric(4, 1))
+                                .min_size(egui::Vec2::new(82.0, 22.0)),
+                        );
+                        ui.label(
+                            RichText::new(if is_active { "ACTIVE" } else { "STORED" })
+                                .monospace()
+                                .size(theme::font_size(9.0))
+                                .color(if is_active {
+                                    theme::SUCCESS
+                                } else {
+                                    theme::MUTED
+                                }),
+                        );
+                        if theme::action_button(ui, "WRITE", writable).clicked() {
+                            write_row = Some(index);
+                        }
+                        ui.end_row();
+                    }
+
+                    ui.label(
+                        RichText::new("G92")
+                            .monospace()
+                            .size(theme::font_size(12.0))
+                            .color(theme::C1),
+                    );
+                    for (index, axis) in axes.iter().enumerate() {
+                        let _ = axis;
+                        ui.add_enabled(
+                            writable,
+                            egui::TextEdit::singleline(&mut app.offsets.g92[index])
+                                .desired_width(82.0)
+                                .font(egui::TextStyle::Monospace)
+                                .margin(egui::Margin::symmetric(4, 1))
+                                .min_size(egui::Vec2::new(82.0, 22.0)),
+                        );
+                    }
+                    ui.label(
+                        RichText::new("—")
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
+                    ui.label(
+                        RichText::new("G92 IS SEPARATE")
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
+                    if theme::action_button(ui, "APPLY G92", writable).clicked() {
+                        apply_g92 = true;
+                    }
+                    ui.end_row();
+                });
+        });
         if let Some(error) = &app.offsets.error {
             ui.label(RichText::new(error).color(theme::ERROR));
         }
-        if theme::accent_button(ui, "APPLY WORK OFFSET", writable).clicked() {
-            apply_work_offset(app);
-        }
     });
+    app.offsets.selected = selected;
+    if let Some(index) = write_row {
+        apply_work_offset(app, index);
+    }
+    if apply_g92 {
+        apply_g92_values(app);
+    }
 }
 
-fn apply_work_offset(app: &mut LincApp) {
+fn apply_work_offset(app: &mut LincApp, index: u8) {
     let axes = app.axes();
+    let draft = app.offsets.rows.get(&index).cloned().unwrap_or_default();
     let mut values = AxisMap::new();
-    for (index, axis) in axes.iter().enumerate() {
-        let text = app.offsets.values.get(index).cloned().unwrap_or_default();
+    for axis in &axes {
+        let text = draft.values.get(axis).cloned().unwrap_or_default();
         let Ok(value) = text.trim().parse::<f64>() else {
-            app.offsets.error = Some(format!("{axis}: invalid number {text:?}"));
+            app.offsets.error = Some(format!("G{} {axis}: invalid number {text:?}", 53 + index));
             return;
         };
         if let Err(error) = app.profile.machine_ini.validate_axis_value(axis, value) {
@@ -173,73 +253,51 @@ fn apply_work_offset(app: &mut LincApp) {
         }
         values.insert(axis.clone(), value);
     }
-    let rotation = match app.offsets.rotation.trim().parse::<f64>() {
-        Ok(value) => Some(value),
-        Err(_) => {
-            app.offsets.error = Some("rotation: invalid number".into());
-            return;
+    let rotation = if draft.rotation.trim().is_empty() {
+        Some(0.0)
+    } else {
+        match draft.rotation.trim().parse::<f64>() {
+            Ok(value) => Some(value),
+            Err(_) => {
+                app.offsets.error = Some("rotation: invalid number".into());
+                return;
+            }
         }
     };
     app.offsets.error = None;
     app.send(MachineCommand::SetWorkOffset {
-        index: app.offsets.selected,
+        index,
         values,
         rotation,
     });
     app.toast(
-        format!("G{} offset write queued", 53 + app.offsets.selected),
+        format!("G{} offset write queued", 53 + index),
         theme::ACCENT,
     );
 }
 
-fn g92_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
+fn apply_g92_values(app: &mut LincApp) {
     let axes = app.axes();
-    theme::card(ui, |ui| {
-        theme::section_header(ui, "G92 OFFSET");
-        if app.offsets.g92.len() != axes.len() {
-            app.offsets.g92 = vec!["0.0000".into(); axes.len()];
-            app.sync_offsets_from_snapshot(true);
-        }
-        ui.horizontal_wrapped(|ui| {
-            for (index, axis) in axes.iter().enumerate() {
-                ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(axis)
-                            .size(theme::font_size(9.0))
-                            .monospace()
-                            .color(theme::C3),
-                    );
-                    ui.add_enabled(
-                        writable,
-                        egui::TextEdit::singleline(&mut app.offsets.g92[index])
-                            .desired_width(130.0)
-                            .font(egui::TextStyle::Monospace)
-                            .min_size(egui::Vec2::new(130.0, 32.0)),
-                    );
-                });
+    let mut values = AxisMap::new();
+    for (index, axis) in axes.iter().enumerate() {
+        match app
+            .offsets
+            .g92
+            .get(index)
+            .and_then(|text| text.trim().parse::<f64>().ok())
+        {
+            Some(value) => {
+                values.insert(axis.clone(), value);
             }
-        });
-        if theme::action_button(ui, "APPLY G92", writable).clicked() {
-            let mut values = AxisMap::new();
-            for (index, axis) in axes.iter().enumerate() {
-                match app
-                    .offsets
-                    .g92
-                    .get(index)
-                    .and_then(|text| text.trim().parse::<f64>().ok())
-                {
-                    Some(value) => {
-                        values.insert(axis.clone(), value);
-                    }
-                    None => {
-                        app.offsets.error = Some(format!("G92 {axis}: invalid number"));
-                        return;
-                    }
-                }
+            None => {
+                app.offsets.error = Some(format!("G92 {axis}: invalid number"));
+                return;
             }
-            app.send(MachineCommand::SetG92Offset { values });
         }
-    });
+    }
+    app.offsets.error = None;
+    app.send(MachineCommand::SetG92Offset { values });
+    app.toast("G92 offset write queued", theme::ACCENT);
 }
 
 fn tool_offset_card(app: &mut LincApp, ui: &mut Ui) {

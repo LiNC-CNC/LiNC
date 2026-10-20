@@ -20,15 +20,19 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     app.files.poll_mount();
     poll_copy(app);
     let available = ui.available_width();
+    let content_height = (ui.available_height() - 54.0).max(260.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
-            Vec2::new(available * 0.5, 560.0),
+            Vec2::new(available * 0.5, content_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| usb_pane(app, ui),
         );
         ui.add_space(8.0);
         ui.allocate_ui_with_layout(
-            Vec2::new((available - available * 0.5 - 8.0).max(320.0), 560.0),
+            Vec2::new(
+                (available - available * 0.5 - 8.0).max(320.0),
+                content_height,
+            ),
             egui::Layout::top_down(egui::Align::Min),
             |ui| nc_pane(app, ui),
         );
