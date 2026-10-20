@@ -120,6 +120,8 @@ Required profile fields:
 | Tool table | INI `[EMCIO] TOOL_TABLE` |
 | Program prefix / open file | INI `[DISPLAY] PROGRAM_PREFIX`, `OPEN_FILE` |
 | `NC_FILES` root | INI `PROGRAM_PREFIX`; `[files] nc_files = "ini"` |
+| Machine graph bounds | INI travel limits / kinematics |
+| Program graph bounds | Last valid preview parse; never from a syntax-error state |
 | USB mount points | `udisks2` D-Bus, not config |
 | Panel/RIO HAL pin names | `configs/base.toml` |
 | Machine identity and panel ownership | machine profile |
@@ -246,9 +248,9 @@ written while running.
 | top level | `schema_version`, `profile`, `extends` |
 | `[machine]` | `name`, `kind`, `linuxcnc_ini` |
 | `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages` |
-| `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_debounce_ms`, `tab_width` |
+| `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width` |
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running` |
-| `[toolpath]` | `show_grid`, `show_program_bounds`, `show_machine_bounds`, `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors` |
+| `[toolpath]` | `show_grid`, `show_program_bounds`, `show_machine_bounds`, `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
 | `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `help_search` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
 | `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_requires_mode`, `quit_requires_idle`, `confirm_quit` |

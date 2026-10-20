@@ -71,6 +71,9 @@ policy and launch integration.
   position opens it with focus, dirty/save state, undo/redo, find and a
   debounced live preview. Edits and saves are gated by idle state and program
   protect; running programs stay read-only.
+- **Graph overlays program and machine bounds** and highlights the selected
+  line. Edits update the graph only after the preview syntax check succeeds;
+  invalid input keeps the last valid graph and never moves the machine.
 - **G-code is token-highlighted** with a rich but restrained palette:
   G-codes, M-codes, axis letters, numbers, feed/speed, tools, parameters,
   comments, and line numbers each have a distinct treatment.

@@ -26,6 +26,7 @@ line_numbers = true
 highlight_current_line = true
 autosave = false
 live_preview = true
+preview_requires_syntax_ok = true
 preview_debounce_ms = 250
 tab_width = 4
 
@@ -49,6 +50,7 @@ show_program_ticks = false
 show_machine_ticks = false
 perspective = true
 multitool_colors = true
+highlight_selected_line = true
 
 [keys]
 machine = "F5"

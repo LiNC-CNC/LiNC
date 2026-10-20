@@ -268,7 +268,16 @@ becomes editable.
 Program rules:
 
 - G-code is token-highlighted (see §7.3).
-- Current line uses an accent background and left bar; token colours remain.
+- The graph overlays program bounds and machine bounds. Program bounds are a
+  dashed cyan box around the last valid program extents; machine bounds are a
+  dashed muted envelope from the INI travel limits and kinematics. Both use the
+  same view transform as the toolpath.
+- The selected/current G-code line is highlighted in the graph: its segment or
+  arc uses a brighter stroke and a line-number tag, distinct from the execution
+  marker.
+- On editor changes, wait for the debounce, run the preview syntax check, then
+  replace the graph only if it succeeds. On failure, keep the last valid graph,
+  mark the offending line and show a syntax error; never move the machine.
 - While running, the editor is read-only and auto-scrolls to the current line.
 - Edits and saves are allowed only when stopped, `program_protect` is off and
   the panel is in `EDIT`.
@@ -560,6 +569,8 @@ For this design repository:
   explicit copy, eject, mount-state and load actions.
 - Loading an `NC_FILES` file returns to Program in `SPLIT` view with the
   toolpath fitted and the program not started.
+- The Program graph shows program bounds, machine bounds and a selected-line
+  highlight; editing updates it only after a successful syntax check.
 - Layered config profiles exist for the simulation and the physical BaierMill.
 - The profiles reference the LinuxCNC INI as the source of machine data rather
   than duplicating limits, velocities, units, spindle/ATC data or tooling.
@@ -619,6 +630,10 @@ For the future implementation:
 18. Implement file copy with canonical path checks, symlink rejection, free
     space checks, overwrite confirmation, temporary-file-plus-rename, progress
     and copy/eject mutual exclusion. Never invoke a shell for file operations.
+19. Implement graph bounds and selected-line overlay: project program extents
+    and INI machine limits into the current view, map selected lines to
+    segments/arcs, and make preview updates conditional on a successful
+    syntax check.
 
 ## 14. Accepted SVG manifest
 
@@ -627,8 +642,8 @@ Only the accepted versions are included.
 | File | Description |
 |---|---|
 | `svg/machine-dashboard.svg` | Machine dashboard: dark graphite + blue, axis cards, 3D toolpath, program card, feed/spindle-load gauges, machine health, alarms |
-| `svg/program-split.svg` | Program `SPLIT`: syntax-highlighted G-code alongside the 3D toolpath |
-| `svg/program-code.svg` | Program `CODE`: editable syntax-highlighted G-code, cursor/dirty state, mini XY preview graph and program-info card; entered by panel `EDIT` |
+| `svg/program-split.svg` | Program `SPLIT`: syntax-highlighted G-code alongside the 3D toolpath with program/machine bounds and selected-line highlight |
+| `svg/program-code.svg` | Program `CODE`: editable syntax-highlighted G-code, cursor/dirty state, syntax-gated mini XY graph with bounds/selected-line highlight and program-info card; entered by panel `EDIT` |
 | `svg/diagnostics.svg` | Diagnostics overview: health cards, alarms/messages, panel link detail, motion health, event log |
 | `svg/gcode-help.svg` | G-code Help: offline quick-reference index, code search, detail pane, parameter tables, figures and related codes |
 | `svg/files.svg` | Files: USB and `NC_FILES` panes, mount/eject status, file listing and explicit copy/load actions |
