@@ -274,6 +274,7 @@ Program rules:
   the panel is in `EDIT`.
 - `FILE` enters Program; outside EDIT it cycles `SPLIT`/`CODE`; in EDIT it
   selects CODE.
+- `LOAD` or `Ctrl+O` opens Files; `ESC` returns to Program.
 - The header segmented control is also focusable.
 - No on-screen cycle start; loading a program does not start it.
 
@@ -326,7 +327,34 @@ stopping a running program.
 - Read-only; no machine-control actions. The top-level HELP action opens this
   page. No dedicated F1–F8 key.
 
-### 6.7 Settings
+### 6.7 Files
+
+Two-pane file browser opened from `LOAD` or `Ctrl+O`; `ESC` returns to the
+previous page.
+
+- Left pane: removable USB media. Auto-mount on insert via `udisks2` over
+  D-Bus; no `sudo`, no shell commands.
+- Right pane: `NC_FILES`, resolved from LinuxCNC `PROGRAM_PREFIX`; never a
+  duplicated path in HMI config.
+- Show device label/capacity, free space, mount state (`MOUNTING`, `MOUNTED`,
+  `NO USB`, `ERROR`) and a clear `EJECT`.
+- Mount removable filesystems with `nosuid,nodev,noexec`; never auto-run files
+  from USB.
+- Copy selected regular files both ways: `COPY TO USB` from `NC_FILES` and
+  `COPY TO NC_FILES` from USB. Folder navigation only; no recursive folder copy
+  in v1.
+- Copy requires free space, rejects symlinks/path escapes, confirms overwrite,
+  writes to a temporary file in the destination and renames atomically.
+- Copy progress and errors are visible; `EJECT` is disabled while a copy is
+  active.
+- `EJECT` unmounts and powers off the device; never force-unmount by default.
+  Show `SAFE TO REMOVE` after success.
+- `LOAD` accepts only configured G-code extensions from `NC_FILES`; it loads
+  but never starts the program. Loading and writes to `NC_FILES` are disabled
+  while running, and imports are blocked by program protect.
+- Delete, rename, format and folder-copy are intentionally out of scope for v1.
+
+### 6.8 Settings
 
 - Theme/units/display density.
 - Keyboard reference.
@@ -404,13 +432,17 @@ Implementation:
 - `OFFSET`: Offsets.
 - `WIN`: Diagnostics.
 - `HELP` action: G-code Help; no dedicated function key.
+- `LOAD` / `Ctrl+O`: Files, when idle and allowed.
 - `ESC`: back/cancel; on Help, clear search or return from detail history.
 - Arrows: focus/list/scroll.
 - `/`: focus G-code Help search when Help is active.
 - `PageUp`/`PageDown`: tabs/pages.
 - `Home`/`End`: first/last item.
-- `Enter`: select/apply/MDI execute; on Help, open the selected code.
-- `Backspace`: edit; on Help detail, go back through link history.
+- `Enter`: select/apply/MDI execute; on Help, open the selected code; in Files,
+  open a folder or load an `NC_FILES` file.
+- `Backspace`: edit; on Help detail, go back through link history; in Files, go
+  up one folder.
+- `Ctrl+R`: refresh the Files listing.
 - `MO(1)`: symbols/mouse.
 
 No F1–F8 mapping. The bottom keycap highlight reflects the current page:
@@ -516,6 +548,8 @@ For this design repository:
 - G-code mockups show token-level syntax highlighting.
 - The Program CODE screen shows an editable buffer state: cursor, dirty marker,
   save action and mini-graph preview.
+- The Files screen represents `NC_FILES` and removable USB side by side, with
+  explicit copy, eject, mount-state and load actions.
 - Layered config profiles exist for the simulation and the physical BaierMill.
 - The profiles reference the LinuxCNC INI as the source of machine data rather
   than duplicating limits, velocities, units, spindle/ATC data or tooling.
@@ -569,6 +603,12 @@ For the future implementation:
 16. The panel mode pins are 0.5 s pulses, not a persistent mode index. The HMI
     must latch them to know when the selector is in `EDIT`; preferably the
     panel driver should expose a persistent mode state as well.
+17. USB auto-mount depends on `udisks2` and D-Bus/polkit. The service is
+    currently inactive on the development box; verify/enable it on the machine
+    and test insert, mount failure, busy eject and power-off.
+18. Implement file copy with canonical path checks, symlink rejection, free
+    space checks, overwrite confirmation, temporary-file-plus-rename, progress
+    and copy/eject mutual exclusion. Never invoke a shell for file operations.
 
 ## 14. Accepted SVG manifest
 
@@ -581,6 +621,7 @@ Only the accepted versions are included.
 | `svg/program-code.svg` | Program `CODE`: editable syntax-highlighted G-code, cursor/dirty state, mini XY preview graph and program-info card; entered by panel `EDIT` |
 | `svg/diagnostics.svg` | Diagnostics overview: health cards, alarms/messages, panel link detail, motion health, event log |
 | `svg/gcode-help.svg` | G-code Help: offline quick-reference index, code search, detail pane, parameter tables, figures and related codes |
+| `svg/files.svg` | Files: USB and `NC_FILES` panes, mount/eject status, file listing and explicit copy/load actions |
 
 Superseded vendor-style studies, intermediate layout explorations, and
 colour-mapped previews were intentionally removed.

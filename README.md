@@ -22,6 +22,7 @@ SVG mockups; it does not yet contain the Rust HMI implementation.
 | Program — editable code-focused editor with mini graph | `svg/program-code.svg` |
 | Diagnostics | `svg/diagnostics.svg` |
 | G-code Help | `svg/gcode-help.svg` |
+| Files / USB transfer | `svg/files.svg` |
 
 Only the accepted versions are included. The earlier vendor-style studies and
 intermediate layout explorations have been removed.
@@ -78,6 +79,10 @@ policy and launch integration.
 - **G-code Help is an offline reference page**, not a modal popup: searchable
   LinuxCNC index, per-code detail, parameter tables and figures. It remains
   available while a program is running and exposes no machine controls.
+- **Files is a simple two-pane browser** opened from `LOAD`: removable USB on
+  the left, `NC_FILES` on the right. USB drives auto-mount on insert through
+  `udisks2`; copy and eject are explicit actions. No shell commands, no
+  auto-run, no machine controls.
 - **Spindle load is explicit** and must come from real drive feedback, not
   spindle override or commanded speed.
 
@@ -97,7 +102,8 @@ cnc-hmi-design/
     ├── program-split.svg
     ├── program-code.svg
     ├── diagnostics.svg
-    └── gcode-help.svg
+    ├── gcode-help.svg
+    └── files.svg
 ```
 
 ## Viewing the SVGs
@@ -116,8 +122,8 @@ rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
 3. Implement the Rust `egui` shell, theme tokens, and the layered config loader.
 4. Implement the Machine dashboard.
 5. Implement the Program `SPLIT`/`CODE` views, G-code highlighter and editor.
-6. Implement Offsets, Tools, Diagnostics, Settings, and the G-code Help
-   reference browser.
+6. Implement Offsets, Tools, Diagnostics, Settings, the G-code Help reference
+   browser, and the Files/USB transfer page.
 7. Integrate LinuxCNC via PyO3 first, with a `MachineBackend` boundary that can
    later be replaced by a C++ NML bridge.
 8. Verify keyboard-only navigation, panel disconnect handling, program

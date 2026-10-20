@@ -119,6 +119,8 @@ Required profile fields:
 | ATC pockets and heights | INI `[ATC]` |
 | Tool table | INI `[EMCIO] TOOL_TABLE` |
 | Program prefix / open file | INI `[DISPLAY] PROGRAM_PREFIX`, `OPEN_FILE` |
+| `NC_FILES` root | INI `PROGRAM_PREFIX`; `[files] nc_files = "ini"` |
+| USB mount points | `udisks2` D-Bus, not config |
 | Panel/RIO HAL pin names | `configs/base.toml` |
 | Machine identity and panel ownership | machine profile |
 | UI layout, theme, keymap, toolpath options | `base.toml` + overrides |
@@ -245,6 +247,7 @@ written while running.
 | `[machine]` | `name`, `kind`, `linuxcnc_ini` |
 | `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages` |
 | `[program]` | `default_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_debounce_ms`, `tab_width` |
+| `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running` |
 | `[toolpath]` | `show_grid`, `show_program_bounds`, `show_machine_bounds`, `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors` |
 | `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `help_search` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
@@ -264,6 +267,8 @@ Enums:
 - `panel.kind`: `simulated`, `physical`, `external`
 - `panel.link.kind`: `virtual`, `rs485`
 - `diagnostics.panel_link_stats`: `none`, `optional`, `required`
+- `files.usb_backend`: `udisks2`, `none`
+- `files.overwrite`: `confirm`
 
 ## 11. Validation checklist
 
@@ -278,6 +283,9 @@ For this design repository:
 - all safety flags match the policy above;
 - HAL pin names exist in the current panel/RIO configurations;
 - the accepted G-code Help screen is present at `svg/gcode-help.svg`;
+- the accepted Files screen is present at `svg/files.svg`;
+- `[files] nc_files` is `"ini"`, not a duplicated path;
+- USB mount options include `nosuid`, `nodev` and `noexec`;
 - `base.toml` cannot be loaded as a runnable profile.
 
 ## 12. Open issues
@@ -308,3 +316,9 @@ For this design repository:
 8. Panel mode pins are pulse outputs. The HMI latches
    `szgh_panel.mode_*` to track `EDIT`; a persistent mode index from the panel
    driver would be more robust across HMI restarts.
+9. USB auto-mount uses `udisks2` over D-Bus. `udisks2` is inactive on the
+   development box; enable/verify it on the machine and test polkit
+   authorization, mount failure, busy eject and power-off.
+10. File copy implementation must reject symlinks/path escapes, check free
+    space, confirm overwrite, use a temporary file plus rename, report progress,
+    and prevent eject during a copy.

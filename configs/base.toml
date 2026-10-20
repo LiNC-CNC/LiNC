@@ -28,6 +28,16 @@ live_preview = true
 preview_debounce_ms = 250
 tab_width = 4
 
+[files]
+# NC_FILES is derived from the LinuxCNC INI PROGRAM_PREFIX; do not duplicate it.
+nc_files = "ini"
+usb_backend = "udisks2"
+usb_automount = true
+usb_mount_options = ["nosuid", "nodev", "noexec"]
+load_extensions = [".ngc", ".nc", ".tap", ".txt"]
+overwrite = "confirm"
+copy_while_running = false
+
 [toolpath]
 show_grid = false
 show_program_bounds = true
