@@ -1,0 +1,34 @@
+# BaierMill physical-machine profile.
+#
+# Points at the live LinuxCNC configuration in ../../baiermill_pb. The SZGH panel
+# driver is a separate process; the HMI only reads its HAL pins and must never
+# open /dev/ttyUSB0 or load the panel component.
+
+schema_version = 1
+profile = "baiermill"
+extends = "base.toml"
+
+[machine]
+name = "BaierMill"
+kind = "real"
+linuxcnc_ini = "../../baiermill_pb/probe_basic.ini"
+
+[ui]
+window_title = "CNC HMI - BaierMill"
+
+[panel]
+kind = "physical"
+label = "SZGH-1080"
+owner = "szgh-panel-hal"
+
+[panel.link]
+kind = "rs485"
+# Diagnostic metadata only. The panel driver owns the serial port.
+port = "/dev/ttyUSB0"
+baud = 115200
+data_bits = 8
+parity = "none"
+stop_bits = 1
+# Current hallib/szgh_panel.hal passes -c 0.01. This is metadata until the
+# panel driver reads the profile directly.
+cycle_time_ms = 10

@@ -468,6 +468,9 @@ For this design repository:
 - Hardware constraints for the QMK keyboard and SZGH panel are documented.
 - No SVG shows an on-screen machine control panel.
 - G-code mockups show token-level syntax highlighting.
+- Layered config profiles exist for the simulation and the physical BaierMill.
+- The profiles reference the LinuxCNC INI as the source of machine data rather
+  than duplicating limits, velocities, units, spindle/ATC data or tooling.
 
 For the future implementation:
 
@@ -500,6 +503,11 @@ For the future implementation:
    required.
 10. Verify theme contrast and color-blind distinguishability on the target
     display.
+11. Implement the layered config loader and `cnc-hmi --check-config`;
+    `configs/*.toml` currently define the contract only.
+12. Unify the real panel driver's serial port and cycle time with
+    `configs/baiermill.toml`; today they are hard-coded in the driver and
+    `hallib/szgh_panel.hal`.
 
 ## 14. Accepted SVG manifest
 
@@ -514,3 +522,33 @@ Only the accepted versions are included.
 
 Superseded vendor-style studies, intermediate layout explorations, and
 colour-mapped previews were intentionally removed.
+
+## 15. Configuration
+
+Configuration is per machine and layered:
+
+- `configs/base.toml` — UI, keymap, safety policy, HAL pin map, backend and
+  preference defaults.
+- `configs/sim.toml` — simulation profile pointing at
+  `../../baiermill_sim/probe_basic.ini`, the simulated SZGH panel and
+  `rio_sim.py`.
+- `configs/baiermill.toml` — physical-machine profile pointing at
+  `../../baiermill_pb/probe_basic.ini`, with the real SZGH-1080 panel owned by
+  `szgh-panel-hal`.
+
+Rules:
+
+1. A profile is selected explicitly with `--config`; there is no default.
+2. Profiles `extends` `base.toml`; profile tables override base, arrays replace.
+3. The LinuxCNC INI remains authoritative for kinematics, travel, limits,
+   velocities, units, spindle count, ATC settings, tool table and program paths.
+4. The HMI never owns the panel serial port and never writes machine-control
+   HAL pins.
+5. Safety flags are immutable from profiles: panel-only machine control, no
+   software E-stop/cycle/jog/spindle/coolant/overrides.
+6. Runtime UI state is stored separately under
+   `~/.config/cnc-hmi/<profile>.preferences.toml`.
+
+`cnc-hmi --check-config` must validate the merge and path resolution without
+connecting to LinuxCNC or HAL. The full schema, launch snippets and validation
+contract are in `CONFIGURATION.md`.

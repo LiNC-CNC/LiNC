@@ -1,0 +1,34 @@
+# BaierMill simulation profile.
+#
+# Uses the existing LinuxCNC simulation configuration in ../../baiermill_sim.
+# Same machine geometry, limits, velocities, homing, ATC and tooling as the
+# real machine; the FPGA card, SZGH panel and pendant are software stand-ins.
+
+schema_version = 1
+profile = "sim"
+extends = "base.toml"
+
+[machine]
+name = "BaierMill Simulation"
+kind = "sim"
+linuxcnc_ini = "../../baiermill_sim/probe_basic.ini"
+
+[ui]
+window_title = "CNC HMI - BaierMill Simulation"
+
+[panel]
+kind = "simulated"
+label = "Simulated SZGH-1080"
+owner = "baiermill_sim/panel/szgh_panel_gui.py"
+
+[panel.link]
+kind = "virtual"
+
+[diagnostics]
+panel_link_stats = "none"
+
+[simulation]
+enabled = true
+panel = "../../baiermill_sim/panel/szgh_panel_gui.py"
+rio = "../../baiermill_sim/rio_sim.py"
+estop = "panel-gui"

@@ -29,6 +29,28 @@ The SVGs use theme variables (`--surface`, `--fg`, `--muted`, `--border`,
 `--accent`, `--success`, `--warning`, `--error`, `--c1`…`--c6`) and adapt to the
 viewer's theme.
 
+## Configuration
+
+The HMI is configured per machine, with explicit profile selection:
+
+| Profile | File |
+|---|---|
+| Shared defaults | `configs/base.toml` |
+| BaierMill simulation | `configs/sim.toml` |
+| BaierMill physical machine | `configs/baiermill.toml` |
+
+The machine profile points at the LinuxCNC INI, which remains authoritative for
+travel, velocities, units, spindle/ATC data and the tool table. The HMI never
+owns the panel serial port; it reads the `szgh_panel.*` HAL pins.
+
+```sh
+cnc-hmi --config configs/sim.toml
+cnc-hmi --config configs/baiermill.toml
+```
+
+See [`CONFIGURATION.md`](CONFIGURATION.md) for the merge rules, schema, safety
+policy and launch integration.
+
 ## Design decisions locked in
 
 - **Dark graphite + cool-blue optics**, with blue used for interaction,
@@ -56,7 +78,12 @@ viewer's theme.
 ```text
 cnc-hmi-design/
 ├── README.md
+├── CONFIGURATION.md
 ├── SPEC.md
+├── configs/
+│   ├── base.toml
+│   ├── sim.toml
+│   └── baiermill.toml
 └── svg/
     ├── machine-dashboard.svg
     ├── program-split.svg
@@ -77,7 +104,7 @@ rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
 1. Fix and build `../szgh-panel-rust/` with the HAL feature enabled.
 2. Add the read-only panel diagnostics counters required by the Diagnostics
    screen.
-3. Implement the Rust `egui` shell and theme tokens.
+3. Implement the Rust `egui` shell, theme tokens, and the layered config loader.
 4. Implement the Machine dashboard.
 5. Implement the Program `SPLIT`/`CODE` views with the G-code highlighter.
 6. Implement Offsets, Tools, Diagnostics, and Settings.

@@ -1,0 +1,110 @@
+# Shared defaults for all CNC HMI machine profiles.
+#
+# Do not launch the HMI with this file directly. It has no machine profile.
+# A machine profile loads this file via `extends` and then overrides fields.
+#
+# The LinuxCNC INI named by the machine profile is authoritative for machine
+# geometry, travel limits, velocities, units, spindle count, ATC pockets, the
+# tool table and the program prefix. Do not copy those values here.
+
+schema_version = 1
+
+[ui]
+theme = "graphite-blue"
+start_page = "machine"
+window_title = "CNC HMI"
+scale = "auto"
+axis_order = ["X", "Y", "Z"]
+pages = ["machine", "program", "offsets", "tools", "diagnostics"]
+
+[program]
+default_view = "split"
+views = ["split", "code"]
+line_numbers = true
+highlight_current_line = true
+
+[toolpath]
+show_grid = false
+show_program_bounds = true
+show_machine_bounds = true
+show_program_labels = true
+show_machine_labels = false
+show_program_ticks = false
+show_machine_ticks = false
+perspective = true
+multitool_colors = true
+
+[keys]
+machine = "F5"
+program = "F6"
+program_cycle_view = "F6"
+tools = "F7"
+offsets = "F8"
+diagnostics = "F10"
+back = "Escape"
+quit = "Ctrl+Q"
+focus_next = "Down"
+focus_prev = "Up"
+activate = "Enter"
+open = "Ctrl+O"
+
+[safety]
+# The physical panel is the only machine-control surface. These flags are
+# policy, not user preferences: a profile must not turn them on.
+machine_control = "panel-only"
+software_estop = false
+software_cycle_control = false
+software_jog = false
+software_spindle = false
+software_coolant = false
+software_overrides = false
+program_edit_while_running = "read-only"
+program_protect = "panel"
+mdi_requires_mode = "mdi"
+quit_requires_idle = true
+confirm_quit = true
+
+[backend]
+kind = "linuxcnc"
+transport = "pyo3"
+status_hz = 20
+hal_hz = 10
+connect_timeout_ms = 3000
+
+[hal]
+read_only = true
+panel_component = "szgh_panel"
+
+[hal.pins]
+panel_connected = "szgh_panel.panel_connected"
+panel_error = "szgh_panel.communication_error"
+program_protect = "szgh_panel.program_protect"
+feed_override = "szgh_panel.feed_override"
+rapid_override = "szgh_panel.rapid_override"
+spindle_override = "szgh_panel.spindle_override"
+spindle_load = "rio.spindle-modbus.spindle_load-abs"
+spindle_speed = "spindle.0.speed-in"
+
+[panel]
+# The panel is owned by another process. The HMI must never open the serial
+# device, load the panel component, or write panel outputs.
+owner = "external"
+kind = "external"
+read_only = true
+
+[panel.link]
+read_only = true
+
+[preferences]
+# Runtime-only UI state lives here, never in the machine profile.
+# {profile} expands to the selected profile name.
+file = "~/.config/cnc-hmi/{profile}.preferences.toml"
+
+[diagnostics]
+event_log_capacity = 1000
+# "none": no link counters exist; "optional": show them if exposed; "required":
+# fail diagnostics if they are missing.
+panel_link_stats = "optional"
+
+[simulation]
+enabled = false
