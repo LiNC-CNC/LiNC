@@ -266,6 +266,23 @@ present in the real-machine build.
 - A lathe-specific panel mockup still needs turret and live-tool controls;
   until then, the lathe simulation profile runs without a panel window.
 
+### 4.5 HAL wiring
+
+- `hal/linc.hal` loads `linc-panel` and wires `cnc_panel.*` to `halui` modes,
+  cycle start/pause/stop, jog, spindle, coolant/lube, homing, overrides, status
+  LEDs and tool displays.
+- `hal/linc-postgui.hal` is loaded after the GUI has created `linc.*` and wires
+  `linc.status-display` to `cnc_panel.sseg_status`,
+  `linc.tool-change-confirm` to `iocontrol.0.tool-changed`, and
+  `linc.hmi-alive` as a heartbeat.
+- `hal/linc-pendant.hal` is optional and real-machine only. It wires pendant
+  axis-select/handwheel/jog-enable inputs gated by `cnc_panel.mode_jog`; it does
+  not wire pendant mode, cycle, spindle, coolant, override, program or macro
+  controls.
+- `LINC_CONFIG` must select the same profile used by the `linc` display.
+- The core HAL expects the generic `cnc_panel` component/pins; the live machine
+  must rename or alias its legacy panel component first.
+
 ## 5. Application shell
 
 Fixed shell, no right-hand status column:
@@ -982,6 +999,12 @@ For this design repository:
   latching; invalid mode state is `UNKNOWN`.
 - The WHB pendant is documented and implemented as jog-only; non-jog pendant
   controls are ignored.
+- `hal/linc.hal`, `hal/linc-postgui.hal` and `hal/linc-pendant.hal` exist and
+  match the pin names in `configs/base.toml`.
+- The pre-GUI HAL contains no `linc.*` nets; the post-GUI HAL wires all three
+  declared `linc.*` outputs.
+- The pendant HAL wires only jog/handwheel/axis-select paths and is gated by
+  `cnc_panel.mode_jog`.
 - Hardware constraints for the QMK keyboard and CNC control panel are documented.
 - No SVG shows a general on-screen machine-control panel.
 - G-code mockups show token-level syntax highlighting.
@@ -1168,6 +1191,9 @@ Configuration is per machine and layered:
 - `configs/lathe-sim.toml` — lathe simulation profile pointing at
   `../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini`,
   with `gui = "lathe"` and turret/live-tool capabilities.
+- `hal/linc.hal` — core pre-GUI panel/HAL wiring.
+- `hal/linc-postgui.hal` — post-GUI `linc.*` output wiring.
+- `hal/linc-pendant.hal` — optional real-machine pendant jog-only wiring.
 
 Rules:
 

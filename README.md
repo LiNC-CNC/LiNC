@@ -66,6 +66,36 @@ linc --config configs/baiermill.toml
 See [`CONFIGURATION.md`](CONFIGURATION.md) for the merge rules, schema, safety
 policy and launch integration.
 
+## HAL integration
+
+The HAL wiring is included:
+
+| File | Purpose |
+|---|---|
+| `hal/linc.hal` | Core pre-GUI wiring: panel service, modes, cycle, jog, spindle, coolant, homing, overrides and panel LEDs |
+| `hal/linc-postgui.hal` | Post-GUI wiring for `linc.status-display`, `linc.tool-change-confirm` and `linc.hmi-alive` |
+| `hal/linc-pendant.hal` | Optional real-machine WHB04B-6 jog-only wiring |
+
+Use:
+
+```ini
+[HAL]
+HALFILE = /home/jack/CNC/LiNC/hal/linc.hal
+HALFILE = /home/jack/CNC/LiNC/hal/linc-pendant.hal   ; real machine only
+POSTGUI_HALFILE = /home/jack/CNC/LiNC/hal/linc-postgui.hal
+```
+
+`LINC_CONFIG` must name the same profile used by the `linc` display:
+
+```sh
+export LINC_CONFIG=/home/jack/CNC/LiNC/configs/baiermill.toml
+linc --config "$LINC_CONFIG"
+```
+
+The core HAL expects the generic `cnc_panel` component and pins. The live
+machine HAL must rename or alias the legacy panel component before using this
+file unchanged.
+
 ## Design decisions locked in
 
 - **Dark graphite + cool-blue optics**, with blue used for interaction,
@@ -169,6 +199,10 @@ LiNC/
 │   ├── sim.toml
 │   ├── lathe-sim.toml
 │   └── baiermill.toml
+├── hal/
+│   ├── linc.hal
+│   ├── linc-postgui.hal
+│   └── linc-pendant.hal
 └── svg/
     ├── machine-dashboard.svg
     ├── program-split.svg
@@ -198,7 +232,8 @@ rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
 1. Port the existing panel driver into the LiNC `linc-panel` crate with the HAL
    feature enabled, keeping the driver/capability abstraction.
 2. Add panel diagnostics counters and raw bitmaps to `linc-panel`.
-3. Implement the `linc` HAL output component and typed allowlist.
+3. Implement the `linc` HAL output component and typed allowlist; then load
+   `hal/linc.hal` and `hal/linc-postgui.hal` in the machine profile.
 4. Implement the Rust `egui` shell, theme tokens, and the layered config loader.
 5. Implement the Machine dashboard.
 6. Implement the Program `SPLIT`/`CODE` views, G-code highlighter and editor.

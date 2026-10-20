@@ -85,6 +85,35 @@ DISPLAY = linc --config /home/jack/CNC/LiNC/configs/sim.toml
 Do not change the existing `probe_basic.ini` until the `linc` executable is
 installed; Probe Basic remains the current display.
 
+### HAL wiring
+
+The LiNC HAL files are loaded around the GUI:
+
+```ini
+[HAL]
+HALFILE = /home/jack/CNC/LiNC/hal/linc.hal
+HALFILE = /home/jack/CNC/LiNC/hal/linc-pendant.hal   ; real machine only
+POSTGUI_HALFILE = /home/jack/CNC/LiNC/hal/linc-postgui.hal
+
+[DISPLAY]
+DISPLAY = linc --config /home/jack/CNC/LiNC/configs/baiermill.toml
+```
+
+`linc.hal` loads the `linc-panel` service and wires `cnc_panel.*` to
+`halui`, jog, spindle, coolant, homing and overrides. `linc-postgui.hal` runs
+after the GUI has created the `linc.*` component and wires
+`linc.status-display`, `linc.tool-change-confirm` and `linc.hmi-alive`.
+`linc-pendant.hal` is real-machine only and wires jog/handwheel inputs.
+
+`LINC_CONFIG` must select the same profile as `--config`:
+
+```sh
+export LINC_CONFIG=/home/jack/CNC/LiNC/configs/baiermill.toml
+```
+
+The core HAL expects the generic `cnc_panel` component. Rename or alias the
+legacy branded panel HAL component before loading it unchanged.
+
 ## 4. Merge and validation contract
 
 Loading order:
@@ -141,6 +170,9 @@ Required profile fields:
 | Homing commands | `cnc_panel.home-*` / `proghome-*` pins and physical keys; never HMI |
 | PROG.HOME path | Panel `proghome-*` -> existing Probe Basic `issue_mdi`; HMI observes |
 | Panel/RIO HAL pin names | `configs/base.toml` |
+| Core HAL wiring | `hal/linc.hal` |
+| Post-GUI HMI outputs | `hal/linc-postgui.hal` |
+| Optional pendant wiring | `hal/linc-pendant.hal` |
 | WHB pendant | Jog/handwheel inputs only in JOG mode; all other functions ignored |
 | Panel status 7-segment | `linc.status-display` -> `cnc_panel.sseg_status`; `[panel.status]` |
 | Machine identity and panel ownership | machine profile |
@@ -357,6 +389,11 @@ For this design repository:
 - the status display shows the active WCS by default and `--` when unknown;
 - `[panel] mode_encoding = "one_hot_steady"` and
   `override_encoding = "analog_steady"`;
+- `hal/linc.hal`, `hal/linc-postgui.hal` and `hal/linc-pendant.hal` exist;
+- `linc.hal` contains no `linc.*` nets before the GUI component exists;
+- `linc-postgui.hal` wires all three declared `linc.*` outputs;
+- `linc-pendant.hal` wires only jog/handwheel/axis-select, never pendant
+  mode/cycle/spindle/coolant/override/program/macro controls;
 - `[homing] auto_open` is `true` for mode-driven screens;
 - the Homing screen exposes no software home/unhome controls;
 - `[tools] manual_confirm` is `true`;

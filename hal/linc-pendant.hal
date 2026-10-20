@@ -1,0 +1,47 @@
+# LiNC WHB04B-6 pendant wiring (real machine only)
+#
+# The pendant is a JOG input only. Its mode, cycle, spindle, coolant,
+# override, program, macro and probe controls are intentionally not wired.
+# Its handwheel/axis-select paths are enabled only while the panel is in JOG.
+
+loadusr -W xhc-whb04b-6 -HsfB
+
+loadrt and2 names=and2.pendant_x,and2.pendant_y,and2.pendant_z
+addf and2.pendant_x servo-thread
+addf and2.pendant_y servo-thread
+addf and2.pendant_z servo-thread
+
+# Axis selection is part of the jog path; it does not initiate motion.
+net pendant-x-select whb.halui.axis.x.select => halui.axis.x.select
+net pendant-y-select whb.halui.axis.y.select => halui.axis.y.select
+net pendant-z-select whb.halui.axis.z.select => halui.axis.z.select
+
+# Handwheel counts/scales feed LinuxCNC only when both the pendant jog enable
+# and the physical panel's JOG mode are true.
+net pendant-x-enable whb.axis.x.jog-enable => and2.pendant_x.in0
+net pendant-y-enable whb.axis.y.jog-enable => and2.pendant_y.in0
+net pendant-z-enable whb.axis.z.jog-enable => and2.pendant_z.in0
+net mode-jog and2.pendant_x.in1
+net mode-jog and2.pendant_y.in1
+net mode-jog and2.pendant_z.in1
+net pendant-x-jog and2.pendant_x.out => axis.x.jog-enable
+net pendant-y-jog and2.pendant_y.out => axis.y.jog-enable
+net pendant-z-jog and2.pendant_z.out => axis.z.jog-enable
+
+net pendant-x-counts whb.axis.x.jog-counts => axis.x.jog-counts
+net pendant-y-counts whb.axis.y.jog-counts => axis.y.jog-counts
+net pendant-z-counts whb.axis.z.jog-counts => axis.z.jog-counts
+net pendant-x-scale whb.axis.x.jog-scale => axis.x.jog-scale
+net pendant-y-scale whb.axis.y.jog-scale => axis.y.jog-scale
+net pendant-z-scale whb.axis.z.jog-scale => axis.z.jog-scale
+net pendant-x-vel whb.axis.x.jog-vel-mode => axis.x.jog-vel-mode
+net pendant-y-vel whb.axis.y.jog-vel-mode => axis.y.jog-vel-mode
+net pendant-z-vel whb.axis.z.jog-vel-mode => axis.z.jog-vel-mode
+
+# Do not wire:
+#   whb.halui.mode.*        (mode remains on the CNC control panel)
+#   whb.halui.program.*     (AUTO start/stop remains on the panel)
+#   whb.halui.spindle.*     (spindle remains on the panel)
+#   whb.halui.flood/mist    (coolant remains on the panel)
+#   whb.halui.*override*    (overrides remain on the panel)
+#   whb.button.macro-*      (macros are not part of LiNC)

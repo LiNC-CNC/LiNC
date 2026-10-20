@@ -1,0 +1,15 @@
+# LiNC post-GUI HAL wiring
+#
+# Loaded only after the linc GUI has created its linc.* HAL component.
+# This is the only place where the HMI's declared outputs are connected.
+
+# Two-digit panel status display: active WCS from linc, 54-59 or --.
+net linc-status linc.status-display => cnc_panel.sseg_status
+
+# Manual tool-change acknowledgement: operator pressed CONFIRM INSTALLED.
+# The linc backend only pulses this after validating a pending manual change.
+net linc-tool-confirm linc.tool-change-confirm => iocontrol.0.tool-changed
+
+# UI heartbeat. A machine/PLC watchdog may consume this signal; it is not used
+# to drive motion or panel controls.
+net linc-hmi-heartbeat linc.hmi-alive

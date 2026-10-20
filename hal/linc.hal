@@ -1,0 +1,207 @@
+# LiNC core HAL wiring (pre-GUI)
+#
+# Requirements:
+#   * LINC_CONFIG is exported in the LinuxCNC environment and selects the same
+#     profile used by the linc GUI.
+#   * linc-panel is installed and creates the cnc_panel HAL component.
+#   * The machine HAL provides rio.probe.bit, rio.worklamp.bit and
+#     rio.tool-change.bit; adjust those names to the actual machine I/O.
+#
+# The linc GUI creates the linc.* output component after it starts. Wire those
+# pins in linc-postgui.hal.
+
+loadusr -W linc-panel
+
+# ---------------------------------------------------------------------------
+# Logic and conversion components
+# ---------------------------------------------------------------------------
+loadrt and2 names=and2.cycle_gate,and2.cycle_run,and2.cycle_resume
+loadrt or2 names=or2.jog_a,or2.jog_b,or2.pause
+loadrt not names=not.paused,not.coolant,not.lube,not.opt,not.bdt,not.spindle_on
+loadrt toggle names=toggle.coolant,toggle.lube,toggle.opt,toggle.bdt,toggle.sbk,toggle.worklamp
+loadrt scale names=scale.feed,scale.rapid,scale.spindle
+loadrt conv_float_s32 names=conv.feed,conv.rapid,conv.spindle
+
+addf and2.cycle_gate servo-thread
+addf and2.cycle_run servo-thread
+addf and2.cycle_resume servo-thread
+addf or2.jog_a servo-thread
+addf or2.jog_b servo-thread
+addf or2.pause servo-thread
+addf not.paused servo-thread
+addf not.coolant servo-thread
+addf not.lube servo-thread
+addf not.opt servo-thread
+addf not.bdt servo-thread
+addf not.spindle_on servo-thread
+addf toggle.coolant servo-thread
+addf toggle.lube servo-thread
+addf toggle.opt servo-thread
+addf toggle.bdt servo-thread
+addf toggle.sbk servo-thread
+addf toggle.worklamp servo-thread
+addf scale.feed servo-thread
+addf scale.rapid servo-thread
+addf scale.spindle servo-thread
+addf conv.feed servo-thread
+addf conv.rapid servo-thread
+addf conv.spindle servo-thread
+
+setp scale.feed.gain 100
+setp scale.rapid.gain 100
+setp scale.spindle.gain 100
+setp conv.feed.clamp true
+setp conv.rapid.clamp true
+setp conv.spindle.clamp true
+
+# ---------------------------------------------------------------------------
+# Panel modes
+# ---------------------------------------------------------------------------
+net mode-auto cnc_panel.mode_auto => halui.mode.auto
+net mode-mdi cnc_panel.mode_mdi => halui.mode.mdi
+net mode-jog cnc_panel.mode_jog => or2.jog_a.in0
+net mode-inc cnc_panel.mode_inc => or2.jog_a.in1
+net mode-mpg cnc_panel.mode_mpg => or2.jog_b.in0
+net mode-jog-a or2.jog_a.out => or2.jog_b.in1
+net mode-jog-any or2.jog_b.out => halui.mode.teleop
+
+# EDIT, HOME and PROG.HOME are not LinuxCNC task modes. HOME buttons are wired
+# below; PROG.HOME is handled by the panel/LiNC issue_mdi path.
+
+# ---------------------------------------------------------------------------
+# Cycle start / pause / stop
+# ---------------------------------------------------------------------------
+net is-auto halui.mode.is-auto => and2.cycle_gate.in0
+net is-paused halui.program.is-paused => not.paused.in and2.cycle_resume.in0
+net not-paused not.paused.out => and2.cycle_gate.in1
+net cycle-gate and2.cycle_gate.out => and2.cycle_run.in0
+net cycle-start cnc_panel.cycle_start => and2.cycle_run.in1 and2.cycle_resume.in1
+net cycle-run and2.cycle_run.out => halui.program.run
+
+net cycle-resume and2.cycle_resume.out => halui.program.resume
+
+net cycle-stop cnc_panel.cycle_stop => or2.pause.in1
+net sbk-mode toggle.sbk.out => or2.pause.in0
+net pause-request or2.pause.out => halui.program.pause
+net single-block-step cnc_panel.step => halui.program.step
+
+net sbk-button cnc_panel.sbk => toggle.sbk.in
+net sbk-led toggle.sbk.out => cnc_panel.led_sbk
+
+net k4-stop cnc_panel.k4 => halui.program.stop
+
+# Block delete
+net bdt-button cnc_panel.bdt => toggle.bdt.in
+net bdt-on toggle.bdt.out => halui.program.block-delete.on not.bdt.in
+net bdt-off not.bdt.out => halui.program.block-delete.off
+net bdt-status halui.program.block-delete.is-on => cnc_panel.led_bdt
+
+# Optional stop
+net opt-button cnc_panel.opt => toggle.opt.in
+net opt-on toggle.opt.out => halui.program.optional-stop.on not.opt.in
+net opt-off not.opt.out => halui.program.optional-stop.off
+net opt-status halui.program.optional-stop.is-on => cnc_panel.led_opt
+
+# ---------------------------------------------------------------------------
+# Spindle
+# ---------------------------------------------------------------------------
+net spindle-cw cnc_panel.spd_cw => halui.spindle.0.forward
+net spindle-ccw cnc_panel.spd_ccw => halui.spindle.0.reverse
+net spindle-stop cnc_panel.spd_sp => halui.spindle.0.stop
+
+# spindle.0.orient is a status output from motmod, not a request input.
+# Wire the panel orient button to the machine-specific orient command (for
+# example an INI halui MDI command) rather than to spindle.0.orient.
+net spindle-oriented spindle.0.orient => cnc_panel.led_spd_ori
+
+net spindle-on halui.spindle.0.is-on => not.spindle_on.in
+net spindle-off not.spindle_on.out => cnc_panel.led_spd_sp
+net spindle-forward halui.spindle.0.runs-forward => cnc_panel.led_spd_cw
+net spindle-reverse halui.spindle.0.runs-backward => cnc_panel.led_spd_ccw
+
+# ---------------------------------------------------------------------------
+# Coolant, lube, work lamp
+# ---------------------------------------------------------------------------
+net coolant-button cnc_panel.coolant => toggle.coolant.in
+net coolant-on toggle.coolant.out => halui.flood.on not.coolant.in
+net coolant-off not.coolant.out => halui.flood.off
+net coolant-status halui.flood.is-on => cnc_panel.led_coolant
+
+net lube-button cnc_panel.lube => toggle.lube.in
+net lube-on toggle.lube.out => halui.lube.on not.lube.in
+net lube-off not.lube.out => halui.lube.off
+net lube-status halui.lube.is-on => cnc_panel.led_lub
+
+net worklamp-button cnc_panel.worklamp => toggle.worklamp.in
+net worklamp-on toggle.worklamp.out => rio.worklamp.bit cnc_panel.led_worklamp
+
+# ---------------------------------------------------------------------------
+# Jog buttons (panel; pendant jog is wired in linc-pendant.hal)
+# ---------------------------------------------------------------------------
+net jog-xp cnc_panel.jog_xp => halui.axis.x.plus
+net jog-xn cnc_panel.jog_xn => halui.axis.x.minus
+net jog-yp cnc_panel.jog_yp => halui.axis.y.plus
+net jog-yn cnc_panel.jog_yn => halui.axis.y.minus
+net jog-zp cnc_panel.jog_zp => halui.axis.z.plus
+net jog-zn cnc_panel.jog_zn => halui.axis.z.minus
+
+# ---------------------------------------------------------------------------
+# Homing
+# ---------------------------------------------------------------------------
+net home-all cnc_panel.home-all => halui.home-all
+net home-x cnc_panel.home-x => halui.joint.0.home
+net home-y cnc_panel.home-y => halui.joint.1.home
+net home-z cnc_panel.home-z => halui.joint.2.home
+
+# PROG.HOME outputs are consumed by the LiNC/panel issue_mdi path, not by a
+# generic HAL movement block.
+
+# ---------------------------------------------------------------------------
+# Overrides
+# ---------------------------------------------------------------------------
+net feed-override cnc_panel.feed_override => scale.feed.in
+net feed-override-scaled scale.feed.out => conv.feed.in
+net feed-override-counts conv.feed.out => halui.feed-override.counts
+net rapid-override cnc_panel.rapid_override => scale.rapid.in
+net rapid-override-scaled scale.rapid.out => conv.rapid.in
+net rapid-override-counts conv.rapid.out => halui.rapid-override.counts
+net spindle-override cnc_panel.spindle_override => scale.spindle.in
+net spindle-override-scaled scale.spindle.out => conv.spindle.in
+net spindle-override-counts conv.spindle.out => halui.spindle.0.override.counts
+
+setp halui.feed-override.count-enable true
+setp halui.feed-override.direct-value true
+setp halui.feed-override.scale .01
+setp halui.rapid-override.count-enable true
+setp halui.rapid-override.direct-value true
+setp halui.rapid-override.scale .01
+setp halui.spindle.0.override.count-enable true
+setp halui.spindle.0.override.direct-value true
+setp halui.spindle.0.override.scale .01
+
+# ---------------------------------------------------------------------------
+# Status LEDs and tool displays
+# ---------------------------------------------------------------------------
+net machine-on halui.machine.is-on => cnc_panel.led_ready
+net program-running halui.program.is-running => cnc_panel.led_run cnc_panel.led_cycle_on cnc_panel.led_k4
+net program-paused halui.program.is-paused => cnc_panel.led_cycle_off
+net machine-estop halui.estop.is-activated => cnc_panel.led_mc_alarm
+
+net axis-x-homed halui.joint.0.is-homed => cnc_panel.led_x
+net axis-y-homed halui.joint.1.is-homed => cnc_panel.led_y
+net axis-z-homed halui.joint.2.is-homed => cnc_panel.led_z
+
+net rapid-button cnc_panel.rapid => cnc_panel.led_rapid
+net tool-change-active iocontrol.0.tool-change => cnc_panel.led_chuck
+net tool-prep-number iocontrol.0.tool-prep-number => cnc_panel.sseg_magtool
+net tool-number iocontrol.0.tool-number => cnc_panel.sseg_spdtool
+
+# ---------------------------------------------------------------------------
+# Probe input and manual tool-change/panel I/O
+# ---------------------------------------------------------------------------
+net probe-input rio.probe.bit => motion.probe-input
+net tool-change-piston cnc_panel.chuck => rio.tool-change.bit
+
+# Adjust or remove the rio.* nets to match the actual machine I/O. The
+# generic cnc_panel.estop input remains part of the hardware safety chain and
+# is not routed through software.
