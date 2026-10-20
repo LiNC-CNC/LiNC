@@ -315,6 +315,16 @@ Program rules:
 - While running, the editor is read-only and auto-scrolls to the current line.
 - Edits and saves are allowed only when stopped, `program_protect` is off and
   the panel is in `EDIT`.
+- The physical panel's **PROGRAM PROTECT** switch is authoritative. While it
+  is on, the controller is editing-locked: no cursor edits, saves, offset/tool
+  table writes, file imports, or probe-result applies. Show a persistent
+  `PROTECT ON — EDITING LOCKED` state and disable the affected actions.
+- Protect must fail closed: an unknown or stale protect input is treated as ON.
+  Every write rechecks it in the backend; a value sampled in the UI is not
+  sufficient.
+- If protect turns on with unsaved changes, keep the buffer and dirty marker,
+  do not discard or auto-revert, and keep it read-only until the switch is off.
+- Program load remains readable; program protect blocks writing, not viewing.
 - `FILE` enters Program; outside EDIT it cycles `SPLIT`/`CODE`; in EDIT it
   selects CODE.
 - `LOAD` or `Ctrl+O` opens Files; `ESC` returns to Program.
@@ -529,6 +539,37 @@ observes, explains and logs the panel behavior; it never issues a home command.
 - Panel link information.
 - About/support.
 
+### 6.12 Manual modes: JOG / INC / MPG
+
+Mode-driven screen shared by the panel's `JOG`, `INC` and `MPG` positions.
+Entering any of those positions opens it; leaving them closes it. No left-nav
+item is added. The screen is read-only: all jog, increment, handwheel, mode and
+override input stays on the physical panel.
+
+- **Large graph window** is the dominant element: mill 3D or lathe XZ
+  toolpath, axes, grid, stock/program bounds where available, live tool marker
+  and a short position trail. The view follows the machine position without
+  jumping; the last program path stays visible as a muted reference.
+- **Large, readable coordinates** are always visible beside the graph:
+  work coordinates (primary), machine coordinates (secondary) and
+  distance-to-go, with units and sign. Work coordinates use a large monospace
+  face; machine/DTG values may be smaller but must remain legible at the target
+  display.
+- Optional axes follow the INI. Lathe X is shown in the configured
+  radius/diameter convention, with the convention labeled.
+- The active axis is highlighted from the panel's selected-axis state. Unknown
+  selection is shown as `—`, never guessed.
+- Mode context:
+  - `JOG`: `CONTINUOUS`, active axis, jog speed and rapid state.
+  - `INC`: increment size, active axis and remaining step where available.
+  - `MPG`: active axis, handwheel scale and step mode. The RS-485 link does not
+    carry encoder counts; do not fabricate a handwheel count or velocity.
+- A persistent `PANEL MODE: JOG|INC|MPG` label plus `NO ON-SCREEN JOG`
+  reminder. No mode buttons, jog buttons, override sliders or E-stop.
+- The graph updates at the normal 10–20 Hz position rate; no animation loop is
+  required while idle. When the panel mode or axis selection is unknown after
+  reconnect, show `UNKNOWN` until a fresh panel state arrives.
+
 ## 7. Visual system
 
 ### 7.1 Theme
@@ -629,12 +670,16 @@ No F1–F8 mapping. The bottom keycap highlight reflects the current page:
   originates in the panel's home/proghome pins and keys. The HMI never homes an
   axis and never intercepts the panel's existing direct `issue_mdi` PROG.HOME
   path.
+- JOG/INC/MPG open the Manual screen with the large graph and coordinate
+  readout. Jog, increment and handwheel motion remain panel-only.
 - The HMI MDI screen stages only; its block runs only after physical CYCLE
   START. The PROG.HOME panel action is a separate, existing panel behavior and
   is not routed through that staging screen.
 - Program start is physical CYCLE START only.
 - Overrides are physical switches; the GUI displays values.
 - Jog is physical only.
+- Program protect is a physical panel input. It blocks every controller-side
+  write and is treated as ON when unknown or stale.
 - The GUI may load programs, edit G-code, edit offsets/tools, and run MDI
   within the gating above.
 
@@ -714,7 +759,11 @@ serial counters and raw bitmaps; those must be added for Diagnostics.
   its PROG.HOME `issue_mdi` actions.
 - Probing routines are prepared as MDI; only the physical CYCLE START key may
   start probe motion. Never auto-start a probe routine.
-- Respect program protect and running state.
+- Respect program protect and running state. Program protect is a panel
+  switch, is rechecked by the backend on every write, and fails closed when
+  unknown or stale.
+- Manual modes are read-only: no HMI jog, increment, handwheel, mode or
+  override command exists.
 - Do not hide alarms behind tabs; persistent banner plus Diagnostics.
 - HMI crash must not stop the machine or remove panel control.
 - Panel disconnect must be visible and actionable by the operator.
@@ -744,6 +793,11 @@ For this design repository:
 - The Tools screen represents the tool table, current/next tool, a staged
   `Tn M6` change, manual confirmation and an explicit optional ATC/turret
   section, without requiring MDI entry.
+- The Manual screen opens at JOG/INC/MPG, shows a large graph plus large work
+  coordinates, machine coordinates and DTG, and provides no on-screen jog or
+  mode control.
+- Program protect ON locks program editing, saves, offset/tool writes, file
+  imports and probe applies; unsaved changes are preserved, not discarded.
 - Hardware constraints for the QMK keyboard and SZGH panel are documented.
 - No SVG shows an on-screen machine control panel.
 - G-code mockups show token-level syntax highlighting.
@@ -844,6 +898,14 @@ For the future implementation:
 29. Defer ATC/turret implementation. When added, reuse the existing `M6` remap
     and carousel/turret routines, expose real clamp/index state and never
     duplicate toolchange motion logic in the HMI.
+30. Implement the Manual screen's JOG/INC/MPG mode latch and selected-axis
+    source. The RS-485 link carries mode pulses and jog buttons, not a
+    persistent selected axis; show `UNKNOWN` unless HALUI/pendant state is
+    available. MPG counts must not be fabricated.
+31. Implement program protect as a fail-closed backend gate: subscribe to the
+    panel pin, recheck it for every program/offset/tool/file/probe write, and
+    test the switch toggling with a dirty editor buffer and during an in-flight
+    write.
 
 ## 14. Accepted SVG manifest
 
@@ -860,6 +922,7 @@ Only the accepted versions are included.
 | `svg/lathe-dashboard.svg` | Lathe dashboard: X/Z/C/Y cards, XZ toolpath, power turret/live-tool card, spindle load and machine health |
 | `svg/probe.svg` | Touch Probe: Probe Basic-style category strip and illustrated operation cards, WCS/parameters, prepared-MDI state, result/apply and calibration |
 | `svg/mdi.svg` | MDI: single-block command, quick inserts, DRO/modal, staged state, history and physical-cycle-start gating |
+| `svg/manual.svg` | Manual JOG/INC/MPG: dominant live graph, large work/machine/DTG coordinates and mode context; no on-screen jog controls |
 | `svg/homing.svg` | Homing: per-axis/sequence state, HOME/PROG.HOME physical-key mapping and machine position; no software home controls |
 | `svg/tools.svg` | Tools: tool table, current/next tool, staged quick change, manual confirm, optional ATC/turret state |
 | `svg/sim-panel.svg` | Simulation-only SZGH-1080 panel window: power, E-stop, mode, overrides, lamps, displays and key matrix |

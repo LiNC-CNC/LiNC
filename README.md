@@ -28,6 +28,7 @@ contain the Rust HMI implementation.
 | Lathe dashboard | `svg/lathe-dashboard.svg` |
 | Touch probe interface | `svg/probe.svg` |
 | MDI screen | `svg/mdi.svg` |
+| Manual JOG/INC/MPG | `svg/manual.svg` |
 | Homing screen | `svg/homing.svg` |
 | Tools / tool change | `svg/tools.svg` |
 | Simulator panel (separate window) | `svg/sim-panel.svg` |
@@ -99,6 +100,14 @@ policy and launch integration.
 - **MDI is a mode-driven screen**: the panel's MDI position opens it, focuses
   the command line and shows DRO/modal/history. `Enter` stages one block; only
   physical CYCLE START runs it. Leaving MDI discards an unrun staged block.
+- **JOG, INC and MPG open a shared read-only Manual screen.** A large live
+  graph dominates, with large work coordinates plus machine coordinates and
+  DTG. Jog/increment/handwheel input remains on the panel; the screen never
+  offers jog or mode controls.
+- **The panel's PROGRAM PROTECT switch is a hard editing lock.** While on, the
+  HMI cannot edit/save G-code, write offsets/tools, import files or apply probe
+  results. Protect fails closed when unknown or stale; a dirty buffer is
+  preserved read-only rather than discarded.
 - **Homing is panel-only, exactly like the current machine.** HOME mode shows
   per-axis/sequence state; `RAPID` homes all and the axis jog keys home their
   axis through the panel's `home-*` pins. PROG.HOME keeps the existing
@@ -147,6 +156,7 @@ LiNC/
     ├── lathe-dashboard.svg
     ├── probe.svg
     ├── mdi.svg
+    ├── manual.svg
     ├── homing.svg
     ├── tools.svg
     └── sim-panel.svg
@@ -172,7 +182,8 @@ rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
    lathe live-tool/power-turret state, Offsets, Tools, Diagnostics, Settings,
    the G-code Help reference browser, the Files/USB transfer page, the Touch
    Probe interface, the mode-driven MDI screen, the panel-only Homing screen,
-   and the Tools/tool-change page.
+   the JOG/INC/MPG Manual screen, the Tools/tool-change page and the
+   program-protect editing lock.
 7. Integrate LinuxCNC via PyO3 first, with a `MachineBackend` boundary that can
    later be replaced by a C++ NML bridge.
 8. Verify keyboard-only navigation, panel disconnect handling, program

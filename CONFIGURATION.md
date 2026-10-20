@@ -231,6 +231,12 @@ The loader must reject a profile that changes these to weaker values. The HMI
 may still edit offsets, tool data and the program when idle, subject to
 `program_protect` and LinuxCNC state.
 
+`program_protect` is the physical panel switch. While ON, the controller is
+editing-locked: program edits/saves, offset/tool writes, NC_FILES imports and
+probe applies are disabled. An unknown or stale switch state is treated as ON.
+The backend rechecks the input for every write; unsaved editor content is
+preserved read-only, never discarded.
+
 Machine commands remain on the panel and pendant. `Ctrl+Q` is guarded and must
 not quit while the machine is moving or a program is running.
 
@@ -263,6 +269,7 @@ written while running.
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running` |
 | `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter`, `prepare_only` |
 | `[tools]` | `changer`, `atc_pockets`, `tool_change_stage`, `manual_confirm` |
+| `[manual]` | `auto_open`, `close_on_mode_exit`, `show_machine_coordinates`, `show_dtg`, `trail` |
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
 | `[mdi]` | `stage_only`, `auto_focus`, `history_limit`, `max_command_length`, `quick_commands` |
 | `[toolpath]` | `show_grid`, `show_program_bounds`, `show_machine_bounds`, `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
@@ -310,6 +317,10 @@ For this design repository:
 - `[probe] prepare_only` is `true` for the mill profiles;
 - the lathe profile disables the mill-oriented touch-probe page;
 - `[mdi] stage_only` is `true` in every profile;
+- `[manual] auto_open` is `true` for JOG/INC/MPG;
+- the Manual screen exposes no software jog, increment, handwheel, mode or
+  override controls;
+- the accepted Manual screen is present at `svg/manual.svg`;
 - `[homing] auto_open` is `true` for mode-driven screens;
 - the Homing screen exposes no software home/unhome controls;
 - `[tools] tool_change_stage` and `manual_confirm` are `true`;
@@ -368,3 +379,7 @@ For this design repository:
 17. Implement tool-change staging and manual confirmation through a narrow
     backend/output path; defer ATC/turret and reuse the existing `M6` remap
     rather than duplicating toolchange motion in the HMI.
+18. Enforce `program_protect` as a fail-closed backend interlock. The panel pin
+    is authoritative; unknown/stale reads lock editing. Test G-code save,
+    offset/tool writes, file imports and probe applies with protect ON and with
+    the panel link lost.

@@ -61,6 +61,14 @@ atc_pockets = "ini"         # derive from [ATC] POCKETS
 tool_change_stage = true    # stage Tn M6; never auto-run
 manual_confirm = true
 
+[manual]
+# Panel modes JOG/INC/MPG drive this read-only screen.
+auto_open = true
+close_on_mode_exit = true
+show_machine_coordinates = true
+show_dtg = true
+trail = true
+
 [homing]
 # Panel mode HOME/PROG.HOME drives this page. The HMI never homes an axis.
 auto_open = true
@@ -128,7 +136,7 @@ software_spindle = false
 software_coolant = false
 software_overrides = false
 program_edit_while_running = "read-only"
-program_protect = "panel"
+program_protect = "panel"          # hardware switch; unknown/stale = locked
 save_requires_idle = true
 confirm_discard = true
 mdi_requires_mode = "mdi"
