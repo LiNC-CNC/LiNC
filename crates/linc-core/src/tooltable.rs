@@ -77,8 +77,10 @@ impl ToolTable {
                 "ATC/turret tool table requires the standard P column".into(),
             ));
         }
-        if !changer.uses_pockets() {
-            parsed_columns.retain(|column| *column != ToolColumn::P);
+        if !changer.uses_pockets() && parsed_columns.contains(&ToolColumn::P) {
+            return Err(ToolTableError::Invalid(
+                "manual changer must not declare the P column".into(),
+            ));
         }
 
         let mut rows = Vec::new();
@@ -395,13 +397,8 @@ mod tests {
 
     #[test]
     fn parses_standard_table_and_exposes_pocket_only_for_atc() {
-        let table = ToolTable::parse(
-            Path::new("tool.tbl"),
-            MILL,
-            "TZPDR",
-            ToolChangerKind::Manual,
-        )
-        .unwrap();
+        let table =
+            ToolTable::parse(Path::new("tool.tbl"), MILL, "TZDR", ToolChangerKind::Manual).unwrap();
         assert_eq!(table.rows.len(), 2);
         assert_eq!(table.rows[0].tool, 1);
         assert!(table.rows[0].pocket.is_none());
@@ -411,6 +408,18 @@ mod tests {
         let atc =
             ToolTable::parse(Path::new("tool.tbl"), MILL, "TZPDR", ToolChangerKind::Atc).unwrap();
         assert_eq!(atc.rows[0].pocket, Some(0));
+    }
+
+    #[test]
+    fn manual_rejects_p_column() {
+        let error = ToolTable::parse(
+            Path::new("tool.tbl"),
+            MILL,
+            "TZPDR",
+            ToolChangerKind::Manual,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("must not declare"));
     }
 
     #[test]

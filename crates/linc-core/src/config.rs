@@ -863,6 +863,12 @@ fn validate(config: &Config, ini: &MachineIni) -> Result<(), ConfigError> {
             config.tools.changer, ini.tool_table_columns
         )));
     }
+    if changer == ToolChangerKind::Manual && ini.tool_table_columns.contains('P') {
+        return Err(ConfigError::Invalid(format!(
+            "tools.changer=manual must not declare the P column ({} found)",
+            ini.tool_table_columns
+        )));
+    }
     if changer == ToolChangerKind::Manual && config.tools.atc_pockets != "ini" {
         return Err(ConfigError::Invalid(
             "tools.atc_pockets must be ini or absent for manual changers".into(),
@@ -1034,6 +1040,36 @@ panel_scale = 1.0
         assert_eq!(profile.machine_ini.coordinates, ["X", "Y", "Z"]);
         assert_eq!(profile.config.tools.changer, "manual");
         assert!(profile.is_sim());
+    }
+
+    #[test]
+    fn manual_changer_rejects_a_p_column() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), true);
+        let profile = dir.path().join("sim.toml");
+        write(
+            &profile,
+            r#"schema_version = 1
+profile = "sim"
+extends = "base.toml"
+[machine]
+name = "Test"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[panel]
+kind = "simulated"
+label = "Sim panel"
+driver = "cnc-panel-sim"
+[panel.link]
+kind = "virtual"
+[simulation]
+enabled = true
+"#,
+        );
+        let error = Profile::load(&profile, None).unwrap_err();
+        assert!(error.to_string().contains("must not declare"), "{error}");
     }
 
     #[test]

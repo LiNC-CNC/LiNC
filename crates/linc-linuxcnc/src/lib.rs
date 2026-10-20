@@ -1607,6 +1607,9 @@ mod tests {
     #[test]
     fn helper_script_is_embedded_and_declares_no_writes() {
         assert!(HELPER.contains("o<probe_cal_reset>"));
+        assert!(HELPER.contains("cnc_panel.proghome-all"));
+        assert!(HELPER.contains("G0 X0Y0Z0"));
+        assert!(HELPER.contains("G0 X0"));
         assert!(!HELPER.contains("serialport"));
         assert!(!HELPER.contains("/dev/tty"));
         assert!(!HELPER.contains("hal.set_p"));

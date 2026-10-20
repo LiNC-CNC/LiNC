@@ -120,6 +120,7 @@ class Bridge:
         self.param_file = self.config.get("RS274NGC", "PARAMETER_FILE", fallback="")
         self.program_prefix = self.config.get("DISPLAY", "PROGRAM_PREFIX", fallback=".")
         self.panel_connected_last = None
+        self.last_proghome = [False, False, False, False]
         self.last_panel_heartbeat = None
         self.last_panel_heartbeat_time = 0.0
         self.pending_restore = None
@@ -155,6 +156,39 @@ class Bridge:
                 except Exception:
                     time.sleep(0.2)
         threading.Thread(target=run, name="linc-errors", daemon=True).start()
+
+    def poll_proghome(self, panel):
+        """Issue the fixed PROG.HOME panel commands on rising edges.
+
+        This is the only panel-driven MDI path besides the explicit HMI
+        MDI/probe/tool screens. It is deliberately fixed text: PROG.HOME asks
+        for X/Y/Z only in the current WCS, never a caller-supplied block.
+        """
+        if panel.get("mode", {}).get("mode") != "proghome":
+            self.last_proghome = [False, False, False, False]
+            return
+        pins = [
+            pin_bool("cnc_panel.proghome-all", False),
+            pin_bool("cnc_panel.proghome-x", False),
+            pin_bool("cnc_panel.proghome-y", False),
+            pin_bool("cnc_panel.proghome-z", False),
+        ]
+        commands = ["G0 X0Y0Z0", "G0 X0", "G0 Y0", "G0 Z0"]
+        for index, (active, command) in enumerate(zip(pins, commands)):
+            if active and not self.last_proghome[index]:
+                try:
+                    self.cmd.mode(linuxcnc.MODE_MDI)
+                    self.cmd.mdi(command)
+                except Exception as error:
+                    self.alarms.append(
+                        {
+                            "kind": "error",
+                            "text": f"PROG.HOME {command} rejected: {error}",
+                            "time": time.time(),
+                        }
+                    )
+                    self.alarms = self.alarms[-100:]
+            self.last_proghome[index] = active
 
     # ---------------------------------------------------------------- snapshot
     def read_parameters(self):
@@ -357,6 +391,7 @@ class Bridge:
             power = "off"
         sparse = time.time() - self.bitmap_last >= HAL_BITMAP_PERIOD
         panel = self.read_panel(sparse)
+        self.poll_proghome(panel)
         homing = {}
         following_error = {}
         for index, axis in enumerate(self.axes):
