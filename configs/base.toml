@@ -15,7 +15,7 @@ start_page = "machine"
 window_title = "CNC HMI"
 scale = "auto"
 axis_order = ["X", "Y", "Z"]
-pages = ["machine", "program", "offsets", "tools", "diagnostics"]
+pages = ["machine", "program", "offsets", "tools", "diagnostics", "help"]
 
 [program]
 default_view = "split"
@@ -47,6 +47,14 @@ focus_next = "Down"
 focus_prev = "Up"
 activate = "Enter"
 open = "Ctrl+O"
+help_search = "/"
+
+[help]
+# Offline LinuxCNC G-code reference bundled with the HMI.
+source = "bundled"
+bundle = "linuxcnc-gcode"
+search = true
+history_limit = 32
 
 [safety]
 # The physical panel is the only machine-control surface. These flags are

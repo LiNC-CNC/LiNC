@@ -21,6 +21,7 @@ SVG mockups; it does not yet contain the Rust HMI implementation.
 | Program — G-code and graph side by side | `svg/program-split.svg` |
 | Program — code-focused with mini graph | `svg/program-code.svg` |
 | Diagnostics | `svg/diagnostics.svg` |
+| G-code Help | `svg/gcode-help.svg` |
 
 Only the accepted versions are included. The earlier vendor-style studies and
 intermediate layout explorations have been removed.
@@ -70,6 +71,9 @@ policy and launch integration.
   comments, and line numbers each have a distinct treatment.
 - **Diagnostics is the detailed, read-only view** for panel link, NML/HAL,
   motion health, I/O, and event logs. It does not expose machine controls.
+- **G-code Help is an offline reference page**, not a modal popup: searchable
+  LinuxCNC index, per-code detail, parameter tables and figures. It remains
+  available while a program is running and exposes no machine controls.
 - **Spindle load is explicit** and must come from real drive feedback, not
   spindle override or commanded speed.
 
@@ -88,7 +92,8 @@ cnc-hmi-design/
     ├── machine-dashboard.svg
     ├── program-split.svg
     ├── program-code.svg
-    └── diagnostics.svg
+    ├── diagnostics.svg
+    └── gcode-help.svg
 ```
 
 ## Viewing the SVGs
@@ -107,7 +112,8 @@ rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
 3. Implement the Rust `egui` shell, theme tokens, and the layered config loader.
 4. Implement the Machine dashboard.
 5. Implement the Program `SPLIT`/`CODE` views with the G-code highlighter.
-6. Implement Offsets, Tools, Diagnostics, and Settings.
+6. Implement Offsets, Tools, Diagnostics, Settings, and the G-code Help
+   reference browser.
 7. Integrate LinuxCNC via PyO3 first, with a `MachineBackend` boundary that can
    later be replaced by a C++ NML bridge.
 8. Verify keyboard-only navigation, panel disconnect handling, program

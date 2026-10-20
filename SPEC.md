@@ -191,12 +191,12 @@ Fixed shell, no right-hand status column:
 
 - **Top status bar**: machine name, physical mode, program, tool, spindle,
   feed, work offset, panel link, alarm/message counts, time.
-- **Left navigation**: Machine, Program, Offsets, Tools, Diagnostics.
-  Keyboard-focusable; `MAIN`/`FILE`/`OFFSET`/`TOOL`/`WIN` jump directly.
+- **Left navigation**: Machine, Program, Offsets, Tools, Diagnostics, G-code
+  Help. Keyboard-focusable; `MAIN`/`FILE`/`OFFSET`/`TOOL`/`WIN` jump directly.
 - **Central page**: active screen.
 - **Bottom action bar**: real keycaps (`MAIN`, `FILE`, `OFFSET`, `TOOL`, `WIN`,
-  `ESC`), context actions, and a compact read-only machine status line
-  (`OVR F/S/R`, program protect, E-stop, alarm count).
+  `ESC`), context actions including `HELP`, and a compact read-only machine
+  status line (`OVR F/S/R`, program protect, E-stop, alarm count).
 - **No persistent panel-status column.** Panel detail belongs in Diagnostics.
 
 Focus rules:
@@ -282,7 +282,24 @@ Read-only detail view. Tabs:
 No fault reset, acknowledge, cycle, jog, override, or E-stop controls here.
 `CLEAR VIEW` clears only the UI log view, never machine faults.
 
-### 6.6 Settings
+### 6.6 G-code Help
+
+Offline LinuxCNC G-code reference, available without network access and without
+stopping a running program.
+
+- Quick-reference index grouped by Motion, Canned cycles, M-codes, O-words and
+  Other codes.
+- Search matches code, parameters, description and meaning. Code matching
+  ignores spaces and commas, so `g2g3` finds `G2, G3`.
+- Detail pane: title, description, parameter table, figures, notes and related
+  codes. Internal links navigate within the reference; Backspace returns through
+  link history.
+- Current bundle: 125 sections, 89 index rows, 14 figures, generated from the
+  pinned LinuxCNC online documentation.
+- Read-only; no machine-control actions. The top-level HELP action opens this
+  page. No dedicated F1–F8 key.
+
+### 6.7 Settings
 
 - Theme/units/display density.
 - Keyboard reference.
@@ -359,12 +376,14 @@ Implementation:
 - `TOOL`: Tools.
 - `OFFSET`: Offsets.
 - `WIN`: Diagnostics.
-- `ESC`: back/cancel.
+- `HELP` action: G-code Help; no dedicated function key.
+- `ESC`: back/cancel; on Help, clear search or return from detail history.
 - Arrows: focus/list/scroll.
+- `/`: focus G-code Help search when Help is active.
 - `PageUp`/`PageDown`: tabs/pages.
 - `Home`/`End`: first/last item.
-- `Enter`: select/apply/MDI execute.
-- `Backspace`: edit.
+- `Enter`: select/apply/MDI execute; on Help, open the selected code.
+- `Backspace`: edit; on Help detail, go back through link history.
 - `MO(1)`: symbols/mouse.
 
 No F1–F8 mapping. The bottom keycap highlight reflects the current page:
@@ -463,8 +482,8 @@ For this design repository:
 
 - `SPEC.md` and `README.md` exist.
 - Only the accepted source SVGs are committed.
-- Canonical Machine, Program SPLIT, Program CODE, and Diagnostics screens are
-  represented.
+- Canonical Machine, Program SPLIT, Program CODE, Diagnostics, and G-code Help
+  screens are represented.
 - Hardware constraints for the QMK keyboard and SZGH panel are documented.
 - No SVG shows an on-screen machine control panel.
 - G-code mockups show token-level syntax highlighting.
@@ -508,6 +527,10 @@ For the future implementation:
 12. Unify the real panel driver's serial port and cycle time with
     `configs/baiermill.toml`; today they are hard-coded in the driver and
     `hallib/szgh_panel.hal`.
+13. Convert the generated Python G-code help data
+    (`../baiermill_pb/user_tabs/gcode_help/gcode_docs.py`) into a Rust-friendly
+    bundle (JSON/TOML), pin the LinuxCNC docs version, and preserve
+    documentation/image attribution.
 
 ## 14. Accepted SVG manifest
 
@@ -519,6 +542,7 @@ Only the accepted versions are included.
 | `svg/program-split.svg` | Program `SPLIT`: syntax-highlighted G-code alongside the 3D toolpath |
 | `svg/program-code.svg` | Program `CODE`: syntax-highlighted G-code dominant, with mini XY graph and program-info card |
 | `svg/diagnostics.svg` | Diagnostics overview: health cards, alarms/messages, panel link detail, motion health, event log |
+| `svg/gcode-help.svg` | G-code Help: offline quick-reference index, code search, detail pane, parameter tables, figures and related codes |
 
 Superseded vendor-style studies, intermediate layout explorations, and
 colour-mapped previews were intentionally removed.

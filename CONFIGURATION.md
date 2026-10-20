@@ -122,6 +122,7 @@ Required profile fields:
 | Panel/RIO HAL pin names | `configs/base.toml` |
 | Machine identity and panel ownership | machine profile |
 | UI layout, theme, keymap, toolpath options | `base.toml` + overrides |
+| G-code help content | bundled `linuxcnc-gcode` reference, generated from linuxcnc.org |
 | Window geometry, last page, recent files | user preferences file |
 
 ### BaierMill values (reference only)
@@ -245,7 +246,8 @@ written while running.
 | `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages` |
 | `[program]` | `default_view`, `views`, `line_numbers`, `highlight_current_line` |
 | `[toolpath]` | `show_grid`, `show_program_bounds`, `show_machine_bounds`, `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors` |
-| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open` |
+| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `help_search` |
+| `[help]` | `source`, `bundle`, `search`, `history_limit` |
 | `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `mdi_requires_mode`, `quit_requires_idle`, `confirm_quit` |
 | `[backend]` | `kind`, `transport`, `status_hz`, `hal_hz`, `connect_timeout_ms` |
 | `[hal]` | `read_only`, `panel_component` |
@@ -275,6 +277,7 @@ For this design repository:
 - the simulation profile contains no serial device path;
 - all safety flags match the policy above;
 - HAL pin names exist in the current panel/RIO configurations;
+- the accepted G-code Help screen is present at `svg/gcode-help.svg`;
 - `base.toml` cannot be loaded as a runnable profile.
 
 ## 12. Open issues
@@ -292,3 +295,8 @@ For this design repository:
 5. Installing profiles outside the repository breaks relative
    `../../baiermill_pb` paths. Either preserve the sibling layout or use absolute
    paths in the installed profile.
+6. The G-code help bundle currently exists only as the Python data module in
+   `../baiermill_pb/user_tabs/gcode_help/`. The accepted screen is
+   `svg/gcode-help.svg`, but the HMI still needs a Rust-friendly generated
+   format (JSON or TOML), a pinned LinuxCNC docs version, and preserved
+   documentation/image attribution.
