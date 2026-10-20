@@ -474,7 +474,29 @@ Rules:
 - History is HMI-local, bounded (`mdi.history_limit`), and not a machine log.
 - No on-screen cycle start, jog, override, spindle, coolant or E-stop controls.
 
-### 6.10 Settings
+### 6.10 Homing
+
+Mode-driven screen. Selecting `HOME` or `PROG.HOME` on the physical panel opens
+it automatically; leaving those positions closes it. The HMI only observes and
+explains the panel behavior; it never issues a home command.
+
+- Axis cards show `HOMED`, `HOMING`, `NOT HOMED`, the INI `HOME_SEQUENCE` and the
+  search/latch/index state. Optional axes are shown only when configured.
+- HOME mode mapping, exactly as `baiermill_pb`:
+  - `RAPID` -> `home-all`;
+  - `X+`/`X-` -> `home-x`;
+  - `Y+`/`Y-` -> `home-y`;
+  - `Z+`/`Z-` -> `home-z`.
+  - Individual home outputs are disabled while any axis is homing; the panel
+    driver/postgui performs the gating.
+- PROG.HOME mode mapping: `RAPID` -> `G0 X0Y0Z0`; axis keys -> `G0 X0` /
+  `G0 Y0` / `G0 Z0` in the current WCS. This is program zero, not machine home.
+- Homing order comes from the INI; the current machine is Z first, then X/Y.
+  `NO_FORCE_HOMING = 0` means programs/MDI are blocked until homed.
+- The page shows machine position, limits, homed count and sequence completion.
+  It provides no on-screen home, unhome, jog or override buttons.
+
+### 6.11 Settings
 
 - Theme/units/display density.
 - Keyboard reference.
@@ -578,6 +600,8 @@ No F1–F8 mapping. The bottom keycap highlight reflects the current page:
   only when useful.
 - MDI is enabled only when the panel is in MDI mode; the MDI screen opens on
   that selector position and closes when it leaves.
+- HOME/PROG.HOME open the Homing screen; all homing motion originates in the
+  panel's home/proghome pins and keys. The HMI never homes an axis.
 - MDI staging never starts motion; the block runs only after physical CYCLE
   START.
 - Program start is physical CYCLE START only.
@@ -657,6 +681,8 @@ serial counters and raw bitmaps; those must be added for Diagnostics.
 - Validate mode/state before MDI and program/offset/tool writes.
 - MDI blocks are staged only; the HMI never auto-runs MDI. Physical CYCLE
   START is the only execution path.
+- Homing is panel-only: no HMI home/unhome command, button or key. The HMI
+  displays sequence/state and must not interfere with the panel's home pins.
 - Probing routines are prepared as MDI; only the physical CYCLE START key may
   start probe motion. Never auto-start a probe routine.
 - Respect program protect and running state.
@@ -681,6 +707,9 @@ For this design repository:
   cycle-start control.
 - The MDI screen opens at the panel MDI position and represents command staging,
   DRO/modal state, history and physical-cycle-start gating.
+- The Homing screen opens at HOME/PROG.HOME, shows per-axis/sequence state and
+  documents the exact physical-panel key mapping without providing home
+  controls.
 - Hardware constraints for the QMK keyboard and SZGH panel are documented.
 - No SVG shows an on-screen machine control panel.
 - G-code mockups show token-level syntax highlighting.
@@ -769,6 +798,9 @@ For the future implementation:
     Probe page is mill-oriented (X/Y/Z and WCS).
 25. Implement MDI staging with syntax validation, history recall and discard on
     mode exit; verify the HMI cannot execute MDI without physical CYCLE START.
+26. Verify Homing UI against the panel's `home-*`/`proghome-*` pins and the
+    existing `baiermill_pb` gating. Test Z-first homing, individual axes,
+    PROG.HOME current-WCS moves, faults and optional-axis display.
 
 ## 14. Accepted SVG manifest
 
@@ -785,6 +817,7 @@ Only the accepted versions are included.
 | `svg/lathe-dashboard.svg` | Lathe dashboard: X/Z/C/Y cards, XZ toolpath, power turret/live-tool card, spindle load and machine health |
 | `svg/probe.svg` | Touch Probe: Probe Basic-style category strip and illustrated operation cards, WCS/parameters, prepared-MDI state, result/apply and calibration |
 | `svg/mdi.svg` | MDI: single-block command, quick inserts, DRO/modal, staged state, history and physical-cycle-start gating |
+| `svg/homing.svg` | Homing: per-axis/sequence state, HOME/PROG.HOME physical-key mapping and machine position; no software home controls |
 | `svg/sim-panel.svg` | Simulation-only SZGH-1080 panel window: power, E-stop, mode, overrides, lamps, displays and key matrix |
 
 Superseded vendor-style studies, intermediate layout explorations, and

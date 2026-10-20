@@ -128,6 +128,8 @@ Required profile fields:
 | Probe subroutines | INI `SUBROUTINE_PATH`; `[probe] subroutines = "ini"` |
 | Probe parameters/results | LinuxCNC parameters `#3014`–`#3036`, results `#1001`–`#1009` |
 | MDI command history | HMI-local ring buffer; not a machine log |
+| Homing sequence | INI `HOME_SEQUENCE`, search/latch/index settings |
+| Homing commands | `szgh_panel.home-*` / `proghome-*` pins and physical keys; never HMI |
 | Panel/RIO HAL pin names | `configs/base.toml` |
 | Machine identity and panel ownership | machine profile |
 | UI layout, theme, keymap, toolpath options | `base.toml` + overrides |
@@ -258,6 +260,7 @@ written while running.
 | `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width` |
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running` |
 | `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter`, `prepare_only` |
+| `[homing]` | `auto_open`, `close_on_mode_exit` |
 | `[mdi]` | `stage_only`, `auto_focus`, `history_limit`, `max_command_length`, `quick_commands` |
 | `[toolpath]` | `show_grid`, `show_program_bounds`, `show_machine_bounds`, `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
 | `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `mdi_stage`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `help_search` |
@@ -303,6 +306,8 @@ For this design repository:
 - `[probe] prepare_only` is `true` for the mill profiles;
 - the lathe profile disables the mill-oriented touch-probe page;
 - `[mdi] stage_only` is `true` in every profile;
+- `[homing] auto_open` is `true` for mode-driven screens;
+- the Homing screen exposes no software home/unhome controls;
 - `base.toml` cannot be loaded as a runnable profile.
 
 ## 12. Open issues
@@ -348,3 +353,6 @@ For this design repository:
 14. Implement MDI staging: syntax check before staging, history recall, discard
     on panel-mode exit, and enforcement that only physical CYCLE START runs a
     staged block.
+15. Verify Homing display against the existing `baiermill_pb` home/proghome
+    pins and gating; test Z-first, individual axes, PROG.HOME current-WCS moves
+    and faults.

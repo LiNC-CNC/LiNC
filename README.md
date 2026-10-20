@@ -26,6 +26,7 @@ SVG mockups; it does not yet contain the Rust HMI implementation.
 | Lathe dashboard | `svg/lathe-dashboard.svg` |
 | Touch probe interface | `svg/probe.svg` |
 | MDI screen | `svg/mdi.svg` |
+| Homing screen | `svg/homing.svg` |
 | Simulator panel (separate window) | `svg/sim-panel.svg` |
 
 Only the accepted versions are included. The earlier vendor-style studies and
@@ -95,6 +96,10 @@ policy and launch integration.
 - **MDI is a mode-driven screen**: the panel's MDI position opens it, focuses
   the command line and shows DRO/modal/history. `Enter` stages one block; only
   physical CYCLE START runs it. Leaving MDI discards an unrun staged block.
+- **Homing is panel-only, exactly like the current machine.** HOME mode shows
+  per-axis/sequence state; `RAPID` homes all and the axis jog keys home their
+  axis through the panel's `home-*` pins. PROG.HOME maps the same keys to
+  `G0 X0Y0Z0` / axis zero. The HMI never supplies a home command or button.
 - **G-code is token-highlighted** with a rich but restrained palette:
   G-codes, M-codes, axis letters, numbers, feed/speed, tools, parameters,
   comments, and line numbers each have a distinct treatment.
@@ -133,6 +138,7 @@ cnc-hmi-design/
     ├── lathe-dashboard.svg
     ├── probe.svg
     ├── mdi.svg
+    ├── homing.svg
     └── sim-panel.svg
 ```
 
@@ -155,7 +161,8 @@ rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
 6. Implement the mill and lathe variants, including dynamic 3–5 axis cards,
    lathe live-tool/power-turret state, Offsets, Tools, Diagnostics, Settings,
    the G-code Help reference browser, the Files/USB transfer page, the Touch
-   Probe interface, and the mode-driven MDI screen.
+   Probe interface, the mode-driven MDI screen, and the panel-only Homing
+   screen.
 7. Integrate LinuxCNC via PyO3 first, with a `MachineBackend` boundary that can
    later be replaced by a C++ NML bridge.
 8. Verify keyboard-only navigation, panel disconnect handling, program
