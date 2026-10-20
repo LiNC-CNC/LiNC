@@ -402,10 +402,11 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                 theme::separator(ui);
 
                 let content = app.snapshot.program.content.as_deref();
+                let window_len = 16usize;
+                let row_height = ui.spacing().interact_size.y.max(16.0);
                 if let Some(content) = content {
                     let current = app.snapshot.program.current_line.max(1);
                     let total = app.snapshot.program.line_count.max(1);
-                    let window_len = 16usize;
                     let is_running = app.snapshot.task.running || app.snapshot.program.paused;
                     let half_window = (window_len / 2) as isize;
                     let first = if is_running {
@@ -419,67 +420,51 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                         let line_number = first + row as isize;
                         let line = if line_number >= 1 { lines.next() } else { None };
                         let is_current = line_number == current as isize;
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            let (marker, _) =
-                                ui.allocate_exact_size(egui::vec2(2.0, 12.0), egui::Sense::hover());
-                            if is_current {
-                                ui.painter().rect_filled(marker, 1.0, theme::ACCENT);
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), row_height),
+                            egui::Sense::hover(),
+                        );
+                        let mut row_ui = ui.new_child(
+                            egui::UiBuilder::new()
+                                .id_salt(("program_row", row))
+                                .max_rect(rect)
+                                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                        );
+                        row_ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+                        row_ui.spacing_mut().item_spacing.x = 4.0;
+                        let (marker, _) =
+                            row_ui.allocate_exact_size(egui::vec2(2.0, 12.0), egui::Sense::hover());
+                        if is_current {
+                            row_ui.painter().rect_filled(marker, 1.0, theme::ACCENT);
+                        }
+                        let number = line
+                            .map(|_| format!("{line_number:>4}"))
+                            .unwrap_or_else(|| "    ".to_string());
+                        row_ui.label(
+                            RichText::new(number)
+                                .monospace()
+                                .size(theme::font_size(7.5))
+                                .color(if is_current {
+                                    theme::ACCENT
+                                } else {
+                                    theme::MUTED
+                                }),
+                        );
+                        match line {
+                            Some(line) => token_line_ui(&mut row_ui, &truncate(line, 26), 9.5),
+                            None => {
+                                row_ui.label(
+                                    RichText::new(" ").monospace().size(theme::font_size(9.5)),
+                                );
                             }
-                            let number = line
-                                .map(|_| format!("{line_number:>4}"))
-                                .unwrap_or_else(|| "    ".to_string());
-                            ui.label(
-                                RichText::new(number)
-                                    .monospace()
-                                    .size(theme::font_size(7.5))
-                                    .color(if is_current {
-                                        theme::ACCENT
-                                    } else {
-                                        theme::MUTED
-                                    }),
-                            );
-                            match line {
-                                Some(line) => token_line_ui(ui, &truncate(line, 26), 9.5),
-                                None => {
-                                    ui.label(
-                                        RichText::new(" ").monospace().size(theme::font_size(9.5)),
-                                    );
-                                }
-                            }
-                        });
+                        }
                     }
                 } else {
-                    field_label(ui, "CURRENT");
-                    let current = app.snapshot.program.current_block.trim();
-                    if current.is_empty() {
-                        ui.label(
-                            RichText::new("—")
-                                .monospace()
-                                .size(theme::font_size(10.0))
-                                .color(theme::MUTED),
+                    for _ in 0..window_len {
+                        let _ = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), row_height),
+                            egui::Sense::hover(),
                         );
-                    } else {
-                        ui.horizontal(|ui| {
-                            let (marker, _) =
-                                ui.allocate_exact_size(egui::vec2(2.0, 14.0), egui::Sense::hover());
-                            ui.painter().rect_filled(marker, 1.0, theme::ACCENT);
-                            token_ui(ui, &truncate(current, 44), 11.0);
-                        });
-                    }
-                    field_label(ui, "NEXT");
-                    match app.snapshot.program.next_line.as_deref() {
-                        Some(next) if !next.trim().is_empty() => {
-                            token_ui(ui, &truncate(next, 44), 10.0);
-                        }
-                        _ => {
-                            ui.label(
-                                RichText::new("—")
-                                    .monospace()
-                                    .size(theme::font_size(10.0))
-                                    .color(theme::MUTED),
-                            );
-                        }
                     }
                 }
                 theme::separator(ui);
