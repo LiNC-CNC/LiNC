@@ -133,6 +133,7 @@ Required profile fields:
 | Homing commands | `szgh_panel.home-*` / `proghome-*` pins and physical keys; never HMI |
 | PROG.HOME path | Panel `proghome-*` -> existing Probe Basic `issue_mdi`; not HMI staging |
 | Panel/RIO HAL pin names | `configs/base.toml` |
+| Panel status 7-segment | Active `g5x_index` via display-only status bridge; `[panel.status]` |
 | Machine identity and panel ownership | machine profile |
 | UI layout, theme, keymap, toolpath options | `base.toml` + overrides |
 | G-code help content | bundled `linuxcnc-gcode` reference, generated from linuxcnc.org |
@@ -272,7 +273,7 @@ written while running.
 | `[manual]` | `auto_open`, `close_on_mode_exit`, `show_machine_coordinates`, `show_dtg`, `trail` |
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
 | `[mdi]` | `stage_only`, `auto_focus`, `history_limit`, `max_command_length`, `quick_commands` |
-| `[toolpath]` | `show_grid`, `show_program_bounds`, `show_machine_bounds`, `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
+| `[toolpath]` | `show_grid`, `show_live_trail`, `trail_max_points`, `clear_trail_action`, `show_program_bounds`, `show_machine_bounds`, `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
 | `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `mdi_stage`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `help_search` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
 | `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_requires_mode`, `quit_requires_idle`, `confirm_quit` |
@@ -280,6 +281,7 @@ written while running.
 | `[hal]` | `read_only`, `panel_component`, `panel_mode_prefix` |
 | `[hal.pins]` | `panel_connected`, `panel_error`, `program_protect`, `feed_override`, `rapid_override`, `spindle_override`, `spindle_load`, `spindle_speed` |
 | `[panel]` | `owner`, `kind`, `read_only` |
+| `[panel.status]` | `source`, `unknown` |
 | `[panel.link]` | `read_only`, `kind`, optional `port`, `baud`, `data_bits`, `parity`, `stop_bits`, `cycle_time_ms` |
 | `[preferences]` | `file` |
 | `[diagnostics]` | `event_log_capacity`, `panel_link_stats` |
@@ -291,6 +293,7 @@ Enums:
 - `machine.gui`: `mill`, `lathe`
 - `tools.changer`: `manual`, `atc`, `turret`
 - `panel.kind`: `simulated`, `physical`, `external`
+- `panel.status.source`: `wcs`, `spindle_load`, `units`
 - `panel.link.kind`: `virtual`, `rs485`
 - `diagnostics.panel_link_stats`: `none`, `optional`, `required`
 - `files.usb_backend`: `udisks2`, `none`
@@ -321,6 +324,11 @@ For this design repository:
 - the Manual screen exposes no software jog, increment, handwheel, mode or
   override controls;
 - the accepted Manual screen is present at `svg/manual.svg`;
+- `[toolpath] show_live_trail` and `clear_trail_action` are `true`;
+- the graph shows loaded program and live trail in distinct colors, and
+  `CLEAR TRAIL` removes only the trail;
+- `[panel.status] source` is one of `wcs`, `spindle_load`, `units`;
+- the status display shows the active WCS by default and `--` when unknown;
 - `[homing] auto_open` is `true` for mode-driven screens;
 - the Homing screen exposes no software home/unhome controls;
 - `[tools] tool_change_stage` and `manual_confirm` are `true`;
@@ -383,3 +391,7 @@ For this design repository:
     is authoritative; unknown/stale reads lock editing. Test G-code save,
     offset/tool writes, file imports and probe applies with protect ON and with
     the panel link lost.
+19. Add the display-only status bridge that maps `g5x_index` to
+    `szgh_panel.sseg_status` (54–59, `--` otherwise) without letting the HMI
+    write panel outputs. Verify the two-digit display after HMI/panel restarts,
+    extended offsets and disconnected/stale status.

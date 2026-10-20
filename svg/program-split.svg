@@ -159,6 +159,8 @@
   <path d="M830 300 A26 26 0 0 1 880 318" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
   <path d="M830 300 L830 370" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
   <path d="M770 380 L830 360" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+  <path d="M770 380 L830 360" fill="none" stroke="var(--success)" stroke-width="2.8"/>
+  <text x="838" y="376" fill="var(--success)" font-size="8" font-family="monospace">LIVE</text>
   <path d="M720 330 L680 348" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
   <path d="M880 318 L920 330" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
 
@@ -199,6 +201,7 @@
   <text x="504" y="599" fill="var(--muted)" font-size="9" font-family="monospace">SIMULATE</text>
   <text x="580" y="599" fill="var(--muted)" font-size="9" font-family="monospace">LAYOUT</text>
   <text x="636" y="599" fill="var(--muted)" font-size="9" font-family="monospace">HELP</text>
+  <text x="684" y="599" fill="var(--muted)" font-size="9" font-family="monospace">CLEAR TRAIL</text>
 
   <!-- Status line -->
   <line x1="4" y1="612" x2="996" y2="612" stroke="var(--border)"/>

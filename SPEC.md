@@ -85,6 +85,7 @@ The Rust component currently exposes:
 - 46 button pins
 - 56 LED pins
 - 2 seven-segment tool displays
+- 1 two-digit status seven-segment display (`sseg_status`)
 - 8 mode pins: `mode_edit`, `mode_auto`, `mode_mdi`, `mode_jog`, `mode_mpg`,
   `mode_inc`, `mode_home`, `mode_proghome`
 - home/proghome outputs
@@ -107,6 +108,14 @@ Panel ownership rules:
 
 Special cases:
 
+- The two-digit status display defaults to the **active work coordinate
+  system**, `54`–`59`. It is the clearest use of two digits and is
+  safety-relevant during setup and PROG.HOME. Show `--` when the value is
+  unknown, stale or outside those offsets; do not guess.
+- The status display is driven by a display-only status bridge from
+  LinuxCNC `g5x_index` to `szgh_panel.sseg_status`; the HMI itself does not
+  write panel outputs. Optional configured sources are spindle load percent
+  and `MM`/`IN` units.
 - The RS-485 protocol exposes `mode_mpg` and `mpg_sim`, but **not handwheel
   encoder counts**. Verify where the MPG encoder is wired; do not assume the
   panel link carries MPG pulses.
@@ -237,8 +246,9 @@ Default page. The layout is selected by `machine.gui`.
   not a duplicated list.
 - Axis cards expand from 3 to 5: 3 large cards at 3-axis; compact cards at
   4/5-axis. Never invent an axis that the INI does not expose.
-- Large 3D toolpath: stock, cut path, rapid path, tool marker, axes, zoom,
-  program/machine bounds and selected-line highlight.
+- Large 3D toolpath: stock, loaded program path, live tool trail in a distinct
+  color, rapid path, tool marker, axes, zoom, program/machine bounds and
+  selected-line highlight. `CLEAR TRAIL` clears only the live trail.
 - Program card, feed/spindle-load gauges, machine health and alarms.
 - ATC state in Tools/Diagnostics; mill tool table uses pocket/orientation.
 
@@ -262,7 +272,8 @@ Two layouts, selected by the header toggle or `FILE`:
 
 - G-code editor/monitor left (~58%).
 - Mill: 3D toolpath right (~42%); lathe: 2D XZ toolpath, with optional 3D when
-  Y/C or live-tool paths are active.
+  Y/C or live-tool paths are active. The loaded program path and live trail are
+  separate colors; `CLEAR TRAIL` clears only the live trail.
 - Live-tool paths use a distinct stroke from turning/rapid moves.
 - Current line synchronized with the graph.
 - Current/next block and modal summary below the editor.
@@ -302,6 +313,17 @@ becomes editable.
 Program rules:
 
 - G-code is token-highlighted (see §7.3).
+- The graph always draws the **loaded program's full toolpath** and the
+  **live toolpath** as separate layers. The program path uses the program
+  colour (cut) and muted dashed rapids; the live trail uses a distinct
+  `--success` stroke. The legend must identify both.
+- The live trail is the actual tool-tip path since the last clear, including
+  program, MDI and jog motion. It is not the commanded program path and must
+  never overwrite or hide the loaded program.
+- A focusable, view-only `CLEAR TRAIL` action clears only the live trail and
+  re-seeds it at the current tool tip. It does not clear the loaded program,
+  selected line, offsets or machine state, and is safe while running. A
+  successful new program load starts a fresh trail.
 - The graph overlays program bounds and machine bounds. Program bounds are a
   dashed cyan box around the last valid program extents; machine bounds are a
   dashed muted envelope from the INI travel limits and kinematics. Both use the
@@ -547,9 +569,13 @@ item is added. The screen is read-only: all jog, increment, handwheel, mode and
 override input stays on the physical panel.
 
 - **Large graph window** is the dominant element: mill 3D or lathe XZ
-  toolpath, axes, grid, stock/program bounds where available, live tool marker
-  and a short position trail. The view follows the machine position without
-  jumping; the last program path stays visible as a muted reference.
+  toolpath, axes, grid, stock/program bounds where available, the loaded
+  program path, live tool marker and a short position trail in a distinct
+  color. The view follows the machine position without jumping; the last
+  program path stays visible as a muted reference.
+- `CLEAR TRAIL` is a view-only, focusable action in the graph header; it clears
+  only the past live trail and re-seeds at the current position. It never
+  clears the loaded program or changes machine state.
 - **Large, readable coordinates** are always visible beside the graph:
   work coordinates (primary), machine coordinates (secondary) and
   distance-to-go, with units and sign. Work coordinates use a large monospace
@@ -798,6 +824,8 @@ For this design repository:
   mode control.
 - Program protect ON locks program editing, saves, offset/tool writes, file
   imports and probe applies; unsaved changes are preserved, not discarded.
+- The panel's status seven-segment display shows the active `G54`–`G59` offset
+  as `54`–`59`, and `--` when unknown; it never fabricates a value.
 - Hardware constraints for the QMK keyboard and SZGH panel are documented.
 - No SVG shows an on-screen machine control panel.
 - G-code mockups show token-level syntax highlighting.
@@ -807,6 +835,9 @@ For this design repository:
   explicit copy, eject, mount-state and load actions.
 - Loading an `NC_FILES` file returns to Program in `SPLIT` view with the
   toolpath fitted and the program not started.
+- The Program graph shows the loaded program path and the live trail in
+  distinct colors, with a focusable `CLEAR TRAIL` action that clears only the
+  trail and re-seeds at the current position.
 - The Program graph shows program bounds, machine bounds and a selected-line
   highlight; editing updates it only after a successful syntax check.
 - Layered config profiles exist for the simulation and the physical BaierMill.
@@ -906,6 +937,13 @@ For the future implementation:
     panel pin, recheck it for every program/offset/tool/file/probe write, and
     test the switch toggling with a dirty editor buffer and during an in-flight
     write.
+32. Implement the loaded-program path plus live-trail layer and the
+    `CLEAR TRAIL` view action. Sample actual tool-tip positions, cap the trail
+    buffer, keep program and trail colors distinct, and verify that clearing
+    never affects the loaded program or machine state.
+33. Implement the display-only panel status bridge for the active WCS. The
+    current Rust panel driver exposes only `sseg_magtool`/`sseg_spdtool`; add
+    `sseg_status` and a source for `g5x_index`, with `--` on unknown/stale.
 
 ## 14. Accepted SVG manifest
 
@@ -925,7 +963,7 @@ Only the accepted versions are included.
 | `svg/manual.svg` | Manual JOG/INC/MPG: dominant live graph, large work/machine/DTG coordinates and mode context; no on-screen jog controls |
 | `svg/homing.svg` | Homing: per-axis/sequence state, HOME/PROG.HOME physical-key mapping and machine position; no software home controls |
 | `svg/tools.svg` | Tools: tool table, current/next tool, staged quick change, manual confirm, optional ATC/turret state |
-| `svg/sim-panel.svg` | Simulation-only SZGH-1080 panel window: power, E-stop, mode, overrides, lamps, displays and key matrix |
+| `svg/sim-panel.svg` | Simulation-only SZGH-1080 panel window: power, E-stop, mode, overrides, lamps, displays (including active WCS status) and key matrix |
 
 Superseded vendor-style studies, intermediate layout explorations, and
 colour-mapped previews were intentionally removed.

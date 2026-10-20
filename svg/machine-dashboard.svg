@@ -104,6 +104,8 @@
   <text x="312" y="182" fill="var(--muted)" font-size="9" font-family="monospace">CUT</text>
   <line x1="348" y1="178" x2="368" y2="178" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
   <text x="374" y="182" fill="var(--muted)" font-size="9" font-family="monospace">RAPID</text>
+  <line x1="420" y1="178" x2="440" y2="178" stroke="var(--success)" stroke-width="2.4"/>
+  <text x="446" y="182" fill="var(--muted)" font-size="9" font-family="monospace">LIVE</text>
   <text x="720" y="182" fill="var(--muted)" font-size="10" font-family="monospace">ZOOM 1.0x</text>
   <line x1="170" y1="192" x2="786" y2="192" stroke="var(--border)"/>
 
@@ -118,6 +120,7 @@
   <path d="M478 268 A30 30 0 0 1 552 290" fill="none" stroke="var(--accent)" stroke-width="2.4"/>
   <path d="M478 268 L478 340" fill="none" stroke="var(--accent)" stroke-width="2.4"/>
   <path d="M382 350 L478 324" fill="none" stroke="var(--accent)" stroke-width="2.4"/>
+  <path d="M292 302 L382 278 L422 294" fill="none" stroke="var(--success)" stroke-width="2.8"/>
   <!-- rapid moves -->
   <path d="M292 302 L250 324" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
   <path d="M552 290 L620 304" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
@@ -217,6 +220,7 @@
   <text x="504" y="599" fill="var(--muted)" font-size="9" font-family="monospace">SIMULATE</text>
   <text x="580" y="599" fill="var(--muted)" font-size="9" font-family="monospace">FIT</text>
   <text x="620" y="599" fill="var(--muted)" font-size="9" font-family="monospace">HELP</text>
+  <text x="676" y="599" fill="var(--muted)" font-size="9" font-family="monospace">CLEAR TRAIL</text>
 
   <!-- Status line -->
   <line x1="4" y1="612" x2="996" y2="612" stroke="var(--border)"/>

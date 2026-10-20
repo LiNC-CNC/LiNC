@@ -27,7 +27,8 @@
   <!-- Large graph -->
   <rect x="16" y="66" width="650" height="492" rx="6" fill="var(--surface)" stroke="var(--border)"/>
   <text x="30" y="88" fill="var(--muted)" font-size="9" font-family="sans-serif" letter-spacing="1">TOOLPATH / LIVE POSITION</text>
-  <text x="650" y="88" fill="var(--muted)" font-size="8" font-family="monospace" text-anchor="end">GRAPH FOLLOWS MACHINE</text>
+  <rect x="548" y="72" width="102" height="20" rx="3" fill="none" stroke="var(--border)"/>
+  <text x="558" y="86" fill="var(--fg)" font-size="8" font-family="monospace">CLEAR TRAIL</text>
   <line x1="28" y1="98" x2="654" y2="98" stroke="var(--border)"/>
 
   <g opacity="0.5">
@@ -69,7 +70,7 @@
   <!-- Program path (muted reference) -->
   <path d="M238 430 L300 410 L340 350 L380 330 L440 330 L500 300 L560 300 L600 270" fill="none" stroke="var(--accent)" stroke-width="1.4" opacity="0.42"/>
   <path d="M238 430 L238 390 L300 390 L300 410" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="4 4" opacity="0.42"/>
-  <text x="474" y="292" fill="var(--accent)" font-size="8" font-family="monospace" opacity="0.8">LAST PROGRAM</text>
+  <text x="474" y="292" fill="var(--accent)" font-size="8" font-family="monospace" opacity="0.8">PROGRAM</text>
 
   <!-- Live trail and position -->
   <path d="M300 410 Q330 390 350 360 T410 332 L430 332" fill="none" stroke="var(--success)" stroke-width="2.2" opacity="0.9"/>

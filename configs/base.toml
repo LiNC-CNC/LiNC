@@ -84,6 +84,9 @@ quick_commands = ["G0", "G1", "G2", "G3", "M3", "M5", "M6", "M8", "M9", "G54", "
 
 [toolpath]
 show_grid = false
+show_live_trail = true
+trail_max_points = 100000
+clear_trail_action = true
 show_program_bounds = true
 show_machine_bounds = true
 show_program_labels = true
@@ -173,6 +176,11 @@ spindle_speed = "spindle.0.speed-in"
 owner = "external"
 kind = "external"
 read_only = true
+
+[panel.status]
+# Two-digit status display: active WCS 54-59, spindle load 0-99, or MM/IN.
+source = "wcs"
+unknown = "--"
 
 [panel.link]
 read_only = true

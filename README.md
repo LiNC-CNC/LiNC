@@ -104,6 +104,14 @@ policy and launch integration.
   graph dominates, with large work coordinates plus machine coordinates and
   DTG. Jog/increment/handwheel input remains on the panel; the screen never
   offers jog or mode controls.
+- **The toolpath graph has two distinct layers.** The loaded program path is
+  drawn in program colours; the live toolpath is a separate green trail.
+  `CLEAR TRAIL` clears only the live trail and re-seeds it at the current
+  position.
+- **The panel status 7-segment shows the active work offset** (`54`–`59`),
+  because two digits fit exactly and the coordinate frame matters during
+  setup. It shows `--` when unknown; spindle load or units are optional
+  configured alternatives.
 - **The panel's PROGRAM PROTECT switch is a hard editing lock.** While on, the
   HMI cannot edit/save G-code, write offsets/tools, import files or apply probe
   results. Protect fails closed when unknown or stale; a dirty buffer is
@@ -182,9 +190,10 @@ rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
    lathe live-tool/power-turret state, Offsets, Tools, Diagnostics, Settings,
    the G-code Help reference browser, the Files/USB transfer page, the Touch
    Probe interface, the mode-driven MDI screen, the panel-only Homing screen,
-   the JOG/INC/MPG Manual screen, the Tools/tool-change page and the
-   program-protect editing lock.
-7. Integrate LinuxCNC via PyO3 first, with a `MachineBackend` boundary that can
-   later be replaced by a C++ NML bridge.
+   the JOG/INC/MPG Manual screen, the Tools/tool-change page, the live-trail
+   clear action and the program-protect editing lock.
+7. Add the display-only status bridge for the panel's active-WCS 7-segment
+   readout, then integrate LinuxCNC via PyO3 first, with a `MachineBackend`
+   boundary that can later be replaced by a C++ NML bridge.
 8. Verify keyboard-only navigation, panel disconnect handling, program
    protection, MDI mode gating, and the physical E-stop path.
