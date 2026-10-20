@@ -2,8 +2,8 @@
 
 LiNC is a Rust `egui` HMI for LinuxCNC, designed for a machine with:
 
-- a **SZGH-1080 physical control panel** connected over RS-485, driven by the
-  Rust HAL component in `../szgh-panel-rust/`
+- a **CNC control panel** connected over RS-485, driven by LiNC's
+  `linc-panel` service
 - a **QMK Syntec-style CNC keyboard** defined in
   `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/keymap.c`
 - **no on-screen machine control panel**
@@ -54,7 +54,7 @@ The HMI is configured per machine, with explicit profile selection:
 The machine profile points at the LinuxCNC INI, which remains authoritative for
 travel, velocities, units, spindle/ATC data and the tool table. The panel
 driver code is part of LiNC and runs as the supervised `linc-panel` service; the
-egui HMI never opens the serial port. `linc-panel` exposes `szgh_panel.*`, and
+egui HMI never opens the serial port. `linc-panel` exposes `cnc_panel.*`, and
 LiNC writes only its declared `linc.*` HAL outputs.
 
 ```sh
@@ -102,7 +102,7 @@ policy and launch integration.
   tooling and power-turret stations. Variant-specific screens are Machine,
   Program graph, Offsets, Tools and Diagnostics; Files and Help are shared.
 - **The simulator panel is a separate companion window**, not part of the HMI.
-  It reproduces the SZGH-1080 controls and HAL pin surface; the real HMI never
+  It reproduces the panel controls and HAL pin surface; the real HMI never
   exposes those controls.
 - **Touch Probe follows Probe Basic's category-first workflow**, reached from
   Offsets: choose a routine group, pick an illustrated operation, adjust
@@ -195,8 +195,8 @@ rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
 
 ## Next implementation steps
 
-1. Port and build `../szgh-panel-rust/` as the LiNC `linc-panel` crate with
-   the HAL feature enabled, keeping the driver/capability abstraction.
+1. Port the existing panel driver into the LiNC `linc-panel` crate with the HAL
+   feature enabled, keeping the driver/capability abstraction.
 2. Add panel diagnostics counters and raw bitmaps to `linc-panel`.
 3. Implement the `linc` HAL output component and typed allowlist.
 4. Implement the Rust `egui` shell, theme tokens, and the layered config loader.

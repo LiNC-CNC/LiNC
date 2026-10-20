@@ -3,13 +3,13 @@
   <rect x="4" y="4" width="992" height="632" rx="8" fill="#202224" stroke="#4a4d50"/>
   <rect x="4" y="4" width="992" height="34" rx="8" fill="#181a1c"/>
   <rect x="4" y="30" width="992" height="8" fill="#181a1c"/>
-  <text x="18" y="27" fill="#f0f1f2" font-size="14" font-family="sans-serif" font-weight="700">SZGH-1080</text>
+  <text x="18" y="27" fill="#f0f1f2" font-size="14" font-family="sans-serif" font-weight="700">CNC CONTROL PANEL</text>
   <text x="118" y="26" fill="#9a9d9f" font-size="9" font-family="sans-serif">SIMULATED OPERATOR PANEL - SEPARATE WINDOW</text>
   <rect x="744" y="10" width="38" height="20" rx="3" fill="#f5b82e"/>
   <text x="753" y="24" fill="#202224" font-size="8" font-family="monospace" font-weight="700">SIM</text>
   <circle cx="806" cy="20" r="3" fill="#39d353"/>
   <text x="814" y="24" fill="#39d353" font-size="8" font-family="monospace">HAL CONNECTED</text>
-  <text x="918" y="24" fill="#9a9d9f" font-size="9" font-family="monospace">szgh_panel</text>
+  <text x="918" y="24" fill="#9a9d9f" font-size="9" font-family="monospace">cnc_panel</text>
 
   <rect x="12" y="44" width="976" height="584" rx="6" fill="#2d2f31" stroke="#3f4245"/>
 
@@ -210,6 +210,6 @@
   <text x="226" y="580" fill="#9a9d9f" font-size="7" font-family="sans-serif">READY</text>
 
   <text x="700" y="574" fill="#9a9d9f" font-size="8" font-family="monospace">SIMULATION ONLY / NOT A SAFETY DEVICE</text>
-  <text x="700" y="590" fill="#9a9d9f" font-size="8" font-family="monospace">HAL COMPONENT: szgh_panel / 128 PINS</text>
+  <text x="700" y="590" fill="#9a9d9f" font-size="8" font-family="monospace">HAL COMPONENT: cnc_panel / 128 PINS</text>
   <text x="700" y="606" fill="#39d353" font-size="8" font-family="monospace">PANEL CONNECTED / MODE: EDIT</text>
 </svg>

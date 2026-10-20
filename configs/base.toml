@@ -157,28 +157,28 @@ hal_hz = 10
 connect_timeout_ms = 3000
 
 [hal]
-panel_component = "szgh_panel"
+panel_component = "cnc_panel"
 linc_component = "linc"
 write_policy = "declared-outputs-only"
 output_prefix = "linc."
 allowed_outputs = ["hmi-alive", "tool-change-confirm", "status-display"]
 
 [hal.pins]
-panel_connected = "szgh_panel.panel_connected"
-panel_error = "szgh_panel.communication_error"
-program_protect = "szgh_panel.program_protect"
-feed_override = "szgh_panel.feed_override"
-rapid_override = "szgh_panel.rapid_override"
-spindle_override = "szgh_panel.spindle_override"
+panel_connected = "cnc_panel.panel_connected"
+panel_error = "cnc_panel.communication_error"
+program_protect = "cnc_panel.program_protect"
+feed_override = "cnc_panel.feed_override"
+rapid_override = "cnc_panel.rapid_override"
+spindle_override = "cnc_panel.spindle_override"
 spindle_load = "rio.spindle-modbus.spindle_load-abs"
 spindle_speed = "spindle.0.speed-in"
 
 [panel]
 # Panel I/O is owned by the linc-panel service. The HMI never opens the serial
-# device or writes szgh_panel.* pins; it writes only the linc.* allowlist above.
+# device or writes cnc_panel.* pins; it writes only the linc.* allowlist above.
 owner = "linc-panel"
 kind = "physical"
-driver = "szgh1080"
+driver = "cnc-panel"
 mode_encoding = "one_hot_steady"
 override_encoding = "analog_steady"
 read_only = true

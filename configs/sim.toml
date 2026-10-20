@@ -2,7 +2,7 @@
 #
 # Uses the existing LinuxCNC simulation configuration in ../../baiermill_sim.
 # Same machine geometry, limits, velocities, homing, ATC and tooling as the
-# real machine; the FPGA card, SZGH panel and pendant are software stand-ins.
+# real machine; the FPGA card, CNC control panel and pendant are software stand-ins.
 
 schema_version = 1
 profile = "sim"
@@ -22,9 +22,9 @@ window_title = "LiNC - BaierMill Simulation"
 
 [panel]
 kind = "simulated"
-label = "Simulated SZGH-1080"
+label = "Simulated CNC control panel"
 owner = "linc-panel"
-driver = "szgh1080-sim"
+driver = "cnc-panel-sim"
 
 [panel.link]
 kind = "virtual"
@@ -34,9 +34,8 @@ panel_link_stats = "none"
 
 [simulation]
 enabled = true
-panel = "../../baiermill_sim/panel/szgh_panel_gui.py"
 rio = "../../baiermill_sim/rio_sim.py"
 estop = "panel-gui"
 panel_window = true
-panel_title = "SZGH-1080 Simulator"
+panel_title = "CNC Control Panel Simulator"
 panel_scale = 1.0

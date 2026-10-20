@@ -1,7 +1,7 @@
 # LiNC Specification
 
 Status: design reference  
-Scope: Rust `egui` HMI for LinuxCNC with SZGH-1080 physical panel and QMK CNC keyboard  
+Scope: Rust `egui` HMI for LinuxCNC with a CNC control panel and QMK CNC keyboard
 Canonical visual: `svg/machine-dashboard.svg`
 
 ---
@@ -10,7 +10,7 @@ Canonical visual: `svg/machine-dashboard.svg`
 
 Build LiNC, a focused, operator-grade HMI that:
 
-- puts machine control on the **physical SZGH panel**, with explicit
+- puts machine control on the **physical CNC control panel**, with explicit
   Probe-Basic-compatible MDI/probe/tool commands from the HMI
 - uses the **QMK CNC keyboard** for text entry, navigation, and screen selection
 - keeps the screen readable at a glance and rich where detail matters
@@ -78,11 +78,10 @@ Hard limitations:
 
 ### 3.2 Physical panel
 
-Source: existing `../szgh-panel-rust/` and `../baiermill_pb/szgh_panel_hal.py`,
-migrated into LiNC's `linc-panel` crate.
+Source: existing panel driver sources, migrated into LiNC's `linc-panel` crate.
 
-The SZGH-1080 panel is connected over RS-485 (115200 8N1) and exposed as a
-LinuxCNC HAL component named `szgh_panel`.
+The CNC control panel is connected over RS-485 (115200 8N1) and exposed as a
+LinuxCNC HAL component named `cnc_panel`.
 
 The integrated panel service exposes:
 
@@ -109,11 +108,11 @@ Panel ownership rules:
   port. The HMI **must not** duplicate panel controls as on-screen buttons.
 - LiNC **may write declared HAL outputs** through its `linc` HAL component.
   The initial allowlist is `linc.hmi-alive`, `linc.tool-change-confirm` and
-  `linc.status-display`. It never writes arbitrary `szgh_panel.*` or
+  `linc.status-display`. It never writes arbitrary `cnc_panel.*` or
   machine-motion pins.
 - The panel driver is modular: a `PanelDriver` trait plus a capabilities
   descriptor (buttons, LEDs, displays, mode encoding, override encoding,
-  pendant support) lets future panel types and transports replace the SZGH
+  pendant support) lets future panel types and transports replace the panel
   implementation without changing the UI/backend contract.
 - Existing HAL glue must be migrated from `qtpyvcp.*` pins to `halui`, the
   `linc` component and `linc-panel` pins.
@@ -143,7 +142,7 @@ Special cases:
   safety-relevant during setup and PROG.HOME. Show `--` when the value is
   unknown, stale or outside those offsets; do not guess.
 - The HMI reads `g5x_index` and writes `linc.status-display`; the panel service
-  maps it to `szgh_panel.sseg_status`. Optional configured sources are spindle
+  maps it to `cnc_panel.sseg_status`. Optional configured sources are spindle
   load percent and `MM`/`IN` units.
 - The RS-485 protocol exposes `mode_mpg` and `mpg_sim`, but **not handwheel
   encoder counts**. Verify where the MPG encoder is wired; do not assume the
@@ -180,12 +179,12 @@ Allowed on screen:
 ## 4. Architecture
 
 ```text
-SZGH panel --RS-485--> linc-panel (LiNC panel service) --> HAL --> halui/LinuxCNC
+CNC control panel --RS-485--> linc-panel (LiNC panel service) --> HAL --> halui/LinuxCNC
 QMK keyboard --USB--> linc (Rust egui) --NML or PyO3--> LinuxCNC
 WHB pendant --USB--> LinuxCNC jog input only (non-jog ignored)
 LinuxCNC status --------------------------------> linc
 linc.* HAL outputs <-----------------------------> linc
-szgh_panel.* HAL pins <--------------------------> linc-panel
+cnc_panel.* HAL pins <--------------------------> linc-panel
 ```
 
 ### 4.1 Processes
@@ -208,7 +207,7 @@ LiNC/
     linc-core/        # state, commands, backend trait, validation
     linc-linuxcnc/    # PyO3 official module; optional C++ NML bridge
     linc-hal/         # typed HAL FFI + linc.* output allowlist
-    linc-panel/       # PanelDriver trait; SZGH-1080 and simulator drivers
+    linc-panel/       # PanelDriver trait; generic panel and simulator drivers
     linc-ui/          # egui shell, theme, screens, widgets
     linc-view/        # 2D/3D toolpath and sparklines
     linc-app/         # main, config, logging
@@ -225,7 +224,7 @@ pub trait PanelDriver {
 ```
 
 `PanelCapabilities` declares buttons, LEDs, displays, mode encoding, override
-encoding and pendant support. The SZGH-1080 driver uses steady one-hot modes and
+encoding and pendant support. The CNC control panel driver uses steady one-hot modes and
 steady overrides; the simulator uses the same contract. Future panels can add
 drivers without changing `linc-core` or the UI.
 
@@ -250,12 +249,12 @@ local HMI.
 ### 4.4 Simulation panel
 
 The simulation build runs the same `linc-panel` driver contract with a
-simulated SZGH-1080 front panel. It is not part of the HMI shell and is never
+simulated CNC control panel. It is not part of the HMI shell and is never
 present in the real-machine build.
 
-- Reproduces the SZGH-1080 front panel: POWER, E-stop, MODE, feed/rapid/spindle
+- Reproduces the CNC control panel: POWER, E-stop, MODE, feed/rapid/spindle
   overrides, axis/alarm lamps, tool displays and key matrix.
-- Creates the same `szgh_panel` HAL component/pin surface as the real driver,
+- Creates the same `cnc_panel` HAL component/pin surface as the real driver,
   plus simulation-only power/E-stop inputs.
 - Modes and overrides use the same steady one-hot/steady contract as the real
   panel.
@@ -792,7 +791,7 @@ No F1–F8 mapping. The bottom keycap highlight reflects the current page:
 - The GUI may load programs, edit G-code, edit offsets/tools, and issue MDI,
   probe and tool-change commands within the gating above.
 - LiNC writes only its declared `linc.*` HAL outputs; it never writes arbitrary
-  motion, spindle, coolant, cycle or `szgh_panel.*` pins.
+  motion, spindle, coolant, cycle or `cnc_panel.*` pins.
 
 ### 8.3 Panel offline
 
@@ -956,7 +955,7 @@ For this design repository:
   Diagnostics, G-code Help and Files screens are represented.
 - Mill layout supports a 3-axis default and optional 4/5-axis expansion.
 - Lathe layout represents X/Z, optional C/Y, live tooling and a power turret.
-- The simulation-only SZGH-1080 panel is represented separately from the HMI.
+- The simulation-only CNC control panel is represented separately from the HMI.
 - The Touch Probe screen represents routine selection, WCS/parameters,
   explicit `RUN PROBE` via Probe Basic `issue_mdi`, results/apply and
   calibration, with no separate cycle-start step.
@@ -983,7 +982,7 @@ For this design repository:
   latching; invalid mode state is `UNKNOWN`.
 - The WHB pendant is documented and implemented as jog-only; non-jog pendant
   controls are ignored.
-- Hardware constraints for the QMK keyboard and SZGH panel are documented.
+- Hardware constraints for the QMK keyboard and CNC control panel are documented.
 - No SVG shows a general on-screen machine-control panel.
 - G-code mockups show token-level syntax highlighting.
 - The Program CODE screen shows an editable buffer state: cursor, dirty marker,
@@ -1016,7 +1015,7 @@ For the future implementation:
 
 ## 13. Open issues
 
-1. Port `szgh-panel-rust` into the LiNC `linc-panel` crate. The current crate
+1. Port the existing panel driver into the LiNC `linc-panel` crate. The current crate
    does not build with HAL enabled:
    - `Cargo.toml` patches to missing
      `patches/linuxcnc-hal-rs/linuxcnc-hal-sys`;
@@ -1042,7 +1041,7 @@ For the future implementation:
     `configs/*.toml` currently define the contract only.
 12. Unify the real panel driver's serial port and cycle time with
     `configs/baiermill.toml`; today they are hard-coded in the driver and
-    `hallib/szgh_panel.hal`.
+    `hallib/cnc_panel.hal`.
 13. Convert the generated Python G-code help data
     (`../baiermill_pb/user_tabs/gcode_help/gcode_docs.py`) into a Rust-friendly
     bundle (JSON/TOML), pin the LinuxCNC docs version, and preserve
@@ -1056,7 +1055,7 @@ For the future implementation:
     operations.
 16. Add a driver capability matrix and conformance tests for future panel
     types: button/LED maps, display count, mode encoding and override
-    encoding. The SZGH-1080 uses steady one-hot modes; no pulse latching.
+    encoding. The CNC control panel uses steady one-hot modes; no pulse latching.
 17. USB auto-mount depends on `udisks2` and D-Bus/polkit. The service is
     currently inactive on the development box; verify/enable it on the machine
     and test insert, mount failure, busy eject and power-off.
@@ -1073,7 +1072,7 @@ For the future implementation:
 21. Verify the mill 3/4/5-axis card layout against the actual INI axis mask and
     validate optional-axis hiding at runtime.
 22. Add a lathe-specific simulator panel mockup with turret/live-tool controls;
-    `svg/sim-panel.svg` is the mill SZGH-1080 panel.
+    `svg/sim-panel.svg` is the mill CNC control panel.
 23. Port the Probe Basic parameter contract (`#3014`–`#3036`) and result contract
     (`#1001`–`#1009`), map every routine to its G-code call, and verify that
     `RUN PROBE` issues the call through `issue_mdi` only after the explicit
@@ -1114,18 +1113,20 @@ For the future implementation:
 34. Implement the `linc` HAL component and typed output allowlist:
     `hmi-alive`, `tool-change-confirm`, `status-display`. Verify ownership,
     startup/shutdown, heartbeat expiry and that no arbitrary pin writes exist.
-35. Prune the WHB04B-6 pendant nets to jog/handwheel-only in JOG mode. Ignore
+35. Rename or alias the existing branded panel HAL component/pins to
+    `cnc_panel` and update the machine HAL, or provide compatibility nets.
+36. Prune the WHB04B-6 pendant nets to jog/handwheel-only in JOG mode. Ignore
     pendant mode, cycle, spindle, coolant, override, program and macro inputs;
     add a fault test proving those controls cannot change machine state.
-36. Migrate the mill tool table to a standard `P` column only when ATC is
+37. Migrate the mill tool table to a standard `P` column only when ATC is
     enabled; keep manual profiles on `TZDR`. Validate the INI
     `TOOL_TABLE_COLUMNS`/`changer` match and hide the pocket column in manual
     mode.
-37. Harden untrusted file ingress: canonicalize LOAD/SAVE beneath
+38. Harden untrusted file ingress: canonicalize LOAD/SAVE beneath
     `PROGRAM_PREFIX`, reject symlink escapes, use same-directory atomic
     replace, bound the preview parser (no remaps/subroutines/side effects) and
     build all HMI-generated MDI with validated numeric templates.
-38. Verify Probe Basic `issue_mdi` mode switching/restoration across MDI, probe
+39. Verify Probe Basic `issue_mdi` mode switching/restoration across MDI, probe
     and tool-change actions: panel selector state, task mode display, faulted
     or canceled commands, and no stale MDI mode left behind.
 
@@ -1147,7 +1148,7 @@ Only the accepted versions are included.
 | `svg/manual.svg` | Manual JOG/INC/MPG: dominant live graph, large work/machine/DTG coordinates and mode context; no on-screen jog controls |
 | `svg/homing.svg` | Homing: per-axis/sequence state, HOME/PROG.HOME physical-key mapping and machine position; no software home controls |
 | `svg/tools.svg` | Tools: standard tool table, conditional pocket column, current/next tool, explicit `Tn M6`, manual confirm, optional ATC/turret state |
-| `svg/sim-panel.svg` | Simulation-only SZGH-1080 panel window: power, E-stop, mode, overrides, lamps, displays (including active WCS status) and key matrix |
+| `svg/sim-panel.svg` | Simulation-only CNC control panel window: power, E-stop, mode, overrides, lamps, displays (including active WCS status) and key matrix |
 
 Superseded vendor-style studies, intermediate layout explorations, and
 colour-mapped previews were intentionally removed.
@@ -1159,10 +1160,10 @@ Configuration is per machine and layered:
 - `configs/base.toml` — UI, keymap, safety policy, HAL output policy, panel
   driver contract, backend and preference defaults.
 - `configs/sim.toml` — mill simulation profile pointing at
-  `../../baiermill_sim/probe_basic.ini`, the simulated SZGH panel and
+  `../../baiermill_sim/probe_basic.ini`, the simulated CNC control panel and
   `rio_sim.py`.
 - `configs/baiermill.toml` — physical mill profile pointing at
-  `../../baiermill_pb/probe_basic.ini`, with the real SZGH-1080 panel owned by
+  `../../baiermill_pb/probe_basic.ini`, with the real CNC control panel owned by
   `linc-panel`.
 - `configs/lathe-sim.toml` — lathe simulation profile pointing at
   `../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini`,

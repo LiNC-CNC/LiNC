@@ -13,7 +13,7 @@ yet; these profiles define how they must behave.
    velocities, units, joint count, spindle count, ATC settings, the tool table
    and the program prefix come from the INI. They are not duplicated in TOML.
 4. **Panel I/O is split from the UI.** The LiNC-owned `linc-panel` service owns
-   the serial port and `szgh_panel.*` pins. The egui HMI never opens the serial
+   the serial port and `cnc_panel.*` pins. The egui HMI never opens the serial
    device. LiNC may write only its declared `linc.*` HAL outputs
    (`hmi-alive`, `tool-change-confirm`, `status-display`).
 5. **Safety policy is not a preference.** A profile cannot enable software
@@ -32,8 +32,8 @@ yet; these profiles define how they must behave.
 | File | Purpose |
 |---|---|
 | `configs/base.toml` | Shared UI, keymap, safety policy, HAL output policy, panel driver contract, backend and preferences defaults. Not runnable alone. |
-| `configs/sim.toml` | Mill simulation: `../../baiermill_sim/probe_basic.ini`, simulated SZGH panel, `rio_sim.py`. |
-| `configs/baiermill.toml` | Physical mill: `../../baiermill_pb/probe_basic.ini`, real SZGH-1080 panel over RS-485 owned by `linc-panel`. |
+| `configs/sim.toml` | Mill simulation: `../../baiermill_sim/probe_basic.ini`, simulated CNC control panel, `rio_sim.py`. |
+| `configs/baiermill.toml` | Physical mill: `../../baiermill_pb/probe_basic.ini`, real CNC control panel over RS-485 owned by `linc-panel`. |
 | `configs/lathe-sim.toml` | Lathe simulation: `../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini`, lathe UI capabilities. |
 
 The profiles use:
@@ -138,11 +138,11 @@ Required profile fields:
 | Probe parameters/results | LinuxCNC parameters `#3014`–`#3036`, results `#1001`–`#1009` |
 | MDI command history | HMI-local ring buffer; not a machine log |
 | Homing sequence | INI `HOME_SEQUENCE`, search/latch/index settings |
-| Homing commands | `szgh_panel.home-*` / `proghome-*` pins and physical keys; never HMI |
+| Homing commands | `cnc_panel.home-*` / `proghome-*` pins and physical keys; never HMI |
 | PROG.HOME path | Panel `proghome-*` -> existing Probe Basic `issue_mdi`; HMI observes |
 | Panel/RIO HAL pin names | `configs/base.toml` |
 | WHB pendant | Jog/handwheel inputs only in JOG mode; all other functions ignored |
-| Panel status 7-segment | `linc.status-display` -> `szgh_panel.sseg_status`; `[panel.status]` |
+| Panel status 7-segment | `linc.status-display` -> `cnc_panel.sseg_status`; `[panel.status]` |
 | Machine identity and panel ownership | machine profile |
 | UI layout, theme, keymap, toolpath options | `base.toml` + overrides |
 | G-code help content | bundled `linuxcnc-gcode` reference, generated from linuxcnc.org |
@@ -179,10 +179,10 @@ and ATC values as the machine; only the HAL stack and paths differ.
 
 - `machine.kind = "sim"` — the HMI shows a persistent `SIM` badge.
 - `linuxcnc_ini = "../../baiermill_sim/probe_basic.ini"`.
-- Panel driver is `szgh1080-sim`; link is `virtual`; the panel service owns the
+- Panel driver is `cnc-panel-sim`; link is `virtual`; the panel service owns the
   simulated window.
 - `rio` is `baiermill_sim/rio_sim.py`; no FPGA card or serial device.
-- The HAL pin surface is the same `szgh_panel.*` and `rio.*` surface as the
+- The HAL pin surface is the same `cnc_panel.*` and `rio.*` surface as the
   real machine, so the HMI uses the same code path.
 - Modes/overrides use steady one-hot/steady values.
 - `panel_link_stats = "none"` because there is no serial link to measure.
@@ -207,7 +207,7 @@ This profile must never be used to command real hardware.
 - `port`, `baud` and `cycle_time_ms` are diagnostic/launch metadata for the
   panel service. The real authority for the link remains `linc-panel` and the
   HAL pin surface.
-- The same `szgh_panel.*` pins feed the HMI and the existing panel logic.
+- The same `cnc_panel.*` pins feed the HMI and the existing panel logic.
 - The physical E-stop and machine-on chain remain hard-wired; the HMI has no
   software E-stop substitute.
 - `panel_link_stats = "optional"` — the Diagnostics page shows counters when
@@ -312,7 +312,7 @@ Enums:
 - `machine.gui`: `mill`, `lathe`
 - `tools.changer`: `manual`, `atc`, `turret`
 - `panel.kind`: `simulated`, `physical`, `external`
-- `panel.driver`: `szgh1080`, `szgh1080-sim`, `lathe-sim`, future driver names
+- `panel.driver`: `cnc-panel`, `cnc-panel-sim`, `lathe-sim`, future driver names
 - `panel.mode_encoding`: `one_hot_steady`
 - `panel.override_encoding`: `analog_steady`
 - `panel.status.source`: `wcs`, `spindle_load`, `units`
@@ -333,7 +333,8 @@ For this design repository:
 - `sim.toml` extends `base.toml`, is `gui = "mill"`, and points at an existing INI;
 - `baiermill.toml` extends `base.toml`, is `gui = "mill"`, and points at an existing INI;
 - `lathe-sim.toml` extends `base.toml`, is `gui = "lathe"`, and points at an existing INI;
-- the mill profiles resolve `simulation.panel` / `simulation.rio` where applicable;
+- the mill simulation profile uses the built-in `cnc-panel-sim` driver and
+  resolves `simulation.rio`;
 - the lathe profile declares turret/live-tool capabilities and has no panel window yet;
 - the real profile contains no simulated panel or `rio_sim.py` path;
 - the simulation profile contains no serial device path;
@@ -372,13 +373,13 @@ For this design repository:
 1. The `linc` binary and config loader do not exist yet. `--check-config`
    and the merge rules in this document are the implementation contract.
 2. The panel driver currently hard-codes `/dev/ttyUSB0` and gets its cycle time
-   from `hallib/szgh_panel.hal` (`-c 0.01`). The profile's `[panel.link]`
+   from `hallib/cnc_panel.hal` (`-c 0.01`). The profile's `[panel.link]`
    fields are metadata until the driver reads a shared config.
 3. The panel driver does not expose RX/TX counters yet, so
    `panel_link_stats = "optional"` will show "unavailable" on the real machine.
 4. The current HAL cycle time is 0.01 s while the protocol sleeps about 14 ms
    per transaction. Raise it to 0.02–0.05 s when the driver is fixed; update
-   the profile and `szgh_panel.hal` together.
+   the profile and `cnc_panel.hal` together.
 5. Installing profiles outside the repository breaks relative
    `../../baiermill_pb` paths. Either preserve the sibling layout or use absolute
    paths in the installed profile.
@@ -404,7 +405,7 @@ For this design repository:
 11. Lathe support needs HAL pin mapping for power-turret station/clamp/index and
     live-tool drive/RPM/direction; the existing lathe simulator exposes neither.
 12. A lathe-specific simulator panel mockup is still needed; the current
-    `svg/sim-panel.svg` is the mill SZGH-1080 panel.
+    `svg/sim-panel.svg` is the mill CNC control panel.
 13. Port the Probe Basic parameter/result contracts and G-code calls; `RUN
     PROBE` issues the selected call through `issue_mdi` after validation.
 14. Implement MDI issue through `issue_mdi`: syntax check, history recall,
@@ -422,7 +423,7 @@ For this design repository:
     offset/tool writes, file imports and probe applies with protect ON and with
     the panel link lost.
 19. Implement `linc.status-display` for `g5x_index` (54–59, `--` otherwise) and
-    wire it to `szgh_panel.sseg_status`. Verify after HMI/panel restarts,
+    wire it to `cnc_panel.sseg_status`. Verify after HMI/panel restarts,
     extended offsets and disconnected/stale status.
 20. Implement the `linc` HAL component with the closed output allowlist
     (`hmi-alive`, `tool-change-confirm`, `status-display`) and no arbitrary
@@ -435,3 +436,6 @@ For this design repository:
     that column.
 23. Add a panel-driver conformance matrix and simulator driver for future panel
     types/transports.
+24. Rename or alias the existing branded panel HAL component/pins to
+    `cnc_panel` and update `hallib`; otherwise LiNC profiles will not find the
+    generic pin names.
