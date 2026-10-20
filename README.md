@@ -23,6 +23,8 @@ SVG mockups; it does not yet contain the Rust HMI implementation.
 | Diagnostics | `svg/diagnostics.svg` |
 | G-code Help | `svg/gcode-help.svg` |
 | Files / USB transfer | `svg/files.svg` |
+| Lathe dashboard | `svg/lathe-dashboard.svg` |
+| Simulator panel (separate window) | `svg/sim-panel.svg` |
 
 Only the accepted versions are included. The earlier vendor-style studies and
 intermediate layout explorations have been removed.
@@ -38,8 +40,9 @@ The HMI is configured per machine, with explicit profile selection:
 | Profile | File |
 |---|---|
 | Shared defaults | `configs/base.toml` |
-| BaierMill simulation | `configs/sim.toml` |
-| BaierMill physical machine | `configs/baiermill.toml` |
+| BaierMill mill simulation | `configs/sim.toml` |
+| BaierMill physical mill | `configs/baiermill.toml` |
+| Lathe simulation | `configs/lathe-sim.toml` |
 
 The machine profile points at the LinuxCNC INI, which remains authoritative for
 travel, velocities, units, spindle/ATC data and the tool table. The HMI never
@@ -47,6 +50,7 @@ owns the panel serial port; it reads the `szgh_panel.*` HAL pins.
 
 ```sh
 cnc-hmi --config configs/sim.toml
+cnc-hmi --config configs/lathe-sim.toml
 cnc-hmi --config configs/baiermill.toml
 ```
 
@@ -74,6 +78,13 @@ policy and launch integration.
 - **Graph overlays program and machine bounds** and highlights the selected
   line. Edits update the graph only after the preview syntax check succeeds;
   invalid input keeps the last valid graph and never moves the machine.
+- **Two machine variants share one shell.** Mill is 3-axis by default and
+  expands to 4/5 axes from the INI; lathe is X/Z with optional C/Y, live
+  tooling and power-turret stations. Variant-specific screens are Machine,
+  Program graph, Offsets, Tools and Diagnostics; Files and Help are shared.
+- **The simulator panel is a separate companion window**, not part of the HMI.
+  It reproduces the SZGH-1080 controls and HAL pin surface; the real HMI never
+  exposes those controls.
 - **G-code is token-highlighted** with a rich but restrained palette:
   G-codes, M-codes, axis letters, numbers, feed/speed, tools, parameters,
   comments, and line numbers each have a distinct treatment.
@@ -100,6 +111,7 @@ cnc-hmi-design/
 ├── configs/
 │   ├── base.toml
 │   ├── sim.toml
+│   ├── lathe-sim.toml
 │   └── baiermill.toml
 └── svg/
     ├── machine-dashboard.svg
@@ -107,7 +119,9 @@ cnc-hmi-design/
     ├── program-code.svg
     ├── diagnostics.svg
     ├── gcode-help.svg
-    └── files.svg
+    ├── files.svg
+    ├── lathe-dashboard.svg
+    └── sim-panel.svg
 ```
 
 ## Viewing the SVGs
@@ -126,8 +140,9 @@ rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
 3. Implement the Rust `egui` shell, theme tokens, and the layered config loader.
 4. Implement the Machine dashboard.
 5. Implement the Program `SPLIT`/`CODE` views, G-code highlighter and editor.
-6. Implement Offsets, Tools, Diagnostics, Settings, the G-code Help reference
-   browser, and the Files/USB transfer page.
+6. Implement the mill and lathe variants, including dynamic 3–5 axis cards,
+   lathe live-tool/power-turret state, Offsets, Tools, Diagnostics, Settings,
+   the G-code Help reference browser, and the Files/USB transfer page.
 7. Integrate LinuxCNC via PyO3 first, with a `MachineBackend` boundary that can
    later be replaced by a C++ NML bridge.
 8. Verify keyboard-only navigation, panel disconnect handling, program

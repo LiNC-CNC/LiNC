@@ -91,11 +91,10 @@
   <rect x="588" y="144" width="32" height="3" rx="1" fill="var(--accent)"/>
 
   <rect x="785" y="70" width="199" height="82" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="797" y="90" fill="var(--muted)" font-size="10" font-family="sans-serif">A</text>
-  <text x="797" y="118" fill="var(--fg)" font-size="22" font-family="monospace" font-weight="700">0.000</text>
-  <text x="797" y="138" fill="var(--muted)" font-size="9" font-family="monospace">DTG 0.000 deg</text>
+  <text x="797" y="90" fill="var(--muted)" font-size="10" font-family="sans-serif">A / C</text>
+  <text x="797" y="118" fill="var(--muted)" font-size="22" font-family="monospace">--</text>
+  <text x="797" y="138" fill="var(--muted)" font-size="9" font-family="monospace">OPTIONAL 4/5 AXIS</text>
   <rect x="797" y="144" width="174" height="3" rx="1" fill="var(--border)"/>
-  <rect x="797" y="144" width="0" height="3" rx="1" fill="var(--accent)"/>
 
   <!-- 3D toolpath -->
   <rect x="158" y="160" width="640" height="270" rx="5" fill="var(--surface)" stroke="var(--border)"/>

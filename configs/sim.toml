@@ -11,7 +11,11 @@ extends = "base.toml"
 [machine]
 name = "BaierMill Simulation"
 kind = "sim"
+gui = "mill"
 linuxcnc_ini = "../../baiermill_sim/probe_basic.ini"
+
+[mill]
+max_axes = 5
 
 [ui]
 window_title = "CNC HMI - BaierMill Simulation"
@@ -32,3 +36,6 @@ enabled = true
 panel = "../../baiermill_sim/panel/szgh_panel_gui.py"
 rio = "../../baiermill_sim/rio_sim.py"
 estop = "panel-gui"
+panel_window = true
+panel_title = "SZGH-1080 Simulator"
+panel_scale = 1.0

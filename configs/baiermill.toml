@@ -11,7 +11,11 @@ extends = "base.toml"
 [machine]
 name = "BaierMill"
 kind = "real"
+gui = "mill"
 linuxcnc_ini = "../../baiermill_pb/probe_basic.ini"
+
+[mill]
+max_axes = 5
 
 [ui]
 window_title = "CNC HMI - BaierMill"

@@ -27,8 +27,9 @@ exist yet; these profiles define how they must behave.
 | File | Purpose |
 |---|---|
 | `configs/base.toml` | Shared UI, keymap, safety policy, HAL pin map, backend and preferences defaults. Not runnable alone. |
-| `configs/sim.toml` | Simulation: `../../baiermill_sim/probe_basic.ini`, simulated SZGH panel, `rio_sim.py`. |
-| `configs/baiermill.toml` | Physical machine: `../../baiermill_pb/probe_basic.ini`, real SZGH-1080 panel over RS-485. |
+| `configs/sim.toml` | Mill simulation: `../../baiermill_sim/probe_basic.ini`, simulated SZGH panel, `rio_sim.py`. |
+| `configs/baiermill.toml` | Physical mill: `../../baiermill_pb/probe_basic.ini`, real SZGH-1080 panel over RS-485. |
+| `configs/lathe-sim.toml` | Lathe simulation: `../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini`, lathe UI capabilities. |
 
 The profiles use:
 
@@ -98,6 +99,7 @@ Required profile fields:
 - `profile`
 - `machine.name`
 - `machine.kind` = `"sim"` or `"real"`
+- `machine.gui` = `"mill"` or `"lathe"`
 - `machine.linuxcnc_ini`
 - `[hal] panel_component`
 - `[panel] kind`, `owner`, `read_only = true`
@@ -246,7 +248,9 @@ written while running.
 | Table | Keys |
 |---|---|
 | top level | `schema_version`, `profile`, `extends` |
-| `[machine]` | `name`, `kind`, `linuxcnc_ini` |
+| `[machine]` | `name`, `kind`, `gui`, `linuxcnc_ini` |
+| `[mill]` | optional `max_axes` |
+| `[lathe]` | optional `turret_stations`, `power_turret`, `live_tooling`, `live_tool_max_rpm`, `c_axis`, `y_axis`, `sub_spindle` |
 | `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages` |
 | `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width` |
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running` |
@@ -261,11 +265,12 @@ written while running.
 | `[panel.link]` | `read_only`, `kind`, optional `port`, `baud`, `data_bits`, `parity`, `stop_bits`, `cycle_time_ms` |
 | `[preferences]` | `file` |
 | `[diagnostics]` | `event_log_capacity`, `panel_link_stats` |
-| `[simulation]` | `enabled`, optional `panel`, `rio`, `estop` |
+| `[simulation]` | `enabled`, optional `panel`, `rio`, `estop`, `panel_window`, `panel_title`, `panel_scale` |
 
 Enums:
 
 - `machine.kind`: `sim`, `real`
+- `machine.gui`: `mill`, `lathe`
 - `panel.kind`: `simulated`, `physical`, `external`
 - `panel.link.kind`: `virtual`, `rs485`
 - `diagnostics.panel_link_stats`: `none`, `optional`, `required`
@@ -276,10 +281,12 @@ Enums:
 
 For this design repository:
 
-- all three TOML files parse with a standard TOML parser;
-- `sim.toml` extends `base.toml` and points at an existing INI;
-- `baiermill.toml` extends `base.toml` and points at an existing INI;
-- both profiles resolve `simulation.panel` / `simulation.rio` where applicable;
+- `base.toml` and all three machine profiles parse with a standard TOML parser;
+- `sim.toml` extends `base.toml`, is `gui = "mill"`, and points at an existing INI;
+- `baiermill.toml` extends `base.toml`, is `gui = "mill"`, and points at an existing INI;
+- `lathe-sim.toml` extends `base.toml`, is `gui = "lathe"`, and points at an existing INI;
+- the mill profiles resolve `simulation.panel` / `simulation.rio` where applicable;
+- the lathe profile declares turret/live-tool capabilities and has no panel window yet;
 - the real profile contains no simulated panel or `rio_sim.py` path;
 - the simulation profile contains no serial device path;
 - all safety flags match the policy above;
@@ -324,3 +331,7 @@ For this design repository:
 10. File copy implementation must reject symlinks/path escapes, check free
     space, confirm overwrite, use a temporary file plus rename, report progress,
     and prevent eject during a copy.
+11. Lathe support needs HAL pin mapping for power-turret station/clamp/index and
+    live-tool drive/RPM/direction; the existing lathe simulator exposes neither.
+12. A lathe-specific simulator panel mockup is still needed; the current
+    `svg/sim-panel.svg` is the mill SZGH-1080 panel.

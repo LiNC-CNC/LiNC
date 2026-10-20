@@ -185,6 +185,22 @@ already handles NML serial/echo. The C++ NML bridge is a later replacement if
 Python must be removed. `linuxcnc-grpc` is only for a remote panel, not the
 local HMI.
 
+### 4.4 Simulation panel
+
+The simulation build also runs a separate operator-panel window. It is not part
+of the HMI shell and is never present in the real-machine build.
+
+- Reproduces the SZGH-1080 front panel: POWER, E-stop, MODE, feed/rapid/spindle
+  overrides, axis/alarm lamps, tool displays and key matrix.
+- Creates the same `szgh_panel` HAL component/pin surface as the real driver,
+  plus simulation-only power/E-stop inputs.
+- The HMI only reads HAL/status; all simulated machine commands originate in
+  this companion window or the keyboard, never in the HMI central page.
+- It may live on a second monitor. The calibration/mockup is
+  `svg/sim-panel.svg`.
+- A lathe-specific panel mockup still needs turret and live-tool controls;
+  until then, the lathe simulation profile runs without a panel window.
+
 ## 5. Application shell
 
 Fixed shell, no right-hand status column:
@@ -212,15 +228,31 @@ Focus rules:
 
 ### 6.1 Machine
 
-Default page.
+Default page. The layout is selected by `machine.gui`.
 
-- Four axis cards: X, Y, Z, A; actual position, distance-to-go, load bar.
-- Large 3D toolpath: stock, cut path, rapid path, tool marker, axes, zoom.
-- Program card: current block, next block, modal G-codes, progress, elapsed.
-- Feed and spindle-load gauges.
-- Machine health: servo load per axis, coolant/lube state.
-- Alarm/message summary.
-- Compact panel state in top/bottom bars only.
+#### Mill
+
+- **3-axis default**; optional 4th/5th axis (`A/B/C` or `U/V/W`) when present
+  in the LinuxCNC INI. Axis order and count come from `COORDINATES`/axis mask,
+  not a duplicated list.
+- Axis cards expand from 3 to 5: 3 large cards at 3-axis; compact cards at
+  4/5-axis. Never invent an axis that the INI does not expose.
+- Large 3D toolpath: stock, cut path, rapid path, tool marker, axes, zoom,
+  program/machine bounds and selected-line highlight.
+- Program card, feed/spindle-load gauges, machine health and alarms.
+- ATC state in Tools/Diagnostics; mill tool table uses pocket/orientation.
+
+#### Lathe
+
+- Base X/Z axes; optional C spindle axis and Y axis when exposed by the INI.
+- 2D XZ toolpath by default; add a 3D view only when Y/C or live-tool paths
+  make it useful. Program/machine bounds and selected line remain visible.
+- Main spindle plus optional sub-spindle; C-axis mode and live-tool state are
+  explicit in the top/bottom status and machine card.
+- Power turret card: station number, clamped/unclamped/indexing state, tool
+  description, live-tool RPM/direction and axial/radial orientation.
+- Feed/spindle-load gauges and live-tool load when available.
+- Compact panel state in top/bottom bars only; no machine controls.
 
 ### 6.2 Program
 
@@ -229,7 +261,9 @@ Two layouts, selected by the header toggle or `FILE`:
 #### SPLIT
 
 - G-code editor/monitor left (~58%).
-- 3D toolpath right (~42%).
+- Mill: 3D toolpath right (~42%); lathe: 2D XZ toolpath, with optional 3D when
+  Y/C or live-tool paths are active.
+- Live-tool paths use a distinct stroke from turning/rapid moves.
 - Current line synchronized with the graph.
 - Current/next block and modal summary below the editor.
 
@@ -294,15 +328,21 @@ Program rules:
 - Work offsets G54–G59.
 - G92 offset.
 - Tool offsets.
+- Mill: X/Y/Z and rotary offsets; lathe: X/Z geometry and wear, tool nose
+  radius, tip orientation, C/Y offsets and turret station.
 - Current axis values and distance-to-go.
 - Read-only while running; blocked when program protect is active.
 - Edits validated against LinuxCNC limits and units.
 
 ### 6.4 Tools
 
-- Tool table: number, description, diameter, length, pocket.
+- Mill: tool table with number, description, diameter, length, pocket and ATC
+  state.
+- Lathe: turret station grid with station number, tool description, X/Z
+  geometry/wear, nose radius, tip orientation, axial/radial live-tool flag,
+  live-tool RPM range/direction and driven-tool state.
 - Current tool and next tool.
-- ATC state when available.
+- ATC/turret state when available.
 - Read-only while running; program protect blocks writes.
 
 ### 6.5 Diagnostics
@@ -315,7 +355,8 @@ Read-only detail view. Tabs:
 | Panel Link | RS-485 transport, cycle time, last RX, RX/TX counts, CRC errors, timeouts, reconnects, mode/overrides, raw button/LED bitmaps, 7-segment values |
 | HAL / NML | NML command/status/error channel state, ages, echo serial, HAL components/pins, thread health |
 | Motion | Following error, commanded vs actual, servo load, spindle load/speed, limits/homing |
-| I/O | Panel LEDs, machine inputs, coolant/lube/door/ATC states, HAL pin browser |
+| Turret / Live Tool | Turret station, clamp/index state, live-tool drive, RPM/direction, axial/radial, C-axis |
+| I/O | Panel LEDs, machine inputs, coolant/lube/door/ATC/turret states, HAL pin browser |
 | Logs | Searchable event history, severity/source filters, export/copy |
 
 No fault reset, acknowledge, cycle, jog, override, or E-stop controls here.
@@ -558,8 +599,11 @@ For this design repository:
 
 - `SPEC.md` and `README.md` exist.
 - Only the accepted source SVGs are committed.
-- Canonical Machine, Program SPLIT, Program CODE, Diagnostics, and G-code Help
-  screens are represented.
+- Canonical mill Machine, lathe Machine, Program SPLIT, Program CODE,
+  Diagnostics, G-code Help and Files screens are represented.
+- Mill layout supports a 3-axis default and optional 4/5-axis expansion.
+- Lathe layout represents X/Z, optional C/Y, live tooling and a power turret.
+- The simulation-only SZGH-1080 panel is represented separately from the HMI.
 - Hardware constraints for the QMK keyboard and SZGH panel are documented.
 - No SVG shows an on-screen machine control panel.
 - G-code mockups show token-level syntax highlighting.
@@ -634,6 +678,13 @@ For the future implementation:
     and INI machine limits into the current view, map selected lines to
     segments/arcs, and make preview updates conditional on a successful
     syntax check.
+20. Map lathe power-turret station/clamp/index and live-tool drive/RPM/direction
+    HAL pins; the current lathe simulator exposes neither. Test static and
+    driven stations, axial/radial orientation and turret indexing interlocks.
+21. Verify the mill 3/4/5-axis card layout against the actual INI axis mask and
+    validate optional-axis hiding at runtime.
+22. Add a lathe-specific simulator panel mockup with turret/live-tool controls;
+    `svg/sim-panel.svg` is the mill SZGH-1080 panel.
 
 ## 14. Accepted SVG manifest
 
@@ -647,6 +698,8 @@ Only the accepted versions are included.
 | `svg/diagnostics.svg` | Diagnostics overview: health cards, alarms/messages, panel link detail, motion health, event log |
 | `svg/gcode-help.svg` | G-code Help: offline quick-reference index, code search, detail pane, parameter tables, figures and related codes |
 | `svg/files.svg` | Files: USB and `NC_FILES` panes, mount/eject status, file listing and explicit copy/load actions |
+| `svg/lathe-dashboard.svg` | Lathe dashboard: X/Z/C/Y cards, XZ toolpath, power turret/live-tool card, spindle load and machine health |
+| `svg/sim-panel.svg` | Simulation-only SZGH-1080 panel window: power, E-stop, mode, overrides, lamps, displays and key matrix |
 
 Superseded vendor-style studies, intermediate layout explorations, and
 colour-mapped previews were intentionally removed.
@@ -657,19 +710,23 @@ Configuration is per machine and layered:
 
 - `configs/base.toml` — UI, keymap, safety policy, HAL pin map, backend and
   preference defaults.
-- `configs/sim.toml` — simulation profile pointing at
+- `configs/sim.toml` — mill simulation profile pointing at
   `../../baiermill_sim/probe_basic.ini`, the simulated SZGH panel and
   `rio_sim.py`.
-- `configs/baiermill.toml` — physical-machine profile pointing at
+- `configs/baiermill.toml` — physical mill profile pointing at
   `../../baiermill_pb/probe_basic.ini`, with the real SZGH-1080 panel owned by
   `szgh-panel-hal`.
+- `configs/lathe-sim.toml` — lathe simulation profile pointing at
+  `../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini`,
+  with `gui = "lathe"` and turret/live-tool capabilities.
 
 Rules:
 
 1. A profile is selected explicitly with `--config`; there is no default.
 2. Profiles `extends` `base.toml`; profile tables override base, arrays replace.
-3. The LinuxCNC INI remains authoritative for kinematics, travel, limits,
-   velocities, units, spindle count, ATC settings, tool table and program paths.
+3. `machine.gui` selects `mill` or `lathe`; the LinuxCNC INI remains
+   authoritative for kinematics, axis count/order, travel, limits, velocities,
+   units, spindle count, ATC/turret settings, tool table and program paths.
 4. The HMI never owns the panel serial port and never writes machine-control
    HAL pins.
 5. Safety flags are immutable from profiles: panel-only machine control, no

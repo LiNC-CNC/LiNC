@@ -1,0 +1,215 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640">
+  <!-- standalone simulator panel window -->
+  <rect x="4" y="4" width="992" height="632" rx="8" fill="#202224" stroke="#4a4d50"/>
+  <rect x="4" y="4" width="992" height="34" rx="8" fill="#181a1c"/>
+  <rect x="4" y="30" width="992" height="8" fill="#181a1c"/>
+  <text x="18" y="27" fill="#f0f1f2" font-size="14" font-family="sans-serif" font-weight="700">SZGH-1080</text>
+  <text x="118" y="26" fill="#9a9d9f" font-size="9" font-family="sans-serif">SIMULATED OPERATOR PANEL - SEPARATE WINDOW</text>
+  <rect x="744" y="10" width="38" height="20" rx="3" fill="#f5b82e"/>
+  <text x="753" y="24" fill="#202224" font-size="8" font-family="monospace" font-weight="700">SIM</text>
+  <circle cx="806" cy="20" r="3" fill="#39d353"/>
+  <text x="814" y="24" fill="#39d353" font-size="8" font-family="monospace">HAL CONNECTED</text>
+  <text x="918" y="24" fill="#9a9d9f" font-size="9" font-family="monospace">szgh_panel</text>
+
+  <rect x="12" y="44" width="976" height="584" rx="6" fill="#2d2f31" stroke="#3f4245"/>
+
+  <!-- POWER -->
+  <text x="26" y="66" fill="#d7d9da" font-size="9" font-family="sans-serif" font-weight="700">POWER</text>
+  <circle cx="28" cy="78" r="3" fill="#39d353"/>
+  <rect x="24" y="86" width="62" height="42" rx="4" fill="#2f7d43" stroke="#4aa55d"/>
+  <text x="39" y="112" fill="#e9f7eb" font-size="11" font-family="sans-serif" font-weight="700">ON</text>
+  <text x="39" y="124" fill="#b9e4c0" font-size="7" font-family="sans-serif">ON</text>
+  <rect x="94" y="86" width="62" height="42" rx="4" fill="#111214" stroke="#4a4d50"/>
+  <text x="108" y="112" fill="#d7d9da" font-size="11" font-family="sans-serif" font-weight="700">OFF</text>
+  <text x="108" y="124" fill="#9a9d9f" font-size="7" font-family="sans-serif">OFF</text>
+
+  <!-- E-stop -->
+  <text x="176" y="66" fill="#d7d9da" font-size="9" font-family="sans-serif" font-weight="700">EMERGENCY STOP</text>
+  <circle cx="208" cy="112" r="48" fill="#d6a800"/>
+  <circle cx="208" cy="112" r="39" fill="#c92a2a" stroke="#7c1717" stroke-width="3"/>
+  <rect x="176" y="151" width="64" height="14" rx="3" fill="#151617"/>
+  <text x="164" y="178" fill="#9a9d9f" font-size="7" font-family="sans-serif">E-STOP</text>
+
+  <!-- MODE -->
+  <text x="310" y="66" fill="#d7d9da" font-size="9" font-family="sans-serif" font-weight="700">MODE</text>
+  <circle cx="370" cy="112" r="42" fill="#151617" stroke="#4a4d50" stroke-width="2"/>
+  <circle cx="370" cy="112" r="33" fill="#232527" stroke="#36393b"/>
+  <line x1="370" y1="112" x2="386" y2="86" stroke="#e8eaed" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="370" cy="112" r="4" fill="#e8eaed"/>
+  <text x="306" y="84" fill="#9a9d9f" font-size="7" font-family="sans-serif">MDI</text>
+  <text x="306" y="106" fill="#9a9d9f" font-size="7" font-family="sans-serif">AUTO</text>
+  <text x="306" y="128" fill="#9a9d9f" font-size="7" font-family="sans-serif">EDIT</text>
+  <text x="306" y="150" fill="#9a9d9f" font-size="7" font-family="sans-serif">JOG</text>
+  <text x="412" y="84" fill="#9a9d9f" font-size="7" font-family="sans-serif">MPG</text>
+  <text x="412" y="106" fill="#9a9d9f" font-size="7" font-family="sans-serif">INC</text>
+  <text x="412" y="128" fill="#9a9d9f" font-size="7" font-family="sans-serif">HOME</text>
+  <text x="412" y="150" fill="#9a9d9f" font-size="7" font-family="sans-serif">PROG.HOME</text>
+  <rect x="330" y="158" width="80" height="14" rx="2" fill="#151617" stroke="#4a4d50"/>
+  <text x="344" y="168" fill="#4da3ff" font-size="8" font-family="monospace">EDIT</text>
+
+  <!-- FEED OVERRIDE -->
+  <text x="486" y="66" fill="#d7d9da" font-size="9" font-family="sans-serif" font-weight="700">FEED OVERRIDE</text>
+  <text x="548" y="78" fill="#9a9d9f" font-size="8" font-family="sans-serif">%</text>
+  <circle cx="532" cy="112" r="34" fill="#151617" stroke="#4a4d50" stroke-width="2"/>
+  <circle cx="532" cy="112" r="26" fill="#232527" stroke="#36393b"/>
+  <line x1="532" y1="112" x2="546" y2="88" stroke="#e8eaed" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="532" cy="112" r="3" fill="#e8eaed"/>
+  <text x="490" y="92" fill="#9a9d9f" font-size="7" font-family="sans-serif">20</text>
+  <text x="532" y="72" fill="#9a9d9f" font-size="7" font-family="sans-serif">100</text>
+  <text x="568" y="92" fill="#9a9d9f" font-size="7" font-family="sans-serif">120</text>
+  <text x="490" y="138" fill="#9a9d9f" font-size="7" font-family="sans-serif">0</text>
+  <text x="568" y="138" fill="#9a9d9f" font-size="7" font-family="sans-serif">150</text>
+
+  <!-- RAPID OVERRIDE -->
+  <text x="620" y="66" fill="#d7d9da" font-size="9" font-family="sans-serif" font-weight="700">RAPID OVERRIDE</text>
+  <text x="686" y="78" fill="#9a9d9f" font-size="8" font-family="sans-serif">%</text>
+  <circle cx="662" cy="112" r="32" fill="#151617" stroke="#4a4d50" stroke-width="2"/>
+  <circle cx="662" cy="112" r="24" fill="#232527" stroke="#36393b"/>
+  <line x1="662" y1="112" x2="674" y2="90" stroke="#e8eaed" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="662" cy="112" r="3" fill="#e8eaed"/>
+  <text x="620" y="92" fill="#9a9d9f" font-size="7" font-family="sans-serif">25</text>
+  <text x="656" y="72" fill="#9a9d9f" font-size="7" font-family="sans-serif">50</text>
+  <text x="694" y="92" fill="#9a9d9f" font-size="7" font-family="sans-serif">100</text>
+  <text x="620" y="138" fill="#9a9d9f" font-size="7" font-family="sans-serif">F0</text>
+
+  <!-- SPINDLE OVERRIDE -->
+  <text x="744" y="66" fill="#d7d9da" font-size="9" font-family="sans-serif" font-weight="700">SPINDLE OVERRIDE</text>
+  <text x="814" y="78" fill="#9a9d9f" font-size="8" font-family="sans-serif">%</text>
+  <circle cx="790" cy="112" r="32" fill="#151617" stroke="#4a4d50" stroke-width="2"/>
+  <circle cx="790" cy="112" r="24" fill="#232527" stroke="#36393b"/>
+  <line x1="790" y1="112" x2="802" y2="90" stroke="#e8eaed" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="790" cy="112" r="3" fill="#e8eaed"/>
+  <text x="752" y="92" fill="#9a9d9f" font-size="7" font-family="sans-serif">90</text>
+  <text x="784" y="72" fill="#9a9d9f" font-size="7" font-family="sans-serif">100</text>
+  <text x="820" y="92" fill="#9a9d9f" font-size="7" font-family="sans-serif">120</text>
+  <text x="750" y="138" fill="#9a9d9f" font-size="7" font-family="sans-serif">50</text>
+
+  <!-- PROGRAM PROTECT -->
+  <text x="882" y="66" fill="#d7d9da" font-size="9" font-family="sans-serif" font-weight="700">PROGRAM PROTECT</text>
+  <circle cx="918" cy="112" r="28" fill="#151617" stroke="#4a4d50" stroke-width="2"/>
+  <circle cx="918" cy="112" r="20" fill="#232527"/>
+  <line x1="918" y1="112" x2="932" y2="96" stroke="#f5b82e" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="918" cy="112" r="3" fill="#e8eaed"/>
+  <text x="890" y="150" fill="#9a9d9f" font-size="7" font-family="sans-serif">OFF</text>
+  <text x="934" y="150" fill="#9a9d9f" font-size="7" font-family="sans-serif">ON</text>
+
+  <!-- Axis LEDs -->
+  <text x="26" y="202" fill="#d7d9da" font-size="9" font-family="sans-serif" font-weight="700">AXIS</text>
+  <circle cx="32" cy="220" r="10" fill="#39d353"/>
+  <circle cx="64" cy="220" r="10" fill="#39d353"/>
+  <circle cx="96" cy="220" r="10" fill="#39d353"/>
+  <circle cx="128" cy="220" r="10" fill="#1a1b1d" stroke="#3a3d3f"/>
+  <circle cx="160" cy="220" r="10" fill="#1a1b1d" stroke="#3a3d3f"/>
+  <circle cx="192" cy="220" r="10" fill="#1a1b1d" stroke="#3a3d3f"/>
+  <text x="27" y="242" fill="#9a9d9f" font-size="7" font-family="sans-serif">X</text>
+  <text x="59" y="242" fill="#9a9d9f" font-size="7" font-family="sans-serif">Y</text>
+  <text x="91" y="242" fill="#9a9d9f" font-size="7" font-family="sans-serif">Z</text>
+  <text x="123" y="242" fill="#9a9d9f" font-size="7" font-family="sans-serif">A</text>
+  <text x="155" y="242" fill="#9a9d9f" font-size="7" font-family="sans-serif">B</text>
+  <text x="187" y="242" fill="#9a9d9f" font-size="7" font-family="sans-serif">C</text>
+
+  <!-- Alarm LEDs -->
+  <text x="26" y="268" fill="#d7d9da" font-size="9" font-family="sans-serif" font-weight="700">ALARM</text>
+  <circle cx="32" cy="286" r="8" fill="#e5484d"/>
+  <circle cx="64" cy="286" r="8" fill="#1a1b1d" stroke="#3a3d3f"/>
+  <circle cx="96" cy="286" r="8" fill="#1a1b1d" stroke="#3a3d3f"/>
+  <circle cx="128" cy="286" r="8" fill="#1a1b1d" stroke="#3a3d3f"/>
+  <circle cx="160" cy="286" r="8" fill="#f5b82e"/>
+  <circle cx="192" cy="286" r="8" fill="#39d353"/>
+  <text x="24" y="306" fill="#9a9d9f" font-size="6" font-family="sans-serif">MC</text>
+  <text x="53" y="306" fill="#9a9d9f" font-size="6" font-family="sans-serif">OIL</text>
+  <text x="83" y="306" fill="#9a9d9f" font-size="6" font-family="sans-serif">GEAR</text>
+  <text x="107" y="306" fill="#9a9d9f" font-size="6" font-family="sans-serif">AIR BLOW</text>
+  <text x="154" y="306" fill="#9a9d9f" font-size="6" font-family="sans-serif">RUN</text>
+  <text x="178" y="306" fill="#9a9d9f" font-size="6" font-family="sans-serif">READY</text>
+
+  <!-- 7-segment displays -->
+  <rect x="300" y="190" width="180" height="78" rx="4" fill="#160000" stroke="#3a1d1d"/>
+  <text x="306" y="184" fill="#d7d9da" font-size="8" font-family="sans-serif" font-weight="700">MAG TOOL</text>
+  <text x="342" y="246" fill="#ff2b2b" font-size="52" font-family="monospace" font-weight="700">08</text>
+  <rect x="500" y="190" width="180" height="78" rx="4" fill="#160000" stroke="#3a1d1d"/>
+  <text x="506" y="184" fill="#d7d9da" font-size="8" font-family="sans-serif" font-weight="700">SPD TOOL</text>
+  <text x="542" y="246" fill="#ff2b2b" font-size="52" font-family="monospace" font-weight="700">08</text>
+  <rect x="700" y="190" width="180" height="78" rx="4" fill="#160000" stroke="#3a1d1d"/>
+  <text x="706" y="184" fill="#d7d9da" font-size="8" font-family="sans-serif" font-weight="700">STATUS</text>
+  <text x="756" y="246" fill="#ff2b2b" font-size="46" font-family="monospace" font-weight="700">--</text>
+
+  <!-- key matrix: left jog group -->
+  <g font-family="sans-serif" font-size="8">
+    <rect x="24" y="326" width="78" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="48" y="347" fill="#d7d9da">B &#9650;</text>
+    <rect x="110" y="326" width="78" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="120" y="342" fill="#d7d9da">SAFE DOOR</text><text x="136" y="352" fill="#9a9d9f" font-size="6">B</text>
+    <rect x="196" y="326" width="78" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="220" y="347" fill="#d7d9da">B &#9660;</text>
+
+    <rect x="24" y="366" width="78" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="48" y="387" fill="#d7d9da">A &#9650;</text>
+    <rect x="110" y="366" width="78" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="134" y="387" fill="#d7d9da">Z &#9650;</text>
+    <rect x="196" y="366" width="78" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="220" y="387" fill="#d7d9da">Y &#9650;</text>
+
+    <rect x="24" y="406" width="78" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="48" y="427" fill="#d7d9da">X &#9664;</text>
+    <rect x="110" y="406" width="78" height="32" rx="3" fill="#e8c547" stroke="#f5e08a"/><text x="134" y="427" fill="#202224" font-weight="700">RAPID</text>
+    <rect x="196" y="406" width="78" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="220" y="427" fill="#d7d9da">X &#9654;</text>
+
+    <rect x="24" y="446" width="78" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="48" y="467" fill="#d7d9da">Y &#9660;</text>
+    <rect x="110" y="446" width="78" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="134" y="467" fill="#d7d9da">Z &#9660;</text>
+    <rect x="196" y="446" width="78" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="220" y="467" fill="#d7d9da">A &#9660;</text>
+  </g>
+
+  <!-- key matrix: middle group -->
+  <g font-family="sans-serif" font-size="8">
+    <rect x="300" y="326" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="312" y="346" fill="#d7d9da">MPG SIM</text>
+    <rect x="394" y="326" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="414" y="346" fill="#d7d9da">S.B.K</text>
+    <rect x="488" y="326" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="506" y="346" fill="#d7d9da">B.D.T</text>
+
+    <rect x="300" y="366" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="322" y="386" fill="#d7d9da">M.LK</text>
+    <rect x="394" y="366" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="420" y="386" fill="#d7d9da">OPT</text>
+    <rect x="488" y="366" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="510" y="386" fill="#d7d9da">D.R.N</text>
+
+    <rect x="300" y="406" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="310" y="426" fill="#d7d9da">WORKLAMP</text>
+    <rect x="394" y="406" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="406" y="426" fill="#d7d9da">AIR BLOW</text>
+    <rect x="488" y="406" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="508" y="426" fill="#d7d9da">PT.LA</text>
+
+    <rect x="300" y="446" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="318" y="466" fill="#d7d9da">COOLANT</text>
+    <rect x="394" y="446" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="410" y="466" fill="#d7d9da">SPD. CTS</text>
+    <rect x="488" y="446" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="504" y="466" fill="#d7d9da">FLUSH</text>
+
+    <rect x="300" y="486" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="324" y="506" fill="#d7d9da">LUB</text>
+    <rect x="394" y="486" width="86" height="32" rx="3" fill="#f5b82e" stroke="#f8d37e"/><text x="406" y="506" fill="#202224" font-weight="700">CORRIDOR</text>
+    <rect x="488" y="486" width="86" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="518" y="506" fill="#d7d9da">K1</text>
+  </g>
+
+  <!-- key matrix: right group -->
+  <g font-family="sans-serif" font-size="8">
+    <rect x="660" y="326" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="674" y="346" fill="#d7d9da">SPD. ORI</text>
+    <rect x="760" y="326" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="780" y="346" fill="#d7d9da">MAG CW</text>
+    <rect x="860" y="326" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="876" y="346" fill="#d7d9da">MAG CCW</text>
+
+    <rect x="660" y="366" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="676" y="386" fill="#d7d9da">SPD. CW</text>
+    <rect x="760" y="366" width="92" height="32" rx="3" fill="#e5484d" stroke="#ff7a7d"/><text x="780" y="386" fill="#ffffff" font-weight="700">SPD. SP</text>
+    <rect x="860" y="366" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="876" y="386" fill="#d7d9da">SPD. CCW</text>
+
+    <rect x="660" y="406" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="676" y="426" fill="#d7d9da">CHIP CW</text>
+    <rect x="760" y="406" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="780" y="426" fill="#d7d9da">CHIP SP</text>
+    <rect x="860" y="406" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="876" y="426" fill="#d7d9da">CHIP CCW</text>
+
+    <rect x="660" y="446" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="680" y="466" fill="#d7d9da">CHUCK</text>
+    <rect x="760" y="446" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="780" y="466" fill="#d7d9da">POT DN</text>
+    <rect x="860" y="446" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="876" y="466" fill="#d7d9da">ARM MAN</text>
+
+    <rect x="660" y="486" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="686" y="506" fill="#d7d9da">K2</text>
+    <rect x="760" y="486" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="786" y="506" fill="#d7d9da">K3</text>
+    <rect x="860" y="486" width="92" height="32" rx="3" fill="#111214" stroke="#3f4245"/><text x="886" y="506" fill="#d7d9da">K4</text>
+  </g>
+
+  <!-- cycle controls -->
+  <circle cx="64" cy="554" r="27" fill="#e8eaed" stroke="#9a9d9f" stroke-width="2"/>
+  <circle cx="64" cy="554" r="18" fill="#f4f5f6"/>
+  <text x="25" y="594" fill="#d7d9da" font-size="8" font-family="sans-serif" font-weight="700">CYCLE START</text>
+  <circle cx="150" cy="554" r="27" fill="#111214" stroke="#3f4245" stroke-width="2"/>
+  <circle cx="150" cy="554" r="18" fill="#1d1f21"/>
+  <text x="114" y="594" fill="#d7d9da" font-size="8" font-family="sans-serif" font-weight="700">CYCLE STOP</text>
+  <circle cx="244" cy="554" r="9" fill="#39d353"/>
+  <text x="226" y="580" fill="#9a9d9f" font-size="7" font-family="sans-serif">READY</text>
+
+  <text x="700" y="574" fill="#9a9d9f" font-size="8" font-family="monospace">SIMULATION ONLY / NOT A SAFETY DEVICE</text>
+  <text x="700" y="590" fill="#9a9d9f" font-size="8" font-family="monospace">HAL COMPONENT: szgh_panel / 128 PINS</text>
+  <text x="700" y="606" fill="#39d353" font-size="8" font-family="monospace">PANEL CONNECTED / MODE: EDIT</text>
+</svg>
