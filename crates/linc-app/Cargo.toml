@@ -1,0 +1,21 @@
+[package]
+name = "linc-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "linc"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+eframe.workspace = true
+egui.workspace = true
+env_logger.workspace = true
+log.workspace = true
+linc-core = { path = "../linc-core" }
+linc-ui = { path = "../linc-ui" }
+linc-hal = { path = "../linc-hal" }
+linc-linuxcnc = { path = "../linc-linuxcnc" }

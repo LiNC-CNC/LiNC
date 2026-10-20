@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640">
+  <rect x="0" y="0" width="1000" height="640" fill="#141619"/>
   <!-- standalone simulator panel window -->
   <rect x="4" y="4" width="992" height="632" rx="8" fill="#202224" stroke="#4a4d50"/>
   <rect x="4" y="4" width="992" height="34" rx="8" fill="#181a1c"/>

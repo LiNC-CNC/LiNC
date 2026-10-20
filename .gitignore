@@ -1,0 +1,8 @@
+/target
+*.preferences.toml
+configs/linc-sim.log
+configs/linc-sim.pref
+configs/sim.var.bak
+
+__pycache__/
+*.pyc

@@ -11,9 +11,8 @@ LiNC is a Rust `egui` HMI for LinuxCNC, designed for a machine with:
   any vendor's proprietary artwork
 
 The product name is **LiNC**; the executable, Rust workspace crates and HAL
-component use the lowercase identifier `linc`. This repository is design-only.
-It contains the specification and the accepted SVG mockups; it does not yet
-contain the Rust HMI implementation.
+component use the lowercase identifier `linc`. The specification and accepted
+SVG mockups are in this directory; the Rust implementation is in `crates/`.
 
 ## Accepted references
 
@@ -36,9 +35,24 @@ contain the Rust HMI implementation.
 Only the accepted versions are included. The earlier vendor-style studies and
 intermediate layout explorations have been removed.
 
-The SVGs use theme variables (`--surface`, `--fg`, `--muted`, `--border`,
-`--accent`, `--success`, `--warning`, `--error`, `--c1`…`--c6`) and adapt to the
-viewer's theme.
+The SVGs are self-contained: they use the literal graphite theme colors and a
+full dark canvas instead of unresolved CSS custom properties, so `eog`,
+librsvg and browsers render the same image without a theme stylesheet.
+
+## Build and run
+
+```sh
+cargo build --release
+./scripts/start-sim.sh          # foreground; Ctrl+C stops the session
+./scripts/start-sim.sh --detach # background
+./scripts/stop-sim.sh
+```
+
+`start-sim.sh` launches a real LinuxCNC process with the `baiermill_sim` HAL
+and the LiNC HMI/panel pair. The HMI enforces a minimum 1920×1080 window and is
+laid out for that resolution. `linc --check-config --config configs/baiermill.toml` validates
+a profile, its LinuxCNC INI and safety policy without opening the display or
+HAL.
 
 ## Configuration
 
@@ -58,13 +72,20 @@ egui HMI never opens the serial port. `linc-panel` exposes `cnc_panel.*`, and
 LiNC writes only its declared `linc.*` HAL outputs.
 
 ```sh
-linc --config configs/sim.toml
-linc --config configs/lathe-sim.toml
-linc --config configs/baiermill.toml
+./scripts/start-sim.sh                       # real LinuxCNC + sim HAL
+linc --config configs/baiermill.toml         # physical machine / its display entry
 ```
 
 See [`CONFIGURATION.md`](CONFIGURATION.md) for the merge rules, schema, safety
 policy and launch integration.
+
+`[ui] scale` sets the HMI zoom factor at startup: `"auto"` follows the desktop,
+while `"0.8"`, `"80%"` or `"1.25x"` force a factor in `0.5..3.0`. The sim
+profile uses `"0.8"` so the 1920x1080 layout fits a 125% development display;
+change it in the profile for the target machine. Settings shows the configured
+value and offers a temporary runtime override. The HMI enforces a 1920×1080
+minimum window size. The standalone simulation panel uses
+`[simulation] panel_scale` independently.
 
 ## HAL integration
 
@@ -191,6 +212,7 @@ file unchanged.
 
 ```text
 LiNC/
+├── Cargo.toml
 ├── README.md
 ├── CONFIGURATION.md
 ├── SPEC.md
@@ -199,10 +221,24 @@ LiNC/
 │   ├── sim.toml
 │   ├── lathe-sim.toml
 │   └── baiermill.toml
+├── crates/
+│   ├── linc-app/         # CLI, backend selection, window and event loop
+│   ├── linc-core/        # config, INI, model, commands, HAL, sim, IPC
+│   ├── linc-hal/         # typed linc.* HAL output component
+│   ├── linc-linuxcnc/    # LinuxCNC bridge
+│   ├── linc-panel/       # RS-485 panel service and simulator panel
+│   ├── linc-ui/          # egui shell, pages, keyboard model
+│   └── linc-view/        # toolpath and lathe graph rendering
 ├── hal/
 │   ├── linc.hal
 │   ├── linc-postgui.hal
 │   └── linc-pendant.hal
+├── scripts/
+│   ├── start-sim.sh
+│   ├── start-panel-sim.sh
+│   └── stop-sim.sh
+├── tools/
+│   └── generate_help.py
 └── svg/
     ├── machine-dashboard.svg
     ├── program-split.svg
@@ -227,25 +263,33 @@ Any browser or SVG viewer can open the files. For command-line rendering:
 rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
 ```
 
-## Next implementation steps
+## Implementation status
 
-1. Port the existing panel driver into the LiNC `linc-panel` crate with the HAL
-   feature enabled, keeping the driver/capability abstraction.
-2. Add panel diagnostics counters and raw bitmaps to `linc-panel`.
-3. Implement the `linc` HAL output component and typed allowlist; then load
-   `hal/linc.hal` and `hal/linc-postgui.hal` in the machine profile.
-4. Implement the Rust `egui` shell, theme tokens, and the layered config loader.
-5. Implement the Machine dashboard.
-6. Implement the Program `SPLIT`/`CODE` views, G-code highlighter and editor.
-7. Implement the mill and lathe variants, including dynamic 3–5 axis cards,
-   lathe live-tool/power-turret state, Offsets, Tools, Diagnostics, Settings,
-   the G-code Help reference browser, the Files/USB transfer page, the Touch
-   Probe interface, the mode-driven MDI screen, the panel-only Homing screen,
-   the JOG/INC/MPG Manual screen, the Tools/tool-change page, the live-trail
-   clear action and the program-protect editing lock.
-8. Wire `linc.status-display` to the panel WCS readout, then integrate LinuxCNC
-   via PyO3 first, with a `MachineBackend` boundary that can later be replaced
-   by a C++ NML bridge.
-9. Verify keyboard-only navigation, panel disconnect handling, program
-   protection, explicit MDI/probe/tool issue gating, pendant jog-only behavior,
-   and the physical E-stop path.
+The workspace implements the specification in simulation. The shipped mill
+profile runs end to end; the lathe UI is implemented, but `lathe-sim.toml`
+intentionally refuses to load until its INI/tool table has the standard `P`
+column required by a power turret (see `CONFIGURATION.md`).
+
+- `linc` loads and validates a machine profile, renders the fixed shell, and
+  switches pages from the panel mode and keyboard.
+- The mill and lathe Machine, Program `SPLIT`/`CODE`, Offsets, Tools,
+  Diagnostics, Settings, G-code Help, Files, Touch Probe, MDI, Manual and
+  Homing screens are implemented.
+- The Program editor has syntax highlighting, undo/redo/find, dirty/save
+  state, a debounced live preview, program-protect locking and the live trail.
+- `linc-panel` owns the panel driver, HAL pins and the standalone simulator
+  panel. Simulation HMI and panel exchange state over two atomic JSON files so
+  panel modes, power, E-stop, overrides and protect drive the HMI, while the
+  HMI drives the panel status and tool displays.
+- The typed `linc.*` HAL component, the LinuxCNC bridge, the WHB04B-6 pendant
+  wiring and the generated G-code help index are present.
+
+`cargo test --workspace` covers config merging, INI parsing, command
+validation, editor/preview behavior, graph bounds, panel protocol, HAL output
+allowlisting and the simulator backend.
+
+## Remaining hardware verification
+
+The software paths are implemented; the items that still need a real machine
+or commissioned LinuxCNC session are listed in
+[`CONFIGURATION.md`](CONFIGURATION.md#12-remaining-hardware-verification).

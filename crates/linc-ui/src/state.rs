@@ -1,0 +1,771 @@
+//! HMI-local state, backend client and screen models.
+
+use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use linc_core::backend::BackendHandle;
+use linc_core::command::{BackendEvent, MachineCommand, MachineError};
+use linc_core::editor::Editor;
+use linc_core::gcode::Preview;
+use linc_core::help::HelpBundle;
+use linc_core::model::MachineSnapshot;
+use linc_core::probe::{ProbeCategory, ProbeMode, ProbeOperation, ProbeParameters};
+use linc_view::{theme as view_theme, TrajectoryView, ViewMode};
+
+use crate::theme;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Page {
+    Machine,
+    Program,
+    Offsets,
+    Tools,
+    Diagnostics,
+    Help,
+    Files,
+    Probe,
+    Mdi,
+    Homing,
+    Manual,
+    Settings,
+}
+
+impl Page {
+    pub const NAV: [Page; 6] = [
+        Page::Machine,
+        Page::Program,
+        Page::Offsets,
+        Page::Tools,
+        Page::Diagnostics,
+        Page::Help,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Page::Machine => "MACHINE",
+            Page::Program => "PROGRAM",
+            Page::Offsets => "OFFSETS",
+            Page::Tools => "TOOLS",
+            Page::Diagnostics => "DIAGNOSTICS",
+            Page::Help => "G-CODE HELP",
+            Page::Files => "FILES",
+            Page::Probe => "TOUCH PROBE",
+            Page::Mdi => "MDI",
+            Page::Homing => "HOMING",
+            Page::Manual => "MANUAL",
+            Page::Settings => "SETTINGS",
+        }
+    }
+
+    pub fn keycap(self) -> Option<&'static str> {
+        match self {
+            Page::Machine => Some("MAIN"),
+            Page::Program => Some("FILE"),
+            Page::Offsets => Some("OFFSET"),
+            Page::Tools => Some("TOOL"),
+            Page::Diagnostics => Some("WIN"),
+            _ => None,
+        }
+    }
+
+    pub fn is_mode_driven(self) -> bool {
+        matches!(self, Page::Mdi | Page::Homing | Page::Manual)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProgramView {
+    Split,
+    Code,
+}
+
+impl ProgramView {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Split => "SPLIT",
+            Self::Code => "CODE",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiagnosticsTab {
+    Overview,
+    PanelLink,
+    HalNml,
+    Motion,
+    Turret,
+    Io,
+    Logs,
+}
+
+impl DiagnosticsTab {
+    pub const ALL: [DiagnosticsTab; 7] = [
+        DiagnosticsTab::Overview,
+        DiagnosticsTab::PanelLink,
+        DiagnosticsTab::HalNml,
+        DiagnosticsTab::Motion,
+        DiagnosticsTab::Turret,
+        DiagnosticsTab::Io,
+        DiagnosticsTab::Logs,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Overview => "OVERVIEW",
+            Self::PanelLink => "PANEL LINK",
+            Self::HalNml => "HAL / NML",
+            Self::Motion => "MOTION",
+            Self::Turret => "TURRET / LIVE TOOL",
+            Self::Io => "I/O",
+            Self::Logs => "LOGS",
+        }
+    }
+}
+
+pub struct Toast {
+    pub text: String,
+    pub color: egui::Color32,
+    pub until: Instant,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PendingAction {
+    Navigate(Page),
+    OpenFiles,
+    LoadProgram(PathBuf),
+    Quit,
+    NewFile,
+    OpenRecent(PathBuf),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Modal {
+    ConfirmDiscard(PendingAction),
+    ConfirmQuit,
+    ConfirmOverwrite(String),
+    Error(String),
+    Info(String),
+}
+
+pub trait UiBackend {
+    fn snapshot(&mut self) -> MachineSnapshot;
+    fn send(&mut self, command: MachineCommand) -> Result<(), MachineError>;
+    fn drain_events(&mut self) -> Vec<BackendEvent>;
+}
+
+impl UiBackend for BackendHandle {
+    fn snapshot(&mut self) -> MachineSnapshot {
+        BackendHandle::snapshot(self)
+    }
+
+    fn send(&mut self, command: MachineCommand) -> Result<(), MachineError> {
+        BackendHandle::send(self, command);
+        Ok(())
+    }
+
+    fn drain_events(&mut self) -> Vec<BackendEvent> {
+        BackendHandle::drain_events(self)
+    }
+}
+
+/// Synchronous backend for tests and the headless demo.
+pub struct LocalBackend {
+    pub backend: linc_core::sim::SimBackend,
+}
+
+impl LocalBackend {
+    pub fn new(profile: linc_core::config::Profile, mode: linc_core::model::PanelMode) -> Self {
+        Self {
+            backend: linc_core::sim::SimBackend::new(profile, mode),
+        }
+    }
+}
+
+impl UiBackend for LocalBackend {
+    fn snapshot(&mut self) -> MachineSnapshot {
+        linc_core::backend::MachineBackend::snapshot(&mut self.backend)
+    }
+
+    fn send(&mut self, command: MachineCommand) -> Result<(), MachineError> {
+        linc_core::backend::MachineBackend::send(&mut self.backend, command)
+    }
+
+    fn drain_events(&mut self) -> Vec<BackendEvent> {
+        Vec::new()
+    }
+}
+
+#[derive(Default)]
+pub struct HelpUi {
+    pub bundle: Option<std::sync::Arc<HelpBundle>>,
+    pub query: String,
+    pub focus_search: bool,
+    pub selected_anchor: Option<String>,
+    pub selected_row: usize,
+    pub history: Vec<String>,
+    pub textures: HashMap<String, egui::TextureHandle>,
+    pub scroll_to_anchor: bool,
+}
+
+impl HelpUi {
+    pub fn ensure_loaded(&mut self) {
+        if self.bundle.is_none() {
+            match HelpBundle::load_bundled() {
+                Ok(bundle) => self.bundle = Some(std::sync::Arc::new(bundle)),
+                Err(error) => log::error!("cannot load help bundle: {error}"),
+            }
+        }
+    }
+
+    pub fn open(&mut self, anchor: &str) {
+        if let Some(current) = self.selected_anchor.clone() {
+            self.history.push(current);
+        }
+        self.selected_anchor = Some(anchor.to_string());
+        self.scroll_to_anchor = true;
+    }
+
+    pub fn back(&mut self) -> bool {
+        if let Some(previous) = self.history.pop() {
+            self.selected_anchor = Some(previous);
+            self.scroll_to_anchor = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn texture(&mut self, ctx: &egui::Context, name: &str) -> Option<egui::TextureHandle> {
+        if let Some(texture) = self.textures.get(name) {
+            return Some(texture.clone());
+        }
+        let bytes = crate::assets::image_bytes(name)?;
+        let image = image::load_from_memory(bytes).ok()?.to_rgba8();
+        let size = [image.width() as usize, image.height() as usize];
+        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+        let texture = ctx.load_texture(name, color_image, egui::TextureOptions::LINEAR);
+        self.textures.insert(name.to_string(), texture.clone());
+        Some(texture)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FileEntry {
+    pub name: String,
+    pub path: PathBuf,
+    pub is_dir: bool,
+    pub is_symlink: bool,
+    pub size: u64,
+    pub modified: Option<std::time::SystemTime>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MountState {
+    NoUsb,
+    Mounting,
+    Mounted,
+    Error(String),
+}
+
+pub struct FilesUi {
+    pub mount_state: MountState,
+    pub usb_root: Option<PathBuf>,
+    pub usb_label: String,
+    pub usb_free: Option<u64>,
+    pub usb_current: Option<PathBuf>,
+    pub usb_entries: Vec<FileEntry>,
+    pub usb_selected: usize,
+    pub usb_focused: bool,
+    pub nc_root: PathBuf,
+    pub nc_current: PathBuf,
+    pub nc_entries: Vec<FileEntry>,
+    pub nc_selected: usize,
+    pub status: String,
+    pub error: Option<String>,
+    pub copy: Option<CopyJob>,
+    pub mount_job: Option<std::sync::mpsc::Receiver<Result<Option<String>, String>>>,
+    pub last_mount_attempt: Instant,
+    pub pending_overwrite: Option<(PathBuf, PathBuf, PathBuf)>,
+    pub safe_to_remove: bool,
+    pub last_refresh: Instant,
+}
+
+impl FilesUi {
+    pub fn new(nc_root: PathBuf) -> Self {
+        let mut ui = Self {
+            mount_state: MountState::NoUsb,
+            usb_root: None,
+            usb_label: String::new(),
+            usb_free: None,
+            usb_current: None,
+            usb_entries: Vec::new(),
+            usb_selected: 0,
+            usb_focused: false,
+            nc_root: nc_root.clone(),
+            nc_current: nc_root,
+            nc_entries: Vec::new(),
+            nc_selected: 0,
+            status: String::new(),
+            error: None,
+            copy: None,
+            mount_job: None,
+            last_mount_attempt: Instant::now() - Duration::from_secs(10),
+            pending_overwrite: None,
+            safe_to_remove: false,
+            last_refresh: Instant::now() - Duration::from_secs(10),
+        };
+        ui.refresh();
+        ui
+    }
+
+    pub fn refresh(&mut self) {
+        self.last_refresh = Instant::now();
+        if !self.nc_current.starts_with(&self.nc_root) {
+            self.nc_current = self.nc_root.clone();
+        }
+        self.nc_entries = read_dir_entries(&self.nc_current);
+        self.refresh_usb();
+    }
+
+    pub fn refresh_usb(&mut self) {
+        match crate::files::discover_usb() {
+            Ok(Some(usb)) => {
+                self.usb_root = Some(usb.path.clone());
+                self.usb_label = usb.label;
+                self.usb_free = usb.free;
+                self.mount_state = MountState::Mounted;
+                self.usb_current = Some(usb.path.clone());
+                self.usb_entries = read_dir_entries(&usb.path);
+                self.usb_selected = self
+                    .usb_selected
+                    .min(self.usb_entries.len().saturating_sub(1));
+                self.error = None;
+            }
+            Ok(None) => {
+                self.mount_state = MountState::NoUsb;
+                self.usb_root = None;
+                self.usb_entries.clear();
+                self.usb_selected = 0;
+                self.usb_free = None;
+                // Try udisks2 auto-mount in the background; a polkit prompt or
+                // D-Bus timeout must never block the UI.
+                if self.mount_job.is_none()
+                    && self.last_mount_attempt.elapsed() > Duration::from_secs(5)
+                {
+                    self.last_mount_attempt = Instant::now();
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    std::thread::Builder::new()
+                        .name("linc-udisks2-mount".into())
+                        .spawn(move || {
+                            let _ = tx.send(crate::udisks2::mount_first_removable());
+                        })
+                        .ok();
+                    self.mount_job = Some(rx);
+                    self.mount_state = MountState::Mounting;
+                }
+            }
+            Err(error) => {
+                self.mount_state = MountState::Error(error.clone());
+                self.error = Some(error);
+            }
+        }
+    }
+
+    pub fn poll_mount(&mut self) {
+        if self.mount_job.is_none()
+            && self.usb_root.is_none()
+            && self.last_mount_attempt.elapsed() > Duration::from_secs(5)
+        {
+            self.last_mount_attempt = Instant::now();
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::Builder::new()
+                .name("linc-udisks2-mount".into())
+                .spawn(move || {
+                    let _ = tx.send(crate::udisks2::mount_first_removable());
+                })
+                .ok();
+            self.mount_job = Some(rx);
+            self.mount_state = MountState::Mounting;
+            return;
+        }
+        let Some(rx) = &self.mount_job else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(Ok(Some(_path))) => {
+                self.mount_job = None;
+                self.mount_state = MountState::NoUsb;
+                self.refresh_usb();
+            }
+            Ok(Ok(None)) => {
+                self.mount_job = None;
+                self.mount_state = MountState::NoUsb;
+            }
+            Ok(Err(error)) => {
+                self.mount_job = None;
+                self.mount_state = MountState::Error(error);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.mount_job = None;
+                self.mount_state = MountState::NoUsb;
+            }
+        }
+    }
+
+    pub fn nc_selected_path(&self) -> Option<&FileEntry> {
+        self.nc_entries.get(self.nc_selected)
+    }
+
+    pub fn usb_selected_path(&self) -> Option<&FileEntry> {
+        self.usb_entries.get(self.usb_selected)
+    }
+}
+
+pub struct CopyJob {
+    pub rx: std::sync::mpsc::Receiver<CopyProgress>,
+    pub label: String,
+    pub started: Instant,
+}
+
+#[derive(Clone, Debug)]
+pub enum CopyProgress {
+    Progress { copied: u64, total: u64 },
+    Done,
+    Error(String),
+}
+
+pub fn read_dir_entries(root: &std::path::Path) -> Vec<FileEntry> {
+    let mut entries = Vec::new();
+    let Ok(read) = std::fs::read_dir(root) else {
+        return entries;
+    };
+    for entry in read.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') && name != "." {
+            // Dot files are hidden; folder navigation only.
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(&path);
+        let is_symlink = metadata
+            .as_ref()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false);
+        let followed = std::fs::metadata(&path);
+        let is_dir = followed.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+        let size = followed.as_ref().map(|m| m.len()).unwrap_or(0);
+        let modified = followed.ok().and_then(|m| m.modified().ok());
+        entries.push(FileEntry {
+            name,
+            path,
+            is_dir,
+            is_symlink,
+            size,
+            modified,
+        });
+    }
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    entries
+}
+
+pub struct ProgramUi {
+    pub editor: Editor,
+    pub view: ProgramView,
+    pub preview: Preview,
+    pub last_valid_preview: Preview,
+    pub preview_due: Option<Instant>,
+    pub editor_revision_seen: u64,
+    pub program_revision_seen: u64,
+    pub loaded_path: Option<PathBuf>,
+    pub search_open: bool,
+    pub search_needle: String,
+    pub search_matches: Vec<usize>,
+    pub search_index: usize,
+    pub selected_line: usize,
+    pub graph_zoom: f32,
+    pub graph_pan: egui::Vec2,
+    pub graph_view: ViewMode,
+    pub fit_requested: bool,
+    pub follow_current: bool,
+    pub focus_editor: bool,
+    pub code_scroll_to_line: Option<usize>,
+    pub external_change: bool,
+}
+
+impl Default for ProgramUi {
+    fn default() -> Self {
+        Self {
+            editor: Editor::new(),
+            view: ProgramView::Split,
+            preview: Preview::empty(),
+            last_valid_preview: Preview::empty(),
+            preview_due: None,
+            editor_revision_seen: 0,
+            program_revision_seen: 0,
+            loaded_path: None,
+            search_open: false,
+            search_needle: String::new(),
+            search_matches: Vec::new(),
+            search_index: 0,
+            selected_line: 1,
+            graph_zoom: 1.0,
+            graph_pan: egui::Vec2::ZERO,
+            graph_view: ViewMode::Iso3d,
+            fit_requested: true,
+            follow_current: true,
+            focus_editor: false,
+            code_scroll_to_line: None,
+            external_change: false,
+        }
+    }
+}
+
+pub struct OffsetsUi {
+    pub selected: u8,
+    pub values: Vec<String>,
+    pub rotation: String,
+    pub g92: Vec<String>,
+    pub editing: bool,
+    pub error: Option<String>,
+    pub revision_seen: u64,
+}
+
+impl Default for OffsetsUi {
+    fn default() -> Self {
+        Self {
+            selected: 1,
+            values: Vec::new(),
+            rotation: "0.000".into(),
+            g92: Vec::new(),
+            editing: false,
+            error: None,
+            revision_seen: 0,
+        }
+    }
+}
+
+pub struct ToolsUi {
+    pub target: String,
+    pub selected_row: usize,
+    pub edit_row: Option<linc_core::model::ToolRow>,
+    pub edit_fields: HashMap<String, String>,
+    pub error: Option<String>,
+    pub revision_seen: u64,
+    pub confirm_token: Option<linc_core::model::ToolChangeToken>,
+}
+
+impl Default for ToolsUi {
+    fn default() -> Self {
+        Self {
+            target: "1".into(),
+            selected_row: 0,
+            edit_row: None,
+            edit_fields: HashMap::new(),
+            error: None,
+            revision_seen: 0,
+            confirm_token: None,
+        }
+    }
+}
+
+pub struct ProbeUi {
+    pub category: ProbeCategory,
+    pub operation: String,
+    pub params: ProbeParameters,
+    pub wcs: String,
+    pub measure_only: bool,
+    pub require_apply: bool,
+    pub error: Option<String>,
+    pub last_run: Option<Instant>,
+    pub apply_target: u8,
+}
+
+impl ProbeUi {
+    pub fn new(params: ProbeParameters, wcs: String) -> Self {
+        let operation = linc_core::probe::operations_in(ProbeCategory::OutsideCorners)
+            .first()
+            .map(|operation| operation.id.to_string())
+            .unwrap_or_default();
+        Self {
+            category: ProbeCategory::OutsideCorners,
+            operation,
+            params,
+            wcs,
+            measure_only: false,
+            require_apply: true,
+            error: None,
+            last_run: None,
+            apply_target: 1,
+        }
+    }
+
+    pub fn operation(&self) -> Option<&'static ProbeOperation> {
+        linc_core::probe::operation(&self.operation)
+    }
+
+    pub fn mdi(&self) -> Option<String> {
+        self.operation()
+            .map(|operation| self.params.mdi_text(operation))
+    }
+}
+
+pub struct MdiUi {
+    pub input: String,
+    pub focus: bool,
+    pub history: VecDeque<(String, u64)>,
+    pub history_index: Option<usize>,
+    pub last_result: Option<String>,
+    pub last_error: Option<String>,
+    pub quick_commands: Vec<String>,
+    pub syntax_ok: bool,
+    pub panel_mode: Option<linc_core::model::PanelMode>,
+}
+
+impl MdiUi {
+    pub fn new(quick_commands: Vec<String>) -> Self {
+        Self {
+            input: String::new(),
+            focus: true,
+            history: VecDeque::new(),
+            history_index: None,
+            last_result: None,
+            last_error: None,
+            quick_commands,
+            syntax_ok: true,
+            panel_mode: None,
+        }
+    }
+
+    pub fn push_history(&mut self, limit: usize, command: String) {
+        self.history
+            .push_front((command, linc_core::model::now_ms()));
+        while self.history.len() > limit {
+            self.history.pop_back();
+        }
+        self.history_index = None;
+    }
+}
+
+pub struct ManualUi {
+    pub zoom: f32,
+    pub pan: egui::Vec2,
+    pub view: ViewMode,
+    pub fit: bool,
+}
+
+impl Default for ManualUi {
+    fn default() -> Self {
+        Self {
+            zoom: 1.0,
+            pan: egui::Vec2::ZERO,
+            view: ViewMode::Iso3d,
+            fit: true,
+        }
+    }
+}
+
+pub struct SettingsUi {
+    pub density: f32,
+    pub show_keyboard: bool,
+    pub page: usize,
+}
+
+impl Default for SettingsUi {
+    fn default() -> Self {
+        Self {
+            density: 1.0,
+            show_keyboard: true,
+            page: 0,
+        }
+    }
+}
+
+pub struct GraphStyle {
+    pub show_grid: bool,
+    pub show_live_trail: bool,
+    pub show_program_bounds: bool,
+    pub show_machine_bounds: bool,
+    pub highlight_selected_line: bool,
+    pub trail_max_points: usize,
+    pub perspective: bool,
+}
+
+impl GraphStyle {
+    pub fn apply<'a>(
+        &self,
+        view: &mut TrajectoryView<'a>,
+        selected_line: Option<usize>,
+        current_line: Option<usize>,
+    ) {
+        view.show_grid = self.show_grid;
+        view.show_live_trail = self.show_live_trail;
+        view.show_program_bounds = self.show_program_bounds;
+        view.show_machine_bounds = self.show_machine_bounds;
+        view.show_selected_line = self.highlight_selected_line;
+        view.selected_line = selected_line;
+        view.current_line = current_line;
+    }
+}
+
+pub fn toast(text: impl Into<String>, color: egui::Color32) -> Toast {
+    Toast {
+        text: text.into(),
+        color,
+        until: Instant::now() + Duration::from_secs(5),
+    }
+}
+
+pub fn default_probe_mode(measure_only: bool) -> ProbeMode {
+    if measure_only {
+        ProbeMode::MeasureOnly
+    } else {
+        ProbeMode::ApplyWcs
+    }
+}
+
+pub fn page_accent(page: Page) -> egui::Color32 {
+    match page {
+        Page::Machine | Page::Program => theme::ACCENT,
+        Page::Offsets | Page::Tools => theme::ACCENT,
+        Page::Diagnostics => theme::C1,
+        Page::Help => theme::C2,
+        Page::Files => theme::C4,
+        Page::Probe => theme::C6,
+        Page::Mdi | Page::Homing | Page::Manual => theme::C3,
+        Page::Settings => theme::MUTED,
+    }
+}
+
+pub fn view_from_config(value: &str, lathe: bool) -> ViewMode {
+    if lathe {
+        return ViewMode::LatheXz;
+    }
+    match value {
+        "xy" | "top" => ViewMode::TopXy,
+        "xz" | "side" => ViewMode::SideXz,
+        _ => ViewMode::Iso3d,
+    }
+}
+
+pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
+    GraphStyle {
+        show_grid: profile.config.toolpath.show_grid,
+        show_live_trail: profile.config.toolpath.show_live_trail,
+        show_program_bounds: profile.config.toolpath.show_program_bounds,
+        show_machine_bounds: profile.config.toolpath.show_machine_bounds,
+        highlight_selected_line: profile.config.toolpath.highlight_selected_line,
+        trail_max_points: profile.config.toolpath.trail_max_points,
+        perspective: profile.config.toolpath.perspective,
+    }
+}
+
+pub fn selected_line_color() -> egui::Color32 {
+    view_theme::ACCENT
+}

@@ -12,13 +12,15 @@ extends = "base.toml"
 name = "BaierMill Simulation"
 kind = "sim"
 gui = "mill"
-linuxcnc_ini = "../../baiermill_sim/probe_basic.ini"
+linuxcnc_ini = "sim.ini"
 
 [mill]
 max_axes = 5
 
 [ui]
 window_title = "LiNC - BaierMill Simulation"
+# This development display runs at 125%; 0.8 keeps the 1920x1080 layout intact.
+scale = "0.8"
 
 [panel]
 kind = "simulated"

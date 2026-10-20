@@ -1,0 +1,48 @@
+[workspace]
+members = [
+    "crates/linc-core",
+    "crates/linc-view",
+    "crates/linc-hal",
+    "crates/linc-panel",
+    "crates/linc-linuxcnc",
+    "crates/linc-ui",
+    "crates/linc-app",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+authors = ["LiNC contributors"]
+repository = "https://example.invalid/linc"
+
+[workspace.dependencies]
+anyhow = "1.0"
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
+toml = "1.0"
+log = "0.4"
+env_logger = "0.11"
+clap = { version = "4.5", features = ["derive", "env"] }
+egui = "0.37"
+eframe = { version = "0.37", default-features = false, features = [
+    "clipboard",
+    "default_fonts",
+    "glow",
+    "wayland",
+    "x11",
+] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+ropey = "1.6"
+libloading = "0.8"
+libc = "0.2"
+serialport = { version = "4.8", default-features = false }
+signal-hook = "0.3"
+tempfile = "3.14"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"

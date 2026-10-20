@@ -1,0 +1,26 @@
+(LiNC lathe demonstration part - not a production program)
+%
+O2001
+(T0404 rough turn)
+G21 G90 G54 G18 G40
+T4 M6
+G96 S180 M3
+G95 F0.25
+G0 X24 Z2
+G1 Z-45 F0.25
+G1 X22
+G1 Z-42
+G1 X20
+G1 Z-38
+G1 X18
+G1 Z-30
+G1 X16
+G1 Z-20
+G1 X14
+G1 Z-8
+G1 X12
+G1 Z2
+G0 X50 Z50
+M5
+M30
+%

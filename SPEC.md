@@ -304,6 +304,10 @@ Focus rules:
 - `Enter` activates; `Esc` backs out.
 - No hover-only affordances.
 - No Tab dependency.
+- The minimum window size is **1920×1080**. The shell and every screen are
+  designed and optimized for that resolution; do not compress the layout below
+  it. The configured UI scale maps this logical size onto the physical 1080p
+  display (for example `0.8` on a 125% desktop).
 - On-screen actions have a minimum 44 px target at 1920×1080.
 
 ## 6. Screens
@@ -719,7 +723,8 @@ Rules:
 - Numeric/DRO: monospace, tabular figures, 10–24 px.
 - Section headers: sans-serif bold.
 - No condensed low-contrast text for critical values.
-- Scale proportionally at 1920×1080; preserve 44 px targets.
+- Design for a minimum 1920×1080 viewport; scale proportionally at that
+  resolution and preserve 44 px targets. Do not reflow into a smaller layout.
 
 ### 7.3 G-code syntax highlighting
 
@@ -1025,6 +1030,8 @@ For this design repository:
 
 For the future implementation:
 
+- The HMI enforces a minimum 1920×1080 window and every screen is usable and
+  optimized at that resolution; it does not accept a smaller viewport.
 - Keyboard-only navigation works without Tab, Shift, Delete, or F1–F8;
   standard Ctrl editing shortcuts work.
 - Panel service and HMI are separate processes; only the panel service owns

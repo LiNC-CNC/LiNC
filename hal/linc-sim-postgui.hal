@@ -1,0 +1,10 @@
+# LiNC simulation post-GUI wiring.
+#
+# Loaded by linc-display after the linc GUI has created its linc.* component.
+# The reference simulation already owns iocontrol.0.tool-changed through the
+# `tool-changed` signal; the HMI pulses that signal only after a validated
+# manual tool-change acknowledgement.
+
+net linc-status linc.status-display => cnc_panel.sseg_status
+net tool-changed linc.tool-change-confirm
+net linc-hmi-heartbeat linc.hmi-alive

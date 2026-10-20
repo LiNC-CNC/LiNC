@@ -1,176 +1,177 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640">
-  <rect x="4" y="4" width="992" height="632" rx="8" fill="none" stroke="var(--border)"/>
+  <rect x="0" y="0" width="1000" height="640" fill="#141619"/>
+  <rect x="4" y="4" width="992" height="632" rx="8" fill="none" stroke="#30353a"/>
 
   <!-- Top status -->
-  <line x1="4" y1="54" x2="996" y2="54" stroke="var(--border)"/>
-  <text x="16" y="33" fill="var(--fg)" font-size="16" font-family="sans-serif" font-weight="700">VMC-01</text>
-  <rect x="92" y="12" width="66" height="26" rx="4" fill="var(--accent)"/>
-  <text x="104" y="30" fill="var(--surface)" font-size="12" font-family="monospace" font-weight="700">AUTO</text>
-  <text x="176" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">PROGRAM</text>
-  <text x="176" y="34" fill="var(--fg)" font-size="13" font-family="monospace">O1001</text>
-  <text x="246" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">TOOL</text>
-  <text x="246" y="34" fill="var(--fg)" font-size="13" font-family="monospace">T12</text>
-  <text x="300" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">SPINDLE</text>
-  <text x="300" y="34" fill="var(--fg)" font-size="13" font-family="monospace">S 4200</text>
-  <text x="390" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">FEED</text>
-  <text x="390" y="34" fill="var(--fg)" font-size="13" font-family="monospace">F 850</text>
-  <text x="460" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">WORK</text>
-  <text x="460" y="34" fill="var(--fg)" font-size="13" font-family="monospace">G54</text>
-  <circle cx="548" cy="24" r="4" fill="var(--success)"/>
-  <text x="560" y="29" fill="var(--success)" font-size="11" font-family="sans-serif" font-weight="700">PANEL ONLINE</text>
-  <circle cx="686" cy="24" r="4" fill="var(--success)"/>
-  <text x="698" y="29" fill="var(--fg)" font-size="11" font-family="monospace">ALARM 0</text>
-  <circle cx="778" cy="24" r="4" fill="var(--warning)"/>
-  <text x="790" y="29" fill="var(--fg)" font-size="11" font-family="monospace">MSG 2</text>
-  <text x="892" y="30" fill="var(--muted)" font-size="12" font-family="monospace">14:32:05</text>
+  <line x1="4" y1="54" x2="996" y2="54" stroke="#30353a"/>
+  <text x="16" y="33" fill="#e8eaed" font-size="16" font-family="sans-serif" font-weight="700">VMC-01</text>
+  <rect x="92" y="12" width="66" height="26" rx="4" fill="#4da3ff"/>
+  <text x="104" y="30" fill="#141619" font-size="12" font-family="monospace" font-weight="700">AUTO</text>
+  <text x="176" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">PROGRAM</text>
+  <text x="176" y="34" fill="#e8eaed" font-size="13" font-family="monospace">O1001</text>
+  <text x="246" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">TOOL</text>
+  <text x="246" y="34" fill="#e8eaed" font-size="13" font-family="monospace">T12</text>
+  <text x="300" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">SPINDLE</text>
+  <text x="300" y="34" fill="#e8eaed" font-size="13" font-family="monospace">S 4200</text>
+  <text x="390" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">FEED</text>
+  <text x="390" y="34" fill="#e8eaed" font-size="13" font-family="monospace">F 850</text>
+  <text x="460" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">WORK</text>
+  <text x="460" y="34" fill="#e8eaed" font-size="13" font-family="monospace">G54</text>
+  <circle cx="548" cy="24" r="4" fill="#3ddc84"/>
+  <text x="560" y="29" fill="#3ddc84" font-size="11" font-family="sans-serif" font-weight="700">PANEL ONLINE</text>
+  <circle cx="686" cy="24" r="4" fill="#3ddc84"/>
+  <text x="698" y="29" fill="#e8eaed" font-size="11" font-family="monospace">ALARM 0</text>
+  <circle cx="778" cy="24" r="4" fill="#ffb020"/>
+  <text x="790" y="29" fill="#e8eaed" font-size="11" font-family="monospace">MSG 2</text>
+  <text x="892" y="30" fill="#9aa0a6" font-size="12" font-family="monospace">14:32:05</text>
 
   <!-- Left navigation -->
-  <rect x="8" y="62" width="142" height="508" rx="6" fill="var(--surface)" stroke="var(--border)"/>
-  <rect x="20" y="88" width="20" height="20" rx="3" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
-  <line x1="24" y1="98" x2="36" y2="98" stroke="var(--muted)" stroke-width="1.6"/>
-  <circle cx="30" cy="94" r="3" fill="none" stroke="var(--muted)" stroke-width="1.4"/>
-  <text x="48" y="96" fill="var(--muted)" font-size="12" font-family="sans-serif">MACHINE</text>
-  <text x="48" y="112" fill="var(--muted)" font-size="9" font-family="monospace">MAIN</text>
+  <rect x="8" y="62" width="142" height="508" rx="6" fill="#141619" stroke="#30353a"/>
+  <rect x="20" y="88" width="20" height="20" rx="3" fill="none" stroke="#9aa0a6" stroke-width="1.6"/>
+  <line x1="24" y1="98" x2="36" y2="98" stroke="#9aa0a6" stroke-width="1.6"/>
+  <circle cx="30" cy="94" r="3" fill="none" stroke="#9aa0a6" stroke-width="1.4"/>
+  <text x="48" y="96" fill="#9aa0a6" font-size="12" font-family="sans-serif">MACHINE</text>
+  <text x="48" y="112" fill="#9aa0a6" font-size="9" font-family="monospace">MAIN</text>
 
-  <rect x="8" y="126" width="4" height="42" fill="var(--accent)"/>
-  <rect x="20" y="132" width="18" height="20" rx="2" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
-  <line x1="24" y1="138" x2="34" y2="138" stroke="var(--accent)" stroke-width="1.2"/>
-  <line x1="24" y1="143" x2="34" y2="143" stroke="var(--accent)" stroke-width="1.2"/>
-  <line x1="24" y1="148" x2="31" y2="148" stroke="var(--accent)" stroke-width="1.2"/>
-  <text x="48" y="147" fill="var(--accent)" font-size="12" font-family="sans-serif" font-weight="700">PROGRAM</text>
-  <text x="48" y="163" fill="var(--muted)" font-size="9" font-family="monospace">FILE</text>
+  <rect x="8" y="126" width="4" height="42" fill="#4da3ff"/>
+  <rect x="20" y="132" width="18" height="20" rx="2" fill="none" stroke="#4da3ff" stroke-width="1.5"/>
+  <line x1="24" y1="138" x2="34" y2="138" stroke="#4da3ff" stroke-width="1.2"/>
+  <line x1="24" y1="143" x2="34" y2="143" stroke="#4da3ff" stroke-width="1.2"/>
+  <line x1="24" y1="148" x2="31" y2="148" stroke="#4da3ff" stroke-width="1.2"/>
+  <text x="48" y="147" fill="#4da3ff" font-size="12" font-family="sans-serif" font-weight="700">PROGRAM</text>
+  <text x="48" y="163" fill="#9aa0a6" font-size="9" font-family="monospace">FILE</text>
 
-  <circle cx="29" cy="194" r="9" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
-  <line x1="29" y1="180" x2="29" y2="185" stroke="var(--muted)" stroke-width="1.4"/>
-  <line x1="29" y1="203" x2="29" y2="208" stroke="var(--muted)" stroke-width="1.4"/>
-  <line x1="15" y1="194" x2="20" y2="194" stroke="var(--muted)" stroke-width="1.4"/>
-  <line x1="38" y1="194" x2="43" y2="194" stroke="var(--muted)" stroke-width="1.4"/>
-  <text x="48" y="198" fill="var(--muted)" font-size="12" font-family="sans-serif">OFFSETS</text>
-  <text x="48" y="214" fill="var(--muted)" font-size="9" font-family="monospace">OFFSET</text>
+  <circle cx="29" cy="194" r="9" fill="none" stroke="#9aa0a6" stroke-width="1.5"/>
+  <line x1="29" y1="180" x2="29" y2="185" stroke="#9aa0a6" stroke-width="1.4"/>
+  <line x1="29" y1="203" x2="29" y2="208" stroke="#9aa0a6" stroke-width="1.4"/>
+  <line x1="15" y1="194" x2="20" y2="194" stroke="#9aa0a6" stroke-width="1.4"/>
+  <line x1="38" y1="194" x2="43" y2="194" stroke="#9aa0a6" stroke-width="1.4"/>
+  <text x="48" y="198" fill="#9aa0a6" font-size="12" font-family="sans-serif">OFFSETS</text>
+  <text x="48" y="214" fill="#9aa0a6" font-size="9" font-family="monospace">OFFSET</text>
 
-  <path d="M20 250 L28 250 L31 244 L34 256 L38 238 L42 250 L48 250" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
-  <text x="56" y="251" fill="var(--muted)" font-size="12" font-family="sans-serif">TOOLS</text>
-  <text x="56" y="267" fill="var(--muted)" font-size="9" font-family="monospace">TOOL</text>
+  <path d="M20 250 L28 250 L31 244 L34 256 L38 238 L42 250 L48 250" fill="none" stroke="#9aa0a6" stroke-width="1.6"/>
+  <text x="56" y="251" fill="#9aa0a6" font-size="12" font-family="sans-serif">TOOLS</text>
+  <text x="56" y="267" fill="#9aa0a6" font-size="9" font-family="monospace">TOOL</text>
 
-  <path d="M20 306 L20 300 L25 300 L25 312 L37 312 L37 306 L43 306" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
-  <text x="52" y="310" fill="var(--muted)" font-size="12" font-family="sans-serif">DIAGNOSTICS</text>
-  <text x="52" y="326" fill="var(--muted)" font-size="9" font-family="monospace">WIN</text>
+  <path d="M20 306 L20 300 L25 300 L25 312 L37 312 L37 306 L43 306" fill="none" stroke="#9aa0a6" stroke-width="1.6"/>
+  <text x="52" y="310" fill="#9aa0a6" font-size="12" font-family="sans-serif">DIAGNOSTICS</text>
+  <text x="52" y="326" fill="#9aa0a6" font-size="9" font-family="monospace">WIN</text>
 
-  <line x1="20" y1="350" x2="138" y2="350" stroke="var(--border)"/>
-  <text x="20" y="374" fill="var(--muted)" font-size="9" font-family="sans-serif">FOCUS / NAVIGATION</text>
-  <text x="20" y="394" fill="var(--muted)" font-size="9" font-family="monospace">ARROWS MOVE</text>
-  <text x="20" y="410" fill="var(--muted)" font-size="9" font-family="monospace">ENTER SELECT</text>
-  <text x="20" y="426" fill="var(--muted)" font-size="9" font-family="monospace">ESC BACK</text>
-  <text x="20" y="442" fill="var(--muted)" font-size="9" font-family="monospace">PGUP / PGDN</text>
-  <text x="20" y="458" fill="var(--muted)" font-size="9" font-family="monospace">HOME / END</text>
-  <text x="20" y="486" fill="var(--muted)" font-size="9" font-family="sans-serif">SYMBOL LAYER</text>
-  <text x="20" y="502" fill="var(--muted)" font-size="9" font-family="monospace">MO(1) + KEY</text>
-  <text x="20" y="530" fill="var(--muted)" font-size="9" font-family="sans-serif">NO ON-SCREEN</text>
-  <text x="20" y="544" fill="var(--muted)" font-size="9" font-family="sans-serif">MACHINE CONTROLS</text>
+  <line x1="20" y1="350" x2="138" y2="350" stroke="#30353a"/>
+  <text x="20" y="374" fill="#9aa0a6" font-size="9" font-family="sans-serif">FOCUS / NAVIGATION</text>
+  <text x="20" y="394" fill="#9aa0a6" font-size="9" font-family="monospace">ARROWS MOVE</text>
+  <text x="20" y="410" fill="#9aa0a6" font-size="9" font-family="monospace">ENTER SELECT</text>
+  <text x="20" y="426" fill="#9aa0a6" font-size="9" font-family="monospace">ESC BACK</text>
+  <text x="20" y="442" fill="#9aa0a6" font-size="9" font-family="monospace">PGUP / PGDN</text>
+  <text x="20" y="458" fill="#9aa0a6" font-size="9" font-family="monospace">HOME / END</text>
+  <text x="20" y="486" fill="#9aa0a6" font-size="9" font-family="sans-serif">SYMBOL LAYER</text>
+  <text x="20" y="502" fill="#9aa0a6" font-size="9" font-family="monospace">MO(1) + KEY</text>
+  <text x="20" y="530" fill="#9aa0a6" font-size="9" font-family="sans-serif">NO ON-SCREEN</text>
+  <text x="20" y="544" fill="#9aa0a6" font-size="9" font-family="sans-serif">MACHINE CONTROLS</text>
 
   <!-- Page header -->
-  <text x="158" y="78" fill="var(--fg)" font-size="15" font-family="sans-serif" font-weight="700">FILES</text>
-  <text x="204" y="78" fill="var(--muted)" font-size="11" font-family="sans-serif">PROGRAM STORAGE / REMOVABLE MEDIA</text>
-  <rect x="844" y="62" width="66" height="22" rx="3" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="855" y="77" fill="var(--muted)" font-size="9" font-family="monospace">REFRESH</text>
-  <text x="926" y="77" fill="var(--muted)" font-size="9" font-family="monospace">ESC BACK</text>
-  <line x1="158" y1="90" x2="984" y2="90" stroke="var(--border)"/>
+  <text x="158" y="78" fill="#e8eaed" font-size="15" font-family="sans-serif" font-weight="700">FILES</text>
+  <text x="204" y="78" fill="#9aa0a6" font-size="11" font-family="sans-serif">PROGRAM STORAGE / REMOVABLE MEDIA</text>
+  <rect x="844" y="62" width="66" height="22" rx="3" fill="#141619" stroke="#30353a"/>
+  <text x="855" y="77" fill="#9aa0a6" font-size="9" font-family="monospace">REFRESH</text>
+  <text x="926" y="77" fill="#9aa0a6" font-size="9" font-family="monospace">ESC BACK</text>
+  <line x1="158" y1="90" x2="984" y2="90" stroke="#30353a"/>
 
   <!-- USB pane (left) -->
-  <rect x="158" y="98" width="396" height="462" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="170" y="120" fill="var(--fg)" font-size="12" font-family="sans-serif" font-weight="700">USB1</text>
-  <circle cx="220" cy="116" r="3" fill="var(--success)"/>
-  <text x="228" y="120" fill="var(--success)" font-size="9" font-family="monospace">MOUNTED</text>
-  <rect x="460" y="106" width="82" height="22" rx="3" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="472" y="121" fill="var(--muted)" font-size="9" font-family="monospace">EJECT</text>
-  <text x="170" y="138" fill="var(--muted)" font-size="9" font-family="monospace">KINGSTON 32 GB / FAT32 / 27.1 GB FREE</text>
-  <line x1="170" y1="148" x2="542" y2="148" stroke="var(--border)"/>
-  <text x="174" y="166" fill="var(--muted)" font-size="8" font-family="sans-serif">NAME</text>
-  <text x="420" y="166" fill="var(--muted)" font-size="8" font-family="sans-serif">SIZE</text>
-  <text x="468" y="166" fill="var(--muted)" font-size="8" font-family="sans-serif">MODIFIED</text>
+  <rect x="158" y="98" width="396" height="462" rx="5" fill="#141619" stroke="#30353a"/>
+  <text x="170" y="120" fill="#e8eaed" font-size="12" font-family="sans-serif" font-weight="700">USB1</text>
+  <circle cx="220" cy="116" r="3" fill="#3ddc84"/>
+  <text x="228" y="120" fill="#3ddc84" font-size="9" font-family="monospace">MOUNTED</text>
+  <rect x="460" y="106" width="82" height="22" rx="3" fill="#141619" stroke="#30353a"/>
+  <text x="472" y="121" fill="#9aa0a6" font-size="9" font-family="monospace">EJECT</text>
+  <text x="170" y="138" fill="#9aa0a6" font-size="9" font-family="monospace">KINGSTON 32 GB / FAT32 / 27.1 GB FREE</text>
+  <line x1="170" y1="148" x2="542" y2="148" stroke="#30353a"/>
+  <text x="174" y="166" fill="#9aa0a6" font-size="8" font-family="sans-serif">NAME</text>
+  <text x="420" y="166" fill="#9aa0a6" font-size="8" font-family="sans-serif">SIZE</text>
+  <text x="468" y="166" fill="#9aa0a6" font-size="8" font-family="sans-serif">MODIFIED</text>
 
-  <text x="174" y="188" fill="var(--muted)" font-size="10" font-family="monospace">..</text>
-  <text x="174" y="212" fill="var(--fg)" font-size="10" font-family="monospace">PART_A.NGC</text>
-  <text x="420" y="212" fill="var(--muted)" font-size="9" font-family="monospace">12.4 KB</text>
-  <text x="468" y="212" fill="var(--muted)" font-size="9" font-family="monospace">10-19 09:12</text>
-  <text x="174" y="236" fill="var(--fg)" font-size="10" font-family="monospace">PART_B.NGC</text>
-  <text x="420" y="236" fill="var(--muted)" font-size="9" font-family="monospace">8.1 KB</text>
-  <text x="468" y="236" fill="var(--muted)" font-size="9" font-family="monospace">10-19 09:10</text>
-  <text x="174" y="260" fill="var(--fg)" font-size="10" font-family="monospace">TOOLING.TXT</text>
-  <text x="420" y="260" fill="var(--muted)" font-size="9" font-family="monospace">2.0 KB</text>
-  <text x="468" y="260" fill="var(--muted)" font-size="9" font-family="monospace">10-18 18:40</text>
-  <text x="174" y="284" fill="var(--accent)" font-size="10" font-family="monospace">backup/</text>
-  <text x="420" y="284" fill="var(--muted)" font-size="9" font-family="monospace">DIR</text>
+  <text x="174" y="188" fill="#9aa0a6" font-size="10" font-family="monospace">..</text>
+  <text x="174" y="212" fill="#e8eaed" font-size="10" font-family="monospace">PART_A.NGC</text>
+  <text x="420" y="212" fill="#9aa0a6" font-size="9" font-family="monospace">12.4 KB</text>
+  <text x="468" y="212" fill="#9aa0a6" font-size="9" font-family="monospace">10-19 09:12</text>
+  <text x="174" y="236" fill="#e8eaed" font-size="10" font-family="monospace">PART_B.NGC</text>
+  <text x="420" y="236" fill="#9aa0a6" font-size="9" font-family="monospace">8.1 KB</text>
+  <text x="468" y="236" fill="#9aa0a6" font-size="9" font-family="monospace">10-19 09:10</text>
+  <text x="174" y="260" fill="#e8eaed" font-size="10" font-family="monospace">TOOLING.TXT</text>
+  <text x="420" y="260" fill="#9aa0a6" font-size="9" font-family="monospace">2.0 KB</text>
+  <text x="468" y="260" fill="#9aa0a6" font-size="9" font-family="monospace">10-18 18:40</text>
+  <text x="174" y="284" fill="#4da3ff" font-size="10" font-family="monospace">backup/</text>
+  <text x="420" y="284" fill="#9aa0a6" font-size="9" font-family="monospace">DIR</text>
 
-  <line x1="170" y1="404" x2="542" y2="404" stroke="var(--border)"/>
-  <text x="170" y="424" fill="var(--muted)" font-size="9" font-family="sans-serif">USB AUTO-MOUNT</text>
-  <text x="170" y="442" fill="var(--success)" font-size="9" font-family="monospace">ON INSERT / NOEXEC NOSUID NODEV</text>
-  <text x="170" y="460" fill="var(--muted)" font-size="9" font-family="monospace">MOUNTED BY UDISKS2 / USER SESSION</text>
-  <text x="170" y="486" fill="var(--muted)" font-size="9" font-family="sans-serif">EJECT AFTER COPIES COMPLETE</text>
-  <text x="170" y="502" fill="var(--muted)" font-size="9" font-family="sans-serif">UNMOUNT + POWER OFF / SAFE TO REMOVE</text>
+  <line x1="170" y1="404" x2="542" y2="404" stroke="#30353a"/>
+  <text x="170" y="424" fill="#9aa0a6" font-size="9" font-family="sans-serif">USB AUTO-MOUNT</text>
+  <text x="170" y="442" fill="#3ddc84" font-size="9" font-family="monospace">ON INSERT / NOEXEC NOSUID NODEV</text>
+  <text x="170" y="460" fill="#9aa0a6" font-size="9" font-family="monospace">MOUNTED BY UDISKS2 / USER SESSION</text>
+  <text x="170" y="486" fill="#9aa0a6" font-size="9" font-family="sans-serif">EJECT AFTER COPIES COMPLETE</text>
+  <text x="170" y="502" fill="#9aa0a6" font-size="9" font-family="sans-serif">UNMOUNT + POWER OFF / SAFE TO REMOVE</text>
 
   <!-- NC_FILES pane (right, active) -->
-  <rect x="566" y="98" width="418" height="462" rx="5" fill="var(--surface)" stroke="var(--accent)"/>
-  <text x="578" y="120" fill="var(--accent)" font-size="12" font-family="sans-serif" font-weight="700">NC_FILES</text>
-  <text x="650" y="120" fill="var(--muted)" font-size="9" font-family="monospace">~/linuxcnc/nc_files</text>
-  <text x="578" y="138" fill="var(--muted)" font-size="9" font-family="monospace">18.4 GB FREE  /  9 ITEMS</text>
-  <line x1="578" y1="148" x2="972" y2="148" stroke="var(--border)"/>
-  <text x="582" y="166" fill="var(--muted)" font-size="8" font-family="sans-serif">NAME</text>
-  <text x="860" y="166" fill="var(--muted)" font-size="8" font-family="sans-serif">SIZE</text>
-  <text x="910" y="166" fill="var(--muted)" font-size="8" font-family="sans-serif">MODIFIED</text>
+  <rect x="566" y="98" width="418" height="462" rx="5" fill="#141619" stroke="#4da3ff"/>
+  <text x="578" y="120" fill="#4da3ff" font-size="12" font-family="sans-serif" font-weight="700">NC_FILES</text>
+  <text x="650" y="120" fill="#9aa0a6" font-size="9" font-family="monospace">~/linuxcnc/nc_files</text>
+  <text x="578" y="138" fill="#9aa0a6" font-size="9" font-family="monospace">18.4 GB FREE  /  9 ITEMS</text>
+  <line x1="578" y1="148" x2="972" y2="148" stroke="#30353a"/>
+  <text x="582" y="166" fill="#9aa0a6" font-size="8" font-family="sans-serif">NAME</text>
+  <text x="860" y="166" fill="#9aa0a6" font-size="8" font-family="sans-serif">SIZE</text>
+  <text x="910" y="166" fill="#9aa0a6" font-size="8" font-family="sans-serif">MODIFIED</text>
 
-  <text x="582" y="188" fill="var(--muted)" font-size="10" font-family="monospace">..</text>
-  <rect x="578" y="196" width="394" height="24" fill="var(--accent)" opacity="0.16"/>
-  <rect x="578" y="196" width="3" height="24" fill="var(--accent)"/>
-  <text x="582" y="212" fill="var(--fg)" font-size="10" font-family="monospace" font-weight="700">DEMO.NC</text>
-  <text x="860" y="212" fill="var(--muted)" font-size="9" font-family="monospace">1.8 KB</text>
-  <text x="910" y="212" fill="var(--muted)" font-size="9" font-family="monospace">10-20 07:15</text>
-  <text x="582" y="236" fill="var(--fg)" font-size="10" font-family="monospace">hello-turn.ngc</text>
-  <text x="860" y="236" fill="var(--muted)" font-size="9" font-family="monospace">471 B</text>
-  <text x="910" y="236" fill="var(--muted)" font-size="9" font-family="monospace">07-24 10:38</text>
-  <text x="582" y="260" fill="var(--fg)" font-size="10" font-family="monospace">POCKET.NC</text>
-  <text x="860" y="260" fill="var(--muted)" font-size="9" font-family="monospace">4.2 KB</text>
-  <text x="910" y="260" fill="var(--muted)" font-size="9" font-family="monospace">10-18 16:02</text>
-  <text x="582" y="284" fill="var(--fg)" font-size="10" font-family="monospace">ROUGH.NC</text>
-  <text x="860" y="284" fill="var(--muted)" font-size="9" font-family="monospace">8.8 KB</text>
-  <text x="910" y="284" fill="var(--muted)" font-size="9" font-family="monospace">10-18 15:44</text>
-  <text x="582" y="308" fill="var(--fg)" font-size="10" font-family="monospace">readme.ngc</text>
-  <text x="860" y="308" fill="var(--muted)" font-size="9" font-family="monospace">1.5 KB</text>
-  <text x="910" y="308" fill="var(--muted)" font-size="9" font-family="monospace">07-24 06:21</text>
-  <text x="582" y="332" fill="var(--accent)" font-size="10" font-family="monospace">examples/</text>
-  <text x="860" y="332" fill="var(--muted)" font-size="9" font-family="monospace">DIR</text>
-  <text x="582" y="356" fill="var(--accent)" font-size="10" font-family="monospace">nativecam/</text>
-  <text x="860" y="356" fill="var(--muted)" font-size="9" font-family="monospace">DIR</text>
-  <text x="582" y="380" fill="var(--accent)" font-size="10" font-family="monospace">pb_examples/</text>
-  <text x="860" y="380" fill="var(--muted)" font-size="9" font-family="monospace">DIR</text>
+  <text x="582" y="188" fill="#9aa0a6" font-size="10" font-family="monospace">..</text>
+  <rect x="578" y="196" width="394" height="24" fill="#4da3ff" opacity="0.16"/>
+  <rect x="578" y="196" width="3" height="24" fill="#4da3ff"/>
+  <text x="582" y="212" fill="#e8eaed" font-size="10" font-family="monospace" font-weight="700">DEMO.NC</text>
+  <text x="860" y="212" fill="#9aa0a6" font-size="9" font-family="monospace">1.8 KB</text>
+  <text x="910" y="212" fill="#9aa0a6" font-size="9" font-family="monospace">10-20 07:15</text>
+  <text x="582" y="236" fill="#e8eaed" font-size="10" font-family="monospace">hello-turn.ngc</text>
+  <text x="860" y="236" fill="#9aa0a6" font-size="9" font-family="monospace">471 B</text>
+  <text x="910" y="236" fill="#9aa0a6" font-size="9" font-family="monospace">07-24 10:38</text>
+  <text x="582" y="260" fill="#e8eaed" font-size="10" font-family="monospace">POCKET.NC</text>
+  <text x="860" y="260" fill="#9aa0a6" font-size="9" font-family="monospace">4.2 KB</text>
+  <text x="910" y="260" fill="#9aa0a6" font-size="9" font-family="monospace">10-18 16:02</text>
+  <text x="582" y="284" fill="#e8eaed" font-size="10" font-family="monospace">ROUGH.NC</text>
+  <text x="860" y="284" fill="#9aa0a6" font-size="9" font-family="monospace">8.8 KB</text>
+  <text x="910" y="284" fill="#9aa0a6" font-size="9" font-family="monospace">10-18 15:44</text>
+  <text x="582" y="308" fill="#e8eaed" font-size="10" font-family="monospace">readme.ngc</text>
+  <text x="860" y="308" fill="#9aa0a6" font-size="9" font-family="monospace">1.5 KB</text>
+  <text x="910" y="308" fill="#9aa0a6" font-size="9" font-family="monospace">07-24 06:21</text>
+  <text x="582" y="332" fill="#4da3ff" font-size="10" font-family="monospace">examples/</text>
+  <text x="860" y="332" fill="#9aa0a6" font-size="9" font-family="monospace">DIR</text>
+  <text x="582" y="356" fill="#4da3ff" font-size="10" font-family="monospace">nativecam/</text>
+  <text x="860" y="356" fill="#9aa0a6" font-size="9" font-family="monospace">DIR</text>
+  <text x="582" y="380" fill="#4da3ff" font-size="10" font-family="monospace">pb_examples/</text>
+  <text x="860" y="380" fill="#9aa0a6" font-size="9" font-family="monospace">DIR</text>
 
-  <line x1="578" y1="404" x2="972" y2="404" stroke="var(--border)"/>
-  <text x="578" y="424" fill="var(--muted)" font-size="9" font-family="sans-serif">SELECTED</text>
-  <text x="578" y="442" fill="var(--fg)" font-size="10" font-family="monospace">DEMO.NC  /  1.8 KB  /  10-20 07:15</text>
-  <text x="578" y="460" fill="var(--muted)" font-size="9" font-family="monospace">G-CODE / 22 LINES / UTF-8</text>
-  <text x="578" y="486" fill="var(--muted)" font-size="9" font-family="sans-serif">FREE SPACE CHECKED BEFORE COPY</text>
-  <text x="578" y="502" fill="var(--muted)" font-size="9" font-family="sans-serif">WRITES BLOCKED WHILE PROGRAM RUNS</text>
+  <line x1="578" y1="404" x2="972" y2="404" stroke="#30353a"/>
+  <text x="578" y="424" fill="#9aa0a6" font-size="9" font-family="sans-serif">SELECTED</text>
+  <text x="578" y="442" fill="#e8eaed" font-size="10" font-family="monospace">DEMO.NC  /  1.8 KB  /  10-20 07:15</text>
+  <text x="578" y="460" fill="#9aa0a6" font-size="9" font-family="monospace">G-CODE / 22 LINES / UTF-8</text>
+  <text x="578" y="486" fill="#9aa0a6" font-size="9" font-family="sans-serif">FREE SPACE CHECKED BEFORE COPY</text>
+  <text x="578" y="502" fill="#9aa0a6" font-size="9" font-family="sans-serif">WRITES BLOCKED WHILE PROGRAM RUNS</text>
 
   <!-- Bottom action bar -->
-  <line x1="4" y1="578" x2="996" y2="578" stroke="var(--border)"/>
-  <text x="16" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ESC BACK</text>
-  <text x="92" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ENTER OPEN</text>
-  <text x="190" y="599" fill="var(--muted)" font-size="9" font-family="monospace">LOAD</text>
-  <line x1="244" y1="584" x2="244" y2="606" stroke="var(--border)"/>
-  <rect x="260" y="584" width="132" height="22" rx="3" fill="var(--accent)"/>
-  <text x="270" y="599" fill="var(--surface)" font-size="9" font-family="monospace" font-weight="700">&lt;- COPY TO USB</text>
-  <text x="408" y="599" fill="var(--muted)" font-size="9" font-family="monospace">COPY TO NC_FILES -&gt;</text>
-  <text x="588" y="599" fill="var(--warning)" font-size="9" font-family="monospace">EJECT</text>
-  <text x="646" y="599" fill="var(--muted)" font-size="9" font-family="monospace">REFRESH</text>
-  <text x="714" y="599" fill="var(--muted)" font-size="9" font-family="monospace">HELP</text>
-  <text x="916" y="599" fill="var(--muted)" font-size="9" font-family="monospace">COPY IDLE</text>
+  <line x1="4" y1="578" x2="996" y2="578" stroke="#30353a"/>
+  <text x="16" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">ESC BACK</text>
+  <text x="92" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">ENTER OPEN</text>
+  <text x="190" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">LOAD</text>
+  <line x1="244" y1="584" x2="244" y2="606" stroke="#30353a"/>
+  <rect x="260" y="584" width="132" height="22" rx="3" fill="#4da3ff"/>
+  <text x="270" y="599" fill="#141619" font-size="9" font-family="monospace" font-weight="700">&lt;- COPY TO USB</text>
+  <text x="408" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">COPY TO NC_FILES -&gt;</text>
+  <text x="588" y="599" fill="#ffb020" font-size="9" font-family="monospace">EJECT</text>
+  <text x="646" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">REFRESH</text>
+  <text x="714" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">HELP</text>
+  <text x="916" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">COPY IDLE</text>
 
   <!-- Status line -->
-  <line x1="4" y1="612" x2="996" y2="612" stroke="var(--border)"/>
-  <text x="16" y="628" fill="var(--muted)" font-size="9" font-family="monospace">FILES  USB1 MOUNTED  NC_FILES 9 ITEMS  COPY IDLE</text>
-  <text x="500" y="628" fill="var(--muted)" font-size="9" font-family="monospace">27.1 GB / 18.4 GB FREE</text>
-  <text x="650" y="628" fill="var(--success)" font-size="9" font-family="monospace">PROTECT OFF</text>
-  <text x="740" y="628" fill="var(--success)" font-size="9" font-family="monospace">E-STOP OK</text>
-  <text x="820" y="628" fill="var(--success)" font-size="9" font-family="monospace">ALARM 0</text>
-  <text x="900" y="628" fill="var(--muted)" font-size="9" font-family="monospace">14:32:05</text>
+  <line x1="4" y1="612" x2="996" y2="612" stroke="#30353a"/>
+  <text x="16" y="628" fill="#9aa0a6" font-size="9" font-family="monospace">FILES  USB1 MOUNTED  NC_FILES 9 ITEMS  COPY IDLE</text>
+  <text x="500" y="628" fill="#9aa0a6" font-size="9" font-family="monospace">27.1 GB / 18.4 GB FREE</text>
+  <text x="650" y="628" fill="#3ddc84" font-size="9" font-family="monospace">PROTECT OFF</text>
+  <text x="740" y="628" fill="#3ddc84" font-size="9" font-family="monospace">E-STOP OK</text>
+  <text x="820" y="628" fill="#3ddc84" font-size="9" font-family="monospace">ALARM 0</text>
+  <text x="900" y="628" fill="#9aa0a6" font-size="9" font-family="monospace">14:32:05</text>
 </svg>

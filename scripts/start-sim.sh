@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Start the LiNC simulation with a real LinuxCNC process.
+#
+#   ./scripts/start-sim.sh                 foreground (Ctrl+C stops LinuxCNC)
+#   ./scripts/start-sim.sh --detach        background, PID in $XDG_RUNTIME_DIR/linc/sim.pid
+#
+# LinuxCNC loads the reference baiermill_sim software FPGA/pendant HAL and the
+# LiNC panel service. LiNC is the [DISPLAY] program; linc-panel is the CNC
+# control panel window.
+#
+# Environment:
+#   LINC_SIM_CONFIG   profile (default: configs/sim.toml)
+#   LINC_SIM_INI      LinuxCNC INI (default: configs/sim.ini)
+#   LINC_BIN          linc binary (default: target/release/linc)
+#   LINC_LOG_LEVEL    RUST_LOG for linc/linc-panel (default: info)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+PROFILE="${LINC_SIM_CONFIG:-$ROOT/configs/sim.toml}"
+INI="${LINC_SIM_INI:-$ROOT/configs/sim.ini}"
+BIN="${LINC_BIN:-$ROOT/target/release/linc}"
+PANEL_BIN="${LINC_PANEL_BIN:-$ROOT/target/release/linc-panel}"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/linc"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/linc"
+PID_FILE="$RUNTIME_DIR/sim.pid"
+PANEL_PID_FILE="$RUNTIME_DIR/panel-sim.pid"
+LINC_PID_FILE="$RUNTIME_DIR/linc.pid"
+LOG_FILE="$STATE_DIR/sim.log"
+mkdir -p "$RUNTIME_DIR" "$STATE_DIR"
+
+if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+    echo "no graphical session: set DISPLAY or WAYLAND_DISPLAY" >&2
+    exit 1
+fi
+for file in "$PROFILE" "$INI"; do
+    if [[ ! -f "$file" ]]; then
+        echo "file not found: $file" >&2
+        exit 1
+    fi
+done
+if [[ ! -x "$BIN" || ! -x "$PANEL_BIN" ]]; then
+    echo "building LiNC release binaries..." >&2
+    (cd "$ROOT" && cargo build --release -p linc-app -p linc-panel)
+fi
+
+DETACH=0
+if [[ "${1:-}" == "--detach" ]]; then
+    DETACH=1
+    shift
+fi
+
+export LINC_CONFIG="$PROFILE"
+export LINC_PANEL_PID_FILE="$PANEL_PID_FILE"
+export LINC_DISPLAY_PID_FILE="$LINC_PID_FILE"
+export RUST_LOG="${LINC_LOG_LEVEL:-info}"
+export PATH="$ROOT/target/release:$ROOT/scripts:$PATH"
+
+if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    echo "LiNC/LinuxCNC sim already running (PID $(cat "$PID_FILE"))"
+    exit 0
+fi
+rm -f "$PANEL_PID_FILE" "$LINC_PID_FILE"
+
+# The reference HAL uses paths relative to baiermill_sim (rio_sim.py and the
+# machine INI); run LinuxCNC from there.
+cd "$ROOT/../baiermill_sim"
+
+if (( DETACH )); then
+    nohup linuxcnc "$INI" "$@" >"$LOG_FILE" 2>&1 &
+    PID=$!
+    echo "$PID" >"$PID_FILE"
+    sleep 2
+    if ! kill -0 "$PID" 2>/dev/null; then
+        echo "LinuxCNC failed to start; see $LOG_FILE" >&2
+        tail -n 20 "$LOG_FILE" >&2 || true
+        rm -f "$PID_FILE"
+        exit 1
+    fi
+    echo "LiNC + LinuxCNC sim started (PID $PID)"
+    echo "  ini:     $INI"
+    echo "  profile: $PROFILE"
+    echo "  panel:   $PANEL_PID_FILE"
+    echo "  display: $LINC_PID_FILE"
+    echo "  log:     $LOG_FILE"
+    echo "  stop:    $SCRIPT_DIR/stop-sim.sh"
+else
+    trap '"$SCRIPT_DIR/stop-sim.sh"' EXIT INT TERM
+    linuxcnc "$INI" "$@"
+fi

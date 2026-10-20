@@ -1,266 +1,267 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640">
-  <rect x="4" y="4" width="992" height="632" rx="8" fill="none" stroke="var(--border)"/>
+  <rect x="0" y="0" width="1000" height="640" fill="#141619"/>
+  <rect x="4" y="4" width="992" height="632" rx="8" fill="none" stroke="#30353a"/>
 
   <!-- Top status -->
-  <line x1="4" y1="54" x2="996" y2="54" stroke="var(--border)"/>
-  <text x="16" y="33" fill="var(--fg)" font-size="16" font-family="sans-serif" font-weight="700">VMC-01</text>
-  <rect x="92" y="12" width="66" height="26" rx="4" fill="var(--accent)"/>
-  <text x="104" y="30" fill="var(--surface)" font-size="12" font-family="monospace" font-weight="700">AUTO</text>
-  <text x="176" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">PROGRAM</text>
-  <text x="176" y="34" fill="var(--fg)" font-size="13" font-family="monospace">O1001</text>
-  <text x="246" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">TOOL</text>
-  <text x="246" y="34" fill="var(--fg)" font-size="13" font-family="monospace">T12</text>
-  <text x="300" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">SPINDLE</text>
-  <text x="300" y="34" fill="var(--fg)" font-size="13" font-family="monospace">S 4200</text>
-  <text x="390" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">FEED</text>
-  <text x="390" y="34" fill="var(--fg)" font-size="13" font-family="monospace">F 850</text>
-  <text x="460" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">WORK</text>
-  <text x="460" y="34" fill="var(--fg)" font-size="13" font-family="monospace">G54</text>
-  <circle cx="548" cy="24" r="4" fill="var(--success)"/>
-  <text x="560" y="29" fill="var(--success)" font-size="11" font-family="sans-serif" font-weight="700">PANEL ONLINE</text>
-  <circle cx="686" cy="24" r="4" fill="var(--success)"/>
-  <text x="698" y="29" fill="var(--fg)" font-size="11" font-family="monospace">ALARM 0</text>
-  <circle cx="778" cy="24" r="4" fill="var(--warning)"/>
-  <text x="790" y="29" fill="var(--fg)" font-size="11" font-family="monospace">MSG 2</text>
-  <text x="892" y="30" fill="var(--muted)" font-size="12" font-family="monospace">14:32:05</text>
+  <line x1="4" y1="54" x2="996" y2="54" stroke="#30353a"/>
+  <text x="16" y="33" fill="#e8eaed" font-size="16" font-family="sans-serif" font-weight="700">VMC-01</text>
+  <rect x="92" y="12" width="66" height="26" rx="4" fill="#4da3ff"/>
+  <text x="104" y="30" fill="#141619" font-size="12" font-family="monospace" font-weight="700">AUTO</text>
+  <text x="176" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">PROGRAM</text>
+  <text x="176" y="34" fill="#e8eaed" font-size="13" font-family="monospace">O1001</text>
+  <text x="246" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">TOOL</text>
+  <text x="246" y="34" fill="#e8eaed" font-size="13" font-family="monospace">T12</text>
+  <text x="300" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">SPINDLE</text>
+  <text x="300" y="34" fill="#e8eaed" font-size="13" font-family="monospace">S 4200</text>
+  <text x="390" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">FEED</text>
+  <text x="390" y="34" fill="#e8eaed" font-size="13" font-family="monospace">F 850</text>
+  <text x="460" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">WORK</text>
+  <text x="460" y="34" fill="#e8eaed" font-size="13" font-family="monospace">G54</text>
+  <circle cx="548" cy="24" r="4" fill="#3ddc84"/>
+  <text x="560" y="29" fill="#3ddc84" font-size="11" font-family="sans-serif" font-weight="700">PANEL ONLINE</text>
+  <circle cx="686" cy="24" r="4" fill="#3ddc84"/>
+  <text x="698" y="29" fill="#e8eaed" font-size="11" font-family="monospace">ALARM 0</text>
+  <circle cx="778" cy="24" r="4" fill="#ffb020"/>
+  <text x="790" y="29" fill="#e8eaed" font-size="11" font-family="monospace">MSG 2</text>
+  <text x="892" y="30" fill="#9aa0a6" font-size="12" font-family="monospace">14:32:05</text>
 
   <!-- Left navigation -->
-  <rect x="8" y="62" width="142" height="508" rx="6" fill="var(--surface)" stroke="var(--border)"/>
-  <rect x="20" y="88" width="20" height="20" rx="3" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
-  <line x1="24" y1="98" x2="36" y2="98" stroke="var(--muted)" stroke-width="1.6"/>
-  <circle cx="30" cy="94" r="3" fill="none" stroke="var(--muted)" stroke-width="1.4"/>
-  <text x="48" y="96" fill="var(--muted)" font-size="12" font-family="sans-serif">MACHINE</text>
-  <text x="48" y="112" fill="var(--muted)" font-size="9" font-family="monospace">MAIN</text>
+  <rect x="8" y="62" width="142" height="508" rx="6" fill="#141619" stroke="#30353a"/>
+  <rect x="20" y="88" width="20" height="20" rx="3" fill="none" stroke="#9aa0a6" stroke-width="1.6"/>
+  <line x1="24" y1="98" x2="36" y2="98" stroke="#9aa0a6" stroke-width="1.6"/>
+  <circle cx="30" cy="94" r="3" fill="none" stroke="#9aa0a6" stroke-width="1.4"/>
+  <text x="48" y="96" fill="#9aa0a6" font-size="12" font-family="sans-serif">MACHINE</text>
+  <text x="48" y="112" fill="#9aa0a6" font-size="9" font-family="monospace">MAIN</text>
 
-  <rect x="20" y="132" width="18" height="20" rx="2" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
-  <line x1="24" y1="138" x2="34" y2="138" stroke="var(--muted)" stroke-width="1.2"/>
-  <line x1="24" y1="143" x2="34" y2="143" stroke="var(--muted)" stroke-width="1.2"/>
-  <line x1="24" y1="148" x2="31" y2="148" stroke="var(--muted)" stroke-width="1.2"/>
-  <text x="48" y="147" fill="var(--muted)" font-size="12" font-family="sans-serif">PROGRAM</text>
-  <text x="48" y="163" fill="var(--muted)" font-size="9" font-family="monospace">FILE</text>
+  <rect x="20" y="132" width="18" height="20" rx="2" fill="none" stroke="#9aa0a6" stroke-width="1.5"/>
+  <line x1="24" y1="138" x2="34" y2="138" stroke="#9aa0a6" stroke-width="1.2"/>
+  <line x1="24" y1="143" x2="34" y2="143" stroke="#9aa0a6" stroke-width="1.2"/>
+  <line x1="24" y1="148" x2="31" y2="148" stroke="#9aa0a6" stroke-width="1.2"/>
+  <text x="48" y="147" fill="#9aa0a6" font-size="12" font-family="sans-serif">PROGRAM</text>
+  <text x="48" y="163" fill="#9aa0a6" font-size="9" font-family="monospace">FILE</text>
 
-  <circle cx="29" cy="194" r="9" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
-  <line x1="29" y1="180" x2="29" y2="185" stroke="var(--muted)" stroke-width="1.4"/>
-  <line x1="29" y1="203" x2="29" y2="208" stroke="var(--muted)" stroke-width="1.4"/>
-  <line x1="15" y1="194" x2="20" y2="194" stroke="var(--muted)" stroke-width="1.4"/>
-  <line x1="38" y1="194" x2="43" y2="194" stroke="var(--muted)" stroke-width="1.4"/>
-  <text x="48" y="198" fill="var(--muted)" font-size="12" font-family="sans-serif">OFFSETS</text>
-  <text x="48" y="214" fill="var(--muted)" font-size="9" font-family="monospace">OFFSET</text>
+  <circle cx="29" cy="194" r="9" fill="none" stroke="#9aa0a6" stroke-width="1.5"/>
+  <line x1="29" y1="180" x2="29" y2="185" stroke="#9aa0a6" stroke-width="1.4"/>
+  <line x1="29" y1="203" x2="29" y2="208" stroke="#9aa0a6" stroke-width="1.4"/>
+  <line x1="15" y1="194" x2="20" y2="194" stroke="#9aa0a6" stroke-width="1.4"/>
+  <line x1="38" y1="194" x2="43" y2="194" stroke="#9aa0a6" stroke-width="1.4"/>
+  <text x="48" y="198" fill="#9aa0a6" font-size="12" font-family="sans-serif">OFFSETS</text>
+  <text x="48" y="214" fill="#9aa0a6" font-size="9" font-family="monospace">OFFSET</text>
 
-  <path d="M20 250 L28 250 L31 244 L34 256 L38 238 L42 250 L48 250" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
-  <text x="56" y="251" fill="var(--muted)" font-size="12" font-family="sans-serif">TOOLS</text>
-  <text x="56" y="267" fill="var(--muted)" font-size="9" font-family="monospace">TOOL</text>
+  <path d="M20 250 L28 250 L31 244 L34 256 L38 238 L42 250 L48 250" fill="none" stroke="#9aa0a6" stroke-width="1.6"/>
+  <text x="56" y="251" fill="#9aa0a6" font-size="12" font-family="sans-serif">TOOLS</text>
+  <text x="56" y="267" fill="#9aa0a6" font-size="9" font-family="monospace">TOOL</text>
 
-  <rect x="8" y="294" width="4" height="42" fill="var(--accent)"/>
-  <path d="M20 306 L20 300 L25 300 L25 312 L37 312 L37 306 L43 306" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
-  <text x="52" y="310" fill="var(--accent)" font-size="12" font-family="sans-serif" font-weight="700">DIAGNOSTICS</text>
-  <text x="52" y="326" fill="var(--muted)" font-size="9" font-family="monospace">WIN</text>
+  <rect x="8" y="294" width="4" height="42" fill="#4da3ff"/>
+  <path d="M20 306 L20 300 L25 300 L25 312 L37 312 L37 306 L43 306" fill="none" stroke="#4da3ff" stroke-width="1.6"/>
+  <text x="52" y="310" fill="#4da3ff" font-size="12" font-family="sans-serif" font-weight="700">DIAGNOSTICS</text>
+  <text x="52" y="326" fill="#9aa0a6" font-size="9" font-family="monospace">WIN</text>
 
-  <line x1="20" y1="350" x2="138" y2="350" stroke="var(--border)"/>
-  <text x="20" y="374" fill="var(--muted)" font-size="9" font-family="sans-serif">FOCUS / NAVIGATION</text>
-  <text x="20" y="394" fill="var(--muted)" font-size="9" font-family="monospace">ARROWS MOVE</text>
-  <text x="20" y="410" fill="var(--muted)" font-size="9" font-family="monospace">ENTER SELECT</text>
-  <text x="20" y="426" fill="var(--muted)" font-size="9" font-family="monospace">ESC BACK</text>
-  <text x="20" y="442" fill="var(--muted)" font-size="9" font-family="monospace">PGUP / PGDN</text>
-  <text x="20" y="458" fill="var(--muted)" font-size="9" font-family="monospace">HOME / END</text>
-  <text x="20" y="486" fill="var(--muted)" font-size="9" font-family="sans-serif">SYMBOL LAYER</text>
-  <text x="20" y="502" fill="var(--muted)" font-size="9" font-family="monospace">MO(1) + KEY</text>
-  <text x="20" y="530" fill="var(--muted)" font-size="9" font-family="sans-serif">NO ON-SCREEN</text>
-  <text x="20" y="544" fill="var(--muted)" font-size="9" font-family="sans-serif">MACHINE CONTROLS</text>
+  <line x1="20" y1="350" x2="138" y2="350" stroke="#30353a"/>
+  <text x="20" y="374" fill="#9aa0a6" font-size="9" font-family="sans-serif">FOCUS / NAVIGATION</text>
+  <text x="20" y="394" fill="#9aa0a6" font-size="9" font-family="monospace">ARROWS MOVE</text>
+  <text x="20" y="410" fill="#9aa0a6" font-size="9" font-family="monospace">ENTER SELECT</text>
+  <text x="20" y="426" fill="#9aa0a6" font-size="9" font-family="monospace">ESC BACK</text>
+  <text x="20" y="442" fill="#9aa0a6" font-size="9" font-family="monospace">PGUP / PGDN</text>
+  <text x="20" y="458" fill="#9aa0a6" font-size="9" font-family="monospace">HOME / END</text>
+  <text x="20" y="486" fill="#9aa0a6" font-size="9" font-family="sans-serif">SYMBOL LAYER</text>
+  <text x="20" y="502" fill="#9aa0a6" font-size="9" font-family="monospace">MO(1) + KEY</text>
+  <text x="20" y="530" fill="#9aa0a6" font-size="9" font-family="sans-serif">NO ON-SCREEN</text>
+  <text x="20" y="544" fill="#9aa0a6" font-size="9" font-family="sans-serif">MACHINE CONTROLS</text>
 
   <!-- Diagnostics header / tabs -->
-  <text x="158" y="78" fill="var(--fg)" font-size="15" font-family="sans-serif" font-weight="700">DIAGNOSTICS</text>
-  <text x="278" y="78" fill="var(--accent)" font-size="11" font-family="sans-serif" font-weight="700">OVERVIEW</text>
-  <text x="356" y="78" fill="var(--muted)" font-size="11" font-family="sans-serif">PANEL LINK</text>
-  <text x="442" y="78" fill="var(--muted)" font-size="11" font-family="sans-serif">HAL / NML</text>
-  <text x="520" y="78" fill="var(--muted)" font-size="11" font-family="sans-serif">MOTION</text>
-  <text x="582" y="78" fill="var(--muted)" font-size="11" font-family="sans-serif">I/O</text>
-  <text x="620" y="78" fill="var(--muted)" font-size="11" font-family="sans-serif">LOGS</text>
-  <rect x="278" y="84" width="58" height="2" fill="var(--accent)"/>
-  <circle cx="930" cy="74" r="3" fill="var(--success)"/>
-  <text x="940" y="78" fill="var(--success)" font-size="9" font-family="monospace">LIVE</text>
-  <line x1="158" y1="90" x2="984" y2="90" stroke="var(--border)"/>
+  <text x="158" y="78" fill="#e8eaed" font-size="15" font-family="sans-serif" font-weight="700">DIAGNOSTICS</text>
+  <text x="278" y="78" fill="#4da3ff" font-size="11" font-family="sans-serif" font-weight="700">OVERVIEW</text>
+  <text x="356" y="78" fill="#9aa0a6" font-size="11" font-family="sans-serif">PANEL LINK</text>
+  <text x="442" y="78" fill="#9aa0a6" font-size="11" font-family="sans-serif">HAL / NML</text>
+  <text x="520" y="78" fill="#9aa0a6" font-size="11" font-family="sans-serif">MOTION</text>
+  <text x="582" y="78" fill="#9aa0a6" font-size="11" font-family="sans-serif">I/O</text>
+  <text x="620" y="78" fill="#9aa0a6" font-size="11" font-family="sans-serif">LOGS</text>
+  <rect x="278" y="84" width="58" height="2" fill="#4da3ff"/>
+  <circle cx="930" cy="74" r="3" fill="#3ddc84"/>
+  <text x="940" y="78" fill="#3ddc84" font-size="9" font-family="monospace">LIVE</text>
+  <line x1="158" y1="90" x2="984" y2="90" stroke="#30353a"/>
 
   <!-- Health cards -->
-  <rect x="158" y="98" width="199" height="86" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="170" y="118" fill="var(--muted)" font-size="9" font-family="sans-serif">CONTROL</text>
-  <circle cx="174" cy="136" r="3" fill="var(--success)"/>
-  <text x="184" y="140" fill="var(--success)" font-size="10" font-family="monospace" font-weight="700">HEALTHY</text>
-  <text x="170" y="158" fill="var(--muted)" font-size="9" font-family="monospace">LINUXCNC 2.10</text>
-  <text x="170" y="174" fill="var(--muted)" font-size="9" font-family="monospace">AUTO / AUTO</text>
+  <rect x="158" y="98" width="199" height="86" rx="5" fill="#141619" stroke="#30353a"/>
+  <text x="170" y="118" fill="#9aa0a6" font-size="9" font-family="sans-serif">CONTROL</text>
+  <circle cx="174" cy="136" r="3" fill="#3ddc84"/>
+  <text x="184" y="140" fill="#3ddc84" font-size="10" font-family="monospace" font-weight="700">HEALTHY</text>
+  <text x="170" y="158" fill="#9aa0a6" font-size="9" font-family="monospace">LINUXCNC 2.10</text>
+  <text x="170" y="174" fill="#9aa0a6" font-size="9" font-family="monospace">AUTO / AUTO</text>
 
-  <rect x="367" y="98" width="199" height="86" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="379" y="118" fill="var(--muted)" font-size="9" font-family="sans-serif">PANEL LINK</text>
-  <circle cx="383" cy="136" r="3" fill="var(--success)"/>
-  <text x="393" y="140" fill="var(--success)" font-size="10" font-family="monospace" font-weight="700">ONLINE</text>
-  <text x="379" y="158" fill="var(--muted)" font-size="9" font-family="monospace">RS-485 115200</text>
-  <text x="379" y="174" fill="var(--muted)" font-size="9" font-family="monospace">CRC 0 / TO 0</text>
+  <rect x="367" y="98" width="199" height="86" rx="5" fill="#141619" stroke="#30353a"/>
+  <text x="379" y="118" fill="#9aa0a6" font-size="9" font-family="sans-serif">PANEL LINK</text>
+  <circle cx="383" cy="136" r="3" fill="#3ddc84"/>
+  <text x="393" y="140" fill="#3ddc84" font-size="10" font-family="monospace" font-weight="700">ONLINE</text>
+  <text x="379" y="158" fill="#9aa0a6" font-size="9" font-family="monospace">RS-485 115200</text>
+  <text x="379" y="174" fill="#9aa0a6" font-size="9" font-family="monospace">CRC 0 / TO 0</text>
 
-  <rect x="576" y="98" width="199" height="86" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="588" y="118" fill="var(--muted)" font-size="9" font-family="sans-serif">NML / COMMAND</text>
-  <circle cx="592" cy="136" r="3" fill="var(--success)"/>
-  <text x="602" y="140" fill="var(--success)" font-size="10" font-family="monospace" font-weight="700">CONNECTED</text>
-  <text x="588" y="158" fill="var(--muted)" font-size="9" font-family="monospace">STATUS 20 ms</text>
-  <text x="588" y="174" fill="var(--muted)" font-size="9" font-family="monospace">CMD OK / ERR 0</text>
+  <rect x="576" y="98" width="199" height="86" rx="5" fill="#141619" stroke="#30353a"/>
+  <text x="588" y="118" fill="#9aa0a6" font-size="9" font-family="sans-serif">NML / COMMAND</text>
+  <circle cx="592" cy="136" r="3" fill="#3ddc84"/>
+  <text x="602" y="140" fill="#3ddc84" font-size="10" font-family="monospace" font-weight="700">CONNECTED</text>
+  <text x="588" y="158" fill="#9aa0a6" font-size="9" font-family="monospace">STATUS 20 ms</text>
+  <text x="588" y="174" fill="#9aa0a6" font-size="9" font-family="monospace">CMD OK / ERR 0</text>
 
-  <rect x="785" y="98" width="199" height="86" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="797" y="118" fill="var(--muted)" font-size="9" font-family="sans-serif">MOTION</text>
-  <circle cx="801" cy="136" r="3" fill="var(--success)"/>
-  <text x="811" y="140" fill="var(--success)" font-size="10" font-family="monospace" font-weight="700">NOMINAL</text>
-  <text x="797" y="158" fill="var(--muted)" font-size="9" font-family="monospace">FOLLOW 4 µm</text>
-  <text x="797" y="174" fill="var(--muted)" font-size="9" font-family="monospace">SERVO 32% / SPDL 38%</text>
+  <rect x="785" y="98" width="199" height="86" rx="5" fill="#141619" stroke="#30353a"/>
+  <text x="797" y="118" fill="#9aa0a6" font-size="9" font-family="sans-serif">MOTION</text>
+  <circle cx="801" cy="136" r="3" fill="#3ddc84"/>
+  <text x="811" y="140" fill="#3ddc84" font-size="10" font-family="monospace" font-weight="700">NOMINAL</text>
+  <text x="797" y="158" fill="#9aa0a6" font-size="9" font-family="monospace">FOLLOW 4 µm</text>
+  <text x="797" y="174" fill="#9aa0a6" font-size="9" font-family="monospace">SERVO 32% / SPDL 38%</text>
 
   <!-- Alarms / messages -->
-  <rect x="158" y="194" width="500" height="192" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="170" y="216" fill="var(--fg)" font-size="12" font-family="sans-serif" font-weight="700">ACTIVE ALARMS &amp; MESSAGES</text>
-  <rect x="398" y="202" width="46" height="18" rx="3" fill="var(--accent)"/>
-  <text x="407" y="215" fill="var(--surface)" font-size="8" font-family="monospace" font-weight="700">ALL 2</text>
-  <text x="452" y="215" fill="var(--muted)" font-size="8" font-family="monospace">ALARMS 0</text>
-  <text x="520" y="215" fill="var(--muted)" font-size="8" font-family="monospace">MESSAGES 2</text>
-  <line x1="170" y1="224" x2="646" y2="224" stroke="var(--border)"/>
-  <text x="170" y="240" fill="var(--muted)" font-size="8" font-family="sans-serif">TIME</text>
-  <text x="230" y="240" fill="var(--muted)" font-size="8" font-family="sans-serif">SEVERITY</text>
-  <text x="300" y="240" fill="var(--muted)" font-size="8" font-family="sans-serif">SOURCE</text>
-  <text x="370" y="240" fill="var(--muted)" font-size="8" font-family="sans-serif">CODE</text>
-  <text x="430" y="240" fill="var(--muted)" font-size="8" font-family="sans-serif">MESSAGE</text>
+  <rect x="158" y="194" width="500" height="192" rx="5" fill="#141619" stroke="#30353a"/>
+  <text x="170" y="216" fill="#e8eaed" font-size="12" font-family="sans-serif" font-weight="700">ACTIVE ALARMS &amp; MESSAGES</text>
+  <rect x="398" y="202" width="46" height="18" rx="3" fill="#4da3ff"/>
+  <text x="407" y="215" fill="#141619" font-size="8" font-family="monospace" font-weight="700">ALL 2</text>
+  <text x="452" y="215" fill="#9aa0a6" font-size="8" font-family="monospace">ALARMS 0</text>
+  <text x="520" y="215" fill="#9aa0a6" font-size="8" font-family="monospace">MESSAGES 2</text>
+  <line x1="170" y1="224" x2="646" y2="224" stroke="#30353a"/>
+  <text x="170" y="240" fill="#9aa0a6" font-size="8" font-family="sans-serif">TIME</text>
+  <text x="230" y="240" fill="#9aa0a6" font-size="8" font-family="sans-serif">SEVERITY</text>
+  <text x="300" y="240" fill="#9aa0a6" font-size="8" font-family="sans-serif">SOURCE</text>
+  <text x="370" y="240" fill="#9aa0a6" font-size="8" font-family="sans-serif">CODE</text>
+  <text x="430" y="240" fill="#9aa0a6" font-size="8" font-family="sans-serif">MESSAGE</text>
 
-  <circle cx="174" cy="260" r="3" fill="var(--success)"/>
-  <text x="182" y="264" fill="var(--fg)" font-size="9" font-family="monospace">14:31:58</text>
-  <text x="230" y="264" fill="var(--success)" font-size="9" font-family="monospace">INFO</text>
-  <text x="300" y="264" fill="var(--muted)" font-size="9" font-family="monospace">PANEL</text>
-  <text x="370" y="264" fill="var(--muted)" font-size="9" font-family="monospace">P-ONLINE</text>
-  <text x="430" y="264" fill="var(--fg)" font-size="9" font-family="monospace">Panel link established</text>
+  <circle cx="174" cy="260" r="3" fill="#3ddc84"/>
+  <text x="182" y="264" fill="#e8eaed" font-size="9" font-family="monospace">14:31:58</text>
+  <text x="230" y="264" fill="#3ddc84" font-size="9" font-family="monospace">INFO</text>
+  <text x="300" y="264" fill="#9aa0a6" font-size="9" font-family="monospace">PANEL</text>
+  <text x="370" y="264" fill="#9aa0a6" font-size="9" font-family="monospace">P-ONLINE</text>
+  <text x="430" y="264" fill="#e8eaed" font-size="9" font-family="monospace">Panel link established</text>
 
-  <circle cx="174" cy="282" r="3" fill="var(--warning)"/>
-  <text x="182" y="286" fill="var(--fg)" font-size="9" font-family="monospace">14:31:42</text>
-  <text x="230" y="286" fill="var(--warning)" font-size="9" font-family="monospace">INFO</text>
-  <text x="300" y="286" fill="var(--muted)" font-size="9" font-family="monospace">PROGRAM</text>
-  <text x="370" y="286" fill="var(--muted)" font-size="9" font-family="monospace">P-READY</text>
-  <text x="430" y="286" fill="var(--fg)" font-size="9" font-family="monospace">Program O1001 loaded</text>
+  <circle cx="174" cy="282" r="3" fill="#ffb020"/>
+  <text x="182" y="286" fill="#e8eaed" font-size="9" font-family="monospace">14:31:42</text>
+  <text x="230" y="286" fill="#ffb020" font-size="9" font-family="monospace">INFO</text>
+  <text x="300" y="286" fill="#9aa0a6" font-size="9" font-family="monospace">PROGRAM</text>
+  <text x="370" y="286" fill="#9aa0a6" font-size="9" font-family="monospace">P-READY</text>
+  <text x="430" y="286" fill="#e8eaed" font-size="9" font-family="monospace">Program O1001 loaded</text>
 
-  <circle cx="174" cy="304" r="3" fill="var(--muted)"/>
-  <text x="182" y="308" fill="var(--muted)" font-size="9" font-family="monospace">14:30:12</text>
-  <text x="230" y="308" fill="var(--muted)" font-size="9" font-family="monospace">INFO</text>
-  <text x="300" y="308" fill="var(--muted)" font-size="9" font-family="monospace">HMI</text>
-  <text x="370" y="308" fill="var(--muted)" font-size="9" font-family="monospace">H-THEME</text>
-  <text x="430" y="308" fill="var(--muted)" font-size="9" font-family="monospace">Theme loaded / 60 Hz UI</text>
+  <circle cx="174" cy="304" r="3" fill="#9aa0a6"/>
+  <text x="182" y="308" fill="#9aa0a6" font-size="9" font-family="monospace">14:30:12</text>
+  <text x="230" y="308" fill="#9aa0a6" font-size="9" font-family="monospace">INFO</text>
+  <text x="300" y="308" fill="#9aa0a6" font-size="9" font-family="monospace">HMI</text>
+  <text x="370" y="308" fill="#9aa0a6" font-size="9" font-family="monospace">H-THEME</text>
+  <text x="430" y="308" fill="#9aa0a6" font-size="9" font-family="monospace">Theme loaded / 60 Hz UI</text>
 
-  <line x1="170" y1="322" x2="646" y2="322" stroke="var(--border)"/>
-  <text x="170" y="340" fill="var(--muted)" font-size="9" font-family="sans-serif">FILTERS</text>
-  <rect x="222" y="328" width="58" height="18" rx="3" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="230" y="341" fill="var(--muted)" font-size="8" font-family="monospace">ALL</text>
-  <rect x="286" y="328" width="70" height="18" rx="3" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="294" y="341" fill="var(--muted)" font-size="8" font-family="monospace">ALARMS</text>
-  <rect x="362" y="328" width="78" height="18" rx="3" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="370" y="341" fill="var(--muted)" font-size="8" font-family="monospace">MESSAGES</text>
-  <text x="470" y="341" fill="var(--muted)" font-size="8" font-family="sans-serif">LAST 24 H</text>
-  <text x="560" y="341" fill="var(--muted)" font-size="8" font-family="sans-serif">SOURCE: ALL</text>
+  <line x1="170" y1="322" x2="646" y2="322" stroke="#30353a"/>
+  <text x="170" y="340" fill="#9aa0a6" font-size="9" font-family="sans-serif">FILTERS</text>
+  <rect x="222" y="328" width="58" height="18" rx="3" fill="#141619" stroke="#30353a"/>
+  <text x="230" y="341" fill="#9aa0a6" font-size="8" font-family="monospace">ALL</text>
+  <rect x="286" y="328" width="70" height="18" rx="3" fill="#141619" stroke="#30353a"/>
+  <text x="294" y="341" fill="#9aa0a6" font-size="8" font-family="monospace">ALARMS</text>
+  <rect x="362" y="328" width="78" height="18" rx="3" fill="#141619" stroke="#30353a"/>
+  <text x="370" y="341" fill="#9aa0a6" font-size="8" font-family="monospace">MESSAGES</text>
+  <text x="470" y="341" fill="#9aa0a6" font-size="8" font-family="sans-serif">LAST 24 H</text>
+  <text x="560" y="341" fill="#9aa0a6" font-size="8" font-family="sans-serif">SOURCE: ALL</text>
 
   <!-- Panel link detail -->
-  <rect x="666" y="194" width="318" height="192" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="678" y="216" fill="var(--fg)" font-size="12" font-family="sans-serif" font-weight="700">PANEL LINK</text>
-  <circle cx="776" cy="212" r="3" fill="var(--success)"/>
-  <text x="786" y="216" fill="var(--success)" font-size="9" font-family="monospace">ONLINE</text>
-  <line x1="678" y1="224" x2="972" y2="224" stroke="var(--border)"/>
-  <text x="678" y="244" fill="var(--muted)" font-size="9" font-family="sans-serif">TRANSPORT</text>
-  <text x="770" y="244" fill="var(--fg)" font-size="9" font-family="monospace">RS-485 / 115200 8N1</text>
-  <text x="678" y="264" fill="var(--muted)" font-size="9" font-family="sans-serif">CYCLE</text>
-  <text x="770" y="264" fill="var(--fg)" font-size="9" font-family="monospace">50 ms</text>
-  <text x="870" y="264" fill="var(--muted)" font-size="9" font-family="sans-serif">LAST RX</text>
-  <text x="930" y="264" fill="var(--fg)" font-size="9" font-family="monospace">12 ms</text>
-  <text x="678" y="284" fill="var(--muted)" font-size="9" font-family="sans-serif">RX / TX</text>
-  <text x="770" y="284" fill="var(--fg)" font-size="9" font-family="monospace">12,480 / 12,480</text>
-  <text x="678" y="304" fill="var(--muted)" font-size="9" font-family="sans-serif">CRC / TIMEOUT</text>
-  <text x="770" y="304" fill="var(--success)" font-size="9" font-family="monospace">0 / 0</text>
-  <text x="678" y="324" fill="var(--muted)" font-size="9" font-family="sans-serif">MODE</text>
-  <text x="770" y="324" fill="var(--fg)" font-size="9" font-family="monospace">AUTO</text>
-  <text x="870" y="324" fill="var(--muted)" font-size="9" font-family="sans-serif">OVR</text>
-  <text x="910" y="324" fill="var(--fg)" font-size="9" font-family="monospace">F100 S100 R100</text>
-  <line x1="678" y1="334" x2="972" y2="334" stroke="var(--border)"/>
-  <text x="678" y="352" fill="var(--muted)" font-size="9" font-family="sans-serif">BUTTON BITMAP</text>
-  <text x="770" y="352" fill="var(--muted)" font-size="9" font-family="monospace">0x0000_0000_0000_0000</text>
-  <text x="678" y="370" fill="var(--muted)" font-size="9" font-family="sans-serif">LED BITMAP</text>
-  <text x="770" y="370" fill="var(--muted)" font-size="9" font-family="monospace">0x0000_0000_0000_0000</text>
+  <rect x="666" y="194" width="318" height="192" rx="5" fill="#141619" stroke="#30353a"/>
+  <text x="678" y="216" fill="#e8eaed" font-size="12" font-family="sans-serif" font-weight="700">PANEL LINK</text>
+  <circle cx="776" cy="212" r="3" fill="#3ddc84"/>
+  <text x="786" y="216" fill="#3ddc84" font-size="9" font-family="monospace">ONLINE</text>
+  <line x1="678" y1="224" x2="972" y2="224" stroke="#30353a"/>
+  <text x="678" y="244" fill="#9aa0a6" font-size="9" font-family="sans-serif">TRANSPORT</text>
+  <text x="770" y="244" fill="#e8eaed" font-size="9" font-family="monospace">RS-485 / 115200 8N1</text>
+  <text x="678" y="264" fill="#9aa0a6" font-size="9" font-family="sans-serif">CYCLE</text>
+  <text x="770" y="264" fill="#e8eaed" font-size="9" font-family="monospace">50 ms</text>
+  <text x="870" y="264" fill="#9aa0a6" font-size="9" font-family="sans-serif">LAST RX</text>
+  <text x="930" y="264" fill="#e8eaed" font-size="9" font-family="monospace">12 ms</text>
+  <text x="678" y="284" fill="#9aa0a6" font-size="9" font-family="sans-serif">RX / TX</text>
+  <text x="770" y="284" fill="#e8eaed" font-size="9" font-family="monospace">12,480 / 12,480</text>
+  <text x="678" y="304" fill="#9aa0a6" font-size="9" font-family="sans-serif">CRC / TIMEOUT</text>
+  <text x="770" y="304" fill="#3ddc84" font-size="9" font-family="monospace">0 / 0</text>
+  <text x="678" y="324" fill="#9aa0a6" font-size="9" font-family="sans-serif">MODE</text>
+  <text x="770" y="324" fill="#e8eaed" font-size="9" font-family="monospace">AUTO</text>
+  <text x="870" y="324" fill="#9aa0a6" font-size="9" font-family="sans-serif">OVR</text>
+  <text x="910" y="324" fill="#e8eaed" font-size="9" font-family="monospace">F100 S100 R100</text>
+  <line x1="678" y1="334" x2="972" y2="334" stroke="#30353a"/>
+  <text x="678" y="352" fill="#9aa0a6" font-size="9" font-family="sans-serif">BUTTON BITMAP</text>
+  <text x="770" y="352" fill="#9aa0a6" font-size="9" font-family="monospace">0x0000_0000_0000_0000</text>
+  <text x="678" y="370" fill="#9aa0a6" font-size="9" font-family="sans-serif">LED BITMAP</text>
+  <text x="770" y="370" fill="#9aa0a6" font-size="9" font-family="monospace">0x0000_0000_0000_0000</text>
 
   <!-- Motion health -->
-  <rect x="158" y="394" width="400" height="176" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="170" y="416" fill="var(--fg)" font-size="12" font-family="sans-serif" font-weight="700">MOTION HEALTH</text>
-  <text x="300" y="416" fill="var(--muted)" font-size="9" font-family="monospace">60 s</text>
-  <text x="170" y="434" fill="var(--muted)" font-size="9" font-family="sans-serif">MAX FOLLOWING ERROR</text>
-  <line x1="170" y1="490" x2="546" y2="490" stroke="var(--border)"/>
-  <line x1="170" y1="450" x2="546" y2="450" stroke="var(--border)" stroke-dasharray="2 4"/>
-  <line x1="170" y1="470" x2="546" y2="470" stroke="var(--border)" stroke-dasharray="2 4"/>
-  <polyline points="170,482 190,478 210,480 230,474 250,476 270,468 290,470 310,462 330,466 350,458 370,460 390,454 410,456 430,450 450,452 470,448 490,450 510,446 530,448 546,444" fill="none" stroke="var(--accent)" stroke-width="1.8"/>
-  <text x="170" y="508" fill="var(--muted)" font-size="8" font-family="monospace">-60s</text>
-  <text x="360" y="508" fill="var(--muted)" font-size="8" font-family="monospace">-30s</text>
-  <text x="520" y="508" fill="var(--muted)" font-size="8" font-family="monospace">now</text>
-  <text x="170" y="530" fill="var(--muted)" font-size="9" font-family="sans-serif">SERVO LOAD</text>
-  <text x="170" y="548" fill="var(--fg)" font-size="9" font-family="monospace">X</text>
-  <rect x="186" y="541" width="80" height="5" rx="2" fill="var(--border)"/>
-  <rect x="186" y="541" width="58" height="5" rx="2" fill="var(--accent)"/>
-  <text x="274" y="548" fill="var(--muted)" font-size="8" font-family="monospace">32%</text>
-  <text x="310" y="548" fill="var(--fg)" font-size="9" font-family="monospace">Y</text>
-  <rect x="326" y="541" width="80" height="5" rx="2" fill="var(--border)"/>
-  <rect x="326" y="541" width="34" height="5" rx="2" fill="var(--accent)"/>
-  <text x="414" y="548" fill="var(--muted)" font-size="8" font-family="monospace">18%</text>
-  <text x="450" y="548" fill="var(--fg)" font-size="9" font-family="monospace">Z</text>
-  <rect x="466" y="541" width="60" height="5" rx="2" fill="var(--border)"/>
-  <rect x="466" y="541" width="24" height="5" rx="2" fill="var(--accent)"/>
-  <text x="534" y="548" fill="var(--muted)" font-size="8" font-family="monospace">12%</text>
+  <rect x="158" y="394" width="400" height="176" rx="5" fill="#141619" stroke="#30353a"/>
+  <text x="170" y="416" fill="#e8eaed" font-size="12" font-family="sans-serif" font-weight="700">MOTION HEALTH</text>
+  <text x="300" y="416" fill="#9aa0a6" font-size="9" font-family="monospace">60 s</text>
+  <text x="170" y="434" fill="#9aa0a6" font-size="9" font-family="sans-serif">MAX FOLLOWING ERROR</text>
+  <line x1="170" y1="490" x2="546" y2="490" stroke="#30353a"/>
+  <line x1="170" y1="450" x2="546" y2="450" stroke="#30353a" stroke-dasharray="2 4"/>
+  <line x1="170" y1="470" x2="546" y2="470" stroke="#30353a" stroke-dasharray="2 4"/>
+  <polyline points="170,482 190,478 210,480 230,474 250,476 270,468 290,470 310,462 330,466 350,458 370,460 390,454 410,456 430,450 450,452 470,448 490,450 510,446 530,448 546,444" fill="none" stroke="#4da3ff" stroke-width="1.8"/>
+  <text x="170" y="508" fill="#9aa0a6" font-size="8" font-family="monospace">-60s</text>
+  <text x="360" y="508" fill="#9aa0a6" font-size="8" font-family="monospace">-30s</text>
+  <text x="520" y="508" fill="#9aa0a6" font-size="8" font-family="monospace">now</text>
+  <text x="170" y="530" fill="#9aa0a6" font-size="9" font-family="sans-serif">SERVO LOAD</text>
+  <text x="170" y="548" fill="#e8eaed" font-size="9" font-family="monospace">X</text>
+  <rect x="186" y="541" width="80" height="5" rx="2" fill="#30353a"/>
+  <rect x="186" y="541" width="58" height="5" rx="2" fill="#4da3ff"/>
+  <text x="274" y="548" fill="#9aa0a6" font-size="8" font-family="monospace">32%</text>
+  <text x="310" y="548" fill="#e8eaed" font-size="9" font-family="monospace">Y</text>
+  <rect x="326" y="541" width="80" height="5" rx="2" fill="#30353a"/>
+  <rect x="326" y="541" width="34" height="5" rx="2" fill="#4da3ff"/>
+  <text x="414" y="548" fill="#9aa0a6" font-size="8" font-family="monospace">18%</text>
+  <text x="450" y="548" fill="#e8eaed" font-size="9" font-family="monospace">Z</text>
+  <rect x="466" y="541" width="60" height="5" rx="2" fill="#30353a"/>
+  <rect x="466" y="541" width="24" height="5" rx="2" fill="#4da3ff"/>
+  <text x="534" y="548" fill="#9aa0a6" font-size="8" font-family="monospace">12%</text>
 
   <!-- Event log -->
-  <rect x="566" y="394" width="418" height="176" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="578" y="416" fill="var(--fg)" font-size="12" font-family="sans-serif" font-weight="700">EVENT LOG</text>
-  <text x="652" y="416" fill="var(--muted)" font-size="9" font-family="monospace">LIVE / 24 H</text>
-  <line x1="578" y1="424" x2="972" y2="424" stroke="var(--border)"/>
-  <text x="578" y="440" fill="var(--muted)" font-size="8" font-family="monospace">14:31:58</text>
-  <circle cx="654" cy="437" r="3" fill="var(--success)"/>
-  <text x="664" y="440" fill="var(--muted)" font-size="9" font-family="monospace">PANEL</text>
-  <text x="720" y="440" fill="var(--fg)" font-size="9" font-family="monospace">Online</text>
-  <text x="578" y="458" fill="var(--muted)" font-size="8" font-family="monospace">14:31:42</text>
-  <circle cx="654" cy="455" r="3" fill="var(--warning)"/>
-  <text x="664" y="458" fill="var(--muted)" font-size="9" font-family="monospace">PROGRAM</text>
-  <text x="720" y="458" fill="var(--fg)" font-size="9" font-family="monospace">O1001 loaded</text>
-  <text x="578" y="476" fill="var(--muted)" font-size="8" font-family="monospace">14:30:12</text>
-  <circle cx="654" cy="473" r="3" fill="var(--muted)"/>
-  <text x="664" y="476" fill="var(--muted)" font-size="9" font-family="monospace">HMI</text>
-  <text x="720" y="476" fill="var(--fg)" font-size="9" font-family="monospace">Theme loaded</text>
-  <text x="578" y="494" fill="var(--muted)" font-size="8" font-family="monospace">14:29:51</text>
-  <circle cx="654" cy="491" r="3" fill="var(--muted)"/>
-  <text x="664" y="494" fill="var(--muted)" font-size="9" font-family="monospace">NML</text>
-  <text x="720" y="494" fill="var(--fg)" font-size="9" font-family="monospace">Status channel open</text>
-  <line x1="578" y1="508" x2="972" y2="508" stroke="var(--border)"/>
-  <text x="578" y="526" fill="var(--muted)" font-size="9" font-family="sans-serif">FILTER</text>
-  <rect x="622" y="514" width="54" height="18" rx="3" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="630" y="527" fill="var(--muted)" font-size="8" font-family="monospace">ALL</text>
-  <rect x="682" y="514" width="74" height="18" rx="3" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="690" y="527" fill="var(--muted)" font-size="8" font-family="monospace">ERRORS</text>
-  <rect x="762" y="514" width="74" height="18" rx="3" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="770" y="527" fill="var(--muted)" font-size="8" font-family="monospace">PANEL</text>
-  <text x="852" y="527" fill="var(--muted)" font-size="8" font-family="monospace">SEARCH ...</text>
+  <rect x="566" y="394" width="418" height="176" rx="5" fill="#141619" stroke="#30353a"/>
+  <text x="578" y="416" fill="#e8eaed" font-size="12" font-family="sans-serif" font-weight="700">EVENT LOG</text>
+  <text x="652" y="416" fill="#9aa0a6" font-size="9" font-family="monospace">LIVE / 24 H</text>
+  <line x1="578" y1="424" x2="972" y2="424" stroke="#30353a"/>
+  <text x="578" y="440" fill="#9aa0a6" font-size="8" font-family="monospace">14:31:58</text>
+  <circle cx="654" cy="437" r="3" fill="#3ddc84"/>
+  <text x="664" y="440" fill="#9aa0a6" font-size="9" font-family="monospace">PANEL</text>
+  <text x="720" y="440" fill="#e8eaed" font-size="9" font-family="monospace">Online</text>
+  <text x="578" y="458" fill="#9aa0a6" font-size="8" font-family="monospace">14:31:42</text>
+  <circle cx="654" cy="455" r="3" fill="#ffb020"/>
+  <text x="664" y="458" fill="#9aa0a6" font-size="9" font-family="monospace">PROGRAM</text>
+  <text x="720" y="458" fill="#e8eaed" font-size="9" font-family="monospace">O1001 loaded</text>
+  <text x="578" y="476" fill="#9aa0a6" font-size="8" font-family="monospace">14:30:12</text>
+  <circle cx="654" cy="473" r="3" fill="#9aa0a6"/>
+  <text x="664" y="476" fill="#9aa0a6" font-size="9" font-family="monospace">HMI</text>
+  <text x="720" y="476" fill="#e8eaed" font-size="9" font-family="monospace">Theme loaded</text>
+  <text x="578" y="494" fill="#9aa0a6" font-size="8" font-family="monospace">14:29:51</text>
+  <circle cx="654" cy="491" r="3" fill="#9aa0a6"/>
+  <text x="664" y="494" fill="#9aa0a6" font-size="9" font-family="monospace">NML</text>
+  <text x="720" y="494" fill="#e8eaed" font-size="9" font-family="monospace">Status channel open</text>
+  <line x1="578" y1="508" x2="972" y2="508" stroke="#30353a"/>
+  <text x="578" y="526" fill="#9aa0a6" font-size="9" font-family="sans-serif">FILTER</text>
+  <rect x="622" y="514" width="54" height="18" rx="3" fill="#141619" stroke="#30353a"/>
+  <text x="630" y="527" fill="#9aa0a6" font-size="8" font-family="monospace">ALL</text>
+  <rect x="682" y="514" width="74" height="18" rx="3" fill="#141619" stroke="#30353a"/>
+  <text x="690" y="527" fill="#9aa0a6" font-size="8" font-family="monospace">ERRORS</text>
+  <rect x="762" y="514" width="74" height="18" rx="3" fill="#141619" stroke="#30353a"/>
+  <text x="770" y="527" fill="#9aa0a6" font-size="8" font-family="monospace">PANEL</text>
+  <text x="852" y="527" fill="#9aa0a6" font-size="8" font-family="monospace">SEARCH ...</text>
 
   <!-- Bottom action bar -->
-  <line x1="4" y1="578" x2="996" y2="578" stroke="var(--border)"/>
-  <text x="27" y="599" fill="var(--muted)" font-size="9" font-family="monospace">MAIN</text>
-  <text x="80" y="599" fill="var(--muted)" font-size="9" font-family="monospace">FILE</text>
-  <text x="124" y="599" fill="var(--muted)" font-size="9" font-family="monospace">OFFSET</text>
-  <text x="188" y="599" fill="var(--muted)" font-size="9" font-family="monospace">TOOL</text>
-  <rect x="228" y="584" width="44" height="22" rx="3" fill="var(--accent)"/>
-  <text x="236" y="599" fill="var(--surface)" font-size="9" font-family="monospace" font-weight="700">WIN</text>
-  <text x="280" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ESC</text>
-  <line x1="320" y1="584" x2="320" y2="606" stroke="var(--border)"/>
-  <text x="336" y="599" fill="var(--muted)" font-size="9" font-family="monospace">FILTER</text>
-  <text x="396" y="599" fill="var(--muted)" font-size="9" font-family="monospace">EXPORT</text>
-  <text x="460" y="599" fill="var(--muted)" font-size="9" font-family="monospace">COPY</text>
-  <text x="510" y="599" fill="var(--muted)" font-size="9" font-family="monospace">CLEAR VIEW</text>
-  <text x="596" y="599" fill="var(--muted)" font-size="9" font-family="monospace">HELP</text>
+  <line x1="4" y1="578" x2="996" y2="578" stroke="#30353a"/>
+  <text x="27" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">MAIN</text>
+  <text x="80" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">FILE</text>
+  <text x="124" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">OFFSET</text>
+  <text x="188" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">TOOL</text>
+  <rect x="228" y="584" width="44" height="22" rx="3" fill="#4da3ff"/>
+  <text x="236" y="599" fill="#141619" font-size="9" font-family="monospace" font-weight="700">WIN</text>
+  <text x="280" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">ESC</text>
+  <line x1="320" y1="584" x2="320" y2="606" stroke="#30353a"/>
+  <text x="336" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">FILTER</text>
+  <text x="396" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">EXPORT</text>
+  <text x="460" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">COPY</text>
+  <text x="510" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">CLEAR VIEW</text>
+  <text x="596" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">HELP</text>
 
   <!-- Status line -->
-  <line x1="4" y1="612" x2="996" y2="612" stroke="var(--border)"/>
-  <text x="16" y="628" fill="var(--muted)" font-size="9" font-family="monospace">AUTO  O1001  LN 7/11  G54  T12  S4200  F850</text>
-  <text x="500" y="628" fill="var(--muted)" font-size="9" font-family="monospace">OVR F100 S100 R100</text>
-  <text x="650" y="628" fill="var(--success)" font-size="9" font-family="monospace">PROTECT OFF</text>
-  <text x="740" y="628" fill="var(--success)" font-size="9" font-family="monospace">E-STOP OK</text>
-  <text x="820" y="628" fill="var(--success)" font-size="9" font-family="monospace">ALARM 0</text>
-  <text x="900" y="628" fill="var(--muted)" font-size="9" font-family="monospace">14:32:05</text>
+  <line x1="4" y1="612" x2="996" y2="612" stroke="#30353a"/>
+  <text x="16" y="628" fill="#9aa0a6" font-size="9" font-family="monospace">AUTO  O1001  LN 7/11  G54  T12  S4200  F850</text>
+  <text x="500" y="628" fill="#9aa0a6" font-size="9" font-family="monospace">OVR F100 S100 R100</text>
+  <text x="650" y="628" fill="#3ddc84" font-size="9" font-family="monospace">PROTECT OFF</text>
+  <text x="740" y="628" fill="#3ddc84" font-size="9" font-family="monospace">E-STOP OK</text>
+  <text x="820" y="628" fill="#3ddc84" font-size="9" font-family="monospace">ALARM 0</text>
+  <text x="900" y="628" fill="#9aa0a6" font-size="9" font-family="monospace">14:32:05</text>
 </svg>

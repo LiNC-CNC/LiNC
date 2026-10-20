@@ -1,0 +1,14 @@
+# LiNC simulation-only panel wiring.
+#
+# Loaded after linc.hal (which creates cnc_panel.*) and before the display.
+# The reference baiermill_sim HAL replaces the physical cabinet wiring with
+# rio.sim-* inputs; these nets connect the LiNC panel service to that simulated
+# hardware. Do not load this file on a real machine.
+
+# E-stop mushroom: cnc_panel.estop is the mushroom state.
+net sim-estop cnc_panel.estop => rio.sim-estop
+
+# Momentary POWER ON / POWER OFF keys. A POWER ON also resets a latched E-stop
+# before rio.sim-power-on latches the machine switch.
+net sim-power-on cnc_panel.power_on => rio.sim-power-on halui.estop.reset
+net sim-power-off cnc_panel.power_off => rio.sim-power-off

@@ -13,6 +13,7 @@ schema_version = 1
 theme = "graphite-blue"
 start_page = "machine"
 window_title = "LiNC"
+# "auto" follows the desktop scale; otherwise 0.5..3.0 or a percentage.
 scale = "auto"
 axis_order = ["X", "Y", "Z"]
 pages = ["machine", "program", "offsets", "tools", "diagnostics", "help"]

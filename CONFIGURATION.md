@@ -1,7 +1,8 @@
 # LiNC Configuration
 
-Status: design contract for LiNC. The `linc` binary and its loader do not exist
-yet; these profiles define how they must behave.
+Status: implemented contract for LiNC. The `linc` binary loads and validates
+these profiles. `linc --check-config` performs the merge, path resolution and
+safety validation without connecting to LinuxCNC or HAL.
 
 ## 1. Rules
 
@@ -32,7 +33,7 @@ yet; these profiles define how they must behave.
 | File | Purpose |
 |---|---|
 | `configs/base.toml` | Shared UI, keymap, safety policy, HAL output policy, panel driver contract, backend and preferences defaults. Not runnable alone. |
-| `configs/sim.toml` | Mill simulation: `../../baiermill_sim/probe_basic.ini`, simulated CNC control panel, `rio_sim.py`. |
+| `configs/sim.toml` | Mill simulation: `configs/sim.ini` runs a real `linuxcnc` process with the `baiermill_sim` HAL, LiNC display and simulated CNC control panel. |
 | `configs/baiermill.toml` | Physical mill: `../../baiermill_pb/probe_basic.ini`, real CNC control panel over RS-485 owned by `linc-panel`. |
 | `configs/lathe-sim.toml` | Lathe simulation: `../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini`, lathe UI capabilities. |
 
@@ -52,7 +53,7 @@ profile are resolved relative to that profile file; `~` is expanded.
 Intended command line:
 
 ```sh
-linc --config configs/sim.toml
+./scripts/start-sim.sh
 linc --config configs/baiermill.toml
 ```
 
@@ -79,11 +80,13 @@ Simulation:
 
 ```ini
 [DISPLAY]
-DISPLAY = linc --config /home/jack/CNC/LiNC/configs/sim.toml
+DISPLAY = ../scripts/linc-display.sh
 ```
 
-Do not change the existing `probe_basic.ini` until the `linc` executable is
-installed; Probe Basic remains the current display.
+`scripts/start-sim.sh` launches `linuxcnc configs/sim.ini`; the INI loads
+`baiermill_sim/hallib/rio_sim.hal` and `sim_signals.hal`, then
+`hal/linc.hal` and `hal/linc-sim.hal`. `linc-display.sh` starts the HMI with
+the profile and loads `hal/linc-sim-postgui.hal` after the `linc.*` pins exist.
 
 ### HAL wiring
 
@@ -200,7 +203,7 @@ configuration reviewable.
 | ATC | 12 pockets, Z tool-change height -194 mm (manual changer today; add P only if ATC is enabled) |
 | Tool table | `tool.tbl`, standard `TZDR` (no P in manual mode) |
 | Real config | `../../baiermill_pb/probe_basic.ini` |
-| Sim config | `../../baiermill_sim/probe_basic.ini` |
+| Sim config | `configs/sim.ini` (loads `baiermill_sim` HAL) |
 
 The simulation INI intentionally carries the same travel, tuning, homing order
 and ATC values as the machine; only the HAL stack and paths differ.
@@ -210,9 +213,11 @@ and ATC values as the machine; only the HAL stack and paths differ.
 `configs/sim.toml`:
 
 - `machine.kind = "sim"` — the HMI shows a persistent `SIM` badge.
-- `linuxcnc_ini = "../../baiermill_sim/probe_basic.ini"`.
+- `linuxcnc_ini = "sim.ini"`, a real LinuxCNC simulation configuration.
+- `sim.ini` loads `baiermill_sim/hallib/rio_sim.hal` and the LiNC HAL; motion,
+  I/O, homing and ATC run in LinuxCNC, not in the HMI.
 - Panel driver is `cnc-panel-sim`; link is `virtual`; the panel service owns the
-  simulated window.
+  simulated window and exchanges state through `cnc_panel.*` HAL pins.
 - `rio` is `baiermill_sim/rio_sim.py`; no FPGA card or serial device.
 - The HAL pin surface is the same `cnc_panel.*` and `rio.*` surface as the
   real machine, so the HMI uses the same code path.
@@ -223,7 +228,9 @@ and ATC values as the machine; only the HAL stack and paths differ.
 Launch:
 
 ```sh
-linc --config configs/sim.toml
+./scripts/start-sim.sh          # starts LinuxCNC, linc-display, linc-panel
+./scripts/start-sim.sh --detach
+./scripts/stop-sim.sh
 ```
 
 This profile must never be used to command real hardware.
@@ -307,6 +314,29 @@ preferences.
 `--config`/machine profile changes require a restart. Preferences may be
 written while running.
 
+### UI scale
+
+`[ui] scale` controls the HMI zoom factor and is applied when the window is
+created:
+
+| Value | Effect |
+|---|---|
+| `"auto"` | Use the desktop's native scale. |
+| `"1.0"` | Design size. |
+| `"0.8"` | 80%, fits the 1920x1080 layout on a 125% desktop. |
+| `"80%"` | Same as `0.8`. |
+| `"1.25x"` | 125%. |
+
+Accepted factors are `0.5` through `3.0`. The HMI window enforces a minimum of
+1920×1080 and is optimized for that resolution. The Settings screen shows the
+configured value and offers a temporary runtime override; edit the profile to
+make a scale persistent. The simulation profile ships with `"0.8"` for the
+125% development display; use `"auto"` or `"1.0"` on a 100% machine display.
+
+The standalone simulator panel has its own zoom control,
+`[simulation] panel_scale`, also in `0.5..3.0`; it is independent of the HMI
+scale.
+
 ## 10. Schema reference
 
 | Table | Keys |
@@ -365,8 +395,9 @@ For this design repository:
 - `sim.toml` extends `base.toml`, is `gui = "mill"`, and points at an existing INI;
 - `baiermill.toml` extends `base.toml`, is `gui = "mill"`, and points at an existing INI;
 - `lathe-sim.toml` extends `base.toml`, is `gui = "lathe"`, and points at an existing INI;
-- the mill simulation profile uses the built-in `cnc-panel-sim` driver and
-  resolves `simulation.rio`;
+- the mill simulation profile uses the built-in `cnc-panel-sim` driver, points
+  at `configs/sim.ini`, and starts a real LinuxCNC process through
+  `scripts/start-sim.sh`;
 - the lathe profile declares turret/live-tool capabilities and has no panel window yet;
 - the real profile contains no simulated panel or `rio_sim.py` path;
 - the simulation profile contains no serial device path;
@@ -405,74 +436,28 @@ For this design repository:
 - `[pendant] jog_only = true` and non-jog functions are ignored;
 - `base.toml` cannot be loaded as a runnable profile.
 
-## 12. Open issues
+## 12. Remaining hardware verification
 
-1. The `linc` binary and config loader do not exist yet. `--check-config`
-   and the merge rules in this document are the implementation contract.
-2. The panel driver currently hard-codes `/dev/ttyUSB0` and gets its cycle time
-   from `hallib/cnc_panel.hal` (`-c 0.01`). The profile's `[panel.link]`
-   fields are metadata until the driver reads a shared config.
-3. The panel driver does not expose RX/TX counters yet, so
-   `panel_link_stats = "optional"` will show "unavailable" on the real machine.
-4. The current HAL cycle time is 0.01 s while the protocol sleeps about 14 ms
-   per transaction. Raise it to 0.02–0.05 s when the driver is fixed; update
-   the profile and `cnc_panel.hal` together.
-5. Installing profiles outside the repository breaks relative
-   `../../baiermill_pb` paths. Either preserve the sibling layout or use absolute
-   paths in the installed profile.
-6. The G-code help bundle currently exists only as the Python data module in
-   `../baiermill_pb/user_tabs/gcode_help/`. The accepted screen is
-   `svg/gcode-help.svg`, but the HMI still needs a Rust-friendly generated
-   format (JSON or TOML), a pinned LinuxCNC docs version, and preserved
-   documentation/image attribution.
-7. The G-code editor is design-only. Still to implement: the `ropey` buffer,
-   atomic save, external-change detection, unsaved-change dialog, search,
-   undo/redo, and a preview parser that cannot disturb the running interpreter.
-   The QMK keyboard has standard Ctrl shortcuts but no `Shift`, `Tab` or
-   `Delete`; selection must also work with the mouse layer and line operations.
-8. Panel mode pins are steady one-hot levels and overrides are steady analog
-   values. Decode them directly; do not latch pulses. Add a persistent driver
-   capability descriptor for future panel types.
-9. USB auto-mount uses `udisks2` over D-Bus. `udisks2` is inactive on the
-   development box; enable/verify it on the machine and test polkit
-   authorization, mount failure, busy eject and power-off.
-10. File copy implementation must reject symlinks/path escapes, check free
-    space, confirm overwrite, use a temporary file plus rename, report progress,
-    and prevent eject during a copy.
-11. Lathe support needs HAL pin mapping for power-turret station/clamp/index and
-    live-tool drive/RPM/direction; the existing lathe simulator exposes neither.
-12. A lathe-specific simulator panel mockup is still needed; the current
-    `svg/sim-panel.svg` is the mill CNC control panel.
-13. Port the Probe Basic parameter/result contracts and G-code calls; `RUN
-    PROBE` issues the selected call through `issue_mdi` after validation.
-14. Implement MDI issue through `issue_mdi`: syntax check, history recall,
-    discard unissued input on mode exit, and restore the prior task mode.
-15. Verify Homing display against the existing `baiermill_pb` home/proghome
-    pins and gating; test Z-first, individual axes, PROG.HOME current-WCS moves
-    and faults.
-16. Preserve PROG.HOME's direct `issue_mdi` behavior exactly: panel keys send
-    `G0 X0Y0Z0` / `G0 X0` / `G0 Y0` / `G0 Z0` in the current WCS, X/Y/Z only.
-17. Implement immediate `Tn M6` issue, manual confirmation through
-    `linc.tool-change-confirm`, and deferred ATC/turret support using the
-    standard `P` column rather than ad-hoc pocket parameters.
-18. Enforce `program_protect` as a fail-closed backend interlock. The panel pin
-    is authoritative; unknown/stale reads lock editing. Test G-code save,
-    offset/tool writes, file imports and probe applies with protect ON and with
-    the panel link lost.
-19. Implement `linc.status-display` for `g5x_index` (54–59, `--` otherwise) and
-    wire it to `cnc_panel.sseg_status`. Verify after HMI/panel restarts,
-    extended offsets and disconnected/stale status.
-20. Implement the `linc` HAL component with the closed output allowlist
-    (`hmi-alive`, `tool-change-confirm`, `status-display`) and no arbitrary
-    pin-write API.
-21. Prune the WHB04B-6 pendant nets to jog/handwheel-only in JOG mode; ignore
-    pendant mode/cycle/spindle/coolant/override/program/macro inputs.
-22. Standardize tool tables: manual mill profiles use `TZDR` (no `P`); an
-    ATC/turret profile must add `P`. The current lathe table is `TXZIJDQR`;
-    add `P` when the power turret is commissioned and migrate the ATC remap to
-    that column.
-23. Add a panel-driver conformance matrix and simulator driver for future panel
-    types/transports.
-24. Rename or alias the existing branded panel HAL component/pins to
-    `cnc_panel` and update `hallib`; otherwise LiNC profiles will not find the
-    generic pin names.
+The software implementation is in place; these items still need a real machine
+or a commissioned LinuxCNC session:
+
+1. The live machine HAL must expose the generic `cnc_panel` component. Rename
+   or alias the legacy branded panel component before loading `hal/linc.hal`.
+2. Verify the RS-485 panel's status-display frame. The service exposes
+   `cnc_panel.sseg_status` and the simulator renders it, but the current legacy
+   frame carries only the two tool displays.
+3. Verify `cnc_panel.home_state_x/y/z` against the machine's motmod version and
+   confirm that individual home/proghome keys are inhibited during homing.
+4. Test `udisks2` auto-mount/eject with polkit authorization, mount failure,
+   busy eject, power-off and the `nosuid,nodev,noexec` options.
+5. Commission the lathe power turret/live-tool HAL mapping. Add the standard
+   `P` column to the lathe INI/tool table before enabling
+   `configs/lathe-sim.toml`; the loader intentionally refuses a turret profile
+   without `P`.
+6. Test the WHB04B-6 pendant on hardware, including the JOG-only gate and
+   ignored mode/cycle/spindle/coolant/override/program/macro controls.
+7. Profile paths that use `../../baiermill_pb` require the sibling checkout
+   layout; use absolute paths in an installed profile.
+8. Decide whether the LinuxCNC bridge should remain the supervised official
+   module helper or be replaced by an embedded PyO3/NML implementation. The
+   `MachineBackend` boundary is unchanged either way.

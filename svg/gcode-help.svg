@@ -1,216 +1,217 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640">
-  <rect x="4" y="4" width="992" height="632" rx="8" fill="none" stroke="var(--border)"/>
+  <rect x="0" y="0" width="1000" height="640" fill="#141619"/>
+  <rect x="4" y="4" width="992" height="632" rx="8" fill="none" stroke="#30353a"/>
 
   <!-- Top status -->
-  <line x1="4" y1="54" x2="996" y2="54" stroke="var(--border)"/>
-  <text x="16" y="33" fill="var(--fg)" font-size="16" font-family="sans-serif" font-weight="700">VMC-01</text>
-  <rect x="92" y="12" width="66" height="26" rx="4" fill="var(--accent)"/>
-  <text x="104" y="30" fill="var(--surface)" font-size="12" font-family="monospace" font-weight="700">AUTO</text>
-  <text x="176" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">PROGRAM</text>
-  <text x="176" y="34" fill="var(--fg)" font-size="13" font-family="monospace">O1001</text>
-  <text x="246" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">TOOL</text>
-  <text x="246" y="34" fill="var(--fg)" font-size="13" font-family="monospace">T12</text>
-  <text x="300" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">SPINDLE</text>
-  <text x="300" y="34" fill="var(--fg)" font-size="13" font-family="monospace">S 4200</text>
-  <text x="390" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">FEED</text>
-  <text x="390" y="34" fill="var(--fg)" font-size="13" font-family="monospace">F 850</text>
-  <text x="460" y="16" fill="var(--muted)" font-size="9" font-family="sans-serif">WORK</text>
-  <text x="460" y="34" fill="var(--fg)" font-size="13" font-family="monospace">G54</text>
-  <circle cx="548" cy="24" r="4" fill="var(--success)"/>
-  <text x="560" y="29" fill="var(--success)" font-size="11" font-family="sans-serif" font-weight="700">PANEL ONLINE</text>
-  <circle cx="686" cy="24" r="4" fill="var(--success)"/>
-  <text x="698" y="29" fill="var(--fg)" font-size="11" font-family="monospace">ALARM 0</text>
-  <circle cx="778" cy="24" r="4" fill="var(--warning)"/>
-  <text x="790" y="29" fill="var(--fg)" font-size="11" font-family="monospace">MSG 2</text>
-  <text x="892" y="30" fill="var(--muted)" font-size="12" font-family="monospace">14:32:05</text>
+  <line x1="4" y1="54" x2="996" y2="54" stroke="#30353a"/>
+  <text x="16" y="33" fill="#e8eaed" font-size="16" font-family="sans-serif" font-weight="700">VMC-01</text>
+  <rect x="92" y="12" width="66" height="26" rx="4" fill="#4da3ff"/>
+  <text x="104" y="30" fill="#141619" font-size="12" font-family="monospace" font-weight="700">AUTO</text>
+  <text x="176" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">PROGRAM</text>
+  <text x="176" y="34" fill="#e8eaed" font-size="13" font-family="monospace">O1001</text>
+  <text x="246" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">TOOL</text>
+  <text x="246" y="34" fill="#e8eaed" font-size="13" font-family="monospace">T12</text>
+  <text x="300" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">SPINDLE</text>
+  <text x="300" y="34" fill="#e8eaed" font-size="13" font-family="monospace">S 4200</text>
+  <text x="390" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">FEED</text>
+  <text x="390" y="34" fill="#e8eaed" font-size="13" font-family="monospace">F 850</text>
+  <text x="460" y="16" fill="#9aa0a6" font-size="9" font-family="sans-serif">WORK</text>
+  <text x="460" y="34" fill="#e8eaed" font-size="13" font-family="monospace">G54</text>
+  <circle cx="548" cy="24" r="4" fill="#3ddc84"/>
+  <text x="560" y="29" fill="#3ddc84" font-size="11" font-family="sans-serif" font-weight="700">PANEL ONLINE</text>
+  <circle cx="686" cy="24" r="4" fill="#3ddc84"/>
+  <text x="698" y="29" fill="#e8eaed" font-size="11" font-family="monospace">ALARM 0</text>
+  <circle cx="778" cy="24" r="4" fill="#ffb020"/>
+  <text x="790" y="29" fill="#e8eaed" font-size="11" font-family="monospace">MSG 2</text>
+  <text x="892" y="30" fill="#9aa0a6" font-size="12" font-family="monospace">14:32:05</text>
 
   <!-- Left navigation -->
-  <rect x="8" y="62" width="142" height="508" rx="6" fill="var(--surface)" stroke="var(--border)"/>
-  <rect x="8" y="78" width="4" height="42" fill="var(--border)"/>
-  <rect x="20" y="88" width="20" height="20" rx="3" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
-  <line x1="24" y1="98" x2="36" y2="98" stroke="var(--muted)" stroke-width="1.6"/>
-  <circle cx="30" cy="94" r="3" fill="none" stroke="var(--muted)" stroke-width="1.4"/>
-  <text x="48" y="96" fill="var(--fg)" font-size="12" font-family="sans-serif">MACHINE</text>
-  <text x="48" y="112" fill="var(--muted)" font-size="9" font-family="monospace">MAIN</text>
+  <rect x="8" y="62" width="142" height="508" rx="6" fill="#141619" stroke="#30353a"/>
+  <rect x="8" y="78" width="4" height="42" fill="#30353a"/>
+  <rect x="20" y="88" width="20" height="20" rx="3" fill="none" stroke="#9aa0a6" stroke-width="1.6"/>
+  <line x1="24" y1="98" x2="36" y2="98" stroke="#9aa0a6" stroke-width="1.6"/>
+  <circle cx="30" cy="94" r="3" fill="none" stroke="#9aa0a6" stroke-width="1.4"/>
+  <text x="48" y="96" fill="#e8eaed" font-size="12" font-family="sans-serif">MACHINE</text>
+  <text x="48" y="112" fill="#9aa0a6" font-size="9" font-family="monospace">MAIN</text>
 
-  <rect x="20" y="132" width="18" height="20" rx="2" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
-  <line x1="24" y1="138" x2="34" y2="138" stroke="var(--muted)" stroke-width="1.2"/>
-  <line x1="24" y1="143" x2="34" y2="143" stroke="var(--muted)" stroke-width="1.2"/>
-  <line x1="24" y1="148" x2="31" y2="148" stroke="var(--muted)" stroke-width="1.2"/>
-  <text x="48" y="147" fill="var(--fg)" font-size="12" font-family="sans-serif">PROGRAM</text>
-  <text x="48" y="163" fill="var(--muted)" font-size="9" font-family="monospace">FILE</text>
+  <rect x="20" y="132" width="18" height="20" rx="2" fill="none" stroke="#9aa0a6" stroke-width="1.5"/>
+  <line x1="24" y1="138" x2="34" y2="138" stroke="#9aa0a6" stroke-width="1.2"/>
+  <line x1="24" y1="143" x2="34" y2="143" stroke="#9aa0a6" stroke-width="1.2"/>
+  <line x1="24" y1="148" x2="31" y2="148" stroke="#9aa0a6" stroke-width="1.2"/>
+  <text x="48" y="147" fill="#e8eaed" font-size="12" font-family="sans-serif">PROGRAM</text>
+  <text x="48" y="163" fill="#9aa0a6" font-size="9" font-family="monospace">FILE</text>
 
-  <circle cx="29" cy="194" r="9" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
-  <line x1="29" y1="180" x2="29" y2="185" stroke="var(--muted)" stroke-width="1.4"/>
-  <line x1="29" y1="203" x2="29" y2="208" stroke="var(--muted)" stroke-width="1.4"/>
-  <line x1="15" y1="194" x2="20" y2="194" stroke="var(--muted)" stroke-width="1.4"/>
-  <line x1="38" y1="194" x2="43" y2="194" stroke="var(--muted)" stroke-width="1.4"/>
-  <text x="48" y="198" fill="var(--fg)" font-size="12" font-family="sans-serif">OFFSETS</text>
-  <text x="48" y="214" fill="var(--muted)" font-size="9" font-family="monospace">OFFSET</text>
+  <circle cx="29" cy="194" r="9" fill="none" stroke="#9aa0a6" stroke-width="1.5"/>
+  <line x1="29" y1="180" x2="29" y2="185" stroke="#9aa0a6" stroke-width="1.4"/>
+  <line x1="29" y1="203" x2="29" y2="208" stroke="#9aa0a6" stroke-width="1.4"/>
+  <line x1="15" y1="194" x2="20" y2="194" stroke="#9aa0a6" stroke-width="1.4"/>
+  <line x1="38" y1="194" x2="43" y2="194" stroke="#9aa0a6" stroke-width="1.4"/>
+  <text x="48" y="198" fill="#e8eaed" font-size="12" font-family="sans-serif">OFFSETS</text>
+  <text x="48" y="214" fill="#9aa0a6" font-size="9" font-family="monospace">OFFSET</text>
 
-  <path d="M20 250 L28 250 L31 244 L34 256 L38 238 L42 250 L48 250" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
-  <text x="56" y="251" fill="var(--fg)" font-size="12" font-family="sans-serif">TOOLS</text>
-  <text x="56" y="267" fill="var(--muted)" font-size="9" font-family="monospace">TOOL</text>
+  <path d="M20 250 L28 250 L31 244 L34 256 L38 238 L42 250 L48 250" fill="none" stroke="#9aa0a6" stroke-width="1.6"/>
+  <text x="56" y="251" fill="#e8eaed" font-size="12" font-family="sans-serif">TOOLS</text>
+  <text x="56" y="267" fill="#9aa0a6" font-size="9" font-family="monospace">TOOL</text>
 
-  <path d="M20 306 L20 300 L25 300 L25 312 L37 312 L37 306 L43 306" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
-  <text x="52" y="310" fill="var(--fg)" font-size="12" font-family="sans-serif">DIAGNOSTICS</text>
-  <text x="52" y="326" fill="var(--muted)" font-size="9" font-family="monospace">WIN</text>
+  <path d="M20 306 L20 300 L25 300 L25 312 L37 312 L37 306 L43 306" fill="none" stroke="#9aa0a6" stroke-width="1.6"/>
+  <text x="52" y="310" fill="#e8eaed" font-size="12" font-family="sans-serif">DIAGNOSTICS</text>
+  <text x="52" y="326" fill="#9aa0a6" font-size="9" font-family="monospace">WIN</text>
 
   <!-- Active help item -->
-  <rect x="8" y="338" width="4" height="44" fill="var(--accent)"/>
-  <circle cx="31" cy="360" r="9" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
-  <text x="27" y="364" fill="var(--accent)" font-size="12" font-family="sans-serif" font-weight="700">?</text>
-  <text x="52" y="356" fill="var(--accent)" font-size="12" font-family="sans-serif" font-weight="700">G-CODE HELP</text>
-  <text x="52" y="372" fill="var(--muted)" font-size="9" font-family="monospace">HELP</text>
+  <rect x="8" y="338" width="4" height="44" fill="#4da3ff"/>
+  <circle cx="31" cy="360" r="9" fill="none" stroke="#4da3ff" stroke-width="1.6"/>
+  <text x="27" y="364" fill="#4da3ff" font-size="12" font-family="sans-serif" font-weight="700">?</text>
+  <text x="52" y="356" fill="#4da3ff" font-size="12" font-family="sans-serif" font-weight="700">G-CODE HELP</text>
+  <text x="52" y="372" fill="#9aa0a6" font-size="9" font-family="monospace">HELP</text>
 
-  <line x1="20" y1="392" x2="138" y2="392" stroke="var(--border)"/>
-  <text x="20" y="414" fill="var(--muted)" font-size="9" font-family="monospace">ARROWS MOVE</text>
-  <text x="20" y="430" fill="var(--muted)" font-size="9" font-family="monospace">ENTER OPEN</text>
-  <text x="20" y="446" fill="var(--muted)" font-size="9" font-family="monospace">ESC CLEAR</text>
-  <text x="20" y="462" fill="var(--muted)" font-size="9" font-family="monospace">/ SEARCH</text>
-  <text x="20" y="478" fill="var(--muted)" font-size="9" font-family="monospace">PGUP / PGDN</text>
-  <text x="20" y="494" fill="var(--muted)" font-size="9" font-family="monospace">HOME / END</text>
-  <line x1="20" y1="510" x2="138" y2="510" stroke="var(--border)"/>
-  <text x="20" y="530" fill="var(--muted)" font-size="9" font-family="sans-serif">OFFLINE DOCS</text>
-  <text x="20" y="544" fill="var(--muted)" font-size="9" font-family="monospace">LINUXCNC 2.9</text>
+  <line x1="20" y1="392" x2="138" y2="392" stroke="#30353a"/>
+  <text x="20" y="414" fill="#9aa0a6" font-size="9" font-family="monospace">ARROWS MOVE</text>
+  <text x="20" y="430" fill="#9aa0a6" font-size="9" font-family="monospace">ENTER OPEN</text>
+  <text x="20" y="446" fill="#9aa0a6" font-size="9" font-family="monospace">ESC CLEAR</text>
+  <text x="20" y="462" fill="#9aa0a6" font-size="9" font-family="monospace">/ SEARCH</text>
+  <text x="20" y="478" fill="#9aa0a6" font-size="9" font-family="monospace">PGUP / PGDN</text>
+  <text x="20" y="494" fill="#9aa0a6" font-size="9" font-family="monospace">HOME / END</text>
+  <line x1="20" y1="510" x2="138" y2="510" stroke="#30353a"/>
+  <text x="20" y="530" fill="#9aa0a6" font-size="9" font-family="sans-serif">OFFLINE DOCS</text>
+  <text x="20" y="544" fill="#9aa0a6" font-size="9" font-family="monospace">LINUXCNC 2.9</text>
 
   <!-- Page header -->
-  <text x="158" y="82" fill="var(--fg)" font-size="18" font-family="sans-serif" font-weight="700">G-CODE HELP</text>
-  <text x="158" y="100" fill="var(--muted)" font-size="10" font-family="sans-serif">LinuxCNC reference - bundled offline - 125 sections / 14 figures</text>
-  <rect x="862" y="68" width="122" height="22" rx="3" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="873" y="83" fill="var(--muted)" font-size="9" font-family="monospace">OFFLINE BUNDLE</text>
+  <text x="158" y="82" fill="#e8eaed" font-size="18" font-family="sans-serif" font-weight="700">G-CODE HELP</text>
+  <text x="158" y="100" fill="#9aa0a6" font-size="10" font-family="sans-serif">LinuxCNC reference - bundled offline - 125 sections / 14 figures</text>
+  <rect x="862" y="68" width="122" height="22" rx="3" fill="#141619" stroke="#30353a"/>
+  <text x="873" y="83" fill="#9aa0a6" font-size="9" font-family="monospace">OFFLINE BUNDLE</text>
 
   <!-- Search -->
-  <rect x="158" y="112" width="826" height="34" rx="5" fill="var(--surface)" stroke="var(--accent)"/>
-  <circle cx="174" cy="129" r="5" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
-  <line x1="178" y1="133" x2="182" y2="137" stroke="var(--accent)" stroke-width="1.4"/>
-  <text x="192" y="134" fill="var(--muted)" font-size="12" font-family="sans-serif">Search G2, M3, o sub, arc ...</text>
-  <rect x="930" y="118" width="34" height="22" rx="3" fill="var(--border)"/>
-  <text x="941" y="133" fill="var(--fg)" font-size="11" font-family="monospace">/</text>
-  <text x="900" y="134" fill="var(--muted)" font-size="9" font-family="sans-serif">FOCUS</text>
+  <rect x="158" y="112" width="826" height="34" rx="5" fill="#141619" stroke="#4da3ff"/>
+  <circle cx="174" cy="129" r="5" fill="none" stroke="#4da3ff" stroke-width="1.4"/>
+  <line x1="178" y1="133" x2="182" y2="137" stroke="#4da3ff" stroke-width="1.4"/>
+  <text x="192" y="134" fill="#9aa0a6" font-size="12" font-family="sans-serif">Search G2, M3, o sub, arc ...</text>
+  <rect x="930" y="118" width="34" height="22" rx="3" fill="#30353a"/>
+  <text x="941" y="133" fill="#e8eaed" font-size="11" font-family="monospace">/</text>
+  <text x="900" y="134" fill="#9aa0a6" font-size="9" font-family="sans-serif">FOCUS</text>
 
   <!-- Quick reference -->
-  <rect x="158" y="158" width="310" height="402" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="170" y="178" fill="var(--fg)" font-size="11" font-family="sans-serif" font-weight="700">QUICK REFERENCE</text>
-  <text x="170" y="192" fill="var(--muted)" font-size="9" font-family="monospace">89 entries</text>
-  <line x1="170" y1="200" x2="438" y2="200" stroke="var(--border)"/>
-  <text x="174" y="216" fill="var(--muted)" font-size="8" font-family="sans-serif">CODE</text>
-  <text x="252" y="216" fill="var(--muted)" font-size="8" font-family="sans-serif">DESCRIPTION</text>
-  <text x="408" y="216" fill="var(--muted)" font-size="8" font-family="sans-serif">PARAMS</text>
+  <rect x="158" y="158" width="310" height="402" rx="5" fill="#141619" stroke="#30353a"/>
+  <text x="170" y="178" fill="#e8eaed" font-size="11" font-family="sans-serif" font-weight="700">QUICK REFERENCE</text>
+  <text x="170" y="192" fill="#9aa0a6" font-size="9" font-family="monospace">89 entries</text>
+  <line x1="170" y1="200" x2="438" y2="200" stroke="#30353a"/>
+  <text x="174" y="216" fill="#9aa0a6" font-size="8" font-family="sans-serif">CODE</text>
+  <text x="252" y="216" fill="#9aa0a6" font-size="8" font-family="sans-serif">DESCRIPTION</text>
+  <text x="408" y="216" fill="#9aa0a6" font-size="8" font-family="sans-serif">PARAMS</text>
 
   <!-- groups and rows -->
-  <rect x="170" y="224" width="278" height="20" fill="var(--border)" opacity="0.45"/>
-  <text x="176" y="238" fill="var(--muted)" font-size="9" font-family="sans-serif" font-weight="700">MOTION</text>
-  <text x="176" y="262" fill="var(--c1)" font-size="10" font-family="monospace">G0</text>
-  <text x="252" y="262" fill="var(--fg)" font-size="10" font-family="sans-serif">Rapid move</text>
-  <text x="176" y="286" fill="var(--c1)" font-size="10" font-family="monospace">G1</text>
-  <text x="252" y="286" fill="var(--fg)" font-size="10" font-family="sans-serif">Linear move</text>
-  <rect x="170" y="294" width="278" height="24" fill="var(--accent)" opacity="0.16"/>
-  <rect x="170" y="294" width="3" height="24" fill="var(--accent)"/>
-  <text x="176" y="310" fill="var(--c1)" font-size="10" font-family="monospace" font-weight="700">G2, G3</text>
-  <text x="252" y="310" fill="var(--fg)" font-size="10" font-family="sans-serif" font-weight="700">Arc move</text>
-  <text x="408" y="310" fill="var(--muted)" font-size="9" font-family="monospace">I J K / R</text>
-  <text x="176" y="334" fill="var(--c1)" font-size="10" font-family="monospace">G4</text>
-  <text x="252" y="334" fill="var(--fg)" font-size="10" font-family="sans-serif">Dwell</text>
-  <text x="176" y="358" fill="var(--c1)" font-size="10" font-family="monospace">G5</text>
-  <text x="252" y="358" fill="var(--fg)" font-size="10" font-family="sans-serif">Cubic spline</text>
-  <text x="176" y="382" fill="var(--c1)" font-size="10" font-family="monospace">G5.1</text>
-  <text x="252" y="382" fill="var(--fg)" font-size="10" font-family="sans-serif">Quadratic spline</text>
-  <text x="176" y="406" fill="var(--c1)" font-size="10" font-family="monospace">G38.2-5</text>
-  <text x="252" y="406" fill="var(--fg)" font-size="9" font-family="sans-serif">Straight probe</text>
+  <rect x="170" y="224" width="278" height="20" fill="#30353a" opacity="0.45"/>
+  <text x="176" y="238" fill="#9aa0a6" font-size="9" font-family="sans-serif" font-weight="700">MOTION</text>
+  <text x="176" y="262" fill="#67e8f9" font-size="10" font-family="monospace">G0</text>
+  <text x="252" y="262" fill="#e8eaed" font-size="10" font-family="sans-serif">Rapid move</text>
+  <text x="176" y="286" fill="#67e8f9" font-size="10" font-family="monospace">G1</text>
+  <text x="252" y="286" fill="#e8eaed" font-size="10" font-family="sans-serif">Linear move</text>
+  <rect x="170" y="294" width="278" height="24" fill="#4da3ff" opacity="0.16"/>
+  <rect x="170" y="294" width="3" height="24" fill="#4da3ff"/>
+  <text x="176" y="310" fill="#67e8f9" font-size="10" font-family="monospace" font-weight="700">G2, G3</text>
+  <text x="252" y="310" fill="#e8eaed" font-size="10" font-family="sans-serif" font-weight="700">Arc move</text>
+  <text x="408" y="310" fill="#9aa0a6" font-size="9" font-family="monospace">I J K / R</text>
+  <text x="176" y="334" fill="#67e8f9" font-size="10" font-family="monospace">G4</text>
+  <text x="252" y="334" fill="#e8eaed" font-size="10" font-family="sans-serif">Dwell</text>
+  <text x="176" y="358" fill="#67e8f9" font-size="10" font-family="monospace">G5</text>
+  <text x="252" y="358" fill="#e8eaed" font-size="10" font-family="sans-serif">Cubic spline</text>
+  <text x="176" y="382" fill="#67e8f9" font-size="10" font-family="monospace">G5.1</text>
+  <text x="252" y="382" fill="#e8eaed" font-size="10" font-family="sans-serif">Quadratic spline</text>
+  <text x="176" y="406" fill="#67e8f9" font-size="10" font-family="monospace">G38.2-5</text>
+  <text x="252" y="406" fill="#e8eaed" font-size="9" font-family="sans-serif">Straight probe</text>
 
-  <rect x="170" y="416" width="278" height="20" fill="var(--border)" opacity="0.45"/>
-  <text x="176" y="430" fill="var(--muted)" font-size="9" font-family="sans-serif" font-weight="700">CANNED CYCLES</text>
-  <text x="176" y="454" fill="var(--c1)" font-size="10" font-family="monospace">G73</text>
-  <text x="252" y="454" fill="var(--fg)" font-size="10" font-family="sans-serif">Chip breaking</text>
-  <text x="176" y="478" fill="var(--c1)" font-size="10" font-family="monospace">G81</text>
-  <text x="252" y="478" fill="var(--fg)" font-size="10" font-family="sans-serif">Drilling</text>
-  <text x="176" y="502" fill="var(--c1)" font-size="10" font-family="monospace">G83</text>
-  <text x="252" y="502" fill="var(--fg)" font-size="10" font-family="sans-serif">Peck drilling</text>
-  <text x="176" y="526" fill="var(--c1)" font-size="10" font-family="monospace">G84</text>
-  <text x="252" y="526" fill="var(--fg)" font-size="10" font-family="sans-serif">Tapping</text>
-  <text x="176" y="550" fill="var(--muted)" font-size="9" font-family="sans-serif" font-style="italic">more groups: M-codes, O-words, other ...</text>
+  <rect x="170" y="416" width="278" height="20" fill="#30353a" opacity="0.45"/>
+  <text x="176" y="430" fill="#9aa0a6" font-size="9" font-family="sans-serif" font-weight="700">CANNED CYCLES</text>
+  <text x="176" y="454" fill="#67e8f9" font-size="10" font-family="monospace">G73</text>
+  <text x="252" y="454" fill="#e8eaed" font-size="10" font-family="sans-serif">Chip breaking</text>
+  <text x="176" y="478" fill="#67e8f9" font-size="10" font-family="monospace">G81</text>
+  <text x="252" y="478" fill="#e8eaed" font-size="10" font-family="sans-serif">Drilling</text>
+  <text x="176" y="502" fill="#67e8f9" font-size="10" font-family="monospace">G83</text>
+  <text x="252" y="502" fill="#e8eaed" font-size="10" font-family="sans-serif">Peck drilling</text>
+  <text x="176" y="526" fill="#67e8f9" font-size="10" font-family="monospace">G84</text>
+  <text x="252" y="526" fill="#e8eaed" font-size="10" font-family="sans-serif">Tapping</text>
+  <text x="176" y="550" fill="#9aa0a6" font-size="9" font-family="sans-serif" font-style="italic">more groups: M-codes, O-words, other ...</text>
 
   <!-- scrollbar -->
-  <rect x="458" y="206" width="4" height="340" rx="2" fill="var(--border)"/>
-  <rect x="458" y="206" width="4" height="92" rx="2" fill="var(--muted)"/>
+  <rect x="458" y="206" width="4" height="340" rx="2" fill="#30353a"/>
+  <rect x="458" y="206" width="4" height="92" rx="2" fill="#9aa0a6"/>
 
   <!-- Detail -->
-  <rect x="480" y="158" width="504" height="402" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="494" y="184" fill="var(--c1)" font-size="19" font-family="monospace" font-weight="700">G2, G3</text>
-  <text x="580" y="184" fill="var(--fg)" font-size="12" font-family="sans-serif">Arc move</text>
-  <rect x="904" y="168" width="66" height="20" rx="3" fill="var(--accent)" opacity="0.18"/>
-  <text x="913" y="182" fill="var(--accent)" font-size="8" font-family="monospace">MOTION</text>
-  <line x1="494" y1="198" x2="970" y2="198" stroke="var(--border)"/>
+  <rect x="480" y="158" width="504" height="402" rx="5" fill="#141619" stroke="#30353a"/>
+  <text x="494" y="184" fill="#67e8f9" font-size="19" font-family="monospace" font-weight="700">G2, G3</text>
+  <text x="580" y="184" fill="#e8eaed" font-size="12" font-family="sans-serif">Arc move</text>
+  <rect x="904" y="168" width="66" height="20" rx="3" fill="#4da3ff" opacity="0.18"/>
+  <text x="913" y="182" fill="#4da3ff" font-size="8" font-family="monospace">MOTION</text>
+  <line x1="494" y1="198" x2="970" y2="198" stroke="#30353a"/>
 
-  <text x="494" y="220" fill="var(--fg)" font-size="11" font-family="sans-serif">Clockwise / counter-clockwise arc in the active plane.</text>
-  <text x="494" y="238" fill="var(--muted)" font-size="10" font-family="sans-serif">G17: XY (I, J)  -  G18: XZ (I, K)  -  G19: YZ (J, K)</text>
+  <text x="494" y="220" fill="#e8eaed" font-size="11" font-family="sans-serif">Clockwise / counter-clockwise arc in the active plane.</text>
+  <text x="494" y="238" fill="#9aa0a6" font-size="10" font-family="sans-serif">G17: XY (I, J)  -  G18: XZ (I, K)  -  G19: YZ (J, K)</text>
 
-  <rect x="494" y="252" width="476" height="60" rx="4" fill="var(--border)" opacity="0.28"/>
-  <text x="506" y="274" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G2</tspan> <tspan fill="var(--c3)">X</tspan><tspan fill="var(--fg)">10</tspan> <tspan fill="var(--c3)">Y</tspan><tspan fill="var(--fg)">5</tspan> <tspan fill="var(--c6)">I</tspan><tspan fill="var(--fg)">5</tspan> <tspan fill="var(--c6)">J</tspan><tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c4)">F</tspan><tspan fill="var(--fg)">300</tspan></text>
-  <text x="506" y="296" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G3</tspan> <tspan fill="var(--c3)">X</tspan><tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c3)">Y</tspan><tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c6)">R</tspan><tspan fill="var(--fg)">5</tspan></text>
+  <rect x="494" y="252" width="476" height="60" rx="4" fill="#30353a" opacity="0.28"/>
+  <text x="506" y="274" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="#67e8f9">G2</tspan> <tspan fill="#fbbf24">X</tspan><tspan fill="#e8eaed">10</tspan> <tspan fill="#fbbf24">Y</tspan><tspan fill="#e8eaed">5</tspan> <tspan fill="#f472b6">I</tspan><tspan fill="#e8eaed">5</tspan> <tspan fill="#f472b6">J</tspan><tspan fill="#e8eaed">0</tspan> <tspan fill="#34d399">F</tspan><tspan fill="#e8eaed">300</tspan></text>
+  <text x="506" y="296" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="#67e8f9">G3</tspan> <tspan fill="#fbbf24">X</tspan><tspan fill="#e8eaed">0</tspan> <tspan fill="#fbbf24">Y</tspan><tspan fill="#e8eaed">0</tspan> <tspan fill="#f472b6">R</tspan><tspan fill="#e8eaed">5</tspan></text>
 
-  <text x="494" y="334" fill="var(--muted)" font-size="8" font-family="sans-serif">WORD</text>
-  <text x="574" y="334" fill="var(--muted)" font-size="8" font-family="sans-serif">MEANING</text>
-  <text x="494" y="354" fill="var(--c3)" font-size="10" font-family="monospace">X Y</text>
-  <text x="574" y="354" fill="var(--fg)" font-size="10" font-family="sans-serif">End point</text>
-  <text x="494" y="374" fill="var(--c6)" font-size="10" font-family="monospace">I J K</text>
-  <text x="574" y="374" fill="var(--fg)" font-size="10" font-family="sans-serif">Center offsets</text>
-  <text x="494" y="394" fill="var(--c6)" font-size="10" font-family="monospace">R</text>
-  <text x="574" y="394" fill="var(--fg)" font-size="10" font-family="sans-serif">Radius</text>
-  <text x="494" y="414" fill="var(--c6)" font-size="10" font-family="monospace">P</text>
-  <text x="574" y="414" fill="var(--fg)" font-size="10" font-family="sans-serif">Turns (full circles)</text>
+  <text x="494" y="334" fill="#9aa0a6" font-size="8" font-family="sans-serif">WORD</text>
+  <text x="574" y="334" fill="#9aa0a6" font-size="8" font-family="sans-serif">MEANING</text>
+  <text x="494" y="354" fill="#fbbf24" font-size="10" font-family="monospace">X Y</text>
+  <text x="574" y="354" fill="#e8eaed" font-size="10" font-family="sans-serif">End point</text>
+  <text x="494" y="374" fill="#f472b6" font-size="10" font-family="monospace">I J K</text>
+  <text x="574" y="374" fill="#e8eaed" font-size="10" font-family="sans-serif">Center offsets</text>
+  <text x="494" y="394" fill="#f472b6" font-size="10" font-family="monospace">R</text>
+  <text x="574" y="394" fill="#e8eaed" font-size="10" font-family="sans-serif">Radius</text>
+  <text x="494" y="414" fill="#f472b6" font-size="10" font-family="monospace">P</text>
+  <text x="574" y="414" fill="#e8eaed" font-size="10" font-family="sans-serif">Turns (full circles)</text>
 
-  <rect x="760" y="326" width="210" height="140" rx="4" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="772" y="344" fill="var(--muted)" font-size="8" font-family="monospace">ARC / G17</text>
-  <path d="M800 430 A65 65 0 0 1 930 430" fill="none" stroke="var(--accent)" stroke-width="2"/>
-  <path d="M800 430 L865 430 M865 430 L930 430" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>
-  <circle cx="800" cy="430" r="3" fill="var(--accent)"/>
-  <circle cx="930" cy="430" r="3" fill="var(--accent)"/>
-  <circle cx="865" cy="430" r="2" fill="var(--muted)"/>
-  <text x="790" y="446" fill="var(--muted)" font-size="8" font-family="monospace">START</text>
-  <text x="914" y="446" fill="var(--muted)" font-size="8" font-family="monospace">END</text>
-  <text x="850" y="418" fill="var(--muted)" font-size="8" font-family="monospace">CENTER</text>
-  <path d="M912 422 L924 430 L912 438" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
-  <text x="772" y="462" fill="var(--accent)" font-size="9" font-family="monospace">G2 CW</text>
+  <rect x="760" y="326" width="210" height="140" rx="4" fill="#141619" stroke="#30353a"/>
+  <text x="772" y="344" fill="#9aa0a6" font-size="8" font-family="monospace">ARC / G17</text>
+  <path d="M800 430 A65 65 0 0 1 930 430" fill="none" stroke="#4da3ff" stroke-width="2"/>
+  <path d="M800 430 L865 430 M865 430 L930 430" stroke="#9aa0a6" stroke-width="1" stroke-dasharray="3 3"/>
+  <circle cx="800" cy="430" r="3" fill="#4da3ff"/>
+  <circle cx="930" cy="430" r="3" fill="#4da3ff"/>
+  <circle cx="865" cy="430" r="2" fill="#9aa0a6"/>
+  <text x="790" y="446" fill="#9aa0a6" font-size="8" font-family="monospace">START</text>
+  <text x="914" y="446" fill="#9aa0a6" font-size="8" font-family="monospace">END</text>
+  <text x="850" y="418" fill="#9aa0a6" font-size="8" font-family="monospace">CENTER</text>
+  <path d="M912 422 L924 430 L912 438" fill="none" stroke="#4da3ff" stroke-width="1.6"/>
+  <text x="772" y="462" fill="#4da3ff" font-size="9" font-family="monospace">G2 CW</text>
 
-  <text x="494" y="450" fill="var(--muted)" font-size="9" font-family="sans-serif">R and I/J/K are mutually exclusive.</text>
-  <text x="494" y="464" fill="var(--muted)" font-size="9" font-family="sans-serif">Arcs over 180 degrees with R require P turns.</text>
-  <text x="494" y="484" fill="var(--muted)" font-size="8" font-family="sans-serif">RELATED</text>
-  <rect x="550" y="472" width="38" height="18" rx="3" fill="var(--border)" opacity="0.45"/>
-  <text x="558" y="484" fill="var(--c1)" font-size="8" font-family="monospace">G17</text>
-  <rect x="594" y="472" width="38" height="18" rx="3" fill="var(--border)" opacity="0.45"/>
-  <text x="602" y="484" fill="var(--c1)" font-size="8" font-family="monospace">G18</text>
-  <rect x="638" y="472" width="38" height="18" rx="3" fill="var(--border)" opacity="0.45"/>
-  <text x="646" y="484" fill="var(--c1)" font-size="8" font-family="monospace">G19</text>
-  <rect x="682" y="472" width="54" height="18" rx="3" fill="var(--border)" opacity="0.45"/>
-  <text x="690" y="484" fill="var(--c1)" font-size="8" font-family="monospace">G90.1</text>
+  <text x="494" y="450" fill="#9aa0a6" font-size="9" font-family="sans-serif">R and I/J/K are mutually exclusive.</text>
+  <text x="494" y="464" fill="#9aa0a6" font-size="9" font-family="sans-serif">Arcs over 180 degrees with R require P turns.</text>
+  <text x="494" y="484" fill="#9aa0a6" font-size="8" font-family="sans-serif">RELATED</text>
+  <rect x="550" y="472" width="38" height="18" rx="3" fill="#30353a" opacity="0.45"/>
+  <text x="558" y="484" fill="#67e8f9" font-size="8" font-family="monospace">G17</text>
+  <rect x="594" y="472" width="38" height="18" rx="3" fill="#30353a" opacity="0.45"/>
+  <text x="602" y="484" fill="#67e8f9" font-size="8" font-family="monospace">G18</text>
+  <rect x="638" y="472" width="38" height="18" rx="3" fill="#30353a" opacity="0.45"/>
+  <text x="646" y="484" fill="#67e8f9" font-size="8" font-family="monospace">G19</text>
+  <rect x="682" y="472" width="54" height="18" rx="3" fill="#30353a" opacity="0.45"/>
+  <text x="690" y="484" fill="#67e8f9" font-size="8" font-family="monospace">G90.1</text>
 
-  <line x1="494" y1="502" x2="970" y2="502" stroke="var(--border)"/>
-  <text x="494" y="522" fill="var(--muted)" font-size="8" font-family="monospace">UP/DOWN SELECT   ENTER OPEN   BACKSPACE BACK</text>
-  <text x="494" y="538" fill="var(--muted)" font-size="8" font-family="monospace">/ SEARCH   ESC CLEAR / CLOSE   MOUSE SCROLL</text>
+  <line x1="494" y1="502" x2="970" y2="502" stroke="#30353a"/>
+  <text x="494" y="522" fill="#9aa0a6" font-size="8" font-family="monospace">UP/DOWN SELECT   ENTER OPEN   BACKSPACE BACK</text>
+  <text x="494" y="538" fill="#9aa0a6" font-size="8" font-family="monospace">/ SEARCH   ESC CLEAR / CLOSE   MOUSE SCROLL</text>
 
   <!-- Bottom action bar -->
-  <line x1="4" y1="578" x2="996" y2="578" stroke="var(--border)"/>
-  <text x="16" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ESC</text>
-  <text x="52" y="599" fill="var(--muted)" font-size="9" font-family="monospace">BACKSPACE</text>
-  <text x="132" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ENTER</text>
-  <text x="184" y="599" fill="var(--muted)" font-size="9" font-family="monospace">/</text>
-  <text x="204" y="599" fill="var(--muted)" font-size="9" font-family="monospace">SEARCH</text>
-  <line x1="260" y1="584" x2="260" y2="606" stroke="var(--border)"/>
-  <text x="276" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ARROWS</text>
-  <text x="338" y="599" fill="var(--muted)" font-size="9" font-family="monospace">SELECT</text>
-  <text x="400" y="599" fill="var(--muted)" font-size="9" font-family="monospace">HOME / END</text>
-  <text x="486" y="599" fill="var(--muted)" font-size="9" font-family="monospace">PGUP / PGDN</text>
-  <rect x="916" y="584" width="62" height="22" rx="3" fill="var(--accent)"/>
-  <text x="928" y="599" fill="var(--surface)" font-size="9" font-family="monospace" font-weight="700">HELP</text>
+  <line x1="4" y1="578" x2="996" y2="578" stroke="#30353a"/>
+  <text x="16" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">ESC</text>
+  <text x="52" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">BACKSPACE</text>
+  <text x="132" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">ENTER</text>
+  <text x="184" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">/</text>
+  <text x="204" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">SEARCH</text>
+  <line x1="260" y1="584" x2="260" y2="606" stroke="#30353a"/>
+  <text x="276" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">ARROWS</text>
+  <text x="338" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">SELECT</text>
+  <text x="400" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">HOME / END</text>
+  <text x="486" y="599" fill="#9aa0a6" font-size="9" font-family="monospace">PGUP / PGDN</text>
+  <rect x="916" y="584" width="62" height="22" rx="3" fill="#4da3ff"/>
+  <text x="928" y="599" fill="#141619" font-size="9" font-family="monospace" font-weight="700">HELP</text>
 
   <!-- Status line -->
-  <line x1="4" y1="612" x2="996" y2="612" stroke="var(--border)"/>
-  <text x="16" y="628" fill="var(--muted)" font-size="9" font-family="monospace">G-CODE HELP  125 SECTIONS  14 FIGURES  OFFLINE</text>
-  <text x="360" y="628" fill="var(--muted)" font-size="9" font-family="monospace">LINUXCNC REFERENCE  /  G17 XY</text>
-  <text x="620" y="628" fill="var(--success)" font-size="9" font-family="monospace">PROTECT OFF</text>
-  <text x="710" y="628" fill="var(--success)" font-size="9" font-family="monospace">E-STOP OK</text>
-  <text x="790" y="628" fill="var(--success)" font-size="9" font-family="monospace">ALARM 0</text>
-  <text x="880" y="628" fill="var(--muted)" font-size="9" font-family="monospace">14:32:05</text>
+  <line x1="4" y1="612" x2="996" y2="612" stroke="#30353a"/>
+  <text x="16" y="628" fill="#9aa0a6" font-size="9" font-family="monospace">G-CODE HELP  125 SECTIONS  14 FIGURES  OFFLINE</text>
+  <text x="360" y="628" fill="#9aa0a6" font-size="9" font-family="monospace">LINUXCNC REFERENCE  /  G17 XY</text>
+  <text x="620" y="628" fill="#3ddc84" font-size="9" font-family="monospace">PROTECT OFF</text>
+  <text x="710" y="628" fill="#3ddc84" font-size="9" font-family="monospace">E-STOP OK</text>
+  <text x="790" y="628" fill="#3ddc84" font-size="9" font-family="monospace">ALARM 0</text>
+  <text x="880" y="628" fill="#9aa0a6" font-size="9" font-family="monospace">14:32:05</text>
 </svg>

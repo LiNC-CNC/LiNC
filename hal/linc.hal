@@ -10,7 +10,8 @@
 # The linc GUI creates the linc.* output component after it starts. Wire those
 # pins in linc-postgui.hal.
 
-loadusr -W linc-panel
+# --no-ipc: under LinuxCNC all panel state travels through cnc_panel.* HAL pins.
+loadusr -Wn cnc_panel linc-panel --no-ipc
 
 # ---------------------------------------------------------------------------
 # Logic and conversion components
@@ -81,12 +82,11 @@ net cycle-run and2.cycle_run.out => halui.program.run
 net cycle-resume and2.cycle_resume.out => halui.program.resume
 
 net cycle-stop cnc_panel.cycle_stop => or2.pause.in1
-net sbk-mode toggle.sbk.out => or2.pause.in0
+net sbk-mode toggle.sbk.out => or2.pause.in0 cnc_panel.led_sbk
 net pause-request or2.pause.out => halui.program.pause
 net single-block-step cnc_panel.step => halui.program.step
 
 net sbk-button cnc_panel.sbk => toggle.sbk.in
-net sbk-led toggle.sbk.out => cnc_panel.led_sbk
 
 net k4-stop cnc_panel.k4 => halui.program.stop
 
@@ -153,6 +153,13 @@ net home-x cnc_panel.home-x => halui.joint.0.home
 net home-y cnc_panel.home-y => halui.joint.1.home
 net home-z cnc_panel.home-z => halui.joint.2.home
 
+# Individual home outputs are inhibited while any axis is homing. The panel
+# service reads motmod home-state values (1..4 = homing) and gates
+# home-x/y/z and proghome-x/y/z; it never gates home-all.
+net home-state-x joint.0.home-state => cnc_panel.home_state_x
+net home-state-y joint.1.home-state => cnc_panel.home_state_y
+net home-state-z joint.2.home-state => cnc_panel.home_state_z
+
 # PROG.HOME outputs are consumed by the LiNC/panel issue_mdi path, not by a
 # generic HAL movement block.
 
@@ -182,9 +189,9 @@ setp halui.spindle.0.override.scale .01
 # ---------------------------------------------------------------------------
 # Status LEDs and tool displays
 # ---------------------------------------------------------------------------
-net machine-on halui.machine.is-on => cnc_panel.led_ready
+net sig_halui_machine_is-on => cnc_panel.led_ready
 net program-running halui.program.is-running => cnc_panel.led_run cnc_panel.led_cycle_on cnc_panel.led_k4
-net program-paused halui.program.is-paused => cnc_panel.led_cycle_off
+net is-paused => cnc_panel.led_cycle_off
 net machine-estop halui.estop.is-activated => cnc_panel.led_mc_alarm
 
 net axis-x-homed halui.joint.0.is-homed => cnc_panel.led_x
@@ -192,14 +199,14 @@ net axis-y-homed halui.joint.1.is-homed => cnc_panel.led_y
 net axis-z-homed halui.joint.2.is-homed => cnc_panel.led_z
 
 net rapid-button cnc_panel.rapid => cnc_panel.led_rapid
-net tool-change-active iocontrol.0.tool-change => cnc_panel.led_chuck
-net tool-prep-number iocontrol.0.tool-prep-number => cnc_panel.sseg_magtool
+net tool-change => cnc_panel.led_chuck
+net tool-prep-number cnc_panel.sseg_magtool
 net tool-number iocontrol.0.tool-number => cnc_panel.sseg_spdtool
 
 # ---------------------------------------------------------------------------
 # Probe input and manual tool-change/panel I/O
 # ---------------------------------------------------------------------------
-net probe-input rio.probe.bit => motion.probe-input
+net sig_rio_probe_bit => motion.probe-input
 net tool-change-piston cnc_panel.chuck => rio.tool-change.bit
 
 # Adjust or remove the rio.* nets to match the actual machine I/O. The

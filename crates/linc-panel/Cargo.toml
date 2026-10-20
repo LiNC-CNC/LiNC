@@ -1,0 +1,26 @@
+[package]
+name = "linc-panel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "linc-panel"
+path = "src/main.rs"
+
+[dependencies]
+thiserror.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+eframe.workspace = true
+egui.workspace = true
+env_logger.workspace = true
+log.workspace = true
+serialport.workspace = true
+linc-core = { path = "../linc-core" }
+linc-hal = { path = "../linc-hal" }
+signal-hook.workspace = true
+
+[features]
+default = ["serial"]
+serial = []
