@@ -618,7 +618,7 @@ fn highlight_job(
         let line_no = index + 1;
         let mut format = base.clone();
         if line_no == current_line {
-            format.background = theme::CURRENT_BLOCK_BG;
+            format.underline = egui::Stroke::new(1.0, theme::ACCENT);
         }
         if let Some(error) = error_line {
             if error == line_no {

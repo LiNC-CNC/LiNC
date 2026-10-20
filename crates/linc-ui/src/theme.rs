@@ -24,7 +24,6 @@ pub const C5: Color32 = Color32::from_rgb(0xfb, 0x92, 0x3c);
 pub const C6: Color32 = Color32::from_rgb(0xf4, 0x72, 0xb6);
 pub const COMMENT: Color32 = Color32::from_rgb(0x94, 0xa3, 0xb8);
 pub const LINE_NUMBER: Color32 = Color32::from_rgb(0x6b, 0x72, 0x80);
-pub const CURRENT_BLOCK_BG: Color32 = Color32::from_rgba_premultiplied(0x4d, 0xa3, 0xff, 0x29);
 
 pub const TOP_BAR_HEIGHT: f32 = 48.0;
 pub const BOTTOM_BAR_HEIGHT: f32 = 44.0;

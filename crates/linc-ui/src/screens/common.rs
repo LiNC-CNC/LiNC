@@ -43,6 +43,22 @@ pub fn token_ui(ui: &mut Ui, text: &str, size: f32) {
     });
 }
 
+fn token_line_ui(ui: &mut Ui, text: &str, size: f32) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 3.0;
+        for token in lex_line(text) {
+            let mut rich = RichText::new(token.display())
+                .monospace()
+                .size(theme::font_size(size))
+                .color(token_color(token.kind));
+            if token.kind == TokenKind::Comment {
+                rich = rich.italics();
+            }
+            ui.label(rich);
+        }
+    });
+}
+
 pub fn current_next_cards(app: &LincApp, ui: &mut Ui) {
     ui.columns(2, |columns| {
         theme::card(&mut columns[0], |ui| {
@@ -315,6 +331,56 @@ fn truncate(text: &str, max_chars: usize) -> String {
     out
 }
 
+fn modal_abbreviation(key: &str) -> &'static str {
+    let code = key.trim().trim_start_matches('G').trim();
+    if let Ok(number) = code.parse::<f32>() {
+        if (54.0..=59.3).contains(&number) {
+            return "WORK";
+        }
+        if (81.0..=89.0).contains(&number) {
+            return "CYCLE";
+        }
+    }
+    match code {
+        "0" | "1" | "2" | "3" | "5" | "5.1" | "5.2" | "5.3" | "38.2" | "38.3" | "38.4" | "38.5" => {
+            "MOTION"
+        }
+        "4" => "DWELL",
+        "7" => "DIAM",
+        "8" => "RAD",
+        "9" => "STOP",
+        "10" => "OFFSET",
+        "15" | "16" => "POLAR",
+        "17" | "18" | "19" => "PLANE",
+        "20" | "21" => "UNITS",
+        "28" | "30" => "HOME",
+        "33" | "33.1" | "76" => "THREAD",
+        "40" | "40.1" | "41" | "41.1" | "42" | "42.1" => "COMP",
+        "43" | "43.1" | "49" => "LEN",
+        "53" => "MACHINE",
+        "54" | "55" | "56" | "57" | "58" | "59" | "54.1" | "55.1" | "56.1" | "57.1" | "58.1"
+        | "59.1" | "59.2" | "59.3" => "WORK",
+        "61" | "61.1" | "64" => "PATH",
+        "73" | "74" => "CYCLE",
+        "80" => "CANCEL",
+        "90" | "91" => "DIST",
+        "90.1" | "91.1" => "ARC",
+        "92" | "92.1" | "92.2" | "92.3" => "OFFSET",
+        "93" | "94" | "95" => "FEED",
+        "96" | "97" => "SPIN",
+        "98" | "99" => "RETURN",
+        _ => "G-CODE",
+    }
+}
+
+fn field_label(ui: &mut Ui, text: &str) {
+    ui.label(
+        RichText::new(text)
+            .size(theme::font_size(8.5))
+            .color(theme::MUTED),
+    );
+}
+
 pub fn program_card(app: &LincApp, ui: &mut Ui) {
     program_card_sized(app, ui, ui.available_height());
 }
@@ -333,81 +399,177 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 theme::section_header(ui, "PROGRAM");
-                let name = if app.snapshot.program.display_name.is_empty() {
-                    "NO PROGRAM".to_string()
-                } else {
-                    app.snapshot.program.display_name.clone()
-                };
-                ui.label(
-                    RichText::new(name)
-                        .monospace()
-                        .size(theme::font_size(13.0))
-                        .color(theme::FG),
-                );
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!(
-                            "LN {}/{}  {:.0}%",
-                            app.snapshot.program.current_line,
-                            app.snapshot.program.line_count,
-                            app.snapshot.program.progress * 100.0
-                        ))
-                        .monospace()
-                        .size(theme::font_size(10.0))
-                        .color(theme::MUTED),
-                    );
-                    ui.label(
-                        RichText::new(if app.snapshot.task.running {
-                            "RUN"
-                        } else {
-                            "STOP"
-                        })
-                        .monospace()
-                        .size(theme::font_size(10.0))
-                        .color(if app.snapshot.task.running {
-                            theme::SUCCESS
-                        } else {
-                            theme::MUTED
-                        }),
-                    );
-                });
-                token_ui(ui, &truncate(&app.snapshot.program.current_block, 44), 12.0);
-                if let Some(next) = &app.snapshot.program.next_line {
-                    ui.label(
-                        RichText::new("NEXT")
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
-                    );
-                    token_ui(ui, &truncate(next, 44), 11.0);
-                }
-                if !app.snapshot.program.modal.is_empty() {
-                    ui.label(
-                        RichText::new("MODAL")
-                            .size(theme::font_size(8.5))
-                            .color(theme::MUTED),
-                    );
-                    let codes = app
-                        .snapshot
-                        .program
-                        .modal
-                        .iter()
-                        .filter(|(key, _)| key.starts_with('G'))
-                        .map(|(key, value)| modal_text(key, value))
-                        .collect::<Vec<_>>();
-                    for chunk in codes.chunks(2) {
+                theme::separator(ui);
+
+                let content = app.snapshot.program.content.as_deref();
+                if let Some(content) = content {
+                    let current = app.snapshot.program.current_line.max(1);
+                    let total = app.snapshot.program.line_count.max(1);
+                    let window_len = 16usize;
+                    let is_running = app.snapshot.task.running || app.snapshot.program.paused;
+                    let half_window = (window_len / 2) as isize;
+                    let first = if is_running {
+                        current as isize - half_window
+                    } else {
+                        let last_first = (total.saturating_sub(window_len) + 1).max(1) as isize;
+                        (current.saturating_sub(window_len / 2).max(1) as isize).min(last_first)
+                    };
+                    let mut lines = content.lines().skip((first.max(1) - 1) as usize);
+                    for row in 0..window_len {
+                        let line_number = first + row as isize;
+                        let line = if line_number >= 1 { lines.next() } else { None };
+                        let is_current = line_number == current as isize;
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 6.0;
-                            for code in chunk {
-                                ui.label(
-                                    RichText::new(code)
-                                        .monospace()
-                                        .size(theme::font_size(9.0))
-                                        .color(theme::FG),
-                                );
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            let (marker, _) =
+                                ui.allocate_exact_size(egui::vec2(2.0, 12.0), egui::Sense::hover());
+                            if is_current {
+                                ui.painter().rect_filled(marker, 1.0, theme::ACCENT);
+                            }
+                            let number = line
+                                .map(|_| format!("{line_number:>4}"))
+                                .unwrap_or_else(|| "    ".to_string());
+                            ui.label(
+                                RichText::new(number)
+                                    .monospace()
+                                    .size(theme::font_size(7.5))
+                                    .color(if is_current {
+                                        theme::ACCENT
+                                    } else {
+                                        theme::MUTED
+                                    }),
+                            );
+                            match line {
+                                Some(line) => token_line_ui(ui, &truncate(line, 26), 9.5),
+                                None => {
+                                    ui.label(
+                                        RichText::new(" ").monospace().size(theme::font_size(9.5)),
+                                    );
+                                }
                             }
                         });
                     }
+                } else {
+                    field_label(ui, "CURRENT");
+                    let current = app.snapshot.program.current_block.trim();
+                    if current.is_empty() {
+                        ui.label(
+                            RichText::new("—")
+                                .monospace()
+                                .size(theme::font_size(10.0))
+                                .color(theme::MUTED),
+                        );
+                    } else {
+                        ui.horizontal(|ui| {
+                            let (marker, _) =
+                                ui.allocate_exact_size(egui::vec2(2.0, 14.0), egui::Sense::hover());
+                            ui.painter().rect_filled(marker, 1.0, theme::ACCENT);
+                            token_ui(ui, &truncate(current, 44), 11.0);
+                        });
+                    }
+                    field_label(ui, "NEXT");
+                    match app.snapshot.program.next_line.as_deref() {
+                        Some(next) if !next.trim().is_empty() => {
+                            token_ui(ui, &truncate(next, 44), 10.0);
+                        }
+                        _ => {
+                            ui.label(
+                                RichText::new("—")
+                                    .monospace()
+                                    .size(theme::font_size(10.0))
+                                    .color(theme::MUTED),
+                            );
+                        }
+                    }
                 }
+                theme::separator(ui);
+                field_label(ui, "MODAL");
+                let codes = app
+                    .snapshot
+                    .program
+                    .modal
+                    .iter()
+                    .filter(|(key, _)| key.starts_with('G'))
+                    .map(|(key, value)| (modal_abbreviation(key), modal_text(key, value)))
+                    .collect::<Vec<_>>();
+                if codes.is_empty() {
+                    ui.label(
+                        RichText::new("—")
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
+                } else {
+                    let modal_column_width = ((ui.available_width() - 4.0 * 5.0) / 6.0).max(30.0);
+                    egui::Grid::new("program_modal_fields")
+                        .num_columns(6)
+                        .spacing([4.0, 1.0])
+                        .min_col_width(modal_column_width)
+                        .show(ui, |ui| {
+                            for (index, (abbreviation, code)) in codes.iter().enumerate() {
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        RichText::new(*abbreviation)
+                                            .size(theme::font_size(6.0))
+                                            .color(theme::MUTED),
+                                    );
+                                    ui.label(
+                                        RichText::new(code)
+                                            .monospace()
+                                            .size(theme::font_size(8.0))
+                                            .color(theme::FG),
+                                    );
+                                });
+                                if (index + 1) % 6 == 0 {
+                                    ui.end_row();
+                                }
+                            }
+                        });
+                }
+
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                    ui.horizontal(|ui| {
+                        let status = if app.snapshot.task.running {
+                            "RUNNING"
+                        } else if app.snapshot.program.paused {
+                            "PAUSED"
+                        } else {
+                            "STOP"
+                        };
+                        ui.label(
+                            RichText::new(format!(
+                                "LN {}/{}  {:.0}%",
+                                app.snapshot.program.current_line,
+                                app.snapshot.program.line_count,
+                                app.snapshot.program.progress * 100.0
+                            ))
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                RichText::new(status)
+                                    .monospace()
+                                    .size(theme::font_size(9.0))
+                                    .color(if app.snapshot.task.running {
+                                        theme::SUCCESS
+                                    } else {
+                                        theme::MUTED
+                                    }),
+                            );
+                        });
+                    });
+                    ui.add(
+                        egui::ProgressBar::new(app.snapshot.program.progress.clamp(0.0, 1.0))
+                            .desired_width(ui.available_width())
+                            .desired_height(6.0)
+                            .fill(theme::ACCENT)
+                            .text(""),
+                    );
+                    field_label(ui, "PROGRESS");
+                    theme::separator(ui);
+                });
             },
         );
     });
