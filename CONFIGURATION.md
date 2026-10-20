@@ -130,6 +130,7 @@ Required profile fields:
 | MDI command history | HMI-local ring buffer; not a machine log |
 | Homing sequence | INI `HOME_SEQUENCE`, search/latch/index settings |
 | Homing commands | `szgh_panel.home-*` / `proghome-*` pins and physical keys; never HMI |
+| PROG.HOME path | Panel `proghome-*` -> existing Probe Basic `issue_mdi`; not HMI staging |
 | Panel/RIO HAL pin names | `configs/base.toml` |
 | Machine identity and panel ownership | machine profile |
 | UI layout, theme, keymap, toolpath options | `base.toml` + overrides |
@@ -356,3 +357,6 @@ For this design repository:
 15. Verify Homing display against the existing `baiermill_pb` home/proghome
     pins and gating; test Z-first, individual axes, PROG.HOME current-WCS moves
     and faults.
+16. Preserve PROG.HOME's direct `issue_mdi` behavior exactly: panel keys send
+    `G0 X0Y0Z0` / `G0 X0` / `G0 Y0` / `G0 Z0` in the current WCS, X/Y/Z only,
+    without HMI staging or an added cycle-start gate.

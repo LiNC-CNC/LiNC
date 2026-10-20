@@ -477,8 +477,9 @@ Rules:
 ### 6.10 Homing
 
 Mode-driven screen. Selecting `HOME` or `PROG.HOME` on the physical panel opens
-it automatically; leaving those positions closes it. The HMI only observes and
-explains the panel behavior; it never issues a home command.
+it automatically; leaving those positions closes it. The title/context changes
+between `HOMING` (machine home) and `PROGRAM ZERO` (`PROG.HOME`). The HMI only
+observes, explains and logs the panel behavior; it never issues a home command.
 
 - Axis cards show `HOMED`, `HOMING`, `NOT HOMED`, the INI `HOME_SEQUENCE` and the
   search/latch/index state. Optional axes are shown only when configured.
@@ -489,8 +490,18 @@ explains the panel behavior; it never issues a home command.
   - `Z+`/`Z-` -> `home-z`.
   - Individual home outputs are disabled while any axis is homing; the panel
     driver/postgui performs the gating.
-- PROG.HOME mode mapping: `RAPID` -> `G0 X0Y0Z0`; axis keys -> `G0 X0` /
-  `G0 Y0` / `G0 Z0` in the current WCS. This is program zero, not machine home.
+- PROG.HOME mode mapping, exactly as `baiermill_pb`:
+  - `RAPID` -> `proghome-all` -> `issue_mdi("G0 X0Y0Z0")`;
+  - `X+`/`X-` -> `proghome-x` -> `G0 X0`;
+  - `Y+`/`Y-` -> `proghome-y` -> `G0 Y0`;
+  - `Z+`/`Z-` -> `proghome-z` -> `G0 Z0`.
+  - This is program zero in the current WCS, not machine home and not `G53`.
+  - X/Y/Z only; optional A/C axes are not moved by these panel actions,
+    matching the current Probe Basic handlers.
+  - The panel-owned path issues MDI immediately through the existing
+    `issue_mdi` action; the HMI must not intercept, restage or add a cycle-start
+    gate to it. It still requires machine ON, all axes homed and interpreter
+    idle, or the action is refused.
 - Homing order comes from the INI; the current machine is Z first, then X/Y.
   `NO_FORCE_HOMING = 0` means programs/MDI are blocked until homed.
 - The page shows machine position, limits, homed count and sequence completion.
@@ -600,10 +611,13 @@ No F1–F8 mapping. The bottom keycap highlight reflects the current page:
   only when useful.
 - MDI is enabled only when the panel is in MDI mode; the MDI screen opens on
   that selector position and closes when it leaves.
-- HOME/PROG.HOME open the Homing screen; all homing motion originates in the
-  panel's home/proghome pins and keys. The HMI never homes an axis.
-- MDI staging never starts motion; the block runs only after physical CYCLE
-  START.
+- HOME/PROG.HOME open the Homing screen; all homing/program-zero motion
+  originates in the panel's home/proghome pins and keys. The HMI never homes an
+  axis and never intercepts the panel's existing direct `issue_mdi` PROG.HOME
+  path.
+- The HMI MDI screen stages only; its block runs only after physical CYCLE
+  START. The PROG.HOME panel action is a separate, existing panel behavior and
+  is not routed through that staging screen.
 - Program start is physical CYCLE START only.
 - Overrides are physical switches; the GUI displays values.
 - Jog is physical only.
@@ -682,7 +696,8 @@ serial counters and raw bitmaps; those must be added for Diagnostics.
 - MDI blocks are staged only; the HMI never auto-runs MDI. Physical CYCLE
   START is the only execution path.
 - Homing is panel-only: no HMI home/unhome command, button or key. The HMI
-  displays sequence/state and must not interfere with the panel's home pins.
+  displays sequence/state and must not interfere with the panel's home pins or
+  its PROG.HOME `issue_mdi` actions.
 - Probing routines are prepared as MDI; only the physical CYCLE START key may
   start probe motion. Never auto-start a probe routine.
 - Respect program protect and running state.
@@ -707,9 +722,11 @@ For this design repository:
   cycle-start control.
 - The MDI screen opens at the panel MDI position and represents command staging,
   DRO/modal state, history and physical-cycle-start gating.
-- The Homing screen opens at HOME/PROG.HOME, shows per-axis/sequence state and
-  documents the exact physical-panel key mapping without providing home
-  controls.
+- The Homing/Program Zero screen opens at HOME/PROG.HOME, shows per-axis/sequence
+  state and documents the exact physical-panel key mapping without providing
+  home controls.
+- PROG.HOME retains the current machine's `issue_mdi` behavior: RAPID sends
+  `G0 X0Y0Z0`, axis keys send `G0 X0/Y0/Z0`, in the current WCS, X/Y/Z only.
 - Hardware constraints for the QMK keyboard and SZGH panel are documented.
 - No SVG shows an on-screen machine control panel.
 - G-code mockups show token-level syntax highlighting.
@@ -801,6 +818,9 @@ For the future implementation:
 26. Verify Homing UI against the panel's `home-*`/`proghome-*` pins and the
     existing `baiermill_pb` gating. Test Z-first homing, individual axes,
     PROG.HOME current-WCS moves, faults and optional-axis display.
+27. Preserve the PROG.HOME direct `issue_mdi` path exactly (immediate panel
+    action, X/Y/Z only, current WCS, no HMI staging); document the intentional
+    exception to the HMI MDI staging rule.
 
 ## 14. Accepted SVG manifest
 

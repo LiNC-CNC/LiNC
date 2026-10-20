@@ -98,8 +98,10 @@ policy and launch integration.
   physical CYCLE START runs it. Leaving MDI discards an unrun staged block.
 - **Homing is panel-only, exactly like the current machine.** HOME mode shows
   per-axis/sequence state; `RAPID` homes all and the axis jog keys home their
-  axis through the panel's `home-*` pins. PROG.HOME maps the same keys to
-  `G0 X0Y0Z0` / axis zero. The HMI never supplies a home command or button.
+  axis through the panel's `home-*` pins. PROG.HOME keeps the existing
+  `issue_mdi` behavior: `RAPID` sends `G0 X0Y0Z0`, axis keys send `G0 X0/Y0/Z0`
+  in the current WCS, X/Y/Z only. The HMI neither stages nor intercepts these
+  panel actions.
 - **G-code is token-highlighted** with a rich but restrained palette:
   G-codes, M-codes, axis letters, numbers, feed/speed, tools, parameters,
   comments, and line numbers each have a distinct treatment.
