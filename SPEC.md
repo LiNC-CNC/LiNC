@@ -2,7 +2,7 @@
 
 Status: design reference  
 Scope: Rust `egui` HMI for LinuxCNC with SZGH-1080 physical panel and QMK CNC keyboard  
-Canonical visual: `svg/source/ideal_cnc_hmi_blue_final.svg`
+Canonical visual: `svg/machine-dashboard.svg`
 
 ---
 
@@ -462,7 +462,7 @@ serial counters and raw bitmaps; those must be added for Diagnostics.
 For this design repository:
 
 - `SPEC.md` and `README.md` exist.
-- All source SVGs and colour previews are committed.
+- Only the accepted source SVGs are committed.
 - Canonical Machine, Program SPLIT, Program CODE, and Diagnostics screens are
   represented.
 - Hardware constraints for the QMK keyboard and SZGH panel are documented.
@@ -501,39 +501,16 @@ For the future implementation:
 10. Verify theme contrast and color-blind distinguishability on the target
     display.
 
-## 14. SVG manifest
+## 14. Accepted SVG manifest
 
-### Canonical sources
+Only the accepted versions are included.
 
 | File | Description |
 |---|---|
-| `svg/source/ideal_cnc_hmi_blue_final.svg` | Accepted Machine dashboard; dark graphite + blue, no panel column, spindle-load gauge |
-| `svg/source/program_split.svg` | Program `SPLIT`: G-code + 3D toolpath |
-| `svg/source/program_code_focus.svg` | Program `CODE`: syntax-highlighted G-code + mini graph + program info |
-| `svg/source/cnc_diagnostics.svg` | Diagnostics overview: health, alarms, panel link, motion, event log |
-| `svg/source/fanuc_style_hmi.svg` | FANUC 0i-style study |
-| `svg/source/syntec_style_hmi.svg` | SYNTEC-style study |
-| `svg/source/siemens_style_hmi.svg` | Siemens-style study |
-| `svg/source/fanuc_syntec_hmi.svg` | Early FANUC/SYNTEC hybrid study |
-| `svg/source/ideal_cnc_hmi.svg` | Early ideal dashboard exploration |
-| `svg/source/ideal_cnc_hmi_v2.svg` | Right panel removed; spindle-load gauge added |
-| `svg/source/ideal_cnc_hmi_dark.svg` | Ivory-accent alternative |
+| `svg/machine-dashboard.svg` | Machine dashboard: dark graphite + blue, axis cards, 3D toolpath, program card, feed/spindle-load gauges, machine health, alarms |
+| `svg/program-split.svg` | Program `SPLIT`: syntax-highlighted G-code alongside the 3D toolpath |
+| `svg/program-code.svg` | Program `CODE`: syntax-highlighted G-code dominant, with mini XY graph and program-info card |
+| `svg/diagnostics.svg` | Diagnostics overview: health cards, alarms/messages, panel link detail, motion health, event log |
 
-### Colour previews
-
-`svg/previews/` contains colour-mapped copies:
-
-- `ideal_cnc_hmi_blue_final_color.svg`
-- `program_split_color.svg`
-- `program_code_syntax_color.svg` (preview of `program_code_focus.svg`)
-- `cnc_diagnostics_color.svg`
-- `fanuc_style_hmi_color.svg`
-- `syntec_style_hmi_color.svg`
-- `siemens_style_hmi_color.svg`
-- `fanuc_syntec_hmi_color.svg`
-- `ideal_cnc_hmi_color.svg`
-- `ideal_cnc_hmi_v2_color.svg`
-- `ideal_cnc_hmi_dark_color.svg`
-
-The previews are for compatibility with SVG viewers that do not resolve CSS
-custom properties. The source files remain authoritative.
+Superseded vendor-style studies, intermediate layout explorations, and
+colour-mapped previews were intentionally removed.

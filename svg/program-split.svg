@@ -88,49 +88,47 @@
   <line x1="170" y1="130" x2="626" y2="130" stroke="var(--border)"/>
 
   <text x="170" y="150" fill="var(--muted)" font-size="10" font-family="monospace">0001</text>
-  <text x="214" y="150" fill="var(--muted)" font-size="11" font-family="monospace">O1001 (DEMO)</text>
+  <text x="214" y="150" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c6)">O1001</tspan> <tspan fill="var(--muted)" font-style="italic">(DEMO)</tspan></text>
   <text x="170" y="168" fill="var(--muted)" font-size="10" font-family="monospace">0002</text>
-  <text x="214" y="168" fill="var(--muted)" font-size="11" font-family="monospace">(ROUGHING)</text>
+  <text x="214" y="168" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--muted)" font-style="italic">(ROUGHING)</tspan></text>
   <text x="170" y="186" fill="var(--muted)" font-size="10" font-family="monospace">0003</text>
-  <text x="214" y="186" fill="var(--accent)" font-size="11" font-family="monospace">G21 G90 G54</text>
+  <text x="214" y="186" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G21</tspan> <tspan fill="var(--c1)">G90</tspan> <tspan fill="var(--c1)">G54</tspan></text>
   <text x="170" y="204" fill="var(--muted)" font-size="10" font-family="monospace">0004</text>
-  <text x="214" y="204" fill="var(--fg)" font-size="11" font-family="monospace">T12 M6</text>
+  <text x="214" y="204" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c5)">T12</tspan> <tspan fill="var(--c2)">M6</tspan></text>
   <text x="170" y="222" fill="var(--muted)" font-size="10" font-family="monospace">0005</text>
-  <text x="214" y="222" fill="var(--fg)" font-size="11" font-family="monospace">S4200 M3</text>
+  <text x="214" y="222" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c4)">S4200</tspan> <tspan fill="var(--c2)">M3</tspan></text>
   <text x="170" y="240" fill="var(--muted)" font-size="10" font-family="monospace">0006</text>
-  <text x="214" y="240" fill="var(--accent)" font-size="11" font-family="monospace">G0 X0 Y0 Z50</text>
+  <text x="214" y="240" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G0</tspan> <tspan fill="var(--c3)">X</tspan> <tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c3)">Y</tspan> <tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c3)">Z</tspan> <tspan fill="var(--fg)">50</tspan></text>
   <text x="170" y="258" fill="var(--muted)" font-size="10" font-family="monospace">0007</text>
-  <text x="214" y="258" fill="var(--accent)" font-size="11" font-family="monospace">G1 Z-2 F300</text>
-  <rect x="158" y="266" width="480" height="20" fill="var(--accent)" opacity="0.16"/>
-  <rect x="158" y="266" width="3" height="20" fill="var(--accent)"/>
-  <text x="170" y="280" fill="var(--fg)" font-size="10" font-family="monospace" font-weight="700">0008</text>
-  <text x="214" y="280" fill="var(--fg)" font-size="11" font-family="monospace" font-weight="700">G1 X80 Y0 F850</text>
-  <text x="170" y="298" fill="var(--muted)" font-size="10" font-family="monospace">0009</text>
-  <text x="214" y="298" fill="var(--accent)" font-size="11" font-family="monospace">G2 X80 Y60 R30</text>
-  <text x="170" y="316" fill="var(--muted)" font-size="10" font-family="monospace">0010</text>
-  <text x="214" y="316" fill="var(--accent)" font-size="11" font-family="monospace">G1 X0 Y60</text>
-  <text x="170" y="334" fill="var(--muted)" font-size="10" font-family="monospace">0011</text>
-  <text x="214" y="334" fill="var(--accent)" font-size="11" font-family="monospace">G1 X0 Y0</text>
-  <text x="170" y="352" fill="var(--muted)" font-size="10" font-family="monospace">0012</text>
-  <text x="214" y="352" fill="var(--accent)" font-size="11" font-family="monospace">G0 Z50</text>
-  <text x="170" y="370" fill="var(--muted)" font-size="10" font-family="monospace">0013</text>
-  <text x="214" y="370" fill="var(--muted)" font-size="11" font-family="monospace">(FINISHING)</text>
-  <text x="170" y="388" fill="var(--muted)" font-size="10" font-family="monospace">0014</text>
-  <text x="214" y="388" fill="var(--fg)" font-size="11" font-family="monospace">T13 M6</text>
-  <text x="170" y="406" fill="var(--muted)" font-size="10" font-family="monospace">0015</text>
-  <text x="214" y="406" fill="var(--fg)" font-size="11" font-family="monospace">S5200 M3</text>
-  <text x="170" y="424" fill="var(--muted)" font-size="10" font-family="monospace">0016</text>
-  <text x="214" y="424" fill="var(--accent)" font-size="11" font-family="monospace">G0 X0 Y0 Z50</text>
-  <text x="170" y="442" fill="var(--muted)" font-size="10" font-family="monospace">0017</text>
-  <text x="214" y="442" fill="var(--accent)" font-size="11" font-family="monospace">G1 Z-1 F250</text>
-  <text x="170" y="460" fill="var(--muted)" font-size="10" font-family="monospace">0018</text>
-  <text x="214" y="460" fill="var(--accent)" font-size="11" font-family="monospace">G1 X80 Y0 F700</text>
+  <text x="214" y="258" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G1</tspan> <tspan fill="var(--c3)">Z</tspan> <tspan fill="var(--fg)">-2</tspan> <tspan fill="var(--c4)">F300</tspan></text>
+  <text x="170" y="276" fill="var(--muted)" font-size="10" font-family="monospace">0008</text>
+  <text x="214" y="276" font-size="11" font-family="monospace" font-weight="700" xml:space="preserve"><tspan fill="var(--c1)">G1</tspan> <tspan fill="var(--c3)">X</tspan> <tspan fill="var(--fg)">80</tspan> <tspan fill="var(--c3)">Y</tspan> <tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c4)">F850</tspan></text>
+  <text x="170" y="294" fill="var(--muted)" font-size="10" font-family="monospace">0009</text>
+  <text x="214" y="294" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G2</tspan> <tspan fill="var(--c3)">X</tspan> <tspan fill="var(--fg)">80</tspan> <tspan fill="var(--c3)">Y</tspan> <tspan fill="var(--fg)">60</tspan> <tspan fill="var(--c6)">R30</tspan></text>
+  <text x="170" y="312" fill="var(--muted)" font-size="10" font-family="monospace">0010</text>
+  <text x="214" y="312" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G1</tspan> <tspan fill="var(--c3)">X</tspan> <tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c3)">Y</tspan> <tspan fill="var(--fg)">60</tspan></text>
+  <text x="170" y="330" fill="var(--muted)" font-size="10" font-family="monospace">0011</text>
+  <text x="214" y="330" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G1</tspan> <tspan fill="var(--c3)">X</tspan> <tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c3)">Y</tspan> <tspan fill="var(--fg)">0</tspan></text>
+  <text x="170" y="348" fill="var(--muted)" font-size="10" font-family="monospace">0012</text>
+  <text x="214" y="348" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G0</tspan> <tspan fill="var(--c3)">Z</tspan> <tspan fill="var(--fg)">50</tspan></text>
+  <text x="170" y="366" fill="var(--muted)" font-size="10" font-family="monospace">0013</text>
+  <text x="214" y="366" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--muted)" font-style="italic">(FINISHING)</tspan></text>
+  <text x="170" y="384" fill="var(--muted)" font-size="10" font-family="monospace">0014</text>
+  <text x="214" y="384" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c5)">T13</tspan> <tspan fill="var(--c2)">M6</tspan></text>
+  <text x="170" y="402" fill="var(--muted)" font-size="10" font-family="monospace">0015</text>
+  <text x="214" y="402" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c4)">S5200</tspan> <tspan fill="var(--c2)">M3</tspan></text>
+  <text x="170" y="420" fill="var(--muted)" font-size="10" font-family="monospace">0016</text>
+  <text x="214" y="420" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G0</tspan> <tspan fill="var(--c3)">X</tspan> <tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c3)">Y</tspan> <tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c3)">Z</tspan> <tspan fill="var(--fg)">50</tspan></text>
+  <text x="170" y="438" fill="var(--muted)" font-size="10" font-family="monospace">0017</text>
+  <text x="214" y="438" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G1</tspan> <tspan fill="var(--c3)">Z</tspan> <tspan fill="var(--fg)">-1</tspan> <tspan fill="var(--c4)">F250</tspan></text>
+  <text x="170" y="456" fill="var(--muted)" font-size="10" font-family="monospace">0018</text>
+  <text x="214" y="456" font-size="11" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G1</tspan> <tspan fill="var(--c3)">X</tspan> <tspan fill="var(--fg)">80</tspan> <tspan fill="var(--c3)">Y</tspan> <tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c4)">F700</tspan></text>
 
   <line x1="170" y1="474" x2="626" y2="474" stroke="var(--border)"/>
   <text x="170" y="492" fill="var(--muted)" font-size="9" font-family="sans-serif">CURRENT</text>
-  <text x="232" y="492" fill="var(--fg)" font-size="10" font-family="monospace">G1 X80 Y0 F850</text>
+  <text x="232" y="492" font-size="10" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G1</tspan> <tspan fill="var(--c3)">X</tspan><tspan fill="var(--fg)">80</tspan> <tspan fill="var(--c3)">Y</tspan><tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c4)">F</tspan><tspan fill="var(--fg)">850</tspan></text>
   <text x="170" y="510" fill="var(--muted)" font-size="9" font-family="sans-serif">NEXT</text>
-  <text x="232" y="510" fill="var(--muted)" font-size="10" font-family="monospace">G2 X80 Y60 R30</text>
+  <text x="232" y="510" font-size="10" font-family="monospace" xml:space="preserve"><tspan fill="var(--c1)">G2</tspan> <tspan fill="var(--c3)">X</tspan><tspan fill="var(--fg)">80</tspan> <tspan fill="var(--c3)">Y</tspan><tspan fill="var(--fg)">60</tspan> <tspan fill="var(--c6)">R30</tspan></text>
   <text x="170" y="530" fill="var(--muted)" font-size="9" font-family="sans-serif">MODAL</text>
   <text x="232" y="530" fill="var(--muted)" font-size="9" font-family="monospace">G00 G17 G40 G54 G80 G90 G21</text>
   <text x="170" y="552" fill="var(--success)" font-size="9" font-family="monospace">EDIT ENABLED / PROTECT OFF</text>
@@ -166,7 +164,7 @@
 
   <line x1="658" y1="470" x2="972" y2="470" stroke="var(--border)"/>
   <text x="658" y="490" fill="var(--muted)" font-size="9" font-family="sans-serif">CURRENT BLOCK</text>
-  <text x="658" y="508" fill="var(--fg)" font-size="11" font-family="monospace" font-weight="700">G1 X80 Y0 F850</text>
+  <text x="658" y="508" font-size="11" font-family="monospace" font-weight="700" xml:space="preserve"><tspan fill="var(--c1)">G1</tspan> <tspan fill="var(--c3)">X</tspan><tspan fill="var(--fg)">80</tspan> <tspan fill="var(--c3)">Y</tspan><tspan fill="var(--fg)">0</tspan> <tspan fill="var(--c4)">F</tspan><tspan fill="var(--fg)">850</tspan></text>
   <text x="658" y="530" fill="var(--muted)" font-size="9" font-family="monospace">TOOL T12 / NEXT T13</text>
   <text x="658" y="548" fill="var(--muted)" font-size="9" font-family="monospace">F 850 / S 4200</text>
 

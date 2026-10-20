@@ -10,30 +10,24 @@ Design reference for a Rust `egui` HMI on top of LinuxCNC, for a machine with:
 - FANUC / SYNTEC / Siemens-inspired information architecture, without copying
   any vendor's proprietary artwork
 
-This repository is design-only. It contains the specification and the SVG
-mockups; it does not yet contain the Rust HMI implementation.
+This repository is design-only. It contains the specification and the accepted
+SVG mockups; it does not yet contain the Rust HMI implementation.
 
-## Canonical references
+## Accepted references
 
 | Purpose | File |
 |---|---|
-| Final Machine dashboard | `svg/source/ideal_cnc_hmi_blue_final.svg` |
-| Program — G-code and graph side by side | `svg/source/program_split.svg` |
-| Program — code-focused with mini graph | `svg/source/program_code_focus.svg` |
-| Diagnostics | `svg/source/cnc_diagnostics.svg` |
-| FANUC-style study | `svg/source/fanuc_style_hmi.svg` |
-| SYNTEC-style study | `svg/source/syntec_style_hmi.svg` |
-| Siemens-style study | `svg/source/siemens_style_hmi.svg` |
-| Early FANUC/SYNTEC hybrid study | `svg/source/fanuc_syntec_hmi.svg` |
+| Machine dashboard | `svg/machine-dashboard.svg` |
+| Program — G-code and graph side by side | `svg/program-split.svg` |
+| Program — code-focused with mini graph | `svg/program-code.svg` |
+| Diagnostics | `svg/diagnostics.svg` |
 
-`svg/source/ideal_cnc_hmi.svg`, `ideal_cnc_hmi_v2.svg`, and
-`ideal_cnc_hmi_dark.svg` are earlier explorations retained for history.
-`ideal_cnc_hmi_blue_final.svg` is the accepted visual direction.
+Only the accepted versions are included. The earlier vendor-style studies and
+intermediate layout explorations have been removed.
 
-`svg/previews/` contains colour-mapped copies for viewers that do not support
-CSS custom properties. The canonical files in `svg/source/` use theme
-variables (`--surface`, `--fg`, `--muted`, `--border`, `--accent`, `--success`,
-`--warning`, `--error`, `--c1`…`--c6`) and adapt to the viewer's theme.
+The SVGs use theme variables (`--surface`, `--fg`, `--muted`, `--border`,
+`--accent`, `--success`, `--warning`, `--error`, `--c1`…`--c6`) and adapt to the
+viewer's theme.
 
 ## Design decisions locked in
 
@@ -64,8 +58,10 @@ cnc-hmi-design/
 ├── README.md
 ├── SPEC.md
 └── svg/
-    ├── source/     # canonical design files using theme variables
-    └── previews/   # colour-mapped copies for compatibility
+    ├── machine-dashboard.svg
+    ├── program-split.svg
+    ├── program-code.svg
+    └── diagnostics.svg
 ```
 
 ## Viewing the SVGs
@@ -73,7 +69,7 @@ cnc-hmi-design/
 Any browser or SVG viewer can open the files. For command-line rendering:
 
 ```sh
-rsvg-convert -o /tmp/machine.png svg/previews/ideal_cnc_hmi_blue_final_color.svg
+rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
 ```
 
 ## Next implementation steps
