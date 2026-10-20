@@ -86,10 +86,11 @@ policy and launch integration.
 - **The simulator panel is a separate companion window**, not part of the HMI.
   It reproduces the SZGH-1080 controls and HAL pin surface; the real HMI never
   exposes those controls.
-- **Touch Probe is a guided MDI preparation screen**, reached from Offsets. It
-  reuses Probe Basic's G38.2 subroutine family, shows WCS/clearance/feed/tip
-  parameters, reads results from `#1001`–`#1009`, and requires the physical
-  CYCLE START key before any probing motion.
+- **Touch Probe follows Probe Basic's category-first workflow**, reached from
+  Offsets: choose a routine group, pick an illustrated operation, adjust
+  WCS/clearance/feed/tip parameters, then `PREPARE MDI`. It reuses the G38.2
+  subroutine family, reads results from `#1001`–`#1009`, and requires the
+  physical CYCLE START key before any probing motion.
 - **G-code is token-highlighted** with a rich but restrained palette:
   G-codes, M-codes, axis letters, numbers, feed/speed, tools, parameters,
   comments, and line numbers each have a distinct treatment.

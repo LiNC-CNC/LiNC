@@ -417,12 +417,17 @@ previous page.
 ### 6.8 Touch Probe
 
 Mill-variant interface for touch probing, opened from Offsets. It reuses the
-existing Probe Basic G-code subroutines and math; the HMI is a parameter/result
-front-end, not a reimplementation.
+existing Probe Basic G-code subroutines and math and follows Probe Basic's
+category-first workflow: choose a routine group, then pick the operation card.
 
-- Routine groups: edge (X±, Y±, Z surface), corner (outside/inside, edge angle),
-  pocket/boss (round/rect), ridge/valley (X/Y), and calibration
-  (round/square, reset).
+- Category strip, matching Probe Basic: Outside Corners, Inside Corners,
+  Boss and Pocket, Ridge and Valley, Edge Angle, Rotary Axis, Surface/Z,
+  Calibrate and Probe Help.
+- Each category opens a grid of illustrated operation cards plus a selected
+  operation, diagram and G-code call. Work offset, probe mode and parameters
+  stay visible across categories.
+- Edge operations (X±, Y±, Z surface) remain available within the relevant
+  category; calibration includes round/square boss/pocket and reset.
 - Parameters mirror `touch_probe_param_update.ngc`: probe tool number,
   fast/slow/traverse feed, max XY/Z distance, XY/Z clearance, extra depth, step
   off width, edge width, diameter hints, probe mode, WCS rotation, calibration
@@ -741,7 +746,7 @@ Only the accepted versions are included.
 | `svg/gcode-help.svg` | G-code Help: offline quick-reference index, code search, detail pane, parameter tables, figures and related codes |
 | `svg/files.svg` | Files: USB and `NC_FILES` panes, mount/eject status, file listing and explicit copy/load actions |
 | `svg/lathe-dashboard.svg` | Lathe dashboard: X/Z/C/Y cards, XZ toolpath, power turret/live-tool card, spindle load and machine health |
-| `svg/probe.svg` | Touch Probe: routine list, probe diagram, WCS/parameters, prepared-MDI state, result/apply and calibration |
+| `svg/probe.svg` | Touch Probe: Probe Basic-style category strip and illustrated operation cards, WCS/parameters, prepared-MDI state, result/apply and calibration |
 | `svg/sim-panel.svg` | Simulation-only SZGH-1080 panel window: power, E-stop, mode, overrides, lamps, displays and key matrix |
 
 Superseded vendor-style studies, intermediate layout explorations, and
