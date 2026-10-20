@@ -275,6 +275,8 @@ Program rules:
 - `FILE` enters Program; outside EDIT it cycles `SPLIT`/`CODE`; in EDIT it
   selects CODE.
 - `LOAD` or `Ctrl+O` opens Files; `ESC` returns to Program.
+- A successful file load always returns to Program in `SPLIT` view, even if
+  the previous layout was `CODE` or the panel is in `EDIT`.
 - The header segmented control is also focusable.
 - No on-screen cycle start; loading a program does not start it.
 
@@ -352,6 +354,12 @@ previous page.
 - `LOAD` accepts only configured G-code extensions from `NC_FILES`; it loads
   but never starts the program. Loading and writes to `NC_FILES` are disabled
   while running, and imports are blocked by program protect.
+- On a successful load: close Files, switch to Program, force the `SPLIT`
+  layout, fit the toolpath and highlight the current line. This overrides the
+  remembered Program layout, including `CODE`. On failure, stay in Files and
+  show the error.
+- If the editor has unsaved changes, confirm discard before replacing the
+  loaded program.
 - Delete, rename, format and folder-copy are intentionally out of scope for v1.
 
 ### 6.8 Settings
@@ -550,6 +558,8 @@ For this design repository:
   save action and mini-graph preview.
 - The Files screen represents `NC_FILES` and removable USB side by side, with
   explicit copy, eject, mount-state and load actions.
+- Loading an `NC_FILES` file returns to Program in `SPLIT` view with the
+  toolpath fitted and the program not started.
 - Layered config profiles exist for the simulation and the physical BaierMill.
 - The profiles reference the LinuxCNC INI as the source of machine data rather
   than duplicating limits, velocities, units, spindle/ATC data or tooling.

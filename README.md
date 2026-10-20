@@ -81,8 +81,9 @@ policy and launch integration.
   available while a program is running and exposes no machine controls.
 - **Files is a simple two-pane browser** opened from `LOAD`: removable USB on
   the left, `NC_FILES` on the right. USB drives auto-mount on insert through
-  `udisks2`; copy and eject are explicit actions. No shell commands, no
-  auto-run, no machine controls.
+  `udisks2`; copy and eject are explicit actions. Opening an `NC_FILES` file
+  loads it and returns to Program in `SPLIT` view, fitted and not started. No
+  shell commands, no auto-run, no machine controls.
 - **Spindle load is explicit** and must come from real drive feedback, not
   spindle override or commanded speed.
 

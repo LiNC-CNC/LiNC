@@ -19,6 +19,7 @@ pages = ["machine", "program", "offsets", "tools", "diagnostics", "help"]
 
 [program]
 default_view = "split"
+load_view = "split"
 views = ["split", "code"]
 edit_view = "code"
 line_numbers = true
