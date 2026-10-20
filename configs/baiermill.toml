@@ -1,8 +1,8 @@
 # BaierMill physical-machine profile.
 #
-# Points at the live LinuxCNC configuration in ../../baiermill_pb. The SZGH panel
-# driver is a separate process; the HMI only reads its HAL pins and must never
-# open /dev/ttyUSB0 or load the panel component.
+# Points at the live LinuxCNC configuration in ../../baiermill_pb. The SZGH
+# panel driver is part of LiNC and runs in the linc-panel service; the HMI never
+# opens /dev/ttyUSB0. LiNC writes only its declared linc.* HAL outputs.
 
 schema_version = 1
 profile = "baiermill"
@@ -23,16 +23,19 @@ window_title = "LiNC - BaierMill"
 [panel]
 kind = "physical"
 label = "SZGH-1080"
-owner = "szgh-panel-hal"
+owner = "linc-panel"
+driver = "szgh1080"
+mode_encoding = "one_hot_steady"
+override_encoding = "analog_steady"
 
 [panel.link]
 kind = "rs485"
-# Diagnostic metadata only. The panel driver owns the serial port.
+# linc-panel launch metadata. The panel service owns the serial port; the HMI
+# never opens it.
 port = "/dev/ttyUSB0"
 baud = 115200
 data_bits = 8
 parity = "none"
 stop_bits = 1
-# Current hallib/szgh_panel.hal passes -c 0.01. This is metadata until the
-# panel driver reads the profile directly.
+# linc-panel service cycle; the driver sleeps ~14 ms per transaction.
 cycle_time_ms = 10

@@ -35,7 +35,7 @@ tab_width = 4
 nc_files = "ini"
 usb_backend = "udisks2"
 usb_automount = true
-usb_mount_options = ["nosuid", "nodev", "noexec"]
+usb_mount_options = ["nosuid", "nodev", "noexec"]  # loader floor; cannot remove
 load_extensions = [".ngc", ".nc", ".tap", ".txt"]
 overwrite = "confirm"
 copy_while_running = false
@@ -53,12 +53,10 @@ slow_feed = 50.0
 probe_diameter = 4.0
 max_travel = 10.0
 calibration_diameter = 50.0
-prepare_only = true
 
 [tools]
 changer = "manual"          # manual | atc | turret
 atc_pockets = "ini"         # derive from [ATC] POCKETS
-tool_change_stage = true    # stage Tn M6; never auto-run
 manual_confirm = true
 
 [manual]
@@ -75,8 +73,8 @@ auto_open = true
 close_on_mode_exit = true
 
 [mdi]
-# The HMI stages a block; only the physical CYCLE START key runs it.
-stage_only = true
+# Enter issues through Probe Basic issue_mdi; no staging, no cycle-start gate.
+execute_on_enter = true
 auto_focus = true
 history_limit = 50
 max_command_length = 256
@@ -115,7 +113,11 @@ undo = "Ctrl+Z"
 redo = "Ctrl+Y"
 find = "Ctrl+F"
 select_all = "Ctrl+A"
-mdi_stage = "Enter"
+copy = "Ctrl+C"
+cut = "Ctrl+X"
+paste = "Ctrl+V"
+refresh = "Ctrl+R"
+mdi_issue = "Enter"
 mdi_clear = "Escape"
 mdi_history_up = "Up"
 mdi_history_down = "Down"
@@ -129,9 +131,10 @@ search = true
 history_limit = 32
 
 [safety]
-# The physical panel is the only machine-control surface. These flags are
-# policy, not user preferences: a profile must not turn them on.
-machine_control = "panel-only"
+# The physical panel is the primary machine-control surface. MDI, probe and
+# tool-change actions are explicit exceptions. These flags are policy, not
+# user preferences: a profile must not turn them on.
+machine_control = "panel-with-explicit-mdi"
 software_estop = false
 software_cycle_control = false
 software_jog = false
@@ -142,7 +145,7 @@ program_edit_while_running = "read-only"
 program_protect = "panel"          # hardware switch; unknown/stale = locked
 save_requires_idle = true
 confirm_discard = true
-mdi_requires_mode = "mdi"
+mdi_execution = "explicit-action-only"
 quit_requires_idle = true
 confirm_quit = true
 
@@ -154,11 +157,11 @@ hal_hz = 10
 connect_timeout_ms = 3000
 
 [hal]
-read_only = true
 panel_component = "szgh_panel"
-# Mode pins are 0.5 s pulses, not a persistent mode index. The HMI latches them
-# to track the physical selector, including EDIT.
-panel_mode_prefix = "szgh_panel.mode_"
+linc_component = "linc"
+write_policy = "declared-outputs-only"
+output_prefix = "linc."
+allowed_outputs = ["hmi-alive", "tool-change-confirm", "status-display"]
 
 [hal.pins]
 panel_connected = "szgh_panel.panel_connected"
@@ -171,19 +174,30 @@ spindle_load = "rio.spindle-modbus.spindle_load-abs"
 spindle_speed = "spindle.0.speed-in"
 
 [panel]
-# The panel is owned by another process. The HMI must never open the serial
-# device, load the panel component, or write panel outputs.
-owner = "external"
-kind = "external"
+# Panel I/O is owned by the linc-panel service. The HMI never opens the serial
+# device or writes szgh_panel.* pins; it writes only the linc.* allowlist above.
+owner = "linc-panel"
+kind = "physical"
+driver = "szgh1080"
+mode_encoding = "one_hot_steady"
+override_encoding = "analog_steady"
 read_only = true
 
 [panel.status]
-# Two-digit status display: active WCS 54-59, spindle load 0-99, or MM/IN.
+# Two-digit status display driven by linc.status-display:
+# active WCS 54-59, spindle load 0-99, or MM/IN.
 source = "wcs"
 unknown = "--"
 
 [panel.link]
 read_only = true
+
+[pendant]
+# WHB04B-6 jog-only input. Other pendant controls must be unwired/ignored.
+enabled = true
+kind = "whb04b6"
+jog_only = true
+ignored_functions = ["mode", "cycle", "spindle", "coolant", "overrides", "program", "macro", "probe"]
 
 [preferences]
 # Runtime-only UI state lives here, never in the machine profile.

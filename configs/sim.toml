@@ -23,7 +23,8 @@ window_title = "LiNC - BaierMill Simulation"
 [panel]
 kind = "simulated"
 label = "Simulated SZGH-1080"
-owner = "baiermill_sim/panel/szgh_panel_gui.py"
+owner = "linc-panel"
+driver = "szgh1080-sim"
 
 [panel.link]
 kind = "virtual"

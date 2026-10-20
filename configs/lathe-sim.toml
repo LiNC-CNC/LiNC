@@ -17,6 +17,8 @@ linuxcnc_ini = "../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lath
 
 [tools]
 changer = "turret"
+# Commissioning requirement: add the standard P station column when the power
+# turret is enabled. The current lathe table is TXZIJDQR.
 
 [mdi]
 quick_commands = ["G0", "G1", "G2", "G3", "G7", "G8", "G95", "G96", "M3", "M4", "M5", "M8", "M9", "T"]
@@ -39,7 +41,13 @@ window_title = "LiNC - Smartlathe SL36 Simulation"
 [panel]
 kind = "simulated"
 label = "Lathe Simulator Panel"
-owner = "external"
+owner = "linc-panel"
+driver = "lathe-sim"
+mode_encoding = "one_hot_steady"
+override_encoding = "analog_steady"
+
+[pendant]
+enabled = false
 
 [panel.link]
 kind = "virtual"

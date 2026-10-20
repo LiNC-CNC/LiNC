@@ -10,7 +10,8 @@ Canonical visual: `svg/machine-dashboard.svg`
 
 Build LiNC, a focused, operator-grade HMI that:
 
-- puts all machine control on the **physical SZGH panel**
+- puts machine control on the **physical SZGH panel**, with explicit
+  Probe-Basic-compatible MDI/probe/tool commands from the HMI
 - uses the **QMK CNC keyboard** for text entry, navigation, and screen selection
 - keeps the screen readable at a glance and rich where detail matters
 - exposes G-code, toolpath, offsets, tools, alarms, and diagnostics clearly
@@ -66,8 +67,10 @@ Hard limitations:
   normalises words to uppercase.
 - F1–F8 softkey bars cannot be driven by this keymap. On-screen actions must
   be focusable with arrows/Enter and may also be clicked with the mouse layer.
-- Do not depend on `Ctrl+C`/`Ctrl+V`/`Ctrl+Z`. Provide on-screen edit actions
-  and line-based editing.
+- Standard editing shortcuts are supported: `Ctrl+C`, `Ctrl+X`, `Ctrl+V`,
+  `Ctrl+Z`, `Ctrl+Y`, `Ctrl+A`, `Ctrl+S`, `Ctrl+F`, `Ctrl+O` and `Ctrl+R`.
+  The QMK keymap has a Ctrl key but no Shift/Tab/Delete; on-screen actions
+  remain available for mouse-layer use.
 - `F10` may be intercepted by the window manager. The HMI runs kiosk/fullscreen
   or the WM is configured to pass it through.
 - `Ctrl+Q` must not quit during motion or a running program; confirm and/or
@@ -75,12 +78,13 @@ Hard limitations:
 
 ### 3.2 Physical panel
 
-Source: `../szgh-panel-rust/` and `../baiermill_pb/szgh_panel_hal.py`.
+Source: existing `../szgh-panel-rust/` and `../baiermill_pb/szgh_panel_hal.py`,
+migrated into LiNC's `linc-panel` crate.
 
 The SZGH-1080 panel is connected over RS-485 (115200 8N1) and exposed as a
 LinuxCNC HAL component named `szgh_panel`.
 
-The Rust component currently exposes:
+The integrated panel service exposes:
 
 - 46 button pins
 - 56 LED pins
@@ -95,16 +99,42 @@ The Rust component currently exposes:
 
 Panel ownership rules:
 
-- The panel is the only machine-control surface: mode, cycle start/stop,
+- The panel is the primary machine-control surface: mode, cycle start/stop,
   single block, K4 stop, jog, rapid, spindle, coolant, tool changer, chuck,
   chip conveyor, work lamp, lube, air blow, safe door, overrides, and E-stop.
-- The HMI **must not** open `/dev/ttyUSB0` while the panel component is running.
-- The HMI **must not** duplicate panel controls as on-screen buttons.
-- The HMI reads panel state read-only and displays it.
-- The panel component and HMI are separate processes. The HMI crashing must not
-  remove the panel's ability to stop the machine.
-- Existing HAL glue must be migrated from `qtpyvcp.*` pins to `halui` and/or a
-  small `linc` HAL component.
+- Panel driver code is part of the LiNC repository (`linc-panel`), not an
+  external dependency. It runs as a supervised process separate from the egui
+  UI, so an HMI crash does not remove panel control.
+- The HMI **must not** open `/dev/ttyUSB0`; the panel service owns the serial
+  port. The HMI **must not** duplicate panel controls as on-screen buttons.
+- LiNC **may write declared HAL outputs** through its `linc` HAL component.
+  The initial allowlist is `linc.hmi-alive`, `linc.tool-change-confirm` and
+  `linc.status-display`. It never writes arbitrary `szgh_panel.*` or
+  machine-motion pins.
+- The panel driver is modular: a `PanelDriver` trait plus a capabilities
+  descriptor (buttons, LEDs, displays, mode encoding, override encoding,
+  pendant support) lets future panel types and transports replace the SZGH
+  implementation without changing the UI/backend contract.
+- Existing HAL glue must be migrated from `qtpyvcp.*` pins to `halui`, the
+  `linc` component and `linc-panel` pins.
+
+Mode and override encoding:
+
+- Mode and override switches are **steady one-hot/analog levels**, not
+  pulses. Exactly one `mode_*` input must be active; zero or multiple active
+  inputs resolve to `UNKNOWN` and fail closed. No pulse latching is required.
+- Override values are sampled directly from their steady pins.
+- The simulator uses the same one-hot/steady contract as the real panel.
+
+Pendant:
+
+- The WHB04B-6 pendant is a **jog-only input device**. Its handwheel, axis
+  select and jog-enable functions are used only while the panel mode is `JOG`.
+- Pendant mode selection, cycle start/hold/stop, spindle, coolant, override,
+  program, macro and probe buttons are ignored at the HAL layer. They must not
+  be wired into LiNC or LinuxCNC control paths.
+- The pendant never becomes a second mode/cycle surface. Outside `JOG`, its
+  jog input is ignored too.
 
 Special cases:
 
@@ -112,10 +142,9 @@ Special cases:
   system**, `54`–`59`. It is the clearest use of two digits and is
   safety-relevant during setup and PROG.HOME. Show `--` when the value is
   unknown, stale or outside those offsets; do not guess.
-- The status display is driven by a display-only status bridge from
-  LinuxCNC `g5x_index` to `szgh_panel.sseg_status`; the HMI itself does not
-  write panel outputs. Optional configured sources are spindle load percent
-  and `MM`/`IN` units.
+- The HMI reads `g5x_index` and writes `linc.status-display`; the panel service
+  maps it to `szgh_panel.sseg_status`. Optional configured sources are spindle
+  load percent and `MM`/`IN` units.
 - The RS-485 protocol exposes `mode_mpg` and `mpg_sim`, but **not handwheel
   encoder counts**. Verify where the MPG encoder is wired; do not assume the
   panel link carries MPG pulses.
@@ -127,13 +156,13 @@ Special cases:
 
 Forbidden on screen:
 
-- mode selection
-- cycle start / feed hold / stop / reset
-- jog controls
+- mode selection (except the automatic temporary MDI switch used by
+  Probe-Basic-compatible command execution)
+- general cycle start / feed hold / stop / reset
+- general jog controls
 - spindle CW/CCW/stop/orient
 - coolant on/off
 - override sliders
-- tool change
 - software E-stop
 
 Allowed on screen:
@@ -142,27 +171,34 @@ Allowed on screen:
 - program/file management
 - G-code editor and toolpath
 - offset and tool tables
-- MDI text entry, only when the physical panel is in MDI mode
+- MDI text entry and explicit command issue
+- explicit `RUN PROBE` and tool-change actions that issue their specific MDI
+  block after validation; these are not general cycle-start controls
 - diagnostics, filtering, log export/copy, view clearing
 - layout/view selection
 
 ## 4. Architecture
 
 ```text
-SZGH panel --RS-485--> szgh-panel-hal (Rust HAL component) --> HAL --> halui/LinuxCNC
+SZGH panel --RS-485--> linc-panel (LiNC panel service) --> HAL --> halui/LinuxCNC
 QMK keyboard --USB--> linc (Rust egui) --NML or PyO3--> LinuxCNC
+WHB pendant --USB--> LinuxCNC jog input only (non-jog ignored)
 LinuxCNC status --------------------------------> linc
-szgh_panel.* HAL pins ---------------------------> linc (read-only)
+linc.* HAL outputs <-----------------------------> linc
+szgh_panel.* HAL pins <--------------------------> linc-panel
 ```
 
 ### 4.1 Processes
 
-- `szgh-panel-hal`: owns the serial port, produces button/mode/override pins,
-  consumes LED/7-segment/velocity pins. Separate process from the HMI.
-- `linc`: Rust `egui` application. Owns no machine-control hardware.
+- `linc-panel`: LiNC-owned panel service. Owns the serial port, runs a modular
+  `PanelDriver`, produces button/mode/override pins, consumes LED/7-segment/
+  velocity pins. Separate process from the UI so an egui crash does not remove
+  panel control.
+- `linc`: Rust `egui` application and machine backend. Owns no motion hardware.
+  Loads the `linc` HAL component and writes only its declared outputs:
+  `linc.hmi-alive`, `linc.tool-change-confirm`, `linc.status-display`.
 - `linuxcnc`: task/motion/IO. Authoritative machine state.
-- HAL glue: standard `halui` plus a small `linc` component for
-  app-specific inputs/snapshots.
+- HAL glue: standard `halui`, the `linc` component, and `linc-panel`.
 
 ### 4.2 Rust workspace
 
@@ -171,11 +207,27 @@ LiNC/
   crates/
     linc-core/        # state, commands, backend trait, validation
     linc-linuxcnc/    # PyO3 official module; optional C++ NML bridge
-    linc-hal/         # panel-state snapshot, HAL FFI, linc pins
+    linc-hal/         # typed HAL FFI + linc.* output allowlist
+    linc-panel/       # PanelDriver trait; SZGH-1080 and simulator drivers
     linc-ui/          # egui shell, theme, screens, widgets
     linc-view/        # 2D/3D toolpath and sparklines
     linc-app/         # main, config, logging
 ```
+
+`linc-panel` keeps panel technology behind a small contract:
+
+```rust
+pub trait PanelDriver {
+    fn poll(&mut self) -> Result<PanelSnapshot, PanelError>;
+    fn write(&mut self, outputs: &PanelOutputs) -> Result<(), PanelError>;
+    fn capabilities(&self) -> PanelCapabilities;
+}
+```
+
+`PanelCapabilities` declares buttons, LEDs, displays, mode encoding, override
+encoding and pendant support. The SZGH-1080 driver uses steady one-hot modes and
+steady overrides; the simulator uses the same contract. Future panels can add
+drivers without changing `linc-core` or the UI.
 
 ### 4.3 Backend boundary
 
@@ -186,25 +238,30 @@ pub trait MachineBackend: Send + 'static {
 }
 ```
 
-The UI never talks to NML or HAL directly for machine commands. A worker thread
-owns the backend and publishes snapshots over a channel.
+The UI never talks to NML or HAL directly. A worker thread owns the backend,
+publishes snapshots over a channel, and writes typed HAL outputs through
+`linc-hal`. There is no generic arbitrary-pin write API.
 
-Preferred first bridge: **PyO3 + official `linuxcnc` module**. It is stable and
-already handles NML serial/echo. The C++ NML bridge is a later replacement if
+Preferred first bridge: **PyO3 + official `linuxcnc` module**, matching the
+Probe Basic execution semantics. The C++ NML bridge is a later replacement if
 Python must be removed. `linuxcnc-grpc` is only for a remote panel, not the
 local HMI.
 
 ### 4.4 Simulation panel
 
-The simulation build also runs a separate operator-panel window. It is not part
-of the HMI shell and is never present in the real-machine build.
+The simulation build runs the same `linc-panel` driver contract with a
+simulated SZGH-1080 front panel. It is not part of the HMI shell and is never
+present in the real-machine build.
 
 - Reproduces the SZGH-1080 front panel: POWER, E-stop, MODE, feed/rapid/spindle
   overrides, axis/alarm lamps, tool displays and key matrix.
 - Creates the same `szgh_panel` HAL component/pin surface as the real driver,
   plus simulation-only power/E-stop inputs.
-- The HMI only reads HAL/status; all simulated machine commands originate in
-  this companion window or the keyboard, never in the HMI central page.
+- Modes and overrides use the same steady one-hot/steady contract as the real
+  panel.
+- The HMI reads HAL/status and may issue its explicit MDI/probe/tool commands;
+  simulated machine commands otherwise originate in the panel window or
+  keyboard. It never fabricates panel feedback.
 - It may live on a second monitor. The calibration/mockup is
   `svg/sim-panel.svg`.
 - A lathe-specific panel mockup still needs turret and live-tool controls;
@@ -250,7 +307,8 @@ Default page. The layout is selected by `machine.gui`.
   color, rapid path, tool marker, axes, zoom, program/machine bounds and
   selected-line highlight. `CLEAR TRAIL` clears only the live trail.
 - Program card, feed/spindle-load gauges, machine health and alarms.
-- ATC state in Tools/Diagnostics; mill tool table uses pocket/orientation.
+- ATC state in Tools/Diagnostics; mill tool table uses orientation and, only
+  when ATC is enabled, the standard `P` pocket column.
 
 #### Lathe
 
@@ -370,28 +428,38 @@ Program rules:
 
 ### 6.4 Tools
 
-Primary quick tool-change surface; no MDI entry required.
+Primary quick tool-change surface; no MDI screen required.
 
-- Tool table: number, description, diameter/length or lathe geometry/wear,
-  pocket/station and type. Selected row or a typed target number becomes the
-  target tool.
-- Current tool, next/prepared tool and spindle state are always visible.
-- `STAGE CHANGE` prepares `Tn M6` through the internal command path and shows
-  `WAITING FOR PHYSICAL CYCLE START`. It never executes the change.
+- Tool table backend is the **standard LinuxCNC tool table**, read/written at
+  the path in INI `[EMCIO] TOOL_TABLE`. Columns come from
+  `TOOL_TABLE_COLUMNS`; the HMI uses that schema directly.
+- **Pocket column:** present only when an ATC/turret changer is used. A
+  `manual` changer has no pocket column and the Tools page hides it. An
+  `atc`/`turret` profile requires a standard `P` column; the loader refuses to
+  start if it is missing.
+- Tool table: number, description, dimensions/geometry, optional pocket/station
+  and type. Selected row or a typed target number becomes the target tool.
+- Current tool, prepared/next tool and spindle state are always visible.
+- `CHANGE TOOL` issues `Tn M6` immediately using Probe Basic's `issue_mdi`
+  semantics: machine ON, homed axes, idle interpreter, no active program, then
+  temporary MDI mode and automatic restore. There is no staging and no
+  physical-CYCLE-START step.
 - `T0` unload and manual-change confirmation are supported. `SET CURRENT`
   (`M61 Qn`) is available for a tool already in the spindle but is explicitly
   labeled as not a tool change.
-- Manual changer: after CYCLE START, show `REMOVE current / INSTALL target` and
-  a `CONFIRM INSTALLED` action. Confirmation uses the dedicated tool-change
-  backend/HAL output, not an arbitrary HAL write.
+- Manual changer: after `M6` pauses for the manual change, show
+  `REMOVE current / INSTALL target` and `CONFIRM INSTALLED`. The confirmation
+  writes the declared `linc.tool-change-confirm` HAL output, which is wired to
+  the manual-toolchange chain; it is not an arbitrary HAL write.
 - ATC/turret: optional and lower priority. Use the existing `toolchange.ngc`
-  and `m6_tool_call_*` routines; the HMI only stages the `M6` and renders state.
-  Show carousel/rack pockets, current pocket, clamp/unclamp and faults when
-  exposed. ATC disabled/unavailable states are explicit.
+  and `m6_tool_call_*` routines, updated to use the standard tool-table pocket
+  column rather than ad-hoc pocket parameters. Show carousel/rack pockets,
+  current pocket, clamp/unclamp and faults when exposed.
 - Lathe: power-turret station grid, axial/radial live-tool flag, live-tool RPM
-  range/direction and driven-tool state.
-- Tool table writes and staging require idle; table writes also require program
-  protect off. Running programs leave the page read-only.
+  range/direction and driven-tool state. A turret profile also requires the
+  standard pocket/station column.
+- Tool table writes and tool-change issuing require idle; table writes also
+  require program protect off. Running programs leave the page read-only.
 
 ### 6.5 Diagnostics
 
@@ -480,25 +548,28 @@ category-first workflow: choose a routine group, then pick the operation card.
   offset/diameter and square-calibration axis.
 - Work-offset selector G54–G59. `MEASURE ONLY` must be available in addition to
   applying the result to the selected offset.
-- `PREPARE MDI` builds/queues the selected `o<probe_...> call` and its argument
-  values. It does not move the machine. The operator must press the physical
-  CYCLE START key.
-- Probe motion requires: MDI mode, homed axes, probe tool T99 in the spindle,
-  no active program, and valid parameters. Errors keep the previous result and
-  show the failing condition.
+- `RUN PROBE` builds the selected `o<probe_...> call` and its argument values,
+  then issues it immediately using Probe Basic's `issue_mdi` semantics:
+  temporary MDI mode, command sent, previous task mode restored when the
+  interpreter returns idle. The click is the explicit operator action; there is
+  no second stage and no physical-CYCLE-START step.
+- Probe motion requires machine ON, homed axes, probe tool T99 in the spindle,
+  idle interpreter, no active program and valid parameters. A syntax/validation
+  error issues nothing and marks the failing condition.
 - Read results from the subroutine outputs (`#1001`–`#1009`) and show measured
   value, error, selected WCS, and history.
 - `APPLY RESULT` writes the selected work offset only when idle and program
   protect is off. Calibration routines update the probe calibration offset;
   `RESET CAL` clears it through `probe_cal_reset.ngc`.
-- The page has no cycle-start, jog, override or E-stop controls. The physical
-  panel remains the only motion command source.
+- The page has no general cycle-start, jog, override or E-stop controls. The
+  specific `RUN PROBE` action is the only motion initiator, and the hardware
+  E-stop remains independent.
 
 ### 6.9 MDI
 
 Mode-driven screen. Moving the physical mode selector to `MDI` opens this page
 immediately, focuses the command line and shows `PANEL MODE: MDI`; moving out
-closes it and discards any staged, unrun block. No left-nav item is added.
+closes it and discards unissued input. No left-nav item is added.
 
 Industry-standard layout:
 
@@ -506,19 +577,23 @@ Industry-standard layout:
 - Quick-insert chips for G0/G1/G2/G3, M3/M5/M6/M8/M9, G54, G38.2 and T;
   variant-specific chips for lathe (G7/G8, G95/G96).
 - Position/DRO and modal G-code panel.
-- Staged-command panel with syntax status, requirements and last result.
+- Last-issued block and result panel with syntax status, requirements and
+  error/result.
 - Local MDI history with timestamps; Up/Down recalls prior commands.
 
 Rules:
 
-- `Enter` or `STAGE MDI` stages one block; it never starts motion.
-- Only the physical CYCLE START key runs a staged block.
-- Staging requires panel MDI mode, homed axes, idle interpreter and no active
-  program. A syntax error keeps the previous staged/last result and marks the
-  input.
-- Leaving MDI, pressing `ESC`, or clearing discards the staged block.
+- `Enter` or `ISSUE MDI` issues one block through Probe Basic's `issue_mdi`
+  semantics. This is an explicit on-screen command action, not a general
+  cycle-start control.
+- Issue requires machine ON, homed axes, idle interpreter and no active
+  program. A syntax error issues nothing and marks the input.
+- The command may temporarily select MDI and restores the previous task mode
+  when the interpreter returns idle. No physical CYCLE START is involved.
+- Leaving MDI, pressing `ESC`, or clearing discards unissued input; it does not
+  cancel a command already issued.
 - History is HMI-local, bounded (`mdi.history_limit`), and not a machine log.
-- No on-screen cycle start, jog, override, spindle, coolant or E-stop controls.
+- No on-screen jog, override, spindle, coolant or E-stop controls.
 
 ### 6.10 Homing
 
@@ -545,8 +620,8 @@ observes, explains and logs the panel behavior; it never issues a home command.
   - X/Y/Z only; optional A/C axes are not moved by these panel actions,
     matching the current Probe Basic handlers.
   - The panel-owned path issues MDI immediately through the existing
-    `issue_mdi` action; the HMI must not intercept, restage or add a cycle-start
-    gate to it. It still requires machine ON, all axes homed and interpreter
+    `issue_mdi` action; the HMI must not intercept it or add a cycle-start
+    gate. It still requires machine ON, all axes homed and interpreter
     idle, or the action is refused.
 - Homing order comes from the INI; the current machine is Z first, then X/Y.
   `NO_FORCE_HOMING = 0` means programs/MDI are blocked until homed.
@@ -566,7 +641,8 @@ observes, explains and logs the panel behavior; it never issues a home command.
 Mode-driven screen shared by the panel's `JOG`, `INC` and `MPG` positions.
 Entering any of those positions opens it; leaving them closes it. No left-nav
 item is added. The screen is read-only: all jog, increment, handwheel, mode and
-override input stays on the physical panel.
+override input stays on the physical panel, with the WHB pendant used only for
+jog in JOG mode.
 
 - **Large graph window** is the dominant element: mill 3D or lathe XZ
   toolpath, axes, grid, stock/program bounds where available, the loaded
@@ -667,9 +743,9 @@ Implementation:
 - `WIN`: Diagnostics.
 - `HELP` action: G-code Help; no dedicated function key.
 - `LOAD` / `Ctrl+O`: Files, when idle and allowed.
-- `PROBE` action: Touch Probe from Offsets; prepare only, never start motion.
-- MDI mode: `Enter` stages the block; `Esc` clears it; `Up`/`Down` recall
-  history; physical CYCLE START runs it.
+- `PROBE` action: Touch Probe from Offsets; explicit `RUN PROBE` issues MDI.
+- MDI mode: `Enter` issues the block; `Esc` clears unissued input; `Up`/`Down`
+  recall history. No physical CYCLE START is required.
 - `ESC`: back/cancel; on Help, clear search or return from detail history.
 - Arrows: focus/list/scroll.
 - `/`: focus G-code Help search when Help is active.
@@ -687,27 +763,36 @@ No F1–F8 mapping. The bottom keycap highlight reflects the current page:
 
 ### 8.2 Mode and command gating
 
-- The physical panel mode switch is authoritative.
-- The GUI displays panel mode and LinuxCNC task mode; if they differ, show both
-  only when useful.
-- MDI is enabled only when the panel is in MDI mode; the MDI screen opens on
-  that selector position and closes when it leaves.
+- The physical panel mode switch is authoritative for panel functions. The GUI
+  displays panel mode and LinuxCNC task mode; if they differ, show both only
+  when useful.
+- The MDI screen is available when the panel is in MDI mode; probe and
+  tool-change pages may still issue their specific commands through
+  `issue_mdi`, which temporarily selects MDI and restores the prior mode.
 - HOME/PROG.HOME open the Homing screen; all homing/program-zero motion
   originates in the panel's home/proghome pins and keys. The HMI never homes an
   axis and never intercepts the panel's existing direct `issue_mdi` PROG.HOME
   path.
 - JOG/INC/MPG open the Manual screen with the large graph and coordinate
-  readout. Jog, increment and handwheel motion remain panel-only.
-- The HMI MDI screen stages only; its block runs only after physical CYCLE
-  START. The PROG.HOME panel action is a separate, existing panel behavior and
-  is not routed through that staging screen.
-- Program start is physical CYCLE START only.
+  readout. Jog, increment and handwheel motion remain panel/pendant input only.
+- MDI, probe and tool-change actions use Probe Basic's `issue_mdi` semantics:
+  after an explicit operator action and validation (machine ON, homed, idle, no
+  active program), the HMI may temporarily select MDI, issue the specific
+  command, and restore the previous task mode. This is an intentional exception
+  to panel-exclusive machine control; it is not a general cycle-start action.
+- Leaving the MDI screen clears unissued input only; an already issued command
+  is not cancelled.
+- Program start is physical CYCLE START only. The HMI never starts AUTO.
+- The WHB pendant contributes jog/handwheel input only in JOG mode; all other
+  pendant controls are ignored.
 - Overrides are physical switches; the GUI displays values.
 - Jog is physical only.
 - Program protect is a physical panel input. It blocks every controller-side
   write and is treated as ON when unknown or stale.
-- The GUI may load programs, edit G-code, edit offsets/tools, and run MDI
-  within the gating above.
+- The GUI may load programs, edit G-code, edit offsets/tools, and issue MDI,
+  probe and tool-change commands within the gating above.
+- LiNC writes only its declared `linc.*` HAL outputs; it never writes arbitrary
+  motion, spindle, coolant, cycle or `szgh_panel.*` pins.
 
 ### 8.3 Panel offline
 
@@ -723,43 +808,97 @@ If `panel_connected` is false:
 
 ```rust
 pub struct MachineSnapshot {
-    pub mode: Mode,
-    pub state: MachineState,
-    pub positions: Axes<f64>,
-    pub dtg: Axes<f64>,
-    pub offsets: WorkOffsets,
-    pub tool: ToolState,
-    pub spindle: SpindleState,
+    pub meta: SnapshotMeta,              // sequence, age, stale flag
+    pub panel_mode: PanelMode,           // one-hot decode; Unknown fails closed
+    pub task: TaskState,                 // Task/Interp state, mode, paused
+    pub machine: MachineState,           // on, estop, homed, limits, fault
+    pub positions: AxisMap<PositionSet>, // work, machine, DTG per INI axis
+    pub offsets: WorkOffsetSet,          // G54-G59, G92, rotation, axis count
+    pub tool_table: ToolTableState,      // standard LinuxCNC table + columns
+    pub spindles: Vec<SpindleState>,     // main + sub/live tool
     pub feed: FeedState,
-    pub program: ProgramState,
-    pub alarms: Vec<Alarm>,
+    pub program: ProgramState,           // path, revision, line, dirty, running
+    pub tool_change: ToolChangeState,    // idle / issuing / manual prompt
+    pub probe: ProbeState,               // last result, timestamp, calibration
+    pub atc: Option<AtcState>,           // pockets from standard P column
+    pub pendant: PendantState,           // WHB jog-only snapshot
     pub panel: PanelSnapshot,
+    pub hal: HalOutputs,                 // linc.* output state
+    pub alarms: Vec<Alarm>,
+}
+
+pub struct PositionSet {
+    pub work: f64,
+    pub machine: f64,
+    pub dtg: f64,
+}
+
+pub struct ToolTableState {
+    pub path: PathBuf,
+    pub columns: Vec<ToolColumn>,        // from TOOL_TABLE_COLUMNS
+    pub rows: Vec<ToolRow>,              // P is Some only with ATC/turret
+    pub revision: u64,                   // detect external edits
+}
+
+pub struct ToolRow {
+    pub tool: u16,
+    pub pocket: Option<u16>,
+    pub description: String,
+    pub geometry: ToolGeometry,          // mill length/diameter or lathe X/Z/I/J
+    pub wear: ToolWear,
+    pub nose_radius: Option<f64>,
+    pub orientation: Option<u8>,
 }
 
 pub enum MachineCommand {
-    Mdi(String),
-    LoadProgram(PathBuf),
-    SetWorkOffset { index: u8, offset: [f64; 3] },
-    SetToolOffset { tool: u16, length: f64, diameter: f64 },
+    IssueMdi { block: String, origin: MdiOrigin },
+    IssueToolChange { tool: u16 },
+    ConfirmManualToolChange { token: ToolChangeToken },
+    SetCurrentTool { tool: u16 },
+    LoadProgram { path: PathBuf, expected_revision: Option<u64> },
+    SaveProgram { path: PathBuf, expected_revision: u64 },
+    SetWorkOffset { index: u8, values: AxisMap<f64>, rotation: Option<f64> },
+    SetToolTableRow { row: ToolRow, expected_revision: u64 },
+    ApplyProbeResult { result: ProbeResult, target: ProbeTarget },
+    ResetProbeCalibration,
+    SetHalOutput { output: LincOutput, value: HalValue },
+}
+
+pub enum LincOutput {
+    HmiAlive,
+    ToolChangeConfirm,
+    StatusDisplay,
 }
 ```
 
-Machine-control commands (mode, cycle, jog, spindle, coolant, overrides) are
-not part of the HMI command set.
+`MdiOrigin` records `Mdi`, `Probe`, `ToolChange` or `ManualToolChange` so the
+backend can apply the correct preconditions and result handling. `IssueMdi`
+uses Probe Basic `issue_mdi` semantics; it is not a general cycle-start
+command.
+
+`SetHalOutput` is a closed enum, not a pin-name string. The HMI may write only
+the declared `linc.*` outputs; arbitrary HAL writes are not representable.
+
+Machine-control commands (panel mode, cycle, jog, spindle, coolant, overrides)
+are not part of the HMI command set. The only mode change is the temporary MDI
+selection inside `IssueMdi`, which restores the prior task mode.
 
 Panel snapshot should include at least:
 
 - connected/error
-- mode
-- feed/rapid/spindle override
+- one-hot mode + validity
+- feed/rapid/spindle override (steady)
 - program protect
 - E-stop
 - tool/next tool
 - raw button/LED bitmaps
 - RX/TX, CRC errors, timeouts, last RX age, reconnects
+- pendant jog-only state
+- capacity/capabilities from the panel driver
 
 The current Rust port exposes connection/error and decoded pins but not the
-serial counters and raw bitmaps; those must be added for Diagnostics.
+serial counters and raw bitmaps; those must be added to `linc-panel` for
+Diagnostics.
 
 ## 10. Performance
 
@@ -769,6 +908,8 @@ serial counters and raw bitmaps; those must be added for Diagnostics.
 - 3D toolpath: render only when visible; 30 fps maximum.
 - No continuous 60 fps repaint when idle.
 - No blocking file/serial/NML I/O on the UI thread.
+- HAL outputs: `hmi-alive` 2 Hz heartbeat, `status-display` on WCS change or
+  5 Hz, `tool-change-confirm` edge-driven only.
 - Cache text layout and visible-line tokens.
 - Event log in a ring buffer; persist asynchronously, not on every event.
 
@@ -776,22 +917,32 @@ serial counters and raw bitmaps; those must be added for Diagnostics.
 
 - The hardware E-stop chain is the only safety-rated stop.
 - A software E-stop button is forbidden.
-- No direct HAL writes for machine actions; use LinuxCNC commands/halui.
-- Validate mode/state before MDI and program/offset/tool writes.
-- MDI blocks are staged only; the HMI never auto-runs MDI. Physical CYCLE
-  START is the only execution path.
+- LiNC may write only the declared `linc.*` HAL outputs
+  (`hmi-alive`, `tool-change-confirm`, `status-display`). It never writes
+  arbitrary HAL pins or machine motion/spindle/coolant/cycle pins.
+- Validate machine ON, homed, idle, program protect and no active program
+  before MDI, probe, tool-change and program/offset/tool writes.
+- MDI, probe and tool-change commands use Probe Basic `issue_mdi` semantics:
+  they execute immediately after an explicit operator action, may temporarily
+  select MDI, and restore the prior task mode. There is no staged-command path
+  and no physical-CYCLE-START gate for these specific commands.
+- The HMI never starts an AUTO program; physical CYCLE START is the only AUTO
+  start path.
 - Homing is panel-only: no HMI home/unhome command, button or key. The HMI
   displays sequence/state and must not interfere with the panel's home pins or
   its PROG.HOME `issue_mdi` actions.
-- Probing routines are prepared as MDI; only the physical CYCLE START key may
-  start probe motion. Never auto-start a probe routine.
+- Probe routines start only from the explicit `RUN PROBE` action. Never
+  auto-start a probe routine on screen entry or parameter change.
+- Tool changes start only from the explicit `CHANGE TOOL` action. Manual
+  confirmation requires a pending change and a live panel; never auto-confirm.
 - Respect program protect and running state. Program protect is a panel
   switch, is rechecked by the backend on every write, and fails closed when
   unknown or stale.
 - Manual modes are read-only: no HMI jog, increment, handwheel, mode or
-  override command exists.
+  override command exists. The WHB pendant is accepted for jog only.
 - Do not hide alarms behind tabs; persistent banner plus Diagnostics.
-- HMI crash must not stop the machine or remove panel control.
+- HMI crash must not stop the machine or remove panel control. The panel
+  service is separate; `linc.hmi-alive` exposes UI health to HAL.
 - Panel disconnect must be visible and actionable by the operator.
 - Guard `Ctrl+Q`; never quit during motion or a running program.
 
@@ -807,18 +958,18 @@ For this design repository:
 - Lathe layout represents X/Z, optional C/Y, live tooling and a power turret.
 - The simulation-only SZGH-1080 panel is represented separately from the HMI.
 - The Touch Probe screen represents routine selection, WCS/parameters,
-  prepared-MDI state, results/apply and calibration without a software
-  cycle-start control.
-- The MDI screen opens at the panel MDI position and represents command staging,
-  DRO/modal state, history and physical-cycle-start gating.
+  explicit `RUN PROBE` via Probe Basic `issue_mdi`, results/apply and
+  calibration, with no separate cycle-start step.
+- The MDI screen opens at the panel MDI position and represents command issue,
+  DRO/modal state and history; `Enter` issues immediately through `issue_mdi`.
 - The Homing/Program Zero screen opens at HOME/PROG.HOME, shows per-axis/sequence
   state and documents the exact physical-panel key mapping without providing
   home controls.
 - PROG.HOME retains the current machine's `issue_mdi` behavior: RAPID sends
   `G0 X0Y0Z0`, axis keys send `G0 X0/Y0/Z0`, in the current WCS, X/Y/Z only.
-- The Tools screen represents the tool table, current/next tool, a staged
-  `Tn M6` change, manual confirmation and an explicit optional ATC/turret
-  section, without requiring MDI entry.
+- The Tools screen represents the standard LinuxCNC tool table, current/next
+  tool, explicit `Tn M6` issue, manual confirmation and optional ATC/turret
+  state; the pocket column appears only when a changer uses it.
 - The Manual screen opens at JOG/INC/MPG, shows a large graph plus large work
   coordinates, machine coordinates and DTG, and provides no on-screen jog or
   mode control.
@@ -826,8 +977,14 @@ For this design repository:
   imports and probe applies; unsaved changes are preserved, not discarded.
 - The panel's status seven-segment display shows the active `G54`–`G59` offset
   as `54`–`59`, and `--` when unknown; it never fabricates a value.
+- LiNC exposes the declared `linc.*` HAL outputs and writes them; it never
+  writes arbitrary machine or panel pins.
+- Mode/override inputs are steady one-hot/steady and decoded without pulse
+  latching; invalid mode state is `UNKNOWN`.
+- The WHB pendant is documented and implemented as jog-only; non-jog pendant
+  controls are ignored.
 - Hardware constraints for the QMK keyboard and SZGH panel are documented.
-- No SVG shows an on-screen machine control panel.
+- No SVG shows a general on-screen machine-control panel.
 - G-code mockups show token-level syntax highlighting.
 - The Program CODE screen shows an editable buffer state: cursor, dirty marker,
   save action and mini-graph preview.
@@ -846,33 +1003,39 @@ For this design repository:
 
 For the future implementation:
 
-- Keyboard-only navigation works without Tab, Shift, Delete, or F1–F8.
-- Panel and HMI are separate processes; only the panel owns RS-485.
-- No on-screen machine controls exist.
-- Program protect, panel offline, and MDI mode gating are enforced.
+- Keyboard-only navigation works without Tab, Shift, Delete, or F1–F8;
+  standard Ctrl editing shortcuts work.
+- Panel service and HMI are separate processes; only the panel service owns
+  RS-485.
+- No general on-screen machine-control panel exists. Explicit MDI, probe and
+  tool-change commands are allowed through the validation path above.
+- Program protect, panel offline, and one-hot mode validity are enforced.
+- AUTO program start remains physical CYCLE START only.
 - Diagnostics shows real panel-link statistics and event history.
 - Physical E-stop remains independent.
 
 ## 13. Open issues
 
-1. `szgh-panel-rust` does not currently build with HAL enabled:
+1. Port `szgh-panel-rust` into the LiNC `linc-panel` crate. The current crate
+   does not build with HAL enabled:
    - `Cargo.toml` patches to missing
      `patches/linuxcnc-hal-rs/linuxcnc-hal-sys`;
    - without the patch, crates.io `linuxcnc-hal-sys` fails in bindgen against
      current glibc headers.
 2. The Rust panel port opens/closes the serial port every cycle. It should own
    one `Box<dyn SerialPort>` for process lifetime.
-3. The HAL loads `./szgh-panel-hal -c 0.01`, but the protocol sleeps roughly
-   14 ms per transaction; choose 0.02–0.05 s or reduce delays.
-4. Add Diagnostics counters and raw bitmaps to `szgh-panel-hal`.
+3. The panel service currently uses a 0.01 s cycle while the protocol sleeps
+   roughly 14 ms per transaction; choose 0.02–0.05 s or reduce delays.
+4. Add Diagnostics counters and raw bitmaps to `linc-panel`.
 5. Verify the MPG encoder path; it is not carried by the RS-485 driver.
 6. Choose the LinuxCNC bridge: PyO3 first, C++ NML later.
 7. Confirm spindle-load source (`rio.spindle-modbus.spindle_load-abs` or VFD
    equivalent); never derive it from override.
 8. Map panel `EDIT`/`HOME`/`PROGHOME` modes to UI state; they are not all
-   LinuxCNC task modes.
-9. Design the editor for no Shift/Tab/Delete; line-based operations are
-   required.
+   LinuxCNC task modes. Decode the steady one-hot mode directly; do not latch
+   pulses.
+9. Design the editor for standard Ctrl shortcuts with no Shift/Tab/Delete;
+   line-based operations are still required.
 10. Verify theme contrast and color-blind distinguishability on the target
     display.
 11. Implement the layered config loader and `linc --check-config`;
@@ -888,11 +1051,12 @@ For the future implementation:
     find, atomic save, external-change detection, unsaved-change confirmation
     and a debounced preview parser. The preview must not use the machine
     interpreter or move the machine.
-15. Verify editor usability with no `Shift`, `Tab` or `Delete`: mouse-layer
-    selection, Backspace, cut/paste and line-based operations.
-16. The panel mode pins are 0.5 s pulses, not a persistent mode index. The HMI
-    must latch them to know when the selector is in `EDIT`; preferably the
-    panel driver should expose a persistent mode state as well.
+15. Verify editor usability with standard Ctrl shortcuts and no `Shift`, `Tab`
+    or `Delete`: mouse-layer selection, Backspace, cut/paste and line-based
+    operations.
+16. Add a driver capability matrix and conformance tests for future panel
+    types: button/LED maps, display count, mode encoding and override
+    encoding. The SZGH-1080 uses steady one-hot modes; no pulse latching.
 17. USB auto-mount depends on `udisks2` and D-Bus/polkit. The service is
     currently inactive on the development box; verify/enable it on the machine
     and test insert, mount failure, busy eject and power-off.
@@ -912,27 +1076,30 @@ For the future implementation:
     `svg/sim-panel.svg` is the mill SZGH-1080 panel.
 23. Port the Probe Basic parameter contract (`#3014`–`#3036`) and result contract
     (`#1001`–`#1009`), map every routine to its G-code call, and verify that
-    HMI-prepared MDI runs only after physical CYCLE START.
+    `RUN PROBE` issues the call through `issue_mdi` only after the explicit
+    action and state validation.
 24. Decide lathe touch-probe/tool-setter support separately; the first Touch
     Probe page is mill-oriented (X/Y/Z and WCS).
-25. Implement MDI staging with syntax validation, history recall and discard on
-    mode exit; verify the HMI cannot execute MDI without physical CYCLE START.
+25. Implement MDI issue through Probe Basic `issue_mdi`: syntax validation,
+    history recall, discard of unissued input on mode exit, and restoration of
+    the prior task mode when the interpreter returns idle.
 26. Verify Homing UI against the panel's `home-*`/`proghome-*` pins and the
     existing `baiermill_pb` gating. Test Z-first homing, individual axes,
     PROG.HOME current-WCS moves, faults and optional-axis display.
 27. Preserve the PROG.HOME direct `issue_mdi` path exactly (immediate panel
-    action, X/Y/Z only, current WCS, no HMI staging); document the intentional
-    exception to the HMI MDI staging rule.
-28. Implement the manual tool-change acknowledgement path without arbitrary HAL
-    writes; verify the existing manual-change prompt/confirm and `M61` set-current
-    semantics.
-29. Defer ATC/turret implementation. When added, reuse the existing `M6` remap
-    and carousel/turret routines, expose real clamp/index state and never
-    duplicate toolchange motion logic in the HMI.
-30. Implement the Manual screen's JOG/INC/MPG mode latch and selected-axis
-    source. The RS-485 link carries mode pulses and jog buttons, not a
-    persistent selected axis; show `UNKNOWN` unless HALUI/pendant state is
-    available. MPG counts must not be fabricated.
+    action, X/Y/Z only, current WCS); it follows the same Probe Basic execution
+    semantics as other issued MDI commands.
+28. Implement the manual tool-change acknowledgement through
+    `linc.tool-change-confirm`, gated on a pending change, live panel and idle
+    machine. Verify the existing manual prompt/confirm and `M61` semantics.
+29. Defer ATC/turret implementation. When added, use the standard tool-table
+    `P` column as the pocket source and update `toolchange.ngc`/`m6_tool_call_*`
+    accordingly; expose real clamp/index state and never duplicate toolchange
+    motion in the HMI.
+30. Implement the Manual screen's JOG/INC/MPG selected-axis source. The
+    RS-485 link carries steady one-hot modes and jog buttons, not a persistent
+    selected axis; show `UNKNOWN` unless HALUI/pendant state is available. MPG
+    counts must not be fabricated.
 31. Implement program protect as a fail-closed backend gate: subscribe to the
     panel pin, recheck it for every program/offset/tool/file/probe write, and
     test the switch toggling with a dirty editor buffer and during an in-flight
@@ -941,9 +1108,26 @@ For the future implementation:
     `CLEAR TRAIL` view action. Sample actual tool-tip positions, cap the trail
     buffer, keep program and trail colors distinct, and verify that clearing
     never affects the loaded program or machine state.
-33. Implement the display-only panel status bridge for the active WCS. The
-    current Rust panel driver exposes only `sseg_magtool`/`sseg_spdtool`; add
-    `sseg_status` and a source for `g5x_index`, with `--` on unknown/stale.
+33. Implement `linc.status-display` for the active WCS. Add `sseg_status` to
+    the panel driver and map `g5x_index` to `54`–`59`, with `--` on
+    unknown/stale or extended offsets.
+34. Implement the `linc` HAL component and typed output allowlist:
+    `hmi-alive`, `tool-change-confirm`, `status-display`. Verify ownership,
+    startup/shutdown, heartbeat expiry and that no arbitrary pin writes exist.
+35. Prune the WHB04B-6 pendant nets to jog/handwheel-only in JOG mode. Ignore
+    pendant mode, cycle, spindle, coolant, override, program and macro inputs;
+    add a fault test proving those controls cannot change machine state.
+36. Migrate the mill tool table to a standard `P` column only when ATC is
+    enabled; keep manual profiles on `TZDR`. Validate the INI
+    `TOOL_TABLE_COLUMNS`/`changer` match and hide the pocket column in manual
+    mode.
+37. Harden untrusted file ingress: canonicalize LOAD/SAVE beneath
+    `PROGRAM_PREFIX`, reject symlink escapes, use same-directory atomic
+    replace, bound the preview parser (no remaps/subroutines/side effects) and
+    build all HMI-generated MDI with validated numeric templates.
+38. Verify Probe Basic `issue_mdi` mode switching/restoration across MDI, probe
+    and tool-change actions: panel selector state, task mode display, faulted
+    or canceled commands, and no stale MDI mode left behind.
 
 ## 14. Accepted SVG manifest
 
@@ -958,11 +1142,11 @@ Only the accepted versions are included.
 | `svg/gcode-help.svg` | G-code Help: offline quick-reference index, code search, detail pane, parameter tables, figures and related codes |
 | `svg/files.svg` | Files: USB and `NC_FILES` panes, mount/eject status, file listing and explicit copy/load actions |
 | `svg/lathe-dashboard.svg` | Lathe dashboard: X/Z/C/Y cards, XZ toolpath, power turret/live-tool card, spindle load and machine health |
-| `svg/probe.svg` | Touch Probe: Probe Basic-style category strip and illustrated operation cards, WCS/parameters, prepared-MDI state, result/apply and calibration |
-| `svg/mdi.svg` | MDI: single-block command, quick inserts, DRO/modal, staged state, history and physical-cycle-start gating |
+| `svg/probe.svg` | Touch Probe: Probe Basic-style category strip and illustrated operation cards, WCS/parameters, explicit `RUN PROBE` issue, result/apply and calibration |
+| `svg/mdi.svg` | MDI: single-block command, quick inserts, DRO/modal, command issue via `issue_mdi`, history and last result |
 | `svg/manual.svg` | Manual JOG/INC/MPG: dominant live graph, large work/machine/DTG coordinates and mode context; no on-screen jog controls |
 | `svg/homing.svg` | Homing: per-axis/sequence state, HOME/PROG.HOME physical-key mapping and machine position; no software home controls |
-| `svg/tools.svg` | Tools: tool table, current/next tool, staged quick change, manual confirm, optional ATC/turret state |
+| `svg/tools.svg` | Tools: standard tool table, conditional pocket column, current/next tool, explicit `Tn M6`, manual confirm, optional ATC/turret state |
 | `svg/sim-panel.svg` | Simulation-only SZGH-1080 panel window: power, E-stop, mode, overrides, lamps, displays (including active WCS status) and key matrix |
 
 Superseded vendor-style studies, intermediate layout explorations, and
@@ -972,14 +1156,14 @@ colour-mapped previews were intentionally removed.
 
 Configuration is per machine and layered:
 
-- `configs/base.toml` — UI, keymap, safety policy, HAL pin map, backend and
-  preference defaults.
+- `configs/base.toml` — UI, keymap, safety policy, HAL output policy, panel
+  driver contract, backend and preference defaults.
 - `configs/sim.toml` — mill simulation profile pointing at
   `../../baiermill_sim/probe_basic.ini`, the simulated SZGH panel and
   `rio_sim.py`.
 - `configs/baiermill.toml` — physical mill profile pointing at
   `../../baiermill_pb/probe_basic.ini`, with the real SZGH-1080 panel owned by
-  `szgh-panel-hal`.
+  `linc-panel`.
 - `configs/lathe-sim.toml` — lathe simulation profile pointing at
   `../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini`,
   with `gui = "lathe"` and turret/live-tool capabilities.
@@ -991,10 +1175,11 @@ Rules:
 3. `machine.gui` selects `mill` or `lathe`; the LinuxCNC INI remains
    authoritative for kinematics, axis count/order, travel, limits, velocities,
    units, spindle count, ATC/turret settings, tool table and program paths.
-4. The HMI never owns the panel serial port and never writes machine-control
-   HAL pins.
-5. Safety flags are immutable from profiles: panel-only machine control, no
-   software E-stop/cycle/jog/spindle/coolant/overrides.
+4. The panel service owns the serial port; the HMI never opens it. LiNC writes
+   only its declared `linc.*` HAL outputs and never arbitrary machine pins.
+5. Safety policy is immutable from profiles: panel control except explicit
+   MDI/probe/tool actions, no software E-stop/cycle/jog/spindle/coolant/
+   overrides, pendant jog-only.
 6. Runtime UI state is stored separately under
    `~/.config/linc/<profile>.preferences.toml`.
 

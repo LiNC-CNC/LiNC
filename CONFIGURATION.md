@@ -12,23 +12,28 @@ yet; these profiles define how they must behave.
 3. **The LinuxCNC INI is authoritative for machine data.** Travel limits,
    velocities, units, joint count, spindle count, ATC settings, the tool table
    and the program prefix come from the INI. They are not duplicated in TOML.
-4. **The HMI never owns the panel.** It never opens `/dev/ttyUSB*`, loads the
-   panel component, or writes `szgh_panel.*` outputs. It reads HAL pins and
-   LinuxCNC status only.
+4. **Panel I/O is split from the UI.** The LiNC-owned `linc-panel` service owns
+   the serial port and `szgh_panel.*` pins. The egui HMI never opens the serial
+   device. LiNC may write only its declared `linc.*` HAL outputs
+   (`hmi-alive`, `tool-change-confirm`, `status-display`).
 5. **Safety policy is not a preference.** A profile cannot enable software
-   E-stop, cycle control, jog, spindle, coolant or overrides.
+   E-stop, cycle control, jog, spindle, coolant or overrides; MDI issue is an
+   explicit operator action, not a cycle-start substitute; pendant is jog-only.
 6. **User preferences are separate.** Window geometry, last page, view angle
    and recent files live under `~/.config/linc/`, not in the machine profile.
 7. **Unknown keys are errors.** This catches typos and prevents a machine
    profile from silently not applying a setting.
+8. **Standard tool table only.** The tool table is the LinuxCNC file at
+   `[EMCIO] TOOL_TABLE`; columns come from `TOOL_TABLE_COLUMNS`. `P` is required
+   only when `tools.changer` uses ATC/turret and must be absent for manual.
 
 ## 2. Profiles
 
 | File | Purpose |
 |---|---|
-| `configs/base.toml` | Shared UI, keymap, safety policy, HAL pin map, backend and preferences defaults. Not runnable alone. |
+| `configs/base.toml` | Shared UI, keymap, safety policy, HAL output policy, panel driver contract, backend and preferences defaults. Not runnable alone. |
 | `configs/sim.toml` | Mill simulation: `../../baiermill_sim/probe_basic.ini`, simulated SZGH panel, `rio_sim.py`. |
-| `configs/baiermill.toml` | Physical mill: `../../baiermill_pb/probe_basic.ini`, real SZGH-1080 panel over RS-485. |
+| `configs/baiermill.toml` | Physical mill: `../../baiermill_pb/probe_basic.ini`, real SZGH-1080 panel over RS-485 owned by `linc-panel`. |
 | `configs/lathe-sim.toml` | Lathe simulation: `../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini`, lathe UI capabilities. |
 
 The profiles use:
@@ -101,10 +106,11 @@ Required profile fields:
 - `machine.kind` = `"sim"` or `"real"`
 - `machine.gui` = `"mill"` or `"lathe"`
 - `machine.linuxcnc_ini`
-- `[hal] panel_component`
-- `[panel] kind`, `owner`, `read_only = true`
+- `[hal] panel_component`, `output_prefix`, `allowed_outputs`
+- `[panel] kind`, `driver`, `owner`, `mode_encoding`, `override_encoding`
 - `[panel.link] read_only = true`
-- `[safety] machine_control = "panel-only"` and all `software_* = false`
+- `[safety] machine_control = "panel-with-explicit-mdi"` and all
+  `software_* = false`
 
 `base.toml` has no `[machine]` table, so it cannot be used as a profile.
 
@@ -118,9 +124,11 @@ Required profile fields:
 | Velocities and acceleration | INI `[AXIS_*]` / `[JOINT_*]` |
 | Units | INI `[TRAJ] LINEAR_UNITS`, `ANGULAR_UNITS` |
 | Spindle count / maximum speed | INI `[TRAJ] SPINDLES`, `[DISPLAY] MAX_SPINDLE_SPEED` |
-| Tool table | INI `[EMCIO] TOOL_TABLE` |
+| Tool table | Standard LinuxCNC file at INI `[EMCIO] TOOL_TABLE`; columns from `TOOL_TABLE_COLUMNS` |
+| Tool pocket/station | Standard `P` column; required only for ATC/turret |
 | ATC pockets / tool-change heights | INI `[ATC]`; `[tools] atc_pockets = "ini"` |
-| Tool-change motion | Existing `M6` remap / `toolchange.ngc`; HMI stages only |
+| Tool-change motion | Existing `M6` remap / `toolchange.ngc`; HMI issues `Tn M6` via `issue_mdi` |
+| MDI/probe/tool execution | Probe Basic `issue_mdi` semantics; no staging/physical cycle start |
 | Program prefix / open file | INI `[DISPLAY] PROGRAM_PREFIX`, `OPEN_FILE` |
 | `NC_FILES` root | INI `PROGRAM_PREFIX`; `[files] nc_files = "ini"` |
 | Machine graph bounds | INI travel limits / kinematics |
@@ -131,9 +139,10 @@ Required profile fields:
 | MDI command history | HMI-local ring buffer; not a machine log |
 | Homing sequence | INI `HOME_SEQUENCE`, search/latch/index settings |
 | Homing commands | `szgh_panel.home-*` / `proghome-*` pins and physical keys; never HMI |
-| PROG.HOME path | Panel `proghome-*` -> existing Probe Basic `issue_mdi`; not HMI staging |
+| PROG.HOME path | Panel `proghome-*` -> existing Probe Basic `issue_mdi`; HMI observes |
 | Panel/RIO HAL pin names | `configs/base.toml` |
-| Panel status 7-segment | Active `g5x_index` via display-only status bridge; `[panel.status]` |
+| WHB pendant | Jog/handwheel inputs only in JOG mode; all other functions ignored |
+| Panel status 7-segment | `linc.status-display` -> `szgh_panel.sseg_status`; `[panel.status]` |
 | Machine identity and panel ownership | machine profile |
 | UI layout, theme, keymap, toolpath options | `base.toml` + overrides |
 | G-code help content | bundled `linuxcnc-gcode` reference, generated from linuxcnc.org |
@@ -156,8 +165,8 @@ configuration reviewable.
 | Max acceleration | 500 mm/s² |
 | Default linear velocity | 60 mm/s |
 | Spindle | 1, 0…12000 rpm, 0.5…2.0 override |
-| ATC | 12 pockets, Z tool-change height -194 mm |
-| Tool table | `tool.tbl` |
+| ATC | 12 pockets, Z tool-change height -194 mm (manual changer today; add P only if ATC is enabled) |
+| Tool table | `tool.tbl`, standard `TZDR` (no P in manual mode) |
 | Real config | `../../baiermill_pb/probe_basic.ini` |
 | Sim config | `../../baiermill_sim/probe_basic.ini` |
 
@@ -170,10 +179,12 @@ and ATC values as the machine; only the HAL stack and paths differ.
 
 - `machine.kind = "sim"` — the HMI shows a persistent `SIM` badge.
 - `linuxcnc_ini = "../../baiermill_sim/probe_basic.ini"`.
-- Panel is `baiermill_sim/panel/szgh_panel_gui.py`; link is `virtual`.
+- Panel driver is `szgh1080-sim`; link is `virtual`; the panel service owns the
+  simulated window.
 - `rio` is `baiermill_sim/rio_sim.py`; no FPGA card or serial device.
 - The HAL pin surface is the same `szgh_panel.*` and `rio.*` surface as the
   real machine, so the HMI uses the same code path.
+- Modes/overrides use steady one-hot/steady values.
 - `panel_link_stats = "none"` because there is no serial link to measure.
 - The simulated E-stop is owned by the panel GUI, not the HMI.
 
@@ -191,16 +202,16 @@ This profile must never be used to command real hardware.
 
 - `machine.kind = "real"` — no `SIM` badge.
 - `linuxcnc_ini = "../../baiermill_pb/probe_basic.ini"`.
-- Panel owner is `szgh-panel-hal`; the panel driver owns `/dev/ttyUSB0` at
-  115200 8N1.
-- `port`, `baud` and `cycle_time_ms` are **diagnostic metadata only**. The HMI
-  must not open the port. The real authority for the link remains
-  `hallib/szgh_panel.hal` and the panel driver.
+- Panel owner is `linc-panel`; the panel service owns `/dev/ttyUSB0` at
+  115200 8N1. The HMI never opens it.
+- `port`, `baud` and `cycle_time_ms` are diagnostic/launch metadata for the
+  panel service. The real authority for the link remains `linc-panel` and the
+  HAL pin surface.
 - The same `szgh_panel.*` pins feed the HMI and the existing panel logic.
 - The physical E-stop and machine-on chain remain hard-wired; the HMI has no
   software E-stop substitute.
 - `panel_link_stats = "optional"` — the Diagnostics page shows counters when
-  the panel driver exposes them and otherwise reports "unavailable".
+  the panel service exposes them and otherwise reports "unavailable".
 
 Launch:
 
@@ -214,7 +225,7 @@ linc --config configs/baiermill.toml
 
 ```toml
 [safety]
-machine_control = "panel-only"
+machine_control = "panel-with-explicit-mdi"
 software_estop = false
 software_cycle_control = false
 software_jog = false
@@ -223,14 +234,15 @@ software_coolant = false
 software_overrides = false
 program_edit_while_running = "read-only"
 program_protect = "panel"
-mdi_requires_mode = "mdi"
+mdi_execution = "explicit-action-only"
 quit_requires_idle = true
 confirm_quit = true
 ```
 
 The loader must reject a profile that changes these to weaker values. The HMI
-may still edit offsets, tool data and the program when idle, subject to
-`program_protect` and LinuxCNC state.
+may edit offsets, tool data and the program when idle, subject to
+`program_protect` and LinuxCNC state. It may issue explicit MDI, probe and
+tool-change commands through Probe Basic `issue_mdi`; it never starts AUTO.
 
 `program_protect` is the physical panel switch. While ON, the controller is
 editing-locked: program edits/saves, offset/tool writes, NC_FILES imports and
@@ -238,8 +250,14 @@ probe applies are disabled. An unknown or stale switch state is treated as ON.
 The backend rechecks the input for every write; unsaved editor content is
 preserved read-only, never discarded.
 
-Machine commands remain on the panel and pendant. `Ctrl+Q` is guarded and must
-not quit while the machine is moving or a program is running.
+LiNC writes only `linc.hmi-alive`, `linc.tool-change-confirm` and
+`linc.status-display`. No generic HAL write path exists. The loader hard-codes
+USB mount flags to include `nosuid,nodev,noexec`; a profile may add flags but
+never remove them.
+
+Machine mode/cycle/spindle/coolant/override controls remain on the panel. The
+WHB pendant is jog-only; its other controls are ignored. `Ctrl+Q` is guarded and
+must not quit while the machine is moving or a program is running.
 
 ## 9. Preferences
 
@@ -268,21 +286,22 @@ written while running.
 | `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages` |
 | `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width` |
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running` |
-| `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter`, `prepare_only` |
-| `[tools]` | `changer`, `atc_pockets`, `tool_change_stage`, `manual_confirm` |
+| `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter` |
+| `[tools]` | `changer`, `atc_pockets`, `manual_confirm` |
 | `[manual]` | `auto_open`, `close_on_mode_exit`, `show_machine_coordinates`, `show_dtg`, `trail` |
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
-| `[mdi]` | `stage_only`, `auto_focus`, `history_limit`, `max_command_length`, `quick_commands` |
+| `[mdi]` | `execute_on_enter`, `auto_focus`, `history_limit`, `max_command_length`, `quick_commands` |
 | `[toolpath]` | `show_grid`, `show_live_trail`, `trail_max_points`, `clear_trail_action`, `show_program_bounds`, `show_machine_bounds`, `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
-| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `mdi_stage`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `help_search` |
+| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `help_search` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
-| `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_requires_mode`, `quit_requires_idle`, `confirm_quit` |
+| `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_execution`, `quit_requires_idle`, `confirm_quit` |
 | `[backend]` | `kind`, `transport`, `status_hz`, `hal_hz`, `connect_timeout_ms` |
-| `[hal]` | `read_only`, `panel_component`, `panel_mode_prefix` |
+| `[hal]` | `panel_component`, `linc_component`, `write_policy`, `output_prefix`, `allowed_outputs` |
 | `[hal.pins]` | `panel_connected`, `panel_error`, `program_protect`, `feed_override`, `rapid_override`, `spindle_override`, `spindle_load`, `spindle_speed` |
-| `[panel]` | `owner`, `kind`, `read_only` |
+| `[panel]` | `owner`, `kind`, `driver`, `mode_encoding`, `override_encoding`, `read_only` |
 | `[panel.status]` | `source`, `unknown` |
 | `[panel.link]` | `read_only`, `kind`, optional `port`, `baud`, `data_bits`, `parity`, `stop_bits`, `cycle_time_ms` |
+| `[pendant]` | `enabled`, `kind`, `jog_only`, `ignored_functions` |
 | `[preferences]` | `file` |
 | `[diagnostics]` | `event_log_capacity`, `panel_link_stats` |
 | `[simulation]` | `enabled`, optional `panel`, `rio`, `estop`, `panel_window`, `panel_title`, `panel_scale` |
@@ -293,8 +312,15 @@ Enums:
 - `machine.gui`: `mill`, `lathe`
 - `tools.changer`: `manual`, `atc`, `turret`
 - `panel.kind`: `simulated`, `physical`, `external`
+- `panel.driver`: `szgh1080`, `szgh1080-sim`, `lathe-sim`, future driver names
+- `panel.mode_encoding`: `one_hot_steady`
+- `panel.override_encoding`: `analog_steady`
 - `panel.status.source`: `wcs`, `spindle_load`, `units`
 - `panel.link.kind`: `virtual`, `rs485`
+- `pendant.kind`: `whb04b6`, `none`
+- `pendant.jog_only`: `true`
+- `mdi_execution` (safety): `explicit-action-only`
+- `hal.write_policy`: `declared-outputs-only`
 - `diagnostics.panel_link_stats`: `none`, `optional`, `required`
 - `files.usb_backend`: `udisks2`, `none`
 - `files.overwrite`: `confirm`
@@ -316,10 +342,9 @@ For this design repository:
 - the accepted G-code Help screen is present at `svg/gcode-help.svg`;
 - the accepted Files screen is present at `svg/files.svg`;
 - `[files] nc_files` is `"ini"`, not a duplicated path;
-- USB mount options include `nosuid`, `nodev` and `noexec`;
-- `[probe] prepare_only` is `true` for the mill profiles;
+- USB mount options include `nosuid`, `nodev` and `noexec` and the loader
+  rejects their removal;
 - the lathe profile disables the mill-oriented touch-probe page;
-- `[mdi] stage_only` is `true` in every profile;
 - `[manual] auto_open` is `true` for JOG/INC/MPG;
 - the Manual screen exposes no software jog, increment, handwheel, mode or
   override controls;
@@ -329,10 +354,17 @@ For this design repository:
   `CLEAR TRAIL` removes only the trail;
 - `[panel.status] source` is one of `wcs`, `spindle_load`, `units`;
 - the status display shows the active WCS by default and `--` when unknown;
+- `[panel] mode_encoding = "one_hot_steady"` and
+  `override_encoding = "analog_steady"`;
 - `[homing] auto_open` is `true` for mode-driven screens;
 - the Homing screen exposes no software home/unhome controls;
-- `[tools] tool_change_stage` and `manual_confirm` are `true`;
+- `[tools] manual_confirm` is `true`;
 - the lathe profile uses `tools.changer = "turret"`;
+- manual mill profiles use a standard tool table without `P`; an ATC/turret
+  profile requires `P` in `TOOL_TABLE_COLUMNS`;
+- `[hal] write_policy = "declared-outputs-only"` and `allowed_outputs` is
+  exactly `hmi-alive`, `tool-change-confirm`, `status-display`;
+- `[pendant] jog_only = true` and non-jog functions are ignored;
 - `base.toml` cannot be loaded as a runnable profile.
 
 ## 12. Open issues
@@ -358,11 +390,11 @@ For this design repository:
 7. The G-code editor is design-only. Still to implement: the `ropey` buffer,
    atomic save, external-change detection, unsaved-change dialog, search,
    undo/redo, and a preview parser that cannot disturb the running interpreter.
-   The QMK keyboard has no `Shift`, `Tab` or `Delete`; selection must use the
-   mouse layer and line-based operations.
-8. Panel mode pins are pulse outputs. The HMI latches
-   `szgh_panel.mode_*` to track `EDIT`; a persistent mode index from the panel
-   driver would be more robust across HMI restarts.
+   The QMK keyboard has standard Ctrl shortcuts but no `Shift`, `Tab` or
+   `Delete`; selection must also work with the mouse layer and line operations.
+8. Panel mode pins are steady one-hot levels and overrides are steady analog
+   values. Decode them directly; do not latch pulses. Add a persistent driver
+   capability descriptor for future panel types.
 9. USB auto-mount uses `udisks2` over D-Bus. `udisks2` is inactive on the
    development box; enable/verify it on the machine and test polkit
    authorization, mount failure, busy eject and power-off.
@@ -373,25 +405,33 @@ For this design repository:
     live-tool drive/RPM/direction; the existing lathe simulator exposes neither.
 12. A lathe-specific simulator panel mockup is still needed; the current
     `svg/sim-panel.svg` is the mill SZGH-1080 panel.
-13. Port the Probe Basic parameter/result contracts and G-code calls; verify
-    `prepare_only` is enforced so the HMI never starts probing motion itself.
-14. Implement MDI staging: syntax check before staging, history recall, discard
-    on panel-mode exit, and enforcement that only physical CYCLE START runs a
-    staged block.
+13. Port the Probe Basic parameter/result contracts and G-code calls; `RUN
+    PROBE` issues the selected call through `issue_mdi` after validation.
+14. Implement MDI issue through `issue_mdi`: syntax check, history recall,
+    discard unissued input on mode exit, and restore the prior task mode.
 15. Verify Homing display against the existing `baiermill_pb` home/proghome
     pins and gating; test Z-first, individual axes, PROG.HOME current-WCS moves
     and faults.
 16. Preserve PROG.HOME's direct `issue_mdi` behavior exactly: panel keys send
-    `G0 X0Y0Z0` / `G0 X0` / `G0 Y0` / `G0 Z0` in the current WCS, X/Y/Z only,
-    without HMI staging or an added cycle-start gate.
-17. Implement tool-change staging and manual confirmation through a narrow
-    backend/output path; defer ATC/turret and reuse the existing `M6` remap
-    rather than duplicating toolchange motion in the HMI.
+    `G0 X0Y0Z0` / `G0 X0` / `G0 Y0` / `G0 Z0` in the current WCS, X/Y/Z only.
+17. Implement immediate `Tn M6` issue, manual confirmation through
+    `linc.tool-change-confirm`, and deferred ATC/turret support using the
+    standard `P` column rather than ad-hoc pocket parameters.
 18. Enforce `program_protect` as a fail-closed backend interlock. The panel pin
     is authoritative; unknown/stale reads lock editing. Test G-code save,
     offset/tool writes, file imports and probe applies with protect ON and with
     the panel link lost.
-19. Add the display-only status bridge that maps `g5x_index` to
-    `szgh_panel.sseg_status` (54–59, `--` otherwise) without letting the HMI
-    write panel outputs. Verify the two-digit display after HMI/panel restarts,
+19. Implement `linc.status-display` for `g5x_index` (54–59, `--` otherwise) and
+    wire it to `szgh_panel.sseg_status`. Verify after HMI/panel restarts,
     extended offsets and disconnected/stale status.
+20. Implement the `linc` HAL component with the closed output allowlist
+    (`hmi-alive`, `tool-change-confirm`, `status-display`) and no arbitrary
+    pin-write API.
+21. Prune the WHB04B-6 pendant nets to jog/handwheel-only in JOG mode; ignore
+    pendant mode/cycle/spindle/coolant/override/program/macro inputs.
+22. Standardize tool tables: manual mill profiles use `TZDR` (no `P`); an
+    ATC/turret profile must add `P`. The current lathe table is `TXZIJDQR`;
+    add `P` when the power turret is commissioned and migrate the ATC remap to
+    that column.
+23. Add a panel-driver conformance matrix and simulator driver for future panel
+    types/transports.

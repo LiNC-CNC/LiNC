@@ -52,8 +52,10 @@ The HMI is configured per machine, with explicit profile selection:
 | Lathe simulation | `configs/lathe-sim.toml` |
 
 The machine profile points at the LinuxCNC INI, which remains authoritative for
-travel, velocities, units, spindle/ATC data and the tool table. The HMI never
-owns the panel serial port; it reads the `szgh_panel.*` HAL pins.
+travel, velocities, units, spindle/ATC data and the tool table. The panel
+driver code is part of LiNC and runs as the supervised `linc-panel` service; the
+egui HMI never opens the serial port. `linc-panel` exposes `szgh_panel.*`, and
+LiNC writes only its declared `linc.*` HAL outputs.
 
 ```sh
 linc --config configs/sim.toml
@@ -69,13 +71,23 @@ policy and launch integration.
 - **Dark graphite + cool-blue optics**, with blue used for interaction,
   active state, toolpath, and live data. Green/amber/red are reserved for
   machine state and alarms.
-- **The physical panel is the only machine-control surface.** The GUI has no
-  mode buttons, cycle start/hold/stop, jog buttons, spindle/coolant controls,
-  override sliders, or software E-stop.
+- **The physical panel is the primary machine-control surface.** The GUI has no
+  general mode buttons, cycle start/hold/stop, jog buttons, spindle/coolant
+  controls, override sliders, or software E-stop. Specific MDI, probe and
+  tool-change commands are explicit exceptions.
+- **The panel driver is LiNC-owned and modular.** `linc-panel` runs as a
+  supervised process, decodes steady one-hot modes and steady overrides, and
+  hides panel technology behind a driver/capability trait. Only it owns RS-485.
+- **The WHB04B-6 pendant is jog-only.** Its wheel/axis select work only in JOG
+  mode; pendant mode, cycle, spindle, coolant, override, program and macro
+  controls are ignored.
+- **LiNC writes only declared HAL outputs.** `linc.hmi-alive`,
+  `linc.tool-change-confirm` and `linc.status-display`; there is no generic
+  arbitrary-pin write API.
 - **The QMK keyboard is the only text/navigation device.** There are no
   F1–F8 softkeys. `MAIN`, `FILE`, `OFFSET`, `TOOL`, `WIN`, `ESC`, arrows,
-  PageUp/PageDown, Home/End, and Enter drive the UI. On-screen actions are
-  focusable with arrows/Enter.
+  PageUp/PageDown, Home/End, and Enter drive the UI. Standard Ctrl editing
+  shortcuts work; on-screen actions are focusable with arrows/Enter.
 - **Program has two layouts**: `SPLIT` (G-code + graph) and `CODE`
   (G-code dominant + mini graph). `FILE` enters Program and cycles the layout.
 - **Program `CODE` is also the G-code editor.** The physical panel's `EDIT`
@@ -94,12 +106,13 @@ policy and launch integration.
   exposes those controls.
 - **Touch Probe follows Probe Basic's category-first workflow**, reached from
   Offsets: choose a routine group, pick an illustrated operation, adjust
-  WCS/clearance/feed/tip parameters, then `PREPARE MDI`. It reuses the G38.2
-  subroutine family, reads results from `#1001`–`#1009`, and requires the
-  physical CYCLE START key before any probing motion.
+  WCS/clearance/feed/tip parameters, then `RUN PROBE`. It reuses the G38.2
+  subroutine family, reads results from `#1001`–`#1009`, and issues the selected
+  call immediately via Probe Basic `issue_mdi` after validation.
 - **MDI is a mode-driven screen**: the panel's MDI position opens it, focuses
-  the command line and shows DRO/modal/history. `Enter` stages one block; only
-  physical CYCLE START runs it. Leaving MDI discards an unrun staged block.
+  the command line and shows DRO/modal/history. `Enter` issues one block via
+  `issue_mdi`; leaving MDI discards unissued input but does not cancel an
+  already-issued command.
 - **JOG, INC and MPG open a shared read-only Manual screen.** A large live
   graph dominates, with large work coordinates plus machine coordinates and
   DTG. Jog/increment/handwheel input remains on the panel; the screen never
@@ -120,12 +133,14 @@ policy and launch integration.
   per-axis/sequence state; `RAPID` homes all and the axis jog keys home their
   axis through the panel's `home-*` pins. PROG.HOME keeps the existing
   `issue_mdi` behavior: `RAPID` sends `G0 X0Y0Z0`, axis keys send `G0 X0/Y0/Z0`
-  in the current WCS, X/Y/Z only. The HMI neither stages nor intercepts these
-  panel actions.
+  in the current WCS, X/Y/Z only. The HMI does not intercept these panel
+  actions.
 - **Tools is the quick-change surface.** Select a table row or type a target
-  tool and `STAGE CHANGE`; the HMI stages `Tn M6` without opening MDI, and the
-  physical CYCLE START runs it. Manual changes get an install/confirm prompt;
-  ATC/turret support reuses the existing `M6` G-code and is optional.
+  tool and `CHANGE TOOL`; the HMI issues `Tn M6` through Probe Basic
+  `issue_mdi` without opening the MDI screen. Manual changes get an
+  install/confirm prompt; ATC/turret support reuses the existing `M6` G-code
+  and is optional. The tool table is the standard LinuxCNC format; its pocket
+  column exists only when a changer uses it.
 - **G-code is token-highlighted** with a rich but restrained palette:
   G-codes, M-codes, axis letters, numbers, feed/speed, tools, parameters,
   comments, and line numbers each have a distinct treatment.
@@ -180,20 +195,22 @@ rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
 
 ## Next implementation steps
 
-1. Fix and build `../szgh-panel-rust/` with the HAL feature enabled.
-2. Add the read-only panel diagnostics counters required by the Diagnostics
-   screen.
-3. Implement the Rust `egui` shell, theme tokens, and the layered config loader.
-4. Implement the Machine dashboard.
-5. Implement the Program `SPLIT`/`CODE` views, G-code highlighter and editor.
-6. Implement the mill and lathe variants, including dynamic 3–5 axis cards,
+1. Port and build `../szgh-panel-rust/` as the LiNC `linc-panel` crate with
+   the HAL feature enabled, keeping the driver/capability abstraction.
+2. Add panel diagnostics counters and raw bitmaps to `linc-panel`.
+3. Implement the `linc` HAL output component and typed allowlist.
+4. Implement the Rust `egui` shell, theme tokens, and the layered config loader.
+5. Implement the Machine dashboard.
+6. Implement the Program `SPLIT`/`CODE` views, G-code highlighter and editor.
+7. Implement the mill and lathe variants, including dynamic 3–5 axis cards,
    lathe live-tool/power-turret state, Offsets, Tools, Diagnostics, Settings,
    the G-code Help reference browser, the Files/USB transfer page, the Touch
    Probe interface, the mode-driven MDI screen, the panel-only Homing screen,
    the JOG/INC/MPG Manual screen, the Tools/tool-change page, the live-trail
    clear action and the program-protect editing lock.
-7. Add the display-only status bridge for the panel's active-WCS 7-segment
-   readout, then integrate LinuxCNC via PyO3 first, with a `MachineBackend`
-   boundary that can later be replaced by a C++ NML bridge.
-8. Verify keyboard-only navigation, panel disconnect handling, program
-   protection, MDI mode gating, and the physical E-stop path.
+8. Wire `linc.status-display` to the panel WCS readout, then integrate LinuxCNC
+   via PyO3 first, with a `MachineBackend` boundary that can later be replaced
+   by a C++ NML bridge.
+9. Verify keyboard-only navigation, panel disconnect handling, program
+   protection, explicit MDI/probe/tool issue gating, pendant jog-only behavior,
+   and the physical E-stop path.

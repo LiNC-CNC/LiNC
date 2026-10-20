@@ -58,12 +58,12 @@
   <line x1="20" y1="350" x2="138" y2="350" stroke="var(--border)"/>
   <text x="20" y="374" fill="var(--muted)" font-size="9" font-family="sans-serif">FOCUS / NAVIGATION</text>
   <text x="20" y="394" fill="var(--muted)" font-size="9" font-family="monospace">ARROWS MOVE</text>
-  <text x="20" y="410" fill="var(--muted)" font-size="9" font-family="monospace">ENTER STAGE</text>
+  <text x="20" y="410" fill="var(--muted)" font-size="9" font-family="monospace">ENTER ISSUE</text>
   <text x="20" y="426" fill="var(--muted)" font-size="9" font-family="monospace">UP/DOWN HISTORY</text>
   <text x="20" y="442" fill="var(--muted)" font-size="9" font-family="monospace">ESC CLEAR</text>
   <text x="20" y="458" fill="var(--muted)" font-size="9" font-family="monospace">HOME / END</text>
-  <text x="20" y="486" fill="var(--muted)" font-size="9" font-family="sans-serif">CYCLE START</text>
-  <text x="20" y="502" fill="var(--warning)" font-size="9" font-family="monospace">PHYSICAL ONLY</text>
+  <text x="20" y="486" fill="var(--muted)" font-size="9" font-family="sans-serif">ISSUE MDI</text>
+  <text x="20" y="502" fill="var(--warning)" font-size="9" font-family="monospace">EXPLICIT ONLY</text>
   <text x="20" y="530" fill="var(--muted)" font-size="9" font-family="sans-serif">NO ON-SCREEN</text>
   <text x="20" y="544" fill="var(--muted)" font-size="9" font-family="sans-serif">MACHINE CONTROLS</text>
 
@@ -73,8 +73,8 @@
   <text x="350" y="78" fill="var(--muted)" font-size="9" font-family="monospace">PANEL MODE: MDI</text>
   <rect x="470" y="64" width="96" height="20" rx="3" fill="var(--success)" opacity="0.18"/>
   <circle cx="482" cy="74" r="3" fill="var(--success)"/>
-  <text x="490" y="77" fill="var(--success)" font-size="8" font-family="monospace">READY TO STAGE</text>
-  <text x="820" y="78" fill="var(--warning)" font-size="9" font-family="monospace">CYCLE START ON PANEL</text>
+  <text x="490" y="77" fill="var(--success)" font-size="8" font-family="monospace">READY TO ISSUE</text>
+  <text x="820" y="78" fill="var(--warning)" font-size="9" font-family="monospace">ISSUE ON ENTER</text>
   <line x1="158" y1="90" x2="984" y2="90" stroke="var(--border)"/>
 
   <!-- MDI command input -->
@@ -85,7 +85,7 @@
   <text x="170" y="154" fill="var(--muted)" font-size="9" font-family="monospace">0001</text>
   <text x="214" y="154" font-size="15" font-family="monospace" font-weight="700" xml:space="preserve"><tspan fill="var(--c1)">G1</tspan> <tspan fill="var(--c3)">X</tspan><tspan fill="var(--fg)">10</tspan> <tspan fill="var(--c3)">Y</tspan><tspan fill="var(--fg)">5</tspan> <tspan fill="var(--c4)">F</tspan><tspan fill="var(--fg)">300</tspan></text>
   <rect x="354" y="140" width="2" height="18" fill="var(--accent)"/>
-  <text x="170" y="182" fill="var(--muted)" font-size="8" font-family="sans-serif">SYNTAX OK / BLOCK QUEUED FOR PREPARATION</text>
+  <text x="170" y="182" fill="var(--muted)" font-size="8" font-family="sans-serif">SYNTAX OK / ENTER ISSUES VIA ISSUE_MDI</text>
   <line x1="170" y1="192" x2="666" y2="192" stroke="var(--border)"/>
 
   <!-- quick inserts -->
@@ -116,7 +116,7 @@
   <text x="627" y="234" fill="var(--c5)" font-size="9" font-family="monospace">T</text>
 
   <rect x="522" y="250" width="132" height="14" rx="2" fill="var(--warning)" opacity="0.16"/>
-  <text x="530" y="261" fill="var(--warning)" font-size="8" font-family="monospace">ENTER STAGES / NO RUN</text>
+  <text x="530" y="261" fill="var(--warning)" font-size="8" font-family="monospace">ENTER ISSUES / MDI</text>
 
   <!-- DRO -->
   <rect x="690" y="98" width="294" height="172" rx="5" fill="var(--surface)" stroke="var(--border)"/>
@@ -138,10 +138,10 @@
   <text x="860" y="216" fill="var(--muted)" font-size="8" font-family="monospace">G90 G94 G21</text>
   <text x="702" y="236" fill="var(--muted)" font-size="8" font-family="monospace">ACTUAL POSITION / G54 / MM</text>
 
-  <!-- Staged command -->
+  <!-- Issued command -->
   <rect x="158" y="286" width="520" height="272" rx="5" fill="var(--surface)" stroke="var(--border)"/>
-  <text x="170" y="308" fill="var(--fg)" font-size="11" font-family="sans-serif" font-weight="700">STAGED COMMAND</text>
-  <text x="760" y="308" fill="var(--warning)" font-size="9" font-family="monospace">WAITING FOR CYCLE START</text>
+  <text x="170" y="308" fill="var(--fg)" font-size="11" font-family="sans-serif" font-weight="700">ISSUED COMMAND</text>
+  <text x="760" y="308" fill="var(--warning)" font-size="9" font-family="monospace">ISSUE VIA ISSUE_MDI</text>
   <line x1="170" y1="318" x2="666" y2="318" stroke="var(--border)"/>
   <text x="170" y="342" fill="var(--muted)" font-size="9" font-family="sans-serif">COMMAND</text>
   <text x="170" y="370" font-size="18" font-family="monospace" font-weight="700" xml:space="preserve"><tspan fill="var(--c1)">G1</tspan> <tspan fill="var(--c3)">X</tspan><tspan fill="var(--fg)">10</tspan> <tspan fill="var(--c3)">Y</tspan><tspan fill="var(--fg)">5</tspan> <tspan fill="var(--c4)">F</tspan><tspan fill="var(--fg)">300</tspan></text>
@@ -149,13 +149,13 @@
   <line x1="170" y1="404" x2="666" y2="404" stroke="var(--border)"/>
   <text x="170" y="426" fill="var(--muted)" font-size="9" font-family="sans-serif">STATUS</text>
   <circle cx="174" cy="444" r="3" fill="var(--warning)"/>
-  <text x="184" y="448" fill="var(--warning)" font-size="9" font-family="monospace">STAGED / MDI MODE / IDLE</text>
-  <text x="170" y="468" fill="var(--muted)" font-size="9" font-family="monospace">REQUIRES: HOMED, NO PROGRAM, PANEL MDI</text>
-  <text x="170" y="486" fill="var(--muted)" font-size="9" font-family="monospace">CYCLE START: PHYSICAL PANEL ONLY</text>
+  <text x="184" y="448" fill="var(--warning)" font-size="9" font-family="monospace">ISSUED / MDI MODE / IDLE</text>
+  <text x="170" y="468" fill="var(--muted)" font-size="9" font-family="monospace">REQUIRES: ON, HOMED, IDLE, NO PROGRAM</text>
+  <text x="170" y="486" fill="var(--muted)" font-size="9" font-family="monospace">ISSUE: ENTER / PROBE BASIC MDI</text>
   <text x="170" y="508" fill="var(--muted)" font-size="9" font-family="sans-serif">LAST RESULT</text>
   <text x="170" y="526" fill="var(--success)" font-size="9" font-family="monospace">G0 X0 Y0 Z50 F850 / OK / 14:31:58</text>
   <rect x="170" y="536" width="112" height="14" rx="2" fill="var(--warning)" opacity="0.18"/>
-  <text x="178" y="547" fill="var(--warning)" font-size="8" font-family="monospace">STAGE ONLY - NO RUN</text>
+  <text x="178" y="547" fill="var(--warning)" font-size="8" font-family="monospace">EXPLICIT ACTION ONLY</text>
 
   <!-- History -->
   <rect x="690" y="286" width="294" height="272" rx="5" fill="var(--surface)" stroke="var(--border)"/>
@@ -184,20 +184,20 @@
   <!-- Bottom action bar -->
   <line x1="4" y1="578" x2="996" y2="578" stroke="var(--border)"/>
   <text x="16" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ESC CLEAR</text>
-  <text x="100" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ENTER STAGE</text>
+  <text x="100" y="599" fill="var(--muted)" font-size="9" font-family="monospace">ENTER ISSUE</text>
   <text x="200" y="599" fill="var(--muted)" font-size="9" font-family="monospace">UP/DOWN HISTORY</text>
   <line x1="330" y1="584" x2="330" y2="606" stroke="var(--border)"/>
   <rect x="346" y="584" width="86" height="22" rx="3" fill="var(--accent)"/>
-  <text x="358" y="599" fill="var(--surface)" font-size="9" font-family="monospace" font-weight="700">STAGE MDI</text>
+  <text x="358" y="599" fill="var(--surface)" font-size="9" font-family="monospace" font-weight="700">ISSUE MDI</text>
   <text x="448" y="599" fill="var(--muted)" font-size="9" font-family="monospace">CLEAR</text>
   <text x="504" y="599" fill="var(--muted)" font-size="9" font-family="monospace">RECALL</text>
   <text x="568" y="599" fill="var(--muted)" font-size="9" font-family="monospace">HELP</text>
-  <text x="700" y="599" fill="var(--warning)" font-size="9" font-family="monospace">CYCLE START = PHYSICAL PANEL</text>
+  <text x="700" y="599" fill="var(--warning)" font-size="9" font-family="monospace">ENTER = ISSUE</text>
 
   <!-- Status line -->
   <line x1="4" y1="612" x2="996" y2="612" stroke="var(--border)"/>
   <text x="16" y="628" fill="var(--muted)" font-size="9" font-family="monospace">MDI  PANEL MODE MDI  G54  T12  S4200  F850</text>
-  <text x="430" y="628" fill="var(--warning)" font-size="9" font-family="monospace">STAGED / NOT RUN</text>
+  <text x="430" y="628" fill="var(--warning)" font-size="9" font-family="monospace">ISSUED / RESULT</text>
   <text x="590" y="628" fill="var(--success)" font-size="9" font-family="monospace">PROTECT OFF</text>
   <text x="680" y="628" fill="var(--success)" font-size="9" font-family="monospace">E-STOP OK</text>
   <text x="770" y="628" fill="var(--success)" font-size="9" font-family="monospace">ALARM 0</text>
