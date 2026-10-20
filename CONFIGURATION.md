@@ -127,6 +127,7 @@ Required profile fields:
 | USB mount points | `udisks2` D-Bus, not config |
 | Probe subroutines | INI `SUBROUTINE_PATH`; `[probe] subroutines = "ini"` |
 | Probe parameters/results | LinuxCNC parameters `#3014`–`#3036`, results `#1001`–`#1009` |
+| MDI command history | HMI-local ring buffer; not a machine log |
 | Panel/RIO HAL pin names | `configs/base.toml` |
 | Machine identity and panel ownership | machine profile |
 | UI layout, theme, keymap, toolpath options | `base.toml` + overrides |
@@ -257,8 +258,9 @@ written while running.
 | `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width` |
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running` |
 | `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter`, `prepare_only` |
+| `[mdi]` | `stage_only`, `auto_focus`, `history_limit`, `max_command_length`, `quick_commands` |
 | `[toolpath]` | `show_grid`, `show_program_bounds`, `show_machine_bounds`, `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
-| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `help_search` |
+| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `mdi_stage`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `help_search` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
 | `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_requires_mode`, `quit_requires_idle`, `confirm_quit` |
 | `[backend]` | `kind`, `transport`, `status_hz`, `hal_hz`, `connect_timeout_ms` |
@@ -300,6 +302,7 @@ For this design repository:
 - USB mount options include `nosuid`, `nodev` and `noexec`;
 - `[probe] prepare_only` is `true` for the mill profiles;
 - the lathe profile disables the mill-oriented touch-probe page;
+- `[mdi] stage_only` is `true` in every profile;
 - `base.toml` cannot be loaded as a runnable profile.
 
 ## 12. Open issues
@@ -342,3 +345,6 @@ For this design repository:
     `svg/sim-panel.svg` is the mill SZGH-1080 panel.
 13. Port the Probe Basic parameter/result contracts and G-code calls; verify
     `prepare_only` is enforced so the HMI never starts probing motion itself.
+14. Implement MDI staging: syntax check before staging, history recall, discard
+    on panel-mode exit, and enforcement that only physical CYCLE START runs a
+    staged block.

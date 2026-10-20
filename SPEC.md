@@ -448,7 +448,33 @@ category-first workflow: choose a routine group, then pick the operation card.
 - The page has no cycle-start, jog, override or E-stop controls. The physical
   panel remains the only motion command source.
 
-### 6.9 Settings
+### 6.9 MDI
+
+Mode-driven screen. Moving the physical mode selector to `MDI` opens this page
+immediately, focuses the command line and shows `PANEL MODE: MDI`; moving out
+closes it and discards any staged, unrun block. No left-nav item is added.
+
+Industry-standard layout:
+
+- Large single-block command input with line number and G-code token colours.
+- Quick-insert chips for G0/G1/G2/G3, M3/M5/M6/M8/M9, G54, G38.2 and T;
+  variant-specific chips for lathe (G7/G8, G95/G96).
+- Position/DRO and modal G-code panel.
+- Staged-command panel with syntax status, requirements and last result.
+- Local MDI history with timestamps; Up/Down recalls prior commands.
+
+Rules:
+
+- `Enter` or `STAGE MDI` stages one block; it never starts motion.
+- Only the physical CYCLE START key runs a staged block.
+- Staging requires panel MDI mode, homed axes, idle interpreter and no active
+  program. A syntax error keeps the previous staged/last result and marks the
+  input.
+- Leaving MDI, pressing `ESC`, or clearing discards the staged block.
+- History is HMI-local, bounded (`mdi.history_limit`), and not a machine log.
+- No on-screen cycle start, jog, override, spindle, coolant or E-stop controls.
+
+### 6.10 Settings
 
 - Theme/units/display density.
 - Keyboard reference.
@@ -528,6 +554,8 @@ Implementation:
 - `HELP` action: G-code Help; no dedicated function key.
 - `LOAD` / `Ctrl+O`: Files, when idle and allowed.
 - `PROBE` action: Touch Probe from Offsets; prepare only, never start motion.
+- MDI mode: `Enter` stages the block; `Esc` clears it; `Up`/`Down` recall
+  history; physical CYCLE START runs it.
 - `ESC`: back/cancel; on Help, clear search or return from detail history.
 - Arrows: focus/list/scroll.
 - `/`: focus G-code Help search when Help is active.
@@ -548,7 +576,10 @@ No F1–F8 mapping. The bottom keycap highlight reflects the current page:
 - The physical panel mode switch is authoritative.
 - The GUI displays panel mode and LinuxCNC task mode; if they differ, show both
   only when useful.
-- MDI is enabled only when the panel is in MDI mode.
+- MDI is enabled only when the panel is in MDI mode; the MDI screen opens on
+  that selector position and closes when it leaves.
+- MDI staging never starts motion; the block runs only after physical CYCLE
+  START.
 - Program start is physical CYCLE START only.
 - Overrides are physical switches; the GUI displays values.
 - Jog is physical only.
@@ -624,6 +655,8 @@ serial counters and raw bitmaps; those must be added for Diagnostics.
 - A software E-stop button is forbidden.
 - No direct HAL writes for machine actions; use LinuxCNC commands/halui.
 - Validate mode/state before MDI and program/offset/tool writes.
+- MDI blocks are staged only; the HMI never auto-runs MDI. Physical CYCLE
+  START is the only execution path.
 - Probing routines are prepared as MDI; only the physical CYCLE START key may
   start probe motion. Never auto-start a probe routine.
 - Respect program protect and running state.
@@ -646,6 +679,8 @@ For this design repository:
 - The Touch Probe screen represents routine selection, WCS/parameters,
   prepared-MDI state, results/apply and calibration without a software
   cycle-start control.
+- The MDI screen opens at the panel MDI position and represents command staging,
+  DRO/modal state, history and physical-cycle-start gating.
 - Hardware constraints for the QMK keyboard and SZGH panel are documented.
 - No SVG shows an on-screen machine control panel.
 - G-code mockups show token-level syntax highlighting.
@@ -732,6 +767,8 @@ For the future implementation:
     HMI-prepared MDI runs only after physical CYCLE START.
 24. Decide lathe touch-probe/tool-setter support separately; the first Touch
     Probe page is mill-oriented (X/Y/Z and WCS).
+25. Implement MDI staging with syntax validation, history recall and discard on
+    mode exit; verify the HMI cannot execute MDI without physical CYCLE START.
 
 ## 14. Accepted SVG manifest
 
@@ -747,6 +784,7 @@ Only the accepted versions are included.
 | `svg/files.svg` | Files: USB and `NC_FILES` panes, mount/eject status, file listing and explicit copy/load actions |
 | `svg/lathe-dashboard.svg` | Lathe dashboard: X/Z/C/Y cards, XZ toolpath, power turret/live-tool card, spindle load and machine health |
 | `svg/probe.svg` | Touch Probe: Probe Basic-style category strip and illustrated operation cards, WCS/parameters, prepared-MDI state, result/apply and calibration |
+| `svg/mdi.svg` | MDI: single-block command, quick inserts, DRO/modal, staged state, history and physical-cycle-start gating |
 | `svg/sim-panel.svg` | Simulation-only SZGH-1080 panel window: power, E-stop, mode, overrides, lamps, displays and key matrix |
 
 Superseded vendor-style studies, intermediate layout explorations, and

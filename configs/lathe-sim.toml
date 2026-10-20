@@ -15,6 +15,9 @@ kind = "sim"
 gui = "lathe"
 linuxcnc_ini = "../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini"
 
+[mdi]
+quick_commands = ["G0", "G1", "G2", "G3", "G7", "G8", "G95", "G96", "M3", "M4", "M5", "M8", "M9", "T"]
+
 [probe]
 enabled = false
 

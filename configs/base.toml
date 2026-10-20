@@ -55,6 +55,14 @@ max_travel = 10.0
 calibration_diameter = 50.0
 prepare_only = true
 
+[mdi]
+# The HMI stages a block; only the physical CYCLE START key runs it.
+stage_only = true
+auto_focus = true
+history_limit = 50
+max_command_length = 256
+quick_commands = ["G0", "G1", "G2", "G3", "M3", "M5", "M6", "M8", "M9", "G54", "G38.2", "T"]
+
 [toolpath]
 show_grid = false
 show_program_bounds = true
@@ -85,6 +93,10 @@ undo = "Ctrl+Z"
 redo = "Ctrl+Y"
 find = "Ctrl+F"
 select_all = "Ctrl+A"
+mdi_stage = "Enter"
+mdi_clear = "Escape"
+mdi_history_up = "Up"
+mdi_history_down = "Down"
 help_search = "/"
 
 [help]

@@ -25,6 +25,7 @@ SVG mockups; it does not yet contain the Rust HMI implementation.
 | Files / USB transfer | `svg/files.svg` |
 | Lathe dashboard | `svg/lathe-dashboard.svg` |
 | Touch probe interface | `svg/probe.svg` |
+| MDI screen | `svg/mdi.svg` |
 | Simulator panel (separate window) | `svg/sim-panel.svg` |
 
 Only the accepted versions are included. The earlier vendor-style studies and
@@ -91,6 +92,9 @@ policy and launch integration.
   WCS/clearance/feed/tip parameters, then `PREPARE MDI`. It reuses the G38.2
   subroutine family, reads results from `#1001`–`#1009`, and requires the
   physical CYCLE START key before any probing motion.
+- **MDI is a mode-driven screen**: the panel's MDI position opens it, focuses
+  the command line and shows DRO/modal/history. `Enter` stages one block; only
+  physical CYCLE START runs it. Leaving MDI discards an unrun staged block.
 - **G-code is token-highlighted** with a rich but restrained palette:
   G-codes, M-codes, axis letters, numbers, feed/speed, tools, parameters,
   comments, and line numbers each have a distinct treatment.
@@ -128,6 +132,7 @@ cnc-hmi-design/
     ├── files.svg
     ├── lathe-dashboard.svg
     ├── probe.svg
+    ├── mdi.svg
     └── sim-panel.svg
 ```
 
@@ -149,8 +154,8 @@ rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
 5. Implement the Program `SPLIT`/`CODE` views, G-code highlighter and editor.
 6. Implement the mill and lathe variants, including dynamic 3–5 axis cards,
    lathe live-tool/power-turret state, Offsets, Tools, Diagnostics, Settings,
-   the G-code Help reference browser, the Files/USB transfer page, and the
-   Touch Probe interface.
+   the G-code Help reference browser, the Files/USB transfer page, the Touch
+   Probe interface, and the mode-driven MDI screen.
 7. Integrate LinuxCNC via PyO3 first, with a `MachineBackend` boundary that can
    later be replaced by a C++ NML bridge.
 8. Verify keyboard-only navigation, panel disconnect handling, program
