@@ -27,7 +27,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             ui.label(
                 RichText::new("READ-ONLY")
                     .monospace()
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .color(theme::MUTED),
             );
         });
@@ -252,15 +252,16 @@ fn health_card(ui: &mut Ui, title: &str, value: &str, fault: bool, detail: &str)
     theme::card(ui, |ui| {
         ui.set_min_height(120.0);
         theme::section_header(ui, title);
-        ui.label(RichText::new(value).size(20.0).strong().color(if fault {
-            theme::ERROR
-        } else {
-            theme::SUCCESS
-        }));
+        ui.label(
+            RichText::new(value)
+                .size(theme::font_size(20.0))
+                .strong()
+                .color(if fault { theme::ERROR } else { theme::SUCCESS }),
+        );
         ui.label(
             RichText::new(detail)
                 .monospace()
-                .size(9.0)
+                .size(theme::font_size(9.0))
                 .color(theme::MUTED),
         );
     });
@@ -307,7 +308,7 @@ fn panel_link(app: &mut LincApp, ui: &mut Ui) {
                     if !link.available {
                         ui.label(
                             RichText::new("link counters unavailable in this profile")
-                                .size(10.0)
+                                .size(theme::font_size(10.0))
                                 .color(theme::MUTED),
                         );
                     }
@@ -480,7 +481,7 @@ fn hal_nml(app: &mut LincApp, ui: &mut Ui) {
                     }
                     ui.label(
                         RichText::new("No generic HAL write path exists.")
-                            .size(9.0)
+                            .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
                 });
@@ -517,13 +518,13 @@ fn hal_nml(app: &mut LincApp, ui: &mut Ui) {
                                         ui.label(
                                             RichText::new(name)
                                                 .monospace()
-                                                .size(10.0)
+                                                .size(theme::font_size(10.0))
                                                 .color(theme::C1),
                                         );
                                         ui.label(
                                             RichText::new(value)
                                                 .monospace()
-                                                .size(10.0)
+                                                .size(theme::font_size(10.0))
                                                 .color(theme::FG),
                                         );
                                         ui.end_row();
@@ -552,7 +553,10 @@ fn motion(app: &mut LincApp, ui: &mut Ui) {
                         .show(ui, |ui| {
                             for header in ["AXIS", "COMMANDED", "ACTUAL", "FOLLOW", "SERVO"] {
                                 ui.label(
-                                    RichText::new(header).size(9.0).strong().color(theme::MUTED),
+                                    RichText::new(header)
+                                        .size(theme::font_size(9.0))
+                                        .strong()
+                                        .color(theme::MUTED),
                                 );
                             }
                             ui.end_row();
@@ -569,7 +573,7 @@ fn motion(app: &mut LincApp, ui: &mut Ui) {
                                             .unwrap_or(0.0)
                                     ))
                                     .monospace()
-                                    .size(10.0),
+                                    .size(theme::font_size(10.0)),
                                 );
                                 ui.label(
                                     RichText::new(format!(
@@ -582,7 +586,7 @@ fn motion(app: &mut LincApp, ui: &mut Ui) {
                                             .unwrap_or(0.0)
                                     ))
                                     .monospace()
-                                    .size(10.0),
+                                    .size(theme::font_size(10.0)),
                                 );
                                 ui.label(
                                     RichText::new(format!(
@@ -595,7 +599,7 @@ fn motion(app: &mut LincApp, ui: &mut Ui) {
                                             .unwrap_or(0.0)
                                     ))
                                     .monospace()
-                                    .size(10.0),
+                                    .size(theme::font_size(10.0)),
                                 );
                                 let load = app
                                     .snapshot
@@ -607,7 +611,7 @@ fn motion(app: &mut LincApp, ui: &mut Ui) {
                                 ui.label(
                                     RichText::new(format!("{load:.0}%"))
                                         .monospace()
-                                        .size(10.0)
+                                        .size(theme::font_size(10.0))
                                         .color(theme::pressure_color(load / 100.0)),
                                 );
                                 ui.end_row();
@@ -808,12 +812,12 @@ fn io(app: &mut LincApp, ui: &mut Ui) {
                     ui.label(
                         RichText::new(format!("0x{:016X}", app.snapshot.panel.leds))
                             .monospace()
-                            .size(14.0),
+                            .size(theme::font_size(14.0)),
                     );
                     ui.label(
                         RichText::new(led_names(app.snapshot.panel.leds))
                             .monospace()
-                            .size(9.0)
+                            .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
                     ui.add_space(6.0);
@@ -821,12 +825,12 @@ fn io(app: &mut LincApp, ui: &mut Ui) {
                     ui.label(
                         RichText::new(format!("0x{:016X}", app.snapshot.panel.buttons))
                             .monospace()
-                            .size(14.0),
+                            .size(theme::font_size(14.0)),
                     );
                     ui.label(
                         RichText::new(button_names(app.snapshot.panel.buttons))
                             .monospace()
-                            .size(9.0)
+                            .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
                 });
@@ -862,10 +866,14 @@ fn io(app: &mut LincApp, ui: &mut Ui) {
                                         ui.label(
                                             RichText::new(name)
                                                 .monospace()
-                                                .size(10.0)
+                                                .size(theme::font_size(10.0))
                                                 .color(theme::C1),
                                         );
-                                        ui.label(RichText::new(value).monospace().size(10.0));
+                                        ui.label(
+                                            RichText::new(value)
+                                                .monospace()
+                                                .size(theme::font_size(10.0)),
+                                        );
                                         ui.end_row();
                                     }
                                 });
@@ -878,7 +886,11 @@ fn io(app: &mut LincApp, ui: &mut Ui) {
 
 fn logs(app: &mut LincApp, ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new("SEARCH").size(9.0).color(theme::MUTED));
+        ui.label(
+            RichText::new("SEARCH")
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
         ui.add(
             egui::TextEdit::singleline(&mut app.diagnostics_search)
                 .hint_text("message, code, source")
@@ -916,7 +928,7 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
             ui.label(
                 RichText::new(format!("{} EVENTS", combined_logs(app).len()))
                     .monospace()
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .color(theme::MUTED),
             );
         });
@@ -952,42 +964,49 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
                     .spacing([14.0, 4.0])
                     .show(ui, |ui| {
                         for header in ["TIME", "SEVERITY", "SOURCE", "CODE", "MESSAGE"] {
-                            ui.label(RichText::new(header).size(9.0).strong().color(theme::MUTED));
+                            ui.label(
+                                RichText::new(header)
+                                    .size(theme::font_size(9.0))
+                                    .strong()
+                                    .color(theme::MUTED),
+                            );
                         }
                         ui.end_row();
                         for alarm in logs {
                             ui.label(
                                 RichText::new(format_clock(alarm.timestamp_ms))
                                     .monospace()
-                                    .size(10.0)
+                                    .size(theme::font_size(10.0))
                                     .color(theme::MUTED),
                             );
                             let color = severity_color(alarm.severity);
                             ui.label(
                                 RichText::new(alarm.severity.label())
                                     .monospace()
-                                    .size(9.0)
+                                    .size(theme::font_size(9.0))
                                     .color(color),
                             );
                             ui.label(
                                 RichText::new(alarm.source.label())
                                     .monospace()
-                                    .size(9.0)
+                                    .size(theme::font_size(9.0))
                                     .color(theme::MUTED),
                             );
                             ui.label(
                                 RichText::new(&alarm.code)
                                     .monospace()
-                                    .size(9.0)
+                                    .size(theme::font_size(9.0))
                                     .color(theme::MUTED),
                             );
-                            ui.label(RichText::new(&alarm.message).size(11.0).color(
-                                if alarm.severity == AlarmSeverity::Info {
-                                    theme::MUTED
-                                } else {
-                                    color
-                                },
-                            ));
+                            ui.label(
+                                RichText::new(&alarm.message)
+                                    .size(theme::font_size(11.0))
+                                    .color(if alarm.severity == AlarmSeverity::Info {
+                                        theme::MUTED
+                                    } else {
+                                        color
+                                    }),
+                            );
                             ui.end_row();
                         }
                     });
@@ -1029,35 +1048,42 @@ fn log_table(ui: &mut Ui, id: &str, logs: &[Alarm], limit: usize) {
         .spacing([12.0, 4.0])
         .show(ui, |ui| {
             for header in ["TIME", "SEV", "SOURCE", "MESSAGE"] {
-                ui.label(RichText::new(header).size(9.0).strong().color(theme::MUTED));
+                ui.label(
+                    RichText::new(header)
+                        .size(theme::font_size(9.0))
+                        .strong()
+                        .color(theme::MUTED),
+                );
             }
             ui.end_row();
             for alarm in logs.iter().take(limit) {
                 ui.label(
                     RichText::new(format_clock(alarm.timestamp_ms))
                         .monospace()
-                        .size(9.0)
+                        .size(theme::font_size(9.0))
                         .color(theme::MUTED),
                 );
                 ui.label(
                     RichText::new(alarm.severity.label())
                         .monospace()
-                        .size(9.0)
+                        .size(theme::font_size(9.0))
                         .color(severity_color(alarm.severity)),
                 );
                 ui.label(
                     RichText::new(alarm.source.label())
                         .monospace()
-                        .size(9.0)
+                        .size(theme::font_size(9.0))
                         .color(theme::MUTED),
                 );
-                ui.label(RichText::new(&alarm.message).size(10.0).color(
-                    if alarm.severity == AlarmSeverity::Info {
-                        theme::MUTED
-                    } else {
-                        severity_color(alarm.severity)
-                    },
-                ));
+                ui.label(
+                    RichText::new(&alarm.message)
+                        .size(theme::font_size(10.0))
+                        .color(if alarm.severity == AlarmSeverity::Info {
+                            theme::MUTED
+                        } else {
+                            severity_color(alarm.severity)
+                        }),
+                );
                 ui.end_row();
             }
         });

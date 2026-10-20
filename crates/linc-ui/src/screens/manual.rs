@@ -25,7 +25,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         ui.label(
             RichText::new(format!("PANEL MODE: {mode_label}"))
                 .monospace()
-                .size(14.0)
+                .size(theme::font_size(14.0))
                 .color(if mode.is_some() {
                     theme::ACCENT
                 } else {
@@ -36,7 +36,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             ui.label(
                 RichText::new("NO ON-SCREEN JOG OR MODE CONTROLS")
                     .monospace()
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .color(theme::MUTED),
             );
         });
@@ -118,7 +118,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                             theme::kv_row(ui, "ACTIVE AXIS", app.snapshot.panel.jog.active_axis.clone().unwrap_or_else(|| "—".into()));
                             ui.label(
                                 RichText::new("MPG encoder counts are not carried by the RS-485 link and are never fabricated.")
-                                    .size(9.0)
+                                    .size(theme::font_size(9.0))
                                     .color(theme::MUTED),
                             );
                         });
@@ -145,7 +145,7 @@ fn coordinates_card(app: &LincApp, ui: &mut Ui) {
                         }
                     ))
                     .monospace()
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .color(theme::MUTED),
                 );
             });
@@ -180,24 +180,28 @@ fn coordinates_card(app: &LincApp, ui: &mut Ui) {
                     ui.label(
                         RichText::new(&axis)
                             .monospace()
-                            .size(13.0)
+                            .size(theme::font_size(13.0))
                             .strong()
                             .color(theme::C3),
                     );
                     if active {
-                        ui.label(RichText::new("ACTIVE").size(8.0).color(theme::ACCENT));
+                        ui.label(
+                            RichText::new("ACTIVE")
+                                .size(theme::font_size(8.0))
+                                .color(theme::ACCENT),
+                        );
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             RichText::new(format!("DTG {dtg:.3}"))
                                 .monospace()
-                                .size(9.0)
+                                .size(theme::font_size(9.0))
                                 .color(theme::MUTED),
                         );
                         ui.label(
                             RichText::new(crate::theme::format_position(work, 3))
                                 .monospace()
-                                .size(22.0)
+                                .size(theme::font_size(22.0))
                                 .color(if active { theme::FG } else { theme::FG }),
                         );
                     });
@@ -206,13 +210,13 @@ fn coordinates_card(app: &LincApp, ui: &mut Ui) {
                     ui.label(
                         RichText::new(format!("MACH {machine:+.3}"))
                             .monospace()
-                            .size(8.5)
+                            .size(theme::font_size(8.5))
                             .color(theme::MUTED),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             RichText::new("WORK / MACHINE / DTG")
-                                .size(8.0)
+                                .size(theme::font_size(8.0))
                                 .color(theme::MUTED),
                         );
                     });
@@ -298,7 +302,7 @@ fn mode_context_card(app: &LincApp, ui: &mut Ui) {
         }
         ui.label(
             RichText::new("When the panel mode or axis selection is unknown after reconnect, it stays UNKNOWN until a fresh state arrives.")
-                .size(9.0)
+                .size(theme::font_size(9.0))
                 .color(theme::MUTED),
         );
     });

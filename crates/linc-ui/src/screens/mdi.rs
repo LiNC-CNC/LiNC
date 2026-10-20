@@ -21,7 +21,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         ui.label(
             RichText::new(format!("PANEL MODE: {}", common::mode_label(app)))
                 .monospace()
-                .size(13.0)
+                .size(theme::font_size(13.0))
                 .color(if in_mdi {
                     theme::ACCENT
                 } else {
@@ -36,7 +36,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                     "MDI SCREEN INACTIVE"
                 })
                 .monospace()
-                .size(10.0)
+                .size(theme::font_size(10.0))
                 .color(if in_mdi {
                     theme::SUCCESS
                 } else {
@@ -55,9 +55,10 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     }
     ui.add_space(4.0);
     let available = ui.available_width();
+    let main_height = (ui.available_height() - 12.0).max(320.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
-            Vec2::new((available * 0.64).max(600.0), 470.0),
+            Vec2::new((available * 0.64).max(600.0), main_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| command_card(app, ui, in_mdi),
         );
@@ -65,13 +66,13 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         ui.allocate_ui_with_layout(
             Vec2::new(
                 (available - (available * 0.64).max(600.0) - 8.0).max(300.0),
-                470.0,
+                main_height,
             ),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("mdi-right")
-                    .max_height(470.0)
+                    .max_height(main_height)
                     .show(ui, |ui| {
                         last_result_card(app, ui);
                         common::positions_table(app, ui);
@@ -89,7 +90,7 @@ fn command_card(app: &mut LincApp, ui: &mut Ui, in_mdi: bool) {
             theme::section_header(ui, "MDI COMMAND");
             ui.label(
                 RichText::new("ONE BLOCK / LINUXCNC")
-                    .size(9.0)
+                    .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
@@ -100,7 +101,7 @@ fn command_card(app: &mut LincApp, ui: &mut Ui, in_mdi: bool) {
                         app.profile.config.mdi.max_command_length
                     ))
                     .monospace()
-                    .size(9.0)
+                    .size(theme::font_size(9.0))
                     .color(theme::MUTED),
                 );
             });
@@ -123,7 +124,12 @@ fn command_card(app: &mut LincApp, ui: &mut Ui, in_mdi: bool) {
                     theme::SUCCESS,
                 )
             };
-            ui.label(RichText::new(text).monospace().size(10.0).color(color));
+            ui.label(
+                RichText::new(text)
+                    .monospace()
+                    .size(theme::font_size(10.0))
+                    .color(color),
+            );
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 if theme::action_button(ui, "CLEAR", true).clicked() {
                     app.mdi.input.clear();
@@ -168,7 +174,7 @@ fn command_card(app: &mut LincApp, ui: &mut Ui, in_mdi: bool) {
             for (label, ok) in requirements {
                 ui.label(
                     RichText::new(format!("[{}] {}", if ok { "OK" } else { "--" }, label))
-                        .size(10.0)
+                        .size(theme::font_size(10.0))
                         .color(if ok { theme::SUCCESS } else { theme::ERROR }),
                 );
             }
@@ -180,7 +186,7 @@ fn command_card(app: &mut LincApp, ui: &mut Ui, in_mdi: bool) {
             RichText::new(
                 "Leaving MDI discards unissued input; issued commands are not cancelled.",
             )
-            .size(9.0)
+            .size(theme::font_size(9.0))
             .color(theme::MUTED),
         );
     });
@@ -192,7 +198,7 @@ fn highlighted_input(app: &mut LincApp, ui: &mut Ui, in_mdi: bool) -> egui::Resp
         let mut job = egui::text::LayoutJob::default();
         for token in lex_line(buffer.as_str()) {
             let format = TextFormat {
-                font_id: FontId::monospace(19.0),
+                font_id: FontId::monospace(theme::font_size(19.0)),
                 color: token_color(token.kind),
                 italics: token.kind == TokenKind::Comment,
                 ..Default::default()
@@ -205,7 +211,7 @@ fn highlighted_input(app: &mut LincApp, ui: &mut Ui, in_mdi: bool) -> egui::Resp
     let response = ui.add_enabled(
         in_mdi,
         egui::TextEdit::singleline(&mut text)
-            .font(FontId::monospace(19.0))
+            .font(FontId::monospace(theme::font_size(19.0)))
             .desired_width(ui.available_width())
             .hint_text("G1 X10 Y5 F300")
             .layouter(&mut layouter),
@@ -227,6 +233,10 @@ fn insert(app: &mut LincApp, code: &str) {
 pub fn issue(app: &mut LincApp) {
     app.mdi.last_error = None;
     let command = app.mdi.input.trim().to_string();
+    issue_block(app, command);
+}
+
+fn issue_block(app: &mut LincApp, command: String) {
     if command.is_empty() {
         app.mdi.last_error = Some("MDI command is empty".into());
         return;
@@ -262,6 +272,16 @@ pub fn issue(app: &mut LincApp) {
     app.mdi.focus = true;
 }
 
+fn issue_history(app: &mut LincApp, index: usize) {
+    let Some((command, _)) = app.mdi.history.get(index).cloned() else {
+        return;
+    };
+    app.mdi.input = command.clone();
+    app.mdi.history_index = Some(index);
+    app.mdi.last_error = None;
+    issue_block(app, command);
+}
+
 fn last_result_card(app: &LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
         theme::section_header(ui, "LAST ISSUED / RESULT");
@@ -270,12 +290,16 @@ fn last_result_card(app: &LincApp, ui: &mut Ui) {
         } else {
             ui.label(
                 RichText::new("NO COMMAND ISSUED")
-                    .size(9.0)
+                    .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
         }
         if let Some(error) = &app.mdi.last_error {
-            ui.label(RichText::new(error).size(10.0).color(theme::ERROR));
+            ui.label(
+                RichText::new(error)
+                    .size(theme::font_size(10.0))
+                    .color(theme::ERROR),
+            );
         }
     });
 }
@@ -302,12 +326,13 @@ fn history_card(app: &mut LincApp, ui: &mut Ui) {
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
                     RichText::new("LOCAL / BOUNDED")
-                        .size(9.0)
+                        .size(theme::font_size(9.0))
                         .color(theme::MUTED),
                 );
             });
         });
         let mut recall: Option<String> = None;
+        let mut run_history = None;
         egui::ScrollArea::vertical()
             .id_salt("mdi-history")
             .max_height(120.0)
@@ -318,7 +343,7 @@ fn history_card(app: &mut LincApp, ui: &mut Ui) {
                         selected,
                         RichText::new(format!("{}  {}", format_clock(*timestamp), command))
                             .monospace()
-                            .size(10.0)
+                            .size(theme::font_size(10.0))
                             .color(if selected {
                                 theme::ACCENT
                             } else {
@@ -329,11 +354,37 @@ fn history_card(app: &mut LincApp, ui: &mut Ui) {
                         recall = Some(command.clone());
                         app.mdi.history_index = Some(index);
                     }
+                    if response.has_focus()
+                        && ui.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                        })
+                    {
+                        app.mdi.history_index = Some(index);
+                        recall = Some(command.clone());
+                        run_history = Some(index);
+                    }
                 }
             });
         if let Some(command) = recall {
             app.mdi.input = command;
             app.mdi.focus = true;
+        }
+        let selected = app.mdi.history_index;
+        ui.horizontal(|ui| {
+            if theme::accent_button(ui, "RUN SELECTED", selected.is_some()).clicked() {
+                run_history = selected;
+            }
+            ui.label(
+                RichText::new("ENTER ON A ROW OR CTRL+ENTER")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+        });
+        if ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Enter)) {
+            run_history = selected;
+        }
+        if let Some(index) = run_history {
+            issue_history(app, index);
         }
         ui.horizontal(|ui| {
             let up =
@@ -361,7 +412,7 @@ fn history_card(app: &mut LincApp, ui: &mut Ui) {
             }
             ui.label(
                 RichText::new("UP/DOWN RECALL")
-                    .size(9.0)
+                    .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
         });

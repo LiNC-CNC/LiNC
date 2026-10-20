@@ -10,8 +10,13 @@ use crate::shell::LincApp;
 use crate::state::ProgramView;
 use crate::theme;
 
-const EDITOR_FONT: f32 = 12.5;
-const LINE_HEIGHT: f32 = 17.0;
+fn editor_font() -> f32 {
+    theme::font_size(13.0)
+}
+
+fn line_height() -> f32 {
+    editor_font() * 1.36
+}
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
     if !app.snapshot.probe.enabled && app.profile.variant == linc_core::model::MachineVariant::Lathe
@@ -38,32 +43,52 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 fn header(app: &mut LincApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
-            ui.label(
+            let title_response = ui.label(
                 RichText::new("PROGRAM")
-                    .size(24.0)
+                    .size(theme::font_size(24.0))
                     .strong()
                     .color(theme::FG),
             );
+            let title_focus = ui.interact(
+                title_response.rect,
+                ui.scope_id().with("page-title-focus"),
+                egui::Sense::focusable_noninteractive(),
+            );
+            let requested = ui.ctx().data_mut(|data| {
+                data.remove_temp::<bool>(egui::Id::unique("linc-page-focus"))
+                    .unwrap_or(false)
+            });
+            if requested {
+                title_focus.request_focus();
+            }
+            if title_focus.has_focus() {
+                theme::focus_ring(ui, &title_focus);
+            }
             ui.horizontal(|ui| {
                 let name = if app.snapshot.program.display_name.is_empty() {
                     "NO PROGRAM LOADED".to_string()
                 } else {
                     app.snapshot.program.display_name.clone()
                 };
-                ui.label(RichText::new(name).monospace().size(13.0).color(theme::FG));
+                ui.label(
+                    RichText::new(name)
+                        .monospace()
+                        .size(theme::font_size(13.0))
+                        .color(theme::FG),
+                );
                 ui.label(
                     RichText::new(format!(
                         "LN {}/{}",
                         app.snapshot.program.current_line, app.snapshot.program.line_count
                     ))
                     .monospace()
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .color(theme::MUTED),
                 );
                 if app.program.editor.dirty {
                     ui.label(
                         RichText::new("* UNSAVED")
-                            .size(10.0)
+                            .size(theme::font_size(10.0))
                             .strong()
                             .color(theme::WARNING),
                     );
@@ -71,12 +96,16 @@ fn header(app: &mut LincApp, ui: &mut Ui) {
                 if app.snapshot.task.running {
                     ui.label(
                         RichText::new("RUNNING / READ-ONLY")
-                            .size(10.0)
+                            .size(theme::font_size(10.0))
                             .color(theme::SUCCESS),
                     );
                 }
                 if app.program_protected() {
-                    ui.label(RichText::new("PROTECT ON").size(10.0).color(theme::WARNING));
+                    ui.label(
+                        RichText::new("PROTECT ON")
+                            .size(theme::font_size(10.0))
+                            .color(theme::WARNING),
+                    );
                 }
             });
         });
@@ -96,12 +125,17 @@ fn header(app: &mut LincApp, ui: &mut Ui) {
             } else {
                 ("VALID".to_string(), theme::SUCCESS)
             };
-            ui.label(RichText::new(status).monospace().size(10.0).color(color));
+            ui.label(
+                RichText::new(status)
+                    .monospace()
+                    .size(theme::font_size(10.0))
+                    .color(color),
+            );
             if app.program.preview_due.is_some() {
                 ui.label(
                     RichText::new("PREVIEW…")
                         .monospace()
-                        .size(9.0)
+                        .size(theme::font_size(9.0))
                         .color(theme::MUTED),
                 );
             }
@@ -182,7 +216,11 @@ fn toolbar(app: &mut LincApp, ui: &mut Ui) {
 
 fn search_bar(app: &mut LincApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new("FIND").size(10.0).color(theme::MUTED));
+        ui.label(
+            RichText::new("FIND")
+                .size(theme::font_size(10.0))
+                .color(theme::MUTED),
+        );
         let response = ui.add(
             egui::TextEdit::singleline(&mut app.program.search_needle)
                 .hint_text("search G-code")
@@ -225,7 +263,7 @@ fn search_bar(app: &mut LincApp, ui: &mut Ui) {
                 }
             ))
             .monospace()
-            .size(10.0)
+            .size(theme::font_size(10.0))
             .color(theme::MUTED),
         );
         if theme::action_button(ui, "CLOSE", true).clicked() {
@@ -264,7 +302,7 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
             ui.label(
                 RichText::new("SPLIT / LIVE PATH + PROGRAM PATH")
-                    .size(9.0)
+                    .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
         });
@@ -319,7 +357,7 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, height: f32, kind: ViewKind) {
                         "PROGRAM + LIVE"
                     })
                     .monospace()
-                    .size(9.0)
+                    .size(theme::font_size(9.0))
                     .color(theme::MUTED),
                 );
             });
@@ -363,7 +401,7 @@ fn info_card(app: &mut LincApp, ui: &mut Ui) {
                 app.program.editor.line_count()
             ))
             .monospace()
-            .size(10.0)
+            .size(theme::font_size(10.0))
             .color(theme::MUTED),
         );
         common::token_ui(
@@ -372,10 +410,18 @@ fn info_card(app: &mut LincApp, ui: &mut Ui) {
             12.0,
         );
         theme::separator(ui);
-        ui.label(RichText::new("CURRENT").size(9.0).color(theme::MUTED));
+        ui.label(
+            RichText::new("CURRENT")
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
         common::token_ui(ui, &app.snapshot.program.current_block, 11.0);
         if let Some(next) = &app.snapshot.program.next_line {
-            ui.label(RichText::new("NEXT").size(9.0).color(theme::MUTED));
+            ui.label(
+                RichText::new("NEXT")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
             common::token_ui(ui, next, 11.0);
         }
         theme::separator(ui);
@@ -411,7 +457,7 @@ fn info_card(app: &mut LincApp, ui: &mut Ui) {
 fn syntax_issue(ui: &mut Ui, issue: &SyntaxIssue) {
     ui.label(
         RichText::new(format!("SYNTAX ERROR LN {}: {}", issue.line, issue.message))
-            .size(11.0)
+            .size(theme::font_size(11.0))
             .color(theme::WARNING),
     );
 }
@@ -436,14 +482,19 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                     }
                 })
                 .unwrap_or_else(|| "UNTITLED".into());
-            ui.label(RichText::new(file).monospace().size(12.0).color(theme::FG));
+            ui.label(
+                RichText::new(file)
+                    .monospace()
+                    .size(theme::font_size(12.0))
+                    .color(theme::FG),
+            );
             if app.program.editor.dirty {
                 ui.label(RichText::new("*").color(theme::WARNING));
             }
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
                     RichText::new(if editable { "EDITABLE" } else { "READ-ONLY" })
-                        .size(9.0)
+                        .size(theme::font_size(9.0))
                         .color(if editable {
                             theme::SUCCESS
                         } else {
@@ -453,7 +504,7 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 ui.label(
                     RichText::new(format!("{} LINES", app.program.editor.line_count()))
                         .monospace()
-                        .size(9.0)
+                        .size(theme::font_size(9.0))
                         .color(theme::MUTED),
                 );
             });
@@ -468,18 +519,27 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                     app.program.editor.line_count()
                 ))
                 .monospace()
-                .size(9.0)
+                .size(theme::font_size(9.0))
                 .color(theme::MUTED),
             );
-            ui.label(RichText::new("MODAL").size(9.0).color(theme::MUTED));
+            ui.label(
+                RichText::new("MODAL")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
             if app.snapshot.program.modal.is_empty() {
-                ui.label(RichText::new("—").monospace().size(9.0).color(theme::MUTED));
+                ui.label(
+                    RichText::new("—")
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
             } else {
                 for (key, value) in app.snapshot.program.modal.iter().take(8) {
                     ui.label(
                         RichText::new(format!("{key} {value}"))
                             .monospace()
-                            .size(9.0)
+                            .size(theme::font_size(9.0))
                             .color(theme::FG),
                     );
                 }
@@ -493,7 +553,12 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 } else {
                     ("PREVIEW VALID".to_string(), theme::SUCCESS)
                 };
-                ui.label(RichText::new(text).monospace().size(9.0).color(color));
+                ui.label(
+                    RichText::new(text)
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(color),
+                );
             });
         });
     });
@@ -517,7 +582,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             .code_scroll_to_line
             .take()
             .unwrap_or(current_line);
-        Some(((target as f32 - 3.0) * LINE_HEIGHT).max(0.0))
+        Some(((target as f32 - 3.0) * line_height()).max(0.0))
     } else {
         None
     };
@@ -534,7 +599,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                 egui::Label::new(
                     RichText::new(numbers)
                         .monospace()
-                        .size(EDITOR_FONT)
+                        .size(editor_font())
                         .color(theme::LINE_NUMBER),
                 )
                 .selectable(false),
@@ -553,7 +618,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                 ui.fonts_mut(|fonts| fonts.layout_job(job))
             };
             let output = egui::TextEdit::multiline(&mut text)
-                .font(FontId::monospace(EDITOR_FONT))
+                .font(FontId::monospace(editor_font()))
                 .desired_rows(desired_rows)
                 .desired_width(available)
                 .frame(egui::Frame::NONE)
@@ -598,7 +663,7 @@ fn highlight_job(
 ) -> LayoutJob {
     let mut job = LayoutJob::default();
     let base = TextFormat {
-        font_id: FontId::monospace(EDITOR_FONT),
+        font_id: FontId::monospace(editor_font()),
         color: theme::FG,
         background: Color32::TRANSPARENT,
         italics: false,
@@ -628,7 +693,7 @@ fn highlight_job(
                     job.append(&line[cursor..token.start], 0.0, format.clone());
                 }
                 let mut token_format = TextFormat {
-                    font_id: FontId::monospace(EDITOR_FONT),
+                    font_id: FontId::monospace(editor_font()),
                     color: token_color(token.kind),
                     background: format.background,
                     italics: token.kind == TokenKind::Comment,

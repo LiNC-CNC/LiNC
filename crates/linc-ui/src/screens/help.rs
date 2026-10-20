@@ -20,7 +20,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     );
     let filtered = bundle.filter(&app.help.query);
     ui.horizontal(|ui| {
-        ui.label(RichText::new("SEARCH").size(9.0).color(theme::MUTED));
+        ui.label(
+            RichText::new("SEARCH")
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
         let response = ui.add(
             egui::TextEdit::singleline(&mut app.help.query)
                 .hint_text("G2, G3, M6, o sub, arc …  ( / )")
@@ -76,7 +80,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                 bundle.counts.sections, bundle.counts.rows, bundle.counts.figures
             ))
             .monospace()
-            .size(9.0)
+            .size(theme::font_size(9.0))
             .color(theme::MUTED),
         );
         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
@@ -122,12 +126,16 @@ fn index_pane(app: &mut LincApp, ui: &mut Ui, bundle: &HelpBundle, groups: &[Hel
                 for group in groups {
                     ui.label(
                         RichText::new(&group.name)
-                            .size(13.0)
+                            .size(theme::font_size(13.0))
                             .strong()
                             .color(theme::FG),
                     );
                     if !group.note.is_empty() {
-                        ui.label(RichText::new(&group.note).size(9.0).color(theme::MUTED));
+                        ui.label(
+                            RichText::new(&group.note)
+                                .size(theme::font_size(9.0))
+                                .color(theme::MUTED),
+                        );
                     }
                     for row in &group.rows {
                         let selected = selected_anchor.as_deref() == Some(row.anchor.as_str());
@@ -135,7 +143,7 @@ fn index_pane(app: &mut LincApp, ui: &mut Ui, bundle: &HelpBundle, groups: &[Hel
                             egui::Button::new(
                                 RichText::new(format!("{:<18}  {}", row.code, row.desc))
                                     .monospace()
-                                    .size(11.0)
+                                    .size(theme::font_size(11.0))
                                     .color(if selected { theme::ACCENT } else { theme::FG }),
                             )
                             .fill(if selected {
@@ -186,12 +194,12 @@ fn detail_pane(app: &mut LincApp, ui: &mut Ui, bundle: &HelpBundle) {
         theme::card(ui, |ui| {
             ui.label(
                 RichText::new("SELECT AN INDEX ROW OR PRESS ENTER")
-                    .size(14.0)
+                    .size(theme::font_size(14.0))
                     .color(theme::MUTED),
             );
             ui.label(
                 RichText::new("Code search ignores spaces and commas, so g2g3 finds G2, G3.")
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .color(theme::MUTED),
             );
         });
@@ -217,14 +225,14 @@ fn detail_pane(app: &mut LincApp, ui: &mut Ui, bundle: &HelpBundle) {
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(&section.title)
-                        .size(22.0)
+                        .size(theme::font_size(22.0))
                         .strong()
                         .color(theme::FG),
                 );
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     ui.label(
                         RichText::new(bundle.version.clone())
-                            .size(9.0)
+                            .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
                 });
@@ -247,7 +255,11 @@ fn detail_pane(app: &mut LincApp, ui: &mut Ui, bundle: &HelpBundle) {
                         );
                     }
                     HelpBlock::Para { text } => {
-                        ui.label(RichText::new(text).size(12.0).color(theme::FG));
+                        ui.label(
+                            RichText::new(text)
+                                .size(theme::font_size(12.0))
+                                .color(theme::FG),
+                        );
                     }
                     HelpBlock::Code { text } => {
                         egui::Frame::new()
@@ -257,7 +269,10 @@ fn detail_pane(app: &mut LincApp, ui: &mut Ui, bundle: &HelpBundle) {
                             .inner_margin(8)
                             .show(ui, |ui| {
                                 ui.label(
-                                    RichText::new(text).monospace().size(11.0).color(theme::FG),
+                                    RichText::new(text)
+                                        .monospace()
+                                        .size(theme::font_size(11.0))
+                                        .color(theme::FG),
                                 );
                             });
                     }
@@ -271,7 +286,11 @@ fn detail_pane(app: &mut LincApp, ui: &mut Ui, bundle: &HelpBundle) {
                         .show(ui, |ui| {
                             for row in rows {
                                 for cell in row {
-                                    ui.label(RichText::new(cell).size(10.5).color(theme::FG));
+                                    ui.label(
+                                        RichText::new(cell)
+                                            .size(theme::font_size(10.5))
+                                            .color(theme::FG),
+                                    );
                                 }
                                 ui.end_row();
                             }
@@ -283,7 +302,11 @@ fn detail_pane(app: &mut LincApp, ui: &mut Ui, bundle: &HelpBundle) {
                                 HelpItem::ListItem { text } => {
                                     ui.horizontal(|ui| {
                                         ui.label(RichText::new("•").color(theme::ACCENT));
-                                        ui.label(RichText::new(text).size(12.0).color(theme::FG));
+                                        ui.label(
+                                            RichText::new(text)
+                                                .size(theme::font_size(12.0))
+                                                .color(theme::FG),
+                                        );
                                     });
                                 }
                                 HelpItem::Image { image, text } => {
@@ -303,7 +326,7 @@ fn detail_pane(app: &mut LincApp, ui: &mut Ui, bundle: &HelpBundle) {
                 theme::separator(ui);
                 ui.label(
                     RichText::new("RELATED")
-                        .size(10.0)
+                        .size(theme::font_size(10.0))
                         .strong()
                         .color(theme::MUTED),
                 );
@@ -322,7 +345,7 @@ fn detail_pane(app: &mut LincApp, ui: &mut Ui, bundle: &HelpBundle) {
             ui.add_space(8.0);
             ui.label(
                 RichText::new(format!("{}  •  {}", bundle.attribution, bundle.source))
-                    .size(9.0)
+                    .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
         });
@@ -347,11 +370,15 @@ fn show_figure(app: &mut LincApp, ui: &mut Ui, image: &str, caption: &str) {
         ui.label(
             RichText::new(format!("[figure: {image}]"))
                 .monospace()
-                .size(10.0)
+                .size(theme::font_size(10.0))
                 .color(theme::MUTED),
         );
     }
     if !caption.is_empty() {
-        ui.label(RichText::new(caption).size(9.0).color(theme::MUTED));
+        ui.label(
+            RichText::new(caption)
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
     }
 }

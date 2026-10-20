@@ -60,6 +60,8 @@ pub struct LincApp {
     pub diagnostics_source: Option<AlarmSource>,
     pub diagnostics_clear_view: bool,
     pub ui_log: VecDeque<Alarm>,
+    pub design_scale: f32,
+    pub page_focus_requested: bool,
     pub modal: Option<Modal>,
     pub toasts: Vec<Toast>,
     pub quit_requested: bool,
@@ -74,9 +76,7 @@ pub struct LincApp {
 impl LincApp {
     pub fn new(profile: Profile, mut backend: Box<dyn UiBackend>, ctx: &egui::Context) -> Self {
         theme::apply(ctx);
-        if let Some(scale) = profile.ui_scale() {
-            ctx.set_zoom_factor(scale);
-        }
+        theme::apply_design_zoom(ctx, profile.ui_scale().unwrap_or(1.0));
         let snapshot = backend.snapshot();
         Self::with_snapshot(profile, backend, snapshot)
     }
@@ -167,6 +167,8 @@ impl LincApp {
             diagnostics_source: None,
             diagnostics_clear_view: false,
             ui_log: VecDeque::new(),
+            design_scale: configured_scale,
+            page_focus_requested: true,
             modal: None,
             toasts: Vec::new(),
             quit_requested: false,
@@ -331,6 +333,7 @@ impl LincApp {
         }
         self.page = page;
         self.focus_region = FocusRegion::Page;
+        self.page_focus_requested = true;
         if page == Page::Help {
             self.help.ensure_loaded();
         }
@@ -986,6 +989,7 @@ impl LincApp {
         }
         if focus_right {
             self.focus_region = FocusRegion::Page;
+            self.page_focus_requested = true;
         }
         if escape {
             self.escape();
@@ -1121,6 +1125,15 @@ impl LincApp {
                     .inner_margin(Margin::symmetric(16, 8)),
             )
             .show(ui, |ui| {
+                // The page title is the stable keyboard focus stop. It lets
+                // arrow keys enter the normal widget focus order without a
+                // mouse or Tab.
+                if self.page_focus_requested {
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(egui::Id::unique("linc-page-focus"), true)
+                    });
+                    self.page_focus_requested = false;
+                }
                 self.banners(ui);
                 match self.page {
                     Page::Machine => screens::machine::show(self, ui),
@@ -1149,7 +1162,12 @@ impl LincApp {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("LiNC").size(22.0).strong().color(theme::FG));
+                    ui.label(
+                        RichText::new("LiNC")
+                            .size(theme::font_size(22.0))
+                            .strong()
+                            .color(theme::FG),
+                    );
                     if self.is_sim() {
                         ui.add_space(4.0);
                         let (rect, _) =
@@ -1159,20 +1177,20 @@ impl LincApp {
                             rect.center(),
                             Align2::CENTER_CENTER,
                             "SIM",
-                            FontId::monospace(10.0),
+                            FontId::monospace(theme::font_size(10.0)),
                             Color32::from_rgb(0x1a, 0x12, 0x04),
                         );
                     }
                     ui.label(
                         RichText::new(self.profile.config.machine.name.clone())
-                            .size(12.0)
+                            .size(theme::font_size(12.0))
                             .color(theme::MUTED),
                     );
                     ui.add_space(8.0);
                     ui.label(
                         RichText::new(format!("PANEL {}", self.snapshot.panel.mode.label()))
                             .monospace()
-                            .size(10.0)
+                            .size(theme::font_size(10.0))
                             .color(if self.snapshot.panel.mode.is_valid() {
                                 theme::ACCENT
                             } else {
@@ -1182,7 +1200,7 @@ impl LincApp {
                     ui.label(
                         RichText::new(format!("TASK {}", self.snapshot.task.mode.label()))
                             .monospace()
-                            .size(10.0)
+                            .size(theme::font_size(10.0))
                             .color(theme::MUTED),
                     );
                 });
@@ -1216,7 +1234,7 @@ impl LincApp {
                 ui.label(
                     RichText::new(format_clock(now_ms()))
                         .monospace()
-                        .size(13.0)
+                        .size(theme::font_size(13.0))
                         .color(theme::MUTED),
                 );
                 ui.add_space(14.0);
@@ -1228,13 +1246,13 @@ impl LincApp {
                 ui.label(
                     RichText::new(format!("ALARM {}", self.snapshot.alarm_count()))
                         .monospace()
-                        .size(12.0)
+                        .size(theme::font_size(12.0))
                         .color(alarm_color),
                 );
                 ui.label(
                     RichText::new(format!("MSG {}", self.snapshot.message_count()))
                         .monospace()
-                        .size(12.0)
+                        .size(theme::font_size(12.0))
                         .color(theme::MUTED),
                 );
                 ui.add_space(14.0);
@@ -1272,7 +1290,11 @@ impl LincApp {
 
     fn nav(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.0);
-        ui.label(RichText::new("NAVIGATION").size(10.0).color(theme::MUTED));
+        ui.label(
+            RichText::new("NAVIGATION")
+                .size(theme::font_size(10.0))
+                .color(theme::MUTED),
+        );
         ui.add_space(4.0);
         for (index, (page, label, keycap)) in NAV_ITEMS.iter().enumerate() {
             let selected = *page == self.page;
@@ -1303,7 +1325,7 @@ impl LincApp {
                 egui::pos2(rect.left() + 10.0, rect.center().y),
                 Align2::LEFT_CENTER,
                 *label,
-                FontId::proportional(12.5),
+                FontId::proportional(theme::font_size(12.5)),
                 if selected {
                     Color32::from_rgb(0x0b, 0x17, 0x22)
                 } else {
@@ -1315,7 +1337,7 @@ impl LincApp {
                     egui::pos2(rect.right() - 8.0, rect.center().y),
                     Align2::RIGHT_CENTER,
                     *keycap,
-                    FontId::monospace(8.5),
+                    FontId::monospace(theme::font_size(8.5)),
                     if selected {
                         Color32::from_rgb(0x0b, 0x17, 0x22)
                     } else {
@@ -1332,7 +1354,11 @@ impl LincApp {
         ui.add_space(10.0);
         theme::separator(ui);
         ui.add_space(8.0);
-        ui.label(RichText::new("VIEW").size(10.0).color(theme::MUTED));
+        ui.label(
+            RichText::new("VIEW")
+                .size(theme::font_size(10.0))
+                .color(theme::MUTED),
+        );
         let settings_selected = self.page == Page::Settings;
         if ui
             .add_sized(
@@ -1352,21 +1378,45 @@ impl LincApp {
             .show(ui, |ui| {
                 ui.label(
                     RichText::new("FOCUS / NAVIGATION")
-                        .size(9.0)
+                        .size(theme::font_size(9.0))
                         .strong()
                         .color(theme::MUTED),
                 );
-                ui.label(RichText::new("ARROWS MOVE").size(9.0).color(theme::MUTED));
-                ui.label(RichText::new("ENTER SELECT").size(9.0).color(theme::MUTED));
-                ui.label(RichText::new("ESC BACK").size(9.0).color(theme::MUTED));
-                ui.label(RichText::new("PGUP / PGDN").size(9.0).color(theme::MUTED));
-                ui.label(RichText::new("HOME / END").size(9.0).color(theme::MUTED));
-                ui.label(RichText::new("CTRL+LEFT NAV").size(9.0).color(theme::MUTED));
+                ui.label(
+                    RichText::new("ARROWS MOVE")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new("ENTER SELECT")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new("ESC BACK")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new("PGUP / PGDN")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new("HOME / END")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new("CTRL+LEFT NAV")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
             });
         ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
             ui.label(
                 RichText::new("NO ON-SCREEN\nMACHINE CONTROLS")
-                    .size(9.0)
+                    .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
         });
@@ -1413,7 +1463,7 @@ impl LincApp {
                         self.snapshot.feed.rapid_override * 100.0
                     ))
                     .monospace()
-                    .size(11.0)
+                    .size(theme::font_size(11.0))
                     .color(theme::MUTED),
                 );
                 ui.add_space(12.0);
@@ -1424,7 +1474,7 @@ impl LincApp {
                         "PROTECT OFF"
                     })
                     .monospace()
-                    .size(11.0)
+                    .size(theme::font_size(11.0))
                     .color(if self.program_protected() {
                         theme::WARNING
                     } else {
@@ -1439,7 +1489,7 @@ impl LincApp {
                         "E-STOP OK"
                     })
                     .monospace()
-                    .size(11.0)
+                    .size(theme::font_size(11.0))
                     .color(if self.snapshot.machine.estop {
                         theme::ERROR
                     } else {
@@ -1450,7 +1500,7 @@ impl LincApp {
                 ui.label(
                     RichText::new(format!("ALARM {}", self.snapshot.alarm_count()))
                         .monospace()
-                        .size(11.0)
+                        .size(theme::font_size(11.0))
                         .color(if self.snapshot.alarm_count() > 0 {
                             theme::ERROR
                         } else {
@@ -1671,7 +1721,7 @@ impl LincApp {
             )
             .show(ctx, |ui| match &modal {
                 Modal::ConfirmDiscard(pending) => {
-                    ui.label(RichText::new("UNSAVED CHANGES").size(18.0).strong().color(theme::FG));
+                    ui.label(RichText::new("UNSAVED CHANGES").size(theme::font_size(18.0)).strong().color(theme::FG));
                     ui.add_space(6.0);
                     ui.label("The program buffer has unsaved changes. Leaving, loading another file or quitting will discard them.");
                     ui.add_space(12.0);
@@ -1688,7 +1738,7 @@ impl LincApp {
                     });
                 }
                 Modal::ConfirmQuit => {
-                    ui.label(RichText::new("QUIT LiNC?").size(18.0).strong().color(theme::FG));
+                    ui.label(RichText::new("QUIT LiNC?").size(theme::font_size(18.0)).strong().color(theme::FG));
                     ui.add_space(6.0);
                     ui.label("The HMI is not part of the hardware E-stop chain. Panel control remains with linc-panel.");
                     ui.add_space(12.0);
@@ -1702,7 +1752,7 @@ impl LincApp {
                     });
                 }
                 Modal::ConfirmOverwrite(name) => {
-                    ui.label(RichText::new("OVERWRITE FILE?").size(18.0).strong().color(theme::FG));
+                    ui.label(RichText::new("OVERWRITE FILE?").size(theme::font_size(18.0)).strong().color(theme::FG));
                     ui.add_space(6.0);
                     ui.label(format!("{name} already exists in the destination. Replace it atomically?"));
                     ui.add_space(12.0);
@@ -1716,7 +1766,7 @@ impl LincApp {
                     });
                 }
                 Modal::Error(text) => {
-                    ui.label(RichText::new("ERROR").size(18.0).strong().color(theme::ERROR));
+                    ui.label(RichText::new("ERROR").size(theme::font_size(18.0)).strong().color(theme::ERROR));
                     ui.add_space(6.0);
                     ui.label(text);
                     ui.add_space(12.0);
@@ -1725,7 +1775,7 @@ impl LincApp {
                     }
                 }
                 Modal::Info(text) => {
-                    ui.label(RichText::new("NOTICE").size(18.0).strong().color(theme::FG));
+                    ui.label(RichText::new("NOTICE").size(theme::font_size(18.0)).strong().color(theme::FG));
                     ui.add_space(6.0);
                     ui.label(text);
                     ui.add_space(12.0);
@@ -1781,7 +1831,9 @@ impl LincApp {
                         ui.set_max_width(360.0);
                         ui.add(
                             egui::Label::new(
-                                RichText::new(&toast.text).size(12.0).color(toast.color),
+                                RichText::new(&toast.text)
+                                    .size(theme::font_size(12.0))
+                                    .color(toast.color),
                             )
                             .wrap(),
                         );
@@ -1794,6 +1846,7 @@ impl LincApp {
 
 impl eframe::App for LincApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        theme::apply_design_zoom(ui.ctx(), self.design_scale);
         self.handle_keyboard(ui);
         self.draw(ui);
     }
@@ -1875,7 +1928,11 @@ pub fn machine_bounds(profile: &Profile) -> Option<Bounds3> {
 fn metric(ui: &mut egui::Ui, label: &str, value: String, size: f32) {
     ui.add_space(6.0);
     ui.vertical(|ui| {
-        ui.label(RichText::new(label).size(9.0).color(theme::MUTED));
+        ui.label(
+            RichText::new(label)
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
         ui.label(RichText::new(value).monospace().size(size).color(theme::FG));
     });
 }

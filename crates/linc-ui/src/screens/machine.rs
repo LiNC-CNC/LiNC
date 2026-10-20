@@ -31,9 +31,10 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
     ui.add_space(6.0);
 
     let available = ui.available_width();
-    // Fill the 1080p page instead of leaving unused space below the cards.
-    let main_height = (ui.available_height() - 12.0).max(420.0);
-    let graph_width = (available * 0.65).max(520.0);
+    // Fill the page at the 720p baseline and above instead of leaving unused space.
+    let main_height = (ui.available_height() - 12.0).max(220.0);
+    let graph_width = (available * 0.62).max(460.0);
+    let right_width = (available - graph_width - 8.0).max(300.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
             Vec2::new(graph_width, main_height),
@@ -42,9 +43,10 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
         );
         ui.add_space(8.0);
         ui.allocate_ui_with_layout(
-            Vec2::new((available - graph_width - 8.0).max(300.0), main_height),
+            Vec2::new(right_width, main_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
+                ui.set_max_width((right_width - 24.0).max(220.0));
                 egui::ScrollArea::vertical()
                     .id_salt("machine-right")
                     .max_height(main_height)
@@ -93,7 +95,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                         app.snapshot.program.current_line, app.snapshot.program.line_count
                     ))
                     .monospace()
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .color(theme::MUTED),
                 );
             });
@@ -105,7 +107,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
             app,
             ui,
             &preview,
-            (height - 62.0).max(260.0),
+            (height - 62.0).max(140.0),
             view,
             &mut zoom,
             &mut pan,
@@ -133,8 +135,9 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
     common::axis_cards(app, ui);
     ui.add_space(6.0);
     let available = ui.available_width();
-    let main_height = (ui.available_height() - 12.0).max(400.0);
-    let graph_width = (available * 0.62).max(540.0);
+    let main_height = (ui.available_height() - 12.0).max(200.0);
+    let graph_width = (available * 0.60).max(480.0);
+    let right_width = (available - graph_width - 8.0).max(300.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
             Vec2::new(graph_width, main_height),
@@ -156,7 +159,7 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                             ui.label(
                                 RichText::new("XZ / TURN   LIVE TOOL READY")
                                     .monospace()
-                                    .size(10.0)
+                                    .size(theme::font_size(10.0))
                                     .color(theme::MUTED),
                             );
                         });
@@ -169,7 +172,7 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                         app,
                         ui,
                         &preview,
-                        350.0,
+                        240.0,
                         ViewMode::LatheXz,
                         &mut zoom,
                         &mut pan,
@@ -185,9 +188,10 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
         );
         ui.add_space(8.0);
         ui.allocate_ui_with_layout(
-            Vec2::new((available - graph_width - 8.0).max(300.0), main_height),
+            Vec2::new(right_width, main_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
+                ui.set_max_width((right_width - 24.0).max(220.0));
                 egui::ScrollArea::vertical()
                     .id_salt("machine-right")
                     .max_height(main_height)

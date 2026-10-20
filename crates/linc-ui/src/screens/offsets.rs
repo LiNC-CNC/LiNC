@@ -40,7 +40,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             ui.label(
                 RichText::new(format!("ACTIVE {}", app.active_wcs_label()))
                     .monospace()
-                    .size(11.0)
+                    .size(theme::font_size(11.0))
                     .color(theme::ACCENT),
             );
         });
@@ -78,7 +78,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             RichText::new(
                 "Offset writes are validated against INI travel and rechecked by the backend.",
             )
-            .size(10.0)
+            .size(theme::font_size(10.0))
             .color(theme::MUTED),
         );
     });
@@ -100,7 +100,7 @@ fn work_offset_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                         },
                     )
                     .monospace()
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .color(
                         if app.snapshot.offsets.active_index == Some(app.offsets.selected) {
                             theme::SUCCESS
@@ -117,7 +117,12 @@ fn work_offset_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
         ui.horizontal_wrapped(|ui| {
             for (index, axis) in axes.iter().enumerate() {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(axis).size(9.0).monospace().color(theme::C3));
+                    ui.label(
+                        RichText::new(axis)
+                            .size(theme::font_size(9.0))
+                            .monospace()
+                            .color(theme::C3),
+                    );
                     ui.add_enabled(
                         writable,
                         egui::TextEdit::singleline(&mut app.offsets.values[index])
@@ -128,7 +133,12 @@ fn work_offset_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                 });
             }
             ui.vertical(|ui| {
-                ui.label(RichText::new("ROT").size(9.0).monospace().color(theme::C3));
+                ui.label(
+                    RichText::new("ROT")
+                        .size(theme::font_size(9.0))
+                        .monospace()
+                        .color(theme::C3),
+                );
                 ui.add_enabled(
                     writable,
                     egui::TextEdit::singleline(&mut app.offsets.rotation)
@@ -193,7 +203,12 @@ fn g92_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
         ui.horizontal_wrapped(|ui| {
             for (index, axis) in axes.iter().enumerate() {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(axis).size(9.0).monospace().color(theme::C3));
+                    ui.label(
+                        RichText::new(axis)
+                            .size(theme::font_size(9.0))
+                            .monospace()
+                            .color(theme::C3),
+                    );
                     ui.add_enabled(
                         writable,
                         egui::TextEdit::singleline(&mut app.offsets.g92[index])
@@ -244,7 +259,7 @@ fn tool_offset_card(app: &mut LincApp, ui: &mut Ui) {
         ui.label(
             RichText::new(format!("T{} {}", row.tool, row.description))
                 .monospace()
-                .size(12.0)
+                .size(theme::font_size(12.0))
                 .color(theme::FG),
         );
         if app.profile.variant == linc_core::model::MachineVariant::Lathe {

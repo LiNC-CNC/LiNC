@@ -49,8 +49,8 @@ cargo build --release
 ```
 
 `start-sim.sh` launches a real LinuxCNC process with the `baiermill_sim` HAL
-and the LiNC HMI/panel pair. The HMI enforces a minimum 1920×1080 window and is
-laid out for that resolution. `linc --check-config --config configs/baiermill.toml` validates
+and the LiNC HMI/panel pair. The HMI enforces a minimum 1280×720 window,
+scales proportionally above it, and preserves the SVG font ratios. `linc --check-config --config configs/baiermill.toml` validates
 a profile, its LinuxCNC INI and safety policy without opening the display or
 HAL.
 
@@ -79,13 +79,12 @@ linc --config configs/baiermill.toml         # physical machine / its display en
 See [`CONFIGURATION.md`](CONFIGURATION.md) for the merge rules, schema, safety
 policy and launch integration.
 
-`[ui] scale` sets the HMI zoom factor at startup: `"auto"` follows the desktop,
-while `"0.8"`, `"80%"` or `"1.25x"` force a factor in `0.5..3.0`. The sim
-profile uses `"0.8"` so the 1920x1080 layout fits a 125% development display;
-change it in the profile for the target machine. Settings shows the configured
-value and offers a temporary runtime override. The HMI enforces a 1920×1080
-minimum window size. The standalone simulation panel uses
-`[simulation] panel_scale` independently.
+`[ui] scale` is a multiplier on the 1280×720 baseline: `"auto"`/`"1.0"` is the
+design size, and `"0.8"`, `"80%"` or `"1.25x"` force a factor in `0.5..3.0`.
+The shell scales itself from the physical viewport, so desktop HiDPI scaling
+does not shrink the text. Settings shows the configured value and offers a
+temporary runtime override. The HMI enforces a 1280×720 minimum window size.
+The standalone simulation panel uses `[simulation] panel_scale` independently.
 
 ## HAL integration
 

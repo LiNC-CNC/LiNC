@@ -42,7 +42,7 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new("USB MEDIA")
-                    .size(16.0)
+                    .size(theme::font_size(16.0))
                     .strong()
                     .color(theme::FG),
             );
@@ -61,7 +61,7 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui) {
             MountState::NoUsb => {
                 ui.label(
                     RichText::new("NO USB")
-                        .size(18.0)
+                        .size(theme::font_size(18.0))
                         .strong()
                         .color(theme::MUTED),
                 );
@@ -69,14 +69,14 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui) {
                     RichText::new(
                         "Auto-mount on insert via udisks2; mounts are nosuid,nodev,noexec.",
                     )
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .color(theme::MUTED),
                 );
             }
             MountState::Mounting => {
                 ui.label(
                     RichText::new("MOUNTING…")
-                        .size(18.0)
+                        .size(theme::font_size(18.0))
                         .strong()
                         .color(theme::WARNING),
                 );
@@ -84,11 +84,15 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui) {
             MountState::Error(error) => {
                 ui.label(
                     RichText::new("USB ERROR")
-                        .size(18.0)
+                        .size(theme::font_size(18.0))
                         .strong()
                         .color(theme::ERROR),
                 );
-                ui.label(RichText::new(error).size(10.0).color(theme::ERROR));
+                ui.label(
+                    RichText::new(error)
+                        .size(theme::font_size(10.0))
+                        .color(theme::ERROR),
+                );
             }
             MountState::Mounted => {
                 ui.label(
@@ -101,7 +105,7 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui) {
                             .unwrap_or_else(|| "—".into())
                     ))
                     .monospace()
-                    .size(11.0)
+                    .size(theme::font_size(11.0))
                     .color(theme::FG),
                 );
                 if app.files.safe_to_remove {
@@ -109,7 +113,7 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui) {
                 }
                 ui.label(
                     RichText::new("MOUNTED BY UDISKS2 / USER SESSION")
-                        .size(9.0)
+                        .size(theme::font_size(9.0))
                         .color(theme::MUTED),
                 );
                 file_list(app, ui, Pane::Usb);
@@ -123,7 +127,7 @@ fn nc_pane(app: &mut LincApp, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new("NC_FILES")
-                    .size(16.0)
+                    .size(theme::font_size(16.0))
                     .strong()
                     .color(theme::FG),
             );
@@ -131,7 +135,7 @@ fn nc_pane(app: &mut LincApp, ui: &mut Ui) {
                 ui.label(
                     RichText::new(app.files.nc_current.display().to_string())
                         .monospace()
-                        .size(9.0)
+                        .size(theme::font_size(9.0))
                         .color(theme::MUTED),
                 );
             });
@@ -198,11 +202,21 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
                 .striped(true)
                 .spacing([10.0, 3.0])
                 .show(ui, |ui| {
-                    ui.label(RichText::new("NAME").size(9.0).strong().color(theme::MUTED));
-                    ui.label(RichText::new("SIZE").size(9.0).strong().color(theme::MUTED));
+                    ui.label(
+                        RichText::new("NAME")
+                            .size(theme::font_size(9.0))
+                            .strong()
+                            .color(theme::MUTED),
+                    );
+                    ui.label(
+                        RichText::new("SIZE")
+                            .size(theme::font_size(9.0))
+                            .strong()
+                            .color(theme::MUTED),
+                    );
                     ui.label(
                         RichText::new("MODIFIED")
-                            .size(9.0)
+                            .size(theme::font_size(9.0))
                             .strong()
                             .color(theme::MUTED),
                     );
@@ -229,15 +243,16 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
                         };
                         let response = ui.selectable_label(
                             selected == index,
-                            RichText::new(label).monospace().size(11.0).color(
-                                if entry.is_symlink {
+                            RichText::new(label)
+                                .monospace()
+                                .size(theme::font_size(11.0))
+                                .color(if entry.is_symlink {
                                     theme::WARNING
                                 } else if entry.is_dir {
                                     theme::ACCENT
                                 } else {
                                     theme::FG
-                                },
-                            ),
+                                }),
                         );
                         if response.clicked() {
                             selected = index;
@@ -257,13 +272,13 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
                                 format_size(entry.size)
                             })
                             .monospace()
-                            .size(10.0)
+                            .size(theme::font_size(10.0))
                             .color(theme::MUTED),
                         );
                         ui.label(
                             RichText::new(format_modified(entry.modified))
                                 .monospace()
-                                .size(10.0)
+                                .size(theme::font_size(10.0))
                                 .color(theme::MUTED),
                         );
                         ui.end_row();
@@ -337,7 +352,11 @@ fn actions(app: &mut LincApp, ui: &mut Ui) {
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if let Some(error) = &app.files.error {
-                ui.label(RichText::new(error).size(10.0).color(theme::ERROR));
+                ui.label(
+                    RichText::new(error)
+                        .size(theme::font_size(10.0))
+                        .color(theme::ERROR),
+                );
             }
             if let Some(job) = &app.files.copy {
                 let progress = job.rx.try_recv().ok().and_then(|progress| match progress {
@@ -353,14 +372,14 @@ fn actions(app: &mut LincApp, ui: &mut Ui) {
                             format_size(total)
                         ))
                         .monospace()
-                        .size(10.0)
+                        .size(theme::font_size(10.0))
                         .color(theme::ACCENT),
                     );
                 }
             } else {
                 ui.label(
                     RichText::new("COPY USES TEMP FILE + ATOMIC RENAME")
-                        .size(9.0)
+                        .size(theme::font_size(9.0))
                         .color(theme::MUTED),
                 );
             }

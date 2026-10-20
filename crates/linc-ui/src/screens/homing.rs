@@ -49,7 +49,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                             ui.label(
                                 RichText::new(if all { "ALL AXES HOMED" } else { "HOMING INCOMPLETE" })
                                     .monospace()
-                                    .size(10.0)
+                                    .size(theme::font_size(10.0))
                                     .color(if all { theme::SUCCESS } else { theme::WARNING }),
                             );
                         });
@@ -60,7 +60,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                         .spacing([14.0, 6.0])
                         .show(ui, |ui| {
                             for header in ["AXIS", "STATUS", "SEQ", "SEARCH", "LATCH", "INDEX", "POS"] {
-                                ui.label(RichText::new(header).size(9.0).strong().color(theme::MUTED));
+                                ui.label(RichText::new(header).size(theme::font_size(9.0)).strong().color(theme::MUTED));
                             }
                             ui.end_row();
                             for row in &rows {
@@ -71,13 +71,13 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                                     AxisHomeStatus::Unknown => theme::MUTED,
                                     AxisHomeStatus::NotConfigured => theme::MUTED,
                                 };
-                                ui.label(RichText::new(&row.name).monospace().size(14.0).color(theme::C3));
-                                ui.label(RichText::new(row.status.label()).monospace().size(11.0).color(color));
-                                ui.label(RichText::new(row.sequence.to_string()).monospace().size(11.0));
-                                ui.label(RichText::new(format!("{:.1}", row.search_vel)).monospace().size(11.0));
-                                ui.label(RichText::new(format!("{:.1}", row.latch_vel)).monospace().size(11.0));
-                                ui.label(RichText::new(if row.use_index { "YES" } else { "NO" }).monospace().size(11.0));
-                                ui.label(RichText::new(format!("{:+.3}", row.position)).monospace().size(11.0));
+                                ui.label(RichText::new(&row.name).monospace().size(theme::font_size(14.0)).color(theme::C3));
+                                ui.label(RichText::new(row.status.label()).monospace().size(theme::font_size(11.0)).color(color));
+                                ui.label(RichText::new(row.sequence.to_string()).monospace().size(theme::font_size(11.0)));
+                                ui.label(RichText::new(format!("{:.1}", row.search_vel)).monospace().size(theme::font_size(11.0)));
+                                ui.label(RichText::new(format!("{:.1}", row.latch_vel)).monospace().size(theme::font_size(11.0)));
+                                ui.label(RichText::new(if row.use_index { "YES" } else { "NO" }).monospace().size(theme::font_size(11.0)));
+                                ui.label(RichText::new(format!("{:+.3}", row.position)).monospace().size(theme::font_size(11.0)));
                                 ui.end_row();
                             }
                         });
@@ -89,7 +89,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                     theme::kv_row(ui, "HOMED", format!("{}/{}", rows.iter().filter(|row| row.status == AxisHomeStatus::Homed).count(), rows.len()));
                     ui.label(
                         RichText::new("HOME_SEQUENCE and search/latch/index values come from the INI; optional axes are shown only when configured.")
-                            .size(9.0)
+                            .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
                 });
@@ -108,27 +108,27 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                         .spacing([8.0, 3.0])
                         .show(ui, |ui| {
                             for header in ["KEY", "HOME PIN", "HOME ACTION", "PROG.HOME PIN", "PROG.HOME MDI"] {
-                                ui.label(RichText::new(header).size(8.5).strong().color(theme::MUTED));
+                                ui.label(RichText::new(header).size(theme::font_size(8.5)).strong().color(theme::MUTED));
                             }
                             ui.end_row();
                             for mapping in MAPPINGS {
-                                ui.label(RichText::new(mapping.key.label()).monospace().size(10.0).color(theme::C3));
-                                ui.label(RichText::new(mapping.home_pin).monospace().size(8.0).color(theme::MUTED));
-                                ui.label(RichText::new(mapping.home_action).monospace().size(9.0).color(theme::FG));
-                                ui.label(RichText::new(mapping.proghome_pin).monospace().size(8.0).color(theme::MUTED));
-                                ui.label(RichText::new(mapping.proghome_mdi).monospace().size(9.0).color(theme::SUCCESS));
+                                ui.label(RichText::new(mapping.key.label()).monospace().size(theme::font_size(10.0)).color(theme::C3));
+                                ui.label(RichText::new(mapping.home_pin).monospace().size(theme::font_size(8.0)).color(theme::MUTED));
+                                ui.label(RichText::new(mapping.home_action).monospace().size(theme::font_size(9.0)).color(theme::FG));
+                                ui.label(RichText::new(mapping.proghome_pin).monospace().size(theme::font_size(8.0)).color(theme::MUTED));
+                                ui.label(RichText::new(mapping.proghome_mdi).monospace().size(theme::font_size(9.0)).color(theme::SUCCESS));
                                 ui.end_row();
                             }
                         });
                     ui.add_space(4.0);
                     ui.label(
                         RichText::new("Individual home outputs are disabled while any axis is homing; gating is in the panel service/post-GUI HAL.")
-                            .size(9.0)
+                            .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
                     ui.label(
                         RichText::new("PROG.HOME is current-WCS zero, not machine home and not G53. X/Y/Z only; the panel issues MDI immediately.")
-                            .size(9.0)
+                            .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
                 });
@@ -141,7 +141,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             theme::section_header(ui, "PROGRAM ZERO");
             ui.label(
                 RichText::new("RAPID sends G0 X0Y0Z0; X±/Y±/Z± send G0 X0 / Y0 / Z0 in the current WCS. The HMI does not intercept these panel actions.")
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .color(theme::MUTED),
             );
         });

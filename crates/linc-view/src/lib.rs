@@ -3,6 +3,8 @@
 //! Projection is CPU-side into egui's painter. No GPU buffers, no animation
 //! loop and no machine access.
 
+const FONT_SCALE: f32 = 1.25;
+
 use egui::{
     Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Response, Sense, Stroke,
     StrokeKind, Ui, Vec2,
@@ -296,7 +298,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
                     projection.project(label.0),
                     Align2::LEFT_TOP,
                     "MACHINE",
-                    FontId::monospace(10.0),
+                    FontId::monospace(10.0 * FONT_SCALE),
                     theme::MUTED,
                 );
             }
@@ -341,7 +343,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
                     tag + Vec2::new(6.0, -6.0),
                     Align2::LEFT_BOTTOM,
                     format!("LN {}", segment.line),
-                    FontId::monospace(10.0),
+                    FontId::monospace(10.0 * FONT_SCALE),
                     view.selected_line_color,
                 );
             }
@@ -357,7 +359,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
                     projection.project(label.0),
                     Align2::LEFT_BOTTOM,
                     "PROGRAM",
-                    FontId::monospace(10.0),
+                    FontId::monospace(10.0 * FONT_SCALE),
                     theme::CYAN,
                 );
             }
@@ -421,7 +423,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         legend_rect.left_top() + Vec2::new(40.0, 11.0),
         Align2::LEFT_TOP,
         "PROGRAM CUT",
-        FontId::monospace(10.0),
+        FontId::monospace(10.0 * FONT_SCALE),
         theme::FG,
     );
     painter.line_segment(
@@ -435,14 +437,14 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         legend_rect.left_top() + Vec2::new(40.0, 25.0),
         Align2::LEFT_TOP,
         "LIVE TOOLPATH",
-        FontId::monospace(10.0),
+        FontId::monospace(10.0 * FONT_SCALE),
         theme::FG,
     );
     painter.text(
         legend_rect.left_top() + Vec2::new(10.0, 40.0),
         Align2::LEFT_TOP,
         format!("{}  •  ZOOM {:.1}x", view.view.label(), view.zoom),
-        FontId::monospace(9.0),
+        FontId::monospace(9.0 * FONT_SCALE),
         theme::MUTED,
     );
 
@@ -451,7 +453,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             rect.center(),
             Align2::CENTER_CENTER,
             "NO PROGRAM LOADED",
-            FontId::monospace(14.0),
+            FontId::monospace(14.0 * FONT_SCALE),
             theme::MUTED,
         );
     }
@@ -618,7 +620,7 @@ fn draw_axes(
             origin_pos + vector + Vec2::new(3.0, -3.0),
             Align2::LEFT_BOTTOM,
             label,
-            FontId::monospace(10.0),
+            FontId::monospace(10.0 * FONT_SCALE),
             color,
         );
     }
@@ -651,7 +653,7 @@ pub fn draw_sparkline(ui: &mut Ui, values: &[f64], color: Color32, height: f32) 
             rect.center(),
             Align2::CENTER_CENTER,
             "—",
-            FontId::monospace(12.0),
+            FontId::monospace(12.0 * FONT_SCALE),
             theme::MUTED,
         );
     }

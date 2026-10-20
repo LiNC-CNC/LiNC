@@ -75,7 +75,7 @@ fn operation_grid(app: &mut LincApp, ui: &mut Ui) {
                         operations_in(app.probe.category).len()
                     ))
                     .monospace()
-                    .size(9.0)
+                    .size(theme::font_size(9.0))
                     .color(theme::MUTED),
                 );
             });
@@ -88,7 +88,7 @@ fn operation_grid(app: &mut LincApp, ui: &mut Ui) {
                 } else {
                     "No operations are configured for this category in the current bundle."
                 })
-                .size(11.0)
+                .size(theme::font_size(11.0))
                 .color(theme::MUTED),
             );
         }
@@ -141,7 +141,7 @@ fn operation_card(ui: &mut Ui, operation: &ProbeOperation, selected: bool) -> eg
         Pos2::new(rect.center().x, rect.bottom() - 22.0),
         Align2::CENTER_CENTER,
         operation.name,
-        FontId::proportional(9.5),
+        FontId::proportional(theme::font_size(9.5)),
         if selected { theme::FG } else { theme::MUTED },
     );
     response
@@ -166,7 +166,7 @@ fn draw_diagram(ui: &Ui, rect: Rect, kind: ProbeDiagram, color: Color32) {
                 p + Vec2::new(18.0, -16.0),
                 Align2::LEFT_BOTTOM,
                 "T99",
-                FontId::monospace(8.0),
+                FontId::monospace(theme::font_size(8.0)),
                 color,
             );
         }
@@ -263,7 +263,7 @@ fn draw_diagram(ui: &Ui, rect: Rect, kind: ProbeDiagram, color: Color32) {
                 center,
                 Align2::CENTER_CENTER,
                 "?",
-                FontId::proportional(30.0),
+                FontId::proportional(theme::font_size(30.0)),
                 color,
             );
         }
@@ -277,24 +277,24 @@ fn selected_operation_card(app: &mut LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
         ui.label(
             RichText::new(operation.name)
-                .size(16.0)
+                .size(theme::font_size(16.0))
                 .strong()
                 .color(theme::FG),
         );
         ui.label(
             RichText::new(operation.description)
-                .size(10.0)
+                .size(theme::font_size(10.0))
                 .color(theme::MUTED),
         );
         ui.label(
             RichText::new(format!("o<{}> call", operation.call))
                 .monospace()
-                .size(12.0)
+                .size(theme::font_size(12.0))
                 .color(theme::C2),
         );
         ui.label(
             RichText::new("Parameters are passed through the Probe Basic #3014–#3036 contract.")
-                .size(9.0)
+                .size(theme::font_size(9.0))
                 .color(theme::MUTED),
         );
     });
@@ -312,13 +312,17 @@ fn setup_card(app: &mut LincApp, ui: &mut Ui) {
                         "APPLY WCS"
                     })
                     .monospace()
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .color(theme::ACCENT),
                 );
             });
         });
         ui.horizontal(|ui| {
-            ui.label(RichText::new("WORK OFFSET").size(9.0).color(theme::MUTED));
+            ui.label(
+                RichText::new("WORK OFFSET")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
             for index in 1..=6u8 {
                 let wcs = format!("G{}", 53 + index);
                 if common::page_tab(ui, &wcs, app.probe.wcs == wcs).clicked() {
@@ -521,7 +525,7 @@ fn setup_card(app: &mut LincApp, ui: &mut Ui) {
         });
         ui.label(
             RichText::new("Requires ON, homed, idle, T99 in spindle, no active program.")
-                .size(9.0)
+                .size(theme::font_size(9.0))
                 .color(theme::MUTED),
         );
     });
@@ -534,7 +538,11 @@ fn drag(
     speed: f64,
     range: std::ops::RangeInclusive<f64>,
 ) {
-    ui.label(RichText::new(label).size(9.0).color(theme::MUTED));
+    ui.label(
+        RichText::new(label)
+            .size(theme::font_size(9.0))
+            .color(theme::MUTED),
+    );
     ui.add(egui::DragValue::new(value).speed(speed).range(range));
     ui.end_row();
 }
@@ -547,7 +555,11 @@ fn drag_u16(
     range: std::ops::RangeInclusive<f64>,
 ) {
     let mut value_f = *value as f64;
-    ui.label(RichText::new(label).size(9.0).color(theme::MUTED));
+    ui.label(
+        RichText::new(label)
+            .size(theme::font_size(9.0))
+            .color(theme::MUTED),
+    );
     if ui
         .add(egui::DragValue::new(&mut value_f).speed(speed).range(range))
         .changed()
@@ -565,7 +577,11 @@ fn drag_u8(
     range: std::ops::RangeInclusive<f64>,
 ) {
     let mut value_f = *value as f64;
-    ui.label(RichText::new(label).size(9.0).color(theme::MUTED));
+    ui.label(
+        RichText::new(label)
+            .size(theme::font_size(9.0))
+            .color(theme::MUTED),
+    );
     if ui
         .add(egui::DragValue::new(&mut value_f).speed(speed).range(range))
         .changed()
@@ -585,7 +601,7 @@ fn result_card(app: &mut LincApp, ui: &mut Ui) {
                     result.routine, result.wcs, result.mode
                 ))
                 .monospace()
-                .size(10.0)
+                .size(theme::font_size(10.0))
                 .color(theme::SUCCESS),
             );
             ui.horizontal_wrapped(|ui| {
@@ -593,7 +609,7 @@ fn result_card(app: &mut LincApp, ui: &mut Ui) {
                     ui.label(
                         RichText::new(format!("{axis} {value:+.4}"))
                             .monospace()
-                            .size(11.0)
+                            .size(theme::font_size(11.0))
                             .color(theme::FG),
                     );
                 }
@@ -604,12 +620,16 @@ fn result_card(app: &mut LincApp, ui: &mut Ui) {
         } else {
             ui.label(
                 RichText::new("NO PROBE RESULT")
-                    .size(11.0)
+                    .size(theme::font_size(11.0))
                     .color(theme::MUTED),
             );
         }
         if !app.snapshot.probe.history.is_empty() {
-            ui.label(RichText::new("HISTORY").size(9.0).color(theme::MUTED));
+            ui.label(
+                RichText::new("HISTORY")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
             egui::ScrollArea::vertical()
                 .id_salt("probe-history")
                 .max_height(100.0)
@@ -623,7 +643,7 @@ fn result_card(app: &mut LincApp, ui: &mut Ui) {
                                 result.wcs
                             ))
                             .monospace()
-                            .size(9.0)
+                            .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                         );
                     }

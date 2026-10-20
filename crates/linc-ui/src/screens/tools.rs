@@ -24,14 +24,14 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                 app.profile.changer.label()
             ))
             .monospace()
-            .size(12.0)
+            .size(theme::font_size(12.0))
             .color(theme::FG),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if app.profile.changer == ToolChangerKind::Manual {
                 ui.label(
                     RichText::new("POCKET COLUMN HIDDEN (MANUAL CHANGER)")
-                        .size(9.0)
+                        .size(theme::font_size(9.0))
                         .color(theme::MUTED),
                 );
             }
@@ -102,7 +102,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                         app.snapshot.tool_table.path.display()
                     ))
                     .monospace()
-                    .size(9.0)
+                    .size(theme::font_size(9.0))
                     .color(theme::MUTED),
                 );
             });
@@ -120,25 +120,36 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                     .spacing([14.0, 5.0])
                     .show(ui, |ui| {
                         for header in ["T", "DESCRIPTION"] {
-                            ui.label(RichText::new(header).size(9.0).strong().color(theme::MUTED));
+                            ui.label(
+                                RichText::new(header)
+                                    .size(theme::font_size(9.0))
+                                    .strong()
+                                    .color(theme::MUTED),
+                            );
                         }
                         if lathe {
                             for header in ["X", "Z", "NOSE R", "ORIENT"] {
                                 ui.label(
-                                    RichText::new(header).size(9.0).strong().color(theme::MUTED),
+                                    RichText::new(header)
+                                        .size(theme::font_size(9.0))
+                                        .strong()
+                                        .color(theme::MUTED),
                                 );
                             }
                         } else {
                             for header in ["Ø", "LENGTH", "TYPE"] {
                                 ui.label(
-                                    RichText::new(header).size(9.0).strong().color(theme::MUTED),
+                                    RichText::new(header)
+                                        .size(theme::font_size(9.0))
+                                        .strong()
+                                        .color(theme::MUTED),
                                 );
                             }
                         }
                         if pocket {
                             ui.label(
                                 RichText::new(if lathe { "STATION" } else { "POCKET" })
-                                    .size(9.0)
+                                    .size(theme::font_size(9.0))
                                     .strong()
                                     .color(theme::MUTED),
                             );
@@ -152,7 +163,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                 selected,
                                 RichText::new(format!("T{}", row.tool))
                                     .monospace()
-                                    .size(12.0)
+                                    .size(theme::font_size(12.0))
                                     .color(if current { theme::SUCCESS } else { theme::FG }),
                             );
                             if response.clicked() {
@@ -165,7 +176,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                 } else {
                                     &row.description
                                 })
-                                .size(11.0)
+                                .size(theme::font_size(11.0))
                                 .color(if selected {
                                     theme::FG
                                 } else {
@@ -180,7 +191,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                             row.geometry.values.get(axis).copied().unwrap_or(0.0)
                                         ))
                                         .monospace()
-                                        .size(10.0),
+                                        .size(theme::font_size(10.0)),
                                     );
                                 }
                                 ui.label(
@@ -191,7 +202,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                             .unwrap_or_else(|| "—".into()),
                                     )
                                     .monospace()
-                                    .size(10.0),
+                                    .size(theme::font_size(10.0)),
                                 );
                                 ui.label(
                                     RichText::new(
@@ -201,7 +212,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                             .unwrap_or_else(|| "—".into()),
                                     )
                                     .monospace()
-                                    .size(10.0),
+                                    .size(theme::font_size(10.0)),
                                 );
                             } else {
                                 ui.label(
@@ -212,7 +223,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                             .unwrap_or_else(|| "—".into()),
                                     )
                                     .monospace()
-                                    .size(10.0),
+                                    .size(theme::font_size(10.0)),
                                 );
                                 ui.label(
                                     RichText::new(
@@ -222,9 +233,13 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                             .unwrap_or_else(|| "—".into()),
                                     )
                                     .monospace()
-                                    .size(10.0),
+                                    .size(theme::font_size(10.0)),
                                 );
-                                ui.label(RichText::new(&row.kind).size(9.0).color(theme::MUTED));
+                                ui.label(
+                                    RichText::new(&row.kind)
+                                        .size(theme::font_size(9.0))
+                                        .color(theme::MUTED),
+                                );
                             }
                             if pocket {
                                 ui.label(
@@ -234,7 +249,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                             .unwrap_or_else(|| "—".into()),
                                     )
                                     .monospace()
-                                    .size(10.0),
+                                    .size(theme::font_size(10.0)),
                                 );
                             }
                             ui.end_row();
@@ -248,18 +263,30 @@ fn change_card(app: &mut LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
         theme::section_header(ui, "TOOL CHANGE");
         ui.horizontal(|ui| {
-            ui.label(RichText::new("TARGET").size(10.0).color(theme::MUTED));
+            ui.label(
+                RichText::new("TARGET")
+                    .size(theme::font_size(10.0))
+                    .color(theme::MUTED),
+            );
             ui.add(
                 egui::TextEdit::singleline(&mut app.tools.target)
                     .desired_width(64.0)
                     .font(egui::TextStyle::Monospace),
             );
-            ui.label(RichText::new("T0 UNLOADS").size(9.0).color(theme::MUTED));
+            ui.label(
+                RichText::new("T0 UNLOADS")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
         });
         let gate = app.snapshot.issue_allowed();
         let can_change = gate.is_ok() && !app.snapshot.task.running;
         if let Err(reason) = &gate {
-            ui.label(RichText::new(reason).size(10.0).color(theme::WARNING));
+            ui.label(
+                RichText::new(reason)
+                    .size(theme::font_size(10.0))
+                    .color(theme::WARNING),
+            );
         }
         if theme::accent_button(ui, "CHANGE TOOL", can_change).clicked() {
             issue_change(app);
@@ -279,7 +306,7 @@ fn change_card(app: &mut LincApp, ui: &mut Ui) {
         }
         ui.label(
             RichText::new("CHANGE TOOL issues Tn M6 immediately via issue_mdi; no staging or cycle-start gate.")
-                .size(9.0)
+                .size(theme::font_size(9.0))
                 .color(theme::MUTED),
         );
         if let Some(error) = &app.tools.error {
@@ -290,7 +317,7 @@ fn change_card(app: &mut LincApp, ui: &mut Ui) {
             theme::separator(ui);
             ui.label(
                 RichText::new(&app.snapshot.tool_change.message)
-                    .size(15.0)
+                    .size(theme::font_size(15.0))
                     .strong()
                     .color(theme::WARNING),
             );
@@ -307,7 +334,7 @@ fn change_card(app: &mut LincApp, ui: &mut Ui) {
             }
             ui.label(
                 RichText::new("Writes linc.tool-change-confirm; never auto-confirms.")
-                    .size(9.0)
+                    .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
         } else {
@@ -315,7 +342,7 @@ fn change_card(app: &mut LincApp, ui: &mut Ui) {
             if !app.snapshot.tool_change.message.is_empty() {
                 ui.label(
                     RichText::new(&app.snapshot.tool_change.message)
-                        .size(10.0)
+                        .size(theme::font_size(10.0))
                         .color(theme::MUTED),
                 );
             }
@@ -376,7 +403,7 @@ fn edit_card(app: &mut LincApp, ui: &mut Ui) {
             }
             ui.label(
                 RichText::new("Table writes require idle, machine ON and PROTECT OFF.")
-                    .size(9.0)
+                    .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
             return;
@@ -406,7 +433,11 @@ fn edit_card(app: &mut LincApp, ui: &mut Ui) {
                     if key == "pocket" && !app.profile.changer.uses_pockets() {
                         continue;
                     }
-                    ui.label(RichText::new(label).size(9.0).color(theme::MUTED));
+                    ui.label(
+                        RichText::new(label)
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
                     let field = app.tools.edit_fields.entry(key.to_string()).or_default();
                     ui.add_enabled(
                         writable,

@@ -316,22 +316,23 @@ written while running.
 
 ### UI scale
 
-`[ui] scale` controls the HMI zoom factor and is applied when the window is
-created:
+`[ui] scale` is a multiplier on the 1280×720 baseline and is applied
+continuously as the window changes size:
 
 | Value | Effect |
 |---|---|
-| `"auto"` | Use the desktop's native scale. |
-| `"1.0"` | Design size. |
-| `"0.8"` | 80%, fits the 1920x1080 layout on a 125% desktop. |
+| `"auto"` | Baseline 1.0. |
+| `"1.0"` | Design size at the 1280×720 baseline. |
+| `"0.8"` | 80% of the baseline layout. |
 | `"80%"` | Same as `0.8`. |
-| `"1.25x"` | 125%. |
+| `"1.25x"` | 125% of the baseline layout. |
 
 Accepted factors are `0.5` through `3.0`. The HMI window enforces a minimum of
-1920×1080 and is optimized for that resolution. The Settings screen shows the
+1280×720, scales the shell proportionally above that baseline, and preserves
+the SVG type ratios. The Settings screen shows the
 configured value and offers a temporary runtime override; edit the profile to
-make a scale persistent. The simulation profile ships with `"0.8"` for the
-125% development display; use `"auto"` or `"1.0"` on a 100% machine display.
+make a scale persistent. The simulation profile ships with `"1.0"`; the shell
+handles desktop scaling independently.
 
 The standalone simulator panel has its own zoom control,
 `[simulation] panel_scale`, also in `0.5..3.0`; it is independent of the HMI

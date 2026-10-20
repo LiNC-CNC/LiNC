@@ -304,11 +304,11 @@ Focus rules:
 - `Enter` activates; `Esc` backs out.
 - No hover-only affordances.
 - No Tab dependency.
-- The minimum window size is **1920×1080**. The shell and every screen are
-  designed and optimized for that resolution; do not compress the layout below
-  it. The configured UI scale maps this logical size onto the physical 1080p
-  display (for example `0.8` on a 125% desktop).
-- On-screen actions have a minimum 44 px target at 1920×1080.
+- The minimum window size is **1280×720**. The shell and every screen are
+  designed and optimized for that baseline; do not compress the layout below
+  it. The whole shell scales proportionally above 720p, preserving the SVG's
+  label/value/display font ratios.
+- On-screen actions have a minimum 44 px target at 1280×720.
 
 ## 6. Screens
 
@@ -599,7 +599,10 @@ Industry-standard layout:
 - Position/DRO and modal G-code panel.
 - Last-issued block and result panel with syntax status, requirements and
   error/result.
-- Local MDI history with timestamps; Up/Down recalls prior commands.
+- Local MDI history with timestamps. Up/Down selects entries; `Enter` on a
+  selected row, `Ctrl+Enter`, or `RUN SELECTED` re-issues that exact block
+  through the same `issue_mdi` validation. This mirrors Probe Basic's history
+  selection/run workflow without a queue or mouse.
 
 Rules:
 
@@ -723,8 +726,10 @@ Rules:
 - Numeric/DRO: monospace, tabular figures, 10–24 px.
 - Section headers: sans-serif bold.
 - No condensed low-contrast text for critical values.
-- Design for a minimum 1920×1080 viewport; scale proportionally at that
-  resolution and preserve 44 px targets. Do not reflow into a smaller layout.
+- Design for a minimum 1280×720 viewport; scale proportionally above it and
+  preserve 44 px targets. Do not reflow into a smaller layout. Use the SVG type
+  ramp (8–30 px labels/values/displays) so relative font sizes match the
+  accepted mockups.
 
 ### 7.3 G-code syntax highlighting
 
@@ -766,7 +771,9 @@ Implementation:
 - `LOAD` / `Ctrl+O`: Files, when idle and allowed.
 - `PROBE` action: Touch Probe from Offsets; explicit `RUN PROBE` issues MDI.
 - MDI mode: `Enter` issues the block; `Esc` clears unissued input; `Up`/`Down`
-  recall history. No physical CYCLE START is required.
+  select history; `Enter` on a focused history row or `Ctrl+Enter` runs the
+  selected history entry through the same validation. No physical CYCLE START
+  is required.
 - `ESC`: back/cancel; on Help, clear search or return from detail history.
 - Arrows: focus/list/scroll.
 - `/`: focus G-code Help search when Help is active.
@@ -982,7 +989,8 @@ For this design repository:
   explicit `RUN PROBE` via Probe Basic `issue_mdi`, results/apply and
   calibration, with no separate cycle-start step.
 - The MDI screen opens at the panel MDI position and represents command issue,
-  DRO/modal state and history; `Enter` issues immediately through `issue_mdi`.
+  DRO/modal state and history; `Enter` issues immediately through `issue_mdi`,
+  and a selected history row can be re-run with `Enter`/`RUN SELECTED`.
 - The Homing/Program Zero screen opens at HOME/PROG.HOME, shows per-axis/sequence
   state and documents the exact physical-panel key mapping without providing
   home controls.
@@ -1030,8 +1038,10 @@ For this design repository:
 
 For the future implementation:
 
-- The HMI enforces a minimum 1920×1080 window and every screen is usable and
-  optimized at that resolution; it does not accept a smaller viewport.
+- The HMI enforces a minimum 1280×720 window and every screen is usable and
+  optimized at that baseline; it does not accept a smaller viewport.
+- All interactive controls are reachable and activatable with arrow keys,
+  Enter and Esc only; no mouse or Tab is required.
 - Keyboard-only navigation works without Tab, Shift, Delete, or F1–F8;
   standard Ctrl editing shortcuts work.
 - Panel service and HMI are separate processes; only the panel service owns

@@ -108,12 +108,11 @@ fn main() -> Result<()> {
         Box::new(BackendHandle::spawn(backend, hal, status_hz, status_source));
 
     let title = profile.config.ui.window_title.clone();
-    // The target display is 1920x1080. The configured zoom factor maps this
-    // logical size onto the physical 1080p panel (0.8 cancels a 125% desktop).
-    let size = [1920.0, 1080.0];
+    // The shell is designed at 1280x720 and scales up from that baseline.
+    let size = [1280.0, 720.0];
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size(size)
-        .with_min_inner_size([1920.0, 1080.0])
+        .with_min_inner_size([1280.0, 720.0])
         .with_title(title.clone());
     if args.fullscreen || profile.config.machine.kind == "real" {
         viewport = viewport.with_fullscreen(args.fullscreen);

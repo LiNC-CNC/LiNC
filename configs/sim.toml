@@ -19,8 +19,7 @@ max_axes = 5
 
 [ui]
 window_title = "LiNC - BaierMill Simulation"
-# This development display runs at 125%; 0.8 keeps the 1920x1080 layout intact.
-scale = "0.8"
+scale = "1.0"
 
 [panel]
 kind = "simulated"

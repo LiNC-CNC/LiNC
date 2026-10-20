@@ -30,6 +30,42 @@ pub const TOP_BAR_HEIGHT: f32 = 72.0;
 pub const BOTTOM_BAR_HEIGHT: f32 = 70.0;
 pub const NAV_WIDTH: f32 = 172.0;
 pub const MIN_TARGET: f32 = 44.0;
+/// Baseline layout is 1280x720. Text is enlarged slightly relative to the
+/// 1000x640 SVG so it remains proportional when the shell is scaled.
+pub const FONT_SCALE: f32 = 1.25;
+
+/// SVG type ramp, scaled to the 1280x720 baseline. Keeping the ramp in one
+/// place preserves the label/value/display ratios from the accepted SVGs.
+const SVG_RAMP: [f32; 13] = [
+    8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 18.0, 22.0, 26.0, 30.0,
+];
+
+pub fn font_size(base: f32) -> f32 {
+    let mut nearest = SVG_RAMP[0];
+    for value in SVG_RAMP {
+        if (value - base).abs() <= (nearest - base).abs() {
+            nearest = value;
+        }
+    }
+    nearest * FONT_SCALE
+}
+
+/// Scale the whole shell from the 1280x720 baseline to the actual physical
+/// viewport. `multiplier` is the profile/runtime UI scale preference.
+pub fn apply_design_zoom(ctx: &egui::Context, multiplier: f32) {
+    let rect = ctx.input(|input| input.viewport_rect());
+    let ppp = ctx.pixels_per_point();
+    let physical = rect.size() * ppp;
+    if physical.x < 100.0 || physical.y < 100.0 {
+        return;
+    }
+    let native = ctx.native_pixels_per_point().unwrap_or(1.0).max(0.1);
+    let base = (physical.x / 1280.0).min(physical.y / 720.0);
+    let target = (base / native * multiplier).clamp(0.5, 4.0);
+    if (ctx.zoom_factor() - target).abs() > 0.005 {
+        ctx.set_zoom_factor(target);
+    }
+}
 
 pub fn apply(ctx: &egui::Context) {
     let mut visuals = egui::Visuals::dark();
@@ -75,19 +111,19 @@ pub fn apply(ctx: &egui::Context) {
         style.spacing.indent = 14.0;
         style
             .text_styles
-            .insert(TextStyle::Small, FontId::proportional(11.0));
+            .insert(TextStyle::Small, FontId::proportional(font_size(11.0)));
         style
             .text_styles
-            .insert(TextStyle::Body, FontId::proportional(14.0));
+            .insert(TextStyle::Body, FontId::proportional(font_size(14.0)));
         style
             .text_styles
-            .insert(TextStyle::Button, FontId::proportional(14.0));
+            .insert(TextStyle::Button, FontId::proportional(font_size(14.0)));
         style
             .text_styles
-            .insert(TextStyle::Heading, FontId::proportional(20.0));
+            .insert(TextStyle::Heading, FontId::proportional(font_size(20.0)));
         style
             .text_styles
-            .insert(TextStyle::Monospace, FontId::monospace(14.0));
+            .insert(TextStyle::Monospace, FontId::monospace(font_size(14.0)));
     });
 }
 
@@ -112,7 +148,12 @@ pub fn raised_card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 }
 
 pub fn section_header(ui: &mut Ui, title: &str) {
-    ui.label(RichText::new(title).size(12.0).strong().color(MUTED));
+    ui.label(
+        RichText::new(title)
+            .size(font_size(12.0))
+            .strong()
+            .color(MUTED),
+    );
 }
 
 pub fn mono(text: impl Into<String>, size: f32) -> RichText {
@@ -121,18 +162,20 @@ pub fn mono(text: impl Into<String>, size: f32) -> RichText {
 
 pub fn label_value(ui: &mut Ui, label: &str, value: impl Into<String>, size: f32) {
     ui.vertical(|ui| {
-        ui.label(RichText::new(label).size(11.0).color(MUTED));
+        ui.label(RichText::new(label).size(font_size(11.0)).color(MUTED));
         ui.label(mono(value, size));
     });
 }
 
 pub fn chip(ui: &mut Ui, text: impl Into<String>, active: bool) -> Response {
     let text = text.into();
-    let button = egui::Button::new(RichText::new(text).size(12.0).strong().color(if active {
-        Color32::from_rgb(0x0b, 0x17, 0x22)
-    } else {
-        FG
-    }))
+    let button = egui::Button::new(RichText::new(text).size(font_size(12.0)).strong().color(
+        if active {
+            Color32::from_rgb(0x0b, 0x17, 0x22)
+        } else {
+            FG
+        },
+    ))
     .fill(if active { ACCENT } else { PANEL_RAISED })
     .stroke(Stroke::new(1.0, if active { ACCENT } else { BORDER }))
     .corner_radius(CornerRadius::same(14))
@@ -141,21 +184,24 @@ pub fn chip(ui: &mut Ui, text: impl Into<String>, active: bool) -> Response {
 }
 
 pub fn keycap(ui: &mut Ui, label: &str, active: bool) -> Response {
-    let response = ui.add_sized(
-        [58.0, 32.0],
-        egui::Button::new(RichText::new(label).size(11.0).strong().color(if active {
-            Color32::from_rgb(0x0b, 0x17, 0x22)
-        } else {
-            FG
-        }))
-        .fill(if active {
-            ACCENT
-        } else {
-            Color32::from_rgb(0x24, 0x29, 0x2f)
-        })
-        .stroke(Stroke::new(1.0, if active { ACCENT } else { BORDER }))
-        .corner_radius(CornerRadius::same(4)),
-    );
+    let response =
+        ui.add_sized(
+            [58.0, 32.0],
+            egui::Button::new(RichText::new(label).size(font_size(11.0)).strong().color(
+                if active {
+                    Color32::from_rgb(0x0b, 0x17, 0x22)
+                } else {
+                    FG
+                },
+            ))
+            .fill(if active {
+                ACCENT
+            } else {
+                Color32::from_rgb(0x24, 0x29, 0x2f)
+            })
+            .stroke(Stroke::new(1.0, if active { ACCENT } else { BORDER }))
+            .corner_radius(CornerRadius::same(4)),
+        );
     focus_ring(ui, &response);
     response
 }
@@ -231,7 +277,7 @@ pub fn status_dot(ui: &mut Ui, color: Color32, text: &str) {
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
         ui.painter().circle_filled(rect.center(), 4.0, color);
-        ui.label(RichText::new(text).size(11.0).color(FG));
+        ui.label(RichText::new(text).size(font_size(11.0)).color(FG));
     });
 }
 
@@ -239,7 +285,7 @@ pub fn status_dot(ui: &mut Ui, color: Color32, text: &str) {
 pub fn meter(ui: &mut Ui, label: &str, value: f64, text: impl Into<String>, color: Color32) {
     let text = text.into();
     ui.horizontal(|ui| {
-        ui.label(RichText::new(label).size(11.0).color(MUTED));
+        ui.label(RichText::new(label).size(font_size(11.0)).color(MUTED));
         let width = (ui.available_width() - 74.0).max(60.0);
         let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 12.0), Sense::hover());
         let painter = ui.painter();
@@ -260,7 +306,12 @@ pub fn meter(ui: &mut Ui, label: &str, value: f64, text: impl Into<String>, colo
             Stroke::new(1.0, BORDER),
             StrokeKind::Inside,
         );
-        ui.label(RichText::new(text).monospace().size(11.0).color(FG));
+        ui.label(
+            RichText::new(text)
+                .monospace()
+                .size(font_size(11.0))
+                .color(FG),
+        );
     });
 }
 
@@ -291,7 +342,7 @@ pub fn vertical_meter(ui: &mut Ui, label: &str, value: f64, height: f32) -> Resp
         rect.center_bottom() + Vec2::new(0.0, 4.0),
         Align2::CENTER_TOP,
         label,
-        FontId::monospace(9.0),
+        FontId::monospace(font_size(9.0)),
         MUTED,
     );
     response
@@ -299,9 +350,14 @@ pub fn vertical_meter(ui: &mut Ui, label: &str, value: f64, height: f32) -> Resp
 
 pub fn kv_row(ui: &mut Ui, key: &str, value: impl Into<String>) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new(key).size(11.0).color(MUTED));
+        ui.label(RichText::new(key).size(font_size(11.0)).color(MUTED));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(value.into()).monospace().size(12.0).color(FG));
+            ui.label(
+                RichText::new(value.into())
+                    .monospace()
+                    .size(font_size(12.0))
+                    .color(FG),
+            );
         });
     });
 }

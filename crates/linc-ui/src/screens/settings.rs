@@ -49,21 +49,23 @@ fn display(app: &mut LincApp, ui: &mut Ui) {
                     );
                     ui.label(
                         RichText::new("Units come from the LinuxCNC INI and are read-only here.")
-                            .size(9.0)
+                            .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
                     ui.add_space(6.0);
                     theme::kv_row(ui, "CONFIG SCALE", app.profile.config.ui.scale.clone());
                     ui.label(
                         RichText::new("UI SCALE (runtime override)")
-                            .size(9.0)
+                            .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
+                    let mut scale = app.design_scale;
                     if ui
-                        .add(egui::Slider::new(&mut app.settings.density, 0.5..=2.0).text("scale"))
+                        .add(egui::Slider::new(&mut scale, 0.8..=1.5).text("scale"))
                         .changed()
                     {
-                        ui.ctx().set_zoom_factor(app.settings.density);
+                        app.design_scale = scale;
+                        app.settings.density = scale;
                     }
                     theme::kv_row(ui, "WINDOW", app.profile.config.ui.window_title.clone());
                     theme::kv_row(ui, "START PAGE", app.profile.config.ui.start_page.clone());
@@ -174,35 +176,44 @@ fn keyboard(app: &mut LincApp, ui: &mut Ui) {
             .spacing([18.0, 4.0])
             .show(ui, |ui| {
                 for header in ["KEYCAP", "USB / ACTION", "HMI ACTION"] {
-                    ui.label(RichText::new(header).size(9.0).strong().color(theme::MUTED));
+                    ui.label(
+                        RichText::new(header)
+                            .size(theme::font_size(9.0))
+                            .strong()
+                            .color(theme::MUTED),
+                    );
                 }
                 ui.end_row();
                 for (keycap, action, description) in rows {
                     ui.label(
                         RichText::new(keycap)
                             .monospace()
-                            .size(11.0)
+                            .size(theme::font_size(11.0))
                             .color(theme::C3),
                     );
                     ui.label(
                         RichText::new(action)
                             .monospace()
-                            .size(11.0)
+                            .size(theme::font_size(11.0))
                             .color(theme::FG),
                     );
-                    ui.label(RichText::new(description).size(10.0).color(theme::MUTED));
+                    ui.label(
+                        RichText::new(description)
+                            .size(theme::font_size(10.0))
+                            .color(theme::MUTED),
+                    );
                     ui.end_row();
                 }
             });
         ui.add_space(6.0);
         ui.label(
             RichText::new("Hard limits: no F1-F4, F9, F11, F12; no Tab, Shift or Delete. Letters arrive lowercase; G-code words display uppercase.")
-                .size(9.0)
+                .size(theme::font_size(9.0))
                 .color(theme::MUTED),
         );
         ui.label(
             RichText::new("On-screen actions are focusable with arrows/Enter and clickable with the MO(1) mouse layer.")
-                .size(9.0)
+                .size(theme::font_size(9.0))
                 .color(theme::MUTED),
         );
     });
@@ -228,15 +239,15 @@ fn machine(app: &mut LincApp, ui: &mut Ui) {
                         .striped(true)
                         .show(ui, |ui| {
                             for header in ["AXIS", "MIN", "MAX", "MAX VEL", "HOME SEQ"] {
-                                ui.label(RichText::new(header).size(9.0).strong().color(theme::MUTED));
+                                ui.label(RichText::new(header).size(theme::font_size(9.0)).strong().color(theme::MUTED));
                             }
                             ui.end_row();
                             for axis in &app.profile.machine_ini.axes {
                                 ui.label(RichText::new(&axis.name).monospace().color(theme::C3));
-                                ui.label(RichText::new(format!("{:.3}", axis.min_limit)).monospace().size(10.0));
-                                ui.label(RichText::new(format!("{:.3}", axis.max_limit)).monospace().size(10.0));
-                                ui.label(RichText::new(format!("{:.2}", axis.max_velocity)).monospace().size(10.0));
-                                ui.label(RichText::new(axis.home_sequence.to_string()).monospace().size(10.0));
+                                ui.label(RichText::new(format!("{:.3}", axis.min_limit)).monospace().size(theme::font_size(10.0)));
+                                ui.label(RichText::new(format!("{:.3}", axis.max_limit)).monospace().size(theme::font_size(10.0)));
+                                ui.label(RichText::new(format!("{:.2}", axis.max_velocity)).monospace().size(theme::font_size(10.0)));
+                                ui.label(RichText::new(axis.home_sequence.to_string()).monospace().size(theme::font_size(10.0)));
                                 ui.end_row();
                             }
                         });
@@ -259,8 +270,8 @@ fn machine(app: &mut LincApp, ui: &mut Ui) {
                 });
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "CONFIGURATION RULES");
-                    ui.label(RichText::new("The INI remains authoritative for travel, velocities, units, spindle/ATC data, tool table and program prefix. The HMI refuses to start without an explicit profile.").size(10.0).color(theme::MUTED));
-                    ui.label(RichText::new("Unknown profile keys are errors; arrays replace; safety flags cannot be weakened.").size(10.0).color(theme::MUTED));
+                    ui.label(RichText::new("The INI remains authoritative for travel, velocities, units, spindle/ATC data, tool table and program prefix. The HMI refuses to start without an explicit profile.").size(theme::font_size(10.0)).color(theme::MUTED));
+                    ui.label(RichText::new("Unknown profile keys are errors; arrays replace; safety flags cannot be weakened.").size(theme::font_size(10.0)).color(theme::MUTED));
                 });
             },
         );
@@ -300,7 +311,7 @@ fn panel(app: &mut LincApp, ui: &mut Ui) {
                     for output in &app.profile.config.hal.allowed_outputs {
                         theme::kv_row(ui, "ALLOWED", format!("{}{output}", app.profile.config.hal.output_prefix));
                     }
-                    ui.label(RichText::new("The HMI never opens the panel serial port and never writes arbitrary cnc_panel.* or machine-motion pins.").size(9.0).color(theme::MUTED));
+                    ui.label(RichText::new("The HMI never opens the panel serial port and never writes arbitrary cnc_panel.* or machine-motion pins.").size(theme::font_size(9.0)).color(theme::MUTED));
                 });
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "PENDANT");
@@ -321,8 +332,8 @@ fn about(app: &mut LincApp, ui: &mut Ui) {
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 theme::card(ui, |ui| {
-                    ui.label(RichText::new("LiNC").size(28.0).strong().color(theme::FG));
-                    ui.label(RichText::new("Rust egui HMI for LinuxCNC").size(13.0).color(theme::MUTED));
+                    ui.label(RichText::new("LiNC").size(theme::font_size(28.0)).strong().color(theme::FG));
+                    ui.label(RichText::new("Rust egui HMI for LinuxCNC").size(theme::font_size(13.0)).color(theme::MUTED));
                     ui.add_space(8.0);
                     theme::kv_row(ui, "VERSION", env!("CARGO_PKG_VERSION").to_string());
                     theme::kv_row(ui, "PROFILE", app.profile.config.profile.clone());
@@ -331,7 +342,7 @@ fn about(app: &mut LincApp, ui: &mut Ui) {
                     theme::kv_row(ui, "SIMULATION", app.is_sim().to_string());
                     theme::kv_row(ui, "BACKEND", app.profile.config.backend.kind.clone());
                     theme::kv_row(ui, "TRANSPORT", app.profile.config.backend.transport.clone());
-                    ui.label(RichText::new("The hardware E-stop chain is the only safety-rated stop. The HMI is outside the safety path.").size(9.0).color(theme::MUTED));
+                    ui.label(RichText::new("The hardware E-stop chain is the only safety-rated stop. The HMI is outside the safety path.").size(theme::font_size(9.0)).color(theme::MUTED));
                 });
             },
         );
@@ -342,9 +353,9 @@ fn about(app: &mut LincApp, ui: &mut Ui) {
             |ui| {
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "SUPPORT");
-                    ui.label(RichText::new("G-code Help is bundled offline with LinuxCNC documentation attribution.").size(10.0).color(theme::MUTED));
-                    ui.label(RichText::new("Diagnostics exposes panel link, NML, motion, I/O and event history without machine controls.").size(10.0).color(theme::MUTED));
-                    ui.label(RichText::new("Manual modes and homing are read-only; all motion input stays on the physical panel.").size(10.0).color(theme::MUTED));
+                    ui.label(RichText::new("G-code Help is bundled offline with LinuxCNC documentation attribution.").size(theme::font_size(10.0)).color(theme::MUTED));
+                    ui.label(RichText::new("Diagnostics exposes panel link, NML, motion, I/O and event history without machine controls.").size(theme::font_size(10.0)).color(theme::MUTED));
+                    ui.label(RichText::new("Manual modes and homing are read-only; all motion input stays on the physical panel.").size(theme::font_size(10.0)).color(theme::MUTED));
                 });
             },
         );

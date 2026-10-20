@@ -33,7 +33,7 @@ pub fn token_ui(ui: &mut Ui, text: &str, size: f32) {
         for token in lex_line(text) {
             let mut rich = RichText::new(token.display())
                 .monospace()
-                .size(size)
+                .size(theme::font_size(size))
                 .color(token_color(token.kind));
             if token.kind == TokenKind::Comment {
                 rich = rich.italics();
@@ -49,14 +49,14 @@ pub fn current_next_cards(app: &LincApp, ui: &mut Ui) {
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new("CURRENT")
-                        .size(10.0)
+                        .size(theme::font_size(10.0))
                         .strong()
                         .color(theme::ACCENT),
                 );
                 ui.label(
                     RichText::new(format!("LN {}", app.snapshot.program.current_line))
                         .monospace()
-                        .size(10.0)
+                        .size(theme::font_size(10.0))
                         .color(theme::MUTED),
                 );
             });
@@ -72,7 +72,7 @@ pub fn current_next_cards(app: &LincApp, ui: &mut Ui) {
         theme::card(&mut columns[1], |ui| {
             ui.label(
                 RichText::new("NEXT")
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .strong()
                     .color(theme::MUTED),
             );
@@ -90,7 +90,7 @@ pub fn modal_summary(app: &LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
         ui.label(
             RichText::new("MODAL")
-                .size(10.0)
+                .size(theme::font_size(10.0))
                 .strong()
                 .color(theme::MUTED),
         );
@@ -103,7 +103,7 @@ pub fn modal_summary(app: &LincApp, ui: &mut Ui) {
                     ui.label(
                         RichText::new(format!("{key} {value}"))
                             .monospace()
-                            .size(11.0)
+                            .size(theme::font_size(11.0))
                             .color(theme::FG),
                     );
                 }
@@ -119,7 +119,7 @@ pub fn axis_cards(app: &LincApp, ui: &mut Ui) {
     let gap = 8.0;
     let width =
         ((ui.available_width() - gap * (count.saturating_sub(1)) as f32) / count as f32).max(120.0);
-    let height = if compact { 82.0 } else { 108.0 };
+    let height = if compact { 76.0 } else { 96.0 };
     let mut rects = Vec::new();
     ui.horizontal_top(|ui| {
         for axis in axes.iter().take(count) {
@@ -165,7 +165,7 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
         rect.left_top() + Vec2::new(14.0, 12.0),
         egui::Align2::LEFT_TOP,
         axis,
-        FontId::proportional(15.0),
+        FontId::proportional(theme::font_size(15.0)),
         theme::C3,
     );
     if active {
@@ -173,7 +173,7 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
             rect.left_top() + Vec2::new(38.0, 14.0),
             egui::Align2::LEFT_TOP,
             "ACTIVE",
-            FontId::monospace(8.5),
+            FontId::monospace(theme::font_size(8.5)),
             theme::ACCENT,
         );
     }
@@ -181,7 +181,7 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
         rect.right_top() + Vec2::new(-14.0, 12.0),
         egui::Align2::RIGHT_TOP,
         if homed { "HOMED" } else { "NOT HOMED" },
-        FontId::monospace(9.0),
+        FontId::monospace(theme::font_size(9.0)),
         if homed {
             theme::SUCCESS
         } else {
@@ -199,14 +199,14 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
         rect.left_bottom() + Vec2::new(14.0, -12.0),
         egui::Align2::LEFT_BOTTOM,
         format!("M {machine:+.3}"),
-        FontId::monospace(9.5),
+        FontId::monospace(theme::font_size(9.5)),
         theme::MUTED,
     );
     painter.text(
         rect.right_bottom() + Vec2::new(-14.0, -12.0),
         egui::Align2::RIGHT_BOTTOM,
         format!("DTG {dtg:.3}"),
-        FontId::monospace(9.5),
+        FontId::monospace(theme::font_size(9.5)),
         theme::MUTED,
     );
 }
@@ -281,7 +281,7 @@ pub fn alarm_card(app: &LincApp, ui: &mut Ui, height: f32) {
                         app.snapshot.message_count()
                     ))
                     .monospace()
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .color(theme::MUTED),
                 );
             });
@@ -290,7 +290,7 @@ pub fn alarm_card(app: &LincApp, ui: &mut Ui, height: f32) {
             ui.label(
                 RichText::new("NO ACTIVE ALARMS")
                     .monospace()
-                    .size(12.0)
+                    .size(theme::font_size(12.0))
                     .color(theme::SUCCESS),
             );
         } else {
@@ -309,22 +309,26 @@ pub fn alarm_card(app: &LincApp, ui: &mut Ui, height: f32) {
                             ui.label(
                                 RichText::new(format_clock(alarm.timestamp_ms))
                                     .monospace()
-                                    .size(10.0)
+                                    .size(theme::font_size(10.0))
                                     .color(theme::MUTED),
                             );
                             ui.label(
                                 RichText::new(alarm.severity.label())
                                     .monospace()
-                                    .size(9.0)
+                                    .size(theme::font_size(9.0))
                                     .color(color),
                             );
-                            ui.label(RichText::new(&alarm.message).size(11.0).color(
-                                if alarm.severity == linc_core::model::AlarmSeverity::Info {
-                                    theme::MUTED
-                                } else {
-                                    color
-                                },
-                            ));
+                            ui.label(
+                                RichText::new(&alarm.message)
+                                    .size(theme::font_size(11.0))
+                                    .color(
+                                        if alarm.severity == linc_core::model::AlarmSeverity::Info {
+                                            theme::MUTED
+                                        } else {
+                                            color
+                                        },
+                                    ),
+                            );
                         });
                     }
                 });
@@ -351,7 +355,7 @@ pub fn program_card(app: &LincApp, ui: &mut Ui) {
                         0,
                     ))
                     .monospace()
-                    .size(10.0)
+                    .size(theme::font_size(10.0))
                     .color(theme::MUTED),
                 );
             });
@@ -361,7 +365,12 @@ pub fn program_card(app: &LincApp, ui: &mut Ui) {
         } else {
             app.snapshot.program.display_name.clone()
         };
-        ui.label(RichText::new(name).monospace().size(13.0).color(theme::FG));
+        ui.label(
+            RichText::new(name)
+                .monospace()
+                .size(theme::font_size(13.0))
+                .color(theme::FG),
+        );
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(format!(
@@ -371,7 +380,7 @@ pub fn program_card(app: &LincApp, ui: &mut Ui) {
                     app.snapshot.program.progress * 100.0
                 ))
                 .monospace()
-                .size(10.0)
+                .size(theme::font_size(10.0))
                 .color(theme::MUTED),
             );
             ui.label(
@@ -381,7 +390,7 @@ pub fn program_card(app: &LincApp, ui: &mut Ui) {
                     "STOP"
                 })
                 .monospace()
-                .size(10.0)
+                .size(theme::font_size(10.0))
                 .color(if app.snapshot.task.running {
                     theme::SUCCESS
                 } else {
@@ -391,18 +400,26 @@ pub fn program_card(app: &LincApp, ui: &mut Ui) {
         });
         token_ui(ui, &truncate(&app.snapshot.program.current_block, 44), 12.0);
         if let Some(next) = &app.snapshot.program.next_line {
-            ui.label(RichText::new("NEXT").size(9.0).color(theme::MUTED));
+            ui.label(
+                RichText::new("NEXT")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
             token_ui(ui, &truncate(next, 44), 11.0);
         }
         if !app.snapshot.program.modal.is_empty() {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                ui.label(RichText::new("MODAL").size(8.5).color(theme::MUTED));
+                ui.label(
+                    RichText::new("MODAL")
+                        .size(theme::font_size(8.5))
+                        .color(theme::MUTED),
+                );
                 for (key, value) in app.snapshot.program.modal.iter().take(6) {
                     ui.label(
                         RichText::new(format!("{key}{value}"))
                             .monospace()
-                            .size(9.0)
+                            .size(theme::font_size(9.0))
                             .color(theme::FG),
                     );
                 }
@@ -427,7 +444,7 @@ pub fn feed_spindle_card(app: &LincApp, ui: &mut Ui) {
                 app.snapshot.feed.feed, app.snapshot.feed.units
             ))
             .monospace()
-            .size(10.0)
+            .size(theme::font_size(10.0))
             .color(theme::MUTED),
         );
         for spindle in app.snapshot.spindles.iter().take(2) {
@@ -446,7 +463,7 @@ pub fn feed_spindle_card(app: &LincApp, ui: &mut Ui) {
                     spindle.override_factor * 100.0
                 ))
                 .monospace()
-                .size(10.0)
+                .size(theme::font_size(10.0))
                 .color(theme::MUTED),
             );
         }
@@ -525,10 +542,26 @@ pub fn positions_table(app: &LincApp, ui: &mut Ui) {
             .num_columns(4)
             .spacing([16.0, 4.0])
             .show(ui, |ui| {
-                ui.label(RichText::new("AXIS").size(9.0).color(theme::MUTED));
-                ui.label(RichText::new("WORK").size(9.0).color(theme::MUTED));
-                ui.label(RichText::new("MACHINE").size(9.0).color(theme::MUTED));
-                ui.label(RichText::new("DTG").size(9.0).color(theme::MUTED));
+                ui.label(
+                    RichText::new("AXIS")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new("WORK")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new("MACHINE")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new("DTG")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
                 ui.end_row();
                 for axis in app.axes() {
                     let position = app.snapshot.positions.axes.get(&axis);
@@ -615,8 +648,32 @@ pub fn work_positions(app: &LincApp) -> AxisMap<f64> {
 pub fn page_header(ui: &mut Ui, title: &str, subtitle: &str) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
-            ui.label(RichText::new(title).size(24.0).strong().color(theme::FG));
-            ui.label(RichText::new(subtitle).size(11.0).color(theme::MUTED));
+            let title_response = ui.label(
+                RichText::new(title)
+                    .size(theme::font_size(24.0))
+                    .strong()
+                    .color(theme::FG),
+            );
+            let title_focus = ui.interact(
+                title_response.rect,
+                ui.scope_id().with("page-title-focus"),
+                Sense::focusable_noninteractive(),
+            );
+            let requested = ui.ctx().data_mut(|data| {
+                data.remove_temp::<bool>(egui::Id::unique("linc-page-focus"))
+                    .unwrap_or(false)
+            });
+            if requested {
+                title_focus.request_focus();
+            }
+            if title_focus.has_focus() {
+                theme::focus_ring(ui, &title_focus);
+            }
+            ui.label(
+                RichText::new(subtitle)
+                    .size(theme::font_size(11.0))
+                    .color(theme::MUTED),
+            );
         });
     });
     ui.add_space(4.0);
@@ -640,7 +697,12 @@ pub fn panel_mode_is(app: &LincApp, mode: PanelMode) -> bool {
 }
 
 pub fn nav_badge(ui: &mut Ui, text: &str, color: Color32) {
-    ui.label(RichText::new(text).monospace().size(10.0).color(color));
+    ui.label(
+        RichText::new(text)
+            .monospace()
+            .size(theme::font_size(10.0))
+            .color(color),
+    );
 }
 
 pub fn file_size(size: u64) -> String {
@@ -648,7 +710,11 @@ pub fn file_size(size: u64) -> String {
 }
 
 pub fn read_only_hint(ui: &mut Ui, reason: &str) {
-    ui.label(RichText::new(reason).size(10.0).color(theme::WARNING));
+    ui.label(
+        RichText::new(reason)
+            .size(theme::font_size(10.0))
+            .color(theme::WARNING),
+    );
 }
 
 pub fn snapshot_axes(snapshot: &MachineSnapshot) -> Vec<String> {
@@ -665,7 +731,11 @@ pub fn centered_notice(ui: &mut Ui, text: &str, color: Color32) {
         Vec2::new(ui.available_width(), 120.0),
         Layout::centered_and_justified(egui::Direction::TopDown),
         |ui| {
-            ui.label(RichText::new(text).size(14.0).color(color));
+            ui.label(
+                RichText::new(text)
+                    .size(theme::font_size(14.0))
+                    .color(color),
+            );
         },
     );
 }
@@ -676,11 +746,16 @@ pub fn small_meter_row(ui: &mut Ui, label: &str, fraction: f64, text: &str) {
 
 pub fn page_tab(ui: &mut Ui, label: &str, active: bool) -> egui::Response {
     let response = ui.add(
-        egui::Button::new(RichText::new(label).size(11.0).strong().color(if active {
-            Color32::from_rgb(0x0b, 0x17, 0x22)
-        } else {
-            theme::FG
-        }))
+        egui::Button::new(
+            RichText::new(label)
+                .size(theme::font_size(11.0))
+                .strong()
+                .color(if active {
+                    Color32::from_rgb(0x0b, 0x17, 0x22)
+                } else {
+                    theme::FG
+                }),
+        )
         .fill(if active { theme::ACCENT } else { theme::PANEL })
         .stroke(egui::Stroke::new(
             1.0,
@@ -694,15 +769,23 @@ pub fn page_tab(ui: &mut Ui, label: &str, active: bool) -> egui::Response {
 
 pub fn big_position(ui: &mut Ui, label: &str, value: f64, unit: &str) {
     ui.vertical(|ui| {
-        ui.label(RichText::new(label).size(10.0).color(theme::MUTED));
+        ui.label(
+            RichText::new(label)
+                .size(theme::font_size(10.0))
+                .color(theme::MUTED),
+        );
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(crate::theme::format_position(value, 3))
                     .monospace()
-                    .size(30.0)
+                    .size(theme::font_size(30.0))
                     .color(theme::FG),
             );
-            ui.label(RichText::new(unit).size(11.0).color(theme::MUTED));
+            ui.label(
+                RichText::new(unit)
+                    .size(theme::font_size(11.0))
+                    .color(theme::MUTED),
+            );
         });
     });
 }
@@ -712,7 +795,11 @@ pub fn goto_page(app: &mut LincApp, page: Page) {
 }
 
 pub fn mode_page_hint(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).size(10.0).color(theme::MUTED));
+    ui.label(
+        RichText::new(text)
+            .size(theme::font_size(10.0))
+            .color(theme::MUTED),
+    );
 }
 
 pub fn font_mono(size: f32) -> FontId {
