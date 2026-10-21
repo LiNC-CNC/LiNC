@@ -1,7 +1,9 @@
 //! Program page: SPLIT and CODE layouts, editable G-code, syntax-gated
 //! preview and live/program toolpath layers.
 
-use egui::{text::LayoutJob, Align, Color32, FontId, RichText, TextFormat, Ui, Vec2};
+use std::sync::Arc;
+
+use egui::{text::LayoutJob, Align, Color32, FontId, Galley, RichText, TextFormat, Ui, Vec2};
 use linc_core::gcode::{lex_line, TokenKind};
 use linc_core::model::{PanelMode, SyntaxIssue};
 
@@ -516,10 +518,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
     let syntax_error_line = app.program.preview.error.as_ref().map(|error| error.line);
     let line_count = app.program.editor.line_count();
     let desired_rows = line_count.max(12);
-    let numbers: String = (1..=line_count)
-        .map(|index| format!("{index:>4}"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let numbers: String = number_gutter(ui, line_count);
     let offset = if app.snapshot.task.running || app.program.code_scroll_to_line.is_some() {
         let target = app
             .program
@@ -550,7 +549,29 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             );
             ui.separator();
             let available = (ui.available_width() - 12.0).max(240.0);
+            // Lexing and laying out the whole buffer every frame is the most
+            // expensive thing the UI does. Cache the galley on the editor
+            // revision plus the highlight inputs, so a still buffer is laid
+            // out once (SPEC §7.3 "cache tokens by buffer revision", §10
+            // "cache text layout and visible-line tokens").
             let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
+                let key: GalleyKey = (
+                    app.program.editor.revision,
+                    current_line,
+                    syntax_error_line,
+                    search.clone(),
+                    matches.clone(),
+                    wrap_width.to_bits(),
+                    buffer.as_str().len(),
+                );
+                let cache_id = egui::Id::unique("linc-editor-galley");
+                if let Some((cached, galley)) =
+                    ui.ctx().data(|data| data.get_temp::<(GalleyKey, Arc<Galley>)>(cache_id))
+                {
+                    if cached == key {
+                        return galley;
+                    }
+                }
                 let mut job = highlight_job(
                     buffer.as_str(),
                     current_line,
@@ -559,7 +580,10 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     &matches,
                 );
                 job.wrap.max_width = wrap_width;
-                ui.fonts_mut(|fonts| fonts.layout_job(job))
+                let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(cache_id, (key, galley.clone())));
+                galley
             };
             let output = egui::TextEdit::multiline(&mut text)
                 .font(FontId::monospace(editor_font()))
@@ -592,6 +616,29 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             let _ = wrap_width_unused();
         });
     });
+}
+
+/// Cache key for the editor galley: editor revision, highlight inputs, wrap
+/// width and buffer length.
+type GalleyKey = (u64, usize, Option<usize>, String, Vec<usize>, u32, usize);
+
+/// The line-number gutter only changes when the line count does.
+fn number_gutter(ui: &egui::Ui, line_count: usize) -> String {
+    let cache_id = egui::Id::unique("linc-editor-gutter");
+    if let Some((cached, text)) =
+        ui.ctx().data(|data| data.get_temp::<(usize, String)>(cache_id))
+    {
+        if cached == line_count {
+            return text;
+        }
+    }
+    let text: String = (1..=line_count)
+        .map(|index| format!("{index:>4}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(cache_id, (line_count, text.clone())));
+    text
 }
 
 fn wrap_width_unused() -> f32 {
