@@ -104,7 +104,7 @@ else, so it cannot shadow another page's command.
 
 | Page | Keys |
 |---|---|
-| Program | `Ctrl+S` save, `Ctrl+F` find, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE` |
+| Program | `Ctrl+S` save, `Ctrl+F` find, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
 | Files | `Ctrl+R` refresh, `Enter` open, `Backspace` up a folder |
 | MDI | `Enter` issue, `Up`/`Down` history, `Esc` clear the unissued block |
 | Help | `/` focus search, `Backspace` back through link history |
@@ -410,16 +410,36 @@ Two layouts, selected by the header toggle or `FILE`:
   separate colors; `CLEAR TRAIL` clears only the live trail.
 - Live-tool paths use a distinct stroke from turning/rapid moves.
 - Current line synchronized with the graph.
-- Current/next block and modal summary below the editor.
+- Current/next block below the editor; `MODAL` is its own pane under the
+  toolpath, using the same abbreviated cells as the Machine dashboard.
+- `FIT` (`Ctrl+0`) reframes the toolpath and `CLEAR TRAIL` (`Ctrl+L`) clears
+  only the live trail; both are page-local commands, not buttons.
 
 #### CODE
 
 - G-code editor dominant (~80%).
-- Mini XY graph top-right.
-- Program info card below the mini graph: cursor/current block, next block,
-  modal summary, buffer state and line count.
+- Mini XY graph top-right, without the colour legend: it covers most of a
+  thumbnail that small.
+- `MODAL` pane below the mini graph, then the program info card: cursor/current
+  block, next block, buffer state, line count and preview state.
 - Current line synchronized with the mini graph.
 - The CODE layout is reused for editing; there is no separate editor window.
+
+#### RUN FROM LINE
+
+`RUN FROM LINE` starts the loaded program at the selected line. A line number is
+the one program-start input the panel cannot supply, so this is the only program
+start the HMI issues.
+
+- Runs only when the program is loaded, the interpreter is idle, the machine is
+  ON, no E-stop is latched, every axis is homed, the panel state is current and
+  the panel is in `AUTO`. The panel therefore remains the authority over whether
+  the machine may run; the button carries the blocking reason as its tooltip.
+- A confirmation names the line and its block, and states that the lines before
+  it are skipped — work and tool offsets, feed, spindle and coolant are not
+  restored — and that motion starts from the current position.
+- The bridge requires an idle interpreter because `AUTO_RUN` on a paused program
+  would resume it rather than start at the line.
 
 #### EDIT state
 
