@@ -1581,6 +1581,7 @@ impl LincApp {
                     .inner_margin(Margin::symmetric(16, 8)),
             )
             .show(ui, |ui| self.top_bar(ui));
+        self.messages_strip(ui);
         egui::containers::Panel::bottom("linc-bottom")
             .exact_size(theme::BOTTOM_BAR_HEIGHT)
             .frame(
@@ -1976,6 +1977,63 @@ impl LincApp {
         // (F5-F10), ESC and Ctrl+Q are implicit: they are printed on the panel
         // and in the left navigation, so repeating them here wastes the row.
         hints
+    }
+
+    /// Controller messages, one line above the hint row.
+    ///
+    /// The controller is the only thing that reports why a program stopped, and
+    /// those messages used to live only on the Machine page. The newest few are
+    /// shown on every page, newest first, coloured by severity; the row
+    /// disappears when the controller has said nothing.
+    fn messages_strip(&self, ui: &mut egui::Ui) {
+        if self.snapshot.alarms.is_empty() {
+            return;
+        }
+        let size = theme::font_size(9.5);
+        let errors = self
+            .snapshot
+            .alarms
+            .iter()
+            .filter(|alarm| {
+                matches!(
+                    alarm.severity,
+                    linc_core::model::AlarmSeverity::Error
+                        | linc_core::model::AlarmSeverity::Critical
+                )
+            })
+            .count();
+        egui::containers::Panel::bottom("linc-messages")
+            .exact_size(20.0)
+            .frame(
+                Frame::new()
+                    .fill(theme::PANEL)
+                    .inner_margin(Margin::symmetric(16, 2)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(if errors > 0 {
+                            format!("MESSAGES · {errors} ERROR")
+                        } else {
+                            "MESSAGES".to_string()
+                        })
+                        .size(size)
+                        .strong()
+                        .color(if errors > 0 { theme::ERROR } else { theme::MUTED }),
+                    );
+                    ui.add_space(8.0);
+                    for alarm in self.snapshot.alarms.iter().take(3) {
+                        let colour = match alarm.severity {
+                            linc_core::model::AlarmSeverity::Critical
+                            | linc_core::model::AlarmSeverity::Error => theme::ERROR,
+                            linc_core::model::AlarmSeverity::Warning => theme::WARNING,
+                            linc_core::model::AlarmSeverity::Info => theme::MUTED,
+                        };
+                        ui.label(RichText::new(&alarm.message).size(size).color(colour));
+                        ui.add_space(12.0);
+                    }
+                });
+            });
     }
 
     /// Bottom bar: keyboard commands on the left, read-only machine status on

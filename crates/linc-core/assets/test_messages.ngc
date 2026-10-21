@@ -1,0 +1,15 @@
+(LiNC message-reporting test - messages, not motion)
+(Every (MSG,) and (DEBUG,) line posts a controller message;)
+(the GUI must show each one with its severity and time.)
+%
+O2001
+G21 G90 G54 G17 G40 G49 G80
+(MSG, LiNC test: program start)
+(DEBUG, LiNC test: a debug line)
+G0 Z0
+(MSG, LiNC test: after the first move)
+(DEBUG, LiNC test: a second debug line)
+G0 Z1
+(MSG, LiNC test: about to finish)
+M2
+%
