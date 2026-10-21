@@ -120,7 +120,9 @@ pub fn shell_card<R>(ui: &mut Ui, rect: egui::Rect, add: impl FnOnce(&mut Ui) ->
             .max_rect(rect)
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
-    child.set_clip_rect(rect);
+    // Slightly larger than the rect: the frame's 1 px stroke sits on the rect's
+    // edge, and clipping exactly there cut the bottom border off.
+    child.set_clip_rect(rect.expand(1.5));
     let inner = Vec2::new(
         (rect.width() - 8.0).max(20.0),
         (rect.height() - 8.0).max(10.0),

@@ -39,10 +39,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 
 fn split(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
-    // Leave a gap above the hint row so the card borders are not flush with it.
-    let height = (available.y - 12.0).max(220.0);
-    let half = ((available.x - 8.0) * 0.5).max(300.0);
     let top = ui.cursor().top();
+    // Reach to the bottom of the page less a small gap: `available_size` stops
+    // short of it, which left the cards ending well above the hint row.
+    let height = (ui.max_rect().bottom() - top - 10.0).max(220.0);
+    let half = ((available.x - 8.0) * 0.5).max(300.0);
     let left_rect =
         egui::Rect::from_min_size(egui::pos2(ui.cursor().left(), top), Vec2::new(half, height));
     let right_rect = egui::Rect::from_min_size(
@@ -82,7 +83,7 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
 
 fn code(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
-    let height = (available.y - 12.0).max(220.0);
+    let height = (ui.max_rect().bottom() - ui.cursor().top() - 10.0).max(220.0);
     // CODE is an editing layout: the code gets the width, and the graph column
     // is a thumbnail strip beside it.
     let editor_width = (available.x * 0.76).max(520.0);
