@@ -48,8 +48,28 @@ struct Args {
     fullscreen: bool,
 }
 
+/// Install logging. `RUST_LOG` wins; without it LiNC's own crates log at info
+/// and everything else at warn.
+///
+/// The D-Bus stack (zbus, reached through the UDisks2 USB support) is held at
+/// warn even when `RUST_LOG` says info: at info it logs every message, every
+/// socket read and every property-cache refresh — thousands of records per
+/// start, which buries LiNC's own lines. A directive that names the noisy
+/// target itself, e.g. `RUST_LOG=zbus::connection=trace`, still wins because
+/// the most specific target matches.
+fn init_logging() {
+    let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(
+        "warn,linc_app=info,linc_core=info,linc_ui=info,linc_view=info,\
+         linc_hal=info,linc_panel=info,linc_linuxcnc=info",
+    ));
+    for target in ["zbus", "zbus_macros", "zbus_xdg", "udisks2", "tracing"] {
+        builder.filter_module(target, log::LevelFilter::Warn);
+    }
+    builder.init();
+}
+
 fn main() -> Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    init_logging();
     let args = parse_args();
     let config_path = args
         .config

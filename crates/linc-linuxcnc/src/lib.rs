@@ -424,7 +424,15 @@ impl PythonBridgeBackend {
                 .name("linc-linuxcnc-stderr".into())
                 .spawn(move || {
                     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                        log::warn!("linuxcnc bridge: {line}");
+                        // The helper's stderr carries both routine reports and
+                        // failures. Logging everything at warn made a normal
+                        // startup ("the file has X, the controller Y") look like
+                        // an error on the console.
+                        if bridge_line_is_failure(&line) {
+                            log::warn!("linuxcnc bridge: {line}");
+                        } else {
+                            log::info!("linuxcnc bridge: {line}");
+                        }
                     }
                 })
                 .ok();
@@ -1749,6 +1757,44 @@ fn profile_capabilities(profile: &Profile) -> PanelCapabilities {
             .kind
             .clone()
             .unwrap_or_else(|| "hal".into()),
+    }
+}
+
+/// Does a helper stderr line report a failure (as opposed to a routine report)?
+fn bridge_line_is_failure(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    [
+        "error",
+        "failed",
+        "cannot",
+        "could not",
+        "refused",
+        "mismatch",
+        "not available",
+        "will not persist",
+        "no [rs274ngc]",
+    ]
+        .iter()
+        .any(|needle| lower.contains(needle))
+}
+
+#[cfg(test)]
+mod bridge_log_tests {
+    use super::bridge_line_is_failure;
+
+    #[test]
+    fn routine_reports_are_not_failures() {
+        assert!(!bridge_line_is_failure(
+            "linc bridge: G54 X file -11.1000, controller not applied yet 0.0000 (/x/sim.var)"
+        ));
+        assert!(!bridge_line_is_failure("linc bridge: applied the stored G54 offsets"));
+    }
+
+    #[test]
+    fn real_failures_stay_warnings() {
+        assert!(bridge_line_is_failure("linc bridge: could not apply stored G54 offsets"));
+        assert!(bridge_line_is_failure("linc bridge: G54 -> controller ... (mismatch)"));
+        assert!(bridge_line_is_failure("no [RS274NGC] PARAMETER_FILE in '/x/sim.ini'"));
     }
 }
 
