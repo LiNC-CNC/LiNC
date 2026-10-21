@@ -855,11 +855,15 @@ pub fn page_header(ui: &mut Ui, title: &str, subtitle: &str) {
             if title_focus.has_focus() {
                 theme::focus_ring(ui, &title_focus);
             }
-            ui.label(
-                RichText::new(subtitle)
-                    .size(theme::font_size(11.0))
-                    .color(theme::MUTED),
-            );
+            // A page with nothing to say gets no subtitle line at all; drawing
+            // an empty label still costs a row of vertical space.
+            if !subtitle.is_empty() {
+                ui.label(
+                    RichText::new(subtitle)
+                        .size(theme::font_size(11.0))
+                        .color(theme::MUTED),
+                );
+            }
         });
     });
     ui.add_space(4.0);

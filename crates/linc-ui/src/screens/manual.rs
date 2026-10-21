@@ -19,11 +19,8 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         .mode()
         .filter(|mode| mode.is_manual());
     let mode_label = mode.map(|mode| mode.label()).unwrap_or("UNKNOWN");
-    common::page_header(
-        ui,
-        "MANUAL",
-        "JOG / INC / MPG share this read-only screen. Input stays on the physical panel.",
-    );
+    // No page title: `live_mode_header` already names the mode, and a heading
+    // above it only costs vertical space.
     common::live_mode_header(
         ui,
         mode_label,

@@ -16,20 +16,8 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     let mode = app.snapshot.panel.mode.mode();
     let program_zero = mode == Some(PanelMode::ProgHome);
     let on_screen = matches!(mode, Some(PanelMode::Home) | Some(PanelMode::ProgHome));
-    let title = if program_zero {
-        "PROGRAM ZERO"
-    } else {
-        "HOMING"
-    };
-    common::page_header(
-        ui,
-        title,
-        if program_zero {
-            "PROG.HOME moves X/Y/Z to zero in the current WCS. Panel keys only; the HMI never issues home."
-        } else {
-            "HOME mode is panel-only. The HMI observes sequence and state; it never homes an axis."
-        },
-    );
+    // No page title or subtitle: `live_mode_header` names the mode and the
+    // context card explains what the keys do.
     if !on_screen {
         theme::banner(
             ui,
