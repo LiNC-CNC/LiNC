@@ -1182,9 +1182,13 @@ impl LincApp {
     }
 
     pub fn handle_keyboard(&mut self, ui: &mut egui::Ui) {
-        // The G-code editor keeps the cursor keys while it holds the keyboard.
-        let text_focused =
-            ui.memory(|memory| memory.has_focus(egui::Id::unique("linc-program-editor")));
+        // A text field keeps Home, End and the page keys while it holds the
+        // keyboard; they are cursor movement there and focus navigation here.
+        // Add every text field that can hold focus to this list.
+        let text_focused = ui.memory(|memory| {
+            memory.has_focus(egui::Id::unique("linc-program-editor"))
+                || memory.has_focus(egui::Id::unique("linc-tool-cell"))
+        });
         let mut nav_page = None;
         let mut escape = false;
         let mut quit = false;

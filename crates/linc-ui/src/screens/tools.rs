@@ -264,7 +264,10 @@ fn format_cell(text: &str) -> String {
 
 fn cell_text(draft: &ToolDraft, entry: &linc_core::model::ToolRow, cell: Cell) -> String {
     match cell {
-        Cell::Tool => format!("T{}", entry.tool),
+        Cell::Tool => {
+            let _ = entry;
+            draft.tool.clone()
+        }
         Cell::Description => draft.description.clone(),
         Cell::Kind => {
             if entry.kind.is_empty() {
@@ -287,7 +290,8 @@ fn cell_text(draft: &ToolDraft, entry: &linc_core::model::ToolRow, cell: Cell) -
 /// The draft field a cell edits, if it edits one.
 fn cell_field(draft: &mut ToolDraft, cell: Cell) -> Option<&mut String> {
     match cell {
-        Cell::Tool | Cell::Kind => None,
+        Cell::Tool => Some(&mut draft.tool),
+        Cell::Kind => None,
         Cell::Description => Some(&mut draft.description),
         Cell::Number(field) => Some(match field {
             Field::Axis(axis) => draft.axes.entry(axis.to_string()).or_default(),
@@ -486,6 +490,10 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                     body.rows(ROW_HEIGHT, rows.len(), |mut row| {
                         let index = row.index();
                         let entry = rows[index].clone();
+                        // `TableRow::response` may only be called after a cell
+                        // exists, so the row's geometry is taken from the cells.
+                        let mut row_rect: Option<egui::Rect> = None;
+                        let mut row_span: Option<(f32, f32)> = None;
                         for (position, column) in columns.iter().enumerate() {
                             let selected_cell = index == selected_row && position == selected_column;
                             let response = row.col(|ui| {
@@ -493,6 +501,9 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     let edit = ui.add_sized(
                                         [column.width, FIELD_HEIGHT],
                                         egui::TextEdit::singleline(&mut app.tools.edit_buffer)
+                                            // Stable id: the shell checks it to
+                                            // leave Home and End to the cell.
+                                            .id(egui::Id::unique("linc-tool-cell"))
                                             .font(egui::TextStyle::Monospace)
                                             .margin(egui::Margin::symmetric(2, 0)),
                                     );
@@ -501,6 +512,12 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                         app.tools.edit_focus = false;
                                     }
                                 } else {
+                                    if column.cell == Cell::Tool {
+                                        // Keeps the row's accent bar off the
+                                        // tool number, in every row so nothing
+                                        // shifts when the selection moves.
+                                        ui.add_space(SELECTION_BAR + 3.0);
+                                    }
                                     let text = cell_text(draft_for(app, entry.tool), &entry, column.cell);
                                     ui.label(
                                         RichText::new(text)
@@ -517,8 +534,12 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                 }
                             });
                             let rect = response.0;
+                            row_rect.get_or_insert(rect);
                             if index == selected_row {
-                                painter.rect_filled(rect, egui::CornerRadius::ZERO, tint(theme::ACCENT, ROW_ALPHA));
+                                row_span = Some(match row_span {
+                                    Some((left, right)) => (left.min(rect.left()), right.max(rect.right())),
+                                    None => (rect.left(), rect.right()),
+                                });
                             }
                             if selected_cell {
                                 painter.rect_stroke(
@@ -528,21 +549,30 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     egui::StrokeKind::Inside,
                                 );
                             }
-                            if index == selected_row && position == 0 {
-                                // Solid bar on the row's rim: the band alone is
-                                // faint, and the bar is what the eye lands on.
-                                painter.rect_filled(
-                                    egui::Rect::from_min_size(
-                                        rect.left_top(),
-                                        egui::vec2(SELECTION_BAR, rect.height()),
-                                    ),
-                                    egui::CornerRadius::ZERO,
-                                    theme::ACCENT,
-                                );
-                            }
+
                             if response.1.clicked() {
                                 clicked.set(Some((index, position)));
                             }
+                        }
+                        if let (Some((left, right)), Some(row_rect)) = (row_span, row_rect) {
+                            // One band across the row, so the gaps between
+                            // columns are filled and the highlight is
+                            // continuous instead of a row of boxes.
+                            let band = egui::Rect::from_min_max(
+                                egui::pos2(left, row_rect.top()),
+                                egui::pos2(right, row_rect.bottom()),
+                            );
+                            painter.rect_filled(band, egui::CornerRadius::ZERO, tint(theme::ACCENT, ROW_ALPHA));
+                            // Solid bar on the rim: the band alone is faint, and
+                            // the bar is what the eye lands on.
+                            painter.rect_filled(
+                                egui::Rect::from_min_size(
+                                    egui::pos2(left, row_rect.top()),
+                                    egui::vec2(SELECTION_BAR, row_rect.height()),
+                                ),
+                                egui::CornerRadius::ZERO,
+                                theme::ACCENT,
+                            );
                         }
                         let _ = &clicked;
                     });
@@ -624,6 +654,22 @@ fn save_tool_row(app: &mut LincApp, tool: u16) {
         return;
     };
     let result = (|| -> Result<(), String> {
+        // The tool number is editable, so a row can be renumbered; it must parse
+        // and must not collide with another row.
+        let renumbered = draft.tool.trim().parse::<u16>().map_err(|_| {
+            format!("T{tool}: invalid tool number {:?}", draft.tool)
+        })?;
+        if renumbered != tool
+            && app
+                .snapshot
+                .tool_table
+                .rows
+                .iter()
+                .any(|other| other.tool == renumbered && other.tool != tool)
+        {
+            return Err(format!("T{renumbered} already exists"));
+        }
+        row.tool = renumbered;
         row.description = draft.description.clone();
         row.geometry.diameter = parse_number(&draft.diameter, "diameter")?;
         row.geometry.length = parse_number(&draft.length, "length")?;
@@ -668,11 +714,21 @@ fn save_tool_row(app: &mut LincApp, tool: u16) {
         return;
     }
     app.tools.error = None;
+    let written = row.tool;
     app.send(MachineCommand::SetToolTableRow {
         row,
         expected_revision: app.snapshot.tool_table.revision,
     });
-    app.toast(format!("T{tool} tool table write queued"), theme::ACCENT);
+    // Follow the row if it was renumbered, so later edits target the new tool.
+    if written != tool {
+        if let Some(draft) = app.tools.drafts.remove(&tool) {
+            app.tools.drafts.insert(written, draft);
+        }
+    }
+    app.toast(
+        format!("T{written} tool table write queued"),
+        theme::ACCENT,
+    );
 }
 
 fn change_card(app: &mut LincApp, ui: &mut Ui) {

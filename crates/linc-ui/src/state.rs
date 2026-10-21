@@ -573,6 +573,8 @@ impl Default for OffsetsUi {
 
 #[derive(Clone, Debug, Default)]
 pub struct ToolDraft {
+    /// Tool number, as text so the cell can be edited like any other.
+    pub tool: String,
     pub description: String,
     pub diameter: String,
     pub length: String,
@@ -585,6 +587,7 @@ pub struct ToolDraft {
 impl ToolDraft {
     pub fn from_row(row: &linc_core::model::ToolRow) -> Self {
         Self {
+            tool: row.tool.to_string(),
             description: row.description.clone(),
             diameter: row
                 .geometry
