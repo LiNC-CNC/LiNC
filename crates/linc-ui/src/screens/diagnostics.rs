@@ -1005,66 +1005,10 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
                     }
             })
             .collect();
-        let width = ui.available_width();
-        let message_width = (width - 340.0).max(160.0);
         egui::ScrollArea::vertical()
             .id_salt("log-scroll")
             .max_height(480.0)
-            .show(ui, |ui| theme::dense_grid(ui, |ui| {
-                egui::Grid::new("log-grid")
-                    .num_columns(5)
-                    .striped(true)
-                    .spacing([14.0, 2.0])
-                    .show(ui, |ui| {
-                        for header in ["TIME", "SEVERITY", "SOURCE", "CODE", "MESSAGE"] {
-                            ui.label(
-                                RichText::new(header)
-                                    .size(theme::font_size(9.0))
-                                    .strong()
-                                    .color(theme::MUTED),
-                            );
-                        }
-                        ui.end_row();
-                        for alarm in logs {
-                            ui.label(
-                                RichText::new(format_clock(alarm.timestamp_ms))
-                                    .monospace()
-                                    .size(theme::font_size(10.0))
-                                    .color(theme::MUTED),
-                            );
-                            let color = severity_color(alarm.severity);
-                            ui.label(
-                                RichText::new(alarm.severity.label())
-                                    .monospace()
-                                    .size(theme::font_size(9.0))
-                                    .color(color),
-                            );
-                            ui.label(
-                                RichText::new(alarm.source.label())
-                                    .monospace()
-                                    .size(theme::font_size(9.0))
-                                    .color(theme::MUTED),
-                            );
-                            ui.label(
-                                RichText::new(&alarm.code)
-                                    .monospace()
-                                    .size(theme::font_size(9.0))
-                                    .color(theme::MUTED),
-                            );
-                            message_cell(
-                                ui,
-                                message_width,
-                                &alarm.message,
-                                if alarm.severity == AlarmSeverity::Info {
-                                    theme::MUTED
-                                } else {
-                                    color
-                                },
-                            );
-                            ui.end_row();
-                        }
-                    });
-            }));
+            .show(ui, |ui| log_table(ui, "log-grid", &logs, usize::MAX));
     });
 }
 
@@ -1095,91 +1039,105 @@ fn combined_logs(app: &LincApp) -> Vec<Alarm> {
     logs
 }
 
-fn log_table(ui: &mut Ui, id: &str, logs: &[Alarm], limit: usize) {
-    let width = ui.available_width();
-    // Time, severity, source and code take about this much; the rest is the
-    // message, which wraps instead of running off the card.
-    let message_width = (width - 300.0).max(140.0);
-    theme::dense_grid(ui, |ui| log_table_inner(ui, id, logs, limit, message_width));
-}
-
-fn log_table_inner(ui: &mut Ui, id: &str, logs: &[Alarm], limit: usize, message_width: f32) {
-    egui::Grid::new(id)
-        .num_columns(5)
-        .striped(true)
-        .spacing([12.0, 2.0])
-        .show(ui, |ui| {
-            for header in ["TIME", "SEVERITY", "SOURCE", "CODE", "MESSAGE"] {
-                ui.label(
-                    RichText::new(header)
-                        .size(theme::font_size(9.0))
-                        .strong()
-                        .color(theme::MUTED),
-                );
-            }
-            ui.end_row();
-            for alarm in logs.iter().take(limit) {
-                ui.label(
-                    RichText::new(format_clock(alarm.timestamp_ms))
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                ui.label(
-                    RichText::new(alarm.severity.label())
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(severity_color(alarm.severity)),
-                );
-                ui.label(
-                    RichText::new(alarm.source.label())
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                ui.label(
-                    RichText::new(if alarm.code.is_empty() {
-                        "—"
-                    } else {
-                        alarm.code.as_str()
-                    })
-                    .monospace()
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-                );
-                message_cell(
-                    ui,
-                    message_width,
-                    &alarm.message,
-                    if alarm.severity == AlarmSeverity::Info {
-                        theme::MUTED
-                    } else {
-                        severity_color(alarm.severity)
-                    },
-                );
-                ui.end_row();
-            }
-        });
-}
-
-
-/// A message cell that wraps inside a fixed width.
+/// The alarm table.
 ///
-/// `egui::Grid` gives every cell an unbounded width by default, so a label in
-/// the last column runs off the card instead of wrapping.
-fn message_cell(ui: &mut Ui, width: f32, text: &str, color: egui::Color32) {
+/// Not an `egui::Grid`: a grid row cannot size itself around a wrapped cell, so
+/// a long message spilled into the row below. Each entry is one horizontal line
+/// whose last cell is a width-bounded scope, so the message wraps inside its
+/// column and the row grows to fit it, with the metadata aligned to the top.
+fn log_table(ui: &mut Ui, _id: &str, logs: &[Alarm], limit: usize) {
+    const TIME: f32 = 66.0;
+    const SEVERITY: f32 = 74.0;
+    const SOURCE: f32 = 56.0;
+    const CODE: f32 = 64.0;
+    const GAP: f32 = 12.0;
+    let tight = ui.spacing().item_spacing.y;
+    ui.spacing_mut().item_spacing.y = 2.0;
+    log_row(ui, [TIME, SEVERITY, SOURCE, CODE], GAP, None);
+    for alarm in logs.iter().take(limit) {
+        log_row(ui, [TIME, SEVERITY, SOURCE, CODE], GAP, Some(alarm));
+        ui.add_space(3.0);
+    }
+    ui.spacing_mut().item_spacing.y = tight;
+}
+
+fn log_column(ui: &mut Ui, width: f32, text: &str, colour: egui::Color32, strong: bool) {
     ui.allocate_ui_with_layout(
         egui::vec2(width, 0.0),
         egui::Layout::top_down(egui::Align::Min),
         |ui| {
-            ui.add(
-                egui::Label::new(
-                    RichText::new(text).size(theme::font_size(10.0)).color(color),
-                )
-                .wrap(),
-            );
+            let mut rich = RichText::new(text)
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(colour);
+            if strong {
+                rich = rich.strong();
+            }
+            ui.add(egui::Label::new(rich).wrap());
         },
     );
+}
+
+fn log_row(ui: &mut Ui, widths: [f32; 4], gap: f32, alarm: Option<&Alarm>) {
+    let header = ["TIME", "SEVERITY", "SOURCE", "CODE"];
+    ui.horizontal_top(|ui| {
+        for (index, width) in widths.into_iter().enumerate() {
+            let (text, colour, strong) = match alarm {
+                None => (header[index].to_string(), theme::MUTED, true),
+                Some(alarm) => {
+                    let text = match index {
+                        0 => format_clock(alarm.timestamp_ms),
+                        1 => alarm.severity.label().to_string(),
+                        2 => alarm.source.label().to_string(),
+                        _ => {
+                            if alarm.code.is_empty() {
+                                "—".to_string()
+                            } else {
+                                alarm.code.clone()
+                            }
+                        }
+                    };
+                    let colour = if index == 1 {
+                        severity_color(alarm.severity)
+                    } else {
+                        theme::MUTED
+                    };
+                    (text, colour, false)
+                }
+            };
+            log_column(ui, width, &text, colour, strong);
+        }
+        ui.add_space(gap);
+        // Whatever is left of the row is the message column.
+        let rest = ui.available_width().max(80.0);
+        ui.scope(|ui| {
+            ui.set_max_width(rest);
+            match alarm {
+                None => {
+                    ui.label(
+                        RichText::new("MESSAGE")
+                            .size(theme::font_size(9.0))
+                            .strong()
+                            .color(theme::MUTED),
+                    );
+                }
+                Some(alarm) => {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&alarm.message)
+                                .size(theme::font_size(10.0))
+                                .color(if alarm.severity == AlarmSeverity::Info {
+                                    theme::MUTED
+                                } else {
+                                    severity_color(alarm.severity)
+                                }),
+                        )
+                        .wrap(),
+                    );
+                }
+            }
+        });
+    });
 }
 
 fn severity_color(severity: AlarmSeverity) -> egui::Color32 {
