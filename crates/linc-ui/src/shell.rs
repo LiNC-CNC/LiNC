@@ -73,6 +73,11 @@ pub struct LincApp {
     /// Last jog speed handed to the HAL, so RAPID and the slider publish once
     /// instead of on every poll.
     pub jog_speed_published: Option<f64>,
+    /// The work-zero cross, in machine coordinates. Held rather than recomputed
+    /// each frame: while a program loads the snapshot can report no active
+    /// system for a poll, and the cross would snap to the machine origin and
+    /// back.
+    pub graph_origin: [f64; 3],
     /// Whether a modal was open last frame, so a newly opened one can put the
     /// keyboard on its default button.
     pub modal_open_last_frame: bool,
@@ -243,6 +248,7 @@ impl LincApp {
             last_snapshot_ms: now_ms(),
             alarm_id_seen: 0,
             jog_speed_published: None,
+            graph_origin: [0.0; 3],
             modal_open_last_frame: false,
             tool_prompt_open_last_frame: false,
             last_connection: Some(snapshot.panel.connected),
@@ -351,6 +357,16 @@ impl LincApp {
 
     pub fn poll_backend(&mut self) {
         self.snapshot = self.backend.snapshot();
+        // Keep the last known work zero: loading a program can leave the
+        // snapshot without an active system for a poll, and the cross must not
+        // jump to the machine origin when that happens.
+        if let Some(offset) = active_offset(&self.snapshot) {
+            self.graph_origin = [
+                offset.get("X").copied().unwrap_or(0.0),
+                offset.get("Y").copied().unwrap_or(0.0),
+                offset.get("Z").copied().unwrap_or(0.0),
+            ];
+        }
         // RAPID changes the jog ceiling, so the published speed follows it.
         // Compared against what we last sent, not against the snapshot: the
         // snapshot is rebuilt every poll, and comparing with it published on

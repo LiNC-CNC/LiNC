@@ -871,12 +871,7 @@ pub fn trajectory(
 ) -> egui::Response {
     // Machine coordinates throughout: the part, the trail and the tool stay put
     // when the operator touches off, and the work-zero cross moves instead.
-    let offset = app.active_offset().cloned().unwrap_or_default();
-    let origin = [
-        offset.get("X").copied().unwrap_or(0.0),
-        offset.get("Y").copied().unwrap_or(0.0),
-        offset.get("Z").copied().unwrap_or(0.0),
-    ];
+    let origin = app.graph_origin;
     let mut view = TrajectoryView::new(
         preview,
         app.snapshot.live_trail.as_slice(),
