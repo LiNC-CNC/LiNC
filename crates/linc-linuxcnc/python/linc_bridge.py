@@ -302,6 +302,36 @@ class Bridge:
             pass
         return values
 
+    def report_parameter_state(self):
+        """Say what the parameter file holds against the live controller.
+
+        A value that is written and then lost between sessions is otherwise
+        invisible: the file is only read once, so the first thing to compare is
+        the file against the status.
+        """
+        path = self.parameter_path()
+        if not path:
+            return
+        try:
+            self.stat.poll()
+            live = list(getattr(self.stat, "g5x_offset", ()) or ())
+            file_x = self.parameters.get(5221)
+            live_x = live[0] if live else None
+            if file_x is not None and live_x is not None and abs(file_x - live_x) > 1e-6:
+                print(
+                    "linc bridge: G54 X differs — file %.4f, controller %.4f (%s)"
+                    % (file_x, live_x, path),
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    "linc bridge: G54 X file %r controller %r (%s)"
+                    % (file_x, live_x, path),
+                    file=sys.stderr,
+                )
+        except Exception as error:
+            print(f"linc bridge: could not report parameters: {error}", file=sys.stderr)
+
     def read_parameters(self):
         return self.parameters
 
@@ -377,6 +407,29 @@ class Bridge:
                 handle.write("\n".join(lines) + "\n")
         except OSError as exc:
             self.last_save_error = "could not write %s: %s" % (path, exc)
+            return False
+        # Read the file back: a write that is later overwritten, or one that
+        # never landed, must not be reported as success.
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                written = {}
+                for line in handle:
+                    parts = line.split()
+                    if len(parts) == 2:
+                        try:
+                            written[int(parts[0])] = float(parts[1])
+                        except ValueError:
+                            pass
+            wrong = [
+                "%d=%r (wrote %r)" % (key, written.get(key), value)
+                for key, value in updates.items()
+                if written.get(key) is None or abs(written[key] - value) > 1e-6
+            ]
+            if wrong:
+                self.last_save_error = "%s did not keep: %s" % (path, ", ".join(wrong))
+                return False
+        except OSError as exc:
+            self.last_save_error = "could not read back %s: %s" % (path, exc)
             return False
         self.last_save_error = None
         return True
@@ -968,6 +1021,7 @@ class Bridge:
 
     def run(self):
         # Announce readiness after the first snapshot.
+        self.report_parameter_state()
         emit({"type": "hello", "pid": os.getpid(), "ini": self.ini_path})
         last_status = 0.0
         while True:
