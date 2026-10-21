@@ -62,7 +62,7 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
         ui.allocate_ui_with_layout(
             Vec2::new(editor_width, main_height),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| editor_pane(app, ui, main_height - CARD_CHROME - 4.0),
+            |ui| editor_pane(app, ui, main_height),
         );
         ui.add_space(8.0);
         ui.allocate_ui_with_layout(
@@ -73,8 +73,7 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
                     .ctx()
                     .data(|data| data.get_temp::<(f32, f32)>(chrome_key("split")))
                     .unwrap_or((86.0, 110.0));
-                let path_height =
-                    (main_height - graph_chrome - modal_total - 8.0).max(120.0);
+                let path_height = (main_height - graph_chrome - modal_total).max(120.0);
                 let top = ui.cursor().top();
                 graph_card(app, ui, path_height, ViewKind::Full);
                 let after_graph = ui.cursor().top();
@@ -100,7 +99,7 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
         ui.allocate_ui_with_layout(
             Vec2::new(editor_width, available.y),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| editor_pane(app, ui, available.y - 28.0),
+            |ui| editor_pane(app, ui, available.y),
         );
         ui.add_space(8.0);
         ui.allocate_ui_with_layout(
@@ -116,8 +115,7 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
                     .ctx()
                     .data(|data| data.get_temp::<(f32, f32)>(chrome_key("code")))
                     .unwrap_or((86.0, 135.0));
-                let path_height =
-                    (available.y - graph_chrome - modal_height - 8.0).max(120.0);
+                let path_height = (available.y - graph_chrome - modal_height).max(120.0);
                 let top = ui.cursor().top();
                 graph_card(app, ui, path_height, ViewKind::MiniXy);
                 let after_graph = ui.cursor().top();
@@ -199,10 +197,12 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, height: f32, kind: ViewKind) {
 
 
 
-fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
+/// `card_height` is the total height of the card, margins included, so the
+/// pane's bottom edge lines up with whatever sits beside it.
+fn editor_pane(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
     let editable = app.editing_allowed();
     theme::card(ui, |ui| {
-        ui.set_min_height((height - 24.0).max(120.0));
+        ui.set_min_height((card_height - 24.0).max(120.0));
         ui.horizontal(|ui| {
             let file = app
                 .program
