@@ -525,6 +525,9 @@ fn hal_nml(app: &mut LincApp, ui: &mut Ui) {
                                 .increment
                                 .map(|value| format!("{value}"))
                                 .unwrap_or_else(|| "0 (continuous)".into()),
+                            linc_core::command::LincOutput::JogSpeed => {
+                                format!("{:.1}", app.snapshot.panel.jog.speed)
+                            }
                         };
                         theme::kv_row(ui, output.pin_name(), value);
                     }

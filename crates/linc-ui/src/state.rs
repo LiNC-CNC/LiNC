@@ -1158,6 +1158,15 @@ pub fn finite_increments(increments: &[(String, f64)]) -> Vec<(String, f64)> {
         .collect()
 }
 
+/// Jog speed in machine units per second.
+///
+/// The INI's default linear velocity is the 100% reference, and the operator's
+/// percentage scales it; the value published to `linc.jog-speed` is already
+/// absolute, so the machine HAL needs no multiplier.
+pub fn jog_speed(default_linear_velocity: f64, percent: f64) -> f64 {
+    (default_linear_velocity * percent.clamp(0.0, 100.0) / 100.0).max(0.0)
+}
+
 /// Resolve a selected increment against the INI's list.
 ///
 /// Returns the label and the value in machine units. An out-of-range index
@@ -1170,6 +1179,25 @@ pub fn jog_increment(increments: &[(String, f64)], index: usize) -> (String, f64
             Some((label, value)) => (label.clone(), *value),
             None => ("JOG".to_string(), 0.0),
         },
+    }
+}
+
+#[cfg(test)]
+mod jog_speed_tests {
+    use super::jog_speed;
+
+    #[test]
+    fn scales_the_ini_default_by_the_percentage() {
+        // 60 mm/s is the shipped default; 100% is unchanged, 50% is half.
+        assert_eq!(jog_speed(60.0, 100.0), 60.0);
+        assert_eq!(jog_speed(60.0, 50.0), 30.0);
+        assert_eq!(jog_speed(60.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn clamps_out_of_range_percentages() {
+        assert_eq!(jog_speed(60.0, 150.0), 60.0);
+        assert_eq!(jog_speed(60.0, -20.0), 0.0);
     }
 }
 

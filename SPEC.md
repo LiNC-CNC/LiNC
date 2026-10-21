@@ -409,9 +409,11 @@ Two layouts, selected by the header toggle or `FILE`:
   Y/C or live-tool paths are active. The loaded program path and live trail are
   separate colors; `CLEAR TRAIL` clears only the live trail.
 - Live-tool paths use a distinct stroke from turning/rapid moves.
-- Current line synchronized with the graph.
-- Current/next block below the editor; `MODAL` is its own pane under the
-  toolpath, using the same abbreviated cells as the Machine dashboard.
+- Current line synchronized with the graph, and the running line marked in the
+  editor the way the Machine page's G-code display marks it: an accent bar in
+  the gutter plus a tinted row. There is no separate current/next pane.
+- `MODAL` is its own pane under the toolpath, using the same abbreviated cells
+  as the Machine dashboard.
 - `FIT` (`Ctrl+0`) reframes the toolpath and `CLEAR TRAIL` (`Ctrl+L`) clears
   only the live trail; both are page-local commands, not buttons.
 
@@ -916,6 +918,12 @@ No F1–F8 mapping. The bottom keycap highlight reflects the current page:
   `JOG` mode, not a zero step. Jog keys are routed by panel mode — continuous
   to `halui.axis.L.plus/minus` (level) and incremental to
   `halui.axis.L.increment-plus/minus` (edge triggered).
+  **Jog speed** is a percentage of the machine INI's
+  `[DISPLAY] DEFAULT_LINEAR_VELOCITY`, set with a slider in the mode context
+  card. The HMI publishes the result in machine units per second on
+  `linc.jog-speed`, wired to `halui.axis.jog-speed` in the post-GUI HAL file, so
+  the machine HAL needs no multiplier and the operator can slow jogging without
+  editing the config. The percentage is remembered in preferences.
   In HAL these positions select the **MANUAL** task mode as well as teleop:
   `halui.axis.L.plus/minus` (`EMC_AXIS_JOG`) is refused unless the task mode is
   MANUAL. `halui.axis.jog-speed` defaults to 0 and must be set from the INI

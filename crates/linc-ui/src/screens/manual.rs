@@ -97,6 +97,40 @@ fn mode_context_card(app: &mut LincApp, ui: &mut Ui) {
             .clone()
             .unwrap_or_else(|| "—".into());
         theme::kv_row(ui, "ACTIVE AXIS", active);
+        // Jog speed is a percentage of the INI's default linear velocity, so
+        // the operator can slow jogging without editing the machine config.
+        if matches!(
+            mode,
+            Some(linc_core::model::PanelMode::Jog)
+                | Some(linc_core::model::PanelMode::Inc)
+                | Some(linc_core::model::PanelMode::Mpg)
+        ) {
+            let mut percent = app.jog_speed_percent;
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("JOG SPEED")
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
+                );
+                ui.add(
+                    egui::Slider::new(&mut percent, 0.0..=100.0)
+                        .suffix(" %")
+                        .fixed_decimals(0),
+                );
+            });
+            if (percent - app.jog_speed_percent).abs() > f64::EPSILON {
+                app.set_jog_speed_percent(percent);
+            }
+            theme::kv_row(
+                ui,
+                "FEED",
+                format!(
+                    "{:.1} {}/s",
+                    app.jog_speed_value(),
+                    app.snapshot.positions.units
+                ),
+            );
+        }
         match mode {
             Some(linc_core::model::PanelMode::Jog) => {
                 theme::kv_row(ui, "MODE", "CONTINUOUS");

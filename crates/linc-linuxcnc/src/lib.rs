@@ -887,6 +887,11 @@ impl MachineBackend for PythonBridgeBackend {
                                 if value > 0.0 { Some(value) } else { None };
                         }
                     }
+                    LincOutput::JogSpeed => {
+                        if let HalValue::Float(value) = value {
+                            self.shared.snapshot.lock().unwrap().panel.jog.speed = value;
+                        }
+                    }
                     LincOutput::HmiAlive | LincOutput::StatusDisplay => {}
                 }
                 Ok(())

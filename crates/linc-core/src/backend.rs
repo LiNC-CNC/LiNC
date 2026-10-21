@@ -183,6 +183,7 @@ fn run_worker(
     let mut last_confirm_seq = 0u64;
     // NaN so the first pass always publishes the initial selection.
     let mut last_jog_increment = f64::NAN;
+    let mut last_jog_speed = f64::NAN;
     let mut confirm_low_at: Option<Instant> = None;
 
     while !shared.shutdown.load(Ordering::Relaxed) {
@@ -263,6 +264,20 @@ fn run_worker(
                         writer.write(LincOutput::JogIncrement, HalValue::Float(increment))
                     {
                         log::warn!("HAL jog-increment write failed: {error}");
+                    }
+                }
+            }
+
+            // Jog speed for `halui.axis.jog-speed`, already scaled by the
+            // operator's percentage in the HMI.
+            let speed = snapshot.panel.jog.speed;
+            if speed != last_jog_speed {
+                last_jog_speed = speed;
+                if let Some(writer) = hal.as_mut() {
+                    if let Err(error) =
+                        writer.write(LincOutput::JogSpeed, HalValue::Float(speed))
+                    {
+                        log::warn!("HAL jog-speed write failed: {error}");
                     }
                 }
             }

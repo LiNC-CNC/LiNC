@@ -1224,6 +1224,11 @@ impl MachineBackend for SimBackend {
                                 if value > 0.0 { Some(value) } else { None };
                         }
                     }
+                    LincOutput::JogSpeed => {
+                        if let HalValue::Float(value) = value {
+                            self.snapshot.panel.jog.speed = value;
+                        }
+                    }
                 }
                 Ok(())
             }

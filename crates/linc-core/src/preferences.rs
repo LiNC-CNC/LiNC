@@ -44,6 +44,9 @@ pub struct Preferences {
     /// Index into `[DISPLAY] INCREMENTS`; 0 is continuous jog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jog_increment: Option<usize>,
+    /// Jog speed as a percentage of `[DISPLAY] DEFAULT_LINEAR_VELOCITY`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jog_speed_percent: Option<f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_files: Vec<String>,
     /// Page keys the operator has chosen to show.

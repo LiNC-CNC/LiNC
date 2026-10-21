@@ -226,6 +226,8 @@ and ATC values as the machine; only the HAL stack and paths differ.
 - `INC` steps are read from `[DISPLAY] INCREMENTS` in the machine INI. The
   leading `JOG` entry means continuous and is filtered out, so the selector
   offers only finite steps.
+- Jog speed is a percentage of `[DISPLAY] DEFAULT_LINEAR_VELOCITY`, published
+  absolute on `linc.jog-speed`. The HMI does the scaling.
 - The simulated E-stop is owned by the panel GUI, not the HMI.
 - The panel window boots with the E-stop latched and power OFF, matching a real
   cabinet before power-up. Releasing the mushroom raises `cnc_panel.estop_reset`

@@ -86,6 +86,8 @@ pub struct LincApp {
     pub jog_increments: Vec<(String, f64)>,
     /// Index into `jog_increments`.
     pub jog_increment_index: usize,
+    /// Jog speed as a percentage of the INI's default linear velocity.
+    pub jog_speed_percent: f64,
     preferences_dirty: bool,
     preferences_saved_at: std::time::Instant,
 }
@@ -220,6 +222,11 @@ impl LincApp {
             nav: nav_pages(&profile.config.ui.pages),
             jog_increments: crate::state::finite_increments(&profile.machine_ini.increments),
             jog_increment_index: preferences.jog_increment.unwrap_or(0),
+            jog_speed_percent: preferences
+                .jog_speed_percent
+                .filter(|percent| percent.is_finite())
+                .unwrap_or(100.0)
+                .clamp(0.0, 100.0),
             preferences,
             preferences_dirty: false,
             preferences_saved_at: std::time::Instant::now(),
@@ -244,6 +251,21 @@ impl LincApp {
         }
         if let Some(view) = program_view {
             app.program.view = view;
+        }
+        // Publish the jog selections once at startup: the HAL nets for them
+        // only exist after the GUI creates its component, and a pin that is
+        // never written would leave jogging at zero speed.
+        for (output, value) in [
+            (
+                linc_core::command::LincOutput::JogIncrement,
+                linc_core::command::HalValue::Float(app.jog_increment_value()),
+            ),
+            (
+                linc_core::command::LincOutput::JogSpeed,
+                linc_core::command::HalValue::Float(app.jog_speed_value()),
+            ),
+        ] {
+            app.send(linc_core::command::MachineCommand::SetHalOutput { output, value });
         }
         // Probe Basic's contract expects the probe tool in `#3014` to be 99.
         // A different value silently changes which tool the probe cycles assume
@@ -994,6 +1016,31 @@ impl LincApp {
         let value = self.jog_increment_value();
         self.send(linc_core::command::MachineCommand::SetHalOutput {
             output: linc_core::command::LincOutput::JogIncrement,
+            value: linc_core::command::HalValue::Float(value),
+        });
+    }
+
+    /// Jog speed in machine units per second: the INI's default linear
+    /// velocity scaled by the operator's percentage.
+    pub fn jog_speed_value(&self) -> f64 {
+        crate::state::jog_speed(
+            self.profile.machine_ini.default_linear_velocity,
+            self.jog_speed_percent,
+        )
+    }
+
+    /// Publish the jog speed to `linc.jog-speed` when the percentage changes.
+    pub fn set_jog_speed_percent(&mut self, percent: f64) {
+        let percent = percent.clamp(0.0, 100.0);
+        if (percent - self.jog_speed_percent).abs() < f64::EPSILON {
+            return;
+        }
+        self.jog_speed_percent = percent;
+        self.preferences.jog_speed_percent = Some(percent);
+        self.preferences_dirty = true;
+        let value = self.jog_speed_value();
+        self.send(linc_core::command::MachineCommand::SetHalOutput {
+            output: linc_core::command::LincOutput::JogSpeed,
             value: linc_core::command::HalValue::Float(value),
         });
     }

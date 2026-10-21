@@ -224,6 +224,7 @@ pub struct LincHal {
     tool_change_confirm: HalPin,
     status_display: HalPin,
     jog_increment: HalPin,
+    jog_speed: HalPin,
     last_confirm: bool,
 }
 
@@ -241,15 +242,17 @@ impl LincHal {
         let tool_change_confirm = component.bit_out("tool-change-confirm")?;
         let status_display = component.s32_out("status-display")?;
         let jog_increment = component.float_out("jog-increment")?;
+        let jog_speed = component.float_out("jog-speed")?;
         unsafe {
             *hmi_alive.bit() = 0;
             *tool_change_confirm.bit() = 0;
             *status_display.s32() = -1;
             *jog_increment.float() = 0.0;
+            *jog_speed.float() = 0.0;
         }
         component.ready()?;
         log::info!(
-            "created linc.* HAL outputs (hmi-alive, tool-change-confirm, status-display, jog-increment)"
+            "created linc.* HAL outputs (hmi-alive, tool-change-confirm, status-display, jog-increment, jog-speed)"
         );
         Ok(Self {
             component,
@@ -257,6 +260,7 @@ impl LincHal {
             tool_change_confirm,
             status_display,
             jog_increment,
+            jog_speed,
             last_confirm: false,
         })
     }
@@ -271,12 +275,13 @@ impl LincHal {
         }
     }
 
-    pub fn output_names(&self) -> [&'static str; 4] {
+    pub fn output_names(&self) -> [&'static str; 5] {
         [
             LincOutput::HmiAlive.pin_name(),
             LincOutput::ToolChangeConfirm.pin_name(),
             LincOutput::StatusDisplay.pin_name(),
             LincOutput::JogIncrement.pin_name(),
+            LincOutput::JogSpeed.pin_name(),
         ]
     }
 
@@ -312,6 +317,9 @@ impl HalWriter for LincHal {
                 }
                 (LincOutput::JogIncrement, HalValue::Float(value)) => {
                     *self.jog_increment.float() = value;
+                }
+                (LincOutput::JogSpeed, HalValue::Float(value)) => {
+                    *self.jog_speed.float() = value;
                 }
                 _ => {
                     return Err(MachineError::Hal("wrong HAL value type".into()));

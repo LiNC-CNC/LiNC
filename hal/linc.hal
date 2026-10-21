@@ -171,10 +171,11 @@ net worklamp-button cnc_panel.worklamp => toggle.worklamp.in
 net worklamp-on toggle.worklamp.out => rio.worklamp.bit cnc_panel.led_worklamp
 
 # ---------------------------------------------------------------------------
-# Jog speed. `halui.axis.jog-speed` defaults to 0, so without this the jog
-# buttons hold the pins high and the machine does not move at all. Use the
-# machine's configured default manual velocity from the INI.
-setp halui.axis.jog-speed [DISPLAY]DEFAULT_LINEAR_VELOCITY
+# Jog speed. `halui.axis.jog-speed` defaults to 0, so without a value the jog
+# buttons hold the pins high and the machine does not move at all. The HMI
+# publishes the INI's default linear velocity scaled by the operator's
+# percentage on `linc.jog-speed`; that net is in the post-GUI file because the
+# linc.* component only exists once the GUI has started.
 
 # Jog buttons (panel; pendant jog is wired in linc-pendant.hal)
 #
