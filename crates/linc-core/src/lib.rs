@@ -10,6 +10,7 @@ pub mod homing;
 pub mod ini;
 pub mod model;
 pub mod probe;
+pub mod preferences;
 pub mod sim;
 pub mod sim_ipc;
 pub mod tooltable;
