@@ -849,6 +849,15 @@ No F1–F8 mapping. The bottom keycap highlight reflects the current page:
   path.
 - JOG/INC/MPG open the Manual screen with the large graph and coordinate
   readout. Jog, increment and handwheel motion remain panel/pendant input only.
+  **Increment selection**: `INC` steps come from the machine INI's
+  `[DISPLAY] INCREMENTS` list, so the HMI offers exactly the values LinuxCNC was
+  configured with (the same list Axis and Probe Basic use). The selector lives
+  in the HMI's `INC` context card and publishes `linc.jog-increment`, wired to
+  `halui.axis.L.increment` in the post-GUI HAL file. The list's leading `JOG`
+  entry is continuous and is not offered as a step: continuous is the panel's
+  `JOG` mode, not a zero step. Jog keys are routed by panel mode — continuous
+  to `halui.axis.L.plus/minus` (level) and incremental to
+  `halui.axis.L.increment-plus/minus` (edge triggered).
   In HAL these positions select the **MANUAL** task mode as well as teleop:
   `halui.axis.L.plus/minus` (`EMC_AXIS_JOG`) is refused unless the task mode is
   MANUAL. `halui.axis.jog-speed` defaults to 0 and must be set from the INI

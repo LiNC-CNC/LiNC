@@ -223,6 +223,9 @@ and ATC values as the machine; only the HAL stack and paths differ.
   real machine, so the HMI uses the same code path.
 - Modes/overrides use steady one-hot/steady values.
 - `panel_link_stats = "none"` because there is no serial link to measure.
+- `INC` steps are read from `[DISPLAY] INCREMENTS` in the machine INI. The
+  leading `JOG` entry means continuous and is filtered out, so the selector
+  offers only finite steps.
 - The simulated E-stop is owned by the panel GUI, not the HMI.
 - The panel window boots with the E-stop latched and power OFF, matching a real
   cabinet before power-up. Releasing the mushroom raises `cnc_panel.estop_reset`
