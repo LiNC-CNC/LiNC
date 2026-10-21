@@ -9,7 +9,7 @@ net linc-status linc.status-display => cnc_panel.sseg_status
 net tool-changed linc.tool-change-confirm
 net linc-hmi-heartbeat linc.hmi-alive
 # Jog speed, scaled in the HMI from [DISPLAY] DEFAULT_LINEAR_VELOCITY.
-net jog-speed linc.jog-speed => halui.axis.jog-speed
+net jog-speed linc.jog-speed => halui.axis.jog-speed halui.joint.jog-speed
 
 # Jog step for INC mode, selected in the HMI from [DISPLAY] INCREMENTS.
 net jog-increment linc.jog-increment => halui.axis.x.increment halui.axis.y.increment halui.axis.z.increment

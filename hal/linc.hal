@@ -16,12 +16,12 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 # ---------------------------------------------------------------------------
 # Logic and conversion components
 # ---------------------------------------------------------------------------
-loadrt and2 names=and2.teleop_gate,and2.cycle_gate,and2.cycle_run,and2.cycle_resume,and2.jxp_cont,and2.jxn_cont,and2.jyp_cont,and2.jyn_cont,and2.jzp_cont,and2.jzn_cont,and2.jxp_inc,and2.jxn_inc,and2.jyp_inc,and2.jyn_inc,and2.jzp_inc,and2.jzn_inc
+loadrt and2 names=and2.teleop_gate,and2.jog_not_home,and2.homed_xy,and2.homed_z,and2.jxp_joint,and2.jxn_joint,and2.jyp_joint,and2.jyn_joint,and2.jzp_joint,and2.jzn_joint,and2.cycle_gate,and2.cycle_run,and2.cycle_resume,and2.jxp_cont,and2.jxn_cont,and2.jyp_cont,and2.jyn_cont,and2.jzp_cont,and2.jzn_cont,and2.jxp_inc,and2.jxn_inc,and2.jyp_inc,and2.jyn_inc,and2.jzp_inc,and2.jzn_inc
 # `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
 # with "or2: already exists". Instances only used by the simulation
 # (or2.estop_reset) are created here and wired in linc-sim.hal.
-loadrt or2 names=or2.jog_a,or2.jog_b,or2.pause,or2.manual_req,or2.estop_reset
-loadrt not names=not.mode_home,not.paused,not.coolant,not.lube,not.opt,not.bdt,not.spindle_on,not.mode_inc
+loadrt or2 names=or2.jog_a,or2.jog_b,or2.pause,or2.manual_req,or2.estop_reset,or2.joint_req
+loadrt not names=not.mode_home,not.homed_x,not.homed_y,not.homed_z,not.all_homed,not.paused,not.coolant,not.lube,not.opt,not.bdt,not.spindle_on,not.mode_inc
 loadrt toggle names=toggle.coolant,toggle.lube,toggle.opt,toggle.bdt,toggle.sbk,toggle.worklamp
 loadrt scale names=scale.feed,scale.rapid,scale.spindle
 loadrt conv_float_s32 names=conv.feed,conv.rapid,conv.spindle
@@ -90,8 +90,9 @@ net mode-jog-a or2.jog_a.out => or2.jog_b.in1
 #
 # `halui.mode.manual` is a single pin, so JOG and HOME are ORed into one
 # request rather than each linking the pin themselves.
-net mode-jog-any or2.jog_b.out => and2.teleop_gate.in0 or2.manual_req.in0
-net mode-not-home not.mode_home.out => and2.teleop_gate.in1
+net mode-jog-any or2.jog_b.out => and2.jog_not_home.in0 or2.manual_req.in0
+net mode-not-home not.mode_home.out => and2.jog_not_home.in1
+net mode-jog-not-home and2.jog_not_home.out => and2.teleop_gate.in0
 net mode-teleop-request and2.teleop_gate.out => halui.mode.teleop
 
 # EDIT, HOME and PROG.HOME are not LinuxCNC task modes, but HOME must still put
@@ -107,7 +108,9 @@ net mode-teleop-request and2.teleop_gate.out => halui.mode.teleop
 # motion refuses `EMC_JOINT_HOME` with "must be in joint mode to home" while it
 # is teleop — `halui.mode.joint` sends EMC_TRAJ_SET_TELEOP_ENABLE(0), which is
 # MOTION_FREE. Manual mode alone does not.
-net mode-home cnc_panel.mode_home => not.mode_home.in or2.manual_req.in1 halui.mode.joint
+net mode-home cnc_panel.mode_home => not.mode_home.in or2.manual_req.in1 or2.joint_req.in0
+net not-all-homed not.all_homed.out => or2.joint_req.in1
+net mode-joint-request or2.joint_req.out => halui.mode.joint
 net mode-manual-request or2.manual_req.out => halui.mode.manual
 
 # ---------------------------------------------------------------------------
@@ -206,12 +209,27 @@ net jog-yn cnc_panel.jog_yn => and2.jyn_cont.in0 and2.jyn_inc.in0
 net jog-zp cnc_panel.jog_zp => and2.jzp_cont.in0 and2.jzp_inc.in0
 net jog-zn cnc_panel.jog_zn => and2.jzn_cont.in0 and2.jzn_inc.in0
 
-net jog-xp-continuous and2.jxp_cont.out => halui.axis.x.plus
-net jog-xn-continuous and2.jxn_cont.out => halui.axis.x.minus
-net jog-yp-continuous and2.jyp_cont.out => halui.axis.y.plus
-net jog-yn-continuous and2.jyn_cont.out => halui.axis.y.minus
-net jog-zp-continuous and2.jzp_cont.out => halui.axis.z.plus
-net jog-zn-continuous and2.jzn_cont.out => halui.axis.z.minus
+# Axis jog goes through the teleop planner and is refused until every axis is
+# homed; joint jog works on an unhomed machine but needs motion in joint/FREE
+# mode instead of teleop. Both are wired from the same keys and the homed state
+# decides which one is live, so jogging works before homing without giving up
+# axis jog afterwards.
+net jog-xp-continuous and2.jxp_cont.out => halui.axis.x.plus and2.jxp_joint.in0
+net jog-xn-continuous and2.jxn_cont.out => halui.axis.x.minus and2.jxn_joint.in0
+net jog-yp-continuous and2.jyp_cont.out => halui.axis.y.plus and2.jyp_joint.in0
+net jog-yn-continuous and2.jyn_cont.out => halui.axis.y.minus and2.jyn_joint.in0
+net jog-zp-continuous and2.jzp_cont.out => halui.axis.z.plus and2.jzp_joint.in0
+net jog-zn-continuous and2.jzn_cont.out => halui.axis.z.minus and2.jzn_joint.in0
+
+net jog-x-unhomed not.homed_x.out => and2.jxp_joint.in1 and2.jxn_joint.in1
+net jog-y-unhomed not.homed_y.out => and2.jyp_joint.in1 and2.jyn_joint.in1
+net jog-z-unhomed not.homed_z.out => and2.jzp_joint.in1 and2.jzn_joint.in1
+net jog-xp-joint and2.jxp_joint.out => halui.joint.0.plus
+net jog-xn-joint and2.jxn_joint.out => halui.joint.0.minus
+net jog-yp-joint and2.jyp_joint.out => halui.joint.1.plus
+net jog-yn-joint and2.jyn_joint.out => halui.joint.1.minus
+net jog-zp-joint and2.jzp_joint.out => halui.joint.2.plus
+net jog-zn-joint and2.jzn_joint.out => halui.joint.2.minus
 
 # Incremental
 net jog-xp-step and2.jxp_inc.out => halui.axis.x.increment-plus
@@ -270,9 +288,11 @@ net program-running halui.program.is-running => cnc_panel.led_run cnc_panel.led_
 net is-paused => cnc_panel.led_cycle_off
 net machine-estop halui.estop.is-activated => cnc_panel.led_mc_alarm
 
-net axis-x-homed halui.joint.0.is-homed => cnc_panel.led_x
-net axis-y-homed halui.joint.1.is-homed => cnc_panel.led_y
-net axis-z-homed halui.joint.2.is-homed => cnc_panel.led_z
+net axis-x-homed halui.joint.0.is-homed => cnc_panel.led_x not.homed_x.in and2.homed_xy.in0
+net axis-y-homed halui.joint.1.is-homed => cnc_panel.led_y not.homed_y.in and2.homed_xy.in1
+net axis-z-homed halui.joint.2.is-homed => cnc_panel.led_z not.homed_z.in and2.homed_z.in1
+net homed-xy and2.homed_xy.out => and2.homed_z.in0
+net all-homed and2.homed_z.out => not.all_homed.in and2.teleop_gate.in1
 
 net rapid-button cnc_panel.rapid => cnc_panel.led_rapid
 net tool-change => cnc_panel.led_chuck
