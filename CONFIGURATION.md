@@ -224,6 +224,11 @@ and ATC values as the machine; only the HAL stack and paths differ.
 - Modes/overrides use steady one-hot/steady values.
 - `panel_link_stats = "none"` because there is no serial link to measure.
 - The simulated E-stop is owned by the panel GUI, not the HMI.
+- The panel window boots with the E-stop latched and power OFF, matching a real
+  cabinet before power-up. Releasing the mushroom raises `cnc_panel.estop_reset`
+  (wired to `halui.estop.reset`) and leaves the machine off; `POWER ON`
+  separately raises `cnc_panel.power_on`, wired to `rio.sim-power-on` and ORed
+  into the same reset request.
 
 Launch:
 

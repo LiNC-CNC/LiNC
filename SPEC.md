@@ -148,6 +148,20 @@ Special cases:
   encoder counts**. Verify where the MPG encoder is wired; do not assume the
   panel link carries MPG pulses.
 - `program_protect` must make the editor read-only and block offset/tool writes.
+- The panel E-stop mushroom is an **operator-owned latching input**. The panel
+  service must never derive it from a controller lamp: doing so lets the
+  controller clear an E-stop the operator pressed, and races the first poll
+  after the press. Pressing it must latch visibly on the panel itself, light
+  the `MC` alarm lamp, and reach the controller through the machine HAL
+  (`cnc_panel.estop` -> `rio.sim-estop` -> `halui.estop.activate` in the
+  simulation). The HMI shows a persistent `EMERGENCY STOP ACTIVE` banner and
+  blocks machine-modifying actions while it is latched.
+- **Releasing** the mushroom clears the latch and asks the controller to leave
+  E-stop, but must **not** power the machine on: that is a separate `POWER ON`
+  action. The two are separate one-shots — `cnc_panel.estop_reset` (release)
+  and `cnc_panel.power_on` (`POWER ON`) — ORed into `halui.estop.reset`, so
+  releasing alone never latches `rio.sim-power-on`. After a release the panel
+  shows `POWER OFF` as the active power state.
 - `panel_connected == false` must show a persistent banner and block
   machine-modifying UI actions. The hardware E-stop remains independent.
 
@@ -254,6 +268,11 @@ present in the real-machine build.
 
 - Reproduces the CNC control panel: POWER, E-stop, MODE, feed/rapid/spindle
   overrides, axis/alarm lamps, tool displays and key matrix.
+- **Boots in the safe state a real cabinet is found in**: E-stop latched and
+  power OFF. The operator releases the mushroom and presses `POWER ON` to bring
+  the machine up, so the power-up sequence is exercised instead of skipped.
+  Starting powered-on and un-latched made the machine look ready when it was
+  not, and hid the E-stop reset path entirely.
 - Creates the same `cnc_panel` HAL component/pin surface as the real driver,
   plus simulation-only power/E-stop inputs.
 - Modes and overrides use the same steady one-hot/steady contract as the real
@@ -625,8 +644,35 @@ it automatically; leaving those positions closes it. The title/context changes
 between `HOMING` (machine home) and `PROGRAM ZERO` (`PROG.HOME`). The HMI only
 observes, explains and logs the panel behavior; it never issues a home command.
 
-- Axis cards show `HOMED`, `HOMING`, `NOT HOMED`, the INI `HOME_SEQUENCE` and the
+**Layout base.** The Homing screen uses the *same layout base* as the Manual
+(JOG / INC / MPG) screen: a persistent `PANEL MODE:` line, a dominant
+`TOOLPATH / LIVE POSITION` graph card with `CLEAR TRAIL`, `FIT` and the view
+cycle, and a right-hand readout column whose first card is the large
+per-axis work/machine/DTG readout. Only the readout content and the context
+cards differ:
+
+- the readout is headed `MACHINE POSITION` and each axis row carries its homing
+  state as a badge (`HOMED`, `HOMING`, `NOT HOMED`, `UNKNOWN`, `NOT
+  CONFIGURED`) plus the INI sequence/search/latch/index detail;
+- the context card reports the panel mode, axes homed, sequence state, home
+  order, `NO_FORCE_HOMING` and limit state;
+- the panel-mapping card documents the exact physical-key behaviour.
+
+Keeping one base means the two mode-driven screens cannot drift apart; a change
+to the live graph or the coordinate readout applies to both.
+
+- Axis rows show `HOMED`, `HOMING`, `NOT HOMED`, the INI `HOME_SEQUENCE` and the
   search/latch/index state. Optional axes are shown only when configured.
+- Selecting `HOME` on the panel must also select the **MANUAL** task mode in
+  HAL (`cnc_panel.mode_home` -> `halui.mode.manual`). LinuxCNC refuses
+  `halui.joint.N.home` / `halui.home-all` with
+  `can't do that (EMC_JOINT_HOME) in auto mode with the interpreter idle`
+  whenever the task mode is AUTO or MDI, so without this net the home keys do
+  nothing unless the operator happens to be in MANUAL already. Probe Basic
+  reaches the same result through its `home-mode` QtPyVCP signal; LiNC has no
+  QtPyVCP layer, so the mode request is wired directly in HAL.
+  `PROG.HOME` must **not** assert MANUAL: it issues its `G0` through the
+  `issue_mdi` path, which selects MDI itself.
 - HOME mode mapping, exactly as `baiermill_pb`:
   - `RAPID` -> `home-all`;
   - `X+`/`X-` -> `home-x`;
@@ -803,6 +849,12 @@ No F1–F8 mapping. The bottom keycap highlight reflects the current page:
   path.
 - JOG/INC/MPG open the Manual screen with the large graph and coordinate
   readout. Jog, increment and handwheel motion remain panel/pendant input only.
+  In HAL these positions select the **MANUAL** task mode as well as teleop:
+  `halui.axis.L.plus/minus` (`EMC_AXIS_JOG`) is refused unless the task mode is
+  MANUAL. `halui.axis.jog-speed` defaults to 0 and must be set from the INI
+  (LiNC uses `[DISPLAY] DEFAULT_LINEAR_VELOCITY`); without it the jog pins are
+  asserted and the machine does not move. `halui.mode.manual` is one pin, so
+  the JOG and HOME requests are ORed into a single request.
 - MDI, probe and tool-change actions use Probe Basic's `issue_mdi` semantics:
   after an explicit operator action and validation (machine ON, homed, idle, no
   active program), the HMI may temporarily select MDI, issue the specific
@@ -924,9 +976,12 @@ Panel snapshot should include at least:
 - pendant jog-only state
 - capacity/capabilities from the panel driver
 
-The current Rust port exposes connection/error and decoded pins but not the
-serial counters and raw bitmaps; those must be added to `linc-panel` for
-Diagnostics.
+`linc-panel` maintains the serial counters and raw button/LED bitmaps, and the
+simulation surfaces them. On the **physical** path they do not reach the HMI
+yet: the panel service runs with `--no-ipc` under LinuxCNC and the LinuxCNC
+bridge still reports `link.available = false`, so Diagnostics shows the
+counters as unavailable rather than zero. Wiring them over IPC or dedicated HAL
+pins is still open.
 
 ## 10. Performance
 
