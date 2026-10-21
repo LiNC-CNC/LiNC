@@ -1,4 +1,4 @@
-//! Work offsets G54-G59, G92 and tool offsets.
+//! Work offsets G54-G59 and tool offsets.
 
 use egui::{RichText, Ui};
 use linc_core::command::MachineCommand;
@@ -13,7 +13,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     common::page_header(
         ui,
         "OFFSETS",
-        "Directly editable G54–G59, G92 and tool offsets. Read-only while running or protected.",
+        "Directly editable G54–G59 and tool offsets. Read-only while running or protected.",
     );
     let writable = app.snapshot.writes_allowed();
     if !writable {
@@ -70,7 +70,6 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     let active_index = app.snapshot.offsets.active_index;
     let mut selected = app.offsets.selected;
     let mut write_row = None;
-    let mut apply_g92 = false;
     theme::card(ui, |ui| {
         ui.horizontal(|ui| {
             theme::section_header(ui, "WORK OFFSETS");
@@ -189,39 +188,6 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                         ui.end_row();
                     }
 
-                    ui.label(
-                        RichText::new("G92")
-                            .monospace()
-                            .size(theme::font_size(12.0))
-                            .color(theme::C1),
-                    );
-                    for (index, axis) in axes.iter().enumerate() {
-                        let _ = axis;
-                        ui.add_enabled(
-                            writable,
-                            egui::TextEdit::singleline(&mut app.offsets.g92[index])
-                                .desired_width(82.0)
-                                .font(egui::TextStyle::Monospace)
-                                .margin(egui::Margin::symmetric(4, 1))
-                                .min_size(egui::Vec2::new(82.0, 22.0)),
-                        );
-                    }
-                    ui.label(
-                        RichText::new("—")
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
-                    );
-                    ui.label(
-                        RichText::new("G92 IS SEPARATE")
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
-                    );
-                    if theme::action_button(ui, "APPLY G92", writable).clicked() {
-                        apply_g92 = true;
-                    }
-                    ui.end_row();
                 });
         });
         if let Some(error) = &app.offsets.error {
@@ -231,9 +197,6 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     app.offsets.selected = selected;
     if let Some(index) = write_row {
         apply_work_offset(app, index);
-    }
-    if apply_g92 {
-        apply_g92_values(app);
     }
 }
 
@@ -276,29 +239,6 @@ fn apply_work_offset(app: &mut LincApp, index: u8) {
     );
 }
 
-fn apply_g92_values(app: &mut LincApp) {
-    let axes = app.axes();
-    let mut values = AxisMap::new();
-    for (index, axis) in axes.iter().enumerate() {
-        match app
-            .offsets
-            .g92
-            .get(index)
-            .and_then(|text| text.trim().parse::<f64>().ok())
-        {
-            Some(value) => {
-                values.insert(axis.clone(), value);
-            }
-            None => {
-                app.offsets.error = Some(format!("G92 {axis}: invalid number"));
-                return;
-            }
-        }
-    }
-    app.offsets.error = None;
-    app.send(MachineCommand::SetG92Offset { values });
-    app.toast("G92 offset write queued", theme::ACCENT);
-}
 
 fn tool_offset_card(app: &mut LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
