@@ -395,6 +395,9 @@ pub fn alarm_card(app: &LincApp, ui: &mut Ui, height: f32) {
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.set_max_width(width);
+                    // Rows of one message sit tight: the default spacing plus an
+                    // explicit gap made every entry look double-spaced.
+                    ui.spacing_mut().item_spacing.y = 1.0;
                     for alarm in app.snapshot.alarms.iter().take(20) {
                         let color = match alarm.severity {
                             linc_core::model::AlarmSeverity::Critical
@@ -432,7 +435,7 @@ pub fn alarm_card(app: &LincApp, ui: &mut Ui, height: f32) {
                             )
                             .wrap(),
                         );
-                        ui.add_space(4.0);
+                        ui.add_space(3.0);
                     }
                 });
         }
