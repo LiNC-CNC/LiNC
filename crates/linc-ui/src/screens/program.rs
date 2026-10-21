@@ -271,6 +271,10 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                 }
             }
             app.program.selected_line = target_line;
+            app.program.code_scroll_to_line = Some(target_line);
+            // The operator has taken the cursor; do not drag it back to the
+            // running line until the next run starts.
+            app.program.follow_current = false;
         }
     }
     common::shell_card(ui, rect, |ui| {
@@ -397,23 +401,22 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
     let line_count = app.program.editor.line_count();
     let desired_rows = line_count.max(12);
     let numbers: String = number_gutter(ui, line_count);
-    let offset = if app.snapshot.task.running || app.program.code_scroll_to_line.is_some() {
-        let target = app
-            .program
-            .code_scroll_to_line
-            .take()
-            .unwrap_or(current_line);
-        Some(((target as f32 - 3.0) * line_height()).max(0.0))
-    } else {
-        None
-    };
-    let mut scroll = egui::ScrollArea::vertical()
+    // `vertical_scroll_offset` does not move this scroll area, so the view is
+    // asked to reveal a rect instead — the same call the text edit makes when
+    // its cursor moves.
+    let scroll_to = app
+        .program
+        .code_scroll_to_line
+        .take()
+        .or(if app.snapshot.task.running {
+            Some(current_line)
+        } else {
+            None
+        });
+    let scroll = egui::ScrollArea::vertical()
         .id_salt("program-editor")
         .max_height(height)
         .auto_shrink([false, false]);
-    if let Some(offset) = offset {
-        scroll = scroll.vertical_scroll_offset(offset);
-    }
     scroll.show(ui, |ui| {
         ui.horizontal_top(|ui| {
             let gutter = ui.add(
@@ -527,7 +530,16 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             let _ = available;
             let _ = wrap_width_unused();
         });
+        if let Some(line) = scroll_to {
+            let content = ui.min_rect();
+            let rect = egui::Rect::from_min_size(
+                egui::pos2(content.left(), content.top() + line as f32 * line_height()),
+                Vec2::new(content.width().max(10.0), line_height()),
+            );
+            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+        }
     });
+
 }
 
 /// Cache key for the editor galley: editor revision, highlight inputs, wrap

@@ -952,7 +952,11 @@ impl LincApp {
                 self.program.program_revision_seen = revision;
             }
         }
+        // Only while a program is actually running: otherwise a stale
+        // follow flag dragged the view back to line 1 every frame and fought
+        // the operator's own cursor movement.
         if self.program.follow_current
+            && self.snapshot.task.running
             && self.snapshot.program.current_line > 0
             && self.snapshot.program.current_line != self.program.selected_line
         {
