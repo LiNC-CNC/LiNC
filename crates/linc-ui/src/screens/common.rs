@@ -385,10 +385,16 @@ pub fn alarm_card(app: &LincApp, ui: &mut Ui, height: f32) {
                     .color(theme::SUCCESS),
             );
         } else {
+            let width = ui.available_width();
             egui::ScrollArea::vertical()
                 .id_salt("alarm-card")
                 .max_height(height - 34.0)
+                // Without this the scroll area sizes to its content, and a long
+                // controller message widened the whole card and pushed the page
+                // sideways.
+                .auto_shrink([false, false])
                 .show(ui, |ui| {
+                    ui.set_max_width(width);
                     for alarm in app.snapshot.alarms.iter().take(20) {
                         let color = match alarm.severity {
                             linc_core::model::AlarmSeverity::Critical
@@ -409,7 +415,11 @@ pub fn alarm_card(app: &LincApp, ui: &mut Ui, height: f32) {
                                     .size(theme::font_size(9.0))
                                     .color(color),
                             );
-                            ui.label(
+                        });
+                        // The message gets the full card width and wraps, so it
+                        // reads instead of running off the edge.
+                        ui.add(
+                            egui::Label::new(
                                 RichText::new(&alarm.message)
                                     .size(theme::font_size(11.0))
                                     .color(
@@ -419,8 +429,10 @@ pub fn alarm_card(app: &LincApp, ui: &mut Ui, height: f32) {
                                             color
                                         },
                                     ),
-                            );
-                        });
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(4.0);
                     }
                 });
         }

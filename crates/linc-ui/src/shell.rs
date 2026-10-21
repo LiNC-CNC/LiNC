@@ -2041,7 +2041,10 @@ impl LincApp {
                             linc_core::model::AlarmSeverity::Warning => theme::WARNING,
                             linc_core::model::AlarmSeverity::Info => theme::MUTED,
                         };
-                        ui.label(RichText::new(&alarm.message).size(size).color(colour));
+                        // The strip is one row high: long messages are cut here
+                        // and read in full in the Machine page's pane.
+                        let text: String = alarm.message.chars().take(64).collect();
+                        ui.label(RichText::new(text).size(size).color(colour));
                         ui.add_space(12.0);
                     }
                 });
@@ -2255,7 +2258,9 @@ impl LincApp {
                         "TOOL INSTALLED",
                         self.snapshot.panel.connected && state.token.is_some(),
                     );
-                    if focus_default {
+                    // It is the prompt's only action, so holding focus on it is
+                    // harmless and survives a page underneath claiming it.
+                    if focus_default || !installed.has_focus() {
                         installed.request_focus();
                     }
                     if installed.clicked() {
