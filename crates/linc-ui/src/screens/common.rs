@@ -59,48 +59,6 @@ fn token_line_ui(ui: &mut Ui, text: &str, size: f32) {
     });
 }
 
-pub fn current_next_cards(app: &LincApp, ui: &mut Ui) {
-    ui.columns(2, |columns| {
-        theme::card(&mut columns[0], |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("CURRENT")
-                        .size(theme::font_size(10.0))
-                        .strong()
-                        .color(theme::ACCENT),
-                );
-                ui.label(
-                    RichText::new(format!("LN {}", app.snapshot.program.current_line))
-                        .monospace()
-                        .size(theme::font_size(10.0))
-                        .color(theme::MUTED),
-                );
-            });
-            let line = if app.snapshot.program.current_block.is_empty() {
-                app.program
-                    .editor
-                    .line(app.snapshot.program.current_line.max(1))
-            } else {
-                app.snapshot.program.current_block.clone()
-            };
-            token_ui(ui, &line, 13.0);
-        });
-        theme::card(&mut columns[1], |ui| {
-            ui.label(
-                RichText::new("NEXT")
-                    .size(theme::font_size(10.0))
-                    .strong()
-                    .color(theme::MUTED),
-            );
-            let line = app.snapshot.program.next_line.clone().unwrap_or_default();
-            if line.is_empty() {
-                ui.label(RichText::new("—").monospace().color(theme::MUTED));
-            } else {
-                token_ui(ui, &line, 13.0);
-            }
-        });
-    });
-}
 
 /// Active G-code modal groups as abbreviated cells.
 ///

@@ -169,12 +169,11 @@ fn search_bar(app: &mut LincApp, ui: &mut Ui) {
 
 fn split(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
-    // `theme::card` adds 12 px of inner margin on each side, and the height
-    // asked for is the *content* height, so reserve that overhead or the bottom
-    // row is pushed past the panel and clipped.
+    // `theme::card` adds 12 px of inner margin on each side, and the heights
+    // asked for are *content* heights, so reserve that overhead or the columns
+    // render taller than their slots and the last one is clipped.
     const CARD_OVERHEAD: f32 = 26.0;
-    let bottom_height = 88.0;
-    let main_height = (available.y - bottom_height - CARD_OVERHEAD - 4.0).max(220.0);
+    let main_height = (available.y - CARD_OVERHEAD - 4.0).max(220.0);
     let editor_width = (available.x * 0.58).max(480.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
@@ -196,26 +195,6 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
                 common::modal_pane(app, ui, 6, "split-modal");
             },
         );
-    });
-    ui.add_space(4.0);
-    // Only draw the row when the space is really there; on a short window the
-    // cards would otherwise sit half outside the panel.
-    if ui.available_height() < 40.0 {
-        return;
-    }
-    ui.horizontal_top(|ui| {
-        ui.allocate_ui_with_layout(
-            Vec2::new(available.x * 0.58, bottom_height),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| common::current_next_cards(app, ui),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-            ui.label(
-                RichText::new("SPLIT / LIVE PATH + PROGRAM PATH")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-        });
     });
 }
 
@@ -503,7 +482,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
     }
     scroll.show(ui, |ui| {
         ui.horizontal_top(|ui| {
-            ui.add(
+            let gutter = ui.add(
                 egui::Label::new(
                     RichText::new(numbers)
                         .monospace()
@@ -575,6 +554,34 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     usize::from(range.primary.index).min(text.chars().count().saturating_sub(1));
                 let line = text.chars().take(cursor).filter(|ch| *ch == '\n').count() + 1;
                 app.program.selected_line = line.max(1).min(line_count.max(1));
+            }
+            // Mark the line the interpreter is on the way the Machine page's
+            // G-code display does: an accent bar in the gutter plus a tinted
+            // row. The cursor line keeps its underline from the layouter, so
+            // the two are distinguishable while editing.
+            let running = app.snapshot.program.current_line.max(1);
+            let live = app.snapshot.task.running
+                || app.snapshot.program.paused
+                || app.snapshot.task.program_started;
+            if live && running <= line_count {
+                let top = output.galley_pos.y + (running as f32 - 1.0) * line_height();
+                let row = egui::Rect::from_min_size(
+                    egui::pos2(gutter.rect.left() - 6.0, top),
+                    egui::vec2(ui.available_width() + gutter.rect.width(), line_height()),
+                );
+                let row = row.intersect(ui.clip_rect());
+                if row.height() > 0.0 {
+                    ui.painter().rect_filled(
+                        row,
+                        2.0,
+                        theme::ACCENT.gamma_multiply(0.12),
+                    );
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_size(row.left_top(), egui::vec2(2.0, row.height())),
+                        1.0,
+                        theme::ACCENT,
+                    );
+                }
             }
             let _ = output.state;
             let _ = available;
