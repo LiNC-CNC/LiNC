@@ -405,7 +405,11 @@ class Bridge:
                 if axis in values:
                     updates[base + 1 + axis_index] = values[axis]
             if index in self.rotation_overrides:
-                updates[base] = self.rotation_overrides[index]
+                # The row for a system is 5220 + (index-1)*20 .. +10: axis words
+                # start at +1 and the rotation is +10. Writing the rotation at
+                # +0 overwrote parameter 5220, which is the *active* system
+                # index, so every write reset G54..G59 to "system 0".
+                updates[base + 10] = self.rotation_overrides[index]
         if not updates:
             self.last_save_error = None
             return True
@@ -424,9 +428,26 @@ class Bridge:
                 if key in updates:
                     lines[position] = "%d\t%.6f" % (key, updates[key])
                     written.add(key)
-            for key, value in updates.items():
-                if key not in written:
-                    lines.append("%d\t%.6f" % (key, value))
+            # Insert a missing key in numeric order: `restore_parameters` reads
+            # the file expecting strictly ascending keys and fails the whole
+            # restore otherwise, which leaves the interpreter with zeros.
+            for key in sorted(updates):
+                if key in written:
+                    continue
+                position = len(lines)
+                for candidate, line in enumerate(lines):
+                    parts = line.split()
+                    if len(parts) != 2:
+                        continue
+                    try:
+                        other = int(parts[0])
+                    except ValueError:
+                        continue
+                    if other > key:
+                        position = candidate
+                        break
+                lines.insert(position, "%d\t%.6f" % (key, updates[key]))
+                written.add(key)
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write("\n".join(lines) + "\n")
         except OSError as exc:
@@ -480,7 +501,7 @@ class Bridge:
             values = {}
             for axis_index, axis in enumerate(self.axes):
                 values[axis] = params.get(base + 1 + axis_index, 0.0)
-            rotation = params.get(base, 0.0)
+            rotation = params.get(base + 10, 0.0)
             # Overlay what this session has written, then the active system from
             # the live status, which is the most trustworthy of the three.
             remembered = self.offset_overrides.get(index)
@@ -501,7 +522,9 @@ class Bridge:
                     "rotation": rotation,
                 }
             )
-        g92 = {axis: params.get(5201 + i, 0.0) for i, axis in enumerate(self.axes)}
+        # G92 offsets live in 5211..5219 (5210 is the "a G92 offset is active"
+        # flag), not 5201.., which belong to the G54 row.
+        g92 = {axis: params.get(5211 + i, 0.0) for i, axis in enumerate(self.axes)}
         return offsets, g92
 
     def read_panel(self, sparse):
@@ -1348,6 +1371,54 @@ def check_offset_sync():
     print("linc_bridge selftest: live offsets are captured only after the sync")
 
 
+def check_parameter_keys():
+    """The file must keep its ascending order and its active-system index."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "sim.var")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(
+                "5161\t1.000000\n"
+                "5220\t1.000000\n"
+                "5221\t-54.350000\n"
+                "5222\t-49.300000\n"
+                "5223\t-27.150000\n"
+                "5230\t0.000000\n"
+            )
+        bridge = _fake_bridge(linuxcnc.STATE_ON, {}, apply_reset=True, apply_mdi=False)
+        bridge.param_file = path
+        bridge.offset_overrides = {1: {"X": -60.5}}
+        bridge.rotation_overrides = {1: 2.5}
+        assert bridge.save_parameters(), bridge.last_save_error
+
+        def values():
+            out = {}
+            for line in open(path, encoding="utf-8"):
+                parts = line.split()
+                if len(parts) == 2:
+                    out[int(parts[0])] = float(parts[1])
+            return out
+
+        written = values()
+        assert written[5220] == 1.0, written[5220]
+        assert written[5230] == 2.5, written[5230]
+        assert written[5221] == -60.5, written[5221]
+        print("linc_bridge selftest: the rotation writes 5230, not the active system")
+
+        # G54 X already present; G59 X is missing and must be inserted in order.
+        bridge.offset_overrides = {6: {"X": 6.0}}
+        assert bridge.save_parameters(), bridge.last_save_error
+        keys = [int(line.split()[0]) for line in open(path, encoding="utf-8")]
+        assert keys == sorted(keys), keys
+        assert values()[5321] == 6.0, values()
+        print("linc_bridge selftest: a missing key is inserted in numeric order")
+
+        offsets, _g92 = bridge.read_offsets({5220: 1.0, 5221: -54.35, 5230: 2.5})
+        assert offsets[0]["rotation"] == 2.5, offsets[0]["rotation"]
+        print("linc_bridge selftest: the rotation is read from the rotation key")
+
+
 def selftest():
     """Pure-parsing checks that need no LinuxCNC session.
 
@@ -1367,6 +1438,7 @@ def selftest():
         assert got == expected, f"parse_coordinates({raw!r}) = {got!r}, expected {expected!r}"
     print(f"linc_bridge selftest: {len(cases)} coordinate cases OK")
     check_offset_sync()
+    check_parameter_keys()
 
 
 if __name__ == "__main__":
