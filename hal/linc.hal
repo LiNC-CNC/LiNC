@@ -16,42 +16,73 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 # ---------------------------------------------------------------------------
 # Logic and conversion components
 # ---------------------------------------------------------------------------
-loadrt and2 names=and2.cycle_gate,and2.cycle_run,and2.cycle_resume,and2.jxp_cont,and2.jxn_cont,and2.jyp_cont,and2.jyn_cont,and2.jzp_cont,and2.jzn_cont,and2.jxp_inc,and2.jxn_inc,and2.jyp_inc,and2.jyn_inc,and2.jzp_inc,and2.jzn_inc,and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint
+loadrt and2 names=and2.cycle_gate,and2.cycle_resume,and2.cycle_run,and2.jxn_inc,and2.jxp_inc,and2.jyn_inc,and2.jyp_inc,and2.jzn_inc,and2.jzp_inc,and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint
 # `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
 # with "or2: already exists". Instances only used by the simulation
 # (or2.estop_reset) are created here and wired in linc-sim.hal.
-loadrt or2 names=or2.jog_a,or2.jog_b,or2.pause,or2.manual_req,or2.estop_reset
-loadrt not names=not.is_joint,not.paused,not.coolant,not.lube,not.opt,not.bdt,not.spindle_on,not.mode_inc
+loadrt or2 names=or2.estop_reset,or2.jog_a,or2.jog_b,or2.manual_req,or2.pause
+loadrt not names=not.bdt,not.coolant,not.is_joint,not.lube,not.mode_inc,not.opt,not.paused,not.spindle_on
 loadrt toggle names=toggle.coolant,toggle.lube,toggle.opt,toggle.bdt,toggle.sbk,toggle.worklamp
 loadrt scale names=scale.feed,scale.rapid,scale.spindle
 loadrt conv_float_s32 names=conv.feed,conv.rapid,conv.spindle
 
 addf and2.cycle_gate servo-thread
-addf and2.cycle_run servo-thread
 addf and2.cycle_resume servo-thread
-addf and2.jxp_cont servo-thread
-addf and2.jxn_cont servo-thread
-addf and2.jyp_cont servo-thread
-addf and2.jyn_cont servo-thread
-addf and2.jzp_cont servo-thread
-addf and2.jzn_cont servo-thread
-addf and2.jxp_inc servo-thread
+addf and2.cycle_run servo-thread
 addf and2.jxn_inc servo-thread
-addf and2.jyp_inc servo-thread
+addf and2.jxp_inc servo-thread
 addf and2.jyn_inc servo-thread
-addf and2.jzp_inc servo-thread
+addf and2.jyp_inc servo-thread
 addf and2.jzn_inc servo-thread
+addf and2.jzp_inc servo-thread
+addf and2.xn_axis servo-thread
+addf and2.xn_cont servo-thread
+addf and2.xn_inc servo-thread
+addf and2.xn_joint servo-thread
+addf and2.xn_step_axis servo-thread
+addf and2.xn_step_joint servo-thread
+addf and2.xp_axis servo-thread
+addf and2.xp_cont servo-thread
+addf and2.xp_inc servo-thread
+addf and2.xp_joint servo-thread
+addf and2.xp_step_axis servo-thread
+addf and2.xp_step_joint servo-thread
+addf and2.yn_axis servo-thread
+addf and2.yn_cont servo-thread
+addf and2.yn_inc servo-thread
+addf and2.yn_joint servo-thread
+addf and2.yn_step_axis servo-thread
+addf and2.yn_step_joint servo-thread
+addf and2.yp_axis servo-thread
+addf and2.yp_cont servo-thread
+addf and2.yp_inc servo-thread
+addf and2.yp_joint servo-thread
+addf and2.yp_step_axis servo-thread
+addf and2.yp_step_joint servo-thread
+addf and2.zn_axis servo-thread
+addf and2.zn_cont servo-thread
+addf and2.zn_inc servo-thread
+addf and2.zn_joint servo-thread
+addf and2.zn_step_axis servo-thread
+addf and2.zn_step_joint servo-thread
+addf and2.zp_axis servo-thread
+addf and2.zp_cont servo-thread
+addf and2.zp_inc servo-thread
+addf and2.zp_joint servo-thread
+addf and2.zp_step_axis servo-thread
+addf and2.zp_step_joint servo-thread
+addf not.bdt servo-thread
+addf not.coolant servo-thread
+addf not.is_joint servo-thread
+addf not.lube servo-thread
 addf not.mode_inc servo-thread
+addf not.opt servo-thread
+addf not.paused servo-thread
+addf not.spindle_on servo-thread
 addf or2.jog_a servo-thread
 addf or2.jog_b servo-thread
 addf or2.manual_req servo-thread
 addf or2.pause servo-thread
-addf not.paused servo-thread
-addf not.coolant servo-thread
-addf not.lube servo-thread
-addf not.opt servo-thread
-addf not.bdt servo-thread
-addf not.spindle_on servo-thread
 addf toggle.coolant servo-thread
 addf toggle.lube servo-thread
 addf toggle.opt servo-thread
@@ -236,6 +267,12 @@ net jog-yn-step and2.yn_inc.out => and2.yn_step_joint.in0 and2.yn_step_axis.in0
 net jog-zp-step and2.zp_inc.out => and2.zp_step_joint.in0 and2.zp_step_axis.in0
 net jog-zn-step and2.zn_inc.out => and2.zn_step_joint.in0 and2.zn_step_axis.in0
 
+net jog-xp-step-axis-out and2.xp_step_axis.out => halui.axis.x.increment-plus
+net jog-xn-step-axis-out and2.xn_step_axis.out => halui.axis.x.increment-minus
+net jog-yp-step-axis-out and2.yp_step_axis.out => halui.axis.y.increment-plus
+net jog-yn-step-axis-out and2.yn_step_axis.out => halui.axis.y.increment-minus
+net jog-zp-step-axis-out and2.zp_step_axis.out => halui.axis.z.increment-plus
+net jog-zn-step-axis-out and2.zn_step_axis.out => halui.axis.z.increment-minus
 net jog-xp-step-joint-out and2.xp_step_joint.out => halui.joint.0.increment-plus
 net jog-xn-step-joint-out and2.xn_step_joint.out => halui.joint.0.increment-minus
 net jog-yp-step-joint-out and2.yp_step_joint.out => halui.joint.1.increment-plus
