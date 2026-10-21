@@ -5,7 +5,7 @@
 //! [`common::live_split`].
 
 use egui::{RichText, Ui};
-use linc_core::model::MachineVariant;
+use linc_core::model::{MachineVariant, PanelMode};
 
 use crate::screens::common::{self, LiveAxisRow};
 use crate::shell::LincApp;
@@ -75,19 +75,34 @@ fn coordinates_readout(app: &LincApp) -> Vec<LiveAxisRow> {
 
 
 
-/// `X`, `Y`, `Z` zero that axis and `A` zeroes all of them, in the jog modes.
+/// `X`, `Y`, `Z` zero that axis and `A` zeroes all of them.
 ///
+/// The Manual (JOG / INC / MPG) and Homing (HOME / PROG.HOME) pages share one
+/// key row, so both mode families must accept these keys — gating on
+/// `is_manual()` alone left them advertised on the Homing page and dead there.
+/// AUTO, EDIT and MDI keep them inert on purpose.
+///
+/// Modes whose page advertises the `X`/`Y`/`Z` and `A` touch-off keys. AUTO,
+/// EDIT and MDI keep them inert on purpose, and an unknown panel mode fails
+/// closed.
+fn zero_keys_active(mode: Option<PanelMode>) -> bool {
+    matches!(
+        mode,
+        Some(
+            PanelMode::Jog
+                | PanelMode::Inc
+                | PanelMode::Mpg
+                | PanelMode::Home
+                | PanelMode::ProgHome
+        )
+    )
+}
+
 /// The same gate as the on-screen touch-off row: writes must be allowed, which
 /// covers machine ON, idle, homed, program protect and an E-stopped or offline
 /// panel.
-fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
-    let jogging = app
-        .snapshot
-        .panel
-        .mode
-        .mode()
-        .map(|mode| mode.is_manual())
-        .unwrap_or(false);
+pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
+    let zeroable = zero_keys_active(app.snapshot.panel.mode.mode());
     // Only a text field keeps these keys for itself. The page holds focus on an
     // anchor widget for arrow navigation, so any focus at all is too broad a
     // test and made the keys dead.
@@ -95,7 +110,7 @@ fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
         memory.has_focus(egui::Id::unique("linc-program-editor"))
             || memory.has_focus(egui::Id::unique("linc-tool-cell"))
     });
-    if !jogging || text_focused {
+    if !zeroable || text_focused {
         return;
     }
     let axes = app.axes();
@@ -241,4 +256,26 @@ fn mode_context_card(app: &mut LincApp, ui: &mut Ui) {
                 .color(theme::MUTED),
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn touch_off_keys_are_live_in_manual_and_homing_modes() {
+        for mode in [
+            PanelMode::Jog,
+            PanelMode::Inc,
+            PanelMode::Mpg,
+            PanelMode::Home,
+            PanelMode::ProgHome,
+        ] {
+            assert!(zero_keys_active(Some(mode)), "{mode:?}");
+        }
+        for mode in [PanelMode::Auto, PanelMode::Edit, PanelMode::Mdi] {
+            assert!(!zero_keys_active(Some(mode)), "{mode:?}");
+        }
+        assert!(!zero_keys_active(None));
+    }
 }

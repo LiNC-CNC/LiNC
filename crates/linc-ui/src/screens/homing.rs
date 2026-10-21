@@ -13,6 +13,9 @@ use crate::shell::LincApp;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
+    // The Homing page advertises the same X/Y/Z and A touch-off keys as the
+    // Manual page, so it has to handle them too.
+    crate::screens::manual::handle_zero_keys(app, ui);
     let mode = app.snapshot.panel.mode.mode();
     let program_zero = mode == Some(PanelMode::ProgHome);
     let on_screen = matches!(mode, Some(PanelMode::Home) | Some(PanelMode::ProgHome));
