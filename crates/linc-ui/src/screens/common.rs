@@ -1031,7 +1031,9 @@ pub struct LiveAxisRow {
     pub name: String,
     pub work: f64,
     pub machine: f64,
-    pub dtg: f64,
+    /// Distance to go. `None` hides the field: homing is about homed state and
+    /// machine position, where a remaining distance means nothing.
+    pub dtg: Option<f64>,
     /// Highlighted because the panel reports it as the selected jog axis.
     pub active: bool,
     /// Optional state chip, e.g. `HOMED` on the Homing screen.
@@ -1275,12 +1277,14 @@ pub fn live_coordinates_card(
                         );
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(format!("DTG {:.3}", row.dtg))
-                                .monospace()
-                                .size(theme::font_size(9.0))
-                                .color(theme::MUTED),
-                        );
+                        if let Some(dtg) = row.dtg {
+                            ui.label(
+                                RichText::new(format!("DTG {dtg:.3}"))
+                                    .monospace()
+                                    .size(theme::font_size(9.0))
+                                    .color(theme::MUTED),
+                            );
+                        }
                         ui.label(
                             RichText::new(theme::format_position(row.work, 3))
                                 .monospace()
@@ -1305,8 +1309,13 @@ pub fn live_coordinates_card(
                         );
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let legend = if row.dtg.is_some() {
+                            "WORK / MACHINE / DTG"
+                        } else {
+                            "WORK / MACHINE"
+                        };
                         ui.label(
-                            RichText::new("WORK / MACHINE / DTG")
+                            RichText::new(legend)
                                 .size(theme::font_size(8.0))
                                 .color(theme::MUTED),
                         );

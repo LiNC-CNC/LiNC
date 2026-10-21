@@ -77,7 +77,9 @@ fn homing_readout(app: &LincApp, rows: &[linc_core::homing::HomeAxisRow]) -> Vec
                 name: row.name.clone(),
                 work: position.map(|p| p.work).unwrap_or(row.position),
                 machine: position.map(|p| p.machine).unwrap_or(row.position),
-                dtg: position.map(|p| p.dtg).unwrap_or(0.0),
+                // Homing is about homed state and machine position; a
+                // remaining distance to go is noise here.
+                dtg: None,
                 active: app
                     .snapshot
                     .panel

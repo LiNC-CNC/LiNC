@@ -74,7 +74,7 @@ fn coordinates_readout(app: &LincApp) -> Vec<LiveAxisRow> {
                     .unwrap_or(false),
                 work: position.map(|p| p.work).unwrap_or(0.0),
                 machine: position.map(|p| p.machine).unwrap_or(0.0),
-                dtg: position.map(|p| p.dtg).unwrap_or(0.0),
+                dtg: Some(position.map(|p| p.dtg).unwrap_or(0.0)),
                 name: axis,
                 badge: None,
                 note: None,
