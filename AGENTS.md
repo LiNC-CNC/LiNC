@@ -50,6 +50,13 @@ capture taken with one is not a valid layout reference.
 - **`available_height()` inside a frame is not bounded by that frame.** Sizing a
   child from it lets the child ask for more than the card has; size from the
   card's rect instead.
+- **`ui.min_rect()` is not a measurement of what you just drew.** Once
+  `set_min_size` has run, `min_rect` holds the whole card, so using it as a
+  header height hands the rest of the card a negative number. Measure from the
+  cursor before and after the header.
+- **Never feed a measured height back into the next frame's layout.** Measuring
+  the chrome and passing it back next frame makes the card oscillate between
+  two sizes. Lay out from rects and measure within the same frame.
 - **Measure, do not guess, chrome.** `graph_card`'s chrome is ~86 px and a
   MODAL card ~135 px; the cards report their own height back and the next frame
   uses it.

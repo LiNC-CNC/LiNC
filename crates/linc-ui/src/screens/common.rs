@@ -112,22 +112,105 @@ pub fn modal_grid(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str) {
 }
 
 /// A MODAL pane of its own, for pages that have room for a side column.
-/// MODAL pane drawn into an exact rect.
-///
-/// The card is forced to the rect's size rather than to its content: a frame
-/// sizes to content, and the few pixels of difference were enough to leave the
-/// column beside the editor ending on a different line.
-pub fn modal_pane_in(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str, rect: egui::Rect) {
+/// Shared card shell: an exact rect, the same 4 px frame and tight spacing the
+/// Machine page's toolpath card uses, and a plain title label.
+pub fn shell_card<R>(ui: &mut Ui, rect: egui::Rect, add: impl FnOnce(&mut Ui) -> R) -> R {
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect)
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
     child.set_clip_rect(rect);
-    let inner = Vec2::new((rect.width() - 24.0).max(40.0), (rect.height() - 24.0).max(24.0));
-    theme::card(&mut child, |ui| {
-        ui.set_min_size(inner);
-        theme::section_header(ui, "MODAL");
+    let inner = Vec2::new(
+        (rect.width() - 8.0).max(20.0),
+        (rect.height() - 8.0).max(10.0),
+    );
+    egui::Frame::new()
+        .fill(theme::PANEL)
+        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin::same(4))
+        .show(&mut child, |ui| {
+            ui.set_min_size(inner);
+            ui.spacing_mut().interact_size.y = 14.0;
+            ui.spacing_mut().item_spacing.y = 0.0;
+            add(ui)
+        })
+        .inner
+}
+
+/// Card title, matching MAIN: a plain label, not a section header.
+pub fn card_title(ui: &mut Ui, text: &str) {
+    ui.label(
+        RichText::new(text)
+            .size(theme::font_size(10.0))
+            .strong()
+            .color(theme::MUTED),
+    );
+}
+
+/// Toolpath status line: keys on the left, view and zoom on the right. Every
+/// toolpath card draws it, so no card needs a legend over the drawing.
+pub fn toolpath_header(ui: &mut Ui, view: &str, zoom: f32) {
+    ui.horizontal(|ui| {
+        card_title(ui, "TOOLPATH");
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new("— CUT")
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::ACCENT),
+        );
+        ui.label(
+            RichText::new("-- RAPID")
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
+        ui.label(
+            RichText::new("— LIVE")
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::SUCCESS),
+        );
+        let (marker, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+        ui.painter().circle_stroke(
+            marker.center(),
+            4.0,
+            egui::Stroke::new(1.5, linc_view::theme::TOOL),
+        );
+        ui.label(
+            RichText::new("TOOL")
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::FG),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                RichText::new(format!("ZOOM {:.1}x", zoom))
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new(view)
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+        });
+    });
+}
+
+/// MODAL pane drawn into an exact rect.
+///
+/// The card is forced to the rect's size rather than to its content: a frame
+/// sizes to content, and the few pixels of difference were enough to leave the
+/// column beside the editor ending on a different line.
+pub fn modal_pane_in(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str, rect: egui::Rect) {
+    shell_card(ui, rect, |ui| {
+        card_title(ui, "MODAL");
         modal_grid(app, ui, columns, id_salt);
     });
 }
@@ -141,7 +224,8 @@ pub fn modal_pane_in(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str, 
 /// leave the column short.
 pub fn modal_height(codes: usize, columns: usize) -> f32 {
     let rows = codes.max(1).div_ceil(columns.max(1));
-    45.0 + rows as f32 * 45.0
+    // 8 px frame, an 18 px title row, and 26 px per row of cells.
+    26.0 + rows as f32 * 26.0
 }
 
 
@@ -1063,109 +1147,38 @@ pub fn live_mode_header(
 /// and `ZOOM` on the right. FIT and CLEAR TRAIL are keyboard commands, so the
 /// header carries no buttons.
 pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
-    // An exact rect: a frame inside a shared column grows to fit its content,
-    // which is what pushed this card past the bottom of the page.
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), card_height.max(160.0)),
         egui::Sense::hover(),
     );
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect)
-            .layout(egui::Layout::top_down(egui::Align::Min)),
-    );
-    // Same shell as the Machine page's toolpath card: a 4 px frame and a plain
-    // label. A `theme::card` plus `section_header` gives a noticeably taller
-    // title bar, which is why this row looked fatter than MAIN's.
-    egui::Frame::new()
-        .fill(theme::PANEL)
-        .stroke(egui::Stroke::new(1.0, theme::BORDER))
-        .corner_radius(6)
-        .inner_margin(egui::Margin::same(4))
-        .show(&mut child, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.spacing_mut().interact_size.y = 14.0;
-            ui.spacing_mut().item_spacing.y = 0.0;
-            ui.set_max_height(rect.height());
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("TOOLPATH")
-                        .size(theme::font_size(10.0))
-                        .strong()
-                        .color(theme::MUTED),
-                );
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new("— CUT")
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::ACCENT),
-                );
-                ui.label(
-                    RichText::new("-- RAPID")
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                ui.label(
-                    RichText::new("— LIVE")
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::SUCCESS),
-                );
-                let (marker, _) =
-                    ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                ui.painter().circle_stroke(
-                    marker.center(),
-                    4.0,
-                    egui::Stroke::new(1.5, linc_view::theme::TOOL),
-                );
-                ui.label(
-                    RichText::new("TOOL")
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::FG),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(format!("ZOOM {:.1}x", app.manual.zoom))
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
-                    );
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(app.manual.view.label())
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
-                    );
-                });
-            });
-            let graph_height = (rect.height() - 30.0).max(120.0);
-            let preview = app.program.last_valid_preview.clone();
-            let current_line = app.snapshot.program.current_line;
-            let view = app.manual.view;
-            let mut zoom = app.manual.zoom;
-            let mut pan = app.manual.pan;
-            let mut fit = app.manual.fit;
-            trajectory(
-                app,
-                ui,
-                &preview,
-                graph_height,
-                view,
-                &mut zoom,
-                &mut pan,
-                &mut fit,
-                None,
-                Some(current_line),
-                false,
-            );
-            app.manual.zoom = zoom;
-            app.manual.pan = pan;
-            app.manual.fit = fit;
-        });
+    shell_card(ui, rect, |ui| {
+        let body_top = ui.cursor().top();
+        toolpath_header(ui, app.manual.view.label(), app.manual.zoom);
+        let header_height = ui.cursor().top() - body_top;
+        let graph_height = (rect.height() - 8.0 - header_height - 2.0).max(60.0);
+        let preview = app.program.last_valid_preview.clone();
+        let current_line = app.snapshot.program.current_line;
+        let view = app.manual.view;
+        let mut zoom = app.manual.zoom;
+        let mut pan = app.manual.pan;
+        let mut fit = app.manual.fit;
+        trajectory(
+            app,
+            ui,
+            &preview,
+            graph_height,
+            view,
+            &mut zoom,
+            &mut pan,
+            &mut fit,
+            None,
+            Some(current_line),
+            false,
+        );
+        app.manual.zoom = zoom;
+        app.manual.pan = pan;
+        app.manual.fit = fit;
+    });
 }
 
 /// Large work/machine/DTG readout, shared by the Manual and Homing screens.

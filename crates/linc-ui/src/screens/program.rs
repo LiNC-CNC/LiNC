@@ -36,20 +36,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 
 
 
-/// Scratch key for the measured chrome of a Program graph column.
-///
-/// The cards report their own height, so the layout does not carry constants
-/// that silently rot when the font scale or the code count changes.
-fn chrome_key(view: &str) -> egui::Id {
-    egui::Id::unique(match view {
-        "code" => "linc-program-chrome-code",
-        _ => "linc-program-chrome-split",
-    })
-}
 
 fn split(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
-    let height = (available.y - 4.0).max(220.0);
+    // Leave a gap above the hint row so the card borders are not flush with it.
+    let height = (available.y - 12.0).max(220.0);
     let half = ((available.x - 8.0) * 0.5).max(300.0);
     let top = ui.cursor().top();
     let left_rect =
@@ -61,17 +52,8 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
     // Both cards are positioned from rects rather than stacked: the graph's
     // rendered height drifts by a few pixels, and stacking let that drift move
     // the pane below it, so the two columns never ended together.
-    let mut left = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(left_rect)
-            .layout(egui::Layout::top_down(egui::Align::Min)),
-    );
-    editor_pane(app, &mut left, height);
+    editor_pane(app, ui, left_rect);
 
-    let graph_chrome = ui
-        .ctx()
-        .data(|data| data.get_temp::<f32>(chrome_key("split")))
-        .unwrap_or(50.0);
     let codes = app
         .snapshot
         .program
@@ -88,23 +70,7 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
         right_rect.min,
         egui::pos2(right_rect.right(), modal_rect.top() - 4.0),
     );
-    let mut graph_ui = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(graph_rect)
-            .layout(egui::Layout::top_down(egui::Align::Min)),
-    );
-    graph_card(
-        app,
-        &mut graph_ui,
-        (graph_rect.height() - graph_chrome).max(120.0),
-        ViewKind::Full,
-    );
-    ui.ctx().data_mut(|data| {
-        data.insert_temp(
-            chrome_key("split"),
-            graph_ui.cursor().top() - graph_rect.top(),
-        )
-    });
+    graph_card(app, ui, graph_rect, ViewKind::Full);
     let mut modal_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(modal_rect)
@@ -116,15 +82,16 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
 
 fn code(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
+    let height = (available.y - 12.0).max(220.0);
     // CODE is an editing layout: the code gets the width, and the graph column
     // is a thumbnail strip beside it.
     let editor_width = (available.x * 0.76).max(520.0);
     ui.horizontal_top(|ui| {
-        ui.allocate_ui_with_layout(
-            Vec2::new(editor_width, available.y),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| editor_pane(app, ui, available.y),
+        let editor_rect = egui::Rect::from_min_size(
+            ui.cursor().min,
+            Vec2::new(editor_width, height),
         );
+        editor_pane(app, ui, editor_rect);
         ui.add_space(8.0);
         let width = (available.x - editor_width - 8.0).max(220.0);
         ui.allocate_ui_with_layout(
@@ -136,10 +103,6 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
                 // the height of the MODAL card change with the font scale and
                 // the number of active codes. The first frame uses these
                 // defaults and the next corrects them.
-                let graph_chrome = ui
-                    .ctx()
-                    .data(|data| data.get_temp::<f32>(chrome_key("code")))
-                    .unwrap_or(50.0);
                 let codes = app
                     .snapshot
                     .program
@@ -149,8 +112,8 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
                     .count();
                 let modal_h = common::modal_height(codes, 4);
                 let column = egui::Rect::from_min_size(
-                    ui.cursor().min,
-                    Vec2::new(width, available.y),
+                    egui::pos2(ui.cursor().left() + editor_width + 8.0, ui.cursor().top()),
+                    Vec2::new(width, height),
                 );
                 let modal_rect = egui::Rect::from_min_size(
                     egui::pos2(column.left(), column.bottom() - modal_h),
@@ -160,23 +123,7 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
                     column.min,
                     egui::pos2(column.right(), modal_rect.top() - 4.0),
                 );
-                let mut graph_ui = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(graph_rect)
-                        .layout(egui::Layout::top_down(egui::Align::Min)),
-                );
-                graph_card(
-                    app,
-                    &mut graph_ui,
-                    (graph_rect.height() - graph_chrome).max(120.0),
-                    ViewKind::MiniXy,
-                );
-                ui.ctx().data_mut(|data| {
-                    data.insert_temp(
-                        chrome_key("code"),
-                        graph_ui.cursor().top() - graph_rect.top(),
-                    )
-                });
+                graph_card(app, ui, graph_rect, ViewKind::MiniXy);
                 let mut modal_ui = ui.new_child(
                     egui::UiBuilder::new()
                         .max_rect(modal_rect)
@@ -194,35 +141,24 @@ enum ViewKind {
     MiniXy,
 }
 
-fn graph_card(app: &mut LincApp, ui: &mut Ui, height: f32, kind: ViewKind) {
+fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) {
     let preview = app.program.last_valid_preview.clone();
-    theme::card(ui, |ui| {
-        ui.horizontal(|ui| {
-            theme::section_header(
+    common::shell_card(ui, rect, |ui| {
+        let top = ui.cursor().top();
+        match kind {
+            ViewKind::MiniXy => {
+                common::card_title(ui, "PATH");
+            }
+            ViewKind::Full => common::toolpath_header(
                 ui,
-                if matches!(kind, ViewKind::MiniXy) {
-                    "PATH"
-                } else {
-                    "TOOLPATH"
-                },
-            );
-            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                // FIT and CLEAR TRAIL are page-local keyboard commands; their
-                // bindings are listed in the bottom hint row.
-                if !matches!(kind, ViewKind::MiniXy) {
-                    ui.label(
-                        RichText::new(if app.program.preview.error.is_some() {
-                            "LAST VALID"
-                        } else {
-                            "PROGRAM + LIVE"
-                        })
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                    );
-                }
-            });
-        });
+                app.program.graph_view.label(),
+                app.program.graph_zoom,
+            ),
+        }
+        // Measured from the cursor: `min_rect` already holds the minimum size
+        // the shell set, so it would report the whole card as the header and
+        // shrink the graph to nothing.
+        let header_height = ui.cursor().top() - top;
         let view = match kind {
             ViewKind::MiniXy => linc_view::ViewMode::TopXy,
             ViewKind::Full => app.program.graph_view,
@@ -234,16 +170,14 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, height: f32, kind: ViewKind) {
             app,
             ui,
             &preview,
-            height,
+            (rect.height() - 8.0 - header_height - 2.0).max(60.0),
             view,
             &mut zoom,
             &mut pan,
             &mut fit,
             Some(app.program.selected_line),
             Some(app.snapshot.program.current_line),
-            // The mini graph in Code view is a thumbnail: the legend would
-            // cover most of it and name colours that are barely visible.
-            !matches!(kind, ViewKind::MiniXy),
+            false,
         );
         app.program.graph_zoom = zoom;
         app.program.graph_pan = pan;
@@ -255,25 +189,9 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, height: f32, kind: ViewKind) {
 
 /// `card_height` is the total height of the card, margins included, so the
 /// pane's bottom edge lines up with whatever sits beside it.
-fn editor_pane(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
+fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
     let editable = app.editing_allowed();
-    // The card is given an exact rect: a frame inside a shared column grows to
-    // fit its content, and the header, editor and footer together came out
-    // taller than the slot, pushing the card past the column beside it.
-    let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), card_height.max(120.0)),
-        egui::Sense::hover(),
-    );
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect)
-            .layout(egui::Layout::top_down(egui::Align::Min)),
-    );
-    // `max_rect` bounds the layout but does not clip what the frame draws, so
-    // a few pixels of overflow would still show below the column.
-    child.set_clip_rect(rect);
-    let card_top = rect.top();
-    theme::card(&mut child, |ui| {
+    common::shell_card(ui, rect, |ui| {
         let content_top = ui.cursor().top();
         ui.horizontal(|ui| {
             let file = app
@@ -344,13 +262,8 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
         // than the card had and pushed the card past the column beside it.
         const FOOTER_HEIGHT: f32 = 32.0;
         let header_height = ui.cursor().top() - content_top;
-        let editor_height = (rect.bottom()
-            - card_top
-            - 24.0
-            - header_height
-            - FOOTER_HEIGHT
-            - 6.0)
-            .max(80.0);
+        let editor_height =
+            (rect.height() - 8.0 - header_height - FOOTER_HEIGHT - 4.0).max(80.0);
         let (rect, _) = ui.allocate_exact_size(
             Vec2::new(ui.available_width(), editor_height),
             egui::Sense::hover(),
