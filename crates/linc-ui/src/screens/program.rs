@@ -192,6 +192,87 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
 /// pane's bottom edge lines up with whatever sits beside it.
 fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
     let editable = app.editing_allowed();
+    // egui has no page-key support in a text edit or a scroll area, and the
+    // header row's widgets would take the key first, so the editor moves its
+    // selection by a screenful and scrolls to it, before anything else draws.
+    let editor_focused =
+        ui.memory(|memory| memory.has_focus(egui::Id::unique("linc-program-editor")));
+    if editor_focused {
+        let rows = (((rect.height() - 56.0) / line_height()).floor() as usize).max(2) - 1;
+        let mut step = 0isize;
+        ui.input_mut(|input| {
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+                step = -(rows as isize);
+            }
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+                step = rows as isize;
+            }
+        });
+        if step != 0 {
+            // The text edit owns the cursor and rewrites `selected_line` from
+            // it every frame, so the page key moves the cursor itself. egui
+            // then scrolls the view to it.
+            let id = egui::Id::unique("linc-program-editor");
+            let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+            let text = app.program.editor.text();
+            let cursor = state
+                .cursor
+                .char_range()
+                .map(|range| usize::from(range.primary.index))
+                .unwrap_or(0);
+            let line_count = app.program.editor.line_count();
+            let last = line_count.saturating_sub(1);
+            let mut line = 0usize;
+            for (index, character) in text.chars().enumerate() {
+                if index >= cursor {
+                    break;
+                }
+                if character == '\n' {
+                    line += 1;
+                }
+            }
+            // A page covers the whole program when it is shorter than one, and
+            // then the key means "start" or "end" instead of "a screenful away".
+            let index = if line_count <= rows {
+                if step < 0 {
+                    0
+                } else {
+                    text.chars().count()
+                }
+            } else {
+                let wanted = (line as isize + step).clamp(0, last as isize) as usize;
+                let mut current = 0usize;
+                let mut found = 0usize;
+                for (index, character) in text.chars().enumerate() {
+                    if current == wanted {
+                        found = index;
+                        break;
+                    }
+                    if character == '\n' {
+                        current += 1;
+                        found = index + 1;
+                    }
+                }
+                found
+            };
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(
+                    index,
+                ))));
+            state.store(ui.ctx(), id);
+            let mut target_line = 0usize;
+            for (position, character) in text.chars().enumerate() {
+                if position >= index {
+                    break;
+                }
+                if character == '\n' {
+                    target_line += 1;
+                }
+            }
+            app.program.selected_line = target_line;
+        }
+    }
     common::shell_card(ui, rect, |ui| {
         let content_top = ui.cursor().top();
         ui.horizontal(|ui| {

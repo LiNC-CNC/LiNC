@@ -409,6 +409,10 @@ Two layouts, selected by the header toggle or `FILE`:
 
 #### SPLIT
 
+Editor keys while the code has keyboard focus: `Home` / `End` move to the start
+and end of the line, and `PgUp` / `PgDn` move by a screenful — or to the start
+and end of the program when it is shorter than one.
+
 - G-code editor/monitor left (~58%).
 - Mill: 3D toolpath right (~42%); lathe: 2D XZ toolpath, with optional 3D when
   Y/C or live-tool paths are active. The loaded program path and live trail are
