@@ -702,13 +702,21 @@ class Bridge:
         return self.issue({"origin": "tool-change", "blocks": [f"T{tool} M6"]})
 
     def toggle_limits_override(self, command):
-        """Ask the controller to toggle its limits override.
+        """Accept the limit switches that are tripped right now.
 
-        Needed to jog off a limit switch: the controller refuses motion while a
-        joint is on a switch, and this is the only way to accept it.
+        Motion clears its enable request when a joint sits on a switch, so a
+        machine switched on while on a limit never comes up and cannot be jogged
+        off it. The override is the way out, but setting it alone is not enough:
+        the power-on edge has already happened, so nothing asks motion to enable
+        again. This re-requests power after the override takes effect.
         """
         try:
             self.cmd.override_limits()
+            self.cmd.wait_complete(1.0)
+            if int(getattr(self.stat, "task_state", 0)) != linuxcnc.STATE_ON:
+                self.stat.poll()
+                if int(getattr(self.stat, "task_state", 0)) != linuxcnc.STATE_ON:
+                    self.cmd.state(linuxcnc.STATE_ON)
             return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}

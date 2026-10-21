@@ -28,6 +28,10 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     }
     // No mode banner here either: the mode key shows the mode.
 
+    // A machine that could not power up because a joint is on a limit switch
+    // can only be freed from here or the jog page, so the override is offered
+    // wherever the operator might be looking.
+    common::limits_override_row(app, ui);
     let rows = axis_rows(&app.snapshot, &app.profile.machine_ini.axes);
     let readout = homing_readout(app, &rows);
 
