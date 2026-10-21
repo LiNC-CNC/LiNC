@@ -47,6 +47,11 @@ capture taken with one is not a valid layout reference.
 - **Measure, do not guess, chrome.** `graph_card`'s chrome is ~86 px and a
   MODAL card ~135 px; the cards report their own height back and the next frame
   uses it.
+- **Toolpath cards share one shell.** `theme::card` (12 px margin) plus
+  `section_header` gives a visibly fatter title bar than the Machine page's
+  toolpath card, which uses a 4 px `egui::Frame`, a plain label, and
+  `interact_size.y = 14` / `item_spacing.y = 0`. Copy the shell, not just the
+  contents, or the rows stop looking like the same widget.
 - `[ui] pages` selects the navigation entries and their order; it must match
   the keyboard (`MAIN` F5, `FILE` F6, `TOOL` F7, `OFFSET` F8, `WIN` F10).
 - `hal.allowed_outputs` is validated for **exact** equality, so adding a

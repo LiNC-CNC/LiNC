@@ -1051,82 +1051,98 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
             .max_rect(rect)
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
-    theme::card(&mut child, |ui| {
-        ui.horizontal(|ui| {
-            theme::section_header(ui, "TOOLPATH");
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new("— CUT")
-                    .monospace()
-                    .size(theme::font_size(9.0))
-                    .color(theme::ACCENT),
-            );
-            ui.label(
-                RichText::new("-- RAPID")
-                    .monospace()
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-            ui.label(
-                RichText::new("— LIVE")
-                    .monospace()
-                    .size(theme::font_size(9.0))
-                    .color(theme::SUCCESS),
-            );
-            let (marker, _) =
-                ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-            ui.painter().circle_stroke(
-                marker.center(),
-                4.0,
-                egui::Stroke::new(1.5, linc_view::theme::TOOL),
-            );
-            ui.label(
-                RichText::new("TOOL")
-                    .monospace()
-                    .size(theme::font_size(9.0))
-                    .color(theme::FG),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+    // Same shell as the Machine page's toolpath card: a 4 px frame and a plain
+    // label. A `theme::card` plus `section_header` gives a noticeably taller
+    // title bar, which is why this row looked fatter than MAIN's.
+    egui::Frame::new()
+        .fill(theme::PANEL)
+        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .corner_radius(6)
+        .inner_margin(egui::Margin::same(4))
+        .show(&mut child, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.spacing_mut().interact_size.y = 14.0;
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_max_height(rect.height());
+            ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new(format!("ZOOM {:.1}x", app.manual.zoom))
-                        .monospace()
-                        .size(theme::font_size(9.0))
+                    RichText::new("TOOLPATH")
+                        .size(theme::font_size(10.0))
+                        .strong()
                         .color(theme::MUTED),
                 );
                 ui.add_space(8.0);
                 ui.label(
-                    RichText::new(app.manual.view.label())
+                    RichText::new("— CUT")
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::ACCENT),
+                );
+                ui.label(
+                    RichText::new("-- RAPID")
                         .monospace()
                         .size(theme::font_size(9.0))
                         .color(theme::MUTED),
                 );
+                ui.label(
+                    RichText::new("— LIVE")
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::SUCCESS),
+                );
+                let (marker, _) =
+                    ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                ui.painter().circle_stroke(
+                    marker.center(),
+                    4.0,
+                    egui::Stroke::new(1.5, linc_view::theme::TOOL),
+                );
+                ui.label(
+                    RichText::new("TOOL")
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::FG),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(format!("ZOOM {:.1}x", app.manual.zoom))
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new(app.manual.view.label())
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
+                });
             });
+            let graph_height = (rect.height() - 30.0).max(120.0);
+            let preview = app.program.last_valid_preview.clone();
+            let current_line = app.snapshot.program.current_line;
+            let view = app.manual.view;
+            let mut zoom = app.manual.zoom;
+            let mut pan = app.manual.pan;
+            let mut fit = app.manual.fit;
+            trajectory(
+                app,
+                ui,
+                &preview,
+                graph_height,
+                view,
+                &mut zoom,
+                &mut pan,
+                &mut fit,
+                None,
+                Some(current_line),
+                false,
+            );
+            app.manual.zoom = zoom;
+            app.manual.pan = pan;
+            app.manual.fit = fit;
         });
-        // Card margins (24) and the status row (~26) take their share first.
-        let graph_height = (rect.height() - 56.0).max(120.0);
-        let preview = app.program.last_valid_preview.clone();
-        let current_line = app.snapshot.program.current_line;
-        let view = app.manual.view;
-        let mut zoom = app.manual.zoom;
-        let mut pan = app.manual.pan;
-        let mut fit = app.manual.fit;
-        trajectory(
-            app,
-            ui,
-            &preview,
-            graph_height,
-            view,
-            &mut zoom,
-            &mut pan,
-            &mut fit,
-            None,
-            Some(current_line),
-            false,
-        );
-        app.manual.zoom = zoom;
-        app.manual.pan = pan;
-        app.manual.fit = fit;
-    });
 }
 
 /// Large work/machine/DTG readout, shared by the Manual and Homing screens.
