@@ -62,18 +62,26 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         });
 }
 
+/// G54-G59 as an editable table.
+///
+/// Cells are edited in place and committed on Enter or when focus leaves them,
+/// the way the tool table works. A commit writes the whole row through
+/// `SetWorkOffset`, which the bridge issues as `G10 L2` in MDI, switching mode
+/// for the block and restoring the previous mode afterwards.
 fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
+    const WCS: f32 = 64.0;
+    const VALUE: f32 = 100.0;
     let axes = app.axes();
     let offsets = app.snapshot.offsets.offsets.clone();
     let active_index = app.snapshot.offsets.active_index;
     let mut selected = app.offsets.selected;
-    let mut write_row = None;
+    let mut commit: Option<u8> = None;
     theme::card(ui, |ui| {
         ui.horizontal(|ui| {
             theme::section_header(ui, "WORK OFFSETS");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
-                    RichText::new("DIRECT CELL EDIT")
+                    RichText::new("ENTER COMMITS · + - * / ACCEPTED")
                         .monospace()
                         .size(theme::font_size(9.0))
                         .color(theme::MUTED),
@@ -87,125 +95,157 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
             }
             app.offsets.g92 = values;
         }
-        egui::ScrollArea::horizontal().show(ui, |ui| {
-            ui.spacing_mut().interact_size.y = 24.0;
-            egui::Grid::new("work-offsets-direct")
-                .num_columns(axes.len() + 4)
-                .striped(true)
-                .spacing([8.0, 2.0])
-                .show(ui, |ui| {
+        let table = egui_extras::TableBuilder::new(ui)
+            .id_salt("work-offsets-table")
+            .striped(true)
+            .column(egui_extras::Column::exact(WCS))
+            .columns(egui_extras::Column::exact(VALUE), axes.len())
+            .column(egui_extras::Column::exact(VALUE))
+            .column(egui_extras::Column::remainder())
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+        table
+            .header(18.0, |mut header| {
+                header.col(|ui| {
                     ui.label(
                         RichText::new("WCS")
                             .size(theme::font_size(9.0))
                             .strong()
                             .color(theme::MUTED),
                     );
-                    for axis in &axes {
+                });
+                for axis in &axes {
+                    header.col(|ui| {
                         ui.label(
                             RichText::new(axis)
                                 .size(theme::font_size(9.0))
                                 .strong()
                                 .color(theme::C3),
                         );
-                    }
+                    });
+                }
+                header.col(|ui| {
                     ui.label(
                         RichText::new("ROTATION")
                             .size(theme::font_size(9.0))
                             .strong()
                             .color(theme::MUTED),
                     );
+                });
+                header.col(|ui| {
                     ui.label(
                         RichText::new("STATE")
                             .size(theme::font_size(9.0))
                             .strong()
                             .color(theme::MUTED),
                     );
-                    ui.label(
-                        RichText::new("WRITE")
-                            .size(theme::font_size(9.0))
-                            .strong()
-                            .color(theme::MUTED),
-                    );
-                    ui.end_row();
-
-                    for offset in &offsets {
-                        let index = offset.index;
-                        let is_active = active_index == Some(index);
-                        let is_selected = selected == index;
-                        let label = format!("G{}", 53 + index);
-                        let response = ui.selectable_label(
-                            is_selected,
-                            RichText::new(label)
-                                .monospace()
-                                .size(theme::font_size(12.0))
-                                .color(if is_active { theme::SUCCESS } else { theme::FG }),
-                        );
-                        if response.clicked() {
-                            selected = index;
-                        }
-                        let draft = app
-                            .offsets
-                            .rows
-                            .entry(index)
-                            .or_insert_with(crate::state::OffsetDraft::default);
-                        for axis in &axes {
-                            let text = draft
-                                .values
-                                .entry(axis.clone())
-                                .or_insert_with(|| "0.0000".into());
-                            ui.add_enabled(
-                                writable,
-                                egui::TextEdit::singleline(text)
-                                    .desired_width(82.0)
-                                    .font(egui::TextStyle::Monospace)
-                                    .margin(egui::Margin::symmetric(4, 1))
-                                    .min_size(egui::Vec2::new(82.0, 22.0)),
-                            );
-                        }
-                        ui.add_enabled(
-                            writable,
-                            egui::TextEdit::singleline(&mut draft.rotation)
-                                .desired_width(82.0)
-                                .font(egui::TextStyle::Monospace)
-                                .margin(egui::Margin::symmetric(4, 1))
-                                .min_size(egui::Vec2::new(82.0, 22.0)),
-                        );
-                        ui.label(
-                            RichText::new(if is_active { "ACTIVE" } else { "STORED" })
-                                .monospace()
-                                .size(theme::font_size(9.0))
-                                .color(if is_active {
-                                    theme::SUCCESS
-                                } else {
-                                    theme::MUTED
-                                }),
-                        );
-                        if theme::action_button(ui, "WRITE", writable).clicked() {
-                            write_row = Some(index);
-                        }
-                        ui.end_row();
-                    }
-
                 });
-        });
+            })
+            .body(|mut body| {
+                for offset in &offsets {
+                    let index = offset.index;
+                    let is_active = active_index == Some(index);
+                    let is_selected = selected == index;
+                    body.row(26.0, |mut row| {
+                        row.col(|ui| {
+                            // The selected chip fills with the accent colour, so
+                            // its text has to be dark or it disappears into it.
+                            let colour = if is_selected {
+                                theme::SURFACE
+                            } else if is_active {
+                                theme::SUCCESS
+                            } else {
+                                theme::FG
+                            };
+                            let response = ui.selectable_label(
+                                is_selected,
+                                RichText::new(format!("G{}", 53 + index))
+                                    .monospace()
+                                    .size(theme::font_size(12.0))
+                                    .color(colour),
+                            );
+                            if response.clicked() {
+                                selected = index;
+                            }
+                        });
+                        for axis in &axes {
+                            row.col(|ui| {
+                                let draft = app
+                                    .offsets
+                                    .rows
+                                    .entry(index)
+                                    .or_insert_with(crate::state::OffsetDraft::default);
+                                let text = draft
+                                    .values
+                                    .entry(axis.clone())
+                                    .or_insert_with(|| "0.0000".into());
+                                let response = ui.add_enabled(
+                                    writable,
+                                    egui::TextEdit::singleline(text)
+                                        .desired_width(VALUE - 8.0)
+                                        .font(egui::TextStyle::Monospace)
+                                        .margin(egui::Margin::symmetric(4, 1)),
+                                );
+                                if committed(&response) {
+                                    commit = Some(index);
+                                }
+                            });
+                        }
+                        row.col(|ui| {
+                            let draft = app
+                                .offsets
+                                .rows
+                                .entry(index)
+                                .or_insert_with(crate::state::OffsetDraft::default);
+                            let response = ui.add_enabled(
+                                writable,
+                                egui::TextEdit::singleline(&mut draft.rotation)
+                                    .desired_width(VALUE - 8.0)
+                                    .font(egui::TextStyle::Monospace)
+                                    .margin(egui::Margin::symmetric(4, 1)),
+                            );
+                            if committed(&response) {
+                                commit = Some(index);
+                            }
+                        });
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(if is_active { "ACTIVE" } else { "STORED" })
+                                    .monospace()
+                                    .size(theme::font_size(9.0))
+                                    .color(if is_active { theme::SUCCESS } else { theme::MUTED }),
+                            );
+                        });
+                    });
+                }
+            });
         if let Some(error) = &app.offsets.error {
-            ui.label(RichText::new(error).color(theme::ERROR));
+            ui.label(
+                RichText::new(error)
+                    .size(theme::font_size(10.0))
+                    .color(theme::ERROR),
+            );
         }
     });
     app.offsets.selected = selected;
-    if let Some(index) = write_row {
+    if let Some(index) = commit {
         apply_work_offset(app, index);
     }
 }
 
+/// Enter, or leaving the field, commits a cell.
+fn committed(response: &egui::Response) -> bool {
+    response.lost_focus()
+}
+
+/// Write one work offset row, evaluating each cell as an expression.
 fn apply_work_offset(app: &mut LincApp, index: u8) {
     let axes = app.axes();
     let draft = app.offsets.rows.get(&index).cloned().unwrap_or_default();
     let mut values = AxisMap::new();
     for axis in &axes {
         let text = draft.values.get(axis).cloned().unwrap_or_default();
-        let Ok(value) = text.trim().parse::<f64>() else {
-            app.offsets.error = Some(format!("G{} {axis}: invalid number {text:?}", 53 + index));
+        let Some(value) = crate::state::eval_expression(&text) else {
+            app.offsets.error = Some(format!("G{} {axis}: invalid entry {text:?}", 53 + index));
             return;
         };
         if let Err(error) = app.profile.machine_ini.validate_axis_value(axis, value) {
@@ -217,26 +257,32 @@ fn apply_work_offset(app: &mut LincApp, index: u8) {
     let rotation = if draft.rotation.trim().is_empty() {
         Some(0.0)
     } else {
-        match draft.rotation.trim().parse::<f64>() {
-            Ok(value) => Some(value),
-            Err(_) => {
-                app.offsets.error = Some("rotation: invalid number".into());
+        match crate::state::eval_expression(&draft.rotation) {
+            Some(value) => Some(value),
+            None => {
+                app.offsets.error = Some("rotation: invalid entry".into());
                 return;
             }
         }
     };
     app.offsets.error = None;
+    // Show the evaluated numbers, so an expression is visible as its result.
+    if let Some(draft) = app.offsets.rows.get_mut(&index) {
+        for (axis, value) in values.iter() {
+            draft.values.insert(axis.to_string(), format!("{value:.4}"));
+        }
+        draft.rotation = format!("{:.4}", rotation.unwrap_or(0.0));
+    }
     app.send(MachineCommand::SetWorkOffset {
         index,
         values,
         rotation,
     });
     app.toast(
-        format!("G{} offset write queued", 53 + index),
+        format!("G{} offset written", 53 + index),
         theme::ACCENT,
     );
 }
-
 
 fn tool_offset_card(app: &mut LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {

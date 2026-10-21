@@ -543,6 +543,130 @@ impl Default for ProgramUi {
     }
 }
 
+/// Evaluate a numeric entry, including simple arithmetic.
+///
+/// Operators are an operator convenience: entering `-25.15/2` or `10+2.5` is
+/// quicker than working it out, and it means a copied expression from a drawing
+/// can be typed straight in. Grammar: `+ - * /`, parentheses, unary minus.
+pub fn eval_expression(text: &str) -> Option<f64> {
+    let mut parser = ExpressionParser {
+        bytes: text.trim().as_bytes(),
+        position: 0,
+    };
+    let value = parser.sum()?;
+    parser.skip_space();
+    if parser.position == parser.bytes.len() && value.is_finite() {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+struct ExpressionParser<'a> {
+    bytes: &'a [u8],
+    position: usize,
+}
+
+impl ExpressionParser<'_> {
+    fn skip_space(&mut self) {
+        while self
+            .bytes
+            .get(self.position)
+            .is_some_and(|byte| byte.is_ascii_whitespace())
+        {
+            self.position += 1;
+        }
+    }
+
+    fn peek(&mut self) -> Option<u8> {
+        self.skip_space();
+        self.bytes.get(self.position).copied()
+    }
+
+    fn sum(&mut self) -> Option<f64> {
+        let mut value = self.product()?;
+        loop {
+            match self.peek() {
+                Some(b'+') => {
+                    self.position += 1;
+                    value += self.product()?;
+                }
+                Some(b'-') => {
+                    self.position += 1;
+                    value -= self.product()?;
+                }
+                _ => return Some(value),
+            }
+        }
+    }
+
+    fn product(&mut self) -> Option<f64> {
+        let mut value = self.unary()?;
+        loop {
+            match self.peek() {
+                Some(b'*') => {
+                    self.position += 1;
+                    value *= self.unary()?;
+                }
+                Some(b'/') => {
+                    self.position += 1;
+                    let divisor = self.unary()?;
+                    if divisor == 0.0 {
+                        return None;
+                    }
+                    value /= divisor;
+                }
+                _ => return Some(value),
+            }
+        }
+    }
+
+    fn unary(&mut self) -> Option<f64> {
+        match self.peek() {
+            Some(b'-') => {
+                self.position += 1;
+                Some(-self.unary()?)
+            }
+            Some(b'+') => {
+                self.position += 1;
+                self.unary()
+            }
+            _ => self.atom(),
+        }
+    }
+
+    fn atom(&mut self) -> Option<f64> {
+        match self.peek()? {
+            b'(' => {
+                self.position += 1;
+                let value = self.sum()?;
+                if self.peek()? != b')' {
+                    return None;
+                }
+                self.position += 1;
+                Some(value)
+            }
+            _ => {
+                let start = self.position;
+                while self
+                    .bytes
+                    .get(self.position)
+                    .is_some_and(|byte| byte.is_ascii_digit() || *byte == b'.')
+                {
+                    self.position += 1;
+                }
+                if self.position == start {
+                    return None;
+                }
+                std::str::from_utf8(&self.bytes[start..self.position])
+                    .ok()?
+                    .parse::<f64>()
+                    .ok()
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct OffsetDraft {
     pub values: HashMap<String, String>,
@@ -1324,6 +1448,23 @@ mod keymap_tests {
         let keymap = Keymap::from_config(&keys);
         assert_eq!(keymap.tools.key, egui::Key::F9);
         assert!(keymap.rejected.is_empty());
+    }
+
+    #[test]
+    fn expressions_evaluate_and_reject_nonsense() {
+        assert_eq!(eval_expression("10"), Some(10.0));
+        assert_eq!(eval_expression("-25.15"), Some(-25.15));
+        assert_eq!(eval_expression("10+2.5"), Some(12.5));
+        assert_eq!(eval_expression("-25.15/2"), Some(-12.575));
+        assert_eq!(eval_expression("(1+2)*3"), Some(9.0));
+        assert_eq!(eval_expression("2*-3"), Some(-6.0));
+        assert_eq!(eval_expression(" 4 - 6 "), Some(-2.0));
+        // Division by zero, an unbalanced bracket and a trailing operator are
+        // all rejected rather than producing a value.
+        assert_eq!(eval_expression("1/0"), None);
+        assert_eq!(eval_expression("(1+2"), None);
+        assert_eq!(eval_expression("1+"), None);
+        assert_eq!(eval_expression("abc"), None);
     }
 
     #[test]
