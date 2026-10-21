@@ -16,7 +16,7 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 # ---------------------------------------------------------------------------
 # Logic and conversion components
 # ---------------------------------------------------------------------------
-loadrt and2 names=and2.cycle_gate,and2.cycle_run,and2.cycle_resume,and2.home_all,and2.home_x,and2.home_y,and2.home_z,and2.jxp_cont,and2.jxn_cont,and2.jyp_cont,and2.jyn_cont,and2.jzp_cont,and2.jzn_cont,and2.jxp_inc,and2.jxn_inc,and2.jyp_inc,and2.jyn_inc,and2.jzp_inc,and2.jzn_inc
+loadrt and2 names=and2.cycle_gate,and2.cycle_run,and2.cycle_resume,and2.jxp_cont,and2.jxn_cont,and2.jyp_cont,and2.jyn_cont,and2.jzp_cont,and2.jzn_cont,and2.jxp_inc,and2.jxn_inc,and2.jyp_inc,and2.jyn_inc,and2.jzp_inc,and2.jzn_inc
 # `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
 # with "or2: already exists". Instances only used by the simulation
 # (or2.estop_reset) are created here and wired in linc-sim.hal.
@@ -222,18 +222,10 @@ net jog-zn-step and2.jzn_inc.out => halui.axis.z.increment-minus
 # ---------------------------------------------------------------------------
 # Homing
 # ---------------------------------------------------------------------------
-# Homing is refused unless the task is in its ON state ("cannot be executed
-# until the machine is out of E-stop and turned on"). ESTOP_RESET enables motion,
-# so jogging works while homing does not; gating the requests means a press with
-# the machine off does nothing instead of raising that controller error.
-net home-all-request cnc_panel.home-all => and2.home_all.in0
-net home-all and2.home_all.out => halui.home-all
-net home-x-request cnc_panel.home-x => and2.home_x.in0
-net home-x and2.home_x.out => halui.joint.0.home
-net home-y-request cnc_panel.home-y => and2.home_y.in0
-net home-y and2.home_y.out => halui.joint.1.home
-net home-z-request cnc_panel.home-z => and2.home_z.in0
-net home-z and2.home_z.out => halui.joint.2.home
+net home-all cnc_panel.home-all => halui.home-all
+net home-x cnc_panel.home-x => halui.joint.0.home
+net home-y cnc_panel.home-y => halui.joint.1.home
+net home-z cnc_panel.home-z => halui.joint.2.home
 
 # Individual home outputs are inhibited while any axis is homing. The panel
 # service reads motmod home-state values (1..4 = homing) and gates
@@ -271,7 +263,7 @@ setp halui.spindle.0.override.scale .01
 # ---------------------------------------------------------------------------
 # Status LEDs and tool displays
 # ---------------------------------------------------------------------------
-net sig_halui_machine_is-on => cnc_panel.led_ready and2.home_all.in1 and2.home_x.in1 and2.home_y.in1 and2.home_z.in1
+net sig_halui_machine_is-on => cnc_panel.led_ready
 net program-running halui.program.is-running => cnc_panel.led_run cnc_panel.led_cycle_on cnc_panel.led_k4
 net is-paused => cnc_panel.led_cycle_off
 net machine-estop halui.estop.is-activated => cnc_panel.led_mc_alarm
