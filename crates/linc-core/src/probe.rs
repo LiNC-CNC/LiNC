@@ -564,6 +564,12 @@ pub fn operations_in(category: ProbeCategory) -> Vec<&'static ProbeOperation> {
         .collect()
 }
 
+/// The tool number the Probe Basic parameter contract expects in `#3014`.
+///
+/// A different value is not fatal, but it silently changes which tool the
+/// probe cycles assume is mounted, so it is worth surfacing at startup.
+pub const EXPECTED_PROBE_TOOL: u16 = 99;
+
 /// Probe Basic parameter contract `#3014`–`#3036`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProbeParameters {

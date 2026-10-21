@@ -242,6 +242,28 @@ impl LincApp {
         if let Some(view) = program_view {
             app.program.view = view;
         }
+        // Probe Basic's contract expects the probe tool in `#3014` to be 99.
+        // A different value silently changes which tool the probe cycles assume
+        // is mounted, so say so once at startup rather than at the first cycle.
+        if app.profile.config.probe.enabled
+            && app.profile.config.probe.tool_number != linc_core::probe::EXPECTED_PROBE_TOOL
+        {
+            let configured = app.profile.config.probe.tool_number;
+            let expected = linc_core::probe::EXPECTED_PROBE_TOOL;
+            log::warn!(
+                "probe tool number is {configured}, expected {expected} (#3014)"
+            );
+            app.toast(
+                format!("Probe tool is T{configured}, expected T{expected}"),
+                theme::WARNING,
+            );
+            app.log_ui(
+                AlarmSeverity::Warning,
+                AlarmSource::Ui,
+                "PROBE-TOOL",
+                format!("probe tool is T{configured}, expected T{expected}"),
+            );
+        }
         // Seed the preference with the page we actually opened, so the file is
         // written even if the operator never navigates.
         let opening_page = app.page;
