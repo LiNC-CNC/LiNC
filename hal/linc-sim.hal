@@ -10,5 +10,13 @@ net sim-estop cnc_panel.estop => rio.sim-estop
 
 # Momentary POWER ON / POWER OFF keys. A POWER ON also resets a latched E-stop
 # before rio.sim-power-on latches the machine switch.
-net sim-power-on cnc_panel.power_on => rio.sim-power-on halui.estop.reset
+#
+# Releasing the E-stop mushroom raises its own one-shot (`cnc_panel.estop_reset`)
+# so the controller leaves E-stop without the machine being powered up. Both
+# sources are ORed: `halui.estop.reset` is a single pin.
+# or2.estop_reset is created in linc.hal (or2 is loaded once there).
+addf or2.estop_reset servo-thread
+net sim-power-on cnc_panel.power_on => rio.sim-power-on or2.estop_reset.in0
+net sim-estop-reset cnc_panel.estop_reset => or2.estop_reset.in1
+net estop-reset-request or2.estop_reset.out => halui.estop.reset
 net sim-power-off cnc_panel.power_off => rio.sim-power-off

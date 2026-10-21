@@ -17,7 +17,10 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 # Logic and conversion components
 # ---------------------------------------------------------------------------
 loadrt and2 names=and2.cycle_gate,and2.cycle_run,and2.cycle_resume
-loadrt or2 names=or2.jog_a,or2.jog_b,or2.pause
+# `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
+# with "or2: already exists". Instances only used by the simulation
+# (or2.estop_reset) are created here and wired in linc-sim.hal.
+loadrt or2 names=or2.jog_a,or2.jog_b,or2.pause,or2.manual_req,or2.estop_reset
 loadrt not names=not.paused,not.coolant,not.lube,not.opt,not.bdt,not.spindle_on
 loadrt toggle names=toggle.coolant,toggle.lube,toggle.opt,toggle.bdt,toggle.sbk,toggle.worklamp
 loadrt scale names=scale.feed,scale.rapid,scale.spindle
@@ -28,6 +31,7 @@ addf and2.cycle_run servo-thread
 addf and2.cycle_resume servo-thread
 addf or2.jog_a servo-thread
 addf or2.jog_b servo-thread
+addf or2.manual_req servo-thread
 addf or2.pause servo-thread
 addf not.paused servo-thread
 addf not.coolant servo-thread
@@ -64,10 +68,26 @@ net mode-jog cnc_panel.mode_jog => or2.jog_a.in0
 net mode-inc cnc_panel.mode_inc => or2.jog_a.in1
 net mode-mpg cnc_panel.mode_mpg => or2.jog_b.in0
 net mode-jog-a or2.jog_a.out => or2.jog_b.in1
-net mode-jog-any or2.jog_b.out => halui.mode.teleop
+# JOG / INC / MPG jog the machine, so they must also select the MANUAL task
+# mode: `halui.axis.L.plus/minus` (EMC_AXIS_JOG) is refused unless the task
+# mode is MANUAL. Teleop is requested as well because axis jogging runs
+# through the teleop planner.
+#
+# `halui.mode.manual` is a single pin, so JOG and HOME are ORed into one
+# request rather than each linking the pin themselves.
+net mode-jog-any or2.jog_b.out => halui.mode.teleop or2.manual_req.in0
 
-# EDIT, HOME and PROG.HOME are not LinuxCNC task modes. HOME buttons are wired
-# below; PROG.HOME is handled by the panel/LiNC issue_mdi path.
+# EDIT, HOME and PROG.HOME are not LinuxCNC task modes, but HOME must still put
+# the controller into MANUAL: `halui.joint.N.home` / `halui.home-all` are
+# refused with "can't do that (EMC_JOINT_HOME) in auto mode" whenever the task
+# mode is AUTO or MDI. Selecting HOME on the panel is an explicit request to
+# leave AUTO, exactly like turning the real selector away from AUTO.
+#
+# PROG.HOME is deliberately NOT wired here: it issues its G0 through the
+# panel/LiNC issue_mdi path, which selects MDI itself, and asserting MANUAL
+# would fight that switch.
+net mode-manual-home cnc_panel.mode_home => or2.manual_req.in1
+net mode-manual-request or2.manual_req.out => halui.mode.manual
 
 # ---------------------------------------------------------------------------
 # Cycle start / pause / stop
@@ -136,6 +156,11 @@ net worklamp-button cnc_panel.worklamp => toggle.worklamp.in
 net worklamp-on toggle.worklamp.out => rio.worklamp.bit cnc_panel.led_worklamp
 
 # ---------------------------------------------------------------------------
+# Jog speed. `halui.axis.jog-speed` defaults to 0, so without this the jog
+# buttons hold the pins high and the machine does not move at all. Use the
+# machine's configured default manual velocity from the INI.
+setp halui.axis.jog-speed [DISPLAY]DEFAULT_LINEAR_VELOCITY
+
 # Jog buttons (panel; pendant jog is wired in linc-pendant.hal)
 # ---------------------------------------------------------------------------
 net jog-xp cnc_panel.jog_xp => halui.axis.x.plus
@@ -203,12 +228,20 @@ net tool-change => cnc_panel.led_chuck
 net tool-prep-number cnc_panel.sseg_magtool
 net tool-number iocontrol.0.tool-number => cnc_panel.sseg_spdtool
 
+# Panel emergency stop
+#
+# cnc_panel.estop already reaches the controller through the machine HAL:
+#   sim:  linc-sim.hal -> rio.sim-estop -> rio_sim.py -> rio.estop-in.bit
+#         -> sig_rio_estop-in_bit -> halui.estop.activate
+#   real: the panel mushroom is part of the hardware E-stop chain.
+# Do NOT link halui.estop.activate here: a HAL pin takes exactly one signal and
+# the machine HAL owns that one.
+
 # ---------------------------------------------------------------------------
 # Probe input and manual tool-change/panel I/O
 # ---------------------------------------------------------------------------
 net sig_rio_probe_bit => motion.probe-input
 net tool-change-piston cnc_panel.chuck => rio.tool-change.bit
 
-# Adjust or remove the rio.* nets to match the actual machine I/O. The
-# generic cnc_panel.estop input remains part of the hardware safety chain and
-# is not routed through software.
+# Adjust or remove the rio.* nets to match the actual machine I/O.
+
