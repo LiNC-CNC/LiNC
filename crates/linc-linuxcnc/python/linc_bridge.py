@@ -169,8 +169,14 @@ class Bridge:
                         linuxcnc.OPERATOR_ERROR if hasattr(linuxcnc, "OPERATOR_ERROR") else 11,
                         linuxcnc.NML_ERROR if hasattr(linuxcnc, "NML_ERROR") else 12,
                     ) else "info"
+                    # LinuxCNC's operator text arrives wrapped in, and sometimes
+                    # separated by, newlines; they rendered as blank lines
+                    # between entries in the GUI.
+                    message = " ".join(str(text).split())
+                    if not message:
+                        continue
                     with threading.Lock():
-                        self.alarms.append({"kind": severity, "text": str(text), "time": time.time()})
+                        self.alarms.append({"kind": severity, "text": message, "time": time.time()})
                         self.alarms = self.alarms[-100:]
                 except Exception:
                     time.sleep(0.2)

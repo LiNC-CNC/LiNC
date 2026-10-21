@@ -1012,7 +1012,7 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
                 egui::Grid::new("log-grid")
                     .num_columns(5)
                     .striped(true)
-                    .spacing([14.0, 4.0])
+                    .spacing([14.0, 2.0])
                     .show(ui, |ui| {
                         for header in ["TIME", "SEVERITY", "SOURCE", "CODE", "MESSAGE"] {
                             ui.label(
@@ -1096,7 +1096,7 @@ fn log_table(ui: &mut Ui, id: &str, logs: &[Alarm], limit: usize) {
     egui::Grid::new(id)
         .num_columns(5)
         .striped(true)
-        .spacing([12.0, 4.0])
+        .spacing([12.0, 2.0])
         .show(ui, |ui| {
             for header in ["TIME", "SEVERITY", "SOURCE", "CODE", "MESSAGE"] {
                 ui.label(

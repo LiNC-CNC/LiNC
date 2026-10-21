@@ -1574,7 +1574,12 @@ impl Converter {
             } else {
                 AlarmSeverity::Info
             };
-            let message = alarm.text.clone();
+            // Belt and braces: an older bridge may still send the newlines that
+            // made every entry look triple-spaced.
+            let message = alarm.text.split_whitespace().collect::<Vec<_>>().join(" ");
+            if message.is_empty() {
+                continue;
+            }
             self.alarms.push_front(Alarm::new(
                     self.next_alarm_id,
                     severity,
