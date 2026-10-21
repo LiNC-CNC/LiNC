@@ -405,19 +405,29 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
                         } else {
                             entry.name.clone()
                         };
-                        let response = ui.selectable_label(
-                            selected == index,
-                            RichText::new(label)
-                                .monospace()
-                                .size(theme::font_size(11.0))
-                                .color(if entry.is_symlink {
-                                    theme::WARNING
-                                } else if entry.is_dir {
-                                    theme::ACCENT
-                                } else {
-                                    theme::FG
-                                }),
-                        );
+                        // Selected rows are outlined rather than filled, like
+                        // the REFRESH button: a filled block read as a button
+                        // and hid the row's own colour.
+                        let response = ui
+                            .scope(|ui| {
+                                let visuals = ui.visuals_mut();
+                                visuals.selection.bg_fill = egui::Color32::TRANSPARENT;
+                                visuals.selection.stroke = egui::Stroke::new(1.0, theme::BORDER);
+                                ui.selectable_label(
+                                    selected == index,
+                                    RichText::new(label)
+                                        .monospace()
+                                        .size(theme::font_size(11.0))
+                                        .color(if entry.is_symlink {
+                                            theme::WARNING
+                                        } else if entry.is_dir {
+                                            theme::ACCENT
+                                        } else {
+                                            theme::FG
+                                        }),
+                                )
+                            })
+                            .inner;
                         if response.clicked() {
                             selected = index;
                             app.files.usb_focused = pane == Pane::Usb;
