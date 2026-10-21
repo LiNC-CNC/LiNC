@@ -1049,14 +1049,19 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
                                     .size(theme::font_size(9.0))
                                     .color(theme::MUTED),
                             );
-                            ui.label(
-                                RichText::new(&alarm.message)
-                                    .size(theme::font_size(11.0))
-                                    .color(if alarm.severity == AlarmSeverity::Info {
-                                        theme::MUTED
-                                    } else {
-                                        color
-                                    }),
+                            // One line per event: a message that wrapped used
+                            // to make the list look several lines apart.
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&alarm.message)
+                                        .size(theme::font_size(10.0))
+                                        .color(if alarm.severity == AlarmSeverity::Info {
+                                            theme::MUTED
+                                        } else {
+                                            color
+                                        }),
+                                )
+                                .truncate(),
                             );
                             ui.end_row();
                         }
