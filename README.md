@@ -48,8 +48,8 @@ cargo build --release
 ./scripts/stop-sim.sh
 ```
 
-`start-sim.sh` launches a real LinuxCNC process with the `baiermill_sim` HAL
-and the LiNC HMI/panel pair. The HMI enforces a minimum 1280×720 window,
+`start-sim.sh` launches a real LinuxCNC process with the in-repo simulation
+HAL (`hal/rio_sim.hal`) and the LiNC HMI/panel pair. The HMI enforces a minimum 1280×720 window,
 scales proportionally above it, and preserves the SVG font ratios. `linc --check-config --config configs/baiermill.toml` validates
 a profile, its LinuxCNC INI and safety policy without opening the display or
 HAL.

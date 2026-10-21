@@ -1,6 +1,6 @@
 # BaierMill simulation profile.
 #
-# Uses the existing LinuxCNC simulation configuration in ../../baiermill_sim.
+# Uses the self-contained LinuxCNC simulation configuration in configs/sim.ini:
 # Same machine geometry, limits, velocities, homing, ATC and tooling as the
 # real machine; the FPGA card, CNC control panel and pendant are software stand-ins.
 
@@ -35,7 +35,7 @@ panel_link_stats = "none"
 
 [simulation]
 enabled = true
-rio = "../../baiermill_sim/rio_sim.py"
+rio = "../hal/rio_sim.py"
 estop = "panel-gui"
 panel_window = true
 panel_title = "CNC Control Panel Simulator"

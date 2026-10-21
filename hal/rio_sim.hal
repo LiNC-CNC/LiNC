@@ -1,0 +1,667 @@
+
+# load the realtime components
+loadrt [KINS]KINEMATICS
+loadrt [EMCMOT]EMCMOT base_period_nsec=[EMCMOT]BASE_PERIOD servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS num_dio=[EMCMOT]NUM_DIO num_aio=[EMCMOT]NUM_AIO
+
+# rio_sim.py replaces `loadrt rio`: the FPGA card driver (rio.so) is substituted
+# by a userspace HAL component that models the card in software.  It creates the
+# whole rio.* pin surface (same names/types/directions as riocomp.c) plus the
+# sim-* pins below, and is loaded before anything nets to rio.*.
+# -Wn rio: wait until the component named "rio" is ready (plain -W would wait for
+# a component named after the script, "rio_sim", which never appears)
+# The component lives beside this HAL file; loadusr runs the command with
+# the linuxcnc CWD (the INI directory), so the path is given from there.
+loadusr -Wn rio ../hal/rio_sim.py --cycle 0.002
+
+# accepted for compatibility with the real config; the simulation always runs
+setp rio.sys-simulation 1
+
+# Position loops (Option B): PID closed over the real motor encoders
+loadrt pid num_chan=3
+addf pid.0.do-pid-calcs servo-thread
+addf pid.1.do-pid-calcs servo-thread
+addf pid.2.do-pid-calcs servo-thread
+
+# add the motion functions to threads (rio.readwrite is a userspace thread now,
+# so it is not added to the servo thread)
+addf motion-command-handler servo-thread
+addf motion-controller servo-thread
+
+#################################################################################
+# iocontrol.0.user-enable-out --> rio.sys-enable
+#################################################################################
+net user-enable-out                <= iocontrol.0.user-enable-out
+net user-enable-out                => rio.sys-enable
+
+#################################################################################
+# iocontrol.0.user-request-enable --> rio.sys-enable-request
+#################################################################################
+net user-request-enable            <= iocontrol.0.user-request-enable
+net user-request-enable            => rio.sys-enable-request
+
+#################################################################################
+# &rio.sys-status --> iocontrol.0.emc-enable-in
+#################################################################################
+net sig_rio_sys-status             <= rio.sys-status
+net sig_rio_sys-status             => iocontrol.0.emc-enable-in
+
+#################################################################################
+# halui.machine.is-on --> rio.machine-on
+#################################################################################
+net sig_halui_machine_is-on        <= halui.machine.is-on
+net sig_halui_machine_is-on        => rio.machine-on
+
+#################################################################################
+# iocontrol.0.tool-prep-number --> hal_manualtoolchange.number
+#################################################################################
+net tool-prep-number               <= iocontrol.0.tool-prep-number
+# net tool-prep-number               => hal_manualtoolchange.number (in postgui)
+
+#################################################################################
+# iocontrol.0.tool-change --> hal_manualtoolchange.change
+#################################################################################
+net tool-change                    <= iocontrol.0.tool-change
+# net tool-change                    => hal_manualtoolchange.change (in postgui)
+
+#################################################################################
+# hal_manualtoolchange.changed --> iocontrol.0.tool-changed
+#################################################################################
+# net tool-changed                   <= hal_manualtoolchange.changed (in postgui)
+net tool-changed                   => iocontrol.0.tool-changed
+
+#################################################################################
+# iocontrol.0.tool-prepare --> iocontrol.0.tool-prepared
+#################################################################################
+net tool-prepared                  <= iocontrol.0.tool-prepare
+net tool-prepared                  => iocontrol.0.tool-prepared
+
+#################################################################################
+# halui.machine.is-on --> rio.SlotEN.bit
+#################################################################################
+net sig_halui_machine_is-on        => rio.SlotEN.bit
+
+#################################################################################
+# rio.min-x.bit --> joint.0.neg-lim-sw-in
+#################################################################################
+net sig_rio_min-x_bit              <= rio.min-x.bit
+net sig_rio_min-x_bit              => joint.0.neg-lim-sw-in
+
+#################################################################################
+# rio.max-x.bit --> joint.0.pos-lim-sw-in
+#################################################################################
+net sig_rio_max-x_bit              <= rio.max-x.bit
+net sig_rio_max-x_bit              => joint.0.pos-lim-sw-in
+
+#################################################################################
+# rio.min-y.bit --> joint.1.neg-lim-sw-in
+#################################################################################
+net sig_rio_min-y_bit              <= rio.min-y.bit
+net sig_rio_min-y_bit              => joint.1.neg-lim-sw-in
+
+#################################################################################
+# rio.max-y.bit --> joint.1.pos-lim-sw-in
+#################################################################################
+net sig_rio_max-y_bit              <= rio.max-y.bit
+net sig_rio_max-y_bit              => joint.1.pos-lim-sw-in
+
+#################################################################################
+# rio.min-z.bit --> joint.2.neg-lim-sw-in
+#################################################################################
+net sig_rio_min-z_bit              <= rio.min-z.bit
+net sig_rio_min-z_bit              => joint.2.neg-lim-sw-in
+
+#################################################################################
+# rio.max-z.bit --> joint.2.pos-lim-sw-in
+#################################################################################
+net sig_rio_max-z_bit              <= rio.max-z.bit
+net sig_rio_max-z_bit              => joint.2.pos-lim-sw-in
+
+#################################################################################
+# rio.spindle-alarm.bit --> spindle.0.amp-fault-in
+#################################################################################
+net sig_rio_spindle-alarm_bit      <= rio.spindle-alarm.bit
+net sig_rio_spindle-alarm_bit      => spindle.0.amp-fault-in
+
+#################################################################################
+# rio.machine-on-switch.bit --> halui.machine.on
+#################################################################################
+net sig_rio_machine-on-switch_bit  <= rio.machine-on-switch.bit
+net sig_rio_machine-on-switch_bit  => halui.machine.on
+
+#################################################################################
+# rio.alarm-x.bit --> joint.0.amp-fault-in
+#################################################################################
+net sig_rio_alarm-x_bit            <= rio.alarm-x.bit
+net sig_rio_alarm-x_bit            => joint.0.amp-fault-in
+
+#################################################################################
+# rio.alarm-y.bit --> joint.1.amp-fault-in
+#################################################################################
+net sig_rio_alarm-y_bit            <= rio.alarm-y.bit
+net sig_rio_alarm-y_bit            => joint.1.amp-fault-in
+
+#################################################################################
+# rio.alarm-z.bit --> joint.2.amp-fault-in
+#################################################################################
+net sig_rio_alarm-z_bit            <= rio.alarm-z.bit
+net sig_rio_alarm-z_bit            => joint.2.amp-fault-in
+
+#################################################################################
+# iocontrol.0.coolant-flood --> rio.coolant.bit
+#################################################################################
+net sig_iocontrol_0_coolant-flood  <= iocontrol.0.coolant-flood
+net sig_iocontrol_0_coolant-flood  => rio.coolant.bit
+
+#################################################################################
+# iocontrol.0.lube --> rio.oil-lube.bit
+#################################################################################
+# net sig_iocontrol_0_lube           <= iocontrol.0.lube
+# net sig_iocontrol_0_lube           => rio.oil-lube.bit
+
+#################################################################################
+# spindle.0.forward --> rio.spindle-forward.bit
+#################################################################################
+net sig_spindle_0_forward          <= spindle.0.forward
+# net sig_spindle_0_forward          => rio.spindle-forward.bit (gated by tool check below)
+
+#################################################################################
+# spindle.0.reverse --> rio.spindle-reverse.bit
+#################################################################################
+net sig_spindle_0_reverse          <= spindle.0.reverse
+# net sig_spindle_0_reverse          => rio.spindle-reverse.bit (gated by tool check below)
+
+#################################################################################
+# halui.machine.is-on --> rio.spindle-estop-disabled.bit
+#################################################################################
+net sig_halui_machine_is-on        => rio.spindle-estop-disabled.bit
+
+#################################################################################
+# rio.home-x.bit --> joint.0.home-sw-in
+#################################################################################
+net sig_rio_home-x_bit             <= rio.home-x.bit
+net sig_rio_home-x_bit             => joint.0.home-sw-in
+
+#################################################################################
+# rio.home-y.bit --> joint.1.home-sw-in
+#################################################################################
+net sig_rio_home-y_bit             <= rio.home-y.bit
+net sig_rio_home-y_bit             => joint.1.home-sw-in
+
+#################################################################################
+# rio.home-z.bit --> joint.2.home-sw-in
+#################################################################################
+net sig_rio_home-z_bit             <= rio.home-z.bit
+net sig_rio_home-z_bit             => joint.2.home-sw-in
+
+#################################################################################
+# spindle.0.speed-out --> rio.spindle.dty
+#################################################################################
+net sig_spindle_0_speed-out        <= spindle.0.speed-out
+net sig_spindle_0_speed-out        => rio.spindle.dty
+
+#################################################################################
+# spindle.0.on --> rio.spindle.enable
+#################################################################################
+net sig_spindle_0_on               <= spindle.0.on
+# net sig_spindle_0_on               => rio.spindle.enable (gated by tool check below)
+
+#################################################################################
+# rio.spindle-encoder.position --> spindle.0.revs
+#################################################################################
+net sig_rio_spindle-encoder_position <= rio.spindle-encoder.position
+net sig_rio_spindle-encoder_position => spindle.0.revs
+
+#################################################################################
+# rio.spindle-encoder.rps --> spindle.0.speed-in
+#################################################################################
+net sig_rio_spindle-encoder_rps    <= rio.spindle-encoder.rps
+net sig_rio_spindle-encoder_rps    => spindle.0.speed-in
+
+#################################################################################
+# rio.estop-in.bit --> halui.estop.activate
+#################################################################################
+net sig_rio_estop-in_bit           <= rio.estop-in.bit
+net sig_rio_estop-in_bit           => halui.estop.activate
+
+#################################################################################
+# joint.0.vel-cmd --> rio.x-joint.velocity
+#################################################################################
+
+#################################################################################
+# rio.x-joint.position --> joint.0.motor-pos-fb
+#################################################################################
+
+#################################################################################
+# joint.0.amp-enable-out --> rio.x-joint.enable
+#################################################################################
+
+#################################################################################
+# joint.1.vel-cmd --> rio.y-joint.velocity
+#################################################################################
+
+#################################################################################
+# rio.y-joint.position --> joint.1.motor-pos-fb
+#################################################################################
+
+#################################################################################
+# joint.1.amp-enable-out --> rio.y-joint.enable
+#################################################################################
+
+#################################################################################
+# joint.2.vel-cmd --> rio.z-joint.velocity
+#################################################################################
+
+#################################################################################
+# rio.z-joint.position --> joint.2.motor-pos-fb
+#################################################################################
+
+#################################################################################
+# joint.2.amp-enable-out --> rio.z-joint.enable
+#################################################################################
+
+#################################################################################
+# rio.min-x.bit --> pyvcp.min-x.bit
+#################################################################################
+# net sig_rio_min-x_bit              => pyvcp.min-x.bit (in postgui)
+
+#################################################################################
+# rio.max-x.bit --> pyvcp.max-x.bit
+#################################################################################
+# net sig_rio_max-x_bit              => pyvcp.max-x.bit (in postgui)
+
+#################################################################################
+# rio.min-y.bit --> pyvcp.min-y.bit
+#################################################################################
+# net sig_rio_min-y_bit              => pyvcp.min-y.bit (in postgui)
+
+#################################################################################
+# rio.max-y.bit --> pyvcp.max-y.bit
+#################################################################################
+# net sig_rio_max-y_bit              => pyvcp.max-y.bit (in postgui)
+
+#################################################################################
+# rio.min-z.bit --> pyvcp.min-z.bit
+#################################################################################
+# net sig_rio_min-z_bit              => pyvcp.min-z.bit (in postgui)
+
+#################################################################################
+# rio.max-z.bit --> pyvcp.max-z.bit
+#################################################################################
+# net sig_rio_max-z_bit              => pyvcp.max-z.bit (in postgui)
+
+#################################################################################
+# rio.ls-a.bit --> pyvcp.ls-a.bit
+#################################################################################
+net sig_rio_ls-a_bit               <= rio.ls-a.bit
+# net sig_rio_ls-a_bit               => pyvcp.ls-a.bit (in postgui)
+
+#################################################################################
+# rio.ls-b.bit --> pyvcp.ls-b.bit
+#################################################################################
+net sig_rio_ls-b_bit               <= rio.ls-b.bit
+# net sig_rio_ls-b_bit               => pyvcp.ls-b.bit (in postgui)
+
+#################################################################################
+# rio.spindle-alarm.bit --> pyvcp.spindle-alarm.bit
+#################################################################################
+# net sig_rio_spindle-alarm_bit      => pyvcp.spindle-alarm.bit (in postgui)
+
+#################################################################################
+# rio.spindle-fault.bit --> pyvcp.spindle-fault.bit
+#################################################################################
+net sig_rio_spindle-fault_bit      <= rio.spindle-fault.bit
+# net sig_rio_spindle-fault_bit      => pyvcp.spindle-fault.bit (in postgui)
+
+#################################################################################
+# rio.machine-on-switch.bit --> pyvcp.machine-on-switch.bit
+#################################################################################
+# net sig_rio_machine-on-switch_bit  => pyvcp.machine-on-switch.bit (in postgui)
+
+#################################################################################
+# rio.probe.bit --> pyvcp.probe.bit
+#################################################################################
+net sig_rio_probe_bit              <= rio.probe.bit
+# net sig_rio_probe_bit              => pyvcp.probe.bit (in postgui)
+
+#################################################################################
+# rio.alarm-x.bit --> pyvcp.alarm-x.bit
+#################################################################################
+# net sig_rio_alarm-x_bit            => pyvcp.alarm-x.bit (in postgui)
+
+#################################################################################
+# rio.alarm-y.bit --> pyvcp.alarm-y.bit
+#################################################################################
+# net sig_rio_alarm-y_bit            => pyvcp.alarm-y.bit (in postgui)
+
+#################################################################################
+# rio.alarm-z.bit --> pyvcp.alarm-z.bit
+#################################################################################
+# net sig_rio_alarm-z_bit            => pyvcp.alarm-z.bit (in postgui)
+
+#################################################################################
+# rio.encoder-x.indexout --> pyvcp.encoder-x.indexout
+#################################################################################
+net sig_rio_encoder-x_indexout     <= rio.encoder-x.indexout
+# net sig_rio_encoder-x_indexout     => pyvcp.encoder-x.indexout (in postgui)
+
+#################################################################################
+# rio.encoder-x.position --> pyvcp.encoder-x.position
+#################################################################################
+# encoder position is used as joint feedback (see joint-N blocks)
+# net sig_rio_encoder-x_position     <= rio.encoder-x.position (now joint.0.motor-pos-fb)
+
+#################################################################################
+# rio.encoder-x.rps --> pyvcp.encoder-x.rps
+#################################################################################
+net sig_rio_encoder-x_rps          <= rio.encoder-x.rps
+# net sig_rio_encoder-x_rps          => pyvcp.encoder-x.rps (in postgui)
+
+#################################################################################
+# rio.encoder-x.rpm --> pyvcp.encoder-x.rpm
+#################################################################################
+net sig_rio_encoder-x_rpm          <= rio.encoder-x.rpm
+# net sig_rio_encoder-x_rpm          => pyvcp.encoder-x.rpm (in postgui)
+
+#################################################################################
+# rio.encoder-y.indexout --> pyvcp.encoder-y.indexout
+#################################################################################
+net sig_rio_encoder-y_indexout     <= rio.encoder-y.indexout
+# net sig_rio_encoder-y_indexout     => pyvcp.encoder-y.indexout (in postgui)
+
+#################################################################################
+# rio.encoder-y.position --> pyvcp.encoder-y.position
+#################################################################################
+# net sig_rio_encoder-y_position     <= rio.encoder-y.position (now joint.1.motor-pos-fb)
+
+#################################################################################
+# rio.encoder-y.rps --> pyvcp.encoder-y.rps
+#################################################################################
+net sig_rio_encoder-y_rps          <= rio.encoder-y.rps
+# net sig_rio_encoder-y_rps          => pyvcp.encoder-y.rps (in postgui)
+
+#################################################################################
+# rio.encoder-y.rpm --> pyvcp.encoder-y.rpm
+#################################################################################
+net sig_rio_encoder-y_rpm          <= rio.encoder-y.rpm
+# net sig_rio_encoder-y_rpm          => pyvcp.encoder-y.rpm (in postgui)
+
+#################################################################################
+# rio.encoder-z.indexout --> pyvcp.encoder-z.indexout
+#################################################################################
+net sig_rio_encoder-z_indexout     <= rio.encoder-z.indexout
+# net sig_rio_encoder-z_indexout     => pyvcp.encoder-z.indexout (in postgui)
+
+#################################################################################
+# rio.encoder-z.position --> pyvcp.encoder-z.position
+#################################################################################
+# net sig_rio_encoder-z_position     <= rio.encoder-z.position (now joint.2.motor-pos-fb)
+
+#################################################################################
+# rio.encoder-z.rps --> pyvcp.encoder-z.rps
+#################################################################################
+net sig_rio_encoder-z_rps          <= rio.encoder-z.rps
+# net sig_rio_encoder-z_rps          => pyvcp.encoder-z.rps (in postgui)
+
+#################################################################################
+# rio.encoder-z.rpm --> pyvcp.encoder-z.rpm
+#################################################################################
+net sig_rio_encoder-z_rpm          <= rio.encoder-z.rpm
+# net sig_rio_encoder-z_rpm          => pyvcp.encoder-z.rpm (in postgui)
+
+#################################################################################
+# rio.home-x.bit --> pyvcp.home-x.bit
+#################################################################################
+# net sig_rio_home-x_bit             => pyvcp.home-x.bit (in postgui)
+
+#################################################################################
+# rio.home-y.bit --> pyvcp.home-y.bit
+#################################################################################
+# net sig_rio_home-y_bit             => pyvcp.home-y.bit (in postgui)
+
+#################################################################################
+# rio.home-z.bit --> pyvcp.home-z.bit
+#################################################################################
+# net sig_rio_home-z_bit             => pyvcp.home-z.bit (in postgui)
+
+#################################################################################
+# rio.servo-driver-brake.bit --> pyvcp.servo-driver-brake.bit
+#################################################################################
+net sig_rio_servo-driver-brake_bit <= rio.servo-driver-brake.bit
+# net sig_rio_servo-driver-brake_bit => pyvcp.servo-driver-brake.bit (in postgui)
+
+#################################################################################
+# rio.spindle-encoder.indexout --> pyvcp.spindle-encoder.indexout
+#################################################################################
+net sig_rio_spindle-encoder_indexout <= rio.spindle-encoder.indexout
+# net sig_rio_spindle-encoder_indexout => pyvcp.spindle-encoder.indexout (in postgui)
+
+#################################################################################
+# rio.spindle-encoder.position --> pyvcp.spindle-encoder.position
+#################################################################################
+net sig_rio_spindle-encoder_position <= rio.spindle-encoder.position
+# net sig_rio_spindle-encoder_position => pyvcp.spindle-encoder.position (in postgui)
+
+#################################################################################
+# rio.spindle-encoder.rps --> pyvcp.spindle-encoder.rps
+#################################################################################
+net sig_rio_spindle-encoder_rps    <= rio.spindle-encoder.rps
+# net sig_rio_spindle-encoder_rps    => pyvcp.spindle-encoder.rps (in postgui)
+
+#################################################################################
+# rio.spindle-encoder.rpm --> pyvcp.spindle-encoder.rpm
+#################################################################################
+net sig_rio_spindle-encoder_rpm    <= rio.spindle-encoder.rpm
+# net sig_rio_spindle-encoder_rpm    => pyvcp.spindle-encoder.rpm (in postgui)
+
+#################################################################################
+# rio.estop-in.bit --> pyvcp.estop-in.bit
+#################################################################################
+# net sig_rio_estop-in_bit           => pyvcp.estop-in.bit (in postgui)
+
+#################################################################################
+# rio.SlotEN.bit --> pyvcp.SlotEN.bit
+#################################################################################
+# net sig_halui_machine_is-on        => pyvcp.SlotEN.bit (in postgui)
+
+#################################################################################
+# pyvcp.tool-change.bit --> rio.tool-change.bit
+#################################################################################
+# net sig_pyvcp_tool-change_bit      <= pyvcp.tool-change.bit (in postgui)
+# net sig_pyvcp_tool-change_bit      => rio.tool-change.bit
+
+#################################################################################
+# rio.coolant.bit --> pyvcp.coolant.bit
+#################################################################################
+# net sig_iocontrol_0_coolant-flood  => pyvcp.coolant.bit (in postgui)
+
+#################################################################################
+# rio.oil-lube.bit --> pyvcp.oil-lube.bit
+#################################################################################
+# net sig_iocontrol_0_lube           => pyvcp.oil-lube.bit (in postgui)
+
+#################################################################################
+# rio.spindle-forward.bit --> pyvcp.spindle-forward.bit
+#################################################################################
+# net sig_spindle_0_forward          => pyvcp.spindle-forward.bit (in postgui)
+
+#################################################################################
+# rio.spindle-reverse.bit --> pyvcp.spindle-reverse.bit
+#################################################################################
+# net sig_spindle_0_reverse          => pyvcp.spindle-reverse.bit (in postgui)
+
+#################################################################################
+# rio.spindle-estop-disabled.bit --> pyvcp.spindle-estop-disabled.bit
+#################################################################################
+# net sig_halui_machine_is-on        => pyvcp.spindle-estop-disabled.bit (in postgui)
+
+#################################################################################
+# pyvcp.spindle-power-off.bit --> rio.spindle-power-off.bit
+#################################################################################
+# net sig_pyvcp_spindle-power-off_bit <= pyvcp.spindle-power-off.bit (in postgui)
+net sig_pyvcp_spindle-power-off_bit => rio.spindle-power-off.bit
+
+#################################################################################
+# pyvcp.x-power-off.bit --> rio.x-power-off.bit
+#################################################################################
+# net sig_pyvcp_x-power-off_bit      <= pyvcp.x-power-off.bit (in postgui)
+net sig_pyvcp_x-power-off_bit      => rio.x-power-off.bit
+
+#################################################################################
+# pyvcp.y-power-off.bit --> rio.y-power-off.bit
+#################################################################################
+# net sig_pyvcp_y-power-off_bit      <= pyvcp.y-power-off.bit (in postgui)
+net sig_pyvcp_y-power-off_bit      => rio.y-power-off.bit
+
+#################################################################################
+# pyvcp.z-power-off.bit --> rio.z-power-off.bit
+#################################################################################
+# net sig_pyvcp_z-power-off_bit      <= pyvcp.z-power-off.bit (in postgui)
+net sig_pyvcp_z-power-off_bit      => rio.z-power-off.bit
+
+#################################################################################
+# rio.spindle.dty --> pyvcp.spindle.dty
+#################################################################################
+# net sig_spindle_0_speed-out        => pyvcp.spindle.dty (in postgui)
+
+#################################################################################
+# rio.spindle.enable --> pyvcp.spindle.enable
+#################################################################################
+# net sig_spindle_0_on               => pyvcp.spindle.enable (in postgui)
+
+#################################################################################
+# rio.spindle-modbus.spindle_speed --> pyvcp.spindle-modbus.spindle_speed
+#################################################################################
+net sig_rio_spindle-modbus_spindle_speed <= rio.spindle-modbus.spindle_speed
+# net sig_rio_spindle-modbus_spindle_speed => pyvcp.spindle-modbus.spindle_speed (in postgui)
+
+#################################################################################
+# rio.spindle-modbus.spindle_load --> pyvcp.spindle-modbus.spindle_load
+#################################################################################
+net sig_rio_spindle-modbus_spindle_load <= rio.spindle-modbus.spindle_load
+# net sig_rio_spindle-modbus_spindle_load => pyvcp.spindle-modbus.spindle_load (in postgui)
+
+#################################################################################
+# rio.spindle-modbus.spindle_position --> pyvcp.spindle-modbus.spindle_position
+#################################################################################
+net sig_rio_spindle-modbus_spindle_position <= rio.spindle-modbus.spindle_position
+# net sig_rio_spindle-modbus_spindle_position => pyvcp.spindle-modbus.spindle_position (in postgui)
+
+#################################################################################
+# rio.spindle-modbus.spindle_status --> pyvcp.spindle-modbus.spindle_status
+#################################################################################
+net sig_rio_spindle-modbus_spindle_status <= rio.spindle-modbus.spindle_status
+# net sig_rio_spindle-modbus_spindle_status => pyvcp.spindle-modbus.spindle_status (in postgui)
+
+#################################################################################
+# joint-0  (Option B: PID over motor encoder rio.encoder-x.position)
+#################################################################################
+setp pid.0.Pgain                   [JOINT_0]P
+setp pid.0.Igain                   [JOINT_0]I
+setp pid.0.Dgain                   [JOINT_0]D
+setp pid.0.bias                    [JOINT_0]BIAS
+setp pid.0.FF0                     [JOINT_0]FF0
+setp pid.0.FF1                     [JOINT_0]FF1
+setp pid.0.FF2                     [JOINT_0]FF2
+setp pid.0.deadband                [JOINT_0]DEADBAND
+setp pid.0.maxoutput               [JOINT_0]MAXOUTPUT
+setp rio.x-joint.velocity-scale    [JOINT_0]SCALE
+net j0vel-cmd                      <= pid.0.output
+net j0pos-cmd                      <= joint.0.motor-pos-cmd
+net j0enable                       <= joint.0.amp-enable-out
+net j0vel-cmd                      => rio.x-joint.velocity
+# simulated servo: no drive and no encoder, the axis follows its command rigidly,
+# so the command signal itself is the feedback - and the input of the simulated
+# card, which derives rio.encoder-x.position, rio.home-x.bit and the limits from it
+net j0pos-cmd                      => joint.0.motor-pos-fb
+net j0pos-cmd                      => pid.0.command
+net j0pos-cmd                      => rio.sim-pos-x
+net j0enable                       => rio.x-joint.enable
+net j0enable                       => pid.0.enable
+
+#################################################################################
+# joint-1  (Option B: PID over motor encoder rio.encoder-y.position)
+#################################################################################
+setp pid.1.Pgain                   [JOINT_1]P
+setp pid.1.Igain                   [JOINT_1]I
+setp pid.1.Dgain                   [JOINT_1]D
+setp pid.1.bias                    [JOINT_1]BIAS
+setp pid.1.FF0                     [JOINT_1]FF0
+setp pid.1.FF1                     [JOINT_1]FF1
+setp pid.1.FF2                     [JOINT_1]FF2
+setp pid.1.deadband                [JOINT_1]DEADBAND
+setp pid.1.maxoutput               [JOINT_1]MAXOUTPUT
+setp rio.y-joint.velocity-scale    [JOINT_1]SCALE
+net j1vel-cmd                      <= pid.1.output
+net j1pos-cmd                      <= joint.1.motor-pos-cmd
+net j1enable                       <= joint.1.amp-enable-out
+net j1vel-cmd                      => rio.y-joint.velocity
+# rigid simulated axis - see the joint-0 block above
+net j1pos-cmd                      => joint.1.motor-pos-fb
+net j1pos-cmd                      => pid.1.command
+net j1pos-cmd                      => rio.sim-pos-y
+net j1enable                       => rio.y-joint.enable
+net j1enable                       => pid.1.enable
+
+#################################################################################
+# joint-2  (Option B: PID over motor encoder rio.encoder-z.position)
+#################################################################################
+setp pid.2.Pgain                   [JOINT_2]P
+setp pid.2.Igain                   [JOINT_2]I
+setp pid.2.Dgain                   [JOINT_2]D
+setp pid.2.bias                    [JOINT_2]BIAS
+setp pid.2.FF0                     [JOINT_2]FF0
+setp pid.2.FF1                     [JOINT_2]FF1
+setp pid.2.FF2                     [JOINT_2]FF2
+setp pid.2.deadband                [JOINT_2]DEADBAND
+setp pid.2.maxoutput               [JOINT_2]MAXOUTPUT
+setp rio.z-joint.velocity-scale    [JOINT_2]SCALE
+net j2vel-cmd                      <= pid.2.output
+net j2pos-cmd                      <= joint.2.motor-pos-cmd
+net j2enable                       <= joint.2.amp-enable-out
+net j2vel-cmd                      => rio.z-joint.velocity
+# rigid simulated axis - see the joint-0 block above
+net j2pos-cmd                      => joint.2.motor-pos-fb
+net j2pos-cmd                      => pid.2.command
+net j2pos-cmd                      => rio.sim-pos-z
+net j2enable                       => rio.z-joint.enable
+net j2enable                       => pid.2.enable
+
+#################################################################################
+# setp
+#################################################################################
+# Encoder feedback scale (counts per mm), sign set so +axis motion -> +feedback.
+# Measured: Y = 500 counts/mm (reversed polarity), Z = 250 counts/mm (reversed).
+# X A/B not wired yet; using Y's 500 counts/mm as a closer default than 2500.
+setp rio.encoder-x.position-scale     -500
+setp rio.encoder-y.position-scale     -500
+setp rio.encoder-z.position-scale     -250
+setp rio.spindle-encoder.position-scale   1024.0
+setp rio.spindle.dty-scale            0.00833
+
+#################################################################################
+# preformated
+#################################################################################
+net rios.spindle-encoder.indexenable rio.spindle-encoder.indexenable <=> spindle.0.index-enable
+
+# Joint encoder index-enable (homing to encoder index pulse)
+net x-index-enable joint.0.index-enable <=> rio.encoder-x.indexenable
+net y-index-enable joint.1.index-enable <=> rio.encoder-y.indexenable
+net z-index-enable joint.2.index-enable <=> rio.encoder-z.indexenable
+
+#################################################################################
+# Simulation-only inputs of rio_sim.py
+#################################################################################
+# These pins do not exist on the real card driver; the sim synthesises the
+# hardware state from them:
+#
+#   rio.sim-pos-x|y|z     true axis position (mm) -> encoder / limit / home sw
+#   rio.sim-estop         E-stop mushroom, driven by the panel (see postgui)
+#   rio.sim-probe         probe contact, driven by the GUI (see postgui)
+#   rio.sim-power-on/off  machine POWER ON/OFF buttons (see postgui); latched
+#                         into rio.machine-on-switch.bit
+#   rio.sim-home-pos-x|y|z, rio.sim-home-window, rio.sim-lim-margin,
+#   rio.sim-index-dist-x|y|z
+#                         hardware geometry of the simulated machine; 0 = default
+#
+# sim-pos-* is netted inside the joint-N blocks above; the rest are wired in
+# hallib/probe_basic_postgui.hal (they need pins created by the panel GUI).

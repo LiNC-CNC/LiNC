@@ -1370,9 +1370,9 @@ Configuration is per machine and layered:
 
 - `configs/base.toml` — UI, keymap, safety policy, HAL output policy, panel
   driver contract, backend and preference defaults.
-- `configs/sim.toml` — mill simulation profile pointing at
-  `../../baiermill_sim/probe_basic.ini`, the simulated CNC control panel and
-  `rio_sim.py`.
+- `configs/sim.toml` — mill simulation profile pointing at `configs/sim.ini`,
+  the in-repo simulation HAL (`hal/rio_sim.hal`, `hal/rio_sim.py`) and the
+  simulated CNC control panel.
 - `configs/baiermill.toml` — physical mill profile pointing at
   `../../baiermill_pb/probe_basic.ini`, with the real CNC control panel owned by
   `linc-panel`.

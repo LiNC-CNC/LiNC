@@ -1,7 +1,7 @@
 # LiNC simulation-only panel wiring.
 #
 # Loaded after linc.hal (which creates cnc_panel.*) and before the display.
-# The reference baiermill_sim HAL replaces the physical cabinet wiring with
+# The simulation HAL (hal/rio_sim.hal) replaces the physical cabinet wiring with
 # rio.sim-* inputs; these nets connect the LiNC panel service to that simulated
 # hardware. Do not load this file on a real machine.
 

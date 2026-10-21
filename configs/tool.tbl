@@ -1,0 +1,23 @@
+;Tool  Pocket Z Offset     Diameter     Remark
+T1     P0     Z-56.068000  D+6.000000   ; 6mm 3 Flute 30 deg Helix
+T2     P0     Z+0.000000   D+17.300000  ; 6mm 3 Flute ballnose
+T3     P0     Z-59.815000  D+6.000000   ; 6mm 90deg chamfermill
+T4     P0     Z+0.000000   D+13.450000  ; 14mm 3 flute endmill
+T5     P0     Z-67.128000  D+3.000000   ; 3mm 3 flute endmill
+T6     P0     Z-44.190000  D+0.000000   ; 10mm 3f al endmill
+T7     P0     Z-46.290000  D+8.000000   ; 8mm 1fl endmill
+T10    P0     Z+0.000000   D+50.000000  ; 50mm Facemill
+T11    P0     Z-59.021000  D+63.000000  ; 63mm facemill
+T20    P0     Z+0.000000   D+20.000000  ; 20MM 2F  apmt SHOULDERMILL
+T21    P0     Z-29.864000  D+15.000000  ; 15mm 1 flute apmt 88deg chamfermill
+T30    P0     Z+0.000000   D+6.500000   ; 6.5mm hss drillbit
+T31    P0     Z-79.137000  D+6.000000   ; 6mm centerdrill
+T32    P0     Z+0.000000   D+0.000000   ; 7mm hss drill
+T33    P0     Z-57.702000  D+5.000000   ; 5mm centerdrill
+T34    P0     Z-65.416000  D+0.800000   ; 0.8mm drill bit
+T35    P0     Z+47.643000  D+8.800000   ; 8.8mm HSS 118 deg drill
+T36    P0     Z+63.261000  D+11.300000  ; 11.3mm HSS 118 deg drill
+T37    P0     Z-61.220000  D+0.400000   ; 0.4mm drill bit
+T39    P0     Z+22.435000  D+7.000000   ; chucked drill
+T50    P0     Z-66.491000  D+0.100000   ; 60 deg v-bit
+T99    P99    Z+0.000000   D+3.000000   ; Probe Tool 3MM ball Probe Tip

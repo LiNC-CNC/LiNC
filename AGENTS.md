@@ -18,7 +18,7 @@ cargo test --workspace                      # 107 tests today
 
 - `--check-config` merges the profile, reads the INI, resolves paths and checks safety without a window or HAL; it fails if the INI or a `../../` sibling checkout is missing.
 - `lathe-sim.toml` is expected to fail `--check-config` until its tool table has `P`; that is the turret guard.
-- `./scripts/start-sim.sh` (`--detach`; stop with `./scripts/stop-sim.sh`) runs `linuxcnc configs/sim.ini` from `../baiermill_sim`, exports
+- `./scripts/start-sim.sh` (`--detach`; stop with `./scripts/stop-sim.sh`) runs `linuxcnc configs/sim.ini` from `configs/`, exports
   `LINC_CONFIG=configs/sim.toml`, builds only when a release binary is missing, and needs `DISPLAY`/`WAYLAND_DISPLAY`.
 - Standalone, no LinuxCNC or HAL. Panel and HMI must share `LINC_SIM_IPC`:
 
@@ -126,6 +126,7 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
   `PANEL OFFLINE` banner, not an error dialog.
 - **Profile selection.** `--config` or `LINC_CONFIG` is mandatory; there is no default. Under LinuxCNC they must match the `[DISPLAY]` line, and
   `-ini` overrides `machine.linuxcnc_ini`.
-- **Sibling checkouts.** `sim.toml`/`baiermill.toml` point outside the repo (`../../baiermill_sim`, `../../baiermill_pb`); `--check-config` fails without them.
+- **Sibling checkouts.** `sim.toml` is self-contained (`configs/` + `hal/`), but `baiermill.toml` and `lathe-sim.toml` point outside the repo
+  (`../../baiermill_pb`, `../../probe_basic_dev`); `--check-config` fails without them.
 - **egui 0.37.** The workspace pins `egui`/`eframe`/`egui_extras` 0.37. Copy API style from `theme.rs`/`shell.rs`; older egui examples may not
   compile, and a second egui version breaks type compatibility.

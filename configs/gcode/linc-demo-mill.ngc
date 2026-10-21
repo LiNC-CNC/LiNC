@@ -1,0 +1,36 @@
+(LiNC demonstration part - not a production program)
+(Dark graphite bracket, 2.5D contour)
+
+O1001
+(T1 10mm end mill)
+G21 G90 G54 G17 G40 G49 G80
+T1 M6
+S4200 M3
+G0 X-250 Y-210 Z20
+G1 Z-2 F300
+G1 X-100 Y-210 F850
+G2 X-70 Y-180 R30
+G1 X-70 Y-100
+G2 X-100 Y-70 R30
+G1 X-220 Y-70
+G1 X-250 Y-100
+G1 X-250 Y-210
+G0 Z20
+(Pocket pass)
+G0 X-180 Y-160
+G1 Z-1.5 F250
+G1 X-120 Y-160 F700
+G1 X-120 Y-120
+G1 X-180 Y-120
+G1 X-180 Y-160
+G0 Z20
+(Bolt holes)
+G0 X-235 Y-195
+G81 X-235 Y-195 Z-6 R2 F200
+G81 X-85 Y-195 Z-6 R2
+G81 X-85 Y-85 Z-6 R2
+G81 X-235 Y-85 Z-6 R2
+G80
+G0 Z50
+M5
+M30
