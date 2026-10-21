@@ -6,3 +6,5 @@ configs/sim.var.bak
 
 __pycache__/
 *.pyc
+configs/halshow.preferences
+*.halshow
