@@ -1,10 +1,13 @@
 //! Read-only Manual screen shared by JOG, INC and MPG panel modes.
+//!
+//! Layout base: the same live graph + large coordinate readout + mode context
+//! split as the Homing (HOME / PROG.HOME) screen — see
+//! [`common::live_split`].
 
-use egui::{RichText, Ui, Vec2};
+use egui::{RichText, Ui};
 use linc_core::model::MachineVariant;
-use linc_view::ViewMode;
 
-use crate::screens::common;
+use crate::screens::common::{self, LiveAxisRow};
 use crate::shell::LincApp;
 use crate::theme;
 
@@ -21,210 +24,112 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         "MANUAL",
         "JOG / INC / MPG share this read-only screen. Input stays on the physical panel.",
     );
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(format!("PANEL MODE: {mode_label}"))
-                .monospace()
-                .size(theme::font_size(14.0))
-                .color(if mode.is_some() {
-                    theme::ACCENT
-                } else {
-                    theme::WARNING
-                }),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                RichText::new("NO ON-SCREEN JOG OR MODE CONTROLS")
-                    .monospace()
-                    .size(theme::font_size(10.0))
-                    .color(theme::MUTED),
+    common::live_mode_header(
+        ui,
+        mode_label,
+        mode.is_some(),
+        "NO ON-SCREEN JOG OR MODE CONTROLS",
+    );
+    let readout = coordinates_readout(app);
+    common::live_split(
+        app,
+        ui,
+        "manual-live-right",
+        |app, ui| {
+            let height = (ui.available_height() - 20.0).max(320.0);
+            common::live_graph_card(app, ui, height);
+        },
+        |app, ui| {
+            common::live_coordinates_card(
+                ui,
+                "WORK COORDINATES",
+                &format!(
+                    "{} / {}{}",
+                    app.active_wcs_label(),
+                    app.snapshot.positions.units,
+                    if app.profile.variant == MachineVariant::Lathe {
+                        " / RADIUS"
+                    } else {
+                        ""
+                    }
+                ),
+                &readout,
             );
-        });
-    });
-    ui.add_space(4.0);
-    let available = ui.available_size();
-    let graph_width = (available.x * 0.68).max(560.0);
-    ui.horizontal_top(|ui| {
-        ui.allocate_ui_with_layout(
-            Vec2::new(graph_width, available.y),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                theme::card(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        theme::section_header(ui, "TOOLPATH / LIVE POSITION");
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if theme::action_button(ui, "CLEAR TRAIL", true).clicked() {
-                                app.clear_trail();
-                            }
-                            if theme::action_button(ui, "FIT", true).clicked() {
-                                app.manual.fit = true;
-                            }
-                            let label = app.manual.view.label();
-                            if theme::action_button(ui, label, true).clicked() {
-                                app.manual.view = if app.profile.variant == MachineVariant::Lathe {
-                                    ViewMode::LatheXz
-                                } else {
-                                    match app.manual.view {
-                                        ViewMode::Iso3d => ViewMode::TopXy,
-                                        ViewMode::TopXy => ViewMode::SideXz,
-                                        _ => ViewMode::Iso3d,
-                                    }
-                                };
-                            }
-                            if app.snapshot.machine.estop {
-                                ui.label(RichText::new("E-STOP").color(theme::ERROR));
-                            }
-                        });
-                    });
-                    let preview = app.program.last_valid_preview.clone();
-                    let mut zoom = app.manual.zoom;
-                    let mut pan = app.manual.pan;
-                    let mut fit = app.manual.fit;
-                    common::trajectory(
-                        app,
-                        ui,
-                        &preview,
-                        (available.y - 90.0).max(320.0),
-                        app.manual.view,
-                        &mut zoom,
-                        &mut pan,
-                        &mut fit,
-                        None,
-                        Some(app.snapshot.program.current_line),
-                    );
-                    app.manual.zoom = zoom;
-                    app.manual.pan = pan;
-                    app.manual.fit = fit;
-                });
+            mode_context_card(app, ui);
+            input_card(app, ui);
+        },
+    );
+}
+
+fn coordinates_readout(app: &LincApp) -> Vec<LiveAxisRow> {
+    app.axes()
+        .into_iter()
+        .map(|axis| {
+            let position = app.snapshot.positions.axes.get(&axis);
+            LiveAxisRow {
+                active: app
+                    .snapshot
+                    .panel
+                    .jog
+                    .active_axis
+                    .as_deref()
+                    .map(|name| name == axis)
+                    .unwrap_or(false),
+                work: position.map(|p| p.work).unwrap_or(0.0),
+                machine: position.map(|p| p.machine).unwrap_or(0.0),
+                dtg: position.map(|p| p.dtg).unwrap_or(0.0),
+                name: axis,
+                badge: None,
+                note: None,
+            }
+        })
+        .collect()
+}
+
+fn input_card(app: &LincApp, ui: &mut Ui) {
+    theme::card(ui, |ui| {
+        theme::section_header(ui, "INPUT");
+        theme::kv_row(
+            ui,
+            "PANEL",
+            if app.snapshot.panel.connected {
+                "ONLINE"
+            } else {
+                "OFFLINE"
             },
         );
-        ui.add_space(8.0);
-        ui.allocate_ui_with_layout(
-            Vec2::new((available.x - graph_width - 8.0).max(320.0), available.y),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("manual-right")
-                    .max_height(available.y - 10.0)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        coordinates_card(app, ui);
-                        mode_context_card(app, ui);
-                        theme::card(ui, |ui| {
-                            theme::section_header(ui, "INPUT");
-                            theme::kv_row(ui, "PANEL", if app.snapshot.panel.connected { "ONLINE" } else { "OFFLINE" });
-                            theme::kv_row(ui, "PROTECT", if app.program_protected() { "ON" } else { "OFF" });
-                            theme::kv_row(ui, "PENDANT", if app.snapshot.pendant.connected { "WHB04B-6 / JOG ONLY" } else { "NOT CONNECTED" });
-                            theme::kv_row(ui, "ACTIVE AXIS", app.snapshot.panel.jog.active_axis.clone().unwrap_or_else(|| "—".into()));
-                            ui.label(
-                                RichText::new("MPG encoder counts are not carried by the RS-485 link and are never fabricated.")
-                                    .size(theme::font_size(9.0))
-                                    .color(theme::MUTED),
-                            );
-                        });
-                    });
+        theme::kv_row(
+            ui,
+            "PROTECT",
+            if app.program_protected() { "ON" } else { "OFF" },
+        );
+        theme::kv_row(
+            ui,
+            "PENDANT",
+            if app.snapshot.pendant.connected {
+                "WHB04B-6 / JOG ONLY"
+            } else {
+                "NOT CONNECTED"
             },
+        );
+        theme::kv_row(
+            ui,
+            "ACTIVE AXIS",
+            app.snapshot
+                .panel
+                .jog
+                .active_axis
+                .clone()
+                .unwrap_or_else(|| "—".into()),
+        );
+        ui.label(
+            RichText::new("MPG encoder counts are not carried by the RS-485 link and are never fabricated.")
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
         );
     });
 }
 
-fn coordinates_card(app: &LincApp, ui: &mut Ui) {
-    theme::card(ui, |ui| {
-        ui.horizontal(|ui| {
-            theme::section_header(ui, "WORK COORDINATES");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "{} / {}{}",
-                        app.active_wcs_label(),
-                        app.snapshot.positions.units,
-                        if app.profile.variant == MachineVariant::Lathe {
-                            " / RADIUS"
-                        } else {
-                            ""
-                        }
-                    ))
-                    .monospace()
-                    .size(theme::font_size(10.0))
-                    .color(theme::MUTED),
-                );
-            });
-        });
-        for axis in app.axes() {
-            let position = app.snapshot.positions.axes.get(&axis);
-            let active = app
-                .snapshot
-                .panel
-                .jog
-                .active_axis
-                .as_deref()
-                .map(|name| name == axis)
-                .unwrap_or(false);
-            let work = position.map(|p| p.work).unwrap_or(0.0);
-            let machine = position.map(|p| p.machine).unwrap_or(0.0);
-            let dtg = position.map(|p| p.dtg).unwrap_or(0.0);
-            let frame = egui::Frame::new()
-                .fill(if active {
-                    theme::ACCENT_DARK
-                } else {
-                    theme::PANEL
-                })
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    if active { theme::ACCENT } else { theme::BORDER },
-                ))
-                .corner_radius(3)
-                .inner_margin(egui::Margin::symmetric(8, 4));
-            frame.show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(&axis)
-                            .monospace()
-                            .size(theme::font_size(13.0))
-                            .strong()
-                            .color(theme::C3),
-                    );
-                    if active {
-                        ui.label(
-                            RichText::new("ACTIVE")
-                                .size(theme::font_size(8.0))
-                                .color(theme::ACCENT),
-                        );
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(format!("DTG {dtg:.3}"))
-                                .monospace()
-                                .size(theme::font_size(9.0))
-                                .color(theme::MUTED),
-                        );
-                        ui.label(
-                            RichText::new(crate::theme::format_position(work, 3))
-                                .monospace()
-                                .size(theme::font_size(22.0))
-                                .color(if active { theme::FG } else { theme::FG }),
-                        );
-                    });
-                });
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!("MACH {machine:+.3}"))
-                            .monospace()
-                            .size(theme::font_size(8.5))
-                            .color(theme::MUTED),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new("WORK / MACHINE / DTG")
-                                .size(theme::font_size(8.0))
-                                .color(theme::MUTED),
-                        );
-                    });
-                });
-            });
-        }
-    });
-}
 
 fn mode_context_card(app: &LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {

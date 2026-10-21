@@ -991,3 +991,251 @@ pub fn mode_page_hint(ui: &mut Ui, text: &str) {
 pub fn font_mono(size: f32) -> FontId {
     FontId::monospace(size)
 }
+
+// ---------------------------------------------------------------------------
+// Shared "live mode" layout base
+//
+// The panel's JOG/INC/MPG positions (Manual screen) and its HOME/PROG.HOME
+// positions (Homing screen) are both read-only, mode-driven observation
+// screens: a dominant live graph beside a large coordinate readout and a mode
+// context card. They deliberately share one layout base so the two screens do
+// not drift apart.
+// ---------------------------------------------------------------------------
+
+/// One axis row in the live coordinate readout.
+pub struct LiveAxisRow {
+    pub name: String,
+    pub work: f64,
+    pub machine: f64,
+    pub dtg: f64,
+    /// Highlighted because the panel reports it as the selected jog axis.
+    pub active: bool,
+    /// Optional state chip, e.g. `HOMED` on the Homing screen.
+    pub badge: Option<(String, egui::Color32)>,
+    /// Optional second line, e.g. the INI sequence/search/latch detail.
+    pub note: Option<String>,
+}
+
+/// Two-column live split: dominant graph on the left, scrollable readout on
+/// the right. `salt` keeps the scroll state separate per screen. Both panes
+/// receive `app` as an argument, so the caller never needs two live borrows.
+pub fn live_split<R1, R2>(
+    app: &mut LincApp,
+    ui: &mut Ui,
+    salt: &str,
+    left: impl FnOnce(&mut LincApp, &mut Ui) -> R1,
+    right: impl FnOnce(&mut LincApp, &mut Ui) -> R2,
+) {
+    let available = ui.available_size();
+    let graph_width = (available.x * 0.68).max(560.0);
+    ui.horizontal_top(|ui| {
+        ui.allocate_ui_with_layout(
+            Vec2::new(graph_width, available.y),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                left(app, ui);
+            },
+        );
+        ui.add_space(8.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new((available.x - graph_width - 8.0).max(320.0), available.y),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt(salt)
+                    .max_height(available.y - 10.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        right(app, ui);
+                    });
+            },
+        );
+    });
+}
+
+/// `PANEL MODE: <mode>` banner plus the read-only reminder, shared by the
+/// Manual and Homing screens.
+pub fn live_mode_header(
+    ui: &mut Ui,
+    mode_label: &str,
+    mode_known: bool,
+    reminder: &str,
+) {
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!("PANEL MODE: {mode_label}"))
+                .monospace()
+                .size(theme::font_size(14.0))
+                .color(if mode_known {
+                    theme::ACCENT
+                } else {
+                    theme::WARNING
+                }),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                RichText::new(reminder)
+                    .monospace()
+                    .size(theme::font_size(10.0))
+                    .color(theme::MUTED),
+            );
+        });
+    });
+    ui.add_space(4.0);
+}
+
+/// Dominant live graph card with the shared view controls. Uses the single
+/// live-view state on `app.manual`, so the view is preserved when the operator
+/// moves between the Manual and Homing positions.
+pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
+    theme::card(ui, |ui| {
+        ui.horizontal(|ui| {
+            theme::section_header(ui, "TOOLPATH / LIVE POSITION");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if theme::action_button(ui, "CLEAR TRAIL", app.graph_style.show_live_trail)
+                    .clicked()
+                {
+                    app.clear_trail();
+                }
+                if theme::action_button(ui, "FIT", true).clicked() {
+                    app.manual.fit = true;
+                }
+                let label = app.manual.view.label();
+                if theme::action_button(ui, label, true).clicked() {
+                    app.manual.view = if app.profile.variant == MachineVariant::Lathe {
+                        ViewMode::LatheXz
+                    } else {
+                        match app.manual.view {
+                            ViewMode::Iso3d => ViewMode::TopXy,
+                            ViewMode::TopXy => ViewMode::SideXz,
+                            _ => ViewMode::Iso3d,
+                        }
+                    };
+                }
+                if app.snapshot.machine.estop {
+                    ui.label(RichText::new("E-STOP").color(theme::ERROR));
+                }
+            });
+        });
+        let preview = app.program.last_valid_preview.clone();
+        let current_line = app.snapshot.program.current_line;
+        let view = app.manual.view;
+        let mut zoom = app.manual.zoom;
+        let mut pan = app.manual.pan;
+        let mut fit = app.manual.fit;
+        trajectory(
+            app,
+            ui,
+            &preview,
+            height,
+            view,
+            &mut zoom,
+            &mut pan,
+            &mut fit,
+            None,
+            Some(current_line),
+        );
+        app.manual.zoom = zoom;
+        app.manual.pan = pan;
+        app.manual.fit = fit;
+    });
+}
+
+/// Large work/machine/DTG readout, shared by the Manual and Homing screens.
+pub fn live_coordinates_card(
+    ui: &mut Ui,
+    header: &str,
+    units_label: &str,
+    rows: &[LiveAxisRow],
+) {
+    theme::card(ui, |ui| {
+        ui.horizontal(|ui| {
+            theme::section_header(ui, header);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    RichText::new(units_label)
+                        .monospace()
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
+                );
+            });
+        });
+        for row in rows {
+            let frame = egui::Frame::new()
+                .fill(if row.active {
+                    theme::ACCENT_DARK
+                } else {
+                    theme::PANEL
+                })
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    if row.active { theme::ACCENT } else { theme::BORDER },
+                ))
+                .corner_radius(3)
+                .inner_margin(egui::Margin::symmetric(8, 4));
+            frame.show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(&row.name)
+                            .monospace()
+                            .size(theme::font_size(13.0))
+                            .strong()
+                            .color(theme::C3),
+                    );
+                    if row.active {
+                        ui.label(
+                            RichText::new("ACTIVE")
+                                .size(theme::font_size(8.0))
+                                .color(theme::ACCENT),
+                        );
+                    }
+                    if let Some((text, color)) = &row.badge {
+                        ui.label(
+                            RichText::new(text)
+                                .monospace()
+                                .size(theme::font_size(9.0))
+                                .color(*color),
+                        );
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(format!("DTG {:.3}", row.dtg))
+                                .monospace()
+                                .size(theme::font_size(9.0))
+                                .color(theme::MUTED),
+                        );
+                        ui.label(
+                            RichText::new(theme::format_position(row.work, 3))
+                                .monospace()
+                                .size(theme::font_size(22.0))
+                                .color(theme::FG),
+                        );
+                    });
+                });
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!("MACH {:+.3}", row.machine))
+                            .monospace()
+                            .size(theme::font_size(8.5))
+                            .color(theme::MUTED),
+                    );
+                    if let Some(note) = &row.note {
+                        ui.label(
+                            RichText::new(note)
+                                .monospace()
+                                .size(theme::font_size(8.0))
+                                .color(theme::MUTED),
+                        );
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            RichText::new("WORK / MACHINE / DTG")
+                                .size(theme::font_size(8.0))
+                                .color(theme::MUTED),
+                        );
+                    });
+                });
+            });
+        }
+    });
+}
