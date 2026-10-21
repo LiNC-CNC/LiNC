@@ -789,9 +789,12 @@ impl LincApp {
                 self.program.focus_editor = self.program_editing_allowed();
             }
             PanelMode::Auto => {
-                if self.page.is_mode_driven() {
-                    self.page = self.last_non_mode_page;
-                }
+                // Selecting AUTO on the panel shows the program, as Probe
+                // Basic does: the operator watches the active line and the
+                // running code without hunting for the page. This runs on the
+                // mode change only, so navigating away afterwards is left
+                // alone.
+                self.page = Page::Program;
             }
         }
     }
@@ -2279,7 +2282,7 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         let (_dir, mut app) = make_app(PanelMode::Mdi);
         assert_eq!(app.page, Page::Mdi);
         app.on_mode_change(PanelModeValidity::Valid(PanelMode::Auto));
-        assert_eq!(app.page, app.last_non_mode_page);
+        assert_eq!(app.page, Page::Program, "AUTO shows the running program");
         app.on_mode_change(PanelModeValidity::Valid(PanelMode::Home));
         assert_eq!(app.page, Page::Homing);
         app.on_mode_change(PanelModeValidity::Valid(PanelMode::Jog));
