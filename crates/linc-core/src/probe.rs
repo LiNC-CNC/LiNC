@@ -4,7 +4,7 @@
 //! The HMI never auto-starts a routine. The UI calls [`build_probe_blocks`]
 //! only from the explicit `RUN PROBE` action after validation.
 
-use crate::model::AxisMap;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProbeCategory {
@@ -75,8 +75,27 @@ pub struct ProbeOperation {
     pub calibration: bool,
 }
 
-macro_rules! op {
-    ($id:literal, $name:literal, $call:literal, $cat:ident, $diagram:ident, $desc:literal, $applies:literal, $cal:literal) => {
+impl ProbeOperation {
+    /// Which `#1001`–`#1009` layout the matching Probe Basic subroutine writes.
+    /// Derived from the subroutine name so the table stays the single source
+    /// of routine metadata.
+    pub fn result_family(&self) -> ResultFamily {
+        let call = self.call;
+        if call.contains("z_minus") || call.contains("spindle_nose") {
+            ResultFamily::SurfaceZ
+        } else if call.contains("_x_plus")
+            || call.contains("_x_minus")
+            || call.contains("_y_plus")
+            || call.contains("_y_minus")
+        {
+            ResultFamily::Edge
+        } else {
+            ResultFamily::BossPocket
+        }
+    }
+}
+
+macro_rules! op {    ($id:literal, $name:literal, $call:literal, $cat:ident, $diagram:ident, $desc:literal, $applies:literal, $cal:literal) => {
         ProbeOperation {
             id: $id,
             name: $name,
@@ -417,6 +436,48 @@ pub fn operations() -> &'static [ProbeOperation] {
             true,
             false
         ),
+        // Edge operations. SPEC §6.8: the plain X±/Y± edge probes stay
+        // available in the category that matches what they measure.
+        op!(
+            "edge_x_minus",
+            "EDGE X-",
+            "probe_x_minus_wco",
+            OutsideCorners,
+            EdgeAngle,
+            "Probe the X- face and set the selected WCS X.",
+            true,
+            false
+        ),
+        op!(
+            "edge_x_plus",
+            "EDGE X+",
+            "probe_x_plus_wco",
+            OutsideCorners,
+            EdgeAngle,
+            "Probe the X+ face and set the selected WCS X.",
+            true,
+            false
+        ),
+        op!(
+            "edge_y_minus",
+            "EDGE Y-",
+            "probe_y_minus_wco",
+            OutsideCorners,
+            EdgeAngle,
+            "Probe the Y- face and set the selected WCS Y.",
+            true,
+            false
+        ),
+        op!(
+            "edge_y_plus",
+            "EDGE Y+",
+            "probe_y_plus_wco",
+            OutsideCorners,
+            EdgeAngle,
+            "Probe the Y+ face and set the selected WCS Y.",
+            true,
+            false
+        ),
         // Surface / Z
         op!(
             "surface_z",
@@ -705,6 +766,106 @@ pub struct ParameterResults {
     pub values: [f64; 9],
 }
 
+/// Which `#1001`–`#1009` layout the Probe Basic subroutine writes. The slots
+/// are NOT an X/Y/Z position: `#1001` is an X *width* and `#1002` an X
+/// *centre* for the boss/pocket family. Reading them as axis positions shows
+/// widths and centres where the operator expects coordinates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ResultFamily {
+    /// Corner / boss / pocket / ridge routines: two widths and two centres.
+    #[default]
+    BossPocket,
+    /// Single-edge routines: the four probed face positions.
+    Edge,
+    /// Z-surface routines: only `#1009`.
+    SurfaceZ,
+}
+
+/// The meaning of one `#1001`–`#1009` slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResultSlot {
+    Unused,
+    XWidth,
+    XCenter,
+    YWidth,
+    YCenter,
+    XMinus,
+    XPlus,
+    YMinus,
+    YPlus,
+    ZSurface,
+}
+
+impl ResultSlot {
+    pub fn label(self) -> &'static str {
+        match self {
+            ResultSlot::Unused => "—",
+            ResultSlot::XWidth => "X WIDTH",
+            ResultSlot::XCenter => "X CENTRE",
+            ResultSlot::YWidth => "Y WIDTH",
+            ResultSlot::YCenter => "Y CENTRE",
+            ResultSlot::XMinus => "X- FACE",
+            ResultSlot::XPlus => "X+ FACE",
+            ResultSlot::YMinus => "Y- FACE",
+            ResultSlot::YPlus => "Y+ FACE",
+            ResultSlot::ZSurface => "Z SURFACE",
+        }
+    }
+
+    pub fn used(self) -> bool {
+        self != ResultSlot::Unused
+    }
+}
+
+impl ResultFamily {
+    /// Slot meanings for `#1001` … `#1009`, in parameter order.
+    pub fn slots(self) -> [ResultSlot; 9] {
+        match self {
+            ResultFamily::BossPocket => [
+                ResultSlot::XWidth,
+                ResultSlot::XCenter,
+                ResultSlot::YWidth,
+                ResultSlot::YCenter,
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+            ],
+            ResultFamily::Edge => [
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+                ResultSlot::XMinus,
+                ResultSlot::XPlus,
+                ResultSlot::YMinus,
+                ResultSlot::YPlus,
+                ResultSlot::Unused,
+            ],
+            ResultFamily::SurfaceZ => [
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+                ResultSlot::Unused,
+                ResultSlot::ZSurface,
+            ],
+        }
+    }
+}
+
+/// One named measurement read back from the probe subroutines.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProbeMeasurement {
+    pub parameter: u16,
+    pub slot: ResultSlot,
+    pub value: f64,
+}
+
 impl ParameterResults {
     pub fn from_values(values: &[f64]) -> Self {
         let mut out = [0.0; 9];
@@ -714,28 +875,137 @@ impl ParameterResults {
         Self { values: out }
     }
 
-    pub fn measured_axis(&self, axis: &str) -> Option<f64> {
-        match axis.to_ascii_uppercase().as_str() {
-            "X" => Some(self.values[0]),
-            "Y" => Some(self.values[1]),
-            "Z" => Some(self.values[2]),
-            "A" | "C" => Some(self.values[3]),
-            _ => None,
+    /// Named measurements for the routine family, skipping unused slots.
+    pub fn measurements(&self, family: ResultFamily) -> Vec<ProbeMeasurement> {
+        family
+            .slots()
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| slot.used())
+            .map(|(index, slot)| ProbeMeasurement {
+                parameter: 1001 + index as u16,
+                slot: *slot,
+                value: self.values[index],
+            })
+            .collect()
+    }
+
+    /// The work-offset values this result actually determines, as
+    /// `(axis, value)`. Only the axes the routine measured are returned; an
+    /// axis the routine did not touch is never written.
+    pub fn wcs_offsets(&self, operation: &ProbeOperation) -> Vec<(String, f64)> {
+        let call = operation.call;
+        match operation.result_family() {
+            // The corner/boss/pocket routines locate a feature centre.
+            ResultFamily::BossPocket => vec![
+                ("X".to_string(), self.values[1]),
+                ("Y".to_string(), self.values[3]),
+            ],
+            // A single-edge routine locates one face.
+            ResultFamily::Edge => {
+                let mut out = Vec::new();
+                if call.contains("x_plus") {
+                    out.push(("X".to_string(), self.values[5]));
+                } else if call.contains("x_minus") {
+                    out.push(("X".to_string(), self.values[4]));
+                } else if call.contains("y_plus") {
+                    out.push(("Y".to_string(), self.values[7]));
+                } else if call.contains("y_minus") {
+                    out.push(("Y".to_string(), self.values[6]));
+                }
+                out
+            }
+            ResultFamily::SurfaceZ => vec![("Z".to_string(), self.values[8])],
         }
     }
 
-    pub fn to_axis_map(&self, axes: &[String]) -> AxisMap<f64> {
-        let mut map = AxisMap::new();
-        for axis in axes {
-            map.insert(axis.clone(), self.measured_axis(axis).unwrap_or(0.0));
+    /// The probe error, when the routine measured a feature whose size is
+    /// known from the configured diameter. Never fabricated: `None` when the
+    /// routine does not determine an error.
+    pub fn error(&self, operation: &ProbeOperation, expected_diameter: Option<f64>) -> Option<f64> {
+        if operation.result_family() != ResultFamily::BossPocket {
+            return None;
         }
-        map
+        let expected = expected_diameter?;
+        if expected <= 0.0 {
+            return None;
+        }
+        let x = self.values[0];
+        let y = self.values[2];
+        if x <= 0.0 && y <= 0.0 {
+            return None;
+        }
+        let mut worst = 0.0_f64;
+        if x > 0.0 {
+            worst = worst.max((x - expected).abs());
+        }
+        if y > 0.0 {
+            worst = worst.max((y - expected).abs());
+        }
+        Some(worst)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn result_slots_are_not_axis_positions() {
+        // #1001 is an X width and #1002 an X centre, not X and Y positions.
+        let results = ParameterResults::from_values(&[50.0, 12.5, 30.0, -4.25, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let measured = results.measurements(ResultFamily::BossPocket);
+        assert_eq!(measured.len(), 4);
+        assert_eq!(measured[0].parameter, 1001);
+        assert_eq!(measured[0].slot, ResultSlot::XWidth);
+        assert_eq!(measured[1].parameter, 1002);
+        assert_eq!(measured[1].slot, ResultSlot::XCenter);
+        assert_eq!(measured[3].slot, ResultSlot::YCenter);
+        assert_eq!(measured[3].value, -4.25);
+    }
+
+    #[test]
+    fn wcs_offsets_follow_the_routine_family() {
+        let values = ParameterResults::from_values(&[
+            50.0, 12.5, 30.0, -4.25, -100.0, 100.0, -200.0, 200.0, -3.5,
+        ]);
+        let corner = operations()
+            .iter()
+            .find(|op| op.call.contains("front_left_top"))
+            .expect("corner routine");
+        assert_eq!(corner.result_family(), ResultFamily::BossPocket);
+        assert_eq!(
+            values.wcs_offsets(corner),
+            vec![("X".to_string(), 12.5), ("Y".to_string(), -4.25)]
+        );
+
+        let z = operations()
+            .iter()
+            .find(|op| op.result_family() == ResultFamily::SurfaceZ)
+            .expect("z routine");
+        assert_eq!(values.wcs_offsets(z), vec![("Z".to_string(), -3.5)]);
+    }
+
+    #[test]
+    fn z_surface_result_is_never_read_as_x() {
+        // A Z-surface routine writes only #1009. Reading #1001 as X (the old
+        // behaviour) displayed a stale width as the probed X coordinate.
+        let results = ParameterResults::from_values(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -7.25]);
+        let measured = results.measurements(ResultFamily::SurfaceZ);
+        assert_eq!(measured.len(), 1);
+        assert_eq!(measured[0].parameter, 1009);
+        assert_eq!(measured[0].slot, ResultSlot::ZSurface);
+        assert_eq!(measured[0].value, -7.25);
+    }
+
+    #[test]
+    fn every_operation_has_a_known_result_family() {
+        for operation in operations() {
+            let family = operation.result_family();
+            let used = family.slots().iter().filter(|slot| slot.used()).count();
+            assert!(used > 0, "{} has no result slots", operation.call);
+        }
+    }
 
     #[test]
     fn catalog_covers_all_categories_and_unambiguous_calls() {
