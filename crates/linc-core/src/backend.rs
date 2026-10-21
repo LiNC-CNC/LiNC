@@ -181,6 +181,8 @@ fn run_worker(
     let mut last_status: Option<i32> = None;
     let mut last_status_write = Instant::now() - Duration::from_secs(1);
     let mut last_confirm_seq = 0u64;
+    // NaN so the first pass always publishes the initial selection.
+    let mut last_jog_increment = f64::NAN;
     let mut confirm_low_at: Option<Instant> = None;
 
     while !shared.shutdown.load(Ordering::Relaxed) {
@@ -247,6 +249,20 @@ fn run_worker(
                         HalValue::S32(value.unwrap_or(-1)),
                     ) {
                         log::warn!("HAL status-display write failed: {error}");
+                    }
+                }
+            }
+
+            // Selected jog increment for `halui.axis.L.increment`. 0.0 means
+            // continuous jog; the machine HAL routes the jog keys by mode.
+            let increment = snapshot.panel.jog.increment.unwrap_or(0.0);
+            if increment != last_jog_increment {
+                last_jog_increment = increment;
+                if let Some(writer) = hal.as_mut() {
+                    if let Err(error) =
+                        writer.write(LincOutput::JogIncrement, HalValue::Float(increment))
+                    {
+                        log::warn!("HAL jog-increment write failed: {error}");
                     }
                 }
             }

@@ -164,7 +164,7 @@ panel_component = "cnc_panel"
 linc_component = "linc"
 write_policy = "declared-outputs-only"
 output_prefix = "linc."
-allowed_outputs = ["hmi-alive", "tool-change-confirm", "status-display"]
+allowed_outputs = ["hmi-alive", "tool-change-confirm", "status-display", "jog-increment"]
 
 [hal.pins]
 panel_connected = "cnc_panel.panel_connected"

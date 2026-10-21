@@ -1143,6 +1143,12 @@ impl MachineBackend for SimBackend {
                     LincOutput::StatusDisplay => {
                         // The worker writes the status display from the WCS.
                     }
+                    LincOutput::JogIncrement => {
+                        if let HalValue::Float(value) = value {
+                            self.snapshot.panel.jog.increment =
+                                if value > 0.0 { Some(value) } else { None };
+                        }
+                    }
                 }
                 Ok(())
             }

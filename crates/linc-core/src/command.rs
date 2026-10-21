@@ -47,13 +47,18 @@ pub enum LincOutput {
     HmiAlive,
     ToolChangeConfirm,
     StatusDisplay,
+    /// Selected jog increment in machine units, for `halui.axis.L.increment`.
+    /// 0.0 means continuous jog. Chosen in the HMI because the panel has no
+    /// increment selector, matching how Probe Basic picks it in its GUI.
+    JogIncrement,
 }
 
 impl LincOutput {
-    pub const ALLOWED: [LincOutput; 3] = [
+    pub const ALLOWED: [LincOutput; 4] = [
         LincOutput::HmiAlive,
         LincOutput::ToolChangeConfirm,
         LincOutput::StatusDisplay,
+        LincOutput::JogIncrement,
     ];
 
     pub fn pin_name(self) -> &'static str {
@@ -61,6 +66,7 @@ impl LincOutput {
             Self::HmiAlive => "linc.hmi-alive",
             Self::ToolChangeConfirm => "linc.tool-change-confirm",
             Self::StatusDisplay => "linc.status-display",
+            Self::JogIncrement => "linc.jog-increment",
         }
     }
 
@@ -69,6 +75,7 @@ impl LincOutput {
             Self::HmiAlive => "hmi-alive",
             Self::ToolChangeConfirm => "tool-change-confirm",
             Self::StatusDisplay => "status-display",
+            Self::JogIncrement => "jog-increment",
         }
     }
 
@@ -77,6 +84,7 @@ impl LincOutput {
             "hmi-alive" | "linc.hmi-alive" => Some(Self::HmiAlive),
             "tool-change-confirm" | "linc.tool-change-confirm" => Some(Self::ToolChangeConfirm),
             "status-display" | "linc.status-display" => Some(Self::StatusDisplay),
+            "jog-increment" | "linc.jog-increment" => Some(Self::JogIncrement),
             _ => None,
         }
     }
@@ -96,6 +104,7 @@ impl HalValue {
             (HalValue::Bit(_), LincOutput::HmiAlive)
                 | (HalValue::Bit(_), LincOutput::ToolChangeConfirm)
                 | (HalValue::S32(_), LincOutput::StatusDisplay)
+                | (HalValue::Float(_), LincOutput::JogIncrement)
         )
     }
 }
@@ -263,10 +272,11 @@ mod tests {
 
     #[test]
     fn only_declared_hal_outputs_are_representable() {
-        assert_eq!(LincOutput::ALLOWED.len(), 3);
+        assert_eq!(LincOutput::ALLOWED.len(), 4);
         assert!(LincOutput::from_name("linc.hmi-alive").is_some());
         assert!(LincOutput::from_name("linc.status-display").is_some());
         assert!(LincOutput::from_name("linc.tool-change-confirm").is_some());
+        assert!(LincOutput::from_name("linc.jog-increment").is_some());
         assert!(LincOutput::from_name("motion.spindle-on").is_none());
         assert!(LincOutput::from_name("cnc_panel.cycle_start").is_none());
     }

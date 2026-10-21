@@ -848,6 +848,12 @@ impl MachineBackend for PythonBridgeBackend {
                             .hal
                             .tool_change_confirm_seq = self.confirm_seq;
                     }
+                    LincOutput::JogIncrement => {
+                        if let HalValue::Float(value) = value {
+                            self.shared.snapshot.lock().unwrap().panel.jog.increment =
+                                if value > 0.0 { Some(value) } else { None };
+                        }
+                    }
                     LincOutput::HmiAlive | LincOutput::StatusDisplay => {}
                 }
                 Ok(())

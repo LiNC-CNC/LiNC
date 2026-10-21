@@ -223,6 +223,7 @@ pub struct LincHal {
     hmi_alive: HalPin,
     tool_change_confirm: HalPin,
     status_display: HalPin,
+    jog_increment: HalPin,
     last_confirm: bool,
 }
 
@@ -239,18 +240,23 @@ impl LincHal {
         let hmi_alive = component.bit_out("hmi-alive")?;
         let tool_change_confirm = component.bit_out("tool-change-confirm")?;
         let status_display = component.s32_out("status-display")?;
+        let jog_increment = component.float_out("jog-increment")?;
         unsafe {
             *hmi_alive.bit() = 0;
             *tool_change_confirm.bit() = 0;
             *status_display.s32() = -1;
+            *jog_increment.float() = 0.0;
         }
         component.ready()?;
-        log::info!("created linc.* HAL outputs (hmi-alive, tool-change-confirm, status-display)");
+        log::info!(
+            "created linc.* HAL outputs (hmi-alive, tool-change-confirm, status-display, jog-increment)"
+        );
         Ok(Self {
             component,
             hmi_alive,
             tool_change_confirm,
             status_display,
+            jog_increment,
             last_confirm: false,
         })
     }
@@ -265,11 +271,12 @@ impl LincHal {
         }
     }
 
-    pub fn output_names(&self) -> [&'static str; 3] {
+    pub fn output_names(&self) -> [&'static str; 4] {
         [
             LincOutput::HmiAlive.pin_name(),
             LincOutput::ToolChangeConfirm.pin_name(),
             LincOutput::StatusDisplay.pin_name(),
+            LincOutput::JogIncrement.pin_name(),
         ]
     }
 
@@ -303,6 +310,9 @@ impl HalWriter for LincHal {
                 (LincOutput::StatusDisplay, HalValue::S32(value)) => {
                     *self.status_display.s32() = value;
                 }
+                (LincOutput::JogIncrement, HalValue::Float(value)) => {
+                    *self.jog_increment.float() = value;
+                }
                 _ => {
                     return Err(MachineError::Hal("wrong HAL value type".into()));
                 }
@@ -322,10 +332,16 @@ mod tests {
         // succeeds. Either outcome must not panic.
         let result = LincHal::new();
         if let Ok(mut hal) = result {
-            assert_eq!(hal.output_names().len(), 3);
+            assert_eq!(
+                hal.output_names().len(),
+                LincOutput::ALLOWED.len(),
+                "every declared output needs a pin"
+            );
             hal.write(LincOutput::StatusDisplay, HalValue::S32(54))
                 .unwrap();
             hal.write(LincOutput::HmiAlive, HalValue::Bit(true))
+                .unwrap();
+            hal.write(LincOutput::JogIncrement, HalValue::Float(1.0))
                 .unwrap();
         }
     }

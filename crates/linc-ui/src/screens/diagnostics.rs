@@ -518,6 +518,13 @@ fn hal_nml(app: &mut LincApp, ui: &mut Ui) {
                                 .status_display
                                 .map(|v| v.to_string())
                                 .unwrap_or_else(|| "—".into()),
+                            linc_core::command::LincOutput::JogIncrement => app
+                                .snapshot
+                                .panel
+                                .jog
+                                .increment
+                                .map(|value| format!("{value}"))
+                                .unwrap_or_else(|| "0 (continuous)".into()),
                         };
                         theme::kv_row(ui, output.pin_name(), value);
                     }
