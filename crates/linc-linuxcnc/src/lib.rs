@@ -658,9 +658,9 @@ impl MachineBackend for PythonBridgeBackend {
                 if !snapshot.panel.mode.is_valid() {
                     return Err(MachineError::InvalidPanelMode);
                 }
-                if snapshot.task.interp != InterpState::Idle || snapshot.task.running {
-                    return Err(MachineError::NotIdle);
-                }
+                // No idle or running gate: the operator is changing the tool by
+                // hand while the interpreter waits, and this only satisfies the
+                // M6 handshake.
                 if snapshot.tool_change.status != ToolChangeStatus::ManualPrompt {
                     return Err(MachineError::NoPendingToolChange);
                 }
@@ -669,9 +669,11 @@ impl MachineBackend for PythonBridgeBackend {
                 }
                 self.confirm_seq += 1;
                 let mut state = self.shared.snapshot.lock().unwrap();
-                state.tool_change.status = ToolChangeStatus::Complete;
-                state.tool_change.token = None;
-                state.tool_change.confirm_available = false;
+                // Keep the prompt and the token: the request is still up, and
+                // `iocontrol` clears it. The flag tells the operator the
+                // confirmation has been sent.
+                state.tool_change.confirmed = true;
+                state.hal.tool_change_confirm = true;
                 state.hal.tool_change_confirm_seq = self.confirm_seq;
                 Ok(())
             }
@@ -1087,6 +1089,10 @@ struct Converter {
     last_probe_signature: Option<String>,
     /// One-shot guard for the axis-name mismatch warning below.
     warned_axis_mismatch: bool,
+    /// Increments on the rising edge of `iocontrol.0.tool-change`, so the
+    /// token identifies one change episode instead of the clock.
+    tool_change_serial: u64,
+    tool_change_active: bool,
 }
 
 impl Converter {
@@ -1105,6 +1111,8 @@ impl Converter {
             last_alarm_texts: VecDeque::new(),
             last_probe_signature: None,
             warned_axis_mismatch: false,
+            tool_change_serial: 0,
+            tool_change_active: false,
         }
     }
 
@@ -1359,14 +1367,22 @@ impl Converter {
         snapshot.tool_change.current_tool = dto.tool.current;
         snapshot.tool_change.prepared_tool = dto.tool.prepared;
         snapshot.tool_change.target_tool = Some(dto.tool.prepared).filter(|tool| *tool > 0);
+        if dto.tool.change_active && !self.tool_change_active {
+            // Rising edge: a new episode, and a new token to acknowledge.
+            self.tool_change_serial += 1;
+            self.tool_change_active = true;
+        } else if !dto.tool.change_active {
+            self.tool_change_active = false;
+        }
         if dto.tool.change_active {
             if self.profile.changer == ToolChangerKind::Manual
                 && self.profile.config.tools.manual_confirm
             {
                 snapshot.tool_change.status = ToolChangeStatus::ManualPrompt;
                 snapshot.tool_change.confirm_available = true;
-                snapshot.tool_change.token =
-                    Some(ToolChangeToken((now_ms() << 16) | dto.tool.prepared as u64));
+                snapshot.tool_change.token = Some(ToolChangeToken(
+                    (self.tool_change_serial << 16) | dto.tool.prepared as u64,
+                ));
                 snapshot.tool_change.message = format!(
                     "REMOVE T{} / INSTALL T{}",
                     dto.tool.current, dto.tool.prepared
@@ -1646,6 +1662,12 @@ fn parse_panel_mode(name: &str) -> Option<PanelMode> {
 fn carry_hal_selections(converted: &mut MachineSnapshot, stored: &MachineSnapshot) {
     converted.hal.jog_increment = stored.hal.jog_increment;
     converted.hal.jog_speed = stored.hal.jog_speed;
+    // A manual tool-change confirmation is a level held until `iocontrol`
+    // drops the request: the prompt is rebuilt from the bridge every poll, so
+    // the level and the "confirmed" flag have to be carried while it stands.
+    let prompt = converted.tool_change.status == ToolChangeStatus::ManualPrompt;
+    converted.hal.tool_change_confirm = stored.hal.tool_change_confirm && prompt;
+    converted.tool_change.confirmed = stored.tool_change.confirmed && prompt;
 }
 
 fn modal_lines(gcodes: &[f64], mcodes: &[f64]) -> Vec<(String, String)> {
