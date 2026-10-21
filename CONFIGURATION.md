@@ -33,7 +33,7 @@ safety validation without connecting to LinuxCNC or HAL.
 | File | Purpose |
 |---|---|
 | `configs/base.toml` | Shared UI, keymap, safety policy, HAL output policy, panel driver contract, backend and preferences defaults. Not runnable alone. |
-| `configs/sim.toml` | Mill simulation: `configs/sim.ini` runs a real `linuxcnc` process with the `baiermill_sim` HAL, LiNC display and simulated CNC control panel. |
+| `configs/sim.toml` | Mill simulation: `configs/sim.ini` runs a real `linuxcnc` process with the in-repo simulation HAL (`hal/rio_sim.hal`), LiNC display and simulated CNC control panel. |
 | `configs/baiermill.toml` | Physical mill: `../../baiermill_pb/probe_basic.ini`, real CNC control panel over RS-485 owned by `linc-panel`. |
 | `configs/lathe-sim.toml` | Lathe simulation: `../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini`, lathe UI capabilities. |
 
@@ -84,9 +84,11 @@ DISPLAY = ../scripts/linc-display.sh
 ```
 
 `scripts/start-sim.sh` launches `linuxcnc configs/sim.ini`; the INI loads
-`baiermill_sim/hallib/rio_sim.hal` and `sim_signals.hal`, then
+`hal/rio_sim.hal` (the software FPGA, driven by `hal/rio_sim.py`), then
 `hal/linc.hal` and `hal/linc-sim.hal`. `linc-display.sh` starts the HMI with
 the profile and loads `hal/linc-sim-postgui.hal` after the `linc.*` pins exist.
+Every path in the INI is relative to `configs/`, so the simulation needs
+nothing outside this checkout.
 
 ### HAL wiring
 
@@ -203,7 +205,7 @@ configuration reviewable.
 | ATC | 12 pockets, Z tool-change height -194 mm (manual changer today; add P only if ATC is enabled) |
 | Tool table | `tool.tbl`, standard `TZDR` (no P in manual mode) |
 | Real config | `../../baiermill_pb/probe_basic.ini` |
-| Sim config | `configs/sim.ini` (loads `baiermill_sim` HAL) |
+| Sim config | `configs/sim.ini` (loads the in-repo `hal/rio_sim.hal`) |
 
 The simulation INI intentionally carries the same travel, tuning, homing order
 and ATC values as the machine; only the HAL stack and paths differ.
@@ -214,11 +216,22 @@ and ATC values as the machine; only the HAL stack and paths differ.
 
 - `machine.kind = "sim"` — the HMI shows a persistent `SIM` badge.
 - `linuxcnc_ini = "sim.ini"`, a real LinuxCNC simulation configuration.
-- `sim.ini` loads `baiermill_sim/hallib/rio_sim.hal` and the LiNC HAL; motion,
+- `sim.ini` loads `hal/rio_sim.hal` and the LiNC HAL; motion,
   I/O, homing and ATC run in LinuxCNC, not in the HMI.
 - Panel driver is `cnc-panel-sim`; link is `virtual`; the panel service owns the
   simulated window and exchanges state through `cnc_panel.*` HAL pins.
-- `rio` is `baiermill_sim/rio_sim.py`; no FPGA card or serial device.
+- Work offsets live in `configs/sim.var` (`PARAMETER_FILE = sim.var`, resolved
+  next to the INI, which is also LinuxCNC's working directory). LinuxCNC's
+  interpreter restores that file at startup, but it only *queues* the G5X
+  message and the task delivers queued trajectory messages when motion is idle,
+  so a session that starts in E-stop keeps the DRO at zero. Once the machine is
+  powered on, `linc_bridge.py` re-initializes the interpreter
+  (`reset_interpreter`), which re-reads the file and delivers the offsets; it
+  reads `stat.g5x_offset` back before treating the sync as done, falls back to
+  an MDI `G54`..`G59.3`, and retries for about a minute. Offset writes go
+  through `G10 L2`/`G10 L20`, so the interpreter owns the values and writes them
+  back on exit.
+- `rio` is `hal/rio_sim.py`; no FPGA card or serial device.
 - The HAL pin surface is the same `cnc_panel.*` and `rio.*` surface as the
   real machine, so the HMI uses the same code path.
 - Modes/overrides use steady one-hot/steady values.

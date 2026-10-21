@@ -173,6 +173,13 @@ class Bridge:
         # before the parameter file is rewritten at exit.
         self.offset_overrides = {}
         self.rotation_overrides = {}
+        # `Interp::init()` restores the parameter file but the task only drains
+        # the queued SET_G5X_OFFSET while it executes a block, so motion starts
+        # with zero offsets until the first MDI/program. Push them once the
+        # machine is on (see sync_work_offsets).
+        self.offsets_synced = False
+        self.offset_sync_attempts = 0
+        self.offset_sync_next = 0.0
         self.bitmap_cache = {"buttons": 0, "leds": 0, "sseg_tool": 0, "sseg_next": 0}
         self.bitmap_last = 0.0
         self.start_error_thread()
@@ -275,6 +282,13 @@ class Bridge:
             return None
         path = self.param_file
         if not os.path.isabs(path):
+            # Resolve against the INI directory, not the bridge's own CWD: the
+            # linuxcnc launcher `cd`s to the INI directory before starting the
+            # task and the display, so the interpreter opens a relative
+            # PARAMETER_FILE there. The bridge may be started by an HMI whose CWD
+            # is anywhere (a test harness, a desktop launcher), and resolving
+            # against that CWD read and wrote a different file than the
+            # controller did.
             path = os.path.join(os.path.dirname(self.ini_path), path)
         return path
 
@@ -318,9 +332,13 @@ class Bridge:
             file_x = self.parameters.get(5221)
             live_x = live[0] if live else None
             if file_x is not None and live_x is not None and abs(file_x - live_x) > 1e-6:
+                # Expected before the machine is on: the interpreter restores
+                # the file at startup but only queues the offset, and the task
+                # delivers that queue once motion is idle (see
+                # sync_work_offsets, which does it after power on).
                 print(
-                    "linc bridge: G54 X differs — file %.4f, controller %.4f (%s)"
-                    % (file_x, live_x, path),
+                    "linc bridge: G54 X file %.4f, controller %.4f until the "
+                    "machine is powered on (%s)" % (file_x, live_x, path),
                     file=sys.stderr,
                 )
             else:
@@ -342,6 +360,12 @@ class Bridge:
         is the authority on the active system: `G10 L20` computes its value, and
         a program can move G54 without telling us.
         """
+        # Until sync_work_offsets has delivered the stored offsets, the
+        # controller reports zeros for every system even though the file holds
+        # real values. Treating those zeros as authoritative would erase the
+        # saved offsets whenever a program is loaded during that window.
+        if not self.offsets_synced:
+            return
         try:
             self.stat.poll()
             index = int(getattr(self.stat, "g5x_index", 1) or 1)
@@ -1019,6 +1043,121 @@ class Bridge:
                 pass
             self.pending_restore = None
 
+    def offsets_match_stored(self):
+        """Does the live controller hold the parameter file's active offsets?"""
+        try:
+            self.stat.poll()
+        except Exception:
+            return False
+        try:
+            index = int(round(self.parameters.get(5220, 1.0) or 1.0))
+        except Exception:
+            index = 1
+        index = min(max(index, 1), 9)
+        base = 5200 + index * 20
+        live = list(getattr(self.stat, "g5x_offset", ()) or ())
+        compared = 0
+        for axis_index in range(len(self.axes)):
+            stored = self.parameters.get(base + 1 + axis_index)
+            if stored is None:
+                continue
+            if axis_index >= len(live):
+                return False
+            if abs(live[axis_index] - stored) > 1e-6:
+                return False
+            compared += 1
+        # Nothing in the file for this system: there is nothing to apply.
+        return compared > 0
+
+    def sync_work_offsets(self):
+        """Make motion hold the parameter file's offsets after a start.
+
+        LinuxCNC's interpreter restores the parameter file when it initializes
+        (`Interp::init`), but the restored G5X offset is only queued as a
+        trajectory message; the task drains that queue when it next runs
+        something, so a fresh session can sit there with motion at zero and the
+        DRO/offset table showing zeros for the session that was saved.
+
+        `reset_interpreter()` re-runs `EMC_TASK_PLAN_INIT`, i.e. the same
+        restore path, while the task is running, so the queue drains
+        immediately; if that does not take, selecting the stored coordinate
+        system with an MDI block drains it too. Either way the result is read
+        back before it is believed.
+        """
+        if self.offsets_synced or self.offset_sync_attempts >= 30:
+            return
+        if not self.param_file:
+            return
+        now = time.time()
+        if now < self.offset_sync_next:
+            return
+        self.offset_sync_next = now + 2.0
+        try:
+            self.stat.poll()
+        except Exception:
+            return
+        if bool(getattr(self.stat, "estop", 0)):
+            return
+        if int(getattr(self.stat, "task_state", 0)) != linuxcnc.STATE_ON:
+            return
+        if int(getattr(self.stat, "interp_state", 1)) != linuxcnc.INTERP_IDLE:
+            return
+        index = min(max(int(round(self.parameters.get(5220, 1.0) or 1.0)), 1), 9)
+        base = 5200 + index * 20
+        if not any(base + 1 + i in self.parameters for i in range(len(self.axes))):
+            # The file holds no offsets for the active system; nothing to apply.
+            self.offsets_synced = True
+            return
+        self.offset_sync_attempts += 1
+
+        # 1. Re-initialize the interpreter: it re-reads the file and re-queues
+        #    the offset message, which the idle task loop then delivers.
+        try:
+            self.cmd.reset_interpreter()
+            self.cmd.wait_complete(2.0)
+            time.sleep(0.3)
+        except Exception as error:
+            print("linc bridge: could not re-initialize the interpreter: %s"
+                  % error, file=sys.stderr)
+        if self.offsets_match_stored():
+            self.offsets_synced = True
+            print("linc bridge: stored offsets applied by the interpreter restart",
+                  file=sys.stderr)
+            return
+
+        # 2. Fallback: execute the stored coordinate system.
+        code = {1: "G54", 2: "G55", 3: "G56", 4: "G57", 5: "G58",
+                6: "G59", 7: "G59.1", 8: "G59.2", 9: "G59.3"}[index]
+        try:
+            previous = int(getattr(self.stat, "task_mode", linuxcnc.MODE_MANUAL)
+                           or linuxcnc.MODE_MANUAL)
+            if previous != linuxcnc.MODE_MDI:
+                self.cmd.mode(linuxcnc.MODE_MDI)
+                if not self.cmd.wait_complete(2.0):
+                    print("linc bridge: could not enter MDI to apply %s" % code,
+                          file=sys.stderr)
+                    return
+            self.cmd.mdi(code)
+            self.cmd.wait_complete(2.0)
+            if previous != linuxcnc.MODE_MDI:
+                self.pending_restore = previous
+            time.sleep(0.3)
+        except Exception as error:
+            print("linc bridge: could not apply stored %s offsets: %s"
+                  % (code, error), file=sys.stderr)
+            return
+        if self.offsets_match_stored():
+            self.offsets_synced = True
+            print("linc bridge: stored offsets applied by selecting %s" % code,
+                  file=sys.stderr)
+        elif self.offset_sync_attempts == 1:
+            live = list(getattr(self.stat, "g5x_offset", ()) or ())
+            print("linc bridge: stored offsets not applied yet — controller %s, file %s"
+                  % (["%.4f" % v for v in live[:3]],
+                     ["%.4f" % self.parameters.get(5221 + i, 0.0)
+                      for i in range(len(self.axes))]),
+                  file=sys.stderr)
+
     def run(self):
         # Announce readiness after the first snapshot.
         self.report_parameter_state()
@@ -1026,6 +1165,7 @@ class Bridge:
         last_status = 0.0
         while True:
             self.poll_restore()
+            self.sync_work_offsets()
             now = time.time()
             if now - last_status >= 1.0 / STATUS_HZ:
                 last_status = now
@@ -1082,6 +1222,132 @@ class Bridge:
             emit(result)
 
 
+class _FakeStat:
+    """Minimal `linuxcnc.stat` stand-in for the offset-sync logic."""
+
+    def __init__(self, task_state):
+        self.task_state = task_state
+        self.estop = 0
+        self.interp_state = linuxcnc.INTERP_IDLE
+        self.task_mode = linuxcnc.MODE_MANUAL
+        self.g5x_offset = [0.0] * 9
+        self.homed = [1, 1, 1]
+
+    def poll(self):
+        return True
+
+
+class _FakeCommand:
+    """Records what the sync sends and optionally applies the stored offsets."""
+
+    def __init__(self, stat, values, apply_reset, apply_mdi):
+        self.stat = stat
+        self.values = values
+        self.apply_reset = apply_reset
+        self.apply_mdi = apply_mdi
+        self.modes = []
+        self.blocks = []
+        self.resets = 0
+
+    def _apply(self):
+        self.stat.g5x_offset = list(self.values) + [0.0] * 6
+
+    def mode(self, mode):
+        self.modes.append(mode)
+
+    def wait_complete(self, timeout=None):
+        return True
+
+    def reset_interpreter(self):
+        self.resets += 1
+        if self.apply_reset:
+            self._apply()
+
+    def mdi(self, block):
+        self.blocks.append(block)
+        if self.apply_mdi:
+            self._apply()
+
+
+def _fake_bridge(task_state, values, apply_reset, apply_mdi):
+    bridge = Bridge.__new__(Bridge)
+    bridge.stat = _FakeStat(task_state)
+    bridge.axes = ["X", "Y", "Z"]
+    bridge.parameters = dict(values)
+    bridge.param_file = "sim.var"
+    bridge.ini_path = "/tmp/sim.ini"
+    bridge.offsets_synced = False
+    bridge.offset_sync_attempts = 0
+    bridge.offset_sync_next = 0.0
+    bridge.pending_restore = None
+    index = min(max(int(round(values.get(5220, 1.0) or 1.0)), 1), 9)
+    base = 5200 + index * 20
+    bridge.cmd = _FakeCommand(
+        bridge.stat,
+        [values.get(base + 1 + i, 0.0) for i in range(3)],
+        apply_reset,
+        apply_mdi,
+    )
+    return bridge
+
+
+def check_offset_sync():
+    """The stored offsets must reach motion once the machine is on, once only."""
+    values = {5220: 1.0, 5221: -11.1, 5222: -22.2, 5223: -33.3}
+
+    bridge = _fake_bridge(linuxcnc.STATE_ON, values, apply_reset=True, apply_mdi=False)
+    bridge.sync_work_offsets()
+    assert bridge.offsets_synced, "interpreter restart did not mark the sync done"
+    assert bridge.cmd.resets == 1, bridge.cmd.resets
+    assert bridge.cmd.blocks == [], "fell back to MDI although the restart worked"
+    print("linc_bridge selftest: interpreter restart applies the stored offsets")
+
+    bridge = _fake_bridge(linuxcnc.STATE_ON, values, apply_reset=False, apply_mdi=True)
+    bridge.sync_work_offsets()
+    assert bridge.offsets_synced and bridge.cmd.blocks == ["G54"], bridge.cmd.blocks
+    print("linc_bridge selftest: selecting the stored WCS applies them as a fallback")
+
+    bridge = _fake_bridge(linuxcnc.STATE_ESTOP_RESET, values, apply_reset=True, apply_mdi=True)
+    bridge.sync_work_offsets()
+    assert not bridge.offsets_synced and bridge.cmd.resets == 0 and not bridge.cmd.blocks
+    assert bridge.offset_sync_attempts == 0, "a machine that is off used an attempt"
+    print("linc_bridge selftest: no attempt while the machine is off")
+
+    bridge = _fake_bridge(linuxcnc.STATE_ON, values, apply_reset=False, apply_mdi=False)
+    real_sleep = time.sleep
+    time.sleep = lambda _seconds: None
+    try:
+        for _ in range(40):
+            bridge.offset_sync_next = 0.0
+            bridge.sync_work_offsets()
+    finally:
+        time.sleep = real_sleep
+    assert not bridge.offsets_synced, "marked done although motion kept zeros"
+    assert bridge.offset_sync_attempts == 30, bridge.offset_sync_attempts
+    print("linc_bridge selftest: offsets that never land are retried, then given up")
+
+    bridge = _fake_bridge(
+        linuxcnc.STATE_ON,
+        {5220: 3.0, 5261: 1.0},
+        apply_reset=False,
+        apply_mdi=True,
+    )
+    bridge.sync_work_offsets()
+    assert bridge.cmd.blocks == ["G56"], bridge.cmd.blocks
+    print("linc_bridge selftest: the active WCS from the file is the one selected")
+
+    bridge = _fake_bridge(linuxcnc.STATE_ON, values, apply_reset=True, apply_mdi=False)
+    bridge.offset_overrides = {}
+    bridge.rotation_overrides = {}
+    bridge.capture_live_offsets()
+    assert not bridge.offset_overrides, (
+        "captured the controller's zeros before the stored offsets were applied")
+    bridge.offsets_synced = True
+    bridge.capture_live_offsets()
+    assert bridge.offset_overrides == {1: {"X": 0.0, "Y": 0.0, "Z": 0.0}}, bridge.offset_overrides
+    print("linc_bridge selftest: live offsets are captured only after the sync")
+
+
 def selftest():
     """Pure-parsing checks that need no LinuxCNC session.
 
@@ -1100,6 +1366,7 @@ def selftest():
         got = parse_coordinates(raw)
         assert got == expected, f"parse_coordinates({raw!r}) = {got!r}, expected {expected!r}"
     print(f"linc_bridge selftest: {len(cases)} coordinate cases OK")
+    check_offset_sync()
 
 
 if __name__ == "__main__":
