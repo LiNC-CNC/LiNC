@@ -120,12 +120,27 @@ class Bridge:
             print(f"linc bridge: HAL read component unavailable: {error}", file=sys.stderr)
         self.stat = linuxcnc.stat()
         self.cmd = linuxcnc.command()
-        self.ini_path = os.path.realpath(self.stat.ini_filename or "")
-        self.config = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
+        # `stat.ini_filename` is empty until the status has been polled once, so
+        # reading it straight from the constructor gave an empty path, an empty
+        # config and therefore no `PARAMETER_FILE` — which is why offsets could
+        # not be read from or written to the file.
         try:
-            self.config.read(self.ini_path)
+            self.stat.poll()
         except Exception:
             pass
+        ini = self.stat.ini_filename or os.environ.get("INI_FILE_NAME", "")
+        self.ini_path = os.path.realpath(ini) if ini else ""
+        # `strict=False`: a duplicate option in the INI made ConfigParser raise,
+        # the exception below was swallowed, and the whole config came back empty
+        # — no `PARAMETER_FILE`, no `TOOL_TABLE`, fallback axes. LinuxCNC itself
+        # accepts these files (last value wins), so the bridge must too.
+        self.config = configparser.ConfigParser(
+            inline_comment_prefixes=("#", ";"), strict=False
+        )
+        try:
+            self.config.read(self.ini_path)
+        except Exception as error:
+            print(f"linc bridge: could not read {self.ini_path}: {error}", file=sys.stderr)
         # `[TRAJ] COORDINATES` is written both as `X Y Z` and as the trivkins
         # shorthand `XYZ`. A bare `.split()` turns `XYZ` into the single axis
         # name "XYZ", so every `X`/`Y`/`Z` lookup missed and the HMI showed a
@@ -137,6 +152,12 @@ class Bridge:
         self.angular_units = self.config.get("TRAJ", "ANGULAR_UNITS", fallback="degree")
         self.tool_table = self.config.get("EMCIO", "TOOL_TABLE", fallback="")
         self.param_file = self.config.get("RS274NGC", "PARAMETER_FILE", fallback="")
+        if not self.param_file:
+            print(
+                "linc bridge: no [RS274NGC] PARAMETER_FILE in %r; offsets will not persist"
+                % self.ini_path,
+                file=sys.stderr,
+            )
         self.parameters = self.load_parameters()
         self.program_prefix = self.config.get("DISPLAY", "PROGRAM_PREFIX", fallback=".")
         self.panel_connected_last = None
