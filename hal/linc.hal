@@ -16,12 +16,12 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 # ---------------------------------------------------------------------------
 # Logic and conversion components
 # ---------------------------------------------------------------------------
-loadrt and2 names=and2.cycle_gate,and2.cycle_run,and2.cycle_resume
+loadrt and2 names=and2.cycle_gate,and2.cycle_run,and2.cycle_resume,and2.jxp_cont,and2.jxn_cont,and2.jyp_cont,and2.jyn_cont,and2.jzp_cont,and2.jzn_cont,and2.jxp_inc,and2.jxn_inc,and2.jyp_inc,and2.jyn_inc,and2.jzp_inc,and2.jzn_inc
 # `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
 # with "or2: already exists". Instances only used by the simulation
 # (or2.estop_reset) are created here and wired in linc-sim.hal.
 loadrt or2 names=or2.jog_a,or2.jog_b,or2.pause,or2.manual_req,or2.estop_reset
-loadrt not names=not.paused,not.coolant,not.lube,not.opt,not.bdt,not.spindle_on
+loadrt not names=not.paused,not.coolant,not.lube,not.opt,not.bdt,not.spindle_on,not.mode_inc
 loadrt toggle names=toggle.coolant,toggle.lube,toggle.opt,toggle.bdt,toggle.sbk,toggle.worklamp
 loadrt scale names=scale.feed,scale.rapid,scale.spindle
 loadrt conv_float_s32 names=conv.feed,conv.rapid,conv.spindle
@@ -29,6 +29,19 @@ loadrt conv_float_s32 names=conv.feed,conv.rapid,conv.spindle
 addf and2.cycle_gate servo-thread
 addf and2.cycle_run servo-thread
 addf and2.cycle_resume servo-thread
+addf and2.jxp_cont servo-thread
+addf and2.jxn_cont servo-thread
+addf and2.jyp_cont servo-thread
+addf and2.jyn_cont servo-thread
+addf and2.jzp_cont servo-thread
+addf and2.jzn_cont servo-thread
+addf and2.jxp_inc servo-thread
+addf and2.jxn_inc servo-thread
+addf and2.jyp_inc servo-thread
+addf and2.jyn_inc servo-thread
+addf and2.jzp_inc servo-thread
+addf and2.jzn_inc servo-thread
+addf not.mode_inc servo-thread
 addf or2.jog_a servo-thread
 addf or2.jog_b servo-thread
 addf or2.manual_req servo-thread
@@ -65,7 +78,9 @@ setp conv.spindle.clamp true
 net mode-auto cnc_panel.mode_auto => halui.mode.auto
 net mode-mdi cnc_panel.mode_mdi => halui.mode.mdi
 net mode-jog cnc_panel.mode_jog => or2.jog_a.in0
-net mode-inc cnc_panel.mode_inc => or2.jog_a.in1
+# `cnc_panel.mode_inc` is a pin, so it carries exactly one signal; every INC
+# consumer is a reader on it.
+net mode-inc cnc_panel.mode_inc => or2.jog_a.in1 not.mode_inc.in and2.jxp_inc.in1 and2.jxn_inc.in1 and2.jyp_inc.in1 and2.jyn_inc.in1 and2.jzp_inc.in1 and2.jzn_inc.in1
 net mode-mpg cnc_panel.mode_mpg => or2.jog_b.in0
 net mode-jog-a or2.jog_a.out => or2.jog_b.in1
 # JOG / INC / MPG jog the machine, so they must also select the MANUAL task
@@ -162,13 +177,42 @@ net worklamp-on toggle.worklamp.out => rio.worklamp.bit cnc_panel.led_worklamp
 setp halui.axis.jog-speed [DISPLAY]DEFAULT_LINEAR_VELOCITY
 
 # Jog buttons (panel; pendant jog is wired in linc-pendant.hal)
+#
+# The panel has no increment selector, so the HMI publishes the chosen step on
+# `linc.jog-increment` (from [DISPLAY] INCREMENTS in the machine INI, the same
+# list Axis and Probe Basic offer). That net lives in the post-GUI file: the
+# linc.* component only exists once the GUI has started. `halui.axis.L.increment`
+# reads 0.0 until then, which is continuous jog.
+#
+# Jog keys are routed by panel mode: JOG and MPG jog continuously, and
+# `halui.axis.L.plus/minus` are level inputs. INC jogs one step per press, and
+# `halui.axis.L.increment-plus/minus` are edge triggered. Both branches use
+# `halui.axis.jog-speed`.
 # ---------------------------------------------------------------------------
-net jog-xp cnc_panel.jog_xp => halui.axis.x.plus
-net jog-xn cnc_panel.jog_xn => halui.axis.x.minus
-net jog-yp cnc_panel.jog_yp => halui.axis.y.plus
-net jog-yn cnc_panel.jog_yn => halui.axis.y.minus
-net jog-zp cnc_panel.jog_zp => halui.axis.z.plus
-net jog-zn cnc_panel.jog_zn => halui.axis.z.minus
+net not-inc not.mode_inc.out => and2.jxp_cont.in1 and2.jxn_cont.in1 and2.jyp_cont.in1 and2.jyn_cont.in1 and2.jzp_cont.in1 and2.jzn_cont.in1
+
+# Continuous: JOG / MPG
+net jog-xp cnc_panel.jog_xp => and2.jxp_cont.in0 and2.jxp_inc.in0
+net jog-xn cnc_panel.jog_xn => and2.jxn_cont.in0 and2.jxn_inc.in0
+net jog-yp cnc_panel.jog_yp => and2.jyp_cont.in0 and2.jyp_inc.in0
+net jog-yn cnc_panel.jog_yn => and2.jyn_cont.in0 and2.jyn_inc.in0
+net jog-zp cnc_panel.jog_zp => and2.jzp_cont.in0 and2.jzp_inc.in0
+net jog-zn cnc_panel.jog_zn => and2.jzn_cont.in0 and2.jzn_inc.in0
+
+net jog-xp-continuous and2.jxp_cont.out => halui.axis.x.plus
+net jog-xn-continuous and2.jxn_cont.out => halui.axis.x.minus
+net jog-yp-continuous and2.jyp_cont.out => halui.axis.y.plus
+net jog-yn-continuous and2.jyn_cont.out => halui.axis.y.minus
+net jog-zp-continuous and2.jzp_cont.out => halui.axis.z.plus
+net jog-zn-continuous and2.jzn_cont.out => halui.axis.z.minus
+
+# Incremental
+net jog-xp-step and2.jxp_inc.out => halui.axis.x.increment-plus
+net jog-xn-step and2.jxn_inc.out => halui.axis.x.increment-minus
+net jog-yp-step and2.jyp_inc.out => halui.axis.y.increment-plus
+net jog-yn-step and2.jyn_inc.out => halui.axis.y.increment-minus
+net jog-zp-step and2.jzp_inc.out => halui.axis.z.increment-plus
+net jog-zn-step and2.jzn_inc.out => halui.axis.z.increment-minus
 
 # ---------------------------------------------------------------------------
 # Homing
