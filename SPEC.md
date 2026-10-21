@@ -481,7 +481,11 @@ Program rules:
 - The graph always draws the **loaded program's full toolpath** and the
   **live toolpath** as separate layers. The program path uses the program
   colour (cut) and muted dashed rapids; the live trail uses a distinct
-  `--success` stroke. The legend must identify both.
+  `--success` stroke.
+- The toolpath card's status line is the key: `— CUT`, `-- RAPID`, `— LIVE`
+  and an amber `○ TOOL`, with the view (`3D / ISO`) and `ZOOM` on the right. A
+  legend box inside the graph is not drawn — it repeated that line and covered
+  the drawing.
 - The live trail is the actual tool-tip path since the last clear, including
   program, MDI and jog motion. It is not the commanded program path and must
   never overwrite or hide the loaded program.

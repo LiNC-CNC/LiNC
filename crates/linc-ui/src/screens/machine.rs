@@ -128,12 +128,6 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                         .strong()
                         .color(theme::MUTED),
                 );
-                ui.label(
-                    RichText::new(view.label())
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new("— CUT")
@@ -153,9 +147,32 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                         .size(theme::font_size(9.0))
                         .color(theme::SUCCESS),
                 );
+                // Tool key, matching the amber crosshair on the graph. The rest
+                // of the old legend (colours for cut, rapid, live) is already
+                // this line, and the stock box needs no key.
+                let (marker, _) =
+                    ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                ui.painter().circle_stroke(
+                    marker.center(),
+                    4.0,
+                    egui::Stroke::new(1.5, linc_view::theme::TOOL),
+                );
+                ui.label(
+                    RichText::new("TOOL")
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::FG),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         RichText::new(format!("ZOOM {:.1}x", app.program.graph_zoom))
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new(view.label())
                             .monospace()
                             .size(theme::font_size(9.0))
                             .color(theme::MUTED),
@@ -176,7 +193,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 &mut fit,
                 Some(app.program.selected_line),
                 Some(app.snapshot.program.current_line),
-                true,
+                false,
             );
             app.program.graph_zoom = zoom;
             app.program.graph_pan = pan;
@@ -258,7 +275,7 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                         &mut fit,
                         Some(app.program.selected_line),
                         Some(app.snapshot.program.current_line),
-                        true,
+                        false,
                     );
                     app.program.graph_zoom = zoom;
                     app.program.graph_pan = pan;
