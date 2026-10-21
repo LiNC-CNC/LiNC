@@ -336,7 +336,11 @@ impl LincApp {
             .map(|alarm| alarm.id)
             .max()
             .unwrap_or(0);
-        if newest > self.alarm_id_seen {
+        if self.alarm_id_seen == 0 {
+            // First poll: the controller may already hold a backlog. Show it in
+            // the message strip, but do not fire a toast for every entry.
+            self.alarm_id_seen = newest;
+        } else if newest > self.alarm_id_seen {
             let fresh: Vec<linc_core::model::Alarm> = self
                 .snapshot
                 .alarms

@@ -1093,6 +1093,11 @@ struct Converter {
     /// token identifies one change episode instead of the clock.
     tool_change_serial: u64,
     tool_change_active: bool,
+    /// Controller messages, newest first. The snapshot is rebuilt from the
+    /// bridge on every poll, so without this the log held only the messages
+    /// discovered in the current poll and every page looked silent one frame
+    /// after a message arrived.
+    alarms: std::collections::VecDeque<Alarm>,
 }
 
 impl Converter {
@@ -1113,6 +1118,7 @@ impl Converter {
             warned_axis_mismatch: false,
             tool_change_serial: 0,
             tool_change_active: false,
+            alarms: std::collections::VecDeque::new(),
         }
     }
 
@@ -1569,22 +1575,23 @@ impl Converter {
                 AlarmSeverity::Info
             };
             let message = alarm.text.clone();
-            snapshot.alarms.push_front(Alarm::new(
-                self.next_alarm_id,
-                severity,
-                AlarmSource::Nml,
-                "NML",
-                message.clone(),
-            ));
+            self.alarms.push_front(Alarm::new(
+                    self.next_alarm_id,
+                    severity,
+                    AlarmSource::Nml,
+                    "NML",
+                    message.clone(),
+                ));
             self.next_alarm_id += 1;
             self.last_alarm_texts.push_back(message);
             while self.last_alarm_texts.len() > 100 {
                 self.last_alarm_texts.pop_front();
             }
         }
-        while snapshot.alarms.len() > MAX_EVENT_LOG {
-            snapshot.alarms.pop_back();
+        while self.alarms.len() > MAX_EVENT_LOG {
+            self.alarms.pop_back();
         }
+        snapshot.alarms = self.alarms.clone();
 
         // Live tool trail sampled at the status rate, capped by config.
         let tip = ["X", "Y", "Z"].map(|axis| {
