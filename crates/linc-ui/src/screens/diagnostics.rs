@@ -1005,10 +1005,12 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
                     }
             })
             .collect();
+        let width = ui.available_width();
+        let message_width = (width - 340.0).max(160.0);
         egui::ScrollArea::vertical()
             .id_salt("log-scroll")
             .max_height(480.0)
-            .show(ui, |ui| {
+            .show(ui, |ui| theme::dense_grid(ui, |ui| {
                 egui::Grid::new("log-grid")
                     .num_columns(5)
                     .striped(true)
@@ -1049,24 +1051,20 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
                                     .size(theme::font_size(9.0))
                                     .color(theme::MUTED),
                             );
-                            // One line per event: a message that wrapped used
-                            // to make the list look several lines apart.
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(&alarm.message)
-                                        .size(theme::font_size(10.0))
-                                        .color(if alarm.severity == AlarmSeverity::Info {
-                                            theme::MUTED
-                                        } else {
-                                            color
-                                        }),
-                                )
-                                .truncate(),
+                            message_cell(
+                                ui,
+                                message_width,
+                                &alarm.message,
+                                if alarm.severity == AlarmSeverity::Info {
+                                    theme::MUTED
+                                } else {
+                                    color
+                                },
                             );
                             ui.end_row();
                         }
                     });
-            });
+            }));
     });
 }
 
@@ -1098,6 +1096,14 @@ fn combined_logs(app: &LincApp) -> Vec<Alarm> {
 }
 
 fn log_table(ui: &mut Ui, id: &str, logs: &[Alarm], limit: usize) {
+    let width = ui.available_width();
+    // Time, severity, source and code take about this much; the rest is the
+    // message, which wraps instead of running off the card.
+    let message_width = (width - 300.0).max(140.0);
+    theme::dense_grid(ui, |ui| log_table_inner(ui, id, logs, limit, message_width));
+}
+
+fn log_table_inner(ui: &mut Ui, id: &str, logs: &[Alarm], limit: usize, message_width: f32) {
     egui::Grid::new(id)
         .num_columns(5)
         .striped(true)
@@ -1141,23 +1147,39 @@ fn log_table(ui: &mut Ui, id: &str, logs: &[Alarm], limit: usize) {
                     .size(theme::font_size(9.0))
                     .color(theme::MUTED),
                 );
-                // One line per row: a wrapped message made each entry two or
-                // three rows tall, which is what read as huge gaps.
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(&alarm.message)
-                            .size(theme::font_size(10.0))
-                            .color(if alarm.severity == AlarmSeverity::Info {
-                                theme::MUTED
-                            } else {
-                                severity_color(alarm.severity)
-                            }),
-                    )
-                    .truncate(),
+                message_cell(
+                    ui,
+                    message_width,
+                    &alarm.message,
+                    if alarm.severity == AlarmSeverity::Info {
+                        theme::MUTED
+                    } else {
+                        severity_color(alarm.severity)
+                    },
                 );
                 ui.end_row();
             }
         });
+}
+
+
+/// A message cell that wraps inside a fixed width.
+///
+/// `egui::Grid` gives every cell an unbounded width by default, so a label in
+/// the last column runs off the card instead of wrapping.
+fn message_cell(ui: &mut Ui, width: f32, text: &str, color: egui::Color32) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, 0.0),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(text).size(theme::font_size(10.0)).color(color),
+                )
+                .wrap(),
+            );
+        },
+    );
 }
 
 fn severity_color(severity: AlarmSeverity) -> egui::Color32 {

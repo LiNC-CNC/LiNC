@@ -155,6 +155,20 @@ pub fn apply(ctx: &egui::Context) {
     });
 }
 
+/// Run `add` with grid cells sized to their content.
+///
+/// `egui::Grid` uses `spacing.interact_size` as the *minimum cell size*, and the
+/// theme sets that to 44 px so every button is a touch target. Inside a data
+/// grid that means every row is 44 px tall however little it holds, which is
+/// what made the alarm log look double-spaced.
+pub fn dense_grid<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let previous = ui.spacing().interact_size.y;
+    ui.spacing_mut().interact_size.y = 0.0;
+    let result = add(ui);
+    ui.spacing_mut().interact_size.y = previous;
+    result
+}
+
 pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     Frame::new()
         .fill(PANEL)
