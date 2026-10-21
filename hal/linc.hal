@@ -226,7 +226,6 @@ net jog-zn-step and2.jzn_inc.out => halui.axis.z.increment-minus
 # until the machine is out of E-stop and turned on"). ESTOP_RESET enables motion,
 # so jogging works while homing does not; gating the requests means a press with
 # the machine off does nothing instead of raising that controller error.
-net machine-on halui.machine.is-on => and2.home_all.in1 and2.home_x.in1 and2.home_y.in1 and2.home_z.in1
 net home-all-request cnc_panel.home-all => and2.home_all.in0
 net home-all and2.home_all.out => halui.home-all
 net home-x-request cnc_panel.home-x => and2.home_x.in0
@@ -272,7 +271,7 @@ setp halui.spindle.0.override.scale .01
 # ---------------------------------------------------------------------------
 # Status LEDs and tool displays
 # ---------------------------------------------------------------------------
-net sig_halui_machine_is-on => cnc_panel.led_ready
+net sig_halui_machine_is-on => cnc_panel.led_ready and2.home_all.in1 and2.home_x.in1 and2.home_y.in1 and2.home_z.in1
 net program-running halui.program.is-running => cnc_panel.led_run cnc_panel.led_cycle_on cnc_panel.led_k4
 net is-paused => cnc_panel.led_cycle_off
 net machine-estop halui.estop.is-activated => cnc_panel.led_mc_alarm
