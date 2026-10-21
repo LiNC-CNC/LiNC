@@ -112,9 +112,6 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui) {
                     .size(theme::font_size(11.0))
                     .color(theme::FG),
                 );
-                if app.files.safe_to_remove {
-                    theme::banner(ui, theme::SUCCESS, "SAFE TO REMOVE");
-                }
                 ui.label(
                     RichText::new("MOUNTED BY UDISKS2 / USER SESSION")
                         .size(theme::font_size(9.0))
@@ -122,6 +119,11 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui) {
                 );
                 file_list(app, ui, Pane::Usb);
             }
+        }
+        // The banner belongs to the *unmounted* state: it is shown after a
+        // successful eject, not while the device is still mounted.
+        if app.files.safe_to_remove {
+            theme::banner(ui, theme::SUCCESS, "SAFE TO REMOVE");
         }
     });
 }
@@ -363,23 +365,21 @@ fn actions(app: &mut LincApp, ui: &mut Ui) {
                 );
             }
             if let Some(job) = &app.files.copy {
-                let progress = job.rx.try_recv().ok().and_then(|progress| match progress {
-                    CopyProgress::Progress { copied, total } => Some((copied, total)),
-                    _ => None,
-                });
-                if let Some((copied, total)) = progress {
-                    ui.label(
-                        RichText::new(format!(
-                            "COPYING {}  {} / {}",
-                            job.label,
-                            format_size(copied),
-                            format_size(total)
-                        ))
+                let label = match app.files.copy_progress {
+                    Some((copied, total)) => format!(
+                        "COPYING {}  {} / {}",
+                        job.label,
+                        format_size(copied),
+                        format_size(total)
+                    ),
+                    None => format!("COPYING {}  STARTING", job.label),
+                };
+                ui.label(
+                    RichText::new(label)
                         .monospace()
                         .size(theme::font_size(10.0))
                         .color(theme::ACCENT),
-                    );
-                }
+                );
             } else {
                 ui.label(
                     RichText::new("COPY USES TEMP FILE + ATOMIC RENAME")
@@ -508,6 +508,9 @@ pub fn finish_overwrite(app: &mut LincApp, overwrite: bool) {
 }
 
 fn poll_copy(app: &mut LincApp) {
+    if app.files.copy.is_none() {
+        app.files.copy_progress = None;
+    }
     let (messages, timed_out) = {
         let Some(job) = &app.files.copy else {
             return;
@@ -520,7 +523,11 @@ fn poll_copy(app: &mut LincApp) {
     };
     for message in messages {
         match message {
-            CopyProgress::Progress { .. } => {}
+            CopyProgress::Progress { copied, total } => {
+                // Latch it: the channel is drained here, so the actions row can
+                // no longer read the progress itself.
+                app.files.copy_progress = Some((copied, total));
+            }
             CopyProgress::Done => {
                 app.files.copy = None;
                 app.files.refresh();
@@ -561,6 +568,7 @@ fn eject(app: &mut LincApp) {
     };
     if udisks_result.is_ok() || libc_result == 0 {
         app.files.usb_root = None;
+        // stays true until the next successful mount clears it
         app.files.usb_current = None;
         app.files.usb_entries.clear();
         app.files.mount_state = MountState::NoUsb;

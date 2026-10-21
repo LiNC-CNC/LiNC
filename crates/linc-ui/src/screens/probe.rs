@@ -609,18 +609,57 @@ fn result_card(app: &mut LincApp, ui: &mut Ui) {
                 .size(theme::font_size(10.0))
                 .color(theme::SUCCESS),
             );
-            ui.horizontal_wrapped(|ui| {
-                for (axis, value) in result.measured.iter() {
+            // `#1001`-`#1009` are named measurements, not axis positions.
+            // Label them by meaning so a width is never shown as a coordinate.
+            let measurements = linc_core::probe::ParameterResults::from_values(&result.values)
+                .measurements(result.family);
+            egui::Grid::new("probe-measurements")
+                .num_columns(3)
+                .striped(true)
+                .spacing([14.0, 4.0])
+                .show(ui, |ui| {
+                    for measurement in &measurements {
+                        ui.label(
+                            RichText::new(format!("#{}", measurement.parameter))
+                                .monospace()
+                                .size(theme::font_size(9.0))
+                                .color(theme::MUTED),
+                        );
+                        ui.label(
+                            RichText::new(measurement.slot.label())
+                                .monospace()
+                                .size(theme::font_size(10.0))
+                                .color(theme::C1),
+                        );
+                        ui.label(
+                            RichText::new(format!("{:+.4}", measurement.value))
+                                .monospace()
+                                .size(theme::font_size(11.0))
+                                .color(theme::FG),
+                        );
+                        ui.end_row();
+                    }
+                });
+            if !result.measured.is_empty() {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(
-                        RichText::new(format!("{axis} {value:+.4}"))
-                            .monospace()
-                            .size(theme::font_size(11.0))
-                            .color(theme::FG),
+                        RichText::new("APPLY WRITES")
+                            .size(theme::font_size(8.5))
+                            .color(theme::MUTED),
                     );
-                }
-            });
-            if let Some(error) = result.error {
-                theme::kv_row(ui, "ERROR", format!("{error:.4}"));
+                    for (axis, value) in result.measured.iter() {
+                        ui.label(
+                            RichText::new(format!("{axis} {value:+.4}"))
+                                .monospace()
+                                .size(theme::font_size(11.0))
+                                .color(theme::SUCCESS),
+                        );
+                    }
+                });
+            }
+            match result.error {
+                Some(error) => theme::kv_row(ui, "ERROR", format!("{error:.4}")),
+                None => theme::kv_row(ui, "ERROR", "—"),
             }
         } else {
             ui.label(

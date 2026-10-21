@@ -50,7 +50,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 fn overview(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_width();
     ui.horizontal_top(|ui| {
-        let card_width = (available - 24.0) / 3.0;
+        let card_width = (available - 36.0) / 4.0;
         ui.allocate_ui_with_layout(
             egui::Vec2::new(card_width, 130.0),
             egui::Layout::top_down(egui::Align::Min),
@@ -115,6 +115,21 @@ fn overview(app: &mut LincApp, ui: &mut Ui) {
                 );
             },
         );
+        ui.allocate_ui_with_layout(
+            egui::Vec2::new(card_width, 130.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                let following = max_following_error(app);
+                let servo = max_servo_load(app);
+                health_card(
+                    ui,
+                    "MOTION",
+                    if following > 50.0 { "ELEVATED" } else { "NOMINAL" },
+                    following > 50.0,
+                    &format!("FOLLOW {following:.1} µm / SERVO {servo:.0}%"),
+                );
+            },
+        );
     });
     ui.add_space(6.0);
     let available = ui.available_width();
@@ -129,7 +144,31 @@ fn overview(app: &mut LincApp, ui: &mut Ui) {
                     |ui| {
                         theme::card(ui, |ui| {
                             ui.set_max_height(166.0);
-                            theme::section_header(ui, "ACTIVE ALARMS & MESSAGES");
+                            ui.horizontal(|ui| {
+                                theme::section_header(ui, "ACTIVE ALARMS & MESSAGES");
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let logs = combined_logs(app);
+                                        let alarms =
+                                            logs.iter().filter(|a| a.severity.is_alarm()).count();
+                                        let messages = logs.len().saturating_sub(alarms);
+                                        for (label, count) in [
+                                            ("MESSAGES", messages),
+                                            ("ALARMS", alarms),
+                                            ("ALL", logs.len()),
+                                        ] {
+                                            ui.label(
+                                                RichText::new(format!("{label} {count}"))
+                                                    .monospace()
+                                                    .size(theme::font_size(8.0))
+                                                    .color(theme::MUTED),
+                                            );
+                                            ui.add_space(8.0);
+                                        }
+                                    },
+                                );
+                            });
                             let logs = combined_logs(app);
                             log_table(ui, "overview-alarms", &logs, 5);
                         });
@@ -1046,11 +1085,11 @@ fn combined_logs(app: &LincApp) -> Vec<Alarm> {
 
 fn log_table(ui: &mut Ui, id: &str, logs: &[Alarm], limit: usize) {
     egui::Grid::new(id)
-        .num_columns(4)
+        .num_columns(5)
         .striped(true)
         .spacing([12.0, 4.0])
         .show(ui, |ui| {
-            for header in ["TIME", "SEV", "SOURCE", "MESSAGE"] {
+            for header in ["TIME", "SEVERITY", "SOURCE", "CODE", "MESSAGE"] {
                 ui.label(
                     RichText::new(header)
                         .size(theme::font_size(9.0))
@@ -1077,6 +1116,16 @@ fn log_table(ui: &mut Ui, id: &str, logs: &[Alarm], limit: usize) {
                         .monospace()
                         .size(theme::font_size(9.0))
                         .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new(if alarm.code.is_empty() {
+                        "—"
+                    } else {
+                        alarm.code.as_str()
+                    })
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
                 );
                 ui.label(
                     RichText::new(&alarm.message)
@@ -1380,5 +1429,6 @@ fn linc_panel_button_names() -> &'static [(&'static str, u32)] {
         ("lub", 32),
         ("spd_ccw", 24),
         ("k3", 16),
+        ("k1", 31),
     ]
 }
