@@ -316,18 +316,16 @@ impl MachineIni {
             .map(|value| {
                 value
                     .split_whitespace()
-                    .skip(1)
-                    .filter_map(|token| {
+                    // Keep the whole token as the label ("10mm", ".01in") so a
+                    // selector can show exactly what the INI declares. The
+                    // first entry is conventionally `JOG`, which selects
+                    // continuous jog and therefore carries 0.0.
+                    .map(|token| {
                         let numeric = token
                             .trim_end_matches(|c: char| c.is_ascii_alphabetic())
                             .parse::<f64>()
-                            .ok()?;
-                        let suffix = token
-                            .trim_start_matches(|c: char| {
-                                c.is_ascii_digit() || c == '.' || c == '-'
-                            })
-                            .to_string();
-                        Some((suffix, numeric))
+                            .unwrap_or(0.0);
+                        (token.to_string(), numeric)
                     })
                     .collect()
             })
@@ -474,7 +472,18 @@ HOME_USE_INDEX = YES
         assert_eq!(ini.tool_table_columns, "TZDR");
         assert_eq!(ini.atc_pockets, Some(12));
         assert!(ini.tool_table.ends_with("tool.tbl"));
-        assert_eq!(ini.increments.len(), 4);
+        // `JOG` is kept as the continuous entry, and each label is the whole
+        // token so a selector can show what the INI declares.
+        assert_eq!(
+            ini.increments,
+            vec![
+                ("JOG".to_string(), 0.0),
+                ("10mm".to_string(), 10.0),
+                ("1mm".to_string(), 1.0),
+                (".1mm".to_string(), 0.1),
+                (".01mm".to_string(), 0.01),
+            ]
+        );
     }
 
     #[test]
