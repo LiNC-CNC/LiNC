@@ -2891,6 +2891,36 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     }
 
     #[test]
+    fn a_touch_off_reaches_the_offset_table() {
+        // The keys issue `G10 L20`; the table rebuilds from the snapshot's
+        // revision. A constant revision left the table showing the old value
+        // while the DRO moved, which read as "only the DRO changed".
+        let (_dir, mut app) = make_app(PanelMode::Jog);
+        app.poll_backend();
+        let machine_x = app
+            .snapshot
+            .positions
+            .axes
+            .get("X")
+            .map(|position| position.machine)
+            .unwrap_or(0.0);
+        crate::screens::common::zero_axes(&mut app, vec!["X".to_string()]);
+        app.poll_backend();
+        app.sync_offsets_from_snapshot(false);
+        let row = app
+            .offsets
+            .rows
+            .get(&1)
+            .expect("G54 row present after a touch off");
+        let value = row.values.get("X").cloned().unwrap_or_default();
+        let parsed: f64 = value.parse().unwrap_or(f64::NAN);
+        assert!(
+            (parsed - machine_x).abs() < 1e-6,
+            "G54 X should hold the machine position {machine_x}, got {value:?}"
+        );
+    }
+
+    #[test]
     fn mode_driven_pages_open_and_close() {
         let (_dir, mut app) = make_app(PanelMode::Mdi);
         assert_eq!(app.page, Page::Mdi);
