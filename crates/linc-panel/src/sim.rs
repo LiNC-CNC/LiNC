@@ -21,6 +21,8 @@ pub struct SimPanelState {
     pub power: bool,
     pub power_on_pulse: bool,
     pub power_off_pulse: bool,
+    /// One-shot: the E-stop was just released.
+    pub estop_reset_pulse: bool,
     pub estop: bool,
     pub mode: PanelMode,
     pub feed_override: f64,
@@ -41,10 +43,15 @@ impl Default for SimPanelState {
         Self {
             connected: true,
             error: false,
-            power: true,
+            // The simulator boots in the state a real cabinet is found in
+            // before the operator powers it up: E-stop latched, power off.
+            // Starting powered-on and un-latched hid the whole power-up
+            // sequence and let the machine look ready when it was not.
+            power: false,
             power_on_pulse: false,
             power_off_pulse: false,
-            estop: false,
+            estop_reset_pulse: false,
+            estop: true,
             mode: PanelMode::Auto,
             feed_override: 1.0,
             rapid_override: 1.0,
@@ -121,6 +128,10 @@ pub struct SimPanelDriver {
     cycle_time: Duration,
     last_display: PanelDisplay,
     outputs: PanelOutputs,
+    /// When the current `power_on`/`power_off` pulse was first seen asserted,
+    /// so the driver can expire it on its own cycle even when the simulator
+    /// window (and its timer) is not running.
+    pulse_set_at: Option<Instant>,
 }
 
 impl SimPanelDriver {
@@ -139,6 +150,7 @@ impl SimPanelDriver {
                 homing: false,
             },
             outputs: PanelOutputs::default(),
+            pulse_set_at: None,
         }
     }
 
@@ -211,6 +223,7 @@ impl SimPanelDriver {
             power_on: Some(state.power && !state.estop),
             power_on_pulse: state.power_on_pulse,
             power_off_pulse: state.power_off_pulse,
+            estop_reset_pulse: state.estop_reset_pulse,
             display: self.last_display.clone(),
         }
     }
@@ -218,15 +231,17 @@ impl SimPanelDriver {
 
 impl PanelDriver for SimPanelDriver {
     fn observe_display(&mut self, display: &PanelDisplay) {
-        self.handle.set(|state| {
-            // Do not fight an explicit POWER ON/OFF pulse with one cycle of
-            // stale E-stop/READY lamps.
-            if state.power_on_pulse || state.power_off_pulse {
-                return;
-            }
-            state.power = display.leds & crate::leds::READY != 0;
-            state.estop = display.leds & crate::leds::MC_ALARM != 0;
-        });
+        // The panel's POWER and E-STOP are operator-owned inputs; the READY and
+        // MC_ALARM lamps are outputs. Deriving either input from a lamp created
+        // two problems:
+        //   * E-STOP followed MC_ALARM, so the controller could clear an E-stop
+        //     the operator had pressed;
+        //   * POWER followed READY, which cannot be true while LinuxCNC is in
+        //     E-stop — so `cnc_panel.power_on` (wired to `halui.estop.reset`)
+        //     could never re-assert and the controller could never leave
+        //     E-stop.
+        // The lamps are still consumed for the alarm/axis indicators below.
+        let _ = display;
     }
 
     fn poll(&mut self) -> Result<PanelSnapshot, PanelError> {
@@ -246,6 +261,28 @@ impl PanelDriver for SimPanelDriver {
             ));
         }
         self.last_poll = Instant::now();
+        // Power pulses are one-shots that drive `cnc_panel.power_on` ->
+        // `halui.estop.reset`. They must expire on the driver cycle: the panel
+        // service runs headless under LinuxCNC, where the simulator window (and
+        // its timer) never runs, so a pulse set there would stay asserted.
+        {
+            let state = self.handle.snapshot();
+            let asserted =
+                state.power_on_pulse || state.power_off_pulse || state.estop_reset_pulse;
+            match (asserted, self.pulse_set_at) {
+                (true, None) => self.pulse_set_at = Some(Instant::now()),
+                (true, Some(at)) if at.elapsed() >= POWER_PULSE => {
+                    self.handle.set(|state| {
+                        state.power_on_pulse = false;
+                        state.power_off_pulse = false;
+                        state.estop_reset_pulse = false;
+                    });
+                    self.pulse_set_at = None;
+                }
+                (false, _) => self.pulse_set_at = None,
+                _ => {}
+            }
+        }
         let state = self.handle.snapshot();
         let outputs = self.outputs_from_state(&state);
         self.outputs = outputs.clone();
@@ -318,6 +355,14 @@ pub fn simulator_window(
 struct SimPanelApp {
     handle: SimPanelHandle,
     pressed: u64,
+    /// When the current momentary key was pressed, so it releases after a fixed
+    /// hold instead of when a frame happens to take long enough.
+    press_at: Option<Instant>,
+    /// Keys currently held with the pointer. Latched on press and cleared only
+    /// on a real pointer-up: per-frame `is_pointer_button_down_on` is not a
+    /// reliable "still held" signal (it dropped after about a second, which
+    /// stopped a continuous jog while the operator was still holding the key).
+    mouse_held: u64,
     power_pulse: Option<(bool, Instant)>,
     last_frame: Instant,
     shutdown: Arc<AtomicBool>,
@@ -336,6 +381,8 @@ impl SimPanelApp {
         Self {
             handle,
             pressed: 0,
+            press_at: None,
+            mouse_held: 0,
             power_pulse: None,
             last_frame: Instant::now(),
             shutdown,
@@ -349,10 +396,33 @@ impl eframe::App for SimPanelApp {
         if self.shutdown.load(Ordering::Relaxed) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        if self.pressed != 0 && self.last_frame.elapsed().as_millis() > 80 {
-            let pressed = self.pressed;
-            self.handle.set(|state| state.set_button(pressed, false));
-            self.pressed = 0;
+        // Momentary keys (mouse-held keys are handled by hold state; these are
+        // the keyboard shortcuts and the round buttons) must release after a
+        // fixed hold. Tracking the press instant matters: comparing the *frame
+        // interval* to the hold time never fires at 60 fps, so the key latched
+        // and the machine kept jogging after the operator let go.
+        if ui.input(|input| input.pointer.any_released()) {
+            self.mouse_held = 0;
+        }
+        if self.mouse_held != 0 {
+            // Keep frames coming so the release is observed promptly and the
+            // held keys stay asserted in the panel state.
+            ctx.request_repaint();
+        }
+        if self.pressed != 0 {
+            let started = *self.press_at.get_or_insert_with(Instant::now);
+            if started.elapsed() >= KEY_HOLD {
+                let pressed = self.pressed;
+                self.handle.set(|state| state.set_button(pressed, false));
+                self.pressed = 0;
+                self.press_at = None;
+            } else {
+                ctx.request_repaint_after(KEY_HOLD - started.elapsed());
+            }
+        }
+        if self.pressed != 0 && self.press_at.is_none() {
+            self.press_at = Some(Instant::now());
+            ctx.request_repaint_after(KEY_HOLD);
         }
         if let Some((on, at)) = self.power_pulse {
             if at.elapsed().as_millis() > 120 {
@@ -375,6 +445,7 @@ impl eframe::App for SimPanelApp {
             &state,
             &mut self.handle,
             &mut self.pressed,
+            &mut self.mouse_held,
             &mut self.power_pulse,
         );
         ctx.request_repaint_after(Duration::from_millis(60));
@@ -466,6 +537,47 @@ fn lamp(
     }
 }
 
+/// Draw a direction arrow as a filled triangle. `"<"`, `">"`, `"^"` and
+/// `"v"` are the four directions; anything else is drawn as small text.
+fn paint_key_arrow(
+    painter: &egui::Painter,
+    l: &PanelLayout,
+    x: f32,
+    y: f32,
+    code: &str,
+    color: Color32,
+) {
+    let c = l.p(x, y);
+    let s = 9.0 * l.k;
+    let points = match code {
+        "^" => vec![
+            c + Vec2::new(0.0, -s),
+            c + Vec2::new(-s * 0.85, s * 0.6),
+            c + Vec2::new(s * 0.85, s * 0.6),
+        ],
+        "v" => vec![
+            c + Vec2::new(0.0, s),
+            c + Vec2::new(-s * 0.85, -s * 0.6),
+            c + Vec2::new(s * 0.85, -s * 0.6),
+        ],
+        "<" => vec![
+            c + Vec2::new(-s, 0.0),
+            c + Vec2::new(s * 0.6, -s * 0.85),
+            c + Vec2::new(s * 0.6, s * 0.85),
+        ],
+        ">" => vec![
+            c + Vec2::new(s, 0.0),
+            c + Vec2::new(-s * 0.6, -s * 0.85),
+            c + Vec2::new(-s * 0.6, s * 0.85),
+        ],
+        other => {
+            label(painter, l, x, y, 18.0, other, color, Align2::CENTER_CENTER);
+            return;
+        }
+    };
+    painter.add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
+}
+
 fn rounded_button(
     ui: &egui::Ui,
     l: &PanelLayout,
@@ -503,7 +615,7 @@ fn panel_key(
     mask: u64,
     fill: Color32,
     led: Option<u64>,
-) -> bool {
+) -> (bool, bool) {
     let rect = l.r(x, y, w, h);
     let resp = rounded_button(
         ui,
@@ -548,18 +660,12 @@ fn panel_key(
         Align2::CENTER_CENTER,
     );
     if let Some(sub) = sub {
-        label(
-            ui.painter(),
-            l,
-            x + w * 0.5,
-            y + h * 0.70,
-            18.0,
-            sub,
-            TEXT,
-            Align2::CENTER_CENTER,
-        );
+        paint_key_arrow(ui.painter(), l, x + w * 0.5, y + h * 0.70, sub, TEXT);
     }
-    resp.clicked()
+    // (clicked, held): the key matrix is momentary, so the caller must know
+    // whether the pointer is still down. A click-only edge left the button bit
+    // latched, and halui kept jogging after the operator let go.
+    (resp.clicked(), resp.is_pointer_button_down_on())
 }
 
 fn power_key(
@@ -640,6 +746,15 @@ fn round_key(
     );
     resp.clicked()
 }
+
+/// How long a momentary panel key (keyboard shortcut or round button) stays
+/// asserted. Long enough for halui to sample it, short enough to feel like a
+/// press.
+const KEY_HOLD: Duration = Duration::from_millis(120);
+
+/// How long `cnc_panel.power_on` stays asserted. That pin is wired to
+/// `halui.estop.reset`, which needs a pulse rather than a held level.
+const POWER_PULSE: Duration = Duration::from_millis(150);
 
 fn mode_index(mode: PanelMode) -> usize {
     match mode {
@@ -967,6 +1082,7 @@ fn paint_panel(
     state: &SimPanelState,
     handle: &mut SimPanelHandle,
     pressed: &mut u64,
+    mouse_held: &mut u64,
     power_pulse: &mut Option<(bool, Instant)>,
 ) {
     let painter = ui.painter();
@@ -1033,7 +1149,21 @@ fn paint_panel(
         *power_pulse = Some((true, Instant::now()));
         *pressed = 0;
     }
-    if power_key(ui, l, 105.0, 75.0, 62.0, 56.0, "OFF", KEY_BG, "power-off") {
+    // The ON and OFF keys are mutually exclusive indicators, like the lit
+    // pushbuttons on a real cabinet. OFF used to be drawn with a fixed
+    // background, so after releasing the E-stop the machine was off but no key
+    // showed it.
+    if power_key(
+        ui,
+        l,
+        105.0,
+        75.0,
+        62.0,
+        56.0,
+        "OFF",
+        if power_on { KEY_BG } else { AMBER },
+        "power-off",
+    ) {
         handle.set(|state| {
             state.power = false;
             state.power_on_pulse = false;
@@ -1043,34 +1173,61 @@ fn paint_panel(
     }
     lamp(painter, l, 27.0, 48.0, 7.0, power_on, GREEN);
 
-    // E-stop mushroom
+    // E-stop mushroom. This is an operator-owned latching input, so the latched
+    // state has to be visible on the panel itself — not only in the HMI.
     let estop_center = l.p(245.0, 155.0);
+    let latched = state.estop;
     painter.circle_filled(estop_center, 66.0 * l.k, YELLOW);
-    painter.circle_filled(estop_center, 55.0 * l.k, RED);
+    // A latched mushroom sits lower and darker, like a real pressed button.
+    let inner = if latched { 46.0 } else { 55.0 };
+    painter.circle_filled(
+        estop_center,
+        inner * l.k,
+        if latched {
+            Color32::from_rgb(0x8e, 0x1c, 0x16)
+        } else {
+            RED
+        },
+    );
     painter.circle_stroke(
         estop_center,
-        55.0 * l.k,
+        inner * l.k,
         Stroke::new(3.0 * l.k, Color32::from_rgb(0x9b, 0x1f, 0x18)),
     );
+    if latched {
+        // Concentric ring marks the latched (twist-to-release) state.
+        painter.circle_stroke(estop_center, 30.0 * l.k, Stroke::new(2.0 * l.k, YELLOW));
+    }
     label(
         painter,
         l,
         245.0,
         236.0,
         11.0,
-        "EMERGENCY STOP",
-        MUTED,
+        if latched {
+            "E-STOP ACTIVE"
+        } else {
+            "EMERGENCY STOP"
+        },
+        if latched { RED } else { MUTED },
         Align2::CENTER_CENTER,
     );
     let estop_rect = Rect::from_center_size(estop_center, Vec2::splat(132.0 * l.k));
-    if ui
-        .interact(estop_rect, ui.scope_id().with("estop"), Sense::click())
-        .clicked()
-    {
+    let estop_response = ui.interact(estop_rect, ui.scope_id().with("estop"), Sense::click());
+    if estop_response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if estop_response.clicked() {
         handle.set(|state| {
             state.estop = !state.estop;
             if state.estop {
                 state.power = false;
+            } else {
+                // Releasing the mushroom asks the controller to leave E-stop
+                // through its own one-shot, so the latch clears without the
+                // machine being powered back up. Turning the machine on stays a
+                // separate, deliberate act (`POWER ON`).
+                state.estop_reset_pulse = true;
             }
         });
     }
@@ -1214,7 +1371,10 @@ fn paint_panel(
     ];
     for (index, (bit, name, color)) in alarms.iter().enumerate() {
         let x = 40.0 + index as f32 * 52.0;
-        lamp(painter, l, x, 388.0, 14.0, state.leds & bit != 0, *color);
+        // The MC alarm lamp also mirrors a latched E-stop, so the panel shows
+        // the fault even when no controller is driving the lamps.
+        let lit = state.leds & bit != 0 || (*bit == crate::leds::MC_ALARM && state.estop);
+        lamp(painter, l, x, 388.0, 14.0, lit, *color);
         label(painter, l, x, 415.0, 9.0, name, TEXT, Align2::CENTER_CENTER);
     }
 
@@ -1250,24 +1410,33 @@ fn paint_panel(
     );
 
     // Key matrix, matching the machine panel layout.
+    // Same layout and arrow directions as svg/sim-panel.svg:
+    //   B ▲   SAFE DOOR   B ▼
+    //   A ▲   Z ▲   Y ▲
+    //   X ◀   RAPID   X ▶
+    //   Y ▼   Z ▼   A ▼
+    // `<` `>` `^` `v` are painted as triangles (see `paint_key_arrow`), so the
+    // arrows never depend on font glyph coverage. Rows 2 and 4 previously
+    // shared one JOG_YN, which left Y+ unreachable, and Z/A had their
+    // directions swapped.
     let left = [
-        ("B", Some("v"), buttons::JOG_BN, crate::leds::JOG_BN),
+        ("B", Some("^"), buttons::JOG_BP, crate::leds::JOG_BP),
         (
             "SAFE DOOR",
             None,
             buttons::SAFE_DOOR,
             crate::leds::SAFE_DOOR,
         ),
-        ("B", Some("^"), buttons::JOG_BP, crate::leds::JOG_BP),
-        ("A", Some("v"), buttons::JOG_AN, crate::leds::JOG_AN),
-        ("Z", Some("v"), buttons::JOG_ZN, crate::leds::JOG_ZN),
-        ("Y", Some("v"), buttons::JOG_YN, crate::leds::JOG_YN),
-        ("X", Some("v"), buttons::JOG_XN, crate::leds::JOG_XN),
-        ("RAPID", None, buttons::RAPID, crate::leds::RAPID),
-        ("X", Some("^"), buttons::JOG_XP, crate::leds::JOG_XP),
-        ("Y", Some("v"), buttons::JOG_YN, crate::leds::JOG_YN),
-        ("Z", Some("^"), buttons::JOG_ZP, crate::leds::JOG_ZP),
+        ("B", Some("v"), buttons::JOG_BN, crate::leds::JOG_BN),
         ("A", Some("^"), buttons::JOG_AP, crate::leds::JOG_AP),
+        ("Z", Some("^"), buttons::JOG_ZP, crate::leds::JOG_ZP),
+        ("Y", Some("^"), buttons::JOG_YP, crate::leds::JOG_YP),
+        ("X", Some("<"), buttons::JOG_XN, crate::leds::JOG_XN),
+        ("RAPID", None, buttons::RAPID, crate::leds::RAPID),
+        ("X", Some(">"), buttons::JOG_XP, crate::leds::JOG_XP),
+        ("Y", Some("v"), buttons::JOG_YN, crate::leds::JOG_YN),
+        ("Z", Some("v"), buttons::JOG_ZN, crate::leds::JOG_ZN),
+        ("A", Some("v"), buttons::JOG_AN, crate::leds::JOG_AN),
     ];
     // The left group is 3 columns; cycle keys occupy the bottom row.
     let left_rects = [
@@ -1290,7 +1459,7 @@ fn paint_panel(
         } else {
             KEY_BG
         };
-        if panel_key(
+        let (_, held) = panel_key(
             ui,
             l,
             state,
@@ -1303,10 +1472,13 @@ fn paint_panel(
             *mask,
             fill,
             Some(*led),
-        ) {
-            handle.set(|s| s.set_button(*mask, true));
-            *pressed |= *mask;
+        );
+        // Momentary: latch on press, release only on a pointer-up.
+        if held {
+            *mouse_held |= *mask;
         }
+        let down = *mouse_held & *mask != 0;
+        handle.set(|s| s.set_button(*mask, down));
     }
     if round_key(
         ui,
@@ -1363,7 +1535,7 @@ fn paint_panel(
         ("CORRIDOR", buttons::CORRIDOR, Some(crate::leds::CORRIDOR)),
         ("K1", buttons::K1, Some(crate::leds::K1)),
     ];
-    draw_key_grid(ui, l, state, &middle, 540.0, 500.0, 3, handle, pressed);
+    draw_key_grid(ui, l, state, &middle, 540.0, 500.0, 3, handle, mouse_held);
 
     let right = [
         ("SPD.ORT", buttons::SPD_ORI, Some(crate::leds::SPD_ORI)),
@@ -1382,7 +1554,7 @@ fn paint_panel(
         ("K3", buttons::K3, Some(crate::leds::K3)),
         ("K4", buttons::K4, Some(crate::leds::K4)),
     ];
-    draw_key_grid(ui, l, state, &right, 1050.0, 500.0, 3, handle, pressed);
+    draw_key_grid(ui, l, state, &right, 1050.0, 500.0, 3, handle, mouse_held);
 
     // Tiny power/estop status strip keeps the simulation state visible.
     label(
@@ -1485,7 +1657,7 @@ fn draw_key_grid(
     y0: f32,
     columns: usize,
     handle: &mut SimPanelHandle,
-    pressed: &mut u64,
+    mouse_held: &mut u64,
 ) {
     for (index, (name, mask, led)) in keys.iter().enumerate() {
         let col = index % columns;
@@ -1499,12 +1671,14 @@ fn draw_key_grid(
         } else {
             KEY_BG
         };
-        if panel_key(
+        let (_, held) = panel_key(
             ui, l, state, x, y, 145.0, 60.0, name, None, *mask, fill, *led,
-        ) {
-            handle.set(|s| s.set_button(*mask, true));
-            *pressed |= *mask;
+        );
+        if held {
+            *mouse_held |= *mask;
         }
+        let down = *mouse_held & *mask != 0;
+        handle.set(|s| s.set_button(*mask, down));
     }
 }
 

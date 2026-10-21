@@ -720,6 +720,10 @@ pub struct ProbeResult {
     pub mode: String,
     pub timestamp_ms: u64,
     pub values: Vec<f64>,
+    /// Which `#1001`–`#1009` layout the routine wrote, so the UI labels the
+    /// slots by meaning instead of assuming X/Y/Z positions.
+    #[serde(default)]
+    pub family: crate::probe::ResultFamily,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -933,6 +937,11 @@ pub struct PanelSnapshot {
     pub snapshot_age_ms: u64,
     /// Simulation panel power state; real panels derive this from HAL status.
     pub power_on: Option<bool>,
+    /// One-shot: the panel E-stop was just released and the controller should
+    /// leave E-stop. Kept separate from `power_on` so releasing the mushroom
+    /// clears the latch without powering the machine back on.
+    #[serde(default)]
+    pub estop_reset_pulse: bool,
     /// Momentary POWER ON key edge (simulation panels).
     #[serde(default)]
     pub power_on_pulse: bool,
@@ -997,6 +1006,12 @@ pub enum AlarmSeverity {
 }
 
 impl AlarmSeverity {
+    /// A fault the operator must act on, as opposed to an informational
+    /// message. Used by the Diagnostics alarm/message split.
+    pub fn is_alarm(self) -> bool {
+        matches!(self, Self::Warning | Self::Error | Self::Critical)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Info => "INFO",
@@ -1197,8 +1212,15 @@ impl MachineSnapshot {
             .filter(|index| (1..=9).contains(index))
     }
 
-    /// Two-digit panel status. Unknown never guesses.
+    /// Two-digit panel status. Unknown never guesses: a stale snapshot or an
+    /// offline panel reports `--` rather than the last known value.
     pub fn status_display_value(&self, source: StatusSource) -> Option<i32> {
+        if self.meta.stale
+            || !self.panel.connected
+            || self.panel.communication_error
+        {
+            return None;
+        }
         match source {
             StatusSource::Wcs => self
                 .active_wcs()
@@ -1328,6 +1350,11 @@ mod tests {
     #[test]
     fn wcs_status_maps_54_to_59_and_never_guesses() {
         let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        // The two-digit display requires a live, fresh panel: a stale snapshot
+        // or an offline panel reports `--` instead of the last work offset.
+        snapshot.panel.connected = true;
+        snapshot.panel.communication_error = false;
+        snapshot.meta.stale = false;
         snapshot.offsets.active_index = Some(1);
         assert_eq!(snapshot.status_display_value(StatusSource::Wcs), Some(54));
         snapshot.offsets.active_index = Some(6);
@@ -1335,6 +1362,17 @@ mod tests {
         snapshot.offsets.active_index = Some(7);
         assert_eq!(snapshot.status_display_value(StatusSource::Wcs), None);
         snapshot.offsets.active_index = None;
+        assert_eq!(snapshot.status_display_value(StatusSource::Wcs), None);
+
+        // A stale or offline panel must never keep showing the last offset.
+        snapshot.offsets.active_index = Some(1);
+        snapshot.meta.stale = true;
+        assert_eq!(snapshot.status_display_value(StatusSource::Wcs), None);
+        snapshot.meta.stale = false;
+        snapshot.panel.connected = false;
+        assert_eq!(snapshot.status_display_value(StatusSource::Wcs), None);
+        snapshot.panel.connected = true;
+        snapshot.panel.communication_error = true;
         assert_eq!(snapshot.status_display_value(StatusSource::Wcs), None);
     }
 

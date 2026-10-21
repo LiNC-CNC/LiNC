@@ -100,7 +100,7 @@ pub fn mapping(key: HomingKey) -> HomeMapping {
         .expect("all home keys mapped")
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AxisHomeStatus {
     Homed,
     Homing,

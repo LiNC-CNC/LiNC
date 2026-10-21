@@ -129,12 +129,16 @@ fn run_simulated(
         Some(SimPanelIpc::from_env())
     };
     let handle = linc_panel::sim::SimPanelHandle::new();
-    // A useful default: the simulator starts in AUTO, panel connected, no E-stop.
+    // The simulator starts in the state a real cabinet is found in before the
+    // operator powers it up: E-stop latched and power off, panel connected.
+    // Release the mushroom and press POWER ON to bring the machine up.
     handle.set(|state| {
         state.mode = PanelMode::Auto;
         state.connected = true;
-        state.power = true;
-        state.estop = false;
+        state.power = false;
+        state.power_on_pulse = false;
+        state.power_off_pulse = false;
+        state.estop = true;
         state.sseg_status = 54;
         state.last_cycle_ms = cycle.as_secs_f64() * 1000.0;
     });
@@ -238,6 +242,7 @@ fn run_loop(
             power_on: snapshot.power_on,
             power_on_pulse: snapshot.power_on_pulse,
             power_off_pulse: snapshot.power_off_pulse,
+            estop_reset_pulse: snapshot.estop_reset_pulse,
             display,
         };
         if let Some(hal) = hal.as_mut() {

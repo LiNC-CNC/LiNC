@@ -835,37 +835,56 @@ impl MachineBackend for SimBackend {
                 for line in block.lines().filter(|line| !line.trim().is_empty()) {
                     self.apply_mdi_line(line)?;
                 }
-                // Probe simulation: complete with a plausible measured result.
+                // Probe simulation: complete with a plausible measured result
+                // written into the slots the selected routine actually uses.
                 if origin == MdiOrigin::Probe {
-                    let measured = self.current_tool_tip();
-                    let mut values = AxisMap::new();
-                    for axis in self.snapshot.positions.axes.keys() {
-                        let value = match axis {
-                            "X" => measured[0],
-                            "Y" => measured[1],
-                            "Z" => measured[2],
-                            _ => 0.0,
-                        };
-                        values.insert(axis.to_string(), value);
+                    let tip = self.current_tool_tip();
+                    let operation = crate::probe::operations()
+                        .iter()
+                        .find(|op| block.contains(op.call));
+                    let family = operation.map(|op| op.result_family()).unwrap_or_default();
+                    let diameter = self.profile.config.probe.probe_diameter;
+                    let mut values = [0.0; 9];
+                    match family {
+                        crate::probe::ResultFamily::BossPocket => {
+                            values[0] = diameter;
+                            values[1] = tip[0];
+                            values[2] = diameter;
+                            values[3] = tip[1];
+                        }
+                        crate::probe::ResultFamily::Edge => {
+                            let call = operation.map(|op| op.call).unwrap_or_default();
+                            if call.contains("x_plus") {
+                                values[5] = tip[0];
+                            } else if call.contains("x_minus") {
+                                values[4] = tip[0];
+                            } else if call.contains("y_plus") {
+                                values[7] = tip[1];
+                            } else if call.contains("y_minus") {
+                                values[6] = tip[1];
+                            }
+                        }
+                        crate::probe::ResultFamily::SurfaceZ => values[8] = tip[2],
                     }
+                    let results = crate::probe::ParameterResults::from_values(&values);
+                    let mut measured = AxisMap::new();
+                    if let Some(operation) = operation {
+                        for (axis, value) in results.wcs_offsets(operation) {
+                            measured.insert(axis, value);
+                        }
+                    }
+                    let error = operation.and_then(|op| results.error(op, Some(diameter)));
                     let result = ProbeResult {
-                        routine: "simulated probe".into(),
-                        measured: values.clone(),
-                        error: Some(0.0),
+                        routine: operation
+                            .map(|op| op.name.to_string())
+                            .unwrap_or_else(|| "simulated probe".into()),
+                        measured,
+                        error,
                         wcs: self.snapshot.probe.selected_wcs.clone(),
                         mode: "SIM".into(),
                         timestamp_ms: now_ms(),
-                        values: vec![
-                            values.get("X").copied().unwrap_or(0.0),
-                            values.get("Y").copied().unwrap_or(0.0),
-                            values.get("Z").copied().unwrap_or(0.0),
-                            0.0,
-                            0.0,
-                            0.0,
-                            0.0,
-                            0.0,
-                            0.0,
-                        ],
+                        values: values.to_vec(),
+                        family,
                     };
                     self.snapshot.probe.last_result = Some(result.clone());
                     self.snapshot.probe.history.push_front(result.clone());

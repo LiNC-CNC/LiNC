@@ -64,7 +64,7 @@ pub mod buttons {
     pub const JOG_BP: u64 = 1 << 58;
     pub const JOG_ZN: u64 = 1 << 50;
     pub const WORKLAMP: u64 = 1 << 42;
-    pub const K1: u64 = 1 << 34;
+    pub const K1: u64 = 1 << 32;
     pub const CHIP_SP: u64 = 1 << 26;
     pub const SAFE_DOOR: u64 = 1 << 57;
     pub const JOG_YN: u64 = 1 << 49;
@@ -75,7 +75,7 @@ pub mod buttons {
     pub const JOG_BN: u64 = 1 << 56;
     pub const JOG_XP: u64 = 1 << 48;
     pub const OPT: u64 = 1 << 40;
-    pub const LUB: u64 = 1 << 32;
+    pub const LUB: u64 = 1 << 31;
     pub const SPD_CCW: u64 = 1 << 24;
     pub const K3: u64 = 1 << 16;
 }
@@ -280,6 +280,9 @@ pub struct PanelOutputs {
     /// Momentary POWER ON/OFF key edges for simulation hardware.
     pub power_on_pulse: bool,
     pub power_off_pulse: bool,
+    /// One-shot E-stop release: asks the controller to leave E-stop without
+    /// turning the machine on.
+    pub estop_reset_pulse: bool,
     pub display: PanelDisplay,
 }
 
@@ -491,6 +494,7 @@ pub fn make_snapshot(
         snapshot_age_ms: now_ms(),
         power_on: outputs.power_on,
         power_on_pulse: outputs.power_on_pulse,
+        estop_reset_pulse: outputs.estop_reset_pulse,
         power_off_pulse: outputs.power_off_pulse,
     }
 }
@@ -498,6 +502,32 @@ pub fn make_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The panel bit tables are transcribed from the proven Python driver
+    /// (`baiermill_pb/szgh_panel_hal.py`). Two names collide there:
+    /// `POT_DN`/`CHUCK` on bit 29 and `K2`/`K1` on bit 34. LiNC therefore moves
+    /// exactly those two names onto bits that are free in the reference table,
+    /// so no real button is shadowed. Every other bit, and the whole LED table,
+    /// must match the reference exactly.
+    #[test]
+    fn button_table_matches_the_reference_driver() {
+        // Reference: `LUB = 1 << 31`, `K2 = 1 << 34`.
+        assert_eq!(buttons::LUB, 1 << 31);
+        assert_eq!(buttons::K2, 1 << 34);
+        // Deliberate deviations: bits that are free in the reference.
+        assert_eq!(buttons::CHUCK, 1 << 28);
+        assert_eq!(buttons::K1, 1 << 32);
+
+        let mut bits = std::collections::HashSet::new();
+        for (name, mask) in BUTTON_PINS {
+            assert!(
+                bits.insert(mask),
+                "button {name} reuses bit {} — panel bits must stay distinct",
+                mask.trailing_zeros()
+            );
+        }
+        assert_eq!(bits.len(), BUTTON_PINS.len());
+    }
 
     #[test]
     fn one_hot_contract_fails_closed() {
@@ -532,6 +562,16 @@ mod tests {
         for (name, _) in BUTTON_PINS {
             assert!(seen.insert(name));
         }
+        // Names alone are not enough: two names sharing one bit would make the
+        // pins indistinguishable on the wire. K1 and K2 collided on bit 34.
+        let mut bits = std::collections::HashSet::new();
+        for (name, mask) in BUTTON_PINS {
+            assert!(
+                bits.insert(mask),
+                "button {name} reuses a bit mask already assigned to another button"
+            );
+        }
+        assert_eq!(bits.len(), BUTTON_PINS.len());
     }
 
     #[test]

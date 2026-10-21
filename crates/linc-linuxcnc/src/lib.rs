@@ -344,6 +344,9 @@ struct Shared {
     condvar: Condvar,
     alive: Mutex<bool>,
     last_update: Mutex<Instant>,
+    /// Last MDI block issued for a probe routine, so the result converter can
+    /// interpret `#1001`-`#1009` with the routine that actually ran.
+    last_probe_block: Mutex<Option<String>>,
 }
 
 /// LinuxCNC backend backed by the supervised Python helper.
@@ -374,6 +377,7 @@ impl PythonBridgeBackend {
             condvar: Condvar::new(),
             alive: Mutex::new(true),
             last_update: Mutex::new(Instant::now()),
+            last_probe_block: Mutex::new(None),
         });
         let mut child = Command::new("python3")
             .arg("-u")
@@ -616,6 +620,11 @@ impl MachineBackend for PythonBridgeBackend {
                     }
                 }
                 self.last_mdi = Some(block.clone());
+                if origin == MdiOrigin::Probe {
+                    if let Ok(mut last) = self.shared.last_probe_block.lock() {
+                        *last = Some(block.clone());
+                    }
+                }
                 let result = self.request(
                     serde_json::json!({
                         "cmd": "issue_mdi",
@@ -973,7 +982,12 @@ fn read_loop(stdout: impl std::io::Read, shared: Arc<Shared>, profile: Profile) 
                 if let Ok(mut last) = shared.last_update.lock() {
                     *last = Instant::now();
                 }
-                let mut converted = converter.convert(snapshot);
+                let probe_block = shared
+                    .last_probe_block
+                    .lock()
+                    .ok()
+                    .and_then(|block| block.clone());
+                let mut converted = converter.convert(snapshot, probe_block);
                 if shared
                     .clear_trail
                     .swap(false, std::sync::atomic::Ordering::Relaxed)
@@ -1020,6 +1034,8 @@ struct Converter {
     next_alarm_id: u64,
     last_alarm_texts: VecDeque<String>,
     last_probe_signature: Option<String>,
+    /// One-shot guard for the axis-name mismatch warning below.
+    warned_axis_mismatch: bool,
 }
 
 impl Converter {
@@ -1037,6 +1053,7 @@ impl Converter {
             next_alarm_id: 1,
             last_alarm_texts: VecDeque::new(),
             last_probe_signature: None,
+            warned_axis_mismatch: false,
         }
     }
 
@@ -1054,7 +1071,7 @@ impl Converter {
         }
     }
 
-    fn convert(&mut self, dto: BridgeSnapshot) -> MachineSnapshot {
+    fn convert(&mut self, dto: BridgeSnapshot, probe_block: Option<String>) -> MachineSnapshot {
         self.refresh_tool_table();
         let mut snapshot = initial_snapshot(&self.profile);
         snapshot.machine_name = self.profile.config.machine.name.clone();
@@ -1086,8 +1103,14 @@ impl Converter {
         snapshot.task.running = dto.task.running;
         snapshot.task.motion_active = dto.task.motion_active;
         snapshot.machine.on = dto.machine.on;
-        snapshot.machine.estop = dto.machine.estop;
-        snapshot.machine.fault = dto.machine.fault;
+        // E-stop is the union of the controller's latched state and the panel
+        // mushroom. Reading only LinuxCNC's flag let the HMI show `E-STOP OK`
+        // while the controller was still latched (the panel had been released
+        // but `halui.estop.reset` had not cleared it yet), so the operator was
+        // told the machine was ready when it was not. Failing towards ACTIVE is
+        // the only safe direction.
+        snapshot.machine.estop = dto.machine.estop || dto.panel.estop;
+        snapshot.machine.fault = dto.machine.fault || dto.panel.estop;
         snapshot.machine.force_homing = dto.machine.force_homing;
         snapshot.machine.limits = dto.machine.limits;
         snapshot.machine.coolant_flood = dto.machine.coolant_flood;
@@ -1129,6 +1152,25 @@ impl Converter {
                     velocity: position.velocity,
                 },
             );
+        }
+        // A silent axis-name mismatch (for example an INI whose
+        // `[TRAJ] COORDINATES` is the trivkins shorthand `XYZ`) makes every
+        // position lookup miss, which shows up as a frozen 0.000 DRO and a
+        // tool marker stuck at the origin. Say so instead of failing quietly.
+        if !self.warned_axis_mismatch && !snapshot.positions.axes.is_empty() {
+            let expected = self.profile.machine_ini.axis_names();
+            let missing: Vec<&String> = expected
+                .iter()
+                .filter(|axis| snapshot.positions.axes.get(axis).is_none())
+                .collect();
+            if !missing.is_empty() {
+                log::warn!(
+                    "LinuxCNC bridge reported positions for {:?} but the INI declares {expected:?}; \
+                     check [TRAJ] COORDINATES. Missing: {missing:?}",
+                    snapshot.positions.axes.keys().collect::<Vec<_>>()
+                );
+                self.warned_axis_mismatch = true;
+            }
         }
         snapshot.offsets.offsets = dto
             .offsets
@@ -1394,20 +1436,40 @@ impl Converter {
             for (index, key) in (1001..=1009).enumerate() {
                 values[index] = *dto.probe.values.get(&key.to_string()).unwrap_or(&0.0);
             }
+            let results = linc_core::probe::ParameterResults::from_values(&values);
+            // `#1001`-`#1009` are named measurements, not axis positions: for
+            // the boss/pocket family `#1001` is an X width and `#1002` an X
+            // centre. Interpret them with the routine that was actually issued.
+            let operation = probe_block
+                .as_deref()
+                .and_then(|block| {
+                    linc_core::probe::operations()
+                        .iter()
+                        .find(|op| block.contains(op.call))
+                })
+                .or_else(|| {
+                    snapshot
+                        .probe
+                        .last_routine
+                        .as_deref()
+                        .and_then(|id| linc_core::probe::operations().iter().find(|op| op.id == id))
+                });
+            let family = operation.map(|op| op.result_family()).unwrap_or_default();
             let mut measured = AxisMap::new();
-            for axis in &self.profile.machine_ini.axes {
-                let value = match axis.name.as_str() {
-                    "X" => values[0],
-                    "Y" => values[1],
-                    "Z" => values[2],
-                    _ => 0.0,
-                };
-                measured.insert(axis.name.clone(), value);
+            if let Some(operation) = operation {
+                for (axis, value) in results.wcs_offsets(operation) {
+                    measured.insert(axis, value);
+                }
             }
+            let error = operation
+                .and_then(|op| results.error(op, Some(self.profile.config.probe.probe_diameter)));
+            let routine = operation
+                .map(|op| op.name.to_string())
+                .unwrap_or_else(|| "probe result".into());
             let result = ProbeResult {
-                routine: "probe result".into(),
+                routine,
                 measured,
-                error: None,
+                error,
                 wcs: snapshot
                     .offsets
                     .active_index
@@ -1416,6 +1478,7 @@ impl Converter {
                 mode: "measured".into(),
                 timestamp_ms: now_ms(),
                 values: values.to_vec(),
+                family,
             };
             snapshot.probe.last_result = Some(result.clone());
             snapshot.probe.history.push_front(result.clone());

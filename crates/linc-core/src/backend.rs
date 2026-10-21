@@ -216,7 +216,10 @@ fn run_worker(
             let mut snapshot = backend.snapshot();
             snapshot.meta.sequence += 1;
             snapshot.meta.captured_at_ms = now_ms();
-            snapshot.meta.stale = false;
+            // `meta.stale` belongs to the backend: the LinuxCNC bridge raises
+            // it when the status link stops updating. Clearing it here erased
+            // that flag before the two-digit status display was derived, so a
+            // dead link kept showing the last work offset instead of `--`.
 
             // HAL heartbeat at 2 Hz.
             if last_heartbeat.elapsed() >= Duration::from_millis(500) {
