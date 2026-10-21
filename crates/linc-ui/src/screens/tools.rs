@@ -181,8 +181,10 @@ struct ColumnSpec {
 fn column_specs(ui: &Ui, lathe: bool, pocket: bool) -> Vec<ColumnSpec> {
     let pad = theme::CELL_PAD;
     let tool_width = theme::measure(ui, "T00", 12.0) + pad;
-    let number_width = theme::measure(ui, "-000.0000", 11.0) + 12.0;
-    let kind_width = theme::measure(ui, "DRILL", 9.0) + 12.0;
+    let number_width = theme::measure(ui, "-000.0000", 11.0) + CELL_TEXT_PAD * 2.0;
+    // The type is read at 9 points but the cell pads its text, and "DRILL" was
+    // truncating at the bare measurement.
+    let kind_width = theme::measure(ui, "DRILL", 9.0) + CELL_TEXT_PAD * 2.0 + 8.0;
     let mut columns = vec![
         ColumnSpec {
             cell: Cell::Tool,
@@ -498,8 +500,9 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                             let selected_cell = index == selected_row && position == selected_column;
                             let response = row.col(|ui| {
                                 if selected_cell && editing {
+                                    ui.add_space(CELL_TEXT_PAD);
                                     let edit = ui.add_sized(
-                                        [column.width, FIELD_HEIGHT],
+                                        [column.width - CELL_TEXT_PAD, FIELD_HEIGHT],
                                         egui::TextEdit::singleline(&mut app.tools.edit_buffer)
                                             // Stable id: the shell checks it to
                                             // leave Home and End to the cell.
@@ -512,11 +515,12 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                         app.tools.edit_focus = false;
                                     }
                                 } else {
+                                    // Air between the cell selector and the
+                                    // text, in every row so nothing shifts when
+                                    // the selection moves.
+                                    ui.add_space(CELL_TEXT_PAD);
                                     if column.cell == Cell::Tool {
-                                        // Keeps the row's accent bar off the
-                                        // tool number, in every row so nothing
-                                        // shifts when the selection moves.
-                                        ui.add_space(SELECTION_BAR + 3.0);
+                                        ui.add_space(SELECTION_BAR);
                                     }
                                     let text = cell_text(draft_for(app, entry.tool), &entry, column.cell);
                                     ui.label(
@@ -543,7 +547,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                             }
                             if selected_cell {
                                 painter.rect_stroke(
-                                    rect.shrink(1.0),
+                                    rect.shrink2(egui::vec2(SELECTION_INSET, 1.0)),
                                     egui::CornerRadius::same(SELECTION_RADIUS as u8),
                                     egui::Stroke::new(1.5, theme::ACCENT),
                                     egui::StrokeKind::Inside,
@@ -624,6 +628,10 @@ const HEADER_HEIGHT: f32 = 18.0;
 /// carry the selection, so the wash must stay weak enough to read text through.
 const ROW_ALPHA: u8 = 34;
 const SELECTION_BAR: f32 = 3.0;
+/// Air between a cell's edge and its text.
+const CELL_TEXT_PAD: f32 = 6.0;
+/// How far the cell selector is drawn inside its cell.
+const SELECTION_INSET: f32 = 3.0;
 /// Corner radius of the cell selector.
 const SELECTION_RADIUS: f32 = 4.0;
 
