@@ -74,7 +74,7 @@ Hard limitations:
 - F1–F8 softkey bars cannot be driven by this keymap. On-screen actions must
   be focusable with arrows/Enter and may also be clicked with the mouse layer.
 - Standard editing shortcuts are supported: `Ctrl+C`, `Ctrl+X`, `Ctrl+V`,
-  `Ctrl+Z`, `Ctrl+Y`, `Ctrl+A`, `Ctrl+S`, `Ctrl+F`, `Ctrl+O` and `Ctrl+R`.
+  `Ctrl+Z`, `Ctrl+Y`, `Ctrl+A`, `Ctrl+S`, `Ctrl+O` and `Ctrl+R`.
   The QMK keymap has a Ctrl key but no Shift/Tab/Delete; on-screen actions
   remain available for mouse-layer use.
 - `F10` may be intercepted by the window manager. The HMI runs kiosk/fullscreen
@@ -98,14 +98,14 @@ else, so it cannot shadow another page's command.
 | Arrows, `PageUp`/`PageDown`, `Home`/`End` | Focus, page, first/last item |
 | `Enter` | Select / apply / issue MDI |
 | `Backspace` | Edit text |
-| `Ctrl+O` | Open the Files page |
+| `Ctrl+O` | Open the Files page, except on Program where `FILE` does it |
 
 **Page-local** — consumed only while that page is in front:
 
 | Page | Keys |
 |---|---|
-| Program | `Ctrl+S` save, `Ctrl+F` find, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
-| Files | `Ctrl+R` refresh, `Enter` open, `Backspace` up a folder |
+| Program | `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
+| Files | `Left`/`Right` switch pane, `Enter` open or copy to `NC_FILES`, `Backspace` up a folder, `Ctrl+U` copy to USB, `Ctrl+N` copy to `NC_FILES`, `Ctrl+R` refresh, `Delete`/`Ctrl+X` delete |
 | MDI | `Enter` issue, `Up`/`Down` history, `Esc` clear the unissued block |
 | Help | `/` focus search, `Backspace` back through link history |
 | Offsets, Tools, Probe | Arrows select a row |
@@ -345,7 +345,7 @@ Fixed shell, no right-hand status column:
 
 - **Top status bar**: machine name, physical mode, program, tool, spindle,
   feed, work offset, panel link, alarm/message counts, time.
-- **Left navigation**: Machine, Program, Offsets, Tools, Diagnostics, G-code
+- **Left navigation**: Machine, Program, Tools, Offsets, Diagnostics, G-code
   Help. Keyboard-focusable; `MAIN`/`FILE`/`OFFSET`/`TOOL`/`WIN` jump directly.
 - **Central page**: active screen.
 - **Bottom action bar**: real keycaps (`MAIN`, `FILE`, `OFFSET`, `TOOL`, `WIN`,
@@ -453,8 +453,9 @@ becomes editable.
 - Editor buffer with cursor, selection, line numbers, current-line highlight and
   live token highlighting.
 - Dirty marker in the header and buffer card; `SAVE` is accented until saved.
-- `Ctrl+S` saves; `Ctrl+Z`/`Ctrl+Y` undo/redo; `Ctrl+F` searches;
-  `Ctrl+O` opens; `Ctrl+A/C/X/V` select/cut/copy/paste.
+- `Ctrl+S` saves; `Ctrl+Z`/`Ctrl+Y` undo/redo; `Ctrl+A/C/X/V`
+  select/cut/copy/paste. There is no find bar: search without a visible query
+  field and match list was a shortcut that appeared to do nothing.
 - No `Tab`, `Shift` or `Delete` key: use spaces, the mouse layer for selection,
   Backspace, and cut/paste. Line-based operations are required.
 - The mini graph updates from a separate debounced preview parser; invalid
@@ -506,17 +507,20 @@ Program rules:
 - Program load remains readable; program protect blocks writing, not viewing.
 - `FILE` enters Program; outside EDIT it cycles `SPLIT`/`CODE`; in EDIT it
   selects CODE.
-- `LOAD` or `Ctrl+O` opens Files; `ESC` returns to Program.
-- A successful file load always returns to Program in `SPLIT` view, even if
-  the previous layout was `CODE` or the panel is in `EDIT`.
+- `LOAD` or `Ctrl+O` opens Files; `ESC` returns to Program. `FILE` (`F6`)
+  toggles between Program and Files.
+- A successful file load always returns to Program, in `SPLIT` view when the
+  machine is idle, even if the previous layout was `CODE` or the panel is in
+  `EDIT`.
 - The header segmented control is also focusable.
 - No on-screen cycle start; loading a program does not start it.
 
 ### 6.3 Offsets
 
 - Work offsets G54–G59.
-- G92 offset.
-- Tool offsets.
+- Tool offsets. G92 is deliberately not exposed here: it is a transient offset
+  that silently shifts every WCS, and a field for it invited the operator to
+  leave the machine in a state neither the DRO nor a program could explain.
 - Mill: X/Y/Z and rotary offsets; lathe: X/Z geometry and wear, tool nose
   radius, tip orientation, C/Y offsets and turret station.
 - Current axis values and distance-to-go.
@@ -607,17 +611,23 @@ previous page.
   `NO USB`, `ERROR`) and a clear `EJECT`.
 - Mount removable filesystems with `nosuid,nodev,noexec`; never auto-run files
   from USB.
-- Copy selected regular files both ways: `COPY TO USB` from `NC_FILES` and
-  `COPY TO NC_FILES` from USB. Folder navigation only; no recursive folder copy
-  in v1.
+- Two equal panes, no page header and no button row: every action is a key.
+  `Left`/`Right` move between the panes; `Up`/`Down` move the selection;
+  `Enter` opens a program from `NC_FILES` or copies a file from USB into
+  `NC_FILES`; `Backspace` goes up a folder; `Ctrl+U` copies to USB and `Ctrl+N`
+  copies to `NC_FILES`; `Delete` (or `Ctrl+X`, since the CNC keyboard has no
+  Delete key) deletes the selected file after a confirmation naming its full
+  path; `Ctrl+R` refreshes.
+- Copy and delete selected regular files: `Ctrl+U` from `NC_FILES` and `Ctrl+N`
+  from USB. Folder navigation only; no recursive folder copy in v1.
 - Copy requires free space, rejects symlinks/path escapes, confirms overwrite,
   writes to a temporary file in the destination and renames atomically.
 - Copy progress and errors are visible; `EJECT` is disabled while a copy is
   active.
 - `EJECT` unmounts and powers off the device; never force-unmount by default.
   Show `SAFE TO REMOVE` after success.
-- `LOAD` accepts only configured G-code extensions from `NC_FILES`; it loads
-  but never starts the program. Loading and writes to `NC_FILES` are disabled
+- `Enter` on a program accepts only configured G-code extensions from
+  `NC_FILES`; it loads but never starts the program. Loading and writes to `NC_FILES` are disabled
   while running, and imports are blocked by program protect.
 - On a successful load: close Files, switch to Program, force the `SPLIT`
   layout, fit the toolpath and highlight the current line. This overrides the
