@@ -458,6 +458,27 @@ impl LincApp {
     /// Ask to run from the current line: opens the confirmation, or explains
     /// which condition blocks it. Silent failure would leave the shortcut
     /// looking broken.
+    /// Delete a file from a Files pane, then refresh that pane.
+    pub fn delete_file(&mut self, path: std::path::PathBuf, usb: bool) {
+        // Validate against the pane's configured root, not just its current
+        // directory, so a delete cannot escape it.
+        let root = if usb {
+            match self.files.usb_root.clone() {
+                Some(root) => root,
+                None => return,
+            }
+        } else {
+            self.profile.nc_files_root().to_path_buf()
+        };
+        match crate::files::delete_file(&root, &path) {
+            Ok(()) => {
+                self.toast("file deleted", theme::SUCCESS);
+                self.files.refresh();
+            }
+            Err(error) => self.toast(error.to_string(), theme::ERROR),
+        }
+    }
+
     pub fn request_run_from_line(&mut self) {
         if let Some(reason) = self.run_from_line_block() {
             self.toast(reason, theme::WARNING);
@@ -584,19 +605,21 @@ impl LincApp {
             self.preferences.remember_file(&text, 12);
             self.preferences_dirty = true;
         }
-        if self.snapshot.task.interp != linc_core::model::InterpState::Idle {
-            return;
+        // Reset the view only when the machine is idle; the navigation itself
+        // must always happen, or a load confirmed during a busy interpreter
+        // leaves the operator in Files looking at the file they just loaded.
+        if self.snapshot.task.interp == linc_core::model::InterpState::Idle {
+            self.program.view = ProgramView::Split;
+            self.program.graph_view = if self.profile.variant == MachineVariant::Lathe {
+                linc_view::ViewMode::LatheXz
+            } else {
+                linc_view::ViewMode::Iso3d
+            };
+            self.program.graph_zoom = 1.0;
+            self.program.graph_pan = Vec2::ZERO;
+            self.program.follow_current = true;
+            self.program.focus_editor = false;
         }
-        self.program.view = ProgramView::Split;
-        self.program.graph_view = if self.profile.variant == MachineVariant::Lathe {
-            linc_view::ViewMode::LatheXz
-        } else {
-            linc_view::ViewMode::Iso3d
-        };
-        self.program.graph_zoom = 1.0;
-        self.program.graph_pan = Vec2::ZERO;
-        self.program.follow_current = true;
-        self.program.focus_editor = false;
         self.set_page(Page::Program);
     }
 
@@ -769,9 +792,7 @@ impl LincApp {
                 // Leaving MDI discards unissued input only.
             }
             Page::Program => {
-                if self.program.search_open {
-                    self.program.search_open = false;
-                } else if self.program.focus_editor {
+                if self.program.focus_editor {
                     self.program.focus_editor = false;
                 } else {
                     self.request_page(Page::Machine);
@@ -1220,7 +1241,11 @@ impl LincApp {
             if input.consume_key(self.keymap.quit.modifiers, self.keymap.quit.key) {
                 quit = true;
             }
-            if input.consume_key(self.keymap.open.modifiers, self.keymap.open.key) {
+            // Not on Program: FILE is the way to the file browser there, and a
+            // second key for the same destination only crowds the hint row.
+            if self.page != Page::Program
+                && input.consume_key(self.keymap.open.modifiers, self.keymap.open.key)
+            {
                 request_files = true;
             }
             if input.consume_key(self.keymap.save.modifiers, self.keymap.save.key) {
@@ -1294,10 +1319,6 @@ impl LincApp {
         }
         if save && self.page == Page::Program {
             self.save_program();
-        }
-        if find && self.page == Page::Program {
-            self.program.search_open = true;
-            self.program.focus_editor = true;
         }
         if refresh && self.page == Page::Files {
             self.files.refresh();
@@ -1849,16 +1870,17 @@ impl LincApp {
                 hints.push((k.program_run_from_line.label(), "RUN LINE"));
                 hints.push((k.graph_fit.label(), "FIT"));
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
-                hints.push((k.open.label(), "LOAD"));
                 hints.push((k.save.label(), "SAVE"));
-                hints.push((k.find.label(), "FIND"));
                 hints.push((k.undo.label(), "UNDO"));
                 hints.push((k.redo.label(), "REDO"));
             }
             Page::Files => {
+                hints.push((k.files_copy_to_nc.label(), "COPY NC"));
+                hints.push((k.files_copy_to_usb.label(), "COPY USB"));
                 hints.push((k.refresh.label(), "REFRESH"));
-                hints.push(("Enter".into(), "OPEN"));
+                hints.push(("Enter".into(), "LOAD"));
                 hints.push(("Bksp".into(), "UP"));
+                hints.push((k.files_delete.label(), "DELETE"));
             }
             Page::Help => {
                 hints.push((k.help_search.label(), "SEARCH"));
@@ -2024,6 +2046,7 @@ impl LincApp {
         let mut action: Option<PendingAction> = None;
         let mut save_and_continue = false;
         let mut start_line: Option<u32> = None;
+        let mut delete: Option<(std::path::PathBuf, bool)> = None;
         let mut quit = false;
         let mut overwrite: Option<bool> = None;
         egui::Window::new("LiNC")
@@ -2089,6 +2112,34 @@ impl LincApp {
                         }
                     });
                 }
+                Modal::ConfirmDelete { path, label, usb } => {
+                    ui.label(
+                        RichText::new("DELETE FILE")
+                            .size(theme::font_size(18.0))
+                            .strong()
+                            .color(theme::ERROR),
+                    );
+                    ui.add_space(6.0);
+                    ui.label(format!("Delete {label}?"));
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(path.display().to_string())
+                            .monospace()
+                            .size(theme::font_size(10.0))
+                            .color(theme::MUTED),
+                    );
+                    ui.add_space(8.0);
+                    ui.label("This cannot be undone.");
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if theme::danger_button(ui, "DELETE", true).clicked() {
+                            delete = Some((path.clone(), *usb));
+                        }
+                        if theme::action_button(ui, "CANCEL", true).clicked() {
+                            close = true;
+                        }
+                    });
+                }
                 Modal::ConfirmQuit => {
                     ui.label(RichText::new("QUIT LiNC?").size(theme::font_size(18.0)).strong().color(theme::FG));
                     ui.add_space(6.0);
@@ -2138,6 +2189,10 @@ impl LincApp {
             });
         if close {
             self.modal = None;
+        }
+        if let Some((path, usb)) = delete {
+            self.modal = None;
+            self.delete_file(path, usb);
         }
         if let Some(line) = start_line {
             self.modal = None;
@@ -2308,11 +2363,13 @@ impl eframe::App for LincApp {
 /// Which of these actually appear is `[ui] pages` in the profile, so a machine
 /// can hide the pages it does not use (a machine with no changer can hide
 /// TOOLS, for example) without removing the screen from the binary.
+/// Ordered to match the keyboard: MAIN (F5), FILE (F6), TOOL (F7), OFFSET
+/// (F8), WIN (F10). A page that has no function key follows the ones that do.
 pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
     (Page::Machine, "MACHINE", "MAIN"),
     (Page::Program, "PROGRAM", "FILE"),
-    (Page::Offsets, "OFFSETS", "OFFSET"),
     (Page::Tools, "TOOLS", "TOOL"),
+    (Page::Offsets, "OFFSETS", "OFFSET"),
     (Page::Diagnostics, "DIAGNOSTICS", "WIN"),
     (Page::Help, "G-CODE HELP", "HELP"),
     (Page::Settings, "SETTINGS", ""),

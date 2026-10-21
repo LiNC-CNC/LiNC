@@ -16,7 +16,8 @@ window_title = "LiNC"
 # "auto" follows the desktop scale; otherwise 0.5..3.0 or a percentage.
 scale = "auto"
 axis_order = ["X", "Y", "Z"]
-pages = ["machine", "program", "offsets", "tools", "diagnostics", "help"]
+# Order matches the keyboard: MAIN, FILE, TOOL, OFFSET, WIN.
+pages = ["machine", "program", "tools", "offsets", "diagnostics", "help"]
 
 [program]
 default_view = "split"
@@ -109,6 +110,11 @@ graph_fit = "Ctrl+0"
 graph_clear = "Ctrl+L"
 # Page-local to Program: start the loaded program at a line.
 program_run_from_line = "Ctrl+R"
+# Page-local to Files: copy the selection between the two panes.
+files_copy_to_usb = "Ctrl+U"
+files_copy_to_nc = "Ctrl+N"
+# The CNC keyboard has no Delete key; Ctrl+X is accepted as the same command.
+files_delete = "Delete"
 tools = "F7"
 offsets = "F8"
 # The CNC keyboard has POS/PROG/SET/MON/DIAG/RESET wired to F5/F6/F7/F8/F10/Esc.

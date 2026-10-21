@@ -195,6 +195,16 @@ pub fn validate_destination(root: &Path, path: &Path) -> Result<PathBuf, CopyErr
     Ok(destination)
 }
 
+/// Delete a regular file inside `root`.
+///
+/// Uses the same path checks a copy does: the parent must canonicalise inside
+/// the root, symlinks are rejected, and only regular files are removed.
+pub fn delete_file(root: &Path, path: &Path) -> Result<(), CopyError> {
+    let target = validate_destination(root, path)?;
+    validate_source(&target)?;
+    fs::remove_file(&target).map_err(|error| CopyError::Io(error.to_string()))
+}
+
 /// Copy with progress callbacks, using a temp file in the destination
 /// directory and an atomic rename.
 pub fn copy_file_with_progress(

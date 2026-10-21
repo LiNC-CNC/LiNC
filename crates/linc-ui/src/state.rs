@@ -149,6 +149,12 @@ pub enum Modal {
         line: u32,
         block: String,
     },
+    /// Delete a file from one of the Files panes.
+    ConfirmDelete {
+        path: std::path::PathBuf,
+        label: String,
+        usb: bool,
+    },
     ConfirmOverwrite(String),
     Error(String),
     Info(String),
@@ -496,7 +502,6 @@ pub struct ProgramUi {
     pub editor_revision_seen: u64,
     pub program_revision_seen: u64,
     pub loaded_path: Option<PathBuf>,
-    pub search_open: bool,
     pub search_needle: String,
     pub search_matches: Vec<usize>,
     pub search_index: usize,
@@ -522,7 +527,6 @@ impl Default for ProgramUi {
             editor_revision_seen: 0,
             program_revision_seen: 0,
             loaded_path: None,
-            search_open: false,
             search_needle: String::new(),
             search_matches: Vec::new(),
             search_index: 0,
@@ -1066,6 +1070,10 @@ pub struct Keymap {
     pub graph_clear: Binding,
     /// Page-local to Program: start the loaded program at the current line.
     pub program_run_from_line: Binding,
+    /// Page-local to Files: copy the selection between the panes.
+    pub files_copy_to_usb: Binding,
+    pub files_copy_to_nc: Binding,
+    pub files_delete: Binding,
     pub tools: Binding,
     pub offsets: Binding,
     pub diagnostics: Binding,
@@ -1115,6 +1123,21 @@ impl Keymap {
             program_run_from_line: binding(
                 &keys.program_run_from_line,
                 Binding::new(Key::R, ctrl),
+                &mut rejected,
+            ),
+            files_copy_to_usb: binding(
+                &keys.files_copy_to_usb,
+                Binding::new(Key::U, ctrl),
+                &mut rejected,
+            ),
+            files_copy_to_nc: binding(
+                &keys.files_copy_to_nc,
+                Binding::new(Key::N, ctrl),
+                &mut rejected,
+            ),
+            files_delete: binding(
+                &keys.files_delete,
+                Binding::new(Key::Delete, none),
                 &mut rejected,
             ),
             tools: binding(&keys.tools, Binding::new(Key::F7, none), &mut rejected),
