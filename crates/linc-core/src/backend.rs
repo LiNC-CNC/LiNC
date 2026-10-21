@@ -180,11 +180,10 @@ fn run_worker(
     let mut heartbeat = false;
     let mut last_status: Option<i32> = None;
     let mut last_status_write = Instant::now() - Duration::from_secs(1);
-    let mut last_confirm_seq = 0u64;
+    let mut last_confirm_level = false;
     // NaN so the first pass always publishes the initial selection.
     let mut last_jog_increment = f64::NAN;
     let mut last_jog_speed = f64::NAN;
-    let mut confirm_low_at: Option<Instant> = None;
 
     while !shared.shutdown.load(Ordering::Relaxed) {
         let request = rx.recv_timeout(Duration::from_millis(10));
@@ -282,27 +281,19 @@ fn run_worker(
                 }
             }
 
-            // Edge-driven manual tool-change confirmation.
-            if snapshot.hal.tool_change_confirm_seq != last_confirm_seq {
-                last_confirm_seq = snapshot.hal.tool_change_confirm_seq;
-                snapshot.hal.tool_change_confirm = true;
-                confirm_low_at = Some(Instant::now() + Duration::from_millis(100));
+            // Manual tool-change confirmation is a level, not a pulse: it is
+            // held for as long as the operator's confirmation stands, so
+            // `iocontrol` cannot miss it in a single 100 ms cycle. The backend
+            // drops it when `iocontrol.0.tool-change` does.
+            if snapshot.hal.tool_change_confirm != last_confirm_level {
+                last_confirm_level = snapshot.hal.tool_change_confirm;
                 if let Some(writer) = hal.as_mut() {
-                    if let Err(error) =
-                        writer.write(LincOutput::ToolChangeConfirm, HalValue::Bit(true))
-                    {
+                    if let Err(error) = writer.write(
+                        LincOutput::ToolChangeConfirm,
+                        HalValue::Bit(last_confirm_level),
+                    ) {
                         log::warn!("HAL tool-change-confirm write failed: {error}");
                     }
-                }
-            }
-            if confirm_low_at
-                .map(|when| Instant::now() >= when)
-                .unwrap_or(false)
-            {
-                confirm_low_at = None;
-                snapshot.hal.tool_change_confirm = false;
-                if let Some(writer) = hal.as_mut() {
-                    let _ = writer.write(LincOutput::ToolChangeConfirm, HalValue::Bit(false));
                 }
             }
 
@@ -438,7 +429,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_change_confirm_pulses_then_drops() {
+    fn tool_change_confirm_is_held_as_a_level() {
         use std::sync::{Arc, Mutex};
         struct RecordingHal(Arc<Mutex<Vec<(LincOutput, HalValue)>>>);
         impl HalWriter for RecordingHal {
@@ -447,54 +438,59 @@ mod tests {
                 Ok(())
             }
         }
-        struct Pulsing {
-            snapshot: MachineSnapshot,
+        /// A backend whose confirmation level the test raises and lowers.
+        struct Levelled {
+            snapshot: Arc<Mutex<MachineSnapshot>>,
         }
-        impl MachineBackend for Pulsing {
+        impl MachineBackend for Levelled {
             fn snapshot(&mut self) -> MachineSnapshot {
-                self.snapshot.clone()
+                self.snapshot.lock().unwrap().clone()
             }
-            fn send(&mut self, command: MachineCommand) -> Result<(), MachineError> {
-                if let MachineCommand::SetHalOutput {
-                    output: LincOutput::ToolChangeConfirm,
-                    ..
-                } = command
-                {
-                    self.snapshot.hal.tool_change_confirm_seq += 1;
-                }
+            fn send(&mut self, _command: MachineCommand) -> Result<(), MachineError> {
                 Ok(())
             }
         }
+        fn confirms(recording: &Arc<Mutex<Vec<(LincOutput, HalValue)>>>) -> Vec<bool> {
+            recording
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|(output, value)| match (output, value) {
+                    (LincOutput::ToolChangeConfirm, HalValue::Bit(value)) => Some(*value),
+                    _ => None,
+                })
+                .collect()
+        }
+
         let recording = Arc::new(Mutex::new(Vec::new()));
         let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
         snapshot.offsets.active_index = Some(1);
+        let shared = Arc::new(Mutex::new(snapshot));
         let handle = BackendHandle::spawn(
-            Box::new(Pulsing { snapshot }),
+            Box::new(Levelled {
+                snapshot: shared.clone(),
+            }),
             Some(Box::new(RecordingHal(recording.clone()))),
             50,
             StatusSource::Wcs,
         );
-        handle.send(MachineCommand::SetHalOutput {
-            output: LincOutput::ToolChangeConfirm,
-            value: HalValue::Bit(true),
-        });
-        thread::sleep(Duration::from_millis(300));
-        let writes = recording.lock().unwrap().clone();
-        let confirms: Vec<bool> = writes
-            .iter()
-            .filter_map(|(output, value)| match (output, value) {
-                (LincOutput::ToolChangeConfirm, HalValue::Bit(value)) => Some(*value),
-                _ => None,
-            })
-            .collect();
-        assert!(
-            confirms.contains(&true),
-            "confirm high not written: {confirms:?}"
-        );
+
+        shared.lock().unwrap().hal.tool_change_confirm = true;
+        thread::sleep(Duration::from_millis(250));
+        // Held: one write, with no automatic drop after the old 100 ms pulse.
         assert_eq!(
-            confirms.last().copied(),
-            Some(false),
-            "confirm must drop: {confirms:?}"
+            confirms(&recording),
+            vec![true],
+            "confirmation must be a level, not a pulse"
         );
+
+        shared.lock().unwrap().hal.tool_change_confirm = false;
+        thread::sleep(Duration::from_millis(250));
+        assert_eq!(
+            confirms(&recording),
+            vec![true, false],
+            "confirmation must drop when the request does"
+        );
+        drop(handle);
     }
 }

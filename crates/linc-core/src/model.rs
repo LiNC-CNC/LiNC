@@ -695,6 +695,9 @@ pub struct ToolChangeState {
     pub message: String,
     pub token: Option<ToolChangeToken>,
     pub confirm_available: bool,
+    /// The operator confirmed; the request is still up, so the machine is
+    /// catching up. The prompt stays until the HAL request drops.
+    pub confirmed: bool,
 }
 
 impl Default for ToolChangeState {
@@ -707,6 +710,7 @@ impl Default for ToolChangeState {
             message: String::new(),
             token: None,
             confirm_available: false,
+            confirmed: false,
         }
     }
 }
