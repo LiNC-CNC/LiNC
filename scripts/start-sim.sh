@@ -4,7 +4,7 @@
 #   ./scripts/start-sim.sh                 foreground (Ctrl+C stops LinuxCNC)
 #   ./scripts/start-sim.sh --detach        background, PID in $XDG_RUNTIME_DIR/linc/sim.pid
 #
-# LinuxCNC loads the reference baiermill_sim software FPGA/pendant HAL and the
+# LinuxCNC loads the simulation's software FPGA HAL (hal/rio_sim.hal) and the
 # LiNC panel service. LiNC is the [DISPLAY] program; linc-panel is the CNC
 # control panel window.
 #
@@ -12,7 +12,8 @@
 #   LINC_SIM_CONFIG   profile (default: configs/sim.toml)
 #   LINC_SIM_INI      LinuxCNC INI (default: configs/sim.ini)
 #   LINC_BIN          linc binary (default: target/release/linc)
-#   LINC_LOG_LEVEL    RUST_LOG for linc/linc-panel (default: info)
+#   LINC_LOG_LEVEL    RUST_LOG for linc/linc-panel (default: the binaries' own
+#                     filter — LiNC crates at info, everything else at warn)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,7 +54,12 @@ fi
 export LINC_CONFIG="$PROFILE"
 export LINC_PANEL_PID_FILE="$PANEL_PID_FILE"
 export LINC_DISPLAY_PID_FILE="$LINC_PID_FILE"
-export RUST_LOG="${LINC_LOG_LEVEL:-info}"
+# Only override the filter when asked; the binaries default to LiNC at info and
+# third-party crates at warn, so an exported `RUST_LOG=info` here would turn the
+# D-Bus stack back on and bury the log.
+if [[ -n "${LINC_LOG_LEVEL:-}" ]]; then
+    export RUST_LOG="$LINC_LOG_LEVEL"
+fi
 export PATH="$ROOT/target/release:$ROOT/scripts:$PATH"
 
 if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
@@ -62,9 +68,29 @@ if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
 fi
 rm -f "$PANEL_PID_FILE" "$LINC_PID_FILE"
 
-# The reference HAL uses paths relative to baiermill_sim (rio_sim.py and the
-# machine INI); run LinuxCNC from there.
-cd "$ROOT/../baiermill_sim"
+# A session that is killed rather than closed leaves the System V semaphores and
+# shared memory LinuxCNC created for its NML channels behind. The next session
+# then reports "SHMEM: Can't take semaphore" and can no longer reach the task, so
+# clear them when no LinuxCNC server is running. `LINC_KEEP_IPC=1` skips this,
+# and nothing is removed while a session is alive.
+if [[ "${LINC_KEEP_IPC:-0}" != 1 ]] && ! pgrep -x linuxcncsvr >/dev/null 2>&1; then
+    stale=0
+    while read -r id; do
+        [[ -n "$id" ]] && ipcrm -s "$id" >/dev/null 2>&1 && stale=$((stale + 1))
+    done < <(ipcs -s 2>/dev/null | awk -v u="$USER" '$3 == u {print $2}')
+    while read -r id; do
+        [[ -n "$id" ]] && ipcrm -m "$id" >/dev/null 2>&1 && stale=$((stale + 1))
+    done < <(ipcs -m 2>/dev/null | awk -v u="$USER" '$3 == u {print $2}')
+    if (( stale > 0 )); then
+        echo "cleared $stale stale LinuxCNC IPC object(s) from a killed session"
+    fi
+    rm -f "$HOME/.linuxcnc/lock"
+fi
+
+# Everything the simulation needs lives in this checkout. LinuxCNC chdirs to
+# the INI directory itself, which is also where it keeps its parameter file;
+# start from there so a relative path in this script matches.
+cd "$ROOT/configs"
 
 if (( DETACH )); then
     nohup linuxcnc "$INI" "$@" >"$LOG_FILE" 2>&1 &
