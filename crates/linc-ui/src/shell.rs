@@ -70,6 +70,12 @@ pub struct LincApp {
     /// to appear only in the Machine page's message card, so a program that
     /// aborted looked like it had simply jumped to the end.
     pub alarm_id_seen: u64,
+    /// Whether a modal was open last frame, so a newly opened one can put the
+    /// keyboard on its default button.
+    pub modal_open_last_frame: bool,
+    /// Same, for the manual tool-change prompt, which is driven by the machine
+    /// rather than by `self.modal`.
+    pub tool_prompt_open_last_frame: bool,
     pub last_connection: Option<bool>,
     pub last_protect: Option<bool>,
     pub panel_offline_toast: bool,
@@ -236,6 +242,8 @@ impl LincApp {
             preferences_saved_at: std::time::Instant::now(),
             last_snapshot_ms: now_ms(),
             alarm_id_seen: 0,
+            modal_open_last_frame: false,
+            tool_prompt_open_last_frame: false,
             last_connection: Some(snapshot.panel.connected),
             last_protect: Some(snapshot.panel.protect_effective()),
             panel_offline_toast: false,
@@ -2184,8 +2192,11 @@ impl LincApp {
     /// `tool.change_active` rather than a page, and has no dismiss action.
     fn draw_tool_change_prompt(&mut self, ctx: &egui::Context) {
         if self.snapshot.tool_change.status != linc_core::model::ToolChangeStatus::ManualPrompt {
+            self.tool_prompt_open_last_frame = false;
             return;
         }
+        let focus_default = !self.tool_prompt_open_last_frame;
+        self.tool_prompt_open_last_frame = true;
         let state = self.snapshot.tool_change.clone();
         let remark = self
             .snapshot
@@ -2239,13 +2250,15 @@ impl LincApp {
                             .color(theme::MUTED),
                     );
                     ui.add_space(8.0);
-                    if theme::accent_button(
+                    let installed = theme::accent_button(
                         ui,
                         "TOOL INSTALLED",
                         self.snapshot.panel.connected && state.token.is_some(),
-                    )
-                    .clicked()
-                    {
+                    );
+                    if focus_default {
+                        installed.request_focus();
+                    }
+                    if installed.clicked() {
                         confirm = true;
                     }
                 }
@@ -2259,8 +2272,13 @@ impl LincApp {
 
     fn draw_modal(&mut self, ctx: &egui::Context) {
         let Some(modal) = self.modal.clone() else {
+            self.modal_open_last_frame = false;
             return;
         };
+        // On the frame a dialog opens, put the keyboard on its default button so
+        // Enter takes it and the arrow keys reach the others.
+        let focus_default = !self.modal_open_last_frame;
+        self.modal_open_last_frame = true;
         let mut close = false;
         let mut action: Option<PendingAction> = None;
         let mut save_and_continue = false;
@@ -2292,7 +2310,11 @@ impl LincApp {
                         if theme::accent_button(ui, "SAVE", self.editing_allowed()).clicked() {
                             save_and_continue = true;
                         }
-                        if theme::action_button(ui, "CANCEL", true).clicked() {
+                        let cancel = theme::action_button(ui, "CANCEL", true);
+                        if focus_default {
+                            cancel.request_focus();
+                        }
+                        if cancel.clicked() {
                             close = true;
                         }
                     });
@@ -2326,7 +2348,11 @@ impl LincApp {
                         if theme::danger_button(ui, "RUN FROM LINE", true).clicked() {
                             start_line = Some(*line);
                         }
-                        if theme::action_button(ui, "CANCEL", true).clicked() {
+                        let cancel = theme::action_button(ui, "CANCEL", true);
+                        if focus_default {
+                            cancel.request_focus();
+                        }
+                        if cancel.clicked() {
                             close = true;
                         }
                     });
@@ -2354,7 +2380,11 @@ impl LincApp {
                         if theme::danger_button(ui, "DELETE", true).clicked() {
                             delete = Some((path.clone(), *usb));
                         }
-                        if theme::action_button(ui, "CANCEL", true).clicked() {
+                        let cancel = theme::action_button(ui, "CANCEL", true);
+                        if focus_default {
+                            cancel.request_focus();
+                        }
+                        if cancel.clicked() {
                             close = true;
                         }
                     });
@@ -2368,7 +2398,11 @@ impl LincApp {
                         if theme::danger_button(ui, "QUIT", true).clicked() {
                             quit = true;
                         }
-                        if theme::action_button(ui, "CANCEL", true).clicked() {
+                        let cancel = theme::action_button(ui, "CANCEL", true);
+                        if focus_default {
+                            cancel.request_focus();
+                        }
+                        if cancel.clicked() {
                             close = true;
                         }
                     });
@@ -2382,7 +2416,11 @@ impl LincApp {
                         if theme::danger_button(ui, "OVERWRITE", true).clicked() {
                             overwrite = Some(true);
                         }
-                        if theme::action_button(ui, "CANCEL", true).clicked() {
+                        let cancel = theme::action_button(ui, "CANCEL", true);
+                        if focus_default {
+                            cancel.request_focus();
+                        }
+                        if cancel.clicked() {
                             overwrite = Some(false);
                         }
                     });
