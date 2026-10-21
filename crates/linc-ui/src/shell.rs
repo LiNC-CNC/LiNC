@@ -70,6 +70,9 @@ pub struct LincApp {
     /// to appear only in the Machine page's message card, so a program that
     /// aborted looked like it had simply jumped to the end.
     pub alarm_id_seen: u64,
+    /// Last jog speed handed to the HAL, so RAPID and the slider publish once
+    /// instead of on every poll.
+    pub jog_speed_published: Option<f64>,
     /// Whether a modal was open last frame, so a newly opened one can put the
     /// keyboard on its default button.
     pub modal_open_last_frame: bool,
@@ -242,6 +245,7 @@ impl LincApp {
             preferences_saved_at: std::time::Instant::now(),
             last_snapshot_ms: now_ms(),
             alarm_id_seen: 0,
+            jog_speed_published: None,
             modal_open_last_frame: false,
             tool_prompt_open_last_frame: false,
             last_connection: Some(snapshot.panel.connected),
@@ -320,6 +324,21 @@ impl LincApp {
         app
     }
 
+    /// Send without polling the backend back.
+    ///
+    /// `send` polls, so anything called from `poll_backend` must use this or it
+    /// recurses until the stack overflows.
+    fn send_quiet(&mut self, command: MachineCommand) {
+        if let Err(error) = self.backend.send(command) {
+            self.log_ui(
+                AlarmSeverity::Error,
+                AlarmSource::Ui,
+                "UI-CMD",
+                error.to_string(),
+            );
+        }
+    }
+
     pub fn send(&mut self, command: MachineCommand) {
         if let Err(error) = self.backend.send(command) {
             self.toast(error.to_string(), theme::ERROR);
@@ -336,13 +355,17 @@ impl LincApp {
     pub fn poll_backend(&mut self) {
         self.snapshot = self.backend.snapshot();
         // RAPID changes the jog ceiling, so the published speed follows it.
+        // Compared against what we last sent, not against the snapshot: the
+        // snapshot is rebuilt every poll, and comparing with it published on
+        // every frame and starved the controller.
         let wanted = self.jog_speed_value();
-        let published = self.snapshot.hal.jog_speed;
-        if published
+        if self
+            .jog_speed_published
             .map(|value| (value - wanted).abs() > 1e-9)
             .unwrap_or(true)
         {
-            self.send(linc_core::command::MachineCommand::SetHalOutput {
+            self.jog_speed_published = Some(wanted);
+            self.send_quiet(linc_core::command::MachineCommand::SetHalOutput {
                 output: linc_core::command::LincOutput::JogSpeed,
                 value: linc_core::command::HalValue::Float(wanted),
             });
@@ -1155,6 +1178,7 @@ impl LincApp {
         self.preferences.jog_speed_percent = Some(percent);
         self.preferences_dirty = true;
         let value = self.jog_speed_value();
+        self.jog_speed_published = Some(value);
         self.send(linc_core::command::MachineCommand::SetHalOutput {
             output: linc_core::command::LincOutput::JogSpeed,
             value: linc_core::command::HalValue::Float(value),
