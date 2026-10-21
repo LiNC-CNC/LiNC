@@ -121,6 +121,13 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     });
 }
 
+/// Height of a table row, and of the fields inside it.
+///
+/// It has to fit the row's WRITE button, which is held to the 44 px target the
+/// rest of the panel uses; a shorter row clips the button. The fields match the
+/// row so the cells sit edge to edge instead of leaving a strip.
+const ROW_HEIGHT: f32 = theme::MIN_TARGET;
+
 fn table_card(app: &mut LincApp, ui: &mut Ui) {
     let pocket = app.profile.changer.uses_pockets();
     let lathe = app.profile.variant == MachineVariant::Lathe;
@@ -152,8 +159,24 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
         let tool_width = theme::measure(ui, "T00", 12.0) + pad;
         let number_width = theme::measure(ui, "-000.00", 11.0) + 12.0;
         let kind_width = theme::measure(ui, "DRILL", 9.0) + 12.0;
-        let write_width = 96.0;
+        // The button's own minimum, plus room for its stroke.
+        let write_width = 98.0;
         let description_min = theme::measure(ui, "DESCRIPTION_DESCRIPTION", 11.0);
+        // The description column is sized here rather than left to
+        // `Column::remainder`, because the cell needs to know the width to fill
+        // it: `available_width` inside a cell is the table's, not the column's.
+        let numbers_width = if lathe {
+            4.0 * number_width
+        } else {
+            2.0 * number_width + kind_width
+        };
+        let fixed = tool_width + numbers_width + write_width + if pocket { number_width } else { 0.0 };
+        // The table reserves its own item spacing between columns, so the
+        // widths have to leave room for it or it rescales every column and the
+        // cell contents no longer fit their cells.
+        let columns = 2 + usize::from(pocket) + if lathe { 4 } else { 3 } + 1;
+        let gaps = ui.spacing().item_spacing.x * (columns - 1) as f32;
+        let description_width = (ui.available_width() - fixed - gaps).max(description_min);
         let mut headings: Vec<&str> = vec!["T", "DESCRIPTION"];
         if lathe {
             headings.extend(["X", "Z", "NOSE R", "ORIENT"]);
@@ -174,12 +197,27 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                     .color(theme::MUTED),
             );
         } else {
+            // Cells meet edge to edge: the table's own spacing would separate
+            // every column again, and the field margins would inset them.
+            ui.spacing_mut().item_spacing.x = 0.0;
+            // Square the cell frames so the row reads as one strip rather than
+            // a line of separate boxes.
+            {
+                let visuals = ui.visuals_mut();
+                visuals.widgets.inactive.corner_radius = egui::CornerRadius::ZERO;
+                visuals.widgets.hovered.corner_radius = egui::CornerRadius::ZERO;
+                visuals.widgets.active.corner_radius = egui::CornerRadius::ZERO;
+                visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::ZERO;
+            }
             let mut builder = TableBuilder::new(ui)
+                // Persisted column widths are restored by id, so a table whose
+                // columns change needs a new salt or it keeps the old widths.
+                .id_salt("tool-table-v2")
                 .striped(true)
                 .resizable(false)
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .column(ExtraColumn::exact(tool_width))
-                .column(ExtraColumn::remainder().at_least(description_min));
+                .column(ExtraColumn::exact(description_width));
             let numbers = if lathe { 4 } else { 3 };
             for index in 0..numbers {
                 let width = if !lathe && index == 2 { kind_width } else { number_width };
@@ -203,7 +241,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                     }
                 })
                 .body(|body| {
-                    body.rows(30.0, rows.len(), |mut row| {
+                    body.rows(ROW_HEIGHT, rows.len(), |mut row| {
                         let index = row.index();
                         let entry = &rows[index];
                         row.set_selected(app.tools.selected_row == index);
@@ -225,8 +263,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                 .drafts
                                 .entry(entry.tool)
                                 .or_insert_with(|| ToolDraft::from_row(entry));
-                            let width = ui.available_width();
-                            text_cell(ui, writable, &mut draft.description, width);
+                            text_cell(ui, writable, &mut draft.description, description_width);
                         });
                         if lathe {
                             for axis in ["X", "Z"] {
@@ -325,10 +362,10 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
 fn text_cell(ui: &mut Ui, writable: bool, text: &mut String, width: f32) {
     ui.add_enabled_ui(writable, |ui| {
         ui.add_sized(
-            [width, 24.0],
+            [width, ROW_HEIGHT],
             egui::TextEdit::singleline(text)
                 .font(egui::TextStyle::Monospace)
-                .margin(egui::Margin::symmetric(4, 1)),
+                .margin(egui::Margin::symmetric(2, 0)),
         );
     });
 }
