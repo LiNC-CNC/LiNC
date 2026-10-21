@@ -335,6 +335,18 @@ impl LincApp {
 
     pub fn poll_backend(&mut self) {
         self.snapshot = self.backend.snapshot();
+        // RAPID changes the jog ceiling, so the published speed follows it.
+        let wanted = self.jog_speed_value();
+        let published = self.snapshot.hal.jog_speed;
+        if published
+            .map(|value| (value - wanted).abs() > 1e-9)
+            .unwrap_or(true)
+        {
+            self.send(linc_core::command::MachineCommand::SetHalOutput {
+                output: linc_core::command::LincOutput::JogSpeed,
+                value: linc_core::command::HalValue::Float(wanted),
+            });
+        }
         // Tell the operator about controller errors wherever they are. An
         // aborted program used to leave the console as the only witness.
         let newest = self
@@ -1118,13 +1130,19 @@ impl LincApp {
         });
     }
 
-    /// Jog speed in machine units per second: the INI's default linear
-    /// velocity scaled by the operator's percentage.
+    /// Jog speed in machine units per second.
+    ///
+    /// The ceiling is the profile's `[jog] max_speed` in units per minute,
+    /// switched to `rapid_speed` while the panel's RAPID key is held, and
+    /// scaled by the operator's percentage. The machine still clamps to its own
+    /// MAX_VELOCITY.
     pub fn jog_speed_value(&self) -> f64 {
-        crate::state::jog_speed(
-            self.profile.machine_ini.default_linear_velocity,
-            self.jog_speed_percent,
-        )
+        let ceiling = if self.snapshot.panel.rapid {
+            self.profile.config.jog.rapid_speed
+        } else {
+            self.profile.config.jog.max_speed
+        };
+        crate::state::jog_speed(ceiling / 60.0, self.jog_speed_percent)
     }
 
     /// Publish the jog speed to `linc.jog-speed` when the percentage changes.

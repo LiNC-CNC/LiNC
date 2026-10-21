@@ -256,6 +256,8 @@ struct BridgePanel {
     #[serde(default)]
     connected: bool,
     #[serde(default)]
+    rapid: bool,
+    #[serde(default)]
     error: bool,
     #[serde(default)]
     mode: BridgeMode,
@@ -1322,6 +1324,7 @@ impl Converter {
         snapshot.panel.mode = map_panel_mode(&dto.panel.mode);
         snapshot.panel.feed_override = dto.panel.feed_override;
         snapshot.panel.rapid_override = dto.panel.rapid_override;
+        snapshot.panel.rapid = dto.panel.rapid;
         snapshot.panel.spindle_override = dto.panel.spindle_override;
         snapshot.panel.program_protect = dto.panel.protect;
         snapshot.panel.program_protect_known = dto.panel.protect_known;

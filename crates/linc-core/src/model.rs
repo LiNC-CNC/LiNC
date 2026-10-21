@@ -923,6 +923,9 @@ pub struct PanelSnapshot {
     /// False when the protect input could not be trusted; callers must fail closed.
     pub program_protect_known: bool,
     pub estop: bool,
+    /// The panel's RAPID key, held for faster continuous jog.
+    #[serde(default)]
+    pub rapid: bool,
     pub current_tool: u16,
     pub next_tool: u16,
     pub buttons: u64,

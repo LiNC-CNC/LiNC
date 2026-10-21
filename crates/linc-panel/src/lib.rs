@@ -479,6 +479,7 @@ pub fn make_snapshot(
         home: outputs.home,
         proghome: outputs.proghome,
         step: outputs.step,
+        rapid: outputs.button(buttons::RAPID),
         jog: JogState {
             mode: outputs.mode.label().into(),
             active_axis: None,

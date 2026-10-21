@@ -63,6 +63,8 @@ pub struct Config {
     pub keys: KeysConfig,
     pub help: HelpConfig,
     pub safety: SafetyConfig,
+    #[serde(default)]
+    pub jog: JogConfig,
     pub backend: BackendConfig,
     pub hal: HalConfig,
     pub panel: PanelConfig,
@@ -302,6 +304,25 @@ pub struct HelpConfig {
     pub bundle: String,
     pub search: bool,
     pub history_limit: usize,
+}
+
+/// Continuous jog speed ceilings, in machine units per minute.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JogConfig {
+    /// Fastest jog at 100 %.
+    pub max_speed: f64,
+    /// Fastest jog at 100 % while the panel's RAPID key is held.
+    pub rapid_speed: f64,
+}
+
+impl Default for JogConfig {
+    fn default() -> Self {
+        Self {
+            max_speed: 3000.0,
+            rapid_speed: 6000.0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

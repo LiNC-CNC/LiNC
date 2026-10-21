@@ -330,6 +330,8 @@ class Bridge:
             "spindle_override": float(spindle if spindle is not None else 1.0),
             "sseg_status": int(pin("cnc_panel.sseg_status", -1) or -1),
             "estop": bool(pin_bool("cnc_panel.estop", False)),
+            # RAPID on the panel raises the continuous-jog ceiling.
+            "rapid": bool(pin_bool("cnc_panel.rapid", False)),
             "next_tool": int(pin("iocontrol.0.tool-prep-number", 0) or 0),
         }
         if sparse:

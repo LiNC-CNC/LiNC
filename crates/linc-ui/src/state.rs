@@ -1207,8 +1207,8 @@ pub fn finite_increments(increments: &[(String, f64)]) -> Vec<(String, f64)> {
 /// The INI's default linear velocity is the 100% reference, and the operator's
 /// percentage scales it; the value published to `linc.jog-speed` is already
 /// absolute, so the machine HAL needs no multiplier.
-pub fn jog_speed(default_linear_velocity: f64, percent: f64) -> f64 {
-    (default_linear_velocity * percent.clamp(0.0, 100.0) / 100.0).max(0.0)
+pub fn jog_speed(ceiling_per_second: f64, percent: f64) -> f64 {
+    (ceiling_per_second * percent.clamp(0.0, 100.0) / 100.0).max(0.0)
 }
 
 /// Resolve a selected increment against the INI's list.

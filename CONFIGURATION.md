@@ -273,6 +273,18 @@ linc --config configs/baiermill.toml
 `base.toml` locks:
 
 ```toml
+### `[jog]`
+
+Continuous jog ceilings in machine units per minute, reached at 100 %.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `max_speed` | `3000` | Fastest continuous jog. |
+| `rapid_speed` | `6000` | Fastest continuous jog while the panel's RAPID key is held. |
+
+The machine still clamps to its own `MAX_VELOCITY`, so a ceiling above the
+machine's limit simply saturates.
+
 [safety]
 machine_control = "panel-with-explicit-mdi"
 software_estop = false

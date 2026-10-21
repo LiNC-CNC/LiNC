@@ -148,6 +148,13 @@ bundle = "linuxcnc-gcode"
 search = true
 history_limit = 32
 
+[jog]
+# Continuous jog ceilings in machine units per minute, reached at 100 %.
+# RAPID on the panel switches to the higher ceiling while it is held; the
+# machine still clamps to its own MAX_VELOCITY.
+max_speed = 3000
+rapid_speed = 6000
+
 [safety]
 # The physical panel is the primary machine-control surface. MDI, probe and
 # tool-change actions are explicit exceptions. These flags are policy, not
