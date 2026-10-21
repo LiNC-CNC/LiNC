@@ -44,11 +44,12 @@ Available navigation keys:
 | Keyboard key | USB keycode | HMI action |
 |---|---|---|
 | `MAIN` | `F5` | Machine dashboard |
-| `FILE` | `F6` | Program page; press again to cycle `SPLIT`/`CODE` |
+| `FILE` | `F6` | Program page |
 | `TOOL` | `F7` | Tools page |
 | `OFFSET` | `F8` | Offsets page |
-| `WIN` | `F10` | Diagnostics |
+| `WIN` | `F10` | Toggle `SPLIT`/`CODE` on the Program page, shown as `▢` in the hint row |
 | `ESC` | `Esc` | Back / cancel / close detail |
+| `Ctrl+Esc` | `Ctrl+Esc` | Diagnostics |
 | `Ctrl+Q` | `Ctrl+Q` | Guarded quit |
 | Arrows | — | Focus/lists/scroll/parameter adjustment |
 | `PageUp` / `PageDown` | — | Page or tab navigation |
@@ -56,6 +57,11 @@ Available navigation keys:
 | `Enter` | — | Select / apply / execute MDI |
 | `Backspace` | — | Edit text |
 | `MO(1)` | layer key | Symbols and mouse layer |
+
+The six function keys are the only page keys the keymap can send, so the
+remaining destinations take combinations: `Ctrl+Esc` for Diagnostics and
+`Ctrl+Q` for quit. `[keys]` in the profile binds all of them; the values in the
+table are the defaults in `configs/base.toml`.
 
 Hard limitations:
 
@@ -809,10 +815,11 @@ Implementation:
 ### 8.1 Keyboard navigation
 
 - `MAIN`: Machine.
-- `FILE`: Program; press again to cycle `SPLIT`/`CODE`.
+- `FILE`: Program.
 - `TOOL`: Tools.
 - `OFFSET`: Offsets.
-- `WIN`: Diagnostics.
+- `WIN`: cycle `SPLIT`/`CODE` when Program is in front, nothing elsewhere.
+- `Ctrl+Esc`: Diagnostics.
 - `HELP` action: G-code Help; no dedicated function key.
 - `LOAD` / `Ctrl+O`: Files, when idle and allowed.
 - `PROBE` action: Touch Probe from Offsets; explicit `RUN PROBE` issues MDI.
@@ -833,7 +840,7 @@ Implementation:
 - `MO(1)`: symbols/mouse.
 
 No F1–F8 mapping. The bottom keycap highlight reflects the current page:
-`FILE` active in Program, `WIN` active in Diagnostics, etc.
+`FILE` active in Program, `Ctrl+Esc` reaching Diagnostics, etc.
 
 ### 8.2 Mode and command gating
 

@@ -106,7 +106,9 @@ program = "F6"
 program_cycle_view = "F10"
 tools = "F7"
 offsets = "F8"
-diagnostics = "F9"
+# The CNC keyboard has POS/PROG/SET/MON/DIAG/RESET wired to F5/F6/F7/F8/F10/Esc.
+# There is no F9, so DIAGNOSTICS takes Ctrl+Esc and F10 carries CODE/SPLIT.
+diagnostics = "Ctrl+Esc"
 back = "Escape"
 quit = "Ctrl+Q"
 focus_next = "Down"

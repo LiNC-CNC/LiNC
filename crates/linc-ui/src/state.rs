@@ -1104,7 +1104,7 @@ impl Keymap {
             offsets: binding(&keys.offsets, Binding::new(Key::F8, none), &mut rejected),
             diagnostics: binding(
                 &keys.diagnostics,
-                Binding::new(Key::F10, none),
+                Binding::new(Key::Escape, ctrl),
                 &mut rejected,
             ),
             back: binding(&keys.back, Binding::new(Key::Escape, none), &mut rejected),
