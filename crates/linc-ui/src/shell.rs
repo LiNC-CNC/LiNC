@@ -279,7 +279,7 @@ impl LincApp {
             ),
             (
                 linc_core::command::LincOutput::JogSpeed,
-                linc_core::command::HalValue::Float(app.jog_speed_value()),
+                linc_core::command::HalValue::Float(app.jog_speed_output()),
             ),
         ] {
             app.send(linc_core::command::MachineCommand::SetHalOutput { output, value });
@@ -367,7 +367,7 @@ impl LincApp {
             self.jog_speed_published = Some(wanted);
             self.send_quiet(linc_core::command::MachineCommand::SetHalOutput {
                 output: linc_core::command::LincOutput::JogSpeed,
-                value: linc_core::command::HalValue::Float(wanted),
+                value: linc_core::command::HalValue::Float(wanted * 60.0),
             });
         }
         // Tell the operator about controller errors wherever they are. An
@@ -1159,6 +1159,16 @@ impl LincApp {
     /// switched to `rapid_speed` while the panel's RAPID key is held, and
     /// scaled by the operator's percentage. The machine still clamps to its own
     /// MAX_VELOCITY.
+    /// The value for `halui.axis.jog-speed`.
+    ///
+    /// This build reads the pin as machine units per **minute**: 50 written to
+    /// it jogs at 0.83 mm/s, which is what the operator saw as "1 mm/s". The
+    /// page keeps thinking in units per second (`jog_speed_value`), and the
+    /// conversion happens here so there is one place to change.
+    pub fn jog_speed_output(&self) -> f64 {
+        self.jog_speed_value() * 60.0
+    }
+
     pub fn jog_speed_value(&self) -> f64 {
         let ceiling = if self.snapshot.panel.rapid {
             self.profile.config.jog.rapid_speed
@@ -1179,9 +1189,10 @@ impl LincApp {
         self.preferences_dirty = true;
         let value = self.jog_speed_value();
         self.jog_speed_published = Some(value);
+        let output = self.jog_speed_output();
         self.send(linc_core::command::MachineCommand::SetHalOutput {
             output: linc_core::command::LincOutput::JogSpeed,
-            value: linc_core::command::HalValue::Float(value),
+            value: linc_core::command::HalValue::Float(output),
         });
     }
 

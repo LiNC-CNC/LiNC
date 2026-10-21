@@ -139,7 +139,7 @@ fn mode_context_card(app: &mut LincApp, ui: &mut Ui) {
                 "SENT",
                 match app.snapshot.hal.jog_speed {
                     Some(value) => {
-                        format!("{value:.1} {}/s", app.snapshot.positions.units)
+                        format!("{value:.0} {}/min", app.snapshot.positions.units)
                     }
                     None => "—".to_string(),
                 },
