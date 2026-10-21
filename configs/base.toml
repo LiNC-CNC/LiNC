@@ -107,6 +107,8 @@ program_cycle_view = "F10"
 # Page-local to Program: fit the toolpath, clear the live trail.
 graph_fit = "Ctrl+0"
 graph_clear = "Ctrl+L"
+# Page-local to Program: start the loaded program at a line.
+program_run_from_line = "Ctrl+R"
 tools = "F7"
 offsets = "F8"
 # The CNC keyboard has POS/PROG/SET/MON/DIAG/RESET wired to F5/F6/F7/F8/F10/Esc.

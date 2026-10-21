@@ -1064,6 +1064,8 @@ pub struct Keymap {
     /// Page-local to Program: fit the toolpath and clear the live trail.
     pub graph_fit: Binding,
     pub graph_clear: Binding,
+    /// Page-local to Program: start the loaded program at the current line.
+    pub program_run_from_line: Binding,
     pub tools: Binding,
     pub offsets: Binding,
     pub diagnostics: Binding,
@@ -1110,6 +1112,11 @@ impl Keymap {
             ),
             graph_fit: binding(&keys.graph_fit, Binding::new(Key::Num0, ctrl), &mut rejected),
             graph_clear: binding(&keys.graph_clear, Binding::new(Key::L, ctrl), &mut rejected),
+            program_run_from_line: binding(
+                &keys.program_run_from_line,
+                Binding::new(Key::R, ctrl),
+                &mut rejected,
+            ),
             tools: binding(&keys.tools, Binding::new(Key::F7, none), &mut rejected),
             offsets: binding(&keys.offsets, Binding::new(Key::F8, none), &mut rejected),
             diagnostics: binding(

@@ -455,6 +455,27 @@ impl LincApp {
         None
     }
 
+    /// Ask to run from the current line: opens the confirmation, or explains
+    /// which condition blocks it. Silent failure would leave the shortcut
+    /// looking broken.
+    pub fn request_run_from_line(&mut self) {
+        if let Some(reason) = self.run_from_line_block() {
+            self.toast(reason, theme::WARNING);
+            return;
+        }
+        let line = self.snapshot.program.current_line.max(1) as u32;
+        let block = self
+            .snapshot
+            .program
+            .content
+            .as_deref()
+            .and_then(|text| text.lines().nth(line as usize - 1))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        self.modal = Some(crate::state::Modal::ConfirmRunFromLine { line, block });
+    }
+
     pub fn program_protected(&self) -> bool {
         self.snapshot.panel.protect_effective()
     }
@@ -624,16 +645,13 @@ impl LincApp {
     }
 
     pub fn cycle_program_view(&mut self) {
-        let mode = self.snapshot.panel.mode.mode();
-        if mode == Some(PanelMode::Edit) {
-            self.program.view = ProgramView::Code;
-            self.program.focus_editor = true;
-        } else {
-            self.program.view = match self.program.view {
-                ProgramView::Split => ProgramView::Code,
-                ProgramView::Code => ProgramView::Split,
-            };
-        }
+        // A plain toggle. EDIT mode selects CODE once on the way in (see
+        // `on_mode_change`), but the operator can still switch views while
+        // editing; forcing CODE here made the key look dead in EDIT.
+        self.program.view = match self.program.view {
+            ProgramView::Split => ProgramView::Code,
+            ProgramView::Code => ProgramView::Split,
+        };
         self.program.focus_editor = false;
         self.page = Page::Program;
     }
@@ -1130,6 +1148,7 @@ impl LincApp {
         let mut cycle_view = false;
         let mut graph_fit = false;
         let mut graph_clear = false;
+        let mut run_from_line = false;
         let mut mdi_issue = false;
         let mut help_search = false;
         let mut page_up = false;
@@ -1152,8 +1171,11 @@ impl LincApp {
                 nav_page = Some(Page::Machine);
             }
             if input.consume_key(self.keymap.program.modifiers, self.keymap.program.key) {
+                // The key is labelled FILE: it opens the program, and opens the
+                // file browser when the program is already in front. CODE/SPLIT
+                // is a separate command on the square key.
                 if self.page == Page::Program {
-                    cycle_view = true;
+                    request_files = true;
                 } else {
                     nav_page = Some(Page::Program);
                 }
@@ -1178,6 +1200,12 @@ impl LincApp {
                 if input.consume_key(self.keymap.graph_clear.modifiers, self.keymap.graph_clear.key)
                 {
                     graph_clear = true;
+                }
+                if input.consume_key(
+                    self.keymap.program_run_from_line.modifiers,
+                    self.keymap.program_run_from_line.key,
+                ) {
+                    run_from_line = true;
                 }
             }
             if input.consume_key(self.keymap.tools.modifiers, self.keymap.tools.key) {
@@ -1314,6 +1342,9 @@ impl LincApp {
             if self.program.editor.redo() {
                 self.mark_editor_changed();
             }
+        }
+        if run_from_line {
+            self.request_run_from_line();
         }
         if graph_fit {
             self.fit_graph();
@@ -1804,9 +1835,18 @@ impl LincApp {
         let mut hints: Vec<(String, &'static str)> = Vec::new();
         match self.page {
             Page::Program => {
-                // Drawn as a square rather than as the key name: the toggle
-                // sits on an F-key, and those are implicit everywhere else.
-                hints.push(("\u{25a2}".to_string(), "CODE/SPLIT"));
+                // The square is the key glyph (the toggle sits on an F-key,
+                // which is implicit everywhere else); the label names the view
+                // the press would switch to, so the row reads as an action.
+                hints.push((
+                    "\u{25a2}".to_string(),
+                    if self.program.view == ProgramView::Split {
+                        "CODE"
+                    } else {
+                        "SPLIT"
+                    },
+                ));
+                hints.push((k.program_run_from_line.label(), "RUN LINE"));
                 hints.push((k.graph_fit.label(), "FIT"));
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
                 hints.push((k.open.label(), "LOAD"));

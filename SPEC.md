@@ -44,7 +44,7 @@ Available navigation keys:
 | Keyboard key | USB keycode | HMI action |
 |---|---|---|
 | `MAIN` | `F5` | Machine dashboard |
-| `FILE` | `F6` | Program page |
+| `FILE` | `F6` | Program page; press again for the Files browser, and again to return |
 | `TOOL` | `F7` | Tools page |
 | `OFFSET` | `F8` | Offsets page |
 | `WIN` | `F10` | Toggle `SPLIT`/`CODE` on the Program page, shown as `▢` in the hint row |
@@ -104,7 +104,7 @@ else, so it cannot shadow another page's command.
 
 | Page | Keys |
 |---|---|
-| Program | `Ctrl+S` save, `Ctrl+F` find, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
+| Program | `Ctrl+S` save, `Ctrl+F` find, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
 | Files | `Ctrl+R` refresh, `Enter` open, `Backspace` up a folder |
 | MDI | `Enter` issue, `Up`/`Down` history, `Esc` clear the unissued block |
 | Help | `/` focus search, `Backspace` back through link history |
@@ -429,14 +429,15 @@ Two layouts, selected by the header toggle or `FILE`:
 
 #### RUN FROM LINE
 
-`RUN FROM LINE` starts the loaded program at the selected line. A line number is
-the one program-start input the panel cannot supply, so this is the only program
-start the HMI issues.
+`RUN FROM LINE` (`Ctrl+R`, page-local to Program) starts the loaded program at
+the selected line. A line number is the one program-start input the panel cannot
+supply, so this is the only program start the HMI issues. When a condition blocks
+it, the reason is raised as a notice rather than the key doing nothing.
 
 - Runs only when the program is loaded, the interpreter is idle, the machine is
   ON, no E-stop is latched, every axis is homed, the panel state is current and
   the panel is in `AUTO`. The panel therefore remains the authority over whether
-  the machine may run; the button carries the blocking reason as its tooltip.
+  the machine may run.
 - A confirmation names the line and its block, and states that the lines before
   it are skipped — work and tool offsets, feed, spindle and coolant are not
   restored — and that motion starts from the current position.
@@ -868,7 +869,7 @@ Implementation:
 ### 8.1 Keyboard navigation
 
 - `MAIN`: Machine.
-- `FILE`: Program.
+- `FILE`: Program, or the Files browser when Program is already in front.
 - `TOOL`: Tools.
 - `OFFSET`: Offsets.
 - `WIN`: cycle `SPLIT`/`CODE`, page-local to Program (see 3.1 shortcut scope).
