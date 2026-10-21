@@ -1199,6 +1199,40 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
 }
 
 /// Large work/machine/DTG readout, shared by the Manual and Homing screens.
+/// Limits override, on one compact row above the touch-off card.
+///
+/// The controller refuses motion while a joint sits on a limit switch, and the
+/// override is the only way to accept it — so it has to be reachable: it lives
+/// next to the other machine actions rather than at the bottom of the page.
+pub fn limits_override_row(app: &mut crate::shell::LincApp, ui: &mut Ui) {
+    let overridden = app.snapshot.limits_overridden;
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("LIMITS")
+                .monospace()
+                .size(theme::font_size(10.0))
+                .color(theme::MUTED),
+        );
+        let label = if overridden { "OVERRIDE ON" } else { "OVERRIDE" };
+        let clicked = if overridden {
+            theme::accent_button(ui, label, true).clicked()
+        } else {
+            theme::action_button(ui, label, true).clicked()
+        };
+        if clicked {
+            app.send(linc_core::command::MachineCommand::ToggleLimitsOverride);
+        }
+        if overridden {
+            ui.label(
+                RichText::new("SWITCHES IGNORED")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::WARNING),
+            );
+        }
+    });
+}
+
 /// Touch-off card shared by every live mode.
 ///
 /// Sets the current position as the zero of the active work offset for one axis
@@ -1247,9 +1281,25 @@ pub fn zero_point_card(app: &mut crate::shell::LincApp, ui: &mut Ui) {
                 .color(theme::ACCENT),
         );
     });
-    if let (Some(axes), Some(index)) = (chosen, index) {
-        app.send(linc_core::command::MachineCommand::ZeroWorkOffset { index, axes });
+    if let Some(axes) = chosen {
+        zero_axes(app, axes);
     }
+}
+
+/// Zero the active work offset for `axes`.
+///
+/// Shared by the touch-off row and the axis keys, so both go through the same
+/// gate: writes must be allowed and a work offset must exist.
+pub fn zero_axes(app: &mut crate::shell::LincApp, axes: Vec<String>) {
+    if !app.snapshot.writes_allowed() {
+        app.toast("machine must be ON, homed and idle", theme::WARNING);
+        return;
+    }
+    let Some(index) = app.snapshot.offsets.active_index else {
+        app.toast("no active work offset", theme::WARNING);
+        return;
+    };
+    app.send(linc_core::command::MachineCommand::ZeroWorkOffset { index, axes });
 }
 
 pub fn live_coordinates_card(

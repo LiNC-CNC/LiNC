@@ -12,6 +12,7 @@ use crate::shell::LincApp;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
+    handle_zero_keys(app, ui);
     let mode = app
         .snapshot
         .panel
@@ -38,6 +39,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             common::live_graph_card(app, ui, ui.available_height() - 6.0);
         },
         |app, ui| {
+            common::limits_override_row(app, ui);
             common::zero_point_card(app, ui);
             common::live_coordinates_card(
                 ui,
@@ -86,6 +88,41 @@ fn coordinates_readout(app: &LincApp) -> Vec<LiveAxisRow> {
 
 
 
+/// `X`, `Y`, `Z` zero that axis and `A` zeroes all of them, in the jog modes.
+///
+/// The same gate as the on-screen touch-off row: writes must be allowed, which
+/// covers machine ON, idle, homed, program protect and an E-stopped or offline
+/// panel.
+fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
+    let jogging = app
+        .snapshot
+        .panel
+        .mode
+        .mode()
+        .map(|mode| mode.is_manual())
+        .unwrap_or(false);
+    if !jogging || ui.ctx().memory(|memory| memory.focused()).is_some() {
+        return;
+    }
+    let axes = app.axes();
+    let mut zero: Option<Vec<String>> = None;
+    ui.input_mut(|input| {
+        for (key, axis) in [(egui::Key::X, "X"), (egui::Key::Y, "Y"), (egui::Key::Z, "Z")] {
+            if input.consume_key(egui::Modifiers::NONE, key) {
+                if axes.iter().any(|name| name == axis) {
+                    zero = Some(vec![axis.to_string()]);
+                }
+            }
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::A) {
+            zero = Some(axes.clone());
+        }
+    });
+    if let Some(axes) = zero {
+        common::zero_axes(app, axes);
+    }
+}
+
 fn mode_context_card(app: &mut LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
         theme::section_header(ui, "MODE CONTEXT");
@@ -98,8 +135,6 @@ fn mode_context_card(app: &mut LincApp, ui: &mut Ui) {
             .clone()
             .unwrap_or_else(|| "—".into());
         theme::kv_row(ui, "ACTIVE AXIS", active);
-        // Jog speed follows the feed override, so there is nothing to set
-        // here: the row reports the speed that results from the knob.
         if matches!(
             mode,
             Some(linc_core::model::PanelMode::Jog)

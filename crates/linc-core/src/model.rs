@@ -1114,6 +1114,10 @@ pub struct MachineSnapshot {
     pub simulated: bool,
     pub task: TaskState,
     pub machine: MachineState,
+    /// The controller's limits override is active: jogging is allowed off a
+    /// limit switch, which is the only way out once a machine is sitting on one.
+    #[serde(default)]
+    pub limits_overridden: bool,
     pub positions: Positions,
     pub offsets: WorkOffsetSet,
     pub tool_table: ToolTableState,
@@ -1136,6 +1140,7 @@ pub struct MachineSnapshot {
 impl MachineSnapshot {
     pub fn empty(variant: MachineVariant) -> Self {
         Self {
+            limits_overridden: false,
             meta: SnapshotMeta::default(),
             variant,
             machine_name: String::new(),

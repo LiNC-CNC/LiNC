@@ -133,6 +133,9 @@ pub enum MachineCommand {
     SetCurrentTool {
         tool: u16,
     },
+    /// Toggle the controller's limits override, which accepts jogging off a
+    /// limit switch. The controller owns the state; this only asks it to flip.
+    ToggleLimitsOverride,
     LoadProgram {
         path: PathBuf,
         expected_revision: Option<u64>,
@@ -190,6 +193,7 @@ impl MachineCommand {
             Self::IssueToolChange { .. } => "Tool change",
             Self::ConfirmManualToolChange { .. } => "Confirm manual tool change",
             Self::SetCurrentTool { .. } => "Set current tool",
+            Self::ToggleLimitsOverride => "Toggle limits override",
             Self::LoadProgram { .. } => "Load program",
             Self::SaveProgram { .. } => "Save program",
             Self::SetWorkOffset { .. } => "Set work offset",

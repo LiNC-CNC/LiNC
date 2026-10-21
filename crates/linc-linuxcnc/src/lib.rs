@@ -255,6 +255,9 @@ struct BridgeProgram {
 struct BridgePanel {
     #[serde(default)]
     connected: bool,
+    /// `halui.joint.0.override-limits`: the controller is ignoring limits.
+    #[serde(default)]
+    override_limits: bool,
     #[serde(default)]
     rapid: bool,
     #[serde(default)]
@@ -679,6 +682,10 @@ impl MachineBackend for PythonBridgeBackend {
                 state.hal.tool_change_confirm_seq = self.confirm_seq;
                 Ok(())
             }
+            MachineCommand::ToggleLimitsOverride => self.request(
+                serde_json::json!({ "cmd": "toggle_limits_override" }),
+                Duration::from_secs(5),
+            ),
             MachineCommand::SetCurrentTool { tool } => {
                 self.validate_issue(MdiOrigin::ToolChange)?;
                 self.request(
@@ -1325,6 +1332,7 @@ impl Converter {
         snapshot.panel.feed_override = dto.panel.feed_override;
         snapshot.panel.rapid_override = dto.panel.rapid_override;
         snapshot.panel.rapid = dto.panel.rapid;
+        snapshot.limits_overridden = dto.panel.override_limits;
         snapshot.panel.spindle_override = dto.panel.spindle_override;
         snapshot.panel.program_protect = dto.panel.protect;
         snapshot.panel.program_protect_known = dto.panel.protect_known;

@@ -824,6 +824,10 @@ impl MachineBackend for SimBackend {
     fn send(&mut self, command: MachineCommand) -> Result<(), MachineError> {
         self.sync_panel();
         match command {
+            MachineCommand::ToggleLimitsOverride => {
+                self.snapshot.limits_overridden = !self.snapshot.limits_overridden;
+                Ok(())
+            }
             MachineCommand::IssueMdi { block, origin } => {
                 self.require_issue(origin)?;
                 if block.trim().is_empty() {

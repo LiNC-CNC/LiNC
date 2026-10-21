@@ -332,6 +332,8 @@ class Bridge:
             "estop": bool(pin_bool("cnc_panel.estop", False)),
             # RAPID on the panel raises the continuous-jog ceiling.
             "rapid": bool(pin_bool("cnc_panel.rapid", False)),
+            # The controller's limits override, so the HMI can show it.
+            "override_limits": bool(pin_bool("halui.joint.0.override-limits", False)),
             "next_tool": int(pin("iocontrol.0.tool-prep-number", 0) or 0),
         }
         if sparse:
@@ -690,6 +692,18 @@ class Bridge:
         tool = int(command.get("tool", 0))
         return self.issue({"origin": "tool-change", "blocks": [f"T{tool} M6"]})
 
+    def toggle_limits_override(self, command):
+        """Ask the controller to toggle its limits override.
+
+        Needed to jog off a limit switch: the controller refuses motion while a
+        joint is on a switch, and this is the only way to accept it.
+        """
+        try:
+            self.cmd.override_limits()
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def load_tool_table(self, command):
         try:
             self.cmd.load_tool_table()
@@ -755,6 +769,8 @@ class Bridge:
                     result = self.set_current_tool(command)
                 elif kind == "issue_tool_change":
                     result = self.issue_tool_change(command)
+                elif kind == "toggle_limits_override":
+                    result = self.toggle_limits_override(command)
                 elif kind == "load_tool_table":
                     result = self.load_tool_table(command)
                 elif kind == "reset_probe_cal":

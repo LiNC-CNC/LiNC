@@ -2015,6 +2015,8 @@ impl LincApp {
                 hints.push((k.graph_fit.label(), "FIT"));
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
                 hints.push(("Arrows".into(), "SELECT"));
+                hints.push(("X/Y/Z".into(), "ZERO AXIS"));
+                hints.push(("A".into(), "ZERO ALL"));
             }
             Page::Offsets | Page::Probe => hints.push(("Arrows".into(), "SELECT")),
             Page::Tools => hints.push(("Arrows".into(), "SELECT")),
@@ -2189,6 +2191,14 @@ impl LincApp {
                 ui,
                 theme::ERROR,
                 "EMERGENCY STOP ACTIVE — MOTION AND MACHINE ACTIONS BLOCKED",
+            );
+            ui.add_space(4.0);
+        }
+        if self.snapshot.limits_overridden {
+            theme::banner(
+                ui,
+                theme::WARNING,
+                "LIMITS OVERRIDE ACTIVE — LIMIT SWITCHES ARE IGNORED",
             );
             ui.add_space(4.0);
         }
