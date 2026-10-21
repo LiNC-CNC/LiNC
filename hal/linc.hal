@@ -16,12 +16,12 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 # ---------------------------------------------------------------------------
 # Logic and conversion components
 # ---------------------------------------------------------------------------
-loadrt and2 names=and2.cycle_gate,and2.cycle_run,and2.cycle_resume,and2.jxp_cont,and2.jxn_cont,and2.jyp_cont,and2.jyn_cont,and2.jzp_cont,and2.jzn_cont,and2.jxp_inc,and2.jxn_inc,and2.jyp_inc,and2.jyn_inc,and2.jzp_inc,and2.jzn_inc
+loadrt and2 names=and2.cycle_gate,and2.cycle_run,and2.cycle_resume,and2.jxp_cont,and2.jxn_cont,and2.jyp_cont,and2.jyn_cont,and2.jzp_cont,and2.jzn_cont,and2.jxp_inc,and2.jxn_inc,and2.jyp_inc,and2.jyn_inc,and2.jzp_inc,and2.jzn_inc,and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint
 # `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
 # with "or2: already exists". Instances only used by the simulation
 # (or2.estop_reset) are created here and wired in linc-sim.hal.
 loadrt or2 names=or2.jog_a,or2.jog_b,or2.pause,or2.manual_req,or2.estop_reset
-loadrt not names=not.paused,not.coolant,not.lube,not.opt,not.bdt,not.spindle_on,not.mode_inc
+loadrt not names=not.is_joint,not.paused,not.coolant,not.lube,not.opt,not.bdt,not.spindle_on,not.mode_inc
 loadrt toggle names=toggle.coolant,toggle.lube,toggle.opt,toggle.bdt,toggle.sbk,toggle.worklamp
 loadrt scale names=scale.feed,scale.rapid,scale.spindle
 loadrt conv_float_s32 names=conv.feed,conv.rapid,conv.spindle
@@ -104,9 +104,10 @@ net mode-jog-any or2.jog_b.out => or2.manual_req.in0
 # homing is refused with "must be in joint mode to home".
 net mode-home cnc_panel.mode_home => or2.manual_req.in1
 net mode-manual-request or2.manual_req.out => halui.mode.manual
-# Motion stays in joint/FREE mode for the whole session: it is what joint jog
-# needs, it is the state homing needs, and it is the only mode in which both
-# work whether or not the machine is homed.
+# Motion starts in joint/FREE mode, which is what an unhomed machine needs for
+# jog and for homing. It does not stay there: homing leaves motion in teleop, so
+# the jog nets below follow whichever mode is actually active rather than
+# assuming one.
 setp halui.mode.joint 1
 
 # ---------------------------------------------------------------------------
@@ -176,49 +177,71 @@ net worklamp-button cnc_panel.worklamp => toggle.worklamp.in
 net worklamp-on toggle.worklamp.out => rio.worklamp.bit cnc_panel.led_worklamp
 
 # ---------------------------------------------------------------------------
-# Jog. Every jog goes to the joint pins, in continuous or incremental form.
+# Jog.
 #
-# Joint jog works whether or not the machine is homed, and needs motion in
-# joint/FREE mode; axis jog goes through the teleop planner and is refused until
-# every axis is homed. Using one path means one mode, and no chance of asking
-# for a jog the current motion mode rejects — which is what left the keys dead
-# on a fresh machine.
+# Motion runs either in joint/FREE mode, where `halui.joint.N.plus/minus` jog
+# (and work unhomed), or in teleop, where only `halui.axis.L.plus/minus` do —
+# and those are refused until every axis is homed. Which mode you get is not
+# ours to decide: homing leaves the machine in teleop here. So the keys drive
+# both sets of pins, gated by `halui.mode.is-teleop`, and whichever mode motion
+# is in receives the jog it accepts. Sending a joint jog in teleop is refused
+# with a message that only reaches the console, which is what made this look
+# like dead keys.
 #
-# `halui.joint.jog-speed` defaults to 0, so without a value the keys hold the
-# pins high and nothing moves. The HMI publishes the profile's jog ceiling
-# scaled by the operator's percentage on `linc.jog-speed`; that net lives in the
-# post-GUI file because the linc.* component only exists once the GUI runs.
-# `halui.joint.N.increment` carries the panel's chosen step, likewise from the
-# HMI.
+# `halui.joint.jog-speed` and `halui.axis.jog-speed` both default to 0, so both
+# are fed from `linc.jog-speed` in the post-GUI file.
 #
-# Jog keys are routed by panel mode: JOG and MPG jog continuously, and
-# `halui.joint.N.plus/minus` are level inputs. INC jogs one step per press and
-# `halui.joint.N.increment-plus/minus` are edge triggered.
+# JOG and MPG jog continuously (level pins); INC jogs one step per press
+# (edge-triggered increment pins).
 # ---------------------------------------------------------------------------
-net not-inc not.mode_inc.out => and2.jxp_cont.in1 and2.jxn_cont.in1 and2.jyp_cont.in1 and2.jyn_cont.in1 and2.jzp_cont.in1 and2.jzn_cont.in1
+net is-teleop halui.mode.is-teleop => not.is_joint.in and2.xp_axis.in1 and2.xn_axis.in1 and2.yp_axis.in1 and2.yn_axis.in1 and2.zp_axis.in1 and2.zn_axis.in1 and2.xp_step_axis.in1 and2.xn_step_axis.in1 and2.yp_step_axis.in1 and2.yn_step_axis.in1 and2.zp_step_axis.in1 and2.zn_step_axis.in1
+
+net not-inc not.mode_inc.out => and2.xp_cont.in1 and2.xn_cont.in1 and2.yp_cont.in1 and2.yn_cont.in1 and2.zp_cont.in1 and2.zn_cont.in1
 
 # Continuous: JOG / MPG
-net jog-xp cnc_panel.jog_xp => and2.jxp_cont.in0 and2.jxp_inc.in0
-net jog-xn cnc_panel.jog_xn => and2.jxn_cont.in0 and2.jxn_inc.in0
-net jog-yp cnc_panel.jog_yp => and2.jyp_cont.in0 and2.jyp_inc.in0
-net jog-yn cnc_panel.jog_yn => and2.jyn_cont.in0 and2.jyn_inc.in0
-net jog-zp cnc_panel.jog_zp => and2.jzp_cont.in0 and2.jzp_inc.in0
-net jog-zn cnc_panel.jog_zn => and2.jzn_cont.in0 and2.jzn_inc.in0
+net jog-xp cnc_panel.jog_xp => and2.xp_cont.in0 and2.xp_inc.in0
+net jog-xn cnc_panel.jog_xn => and2.xn_cont.in0 and2.xn_inc.in0
+net jog-yp cnc_panel.jog_yp => and2.yp_cont.in0 and2.yp_inc.in0
+net jog-yn cnc_panel.jog_yn => and2.yn_cont.in0 and2.yn_inc.in0
+net jog-zp cnc_panel.jog_zp => and2.zp_cont.in0 and2.zp_inc.in0
+net jog-zn cnc_panel.jog_zn => and2.zn_cont.in0 and2.zn_inc.in0
 
-net jog-xp-continuous and2.jxp_cont.out => halui.joint.0.plus
-net jog-xn-continuous and2.jxn_cont.out => halui.joint.0.minus
-net jog-yp-continuous and2.jyp_cont.out => halui.joint.1.plus
-net jog-yn-continuous and2.jyn_cont.out => halui.joint.1.minus
-net jog-zp-continuous and2.jzp_cont.out => halui.joint.2.plus
-net jog-zn-continuous and2.jzn_cont.out => halui.joint.2.minus
 
-# Incremental
-net jog-xp-step and2.jxp_inc.out => halui.joint.0.increment-plus
-net jog-xn-step and2.jxn_inc.out => halui.joint.0.increment-minus
-net jog-yp-step and2.jyp_inc.out => halui.joint.1.increment-plus
-net jog-yn-step and2.jyn_inc.out => halui.joint.1.increment-minus
-net jog-zp-step and2.jzp_inc.out => halui.joint.2.increment-plus
-net jog-zn-step and2.jzn_inc.out => halui.joint.2.increment-minus
+net not-teleop not.is_joint.out => and2.xp_joint.in1 and2.xp_step_joint.in1 and2.xn_joint.in1 and2.xn_step_joint.in1 and2.yp_joint.in1 and2.yp_step_joint.in1 and2.yn_joint.in1 and2.yn_step_joint.in1 and2.zp_joint.in1 and2.zp_step_joint.in1 and2.zn_joint.in1 and2.zn_step_joint.in1
+
+net jog-xp-continuous and2.xp_cont.out => and2.xp_joint.in0 and2.xp_axis.in0
+net jog-xn-continuous and2.xn_cont.out => and2.xn_joint.in0 and2.xn_axis.in0
+net jog-yp-continuous and2.yp_cont.out => and2.yp_joint.in0 and2.yp_axis.in0
+net jog-yn-continuous and2.yn_cont.out => and2.yn_joint.in0 and2.yn_axis.in0
+net jog-zp-continuous and2.zp_cont.out => and2.zp_joint.in0 and2.zp_axis.in0
+net jog-zn-continuous and2.zn_cont.out => and2.zn_joint.in0 and2.zn_axis.in0
+
+net jog-xp-joint-out and2.xp_joint.out => halui.joint.0.plus
+net jog-xn-joint-out and2.xn_joint.out => halui.joint.0.minus
+net jog-yp-joint-out and2.yp_joint.out => halui.joint.1.plus
+net jog-yn-joint-out and2.yn_joint.out => halui.joint.1.minus
+net jog-zp-joint-out and2.zp_joint.out => halui.joint.2.plus
+net jog-zn-joint-out and2.zn_joint.out => halui.joint.2.minus
+net jog-xp-axis-out and2.xp_axis.out => halui.axis.x.plus
+net jog-xn-axis-out and2.xn_axis.out => halui.axis.x.minus
+net jog-yp-axis-out and2.yp_axis.out => halui.axis.y.plus
+net jog-yn-axis-out and2.yn_axis.out => halui.axis.y.minus
+net jog-zp-axis-out and2.zp_axis.out => halui.axis.z.plus
+net jog-zn-axis-out and2.zn_axis.out => halui.axis.z.minus
+
+net jog-xp-step and2.xp_inc.out => and2.xp_step_joint.in0 and2.xp_step_axis.in0
+net jog-xn-step and2.xn_inc.out => and2.xn_step_joint.in0 and2.xn_step_axis.in0
+net jog-yp-step and2.yp_inc.out => and2.yp_step_joint.in0 and2.yp_step_axis.in0
+net jog-yn-step and2.yn_inc.out => and2.yn_step_joint.in0 and2.yn_step_axis.in0
+net jog-zp-step and2.zp_inc.out => and2.zp_step_joint.in0 and2.zp_step_axis.in0
+net jog-zn-step and2.zn_inc.out => and2.zn_step_joint.in0 and2.zn_step_axis.in0
+
+net jog-xp-step-joint-out and2.xp_step_joint.out => halui.joint.0.increment-plus
+net jog-xn-step-joint-out and2.xn_step_joint.out => halui.joint.0.increment-minus
+net jog-yp-step-joint-out and2.yp_step_joint.out => halui.joint.1.increment-plus
+net jog-yn-step-joint-out and2.yn_step_joint.out => halui.joint.1.increment-minus
+net jog-zp-step-joint-out and2.zp_step_joint.out => halui.joint.2.increment-plus
+net jog-zn-step-joint-out and2.zn_step_joint.out => halui.joint.2.increment-minus
 
 # ---------------------------------------------------------------------------
 # Homing
