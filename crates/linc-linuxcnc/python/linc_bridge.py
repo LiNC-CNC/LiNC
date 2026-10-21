@@ -79,6 +79,20 @@ def emit(payload):
         pass
 
 
+def parse_coordinates(raw):
+    """Split an INI COORDINATES value into individual axis letters.
+
+    Accepts `X Y Z`, `XYZ`, `X,Y,Z` and mixed forms such as `XY Z`.
+    """
+    axes = []
+    for token in str(raw or "").replace(",", " ").split():
+        if len(token) > 1 and token.isalpha():
+            axes.extend(token.upper())
+        elif token:
+            axes.append(token.upper())
+    return axes or ["X", "Y", "Z"]
+
+
 def pin(name, default=None):
     try:
         return hal.get_value(name)
@@ -112,8 +126,13 @@ class Bridge:
             self.config.read(self.ini_path)
         except Exception:
             pass
-        coords = self.config.get("TRAJ", "COORDINATES", fallback="XYZ").split()
-        self.axes = coords
+        # `[TRAJ] COORDINATES` is written both as `X Y Z` and as the trivkins
+        # shorthand `XYZ`. A bare `.split()` turns `XYZ` into the single axis
+        # name "XYZ", so every `X`/`Y`/`Z` lookup missed and the HMI showed a
+        # frozen 0.000 DRO with a tool marker stuck at the origin.
+        self.axes = parse_coordinates(
+            self.config.get("TRAJ", "COORDINATES", fallback="XYZ")
+        )
         self.linear_units = self.config.get("TRAJ", "LINEAR_UNITS", fallback="mm")
         self.angular_units = self.config.get("TRAJ", "ANGULAR_UNITS", fallback="degree")
         self.tool_table = self.config.get("EMCIO", "TOOL_TABLE", fallback="")
@@ -163,6 +182,11 @@ class Bridge:
         This is the only panel-driven MDI path besides the explicit HMI
         MDI/probe/tool screens. It is deliberately fixed text: PROG.HOME asks
         for X/Y/Z only in the current WCS, never a caller-supplied block.
+
+        SPEC 6.10 requires the same preconditions as any other issued MDI:
+        machine ON, all axes homed and the interpreter idle, or the action is
+        refused. The previous task mode is restored once the interpreter
+        returns idle, exactly like the HMI's own issue_mdi path.
         """
         if panel.get("mode", {}).get("mode") != "proghome":
             self.last_proghome = [False, False, False, False]
@@ -176,9 +200,32 @@ class Bridge:
         commands = ["G0 X0Y0Z0", "G0 X0", "G0 Y0", "G0 Z0"]
         for index, (active, command) in enumerate(zip(pins, commands)):
             if active and not self.last_proghome[index]:
+                # PROG.HOME is a panel action, so it must not be gated on the
+                # panel mode being MDI (require("mdi") would refuse it).
+                error = self.require("proghome")
+                if error:
+                    self.alarms.append(
+                        {
+                            "kind": "error",
+                            "text": f"PROG.HOME {command} refused: {error}",
+                            "time": time.time(),
+                        }
+                    )
+                    self.alarms = self.alarms[-100:]
+                    self.last_proghome[index] = active
+                    continue
+                previous = int(
+                    getattr(self.stat, "task_mode", linuxcnc.MODE_MANUAL)
+                    or linuxcnc.MODE_MANUAL
+                )
                 try:
-                    self.cmd.mode(linuxcnc.MODE_MDI)
+                    if previous != linuxcnc.MODE_MDI:
+                        self.cmd.mode(linuxcnc.MODE_MDI)
+                        if not self.cmd.wait_complete(2.0):
+                            raise RuntimeError("could not select MDI mode")
                     self.cmd.mdi(command)
+                    if previous != linuxcnc.MODE_MDI and self.pending_restore is None:
+                        self.pending_restore = previous
                 except Exception as error:
                     self.alarms.append(
                         {
@@ -672,7 +719,30 @@ class Bridge:
             emit(result)
 
 
+def selftest():
+    """Pure-parsing checks that need no LinuxCNC session.
+
+    `python3 linc_bridge.py --selftest`
+    """
+    cases = {
+        "XYZ": ["X", "Y", "Z"],
+        "X Y Z": ["X", "Y", "Z"],
+        "X,Y,Z": ["X", "Y", "Z"],
+        "XY Z": ["X", "Y", "Z"],
+        "x y z": ["X", "Y", "Z"],
+        "X Z": ["X", "Z"],
+        "": ["X", "Y", "Z"],
+    }
+    for raw, expected in cases.items():
+        got = parse_coordinates(raw)
+        assert got == expected, f"parse_coordinates({raw!r}) = {got!r}, expected {expected!r}"
+    print(f"linc_bridge selftest: {len(cases)} coordinate cases OK")
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        selftest()
+        raise SystemExit(0)
     try:
         Bridge().run()
     except KeyboardInterrupt:
