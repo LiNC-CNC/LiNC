@@ -1133,9 +1133,16 @@ impl LincApp {
 
     /// Fit the program toolpath: reset zoom/pan and ask the view to reframe.
     pub fn fit_graph(&mut self) {
-        self.program.graph_zoom = 1.0;
-        self.program.graph_pan = Vec2::ZERO;
-        self.program.fit_requested = true;
+        // The manual modes draw their own view state.
+        if matches!(self.page, Page::Manual | Page::Homing) {
+            self.manual.zoom = 1.0;
+            self.manual.pan = Vec2::ZERO;
+            self.manual.fit = true;
+        } else {
+            self.program.graph_zoom = 1.0;
+            self.program.graph_pan = Vec2::ZERO;
+            self.program.fit_requested = true;
+        }
     }
 
     pub fn clear_trail(&mut self) {
@@ -1212,9 +1219,8 @@ impl LincApp {
             {
                 cycle_view = true;
             }
-            // Page-local to Program: the toolpath card's FIT / CLEAR TRAIL
-            // buttons are keyboard commands now.
-            if self.page == Page::Program {
+            // Page-local to the pages that draw a toolpath.
+            if matches!(self.page, Page::Program | Page::Manual | Page::Homing) {
                 if input.consume_key(self.keymap.graph_fit.modifiers, self.keymap.graph_fit.key) {
                     graph_fit = true;
                 }
@@ -1891,6 +1897,11 @@ impl LincApp {
             Page::Mdi => {
                 hints.push((k.mdi_issue.label(), "ISSUE"));
                 hints.push((k.mdi_history_up.label(), "HISTORY"));
+            }
+            Page::Manual | Page::Homing => {
+                hints.push((k.graph_fit.label(), "FIT"));
+                hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
+                hints.push(("Arrows".into(), "SELECT"));
             }
             Page::Offsets | Page::Probe => hints.push(("Arrows".into(), "SELECT")),
             Page::Tools => hints.push(("Arrows".into(), "SELECT")),

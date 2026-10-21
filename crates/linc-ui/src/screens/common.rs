@@ -1033,36 +1033,77 @@ pub fn live_mode_header(
 /// Dominant live graph card with the shared view controls. Uses the single
 /// live-view state on `app.manual`, so the view is preserved when the operator
 /// moves between the Manual and Homing positions.
-pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
-    theme::card(ui, |ui| {
+/// Live toolpath card for the manual modes.
+///
+/// Same status line and no legend, so it reads like the Machine page's
+/// toolpath card: `— CUT`, `-- RAPID`, `— LIVE`, `○ TOOL` on the left, the view
+/// and `ZOOM` on the right. FIT and CLEAR TRAIL are keyboard commands, so the
+/// header carries no buttons.
+pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
+    // An exact rect: a frame inside a shared column grows to fit its content,
+    // which is what pushed this card past the bottom of the page.
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), card_height.max(160.0)),
+        egui::Sense::hover(),
+    );
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    theme::card(&mut child, |ui| {
         ui.horizontal(|ui| {
-            theme::section_header(ui, "TOOLPATH / LIVE POSITION");
+            theme::section_header(ui, "TOOLPATH");
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("— CUT")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::ACCENT),
+            );
+            ui.label(
+                RichText::new("-- RAPID")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            ui.label(
+                RichText::new("— LIVE")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::SUCCESS),
+            );
+            let (marker, _) =
+                ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+            ui.painter().circle_stroke(
+                marker.center(),
+                4.0,
+                egui::Stroke::new(1.5, linc_view::theme::TOOL),
+            );
+            ui.label(
+                RichText::new("TOOL")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::FG),
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if theme::action_button(ui, "CLEAR TRAIL", app.graph_style.show_live_trail)
-                    .clicked()
-                {
-                    app.clear_trail();
-                }
-                if theme::action_button(ui, "FIT", true).clicked() {
-                    app.manual.fit = true;
-                }
-                let label = app.manual.view.label();
-                if theme::action_button(ui, label, true).clicked() {
-                    app.manual.view = if app.profile.variant == MachineVariant::Lathe {
-                        ViewMode::LatheXz
-                    } else {
-                        match app.manual.view {
-                            ViewMode::Iso3d => ViewMode::TopXy,
-                            ViewMode::TopXy => ViewMode::SideXz,
-                            _ => ViewMode::Iso3d,
-                        }
-                    };
-                }
-                if app.snapshot.machine.estop {
-                    ui.label(RichText::new("E-STOP").color(theme::ERROR));
-                }
+                ui.label(
+                    RichText::new(format!("ZOOM {:.1}x", app.manual.zoom))
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(app.manual.view.label())
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
             });
         });
+        // Card margins (24) and the status row (~26) take their share first.
+        let graph_height = (rect.height() - 56.0).max(120.0);
         let preview = app.program.last_valid_preview.clone();
         let current_line = app.snapshot.program.current_line;
         let view = app.manual.view;
@@ -1073,14 +1114,14 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
             app,
             ui,
             &preview,
-            height,
+            graph_height,
             view,
             &mut zoom,
             &mut pan,
             &mut fit,
             None,
             Some(current_line),
-            true,
+            false,
         );
         app.manual.zoom = zoom;
         app.manual.pan = pan;

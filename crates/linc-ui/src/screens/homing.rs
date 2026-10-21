@@ -42,8 +42,9 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         ui,
         "homing-live-right",
         |app, ui| {
-            let height = (ui.available_height() - 20.0).max(320.0);
-            common::live_graph_card(app, ui, height);
+            // Leave a gap so the card's bottom border is not flush with the
+            // edge of the page.
+            common::live_graph_card(app, ui, ui.available_height() - 6.0);
         },
         |app, ui| {
             common::live_coordinates_card(
