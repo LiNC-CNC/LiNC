@@ -10,11 +10,9 @@ use crate::state::Page;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
-    common::page_header(
-        ui,
-        "OFFSETS",
-        "Directly editable G54–G59 and tool offsets. Read-only while running or protected.",
-    );
+    // No page title: the navigation names the page, and the banner below
+    // already says why writes are unavailable.
+    common::focus_anchor(ui, "offsets-page-focus");
     let writable = app.snapshot.writes_allowed();
     if !writable {
         let reason = if app.snapshot.panel.protect_effective() {

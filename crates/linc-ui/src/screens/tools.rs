@@ -10,11 +10,8 @@ use crate::state::ToolDraft;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
-    common::page_header(
-        ui,
-        "TOOLS",
-        "Standard LinuxCNC tool table. Explicit change; manual install confirmation is separate.",
-    );
+    // No page title: the navigation names the page.
+    common::focus_anchor(ui, "tools-page-focus");
     ui.horizontal(|ui| {
         ui.label(
             RichText::new(format!(

@@ -424,8 +424,8 @@ Two layouts, selected by the header toggle or `FILE`:
   deliberately narrow, because CODE is an editing layout.
 - The thumbnail carries no colour legend: it would cover most of a graph that
   small.
-- `MODAL` pane below the thumbnail, in at most two columns — the column is too
-  narrow for more, and the codes then read top-to-bottom in pairs.
+- `MODAL` pane below the thumbnail, in at most four columns; the column is too
+  narrow for more and the codes then wrap onto a second row.
 - Current line synchronized with the thumbnail.
 - The CODE layout is reused for editing; there is no separate editor window.
 
