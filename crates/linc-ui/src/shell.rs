@@ -539,6 +539,16 @@ impl LincApp {
         self.page = page;
         self.focus_region = FocusRegion::Page;
         self.page_focus_requested = true;
+        if page == Page::Tools {
+            // The table takes the keyboard as soon as the page opens: nothing
+            // else on the page holds focus, and the cursor starts at the first
+            // editable cell of the selected row.
+            self.tools.editing = false;
+            self.tools.edit_buffer.clear();
+            if self.tools.selected_column == 0 {
+                self.tools.selected_column = 1;
+            }
+        }
         if page == Page::Help {
             self.help.ensure_loaded();
         }
@@ -1288,7 +1298,11 @@ impl LincApp {
             if input.consume_key(self.keymap.redo.modifiers, self.keymap.redo.key) {
                 redo = true;
             }
-            if input.consume_key(self.keymap.back.modifiers, self.keymap.back.key) {
+            // A cell edit owns Escape: it cancels the edit rather than leaving
+            // the page.
+            if !(self.page == Page::Tools && self.tools.editing)
+                && input.consume_key(self.keymap.back.modifiers, self.keymap.back.key)
+            {
                 escape = true;
             }
             if !text_focused && input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
@@ -2377,6 +2391,7 @@ fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Page, color: C
 impl eframe::App for LincApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         theme::apply_design_zoom(ui.ctx(), self.design_scale);
+
         self.handle_keyboard(ui);
         self.draw(ui);
     }

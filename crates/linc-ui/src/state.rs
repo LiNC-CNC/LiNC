@@ -626,7 +626,14 @@ impl ToolDraft {
 
 pub struct ToolsUi {
     pub target: String,
+    /// Selected cell: the table has its own cursor so the operator can move
+    /// without a mouse.
     pub selected_row: usize,
+    pub selected_column: usize,
+    /// True while a cell is being edited; Enter commits, Escape cancels.
+    pub editing: bool,
+    pub edit_buffer: String,
+    pub edit_focus: bool,
     pub drafts: HashMap<u16, ToolDraft>,
     pub error: Option<String>,
     pub revision_seen: u64,
@@ -638,6 +645,10 @@ impl Default for ToolsUi {
         Self {
             target: "1".into(),
             selected_row: 0,
+            selected_column: 0,
+            editing: false,
+            edit_buffer: String::new(),
+            edit_focus: false,
             drafts: HashMap::new(),
             error: None,
             revision_seen: 0,
