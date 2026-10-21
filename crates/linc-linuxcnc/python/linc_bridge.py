@@ -137,6 +137,7 @@ class Bridge:
         self.angular_units = self.config.get("TRAJ", "ANGULAR_UNITS", fallback="degree")
         self.tool_table = self.config.get("EMCIO", "TOOL_TABLE", fallback="")
         self.param_file = self.config.get("RS274NGC", "PARAMETER_FILE", fallback="")
+        self.parameters = self.load_parameters()
         self.program_prefix = self.config.get("DISPLAY", "PROGRAM_PREFIX", fallback=".")
         self.panel_connected_last = None
         self.last_proghome = [False, False, False, False]
@@ -248,13 +249,25 @@ class Bridge:
             self.last_proghome[index] = active
 
     # ---------------------------------------------------------------- snapshot
-    def read_parameters(self):
-        values = {}
+    def parameter_path(self):
         if not self.param_file:
-            return values
+            return None
         path = self.param_file
         if not os.path.isabs(path):
             path = os.path.join(os.path.dirname(self.ini_path), path)
+        return path
+
+    def load_parameters(self):
+        """Read the parameter file once, at startup.
+
+        LinuxCNC rewrites this file when it exits, so re-reading it every poll
+        gained nothing and cost a file parse per cycle; the live values it is
+        missing come from the status instead.
+        """
+        values = {}
+        path = self.parameter_path()
+        if not path:
+            return values
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as handle:
                 for line in handle:
@@ -267,6 +280,52 @@ class Bridge:
         except OSError:
             pass
         return values
+
+    def read_parameters(self):
+        return self.parameters
+
+    def save_parameters(self):
+        """Write the offsets this session changed back to the parameter file.
+
+        LinuxCNC writes the whole file when it exits; doing it here as well means
+        the values survive a session that is killed rather than closed, and the
+        rewrite is limited to the keys this bridge owns.
+        """
+        path = self.parameter_path()
+        if not path or not os.path.exists(path):
+            return
+        updates = {}
+        for index, values in self.offset_overrides.items():
+            base = 5220 + (index - 1) * 20
+            for axis_index, axis in enumerate(self.axes):
+                if axis in values:
+                    updates[base + 1 + axis_index] = values[axis]
+            if index in self.rotation_overrides:
+                updates[base] = self.rotation_overrides[index]
+        if not updates:
+            return
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                lines = handle.read().splitlines()
+            written = set()
+            for position, line in enumerate(lines):
+                parts = line.split()
+                if len(parts) != 2:
+                    continue
+                try:
+                    key = int(parts[0])
+                except ValueError:
+                    continue
+                if key in updates:
+                    lines[position] = "%d\t%.6f" % (key, updates[key])
+                    written.add(key)
+            for key, value in updates.items():
+                if key not in written:
+                    lines.append("%d\t%.6f" % (key, value))
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+        except OSError:
+            pass
 
     def read_offsets(self, params):
         """The six work offsets, live where the controller can tell us.
@@ -833,6 +892,7 @@ class Bridge:
                 elif kind == "reset_probe_cal":
                     result = self.reset_probe_cal(command)
                 elif kind == "shutdown":
+                    self.save_parameters()
                     emit({"type": "result", "id": command_id, "ok": True})
                     break
                 else:
