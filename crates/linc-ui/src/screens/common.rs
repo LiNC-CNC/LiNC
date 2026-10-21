@@ -102,6 +102,65 @@ pub fn current_next_cards(app: &LincApp, ui: &mut Ui) {
     });
 }
 
+/// Active G-code modal groups as abbreviated cells.
+///
+/// The Machine dashboard and the Program side pane use the same cells; only the
+/// column count changes with the width available.
+pub fn modal_grid(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str) {
+    let codes = app
+        .snapshot
+        .program
+        .modal
+        .iter()
+        .filter(|(key, _)| key.starts_with('G'))
+        .map(|(key, value)| (modal_abbreviation(key), modal_text(key, value)))
+        .collect::<Vec<_>>();
+    if codes.is_empty() {
+        ui.label(
+            RichText::new("—")
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
+        return;
+    }
+    let columns = columns.max(1);
+    let gaps = (columns - 1) as f32 * 4.0;
+    let column_width = ((ui.available_width() - gaps) / columns as f32).max(30.0);
+    egui::Grid::new(id_salt)
+        .num_columns(columns)
+        .spacing([4.0, 1.0])
+        .min_col_width(column_width)
+        .show(ui, |ui| {
+            for (index, (abbreviation, code)) in codes.iter().enumerate() {
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new(*abbreviation)
+                            .size(theme::font_size(6.0))
+                            .color(theme::MUTED),
+                    );
+                    ui.label(
+                        RichText::new(code)
+                            .monospace()
+                            .size(theme::font_size(8.0))
+                            .color(theme::FG),
+                    );
+                });
+                if (index + 1) % columns == 0 {
+                    ui.end_row();
+                }
+            }
+        });
+}
+
+/// A MODAL pane of its own, for pages that have room for a side column.
+pub fn modal_pane(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str) {
+    theme::card(ui, |ui| {
+        theme::section_header(ui, "MODAL");
+        modal_grid(app, ui, columns, id_salt);
+    });
+}
+
 pub fn modal_text(key: &str, value: &str) -> String {
     if value.is_empty() {
         key.to_string()
@@ -110,31 +169,6 @@ pub fn modal_text(key: &str, value: &str) -> String {
     }
 }
 
-pub fn modal_summary(app: &LincApp, ui: &mut Ui) {
-    theme::card(ui, |ui| {
-        ui.label(
-            RichText::new("MODAL")
-                .size(theme::font_size(10.0))
-                .strong()
-                .color(theme::MUTED),
-        );
-        if app.snapshot.program.modal.is_empty() {
-            ui.label(RichText::new("—").monospace().color(theme::MUTED));
-        } else {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                for (key, value) in &app.snapshot.program.modal {
-                    ui.label(
-                        RichText::new(modal_text(key, value))
-                            .monospace()
-                            .size(theme::font_size(11.0))
-                            .color(theme::FG),
-                    );
-                }
-            });
-        }
-    });
-}
 
 pub fn axis_cards(app: &LincApp, ui: &mut Ui) {
     let axes = app.axes();
@@ -469,48 +503,7 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                 }
                 theme::separator(ui);
                 field_label(ui, "MODAL");
-                let codes = app
-                    .snapshot
-                    .program
-                    .modal
-                    .iter()
-                    .filter(|(key, _)| key.starts_with('G'))
-                    .map(|(key, value)| (modal_abbreviation(key), modal_text(key, value)))
-                    .collect::<Vec<_>>();
-                if codes.is_empty() {
-                    ui.label(
-                        RichText::new("—")
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
-                    );
-                } else {
-                    let modal_column_width = ((ui.available_width() - 4.0 * 5.0) / 6.0).max(30.0);
-                    egui::Grid::new("program_modal_fields")
-                        .num_columns(6)
-                        .spacing([4.0, 1.0])
-                        .min_col_width(modal_column_width)
-                        .show(ui, |ui| {
-                            for (index, (abbreviation, code)) in codes.iter().enumerate() {
-                                ui.vertical(|ui| {
-                                    ui.label(
-                                        RichText::new(*abbreviation)
-                                            .size(theme::font_size(6.0))
-                                            .color(theme::MUTED),
-                                    );
-                                    ui.label(
-                                        RichText::new(code)
-                                            .monospace()
-                                            .size(theme::font_size(8.0))
-                                            .color(theme::FG),
-                                    );
-                                });
-                                if (index + 1) % 6 == 0 {
-                                    ui.end_row();
-                                }
-                            }
-                        });
-                }
+                modal_grid(app, ui, 6, "program_modal_fields");
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                     ui.horizontal(|ui| {
@@ -788,6 +781,8 @@ pub fn trajectory(
     fit: &mut bool,
     selected_line: Option<usize>,
     current_line: Option<usize>,
+    // Legends name the colours; a thumbnail too small to read them omits it.
+    show_legend: bool,
 ) -> egui::Response {
     let mut view = TrajectoryView::new(
         preview,
@@ -806,6 +801,7 @@ pub fn trajectory(
     view.tool_tip = Some(app.tool_tip());
     app.graph_style
         .apply(&mut view, selected_line, current_line);
+    view.show_legend = view.show_legend && show_legend;
     let response = draw_trajectory(ui, &mut view);
     *zoom = view.zoom;
     *pan = view.pan;
@@ -1160,6 +1156,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
             &mut fit,
             None,
             Some(current_line),
+            true,
         );
         app.manual.zoom = zoom;
         app.manual.pan = pan;

@@ -169,27 +169,43 @@ fn search_bar(app: &mut LincApp, ui: &mut Ui) {
 
 fn split(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
-    let main_height = (available.y - 88.0).max(220.0);
+    // `theme::card` adds 12 px of inner margin on each side, and the height
+    // asked for is the *content* height, so reserve that overhead or the bottom
+    // row is pushed past the panel and clipped.
+    const CARD_OVERHEAD: f32 = 26.0;
+    let bottom_height = 88.0;
+    let main_height = (available.y - bottom_height - CARD_OVERHEAD - 4.0).max(220.0);
     let editor_width = (available.x * 0.58).max(480.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
             Vec2::new(editor_width, main_height),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| editor_pane(app, ui, main_height - 4.0),
+            |ui| editor_pane(app, ui, main_height - CARD_OVERHEAD - 4.0),
         );
         ui.add_space(8.0);
         ui.allocate_ui_with_layout(
             Vec2::new((available.x - editor_width - 8.0).max(300.0), main_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                graph_card(app, ui, (main_height - 12.0).max(240.0), ViewKind::Full);
+                graph_card(
+                    app,
+                    ui,
+                    (main_height - CARD_OVERHEAD - 96.0).max(240.0),
+                    ViewKind::Full,
+                );
+                common::modal_pane(app, ui, 6, "split-modal");
             },
         );
     });
     ui.add_space(4.0);
+    // Only draw the row when the space is really there; on a short window the
+    // cards would otherwise sit half outside the panel.
+    if ui.available_height() < 40.0 {
+        return;
+    }
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
-            Vec2::new(available.x * 0.58, 88.0),
+            Vec2::new(available.x * 0.58, bottom_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| common::current_next_cards(app, ui),
         );
@@ -218,9 +234,12 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 graph_card(app, ui, 150.0, ViewKind::MiniXy);
+                common::modal_pane(app, ui, 4, "program-modal");
+                // Whatever the cards above actually took, not a guessed 178.
+                let info_height = ui.available_height().max(120.0);
                 egui::ScrollArea::vertical()
                     .id_salt("program-info-scroll")
-                    .max_height((available.y - 178.0).max(120.0))
+                    .max_height(info_height)
                     .show(ui, |ui| info_card(app, ui));
             },
         );
@@ -280,6 +299,9 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, height: f32, kind: ViewKind) {
             &mut fit,
             Some(app.program.selected_line),
             Some(app.snapshot.program.current_line),
+            // The mini graph in Code view is a thumbnail: the legend would
+            // cover most of it and name colours that are barely visible.
+            !matches!(kind, ViewKind::MiniXy),
         );
         app.program.graph_zoom = zoom;
         app.program.graph_pan = pan;
@@ -325,7 +347,6 @@ fn info_card(app: &mut LincApp, ui: &mut Ui) {
             common::token_ui(ui, next, 11.0);
         }
         theme::separator(ui);
-        common::modal_summary(app, ui);
         theme::kv_row(
             ui,
             "BUFFER",
@@ -434,28 +455,6 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 .size(theme::font_size(9.0))
                 .color(theme::MUTED),
             );
-            ui.label(
-                RichText::new("MODAL")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-            if app.snapshot.program.modal.is_empty() {
-                ui.label(
-                    RichText::new("—")
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-            } else {
-                for (key, value) in app.snapshot.program.modal.iter() {
-                    ui.label(
-                        RichText::new(common::modal_text(key, value))
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::FG),
-                    );
-                }
-            }
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 let (text, color) = if let Some(error) = &app.program.preview.error {
                     (
