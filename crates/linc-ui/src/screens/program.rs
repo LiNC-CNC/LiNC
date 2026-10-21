@@ -49,11 +49,9 @@ fn chrome_key(view: &str) -> egui::Id {
 
 fn split(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
-    // `theme::card` adds 12 px of inner margin per side. A card that also draws
-    // a `section_header` adds a header row on top. Heights passed to
-    // `graph_card` are the *view* height, so the chrome has to be reserved, and
-    // the cards report their own so the numbers cannot rot.
-    const CARD_CHROME: f32 = 28.0;
+    // Heights passed to `graph_card` are the *view* height, so the card chrome
+    // has to be reserved. The cards report their own chrome back, so the
+    // numbers cannot rot.
     let main_height = (available.y - 4.0).max(220.0);
     // Equal halves: the two panes describe the same program and neither is
     // subordinate to the other.
@@ -85,6 +83,7 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
                         (after_graph - top - path_height, after_modal - after_graph),
                     )
                 });
+
             },
         );
     });
@@ -201,8 +200,19 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, height: f32, kind: ViewKind) {
 /// pane's bottom edge lines up with whatever sits beside it.
 fn editor_pane(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
     let editable = app.editing_allowed();
-    theme::card(ui, |ui| {
-        ui.set_min_height((card_height - 24.0).max(120.0));
+    // The card is given an exact rect: a frame inside a shared column grows to
+    // fit its content, and the header, editor and footer together came out
+    // taller than the slot, pushing the card past the column beside it.
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), card_height.max(120.0)),
+        egui::Sense::hover(),
+    );
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    theme::card(&mut child, |ui| {
         ui.horizontal(|ui| {
             let file = app
                 .program
