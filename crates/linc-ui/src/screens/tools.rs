@@ -181,7 +181,7 @@ struct ColumnSpec {
 fn column_specs(ui: &Ui, lathe: bool, pocket: bool) -> Vec<ColumnSpec> {
     let pad = theme::CELL_PAD;
     let tool_width = theme::measure(ui, "T00", 12.0) + pad;
-    let number_width = theme::measure(ui, "-000.00", 11.0) + 12.0;
+    let number_width = theme::measure(ui, "-000.0000", 11.0) + 12.0;
     let kind_width = theme::measure(ui, "DRILL", 9.0) + 12.0;
     let mut columns = vec![
         ColumnSpec {
@@ -190,11 +190,13 @@ fn column_specs(ui: &Ui, lathe: bool, pocket: bool) -> Vec<ColumnSpec> {
             width: tool_width,
         },
         ColumnSpec {
-            cell: Cell::Description,
-            heading: "DESCRIPTION",
-            width: tool_width,
+            cell: Cell::Kind,
+            heading: "TYPE",
+            width: kind_width,
         },
     ];
+    // Same order as probe_basic: offsets before the description, which takes the
+    // remaining width at the end.
     if lathe {
         for axis in ["X", "Z"] {
             columns.push(ColumnSpec {
@@ -214,18 +216,13 @@ fn column_specs(ui: &Ui, lathe: bool, pocket: bool) -> Vec<ColumnSpec> {
             });
         }
     } else {
-        for (field, heading) in [(Field::Diameter, "Ø"), (Field::Length, "LENGTH")] {
+        for (field, heading) in [(Field::Length, "OFFSET"), (Field::Diameter, "Ø")] {
             columns.push(ColumnSpec {
                 cell: Cell::Number(field),
                 heading,
                 width: number_width,
             });
         }
-        columns.push(ColumnSpec {
-            cell: Cell::Kind,
-            heading: "TYPE",
-            width: kind_width,
-        });
     }
     if pocket {
         columns.push(ColumnSpec {
@@ -234,6 +231,11 @@ fn column_specs(ui: &Ui, lathe: bool, pocket: bool) -> Vec<ColumnSpec> {
             width: number_width,
         });
     }
+    columns.push(ColumnSpec {
+        cell: Cell::Description,
+        heading: "DESCRIPTION",
+        width: tool_width,
+    });
     columns
 }
 
@@ -453,23 +455,37 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
             }
             let clicked = std::cell::Cell::new(None::<(usize, usize)>);
             builder
-                .header(16.0, |mut header| {
-                    for column in &columns {
-                        header.col(|ui| {
+                .header(HEADER_HEIGHT, |mut header| {
+                    for (position, column) in columns.iter().enumerate() {
+                        let response = header.col(|ui| {
                             ui.label(
                                 RichText::new(column.heading)
                                     .size(theme::font_size(9.0))
                                     .strong()
-                                    .color(theme::MUTED),
+                                    .color(if position == selected_column {
+                                        theme::ACCENT
+                                    } else {
+                                        theme::MUTED
+                                    }),
                             );
                         });
+                        if position == selected_column {
+                            let rect = response.0;
+                            painter.rect_filled(
+                                egui::Rect::from_min_size(
+                                    egui::pos2(rect.left(), rect.bottom() - SELECTION_BAR),
+                                    egui::vec2(rect.width(), SELECTION_BAR),
+                                ),
+                                egui::CornerRadius::ZERO,
+                                theme::ACCENT,
+                            );
+                        }
                     }
                 })
                 .body(|body| {
                     body.rows(ROW_HEIGHT, rows.len(), |mut row| {
                         let index = row.index();
                         let entry = rows[index].clone();
-                        row.set_selected(index == selected_row);
                         for (position, column) in columns.iter().enumerate() {
                             let selected_cell = index == selected_row && position == selected_column;
                             let response = row.col(|ui| {
@@ -500,12 +516,28 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     );
                                 }
                             });
+                            let rect = response.0;
+                            if index == selected_row {
+                                painter.rect_filled(rect, egui::CornerRadius::ZERO, tint(theme::ACCENT, ROW_ALPHA));
+                            }
                             if selected_cell {
                                 painter.rect_stroke(
-                                    response.0,
+                                    rect,
                                     egui::CornerRadius::ZERO,
-                                    egui::Stroke::new(1.0, theme::ACCENT),
+                                    egui::Stroke::new(1.5, theme::ACCENT),
                                     egui::StrokeKind::Inside,
+                                );
+                            }
+                            if index == selected_row && position == 0 {
+                                // Solid bar on the row's rim: the band alone is
+                                // faint, and the bar is what the eye lands on.
+                                painter.rect_filled(
+                                    egui::Rect::from_min_size(
+                                        rect.left_top(),
+                                        egui::vec2(SELECTION_BAR, rect.height()),
+                                    ),
+                                    egui::CornerRadius::ZERO,
+                                    theme::ACCENT,
                                 );
                             }
                             if response.1.clicked() {
@@ -552,6 +584,18 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
 /// Height of a table row, and of the field a cell opens for editing.
 const ROW_HEIGHT: f32 = 26.0;
 const FIELD_HEIGHT: f32 = 22.0;
+const HEADER_HEIGHT: f32 = 18.0;
+
+/// Faint washes under the selected row and column; the solid bars on the rim
+/// carry the selection, so the wash must stay weak enough to read text through.
+const ROW_ALPHA: u8 = 34;
+const SELECTION_BAR: f32 = 3.0;
+
+/// A translucent version of a solid colour. `from_rgba_unmultiplied` premultiplies
+/// for us; a premultiplied constructor with a plain colour renders nearly solid.
+fn tint(color: egui::Color32, alpha: u8) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
+}
 
 fn parse_number(text: &str, label: &str) -> Result<Option<f64>, String> {
     if text.trim().is_empty() {
