@@ -623,6 +623,9 @@ pub struct ProgramState {
     pub content: Option<Arc<String>>,
     pub line_count: usize,
     pub current_line: usize,
+    /// Line motion is executing. Lags `current_line`, which the interpreter
+    /// reads ahead by the queue length, so this is the line the tool is cutting.
+    pub motion_line: usize,
     pub next_line: Option<String>,
     pub current_block: String,
     pub modal: Vec<(String, String)>,
@@ -634,6 +637,18 @@ pub struct ProgramState {
     pub loaded_at_ms: u64,
 }
 
+impl ProgramState {
+    /// The line to highlight: the one motion is executing while a program runs,
+    /// otherwise the interpreter's line.
+    pub fn executing_line(&self) -> usize {
+        if self.motion_line > 0 {
+            self.motion_line
+        } else {
+            self.current_line
+        }
+    }
+}
+
 impl Default for ProgramState {
     fn default() -> Self {
         Self {
@@ -643,6 +658,7 @@ impl Default for ProgramState {
             content: None,
             line_count: 0,
             current_line: 0,
+            motion_line: 0,
             next_line: None,
             current_block: String::new(),
             modal: Vec::new(),
@@ -1399,5 +1415,18 @@ mod tests {
     fn axis_map_preserves_ini_order() {
         let map = AxisMap::from_entries([("Z".to_string(), 1), ("X".to_string(), 2)]);
         assert_eq!(map.keys().collect::<Vec<_>>(), vec!["Z", "X"]);
+    }
+
+    #[test]
+    fn executing_line_prefers_motion_over_the_interpreter_read_ahead() {
+        let mut program = ProgramState::default();
+        assert_eq!(program.executing_line(), 0);
+        program.current_line = 11;
+        assert_eq!(program.executing_line(), 11);
+        // The interpreter has read to the end while motion is still on line 3.
+        program.motion_line = 3;
+        assert_eq!(program.executing_line(), 3);
+        program.motion_line = 0;
+        assert_eq!(program.executing_line(), 11);
     }
 }

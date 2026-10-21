@@ -513,7 +513,9 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                 let window_len = 16usize;
                 let row_height = ui.spacing().interact_size.y.max(16.0);
                 if let Some(content) = content {
-                    let current = app.snapshot.program.current_line.max(1);
+                    // Follow the line motion is cutting, not the interpreter's
+                    // read-ahead, which reaches the end of the program first.
+                    let current = app.snapshot.program.executing_line().max(1);
                     let total = app.snapshot.program.line_count.max(1);
                     let is_running = app.snapshot.task.running || app.snapshot.program.paused;
                     let half_window = (window_len / 2) as isize;
@@ -591,7 +593,7 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                         ui.label(
                             RichText::new(format!(
                                 "LN {}/{}  {:.0}%",
-                                app.snapshot.program.current_line,
+                                app.snapshot.program.executing_line(),
                                 app.snapshot.program.line_count,
                                 app.snapshot.program.progress * 100.0
                             ))
@@ -1131,7 +1133,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
         let header_height = ui.cursor().top() - body_top;
         let graph_height = (rect.height() - 8.0 - header_height - 2.0).max(60.0);
         let preview = app.program.last_valid_preview.clone();
-        let current_line = app.snapshot.program.current_line;
+        let current_line = app.snapshot.program.executing_line();
         let view = app.manual.view;
         let mut zoom = app.manual.zoom;
         let mut pan = app.manual.pan;

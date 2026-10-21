@@ -782,6 +782,11 @@ class Bridge:
             "program": {
                 "path": program_path,
                 "current_line": int(getattr(s, "current_line", 0) or 0),
+                # `current_line` is the interpreter's line and runs ahead of the
+                # tool by the look-ahead queue; `motion_line` is the line motion
+                # is executing, which is the one a pane can highlight while a
+                # program runs.
+                "motion_line": int(getattr(s, "motion_line", 0) or 0),
                 "read_line": int(getattr(s, "read_line", 0) or 0),
                 "text": program_text,
                 "gcodes": gcodes,

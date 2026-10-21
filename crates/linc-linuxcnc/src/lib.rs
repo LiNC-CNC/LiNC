@@ -240,6 +240,8 @@ struct BridgeProgram {
     #[serde(default)]
     current_line: usize,
     #[serde(default)]
+    motion_line: usize,
+    #[serde(default)]
     text: Option<String>,
     #[serde(default)]
     gcodes: Vec<f64>,
@@ -1494,6 +1496,14 @@ impl Converter {
         let text = self.program_text.clone();
         let line_count = text.as_ref().map(|text| text.lines().count()).unwrap_or(0);
         let current_line = dto.program.current_line;
+        let motion_line = dto.program.motion_line;
+        // The line to show as current: motion's line lags the interpreter's
+        // read-ahead, so it is the one the tool is actually cutting.
+        let executed = if motion_line > 0 {
+            motion_line
+        } else {
+            current_line
+        };
         snapshot.program = ProgramState {
             path: self.program_path.clone(),
             display_name: self
@@ -1506,14 +1516,15 @@ impl Converter {
             content: text.clone(),
             line_count,
             current_line,
+            motion_line,
             next_line: text
                 .as_ref()
-                .and_then(|text| text.lines().nth(current_line).map(str::to_string)),
+                .and_then(|text| text.lines().nth(executed).map(str::to_string)),
             current_block: text
                 .as_ref()
                 .and_then(|text| {
                     text.lines()
-                        .nth(current_line.saturating_sub(1))
+                        .nth(executed.saturating_sub(1))
                         .map(str::to_string)
                 })
                 .unwrap_or_default(),
@@ -1523,7 +1534,7 @@ impl Converter {
             dirty: false,
             syntax_error: None,
             progress: if line_count > 0 {
-                current_line as f32 / line_count as f32
+                executed as f32 / line_count as f32
             } else {
                 0.0
             },

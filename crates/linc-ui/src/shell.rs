@@ -1081,12 +1081,16 @@ impl LincApp {
         // Only while a program is actually running: otherwise a stale
         // follow flag dragged the view back to line 1 every frame and fought
         // the operator's own cursor movement.
+        // Follow the line the tool is on. `current_line` is the interpreter's
+        // read-ahead and would drag the pane to the end of the program while the
+        // machine is still cutting the first move.
+        let executed = self.snapshot.program.executing_line();
         if self.program.follow_current
             && self.snapshot.task.running
-            && self.snapshot.program.current_line > 0
-            && self.snapshot.program.current_line != self.program.selected_line
+            && executed > 0
+            && executed != self.program.selected_line
         {
-            self.program.selected_line = self.snapshot.program.current_line;
+            self.program.selected_line = executed;
             self.program.code_scroll_to_line = Some(self.program.selected_line);
         }
         if self.snapshot.task.running {

@@ -177,7 +177,7 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
             &mut pan,
             &mut fit,
             Some(app.program.selected_line),
-            Some(app.snapshot.program.current_line),
+            Some(app.snapshot.program.executing_line()),
             false,
         );
         app.program.graph_zoom = zoom;
@@ -499,7 +499,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             // G-code display does: an accent bar in the gutter plus a tinted
             // row. The cursor line keeps its underline from the layouter, so
             // the two are distinguishable while editing.
-            let running = app.snapshot.program.current_line.max(1);
+            let running = app.snapshot.program.executing_line().max(1);
             let live = app.snapshot.task.running
                 || app.snapshot.program.paused
                 || app.snapshot.task.program_started;

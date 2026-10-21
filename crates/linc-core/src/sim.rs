@@ -355,6 +355,7 @@ impl SimBackend {
             revision: self.program_revision,
             line_count,
             current_line: start_line.min(line_count),
+            motion_line: 0,
             next_line: None,
             current_block: text
                 .lines()
