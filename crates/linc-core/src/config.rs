@@ -207,6 +207,7 @@ pub struct ToolpathConfig {
     pub clear_trail_action: bool,
     pub show_program_bounds: bool,
     pub show_machine_bounds: bool,
+    pub show_stock: bool,
     pub show_program_labels: bool,
     pub show_machine_labels: bool,
     pub show_program_ticks: bool,
@@ -245,6 +246,41 @@ pub struct KeysConfig {
     pub mdi_history_up: String,
     pub mdi_history_down: String,
     pub help_search: String,
+}
+
+impl KeysConfig {
+    /// The spec-default bindings (SPEC §3.1, CONFIGURATION.md §10). Used by
+    /// tests and as the reference the Settings screen shows.
+    pub fn spec_default() -> Self {
+        Self {
+            machine: "F5".into(),
+            program: "F6".into(),
+            program_cycle_view: "F6".into(),
+            tools: "F7".into(),
+            offsets: "F8".into(),
+            diagnostics: "F10".into(),
+            back: "Escape".into(),
+            quit: "Ctrl+Q".into(),
+            focus_next: "Down".into(),
+            focus_prev: "Up".into(),
+            activate: "Enter".into(),
+            open: "Ctrl+O".into(),
+            save: "Ctrl+S".into(),
+            undo: "Ctrl+Z".into(),
+            redo: "Ctrl+Y".into(),
+            find: "Ctrl+F".into(),
+            select_all: "Ctrl+A".into(),
+            copy: "Ctrl+C".into(),
+            cut: "Ctrl+X".into(),
+            paste: "Ctrl+V".into(),
+            refresh: "Ctrl+R".into(),
+            mdi_issue: "Enter".into(),
+            mdi_clear: "Escape".into(),
+            mdi_history_up: "Up".into(),
+            mdi_history_down: "Down".into(),
+            help_search: "/".into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

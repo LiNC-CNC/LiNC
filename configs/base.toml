@@ -88,6 +88,8 @@ trail_max_points = 100000
 clear_trail_action = true
 show_program_bounds = true
 show_machine_bounds = true
+# Stock envelope drawn from the program extents (SPEC §6.1).
+show_stock = true
 show_program_labels = true
 show_machine_labels = false
 show_program_ticks = false
