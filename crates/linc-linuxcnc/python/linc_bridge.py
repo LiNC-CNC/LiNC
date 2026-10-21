@@ -743,6 +743,8 @@ class Bridge:
             }
             if rotation is not None:
                 self.rotation_overrides[index] = float(rotation)
+            # Persist at the change, so a session that is killed loses nothing.
+            self.save_parameters()
         return result
 
     def run_from_line(self, command):
@@ -781,7 +783,28 @@ class Bridge:
         if not axes:
             return {"ok": False, "error": "no axes selected"}
         blocks = [f"G10 L20 P{index} " + " ".join(f"{axis}0.0" for axis in axes)]
-        return self.issue({"origin": "write", "blocks": blocks})
+        result = self.issue({"origin": "write", "blocks": blocks})
+        if result.get("ok"):
+            # The controller computes the offset; read it back rather than
+            # deriving it, then persist it with the other writes.
+            try:
+                self.stat.poll()
+                live = list(getattr(self.stat, "g5x_offset", ()) or ())
+                values = {}
+                for axis_index, axis in enumerate(self.axes):
+                    if axis in axes and axis_index < len(live):
+                        values[axis] = live[axis_index]
+                if values:
+                    # Merge: a touch off changes only the axes it names, and the
+                    # rest of that row must keep what was recorded before.
+                    self.offset_overrides.setdefault(index, {}).update(values)
+                rotation = getattr(self.stat, "rotation_xy", None)
+                if rotation is not None:
+                    self.rotation_overrides[index] = float(rotation)
+                self.save_parameters()
+            except Exception:
+                pass
+        return result
 
     def set_g92(self, command):
         error = self.require("mdi")
