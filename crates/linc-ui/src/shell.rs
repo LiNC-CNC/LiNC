@@ -1178,13 +1178,14 @@ impl LincApp {
         crate::state::jog_speed(ceiling / 60.0, percent)
     }
 
+    /// The tool tip in the active work coordinate system, matching the preview.
     pub fn tool_tip(&self) -> [f64; 3] {
         ["X", "Y", "Z"].map(|axis| {
             self.snapshot
                 .positions
                 .axes
                 .get(axis)
-                .map(|position| position.machine)
+                .map(|position| position.work)
                 .unwrap_or(0.0)
         })
     }
@@ -1197,8 +1198,10 @@ impl LincApp {
             return;
         }
         let axes = self.axes();
-        let offset = self.active_offset().cloned();
-        let preview = parse_preview(&text, &axes, offset.as_ref(), self.tool_tip());
+        // No offset: the plot is drawn in the active work coordinate system, so
+        // it sits where the operator zeroed the part rather than at the machine
+        // position of that spot.
+        let preview = parse_preview(&text, &axes, None, self.tool_tip());
         let valid = preview.error.is_none();
         if valid {
             self.program.last_valid_preview = preview.clone();

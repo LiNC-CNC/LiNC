@@ -869,14 +869,26 @@ pub fn trajectory(
     // Legends name the colours; a thumbnail too small to read them omits it.
     show_legend: bool,
 ) -> egui::Response {
-    let mut view = TrajectoryView::new(
-        preview,
-        app.snapshot.live_trail.as_slice(),
-        app.profile.variant,
-    );
+    // The view is drawn in the active work coordinate system, so the trail —
+    // which the backends sample in machine coordinates — is shifted here. The
+    // machine envelope moves with it, otherwise its box would sit a whole work
+    // offset away from the part.
+    let offset = app.active_offset().cloned().unwrap_or_default();
+    let shift = |point: &[f64; 3]| {
+        [
+            point[0] - offset.get("X").copied().unwrap_or(0.0),
+            point[1] - offset.get("Y").copied().unwrap_or(0.0),
+            point[2] - offset.get("Z").copied().unwrap_or(0.0),
+        ]
+    };
+    let trail: Vec<[f64; 3]> = app.snapshot.live_trail.iter().map(shift).collect();
+    let mut view = TrajectoryView::new(preview, trail.as_slice(), app.profile.variant);
     view.view = view_mode;
     view.height = height;
-    view.machine_bounds = app.machine_bounds();
+    view.machine_bounds = app.machine_bounds().map(|bounds| linc_core::gcode::Bounds3 {
+        min: shift(&bounds.min),
+        max: shift(&bounds.max),
+    });
     view.zoom = *zoom;
     view.pan = *pan;
     view.fit = *fit;
