@@ -317,8 +317,12 @@ class Bridge:
         rewrite is limited to the keys this bridge owns.
         """
         path = self.parameter_path()
-        if not path or not os.path.exists(path):
-            return
+        if not path:
+            self.last_save_error = "no [RS274NGC] PARAMETER_FILE in the INI"
+            return False
+        if not os.path.exists(path):
+            self.last_save_error = "%s does not exist" % path
+            return False
         updates = {}
         for index, values in self.offset_overrides.items():
             base = 5220 + (index - 1) * 20
@@ -328,7 +332,8 @@ class Bridge:
             if index in self.rotation_overrides:
                 updates[base] = self.rotation_overrides[index]
         if not updates:
-            return
+            self.last_save_error = None
+            return True
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as handle:
                 lines = handle.read().splitlines()
@@ -349,8 +354,11 @@ class Bridge:
                     lines.append("%d\t%.6f" % (key, value))
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write("\n".join(lines) + "\n")
-        except OSError:
-            pass
+        except OSError as exc:
+            self.last_save_error = "could not write %s: %s" % (path, exc)
+            return False
+        self.last_save_error = None
+        return True
 
     def read_offsets(self, params):
         """The six work offsets, live where the controller can tell us.
@@ -773,13 +781,41 @@ class Bridge:
             parts.append(f"R{float(rotation):.6f}")
         result = self.issue({"origin": "write", "blocks": [" ".join(parts)]})
         if result.get("ok"):
-            self.offset_overrides[index] = {
-                str(axis).upper(): float(value) for axis, value in values.items()
-            }
+            # The block is asynchronous and its errors arrive as operator
+            # messages, so "ok" only means it was sent. Compare what the
+            # controller holds afterwards, and say so when it differs — a silent
+            # mismatch looked like a write that worked and a file that would not
+            # persist.
+            try:
+                self.cmd.wait_complete(2.0)
+                self.stat.poll()
+            except Exception:
+                pass
+            active = int(getattr(self.stat, "g5x_index", 1) or 1)
+            if active == index:
+                live = list(getattr(self.stat, "g5x_offset", ()) or ())
+                kept = {}
+                for axis_index, axis in enumerate(self.axes):
+                    if axis in values and axis_index < len(live):
+                        kept[axis] = live[axis_index]
+                wrong = [
+                    "%s=%.4f (asked %.4f)" % (axis, kept[axis], float(values[axis]))
+                    for axis in kept
+                    if abs(kept[axis] - float(values[axis])) > 1e-4
+                ]
+                if wrong:
+                    return {
+                        "ok": False,
+                        "error": "controller did not take the offset: " + ", ".join(wrong),
+                    }
+            self.offset_overrides.setdefault(index, {}).update(
+                {str(axis).upper(): float(value) for axis, value in values.items()}
+            )
             if rotation is not None:
                 self.rotation_overrides[index] = float(rotation)
             # Persist at the change, so a session that is killed loses nothing.
-            self.save_parameters()
+            if not self.save_parameters():
+                return {"ok": False, "error": self.last_save_error or "could not persist the offset"}
         return result
 
     def run_from_line(self, command):
@@ -841,9 +877,13 @@ class Bridge:
                 rotation = getattr(self.stat, "rotation_xy", None)
                 if rotation is not None:
                     self.rotation_overrides[index] = float(rotation)
-                self.save_parameters()
-            except Exception:
-                pass
+                if not self.save_parameters():
+                    return {
+                        "ok": False,
+                        "error": self.last_save_error or "could not persist the offset",
+                    }
+            except Exception as exc:
+                return {"ok": False, "error": "touch off could not be persisted: %s" % exc}
         return result
 
     def set_g92(self, command):
