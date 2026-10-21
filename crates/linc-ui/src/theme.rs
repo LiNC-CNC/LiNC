@@ -42,6 +42,26 @@ const SVG_RAMP: [f32; 13] = [
     8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 18.0, 22.0, 26.0, 30.0,
 ];
 
+/// Width of `text` set at a ramp size, in points.
+///
+/// Columns are measured from the font rather than given magic numbers, so a
+/// font-scale change moves the table with it.
+pub fn measure(ui: &Ui, text: &str, base: f32) -> f32 {
+    ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                text.to_owned(),
+                FontId::monospace(font_size(base)),
+                Color32::WHITE,
+            )
+            .size()
+            .x
+    })
+}
+
+/// Shared table geometry: cell padding either side of a measured column.
+pub const CELL_PAD: f32 = 16.0;
+
 pub fn font_size(base: f32) -> f32 {
     let mut nearest = SVG_RAMP[0];
     for value in SVG_RAMP {

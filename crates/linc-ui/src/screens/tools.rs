@@ -145,29 +145,52 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
         if let Some(error) = &app.snapshot.tool_table.error {
             ui.label(RichText::new(error).color(theme::ERROR));
         }
+        // Columns are measured from the font and the description takes the
+        // remaining width, so the table fits the card instead of a set of
+        // guessed widths; a card too narrow for the minimums scrolls sideways
+        // rather than hiding a column.
+        let columns = 3 + if lathe { 4 } else { 3 } + usize::from(pocket);
+        let pad = theme::CELL_PAD;
+        let tool_width = theme::measure(ui, "T00", 12.0) + pad;
+        let number_width = theme::measure(ui, "-000.000", 11.0) + pad;
+        let kind_width = theme::measure(ui, "BORING", 9.0) + pad;
+        let write_width = 96.0;
+        let mut fixed = tool_width + write_width + pad;
+        fixed += if lathe {
+            4.0 * number_width
+        } else {
+            2.0 * number_width + kind_width
+        };
+        if pocket {
+            fixed += number_width;
+        }
+        let description_min = theme::measure(ui, "DESCRIPTION_DESCRIPTION", 11.0) + pad;
+        let description_width = (ui.available_width() - fixed).max(description_min);
         {
-            let columns = 3 + if lathe { 4 } else { 3 } + usize::from(pocket);
+            egui::ScrollArea::horizontal()
+                .id_salt("tool-table-scroll")
+                .show(ui, |ui| {
             egui::Grid::new("tool-table-direct")
                 .num_columns(columns)
                 .striped(true)
                 .spacing([8.0, 5.0])
                 .show(ui, |ui| {
-                    header_label(ui, "T", 30.0);
-                    header_label(ui, "DESCRIPTION", 190.0);
+                    header_label(ui, "T", tool_width);
+                    header_label(ui, "DESCRIPTION", description_width);
                     if lathe {
-                        header_label(ui, "X", 72.0);
-                        header_label(ui, "Z", 72.0);
-                        header_label(ui, "NOSE R", 66.0);
-                        header_label(ui, "ORIENT", 56.0);
+                        header_label(ui, "X", number_width);
+                        header_label(ui, "Z", number_width);
+                        header_label(ui, "NOSE R", number_width);
+                        header_label(ui, "ORIENT", number_width);
                     } else {
-                        header_label(ui, "Ø", 72.0);
-                        header_label(ui, "LENGTH", 76.0);
-                        header_label(ui, "TYPE", 44.0);
+                        header_label(ui, "Ø", number_width);
+                        header_label(ui, "LENGTH", number_width);
+                        header_label(ui, "TYPE", kind_width);
                     }
                     if pocket {
-                        header_label(ui, if lathe { "STATION" } else { "POCKET" }, 54.0);
+                        header_label(ui, if lathe { "STATION" } else { "POCKET" }, number_width);
                     }
-                    header_label(ui, "WRITE", 58.0);
+                    header_label(ui, "WRITE", write_width);
                     ui.end_row();
 
                     for (index, row) in rows.iter().enumerate() {
@@ -188,19 +211,19 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                             .drafts
                             .entry(row.tool)
                             .or_insert_with(|| ToolDraft::from_row(row));
-                        text_cell(ui, writable, &mut draft.description, 190.0);
+                        text_cell(ui, writable, &mut draft.description, description_width);
                         if lathe {
                             for axis in ["X", "Z"] {
                                 let text = draft.axes.entry(axis.into()).or_default();
-                                number_cell(ui, writable, text, 72.0);
+                                number_cell(ui, writable, text, number_width);
                             }
-                            number_cell(ui, writable, &mut draft.nose_radius, 66.0);
-                            number_cell(ui, writable, &mut draft.orientation, 56.0);
+                            number_cell(ui, writable, &mut draft.nose_radius, number_width);
+                            number_cell(ui, writable, &mut draft.orientation, number_width);
                         } else {
-                            number_cell(ui, writable, &mut draft.diameter, 72.0);
-                            number_cell(ui, writable, &mut draft.length, 76.0);
+                            number_cell(ui, writable, &mut draft.diameter, number_width);
+                            number_cell(ui, writable, &mut draft.length, number_width);
                             ui.add_sized(
-                                [44.0, 24.0],
+                                [kind_width, 24.0],
                                 egui::Label::new(
                                     RichText::new(if row.kind.is_empty() {
                                         "—"
@@ -213,13 +236,22 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                             );
                         }
                         if pocket {
-                            number_cell(ui, writable, &mut draft.pocket, 54.0);
+                            number_cell(ui, writable, &mut draft.pocket, number_width);
                         }
                         if theme::action_button(ui, "WRITE", writable).clicked() {
                             write_tool = Some(row.tool);
                         }
                         ui.end_row();
                     }
+                    if rows.is_empty() {
+                        ui.label(
+                            RichText::new("no tools in the table")
+                                .size(theme::font_size(10.0))
+                                .color(theme::MUTED),
+                        );
+                        ui.end_row();
+                    }
+                });
                 });
         }
         if let Some(error) = &app.tools.error {
