@@ -1141,14 +1141,19 @@ fn log_table(ui: &mut Ui, id: &str, logs: &[Alarm], limit: usize) {
                     .size(theme::font_size(9.0))
                     .color(theme::MUTED),
                 );
-                ui.label(
-                    RichText::new(&alarm.message)
-                        .size(theme::font_size(10.0))
-                        .color(if alarm.severity == AlarmSeverity::Info {
-                            theme::MUTED
-                        } else {
-                            severity_color(alarm.severity)
-                        }),
+                // One line per row: a wrapped message made each entry two or
+                // three rows tall, which is what read as huge gaps.
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(&alarm.message)
+                            .size(theme::font_size(10.0))
+                            .color(if alarm.severity == AlarmSeverity::Info {
+                                theme::MUTED
+                            } else {
+                                severity_color(alarm.severity)
+                            }),
+                    )
+                    .truncate(),
                 );
                 ui.end_row();
             }
