@@ -16,7 +16,11 @@ net sim-estop cnc_panel.estop => rio.sim-estop
 # sources are ORed: `halui.estop.reset` is a single pin.
 # or2.estop_reset is created in linc.hal (or2 is loaded once there).
 addf or2.estop_reset servo-thread
-net sim-power-on cnc_panel.power_on => rio.sim-power-on or2.estop_reset.in0
+# `halui.estop.reset` leaves the task in ESTOP_RESET, which enables motion but is
+# not the ON state: `EMC_JOINT_HOME` (and other task commands) refuse it with
+# "cannot be executed until the machine is out of E-stop and turned on". Jogging
+# works in that state, which is why homing after a jog was the first failure.
+net sim-power-on cnc_panel.power_on => rio.sim-power-on or2.estop_reset.in0 halui.machine.on
 net sim-estop-reset cnc_panel.estop_reset => or2.estop_reset.in1
 net estop-reset-request or2.estop_reset.out => halui.estop.reset
-net sim-power-off cnc_panel.power_off => rio.sim-power-off
+net sim-power-off cnc_panel.power_off => rio.sim-power-off halui.machine.off
