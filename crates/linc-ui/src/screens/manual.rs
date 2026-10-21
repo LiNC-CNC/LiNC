@@ -128,7 +128,7 @@ fn input_card(app: &LincApp, ui: &mut Ui) {
 }
 
 
-fn mode_context_card(app: &LincApp, ui: &mut Ui) {
+fn mode_context_card(app: &mut LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
         theme::section_header(ui, "MODE CONTEXT");
         let mode = app.snapshot.panel.mode.mode();
@@ -163,16 +163,24 @@ fn mode_context_card(app: &LincApp, ui: &mut Ui) {
             }
             Some(linc_core::model::PanelMode::Inc) => {
                 theme::kv_row(ui, "MODE", "INCREMENT");
-                theme::kv_row(
-                    ui,
-                    "INCREMENT",
-                    app.snapshot
-                        .panel
-                        .jog
-                        .increment
-                        .map(|value| format!("{value} {}", app.snapshot.positions.units))
-                        .unwrap_or_else(|| "UNKNOWN".into()),
-                );
+                // The steps come from [DISPLAY] INCREMENTS in the machine INI,
+                // so the HMI offers exactly the values LinuxCNC was configured
+                // with instead of a hardcoded list. The first entry is the
+                // continuous "JOG" step.
+                theme::kv_row(ui, "STEP", app.jog_increment_label().unwrap_or_else(|| "JOG".into()));
+                let increments: Vec<(String, f64)> = app.increments().to_vec();
+                let selected = app.jog_increment_index();
+                let mut chosen = None;
+                ui.horizontal_wrapped(|ui| {
+                    for (index, (label, _)) in increments.iter().enumerate() {
+                        if theme::chip(ui, label.clone(), index == selected).clicked() {
+                            chosen = Some(index);
+                        }
+                    }
+                });
+                if let Some(index) = chosen {
+                    app.set_jog_increment_index(index);
+                }
                 theme::kv_row(
                     ui,
                     "REMAINING STEP",

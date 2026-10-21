@@ -79,6 +79,11 @@ pub struct LincApp {
     /// Runtime UI preferences (CONFIGURATION.md §9). Machine identity, HAL
     /// pins, safety flags and the INI path are never stored here.
     pub preferences: linc_core::preferences::Preferences,
+    /// The finite steps from `[DISPLAY] INCREMENTS`, without the continuous
+    /// `JOG` entry: continuous is selected by the panel's JOG mode.
+    pub jog_increments: Vec<(String, f64)>,
+    /// Index into `jog_increments`.
+    pub jog_increment_index: usize,
     preferences_dirty: bool,
     preferences_saved_at: std::time::Instant,
 }
@@ -210,6 +215,8 @@ impl LincApp {
             quit_requested: false,
             pending_load: false,
             keymap: crate::state::Keymap::from_config(&profile.config.keys),
+            jog_increments: crate::state::finite_increments(&profile.machine_ini.increments),
+            jog_increment_index: preferences.jog_increment.unwrap_or(0),
             preferences,
             preferences_dirty: false,
             preferences_saved_at: std::time::Instant::now(),
@@ -893,6 +900,40 @@ impl LincApp {
 
     pub fn active_offset_values(&self) -> Option<&linc_core::model::AxisMap<f64>> {
         active_offset(&self.snapshot)
+    }
+
+    /// The finite steps the INI declares.
+    pub fn increments(&self) -> &[(String, f64)] {
+        &self.jog_increments
+    }
+
+    pub fn jog_increment_index(&self) -> usize {
+        self.jog_increment_index.min(self.increments().len().saturating_sub(1))
+    }
+
+    /// Selected increment in machine units; 0.0 means continuous jog.
+    pub fn jog_increment_value(&self) -> f64 {
+        crate::state::jog_increment(self.increments(), self.jog_increment_index()).1
+    }
+
+    pub fn jog_increment_label(&self) -> Option<String> {
+        crate::state::jog_increment(self.increments(), self.jog_increment_index()).0.into()
+    }
+
+    /// Publish the selection to `linc.jog-increment` when it changes.
+    pub fn set_jog_increment_index(&mut self, index: usize) {
+        let index = index.min(self.increments().len().saturating_sub(1));
+        if index == self.jog_increment_index {
+            return;
+        }
+        self.jog_increment_index = index;
+        self.preferences.jog_increment = Some(index);
+        self.preferences_dirty = true;
+        let value = self.jog_increment_value();
+        self.send(linc_core::command::MachineCommand::SetHalOutput {
+            output: linc_core::command::LincOutput::JogIncrement,
+            value: linc_core::command::HalValue::Float(value),
+        });
     }
 
     pub fn tool_tip(&self) -> [f64; 3] {

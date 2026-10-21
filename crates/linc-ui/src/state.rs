@@ -1125,6 +1125,73 @@ impl Keymap {
     }
 }
 
+/// The finite steps from `[DISPLAY] INCREMENTS`.
+///
+/// The list conventionally starts with `JOG` (0.0), which means continuous jog.
+/// The panel's JOG mode already selects continuous, so offering a zero step in
+/// INC mode would only produce a keypress that moves nothing. Continuous is a
+/// mode, not a step.
+pub fn finite_increments(increments: &[(String, f64)]) -> Vec<(String, f64)> {
+    increments
+        .iter()
+        .filter(|(_, value)| *value > 0.0)
+        .cloned()
+        .collect()
+}
+
+/// Resolve a selected increment against the INI's list.
+///
+/// Returns the label and the value in machine units. An out-of-range index
+/// clamps to the last entry, and an empty list yields continuous jog, so a
+/// profile without `[DISPLAY] INCREMENTS` still works.
+pub fn jog_increment(increments: &[(String, f64)], index: usize) -> (String, f64) {
+    match increments.get(index) {
+        Some((label, value)) => (label.clone(), *value),
+        None => match increments.last() {
+            Some((label, value)) => (label.clone(), *value),
+            None => ("JOG".to_string(), 0.0),
+        },
+    }
+}
+
+#[cfg(test)]
+mod jog_increment_tests {
+    use super::{finite_increments, jog_increment};
+
+    fn sample() -> Vec<(String, f64)> {
+        vec![
+            ("JOG".to_string(), 0.0),
+            ("10mm".to_string(), 10.0),
+            ("1mm".to_string(), 1.0),
+            (".1mm".to_string(), 0.1),
+            (".01mm".to_string(), 0.01),
+        ]
+    }
+
+    #[test]
+    fn continuous_is_not_offered_as_a_step() {
+        let steps = finite_increments(&sample());
+        assert_eq!(steps.len(), 4);
+        assert_eq!(steps[0], ("10mm".to_string(), 10.0));
+        assert!(steps.iter().all(|(_, value)| *value > 0.0));
+    }
+
+    #[test]
+    fn resolves_every_ini_step_in_order() {
+        let steps = finite_increments(&sample());
+        assert_eq!(jog_increment(&steps, 0), ("10mm".to_string(), 10.0));
+        assert_eq!(jog_increment(&steps, 1), ("1mm".to_string(), 1.0));
+        assert_eq!(jog_increment(&steps, 3), (".01mm".to_string(), 0.01));
+    }
+
+    #[test]
+    fn clamps_and_survives_a_missing_list() {
+        let steps = finite_increments(&sample());
+        assert_eq!(jog_increment(&steps, 99), (".01mm".to_string(), 0.01));
+        assert_eq!(jog_increment(&[], 3), ("JOG".to_string(), 0.0));
+    }
+}
+
 #[cfg(test)]
 mod keymap_tests {
     use super::*;
