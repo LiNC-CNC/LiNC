@@ -9,18 +9,9 @@ use crate::shell::LincApp;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
-    // The page header is the stable keyboard focus stop. Machine is the
-    // default page, so without it arrow-key navigation could never start
-    // here (egui only bootstraps focus from Tab).
-    common::page_header(
-        ui,
-        if app.profile.variant == MachineVariant::Lathe {
-            "MACHINE / LATHE"
-        } else {
-            "MACHINE / MILL"
-        },
-        "Read-only dashboard. Machine control stays on the physical panel.",
-    );
+    // Machine is the default page, so it needs a focus stop for arrow-key
+    // navigation to start from; it does not need a visible title.
+    common::focus_anchor(ui, "machine-page-focus");
     if app.profile.variant == MachineVariant::Lathe {
         lathe(app, ui);
     } else {

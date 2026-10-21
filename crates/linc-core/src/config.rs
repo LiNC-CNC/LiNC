@@ -757,6 +757,26 @@ fn validate(config: &Config, ini: &MachineIni) -> Result<(), ConfigError> {
             }
         }
     }
+    // `[ui] pages` selects which entries the navigation shows. Unknown keys
+    // would silently disappear from the sidebar, so reject them.
+    const KNOWN_PAGES: [&str; 8] = [
+        "machine",
+        "program",
+        "offsets",
+        "tools",
+        "diagnostics",
+        "help",
+        "settings",
+        "probe",
+    ];
+    for page in &config.ui.pages {
+        let key = page.trim().to_ascii_lowercase();
+        if !KNOWN_PAGES.contains(&key.as_str()) {
+            return Err(ConfigError::Invalid(format!(
+                "ui.pages contains '{page}'; known pages are {KNOWN_PAGES:?}"
+            )));
+        }
+    }
     if config.panel.owner != "linc-panel" {
         return Err(ConfigError::Invalid(
             "panel.owner must be linc-panel; the HMI never owns the link".into(),

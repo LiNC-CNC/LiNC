@@ -79,6 +79,8 @@ pub struct LincApp {
     /// Runtime UI preferences (CONFIGURATION.md §9). Machine identity, HAL
     /// pins, safety flags and the INI path are never stored here.
     pub preferences: linc_core::preferences::Preferences,
+    /// Navigation entries the profile shows, in display order.
+    pub nav: Vec<Page>,
     /// The finite steps from `[DISPLAY] INCREMENTS`, without the continuous
     /// `JOG` entry: continuous is selected by the panel's JOG mode.
     pub jog_increments: Vec<(String, f64)>,
@@ -215,6 +217,7 @@ impl LincApp {
             quit_requested: false,
             pending_load: false,
             keymap: crate::state::Keymap::from_config(&profile.config.keys),
+            nav: nav_pages(&profile.config.ui.pages),
             jog_increments: crate::state::finite_increments(&profile.machine_ini.increments),
             jog_increment_index: preferences.jog_increment.unwrap_or(0),
             preferences,
@@ -1027,10 +1030,7 @@ impl LincApp {
 
     pub fn focus_nav(&mut self) {
         self.focus_region = FocusRegion::Nav;
-        self.nav_focus = NAV_ITEMS
-            .iter()
-            .position(|(page, _, _)| *page == self.page)
-            .unwrap_or(0);
+        self.nav_focus = self.nav.iter().position(|page| *page == self.page).unwrap_or(0);
     }
 
     pub fn handle_keyboard(&mut self, ui: &mut egui::Ui) {
@@ -1067,6 +1067,14 @@ impl LincApp {
                 } else {
                     nav_page = Some(Page::Program);
                 }
+            }
+            // Separate, displayable binding for CODE/SPLIT: the F-keys the
+            // navigation uses are implicit and never listed in the hint row.
+            if input.consume_key(
+                self.keymap.program_cycle_view.modifiers,
+                self.keymap.program_cycle_view.key,
+            ) {
+                cycle_view = true;
             }
             if input.consume_key(self.keymap.tools.modifiers, self.keymap.tools.key) {
                 nav_page = Some(Page::Tools);
@@ -1248,7 +1256,7 @@ impl LincApp {
             let mut activate = false;
             ui.input_mut(|input| {
                 if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-                    self.nav_focus = (self.nav_focus + 1).min(NAV_ITEMS.len() - 1);
+                    self.nav_focus = (self.nav_focus + 1).min(self.nav.len().saturating_sub(1));
                 }
                 if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
                     self.nav_focus = self.nav_focus.saturating_sub(1);
@@ -1258,7 +1266,7 @@ impl LincApp {
                 }
             });
             if activate {
-                let page = NAV_ITEMS[self.nav_focus].0;
+                let page = self.nav.get(self.nav_focus).copied().unwrap_or(Page::Machine);
                 self.request_page(page);
             }
         }
@@ -1550,7 +1558,13 @@ impl LincApp {
                 .color(theme::MUTED),
         );
         ui.add_space(4.0);
-        for (index, (page, label, keycap)) in NAV_ITEMS.iter().enumerate() {
+        // Copied out: the loop body navigates, which borrows `self` mutably.
+        let nav = self.nav.clone();
+        for (index, page) in nav.iter().enumerate() {
+            let Some((_, label, keycap)) = NAV_ITEMS.iter().find(|(entry, _, _)| entry == page)
+            else {
+                continue;
+            };
             let selected = *page == self.page;
             let focused = self.focus_region == FocusRegion::Nav && self.nav_focus == index;
             let (rect, response) =
@@ -1684,6 +1698,9 @@ impl LincApp {
         let mut hints: Vec<(String, &'static str)> = Vec::new();
         match self.page {
             Page::Program => {
+                // Drawn as a square rather than as the key name: the toggle
+                // sits on an F-key, and those are implicit everywhere else.
+                hints.push(("\u{25a2}".to_string(), "CODE/SPLIT"));
                 hints.push((k.open.label(), "LOAD"));
                 hints.push((k.save.label(), "SAVE"));
                 hints.push((k.find.label(), "FIND"));
@@ -2099,6 +2116,11 @@ impl eframe::App for LincApp {
     }
 }
 
+/// Navigation entries in display order, with their label and keycap hint.
+///
+/// Which of these actually appear is `[ui] pages` in the profile, so a machine
+/// can hide the pages it does not use (a machine with no changer can hide
+/// TOOLS, for example) without removing the screen from the binary.
 pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
     (Page::Machine, "MACHINE", "MAIN"),
     (Page::Program, "PROGRAM", "FILE"),
@@ -2108,6 +2130,20 @@ pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
     (Page::Help, "G-CODE HELP", "HELP"),
     (Page::Settings, "SETTINGS", ""),
 ];
+
+/// Navigation entries to show, from `[ui] pages`.
+///
+/// An empty list means "all of them", so a profile that never mentions the key
+/// still gets the full navigation.
+fn nav_pages(configured: &[String]) -> Vec<Page> {
+    if configured.is_empty() {
+        return NAV_ITEMS.iter().map(|(page, _, _)| *page).collect();
+    }
+    configured
+        .iter()
+        .map(|key| page_from_config(key))
+        .collect()
+}
 
 /// Stable preferences key for a page. Mode-driven pages are never persisted.
 fn page_key(page: Page) -> &'static str {

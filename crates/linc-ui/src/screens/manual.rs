@@ -54,7 +54,6 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                 &readout,
             );
             mode_context_card(app, ui);
-            input_card(app, ui);
         },
     );
 }
@@ -84,49 +83,6 @@ fn coordinates_readout(app: &LincApp) -> Vec<LiveAxisRow> {
         .collect()
 }
 
-fn input_card(app: &LincApp, ui: &mut Ui) {
-    theme::card(ui, |ui| {
-        theme::section_header(ui, "INPUT");
-        theme::kv_row(
-            ui,
-            "PANEL",
-            if app.snapshot.panel.connected {
-                "ONLINE"
-            } else {
-                "OFFLINE"
-            },
-        );
-        theme::kv_row(
-            ui,
-            "PROTECT",
-            if app.program_protected() { "ON" } else { "OFF" },
-        );
-        theme::kv_row(
-            ui,
-            "PENDANT",
-            if app.snapshot.pendant.connected {
-                "WHB04B-6 / JOG ONLY"
-            } else {
-                "NOT CONNECTED"
-            },
-        );
-        theme::kv_row(
-            ui,
-            "ACTIVE AXIS",
-            app.snapshot
-                .panel
-                .jog
-                .active_axis
-                .clone()
-                .unwrap_or_else(|| "—".into()),
-        );
-        ui.label(
-            RichText::new("MPG encoder counts are not carried by the RS-485 link and are never fabricated.")
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-        );
-    });
-}
 
 
 fn mode_context_card(app: &mut LincApp, ui: &mut Ui) {

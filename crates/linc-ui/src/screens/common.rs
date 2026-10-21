@@ -831,6 +831,26 @@ pub fn work_positions(app: &LincApp) -> AxisMap<f64> {
     map
 }
 
+/// Keyboard focus stop with nothing drawn.
+///
+/// A page needs one focusable widget at the top so arrow-key navigation can
+/// start there (egui only bootstraps focus from Tab). Pages that do not want a
+/// visible title use this instead of [`page_header`].
+pub fn focus_anchor(ui: &mut Ui, salt: &str) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+    let response = ui.interact(rect, ui.scope_id().with(salt), Sense::focusable_noninteractive());
+    let requested = ui.ctx().data_mut(|data| {
+        data.remove_temp::<bool>(egui::Id::unique("linc-page-focus"))
+            .unwrap_or(false)
+    });
+    if requested {
+        response.request_focus();
+    }
+    if response.has_focus() {
+        theme::focus_ring(ui, &response);
+    }
+}
+
 pub fn page_header(ui: &mut Ui, title: &str, subtitle: &str) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {

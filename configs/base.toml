@@ -101,10 +101,12 @@ highlight_selected_line = true
 [keys]
 machine = "F5"
 program = "F6"
-program_cycle_view = "F6"
+# CODE/SPLIT on the Program page. Shown in the hint row as a square, not as
+# an F-key: F5-F10 are implicit navigation keys and are never listed.
+program_cycle_view = "F10"
 tools = "F7"
 offsets = "F8"
-diagnostics = "F10"
+diagnostics = "F9"
 back = "Escape"
 quit = "Ctrl+Q"
 focus_next = "Down"

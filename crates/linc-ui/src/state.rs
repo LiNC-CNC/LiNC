@@ -861,6 +861,7 @@ impl Binding {
         Self { key, modifiers }
     }
 
+
     /// Short display form, e.g. `F5`, `Ctrl+Q`, `Esc`, `/`. Used by the
     /// bottom bar's keyboard-command hints.
     pub fn label(&self) -> String {
@@ -1052,6 +1053,9 @@ fn parse_key(text: &str) -> Option<egui::Key> {
 pub struct Keymap {
     pub machine: Binding,
     pub program: Binding,
+    /// Separate CODE/SPLIT toggle. Unlike the F-key navigation bindings it is
+    /// listed in the hint row, so the Program screen does not need buttons.
+    pub program_cycle_view: Binding,
     pub tools: Binding,
     pub offsets: Binding,
     pub diagnostics: Binding,
@@ -1091,6 +1095,11 @@ impl Keymap {
         let keymap = Self {
             machine: binding(&keys.machine, Binding::new(Key::F5, none), &mut rejected),
             program: binding(&keys.program, Binding::new(Key::F6, none), &mut rejected),
+            program_cycle_view: binding(
+                &keys.program_cycle_view,
+                Binding::new(Key::F10, none),
+                &mut rejected,
+            ),
             tools: binding(&keys.tools, Binding::new(Key::F7, none), &mut rejected),
             offsets: binding(&keys.offsets, Binding::new(Key::F8, none), &mut rejected),
             diagnostics: binding(

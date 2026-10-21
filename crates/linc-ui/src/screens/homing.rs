@@ -5,7 +5,7 @@
 //! screens stay consistent. The HMI only observes; it never homes an axis.
 
 use egui::{RichText, Ui};
-use linc_core::homing::{axis_rows, AxisHomeStatus, MAPPINGS};
+use linc_core::homing::{axis_rows, AxisHomeStatus};
 use linc_core::model::PanelMode;
 
 use crate::screens::common::{self, LiveAxisRow};
@@ -53,7 +53,6 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                 &readout,
             );
             homing_context_card(app, ui, &rows);
-            panel_mapping_card(ui);
             if program_zero {
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "PROGRAM ZERO");
@@ -88,16 +87,10 @@ fn homing_readout(app: &LincApp, rows: &[linc_core::homing::HomeAxisRow]) -> Vec
                     .map(|name| name == row.name)
                     .unwrap_or(false),
                 badge: Some((row.status.label().to_string(), status_color(row.status))),
-                note: Some(match row.status {
-                    AxisHomeStatus::NotConfigured => "OPTIONAL / NOT CONFIGURED".to_string(),
-                    _ => format!(
-                        "SEQ {} / SEARCH {:.1} / LATCH {:.1} / INDEX {}",
-                        row.sequence,
-                        row.search_vel,
-                        row.latch_vel,
-                        if row.use_index { "YES" } else { "NO" }
-                    ),
-                }),
+                // No sequence/search/latch note: the DRO is a position readout,
+                // and the homing parameters belong in the machine INI rather
+                // than repeated under every axis.
+                note: None,
             }
         })
         .collect()
@@ -182,62 +175,3 @@ fn homing_context_card(app: &LincApp, ui: &mut Ui, rows: &[linc_core::homing::Ho
     });
 }
 
-fn panel_mapping_card(ui: &mut Ui) {
-    theme::card(ui, |ui| {
-        theme::section_header(ui, "PANEL MAPPING");
-        egui::Grid::new("panel-mapping")
-            .num_columns(3)
-            .striped(true)
-            .spacing([12.0, 3.0])
-            .show(ui, |ui| {
-                for header in ["KEY", "HOME ACTION", "PROG.HOME MDI"] {
-                    ui.label(
-                        RichText::new(header)
-                            .size(theme::font_size(8.5))
-                            .strong()
-                            .color(theme::MUTED),
-                    );
-                }
-                ui.end_row();
-                for mapping in MAPPINGS {
-                    ui.label(
-                        RichText::new(mapping.key.label())
-                            .monospace()
-                            .size(theme::font_size(10.0))
-                            .color(theme::C3),
-                    );
-                    ui.label(
-                        RichText::new(mapping.home_action)
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::FG),
-                    );
-                    ui.label(
-                        RichText::new(mapping.proghome_mdi)
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::SUCCESS),
-                    );
-                    ui.end_row();
-                }
-            });
-        ui.add_space(4.0);
-        ui.label(
-            RichText::new("Individual home outputs are disabled while any axis is homing; gating is in the panel service/post-GUI HAL.")
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-        );
-        ui.label(
-            RichText::new("PROG.HOME is current-WCS zero, not machine home and not G53. X/Y/Z only; the panel issues MDI immediately.")
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-        );
-        if ui.available_width() > 0.0 {
-            ui.label(
-                RichText::new("Lathe X is shown in the configured radius/diameter convention.")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-        }
-    });
-}

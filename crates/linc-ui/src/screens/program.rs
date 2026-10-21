@@ -41,50 +41,14 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 }
 
 fn header(app: &mut LincApp, ui: &mut Ui) {
+    // The file name and current line are already in the top bar, so only the
+    // state flags and the view tabs are worth a row here.
+    common::focus_anchor(ui, "program-page-focus");
     ui.horizontal(|ui| {
-        ui.vertical(|ui| {
-            let title_response = ui.label(
-                RichText::new("PROGRAM")
-                    .size(theme::font_size(14.0))
-                    .strong()
-                    .color(theme::FG),
-            );
-            let title_focus = ui.interact(
-                title_response.rect,
-                ui.scope_id().with("page-title-focus"),
-                egui::Sense::focusable_noninteractive(),
-            );
-            let requested = ui.ctx().data_mut(|data| {
-                data.remove_temp::<bool>(egui::Id::unique("linc-page-focus"))
-                    .unwrap_or(false)
-            });
-            if requested {
-                title_focus.request_focus();
-            }
-            if title_focus.has_focus() {
-                theme::focus_ring(ui, &title_focus);
-            }
-            ui.horizontal(|ui| {
-                let name = if app.snapshot.program.display_name.is_empty() {
-                    "NO PROGRAM LOADED".to_string()
-                } else {
-                    app.snapshot.program.display_name.clone()
-                };
-                ui.label(
-                    RichText::new(name)
-                        .monospace()
-                        .size(theme::font_size(13.0))
-                        .color(theme::FG),
-                );
-                ui.label(
-                    RichText::new(format!(
-                        "LN {}/{}",
-                        app.snapshot.program.current_line, app.snapshot.program.line_count
-                    ))
-                    .monospace()
-                    .size(theme::font_size(10.0))
-                    .color(theme::MUTED),
-                );
+        // The CODE/SPLIT toggle is a keyboard command now; the binding is
+        // listed in the bottom hint row with the other page commands.
+        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+            ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
                 if app.program.editor.dirty {
                     ui.label(
                         RichText::new("* UNSAVED")
@@ -108,37 +72,6 @@ fn header(app: &mut LincApp, ui: &mut Ui) {
                     );
                 }
             });
-        });
-        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            let split = app.program.view == ProgramView::Split;
-            if common::page_tab(ui, "CODE", !split).clicked() {
-                app.program.view = ProgramView::Code;
-                app.program.focus_editor = false;
-            }
-            if common::page_tab(ui, "SPLIT", split).clicked() {
-                app.program.view = ProgramView::Split;
-                app.program.focus_editor = false;
-            }
-            ui.add_space(8.0);
-            let (status, color) = if let Some(error) = &app.program.preview.error {
-                (format!("SYNTAX ERROR LN {}", error.line), theme::WARNING)
-            } else {
-                ("VALID".to_string(), theme::SUCCESS)
-            };
-            ui.label(
-                RichText::new(status)
-                    .monospace()
-                    .size(theme::font_size(10.0))
-                    .color(color),
-            );
-            if app.program.preview_due.is_some() {
-                ui.label(
-                    RichText::new("PREVIEW…")
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-            }
         });
     });
 }
@@ -452,6 +385,18 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                         .monospace()
                         .size(theme::font_size(9.0))
                         .color(theme::MUTED),
+                );
+                // Syntax / preview state belongs with the buffer it describes.
+                let (status, color) = if let Some(error) = &app.program.preview.error {
+                    (format!("SYNTAX ERROR LN {}", error.line), theme::WARNING)
+                } else {
+                    ("VALID".to_string(), theme::SUCCESS)
+                };
+                ui.label(
+                    RichText::new(status)
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(color),
                 );
             });
         });
