@@ -16,12 +16,12 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 # ---------------------------------------------------------------------------
 # Logic and conversion components
 # ---------------------------------------------------------------------------
-loadrt and2 names=and2.cycle_gate,and2.cycle_run,and2.cycle_resume,and2.jxp_cont,and2.jxn_cont,and2.jyp_cont,and2.jyn_cont,and2.jzp_cont,and2.jzn_cont,and2.jxp_inc,and2.jxn_inc,and2.jyp_inc,and2.jyn_inc,and2.jzp_inc,and2.jzn_inc
+loadrt and2 names=and2.teleop_gate,and2.cycle_gate,and2.cycle_run,and2.cycle_resume,and2.jxp_cont,and2.jxn_cont,and2.jyp_cont,and2.jyn_cont,and2.jzp_cont,and2.jzn_cont,and2.jxp_inc,and2.jxn_inc,and2.jyp_inc,and2.jyn_inc,and2.jzp_inc,and2.jzn_inc
 # `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
 # with "or2: already exists". Instances only used by the simulation
 # (or2.estop_reset) are created here and wired in linc-sim.hal.
 loadrt or2 names=or2.jog_a,or2.jog_b,or2.pause,or2.manual_req,or2.estop_reset
-loadrt not names=not.paused,not.coolant,not.lube,not.opt,not.bdt,not.spindle_on,not.mode_inc
+loadrt not names=not.mode_home,not.paused,not.coolant,not.lube,not.opt,not.bdt,not.spindle_on,not.mode_inc
 loadrt toggle names=toggle.coolant,toggle.lube,toggle.opt,toggle.bdt,toggle.sbk,toggle.worklamp
 loadrt scale names=scale.feed,scale.rapid,scale.spindle
 loadrt conv_float_s32 names=conv.feed,conv.rapid,conv.spindle
@@ -90,7 +90,9 @@ net mode-jog-a or2.jog_a.out => or2.jog_b.in1
 #
 # `halui.mode.manual` is a single pin, so JOG and HOME are ORed into one
 # request rather than each linking the pin themselves.
-net mode-jog-any or2.jog_b.out => halui.mode.teleop or2.manual_req.in0
+net mode-jog-any or2.jog_b.out => and2.teleop_gate.in0 or2.manual_req.in0
+net mode-not-home not.mode_home.out => and2.teleop_gate.in1
+net mode-teleop-request and2.teleop_gate.out => halui.mode.teleop
 
 # EDIT, HOME and PROG.HOME are not LinuxCNC task modes, but HOME must still put
 # the controller into MANUAL: `halui.joint.N.home` / `halui.home-all` are
@@ -105,7 +107,7 @@ net mode-jog-any or2.jog_b.out => halui.mode.teleop or2.manual_req.in0
 # motion refuses `EMC_JOINT_HOME` with "must be in joint mode to home" while it
 # is teleop — `halui.mode.joint` sends EMC_TRAJ_SET_TELEOP_ENABLE(0), which is
 # MOTION_FREE. Manual mode alone does not.
-net mode-manual-home cnc_panel.mode_home => or2.manual_req.in1 halui.mode.joint
+net mode-home cnc_panel.mode_home => not.mode_home.in or2.manual_req.in1 halui.mode.joint
 net mode-manual-request or2.manual_req.out => halui.mode.manual
 
 # ---------------------------------------------------------------------------
