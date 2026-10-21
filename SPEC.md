@@ -413,18 +413,20 @@ Two layouts, selected by the header toggle or `FILE`:
   editor the way the Machine page's G-code display marks it: an accent bar in
   the gutter plus a tinted row. There is no separate current/next pane.
 - `MODAL` is its own pane under the toolpath, using the same abbreviated cells
-  as the Machine dashboard.
+  as the Machine dashboard, up to eight columns so a full set of active codes
+  stays on one row.
 - `FIT` (`Ctrl+0`) reframes the toolpath and `CLEAR TRAIL` (`Ctrl+L`) clears
   only the live trail; both are page-local commands, not buttons.
 
 #### CODE
 
-- G-code editor dominant (~80%).
-- Mini XY graph top-right, without the colour legend: it covers most of a
-  thumbnail that small.
-- `MODAL` pane below the mini graph, then the program info card: cursor/current
-  block, next block, buffer state, line count and preview state.
-- Current line synchronized with the mini graph.
+- G-code editor dominant (~76%); the `PATH` thumbnail column beside it is
+  deliberately narrow, because CODE is an editing layout.
+- The thumbnail carries no colour legend: it would cover most of a graph that
+  small.
+- `MODAL` pane below the thumbnail, in at most two columns — the column is too
+  narrow for more, and the codes then read top-to-bottom in pairs.
+- Current line synchronized with the thumbnail.
 - The CODE layout is reused for editing; there is no separate editor window.
 
 #### RUN FROM LINE

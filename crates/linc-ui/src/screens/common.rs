@@ -114,6 +114,9 @@ pub fn modal_grid(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str) {
 /// A MODAL pane of its own, for pages that have room for a side column.
 pub fn modal_pane(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str) {
     theme::card(ui, |ui| {
+        // A grid sizes to its content, which leaves the card short of the
+        // column when only a few codes are active.
+        ui.set_min_width(ui.available_width());
         theme::section_header(ui, "MODAL");
         modal_grid(app, ui, columns, id_salt);
     });

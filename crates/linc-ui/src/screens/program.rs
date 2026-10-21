@@ -72,7 +72,7 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
                     (main_height - graph_chrome - modal_total - 8.0).max(160.0),
                     ViewKind::Full,
                 );
-                common::modal_pane(app, ui, 6, "split-modal");
+                common::modal_pane(app, ui, 8, "split-modal");
             },
         );
     });
@@ -80,12 +80,9 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
 
 fn code(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
-    // Matches `split`: the editor takes half, the graph column the other half.
-    let editor_width = (available.x * 0.5 - 6.0).max(400.0);
-    // The graph card's chrome, the MODAL card in full, and the gap between.
-    const GRAPH_CHROME: f32 = 52.0;
-    const MODAL_TOTAL: f32 = 98.0;
-    let path_height = (available.y - GRAPH_CHROME - MODAL_TOTAL - 8.0).max(160.0);
+    // CODE is an editing layout: the code gets the width, and the graph column
+    // is a thumbnail strip beside it.
+    let editor_width = (available.x * 0.76).max(520.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
             Vec2::new(editor_width, available.y),
@@ -94,13 +91,28 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
         );
         ui.add_space(8.0);
         ui.allocate_ui_with_layout(
-            Vec2::new((available.x - editor_width - 8.0).max(250.0), available.y),
+            Vec2::new((available.x - editor_width - 8.0).max(220.0), available.y),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                // PATH is the whole point of the column; with the program info
-                // card gone it fills the space above MODAL.
+                // MODAL needs its own height: two columns wrap the G-codes onto
+                // several rows, so count them instead of guessing.
+                let codes = app
+                    .snapshot
+                    .program
+                    .modal
+                    .iter()
+                    .filter(|(key, _)| key.starts_with('G'))
+                    .count()
+                    .max(1);
+                let modal_rows = codes.div_ceil(2);
+                const MODAL_ROW: f32 = 26.0;
+                // Card margins (24) plus the section header (24).
+                const MODAL_CHROME: f32 = 52.0;
+                let modal_total = MODAL_CHROME + modal_rows as f32 * MODAL_ROW;
+                let path_height =
+                    (available.y - 52.0 - modal_total - 8.0).max(140.0);
                 graph_card(app, ui, path_height, ViewKind::MiniXy);
-                common::modal_pane(app, ui, 4, "program-modal");
+                common::modal_pane(app, ui, 2, "program-modal");
             },
         );
     });
