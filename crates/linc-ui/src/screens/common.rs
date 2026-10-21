@@ -1265,10 +1265,11 @@ pub fn zero_point_card(app: &mut crate::shell::LincApp, ui: &mut Ui) {
     }
 }
 
-/// Zero the active work offset for `axes`.
+/// Touch off: make the current position read zero in the active work offset.
 ///
-/// Shared by the touch-off row and the axis keys, so both go through the same
-/// gate: writes must be allowed and a work offset must exist.
+/// This is `G10 L20`, so the controller computes the offset from the position it
+/// holds — the stored G54 value changes and the DRO reads zero. Shared by the
+/// axis keys and any on-screen control, so both go through the same gate.
 pub fn zero_axes(app: &mut crate::shell::LincApp, axes: Vec<String>) {
     if !app.snapshot.writes_allowed() {
         app.toast("machine must be ON, homed and idle", theme::WARNING);

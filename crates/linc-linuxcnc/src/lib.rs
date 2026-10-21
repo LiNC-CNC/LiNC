@@ -1107,6 +1107,11 @@ struct Converter {
     /// discovered in the current poll and every page looked silent one frame
     /// after a message arrived.
     alarms: std::collections::VecDeque<Alarm>,
+    /// Last offsets handed to the snapshot, plus a counter that changes with
+    /// them. The HMI rebuilds its editable drafts when the counter moves, so a
+    /// constant value left the table showing stale numbers after a `G10` write.
+    offsets_last: Option<Vec<WorkOffset>>,
+    offsets_revision: u64,
 }
 
 impl Converter {
@@ -1128,6 +1133,8 @@ impl Converter {
             tool_change_serial: 0,
             tool_change_active: false,
             alarms: std::collections::VecDeque::new(),
+            offsets_last: None,
+            offsets_revision: 1,
         }
     }
 
@@ -1262,7 +1269,11 @@ impl Converter {
         } else {
             None
         };
-        snapshot.offsets.revision = 1;
+        if self.offsets_last.as_ref() != Some(&snapshot.offsets.offsets) {
+            self.offsets_last = Some(snapshot.offsets.offsets.clone());
+            self.offsets_revision += 1;
+        }
+        snapshot.offsets.revision = self.offsets_revision;
 
         snapshot.spindles = dto
             .spindles
