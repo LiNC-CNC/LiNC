@@ -285,6 +285,11 @@ Continuous jog ceilings in machine units per minute, reached at 100 %.
 The machine still clamps to its own `MAX_VELOCITY`, so a ceiling above the
 machine's limit simply saturates.
 
+The operator's jog percentage is multiplied by the feed override, so the feed
+override knob slows and speeds jogging exactly as it does a program, which is
+what probe_basic's `mult2.jog-speed` does. With the override at 150 % the jog
+can exceed `max_speed`; that is intentional and the machine clamps it.
+
 [safety]
 machine_control = "panel-with-explicit-mdi"
 software_estop = false

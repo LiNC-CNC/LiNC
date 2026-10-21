@@ -1207,8 +1207,13 @@ pub fn finite_increments(increments: &[(String, f64)]) -> Vec<(String, f64)> {
 /// The INI's default linear velocity is the 100% reference, and the operator's
 /// percentage scales it; the value published to `linc.jog-speed` is already
 /// absolute, so the machine HAL needs no multiplier.
+/// Jog speed from the ceiling and a percentage.
+///
+/// The percentage can exceed 100: the feed override scales it, and on this
+/// machine an override of 150 % is reachable. Negative percentages clamp to
+/// zero, because a jog cannot run backwards.
 pub fn jog_speed(ceiling_per_second: f64, percent: f64) -> f64 {
-    (ceiling_per_second * percent.clamp(0.0, 100.0) / 100.0).max(0.0)
+    (ceiling_per_second * percent.clamp(0.0, 150.0) / 100.0).max(0.0)
 }
 
 /// Resolve a selected increment against the INI's list.
@@ -1240,7 +1245,7 @@ mod jog_speed_tests {
 
     #[test]
     fn clamps_out_of_range_percentages() {
-        assert_eq!(jog_speed(60.0, 150.0), 60.0);
+        assert_eq!(jog_speed(60.0, 150.0), 90.0);
         assert_eq!(jog_speed(60.0, -20.0), 0.0);
     }
 }

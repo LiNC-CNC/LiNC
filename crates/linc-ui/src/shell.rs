@@ -1175,7 +1175,10 @@ impl LincApp {
         } else {
             self.profile.config.jog.max_speed
         };
-        crate::state::jog_speed(ceiling / 60.0, self.jog_speed_percent)
+        // The feed override scales the jog, as probe_basic does with its
+        // `mult2.jog-speed` (feed override * 100 -> jog speed percentage).
+        let percent = self.jog_speed_percent * self.snapshot.panel.feed_override;
+        crate::state::jog_speed(ceiling / 60.0, percent)
     }
 
     /// Publish the jog speed to `linc.jog-speed` when the percentage changes.
