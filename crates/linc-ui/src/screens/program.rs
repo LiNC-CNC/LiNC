@@ -246,19 +246,8 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, height: f32, kind: ViewKind) {
                 },
             );
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                let clear_label = if matches!(kind, ViewKind::MiniXy) {
-                    "CLEAR"
-                } else {
-                    "CLEAR TRAIL"
-                };
-                if theme::action_button(ui, clear_label, true).clicked() {
-                    app.clear_trail();
-                }
-                if theme::action_button(ui, "FIT", true).clicked() {
-                    app.program.graph_zoom = 1.0;
-                    app.program.graph_pan = Vec2::ZERO;
-                    app.program.fit_requested = true;
-                }
+                // FIT and CLEAR TRAIL are page-local keyboard commands; their
+                // bindings are listed in the bottom hint row.
                 if !matches!(kind, ViewKind::MiniXy) {
                     ui.label(
                         RichText::new(if app.program.preview.error.is_some() {

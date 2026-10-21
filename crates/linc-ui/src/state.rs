@@ -1061,6 +1061,9 @@ pub struct Keymap {
     /// Separate CODE/SPLIT toggle. Unlike the F-key navigation bindings it is
     /// listed in the hint row, so the Program screen does not need buttons.
     pub program_cycle_view: Binding,
+    /// Page-local to Program: fit the toolpath and clear the live trail.
+    pub graph_fit: Binding,
+    pub graph_clear: Binding,
     pub tools: Binding,
     pub offsets: Binding,
     pub diagnostics: Binding,
@@ -1105,6 +1108,8 @@ impl Keymap {
                 Binding::new(Key::F10, none),
                 &mut rejected,
             ),
+            graph_fit: binding(&keys.graph_fit, Binding::new(Key::Num0, ctrl), &mut rejected),
+            graph_clear: binding(&keys.graph_clear, Binding::new(Key::L, ctrl), &mut rejected),
             tools: binding(&keys.tools, Binding::new(Key::F7, none), &mut rejected),
             offsets: binding(&keys.offsets, Binding::new(Key::F8, none), &mut rejected),
             diagnostics: binding(

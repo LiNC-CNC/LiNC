@@ -1045,6 +1045,13 @@ impl LincApp {
         );
     }
 
+    /// Fit the program toolpath: reset zoom/pan and ask the view to reframe.
+    pub fn fit_graph(&mut self) {
+        self.program.graph_zoom = 1.0;
+        self.program.graph_pan = Vec2::ZERO;
+        self.program.fit_requested = true;
+    }
+
     pub fn clear_trail(&mut self) {
         // View-only action. The backend is not asked to change machine state;
         // the live trail is re-seeded at the current tool tip in the local view.
@@ -1074,6 +1081,8 @@ impl LincApp {
         let mut request_files = false;
         let mut save = false;
         let mut cycle_view = false;
+        let mut graph_fit = false;
+        let mut graph_clear = false;
         let mut mdi_issue = false;
         let mut help_search = false;
         let mut page_up = false;
@@ -1112,6 +1121,17 @@ impl LincApp {
                 )
             {
                 cycle_view = true;
+            }
+            // Page-local to Program: the toolpath card's FIT / CLEAR TRAIL
+            // buttons are keyboard commands now.
+            if self.page == Page::Program {
+                if input.consume_key(self.keymap.graph_fit.modifiers, self.keymap.graph_fit.key) {
+                    graph_fit = true;
+                }
+                if input.consume_key(self.keymap.graph_clear.modifiers, self.keymap.graph_clear.key)
+                {
+                    graph_clear = true;
+                }
             }
             if input.consume_key(self.keymap.tools.modifiers, self.keymap.tools.key) {
                 nav_page = Some(Page::Tools);
@@ -1247,6 +1267,12 @@ impl LincApp {
             if self.program.editor.redo() {
                 self.mark_editor_changed();
             }
+        }
+        if graph_fit {
+            self.fit_graph();
+        }
+        if graph_clear {
+            self.clear_trail();
         }
         if cycle_view {
             self.cycle_program_view();
@@ -1734,6 +1760,8 @@ impl LincApp {
                 // Drawn as a square rather than as the key name: the toggle
                 // sits on an F-key, and those are implicit everywhere else.
                 hints.push(("\u{25a2}".to_string(), "CODE/SPLIT"));
+                hints.push((k.graph_fit.label(), "FIT"));
+                hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
                 hints.push((k.open.label(), "LOAD"));
                 hints.push((k.save.label(), "SAVE"));
                 hints.push((k.find.label(), "FIND"));
