@@ -99,7 +99,8 @@ pub struct LincApp {
     pub jog_increments: Vec<(String, f64)>,
     /// Index into `jog_increments`.
     pub jog_increment_index: usize,
-    /// Jog speed as a percentage of the INI's default linear velocity.
+    /// Fixed at 100: the feed override is what scales the jog now, so there is
+    /// no second control to keep in step with it.
     pub jog_speed_percent: f64,
     preferences_dirty: bool,
     preferences_saved_at: std::time::Instant,
@@ -235,11 +236,7 @@ impl LincApp {
             nav: nav_pages(&profile.config.ui.pages),
             jog_increments: crate::state::finite_increments(&profile.machine_ini.increments),
             jog_increment_index: preferences.jog_increment.unwrap_or(0),
-            jog_speed_percent: preferences
-                .jog_speed_percent
-                .filter(|percent| percent.is_finite())
-                .unwrap_or(100.0)
-                .clamp(0.0, 100.0),
+            jog_speed_percent: 100.0,
             preferences,
             preferences_dirty: false,
             preferences_saved_at: std::time::Instant::now(),
@@ -1179,24 +1176,6 @@ impl LincApp {
         // `mult2.jog-speed` (feed override * 100 -> jog speed percentage).
         let percent = self.jog_speed_percent * self.snapshot.panel.feed_override;
         crate::state::jog_speed(ceiling / 60.0, percent)
-    }
-
-    /// Publish the jog speed to `linc.jog-speed` when the percentage changes.
-    pub fn set_jog_speed_percent(&mut self, percent: f64) {
-        let percent = percent.clamp(0.0, 100.0);
-        if (percent - self.jog_speed_percent).abs() < f64::EPSILON {
-            return;
-        }
-        self.jog_speed_percent = percent;
-        self.preferences.jog_speed_percent = Some(percent);
-        self.preferences_dirty = true;
-        let value = self.jog_speed_value();
-        self.jog_speed_published = Some(value);
-        let output = self.jog_speed_output();
-        self.send(linc_core::command::MachineCommand::SetHalOutput {
-            output: linc_core::command::LincOutput::JogSpeed,
-            value: linc_core::command::HalValue::Float(output),
-        });
     }
 
     pub fn tool_tip(&self) -> [f64; 3] {

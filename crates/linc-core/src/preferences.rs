@@ -45,6 +45,9 @@ pub struct Preferences {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jog_increment: Option<usize>,
     /// Jog speed as a percentage of `[DISPLAY] DEFAULT_LINEAR_VELOCITY`.
+    ///
+    /// No longer read: the jog follows the feed override. Kept so an existing
+    /// preferences file still parses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jog_speed_percent: Option<f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
