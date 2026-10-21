@@ -136,7 +136,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     let focus_id = egui::Id::unique("tools-table-focus");
     let (focus_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
     let focus = ui.interact(focus_rect, focus_id, egui::Sense::focusable_noninteractive());
-    if !app.tools.editing && !focus.has_focus() {
+    // Never while a dialog or the tool-change prompt is up: this widget claims
+    // focus every frame, and it was stealing it back from the dialog's buttons.
+    let overlay_open = app.modal.is_some()
+        || app.snapshot.tool_change.status == ToolChangeStatus::ManualPrompt;
+    if !app.tools.editing && !overlay_open && !focus.has_focus() {
         focus.request_focus();
     }
     ui.memory_mut(|memory| {
