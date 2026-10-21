@@ -416,15 +416,21 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     // is distinguishable from the green live trail it sits on.
     if let Some(tip) = view.tool_tip.or_else(|| view.live_trail.last().copied()) {
         let pos = projection.project(tip);
-        painter.circle_stroke(pos, 6.0, Stroke::new(1.5, theme::TOOL));
-        painter.line_segment(
-            [pos - Vec2::new(9.0, 0.0), pos + Vec2::new(9.0, 0.0)],
+        // An inverted triangle whose point sits exactly on the tool position:
+        // the tip is the datum, so the shape has to end there rather than be
+        // centred on it. A circle plus crosshair left the tip ambiguous at this
+        // size.
+        const HALF_WIDTH: f32 = 7.0;
+        const HEIGHT: f32 = 12.0;
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                pos + Vec2::new(-HALF_WIDTH, -HEIGHT),
+                pos + Vec2::new(HALF_WIDTH, -HEIGHT),
+                pos,
+            ],
+            theme::TOOL,
             Stroke::new(1.0, theme::TOOL),
-        );
-        painter.line_segment(
-            [pos - Vec2::new(0.0, 9.0), pos + Vec2::new(0.0, 9.0)],
-            Stroke::new(1.0, theme::TOOL),
-        );
+        ));
     }
 
     // Execution marker at the current line end.
@@ -508,11 +514,17 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             );
         }
         if view.tool_tip.is_some() {
-            painter.circle_stroke(
-                legend_rect.left_top() + Vec2::new(21.0, 61.0),
-                5.0,
-                Stroke::new(1.5, theme::TOOL),
-            );
+            // Same inverted triangle as the marker, so the key is recognisable.
+            let key_tip = legend_rect.left_top() + Vec2::new(21.0, 66.0);
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    key_tip + Vec2::new(-4.0, -8.0),
+                    key_tip + Vec2::new(4.0, -8.0),
+                    key_tip,
+                ],
+                theme::TOOL,
+                Stroke::new(1.0, theme::TOOL),
+            ));
             painter.text(
                 legend_rect.left_top() + Vec2::new(40.0, 55.0),
                 Align2::LEFT_TOP,

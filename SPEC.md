@@ -483,9 +483,12 @@ Program rules:
   colour (cut) and muted dashed rapids; the live trail uses a distinct
   `--success` stroke.
 - The toolpath card's status line is the key: `— CUT`, `-- RAPID`, `— LIVE`
-  and an amber `○ TOOL`, with the view (`3D / ISO`) and `ZOOM` on the right. A
+  and an amber `▽ TOOL`, with the view (`3D / ISO`) and `ZOOM` on the right. A
   legend box inside the graph is not drawn — it repeated that line and covered
   the drawing.
+- The toolhead is an inverted amber triangle whose point sits on the tool
+  position, not a shape centred on it: the operator reads the tip, and a circle
+  with a crosshair left it ambiguous at display size.
 - The live trail is the actual tool-tip path since the last clear, including
   program, MDI and jog motion. It is not the commanded program path and must
   never overwrite or hide the loaded program.
