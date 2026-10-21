@@ -849,12 +849,16 @@ fn change_card(app: &mut LincApp, ui: &mut Ui) {
                     .color(theme::WARNING),
             );
             if let Some(token) = app.snapshot.tool_change.token.clone() {
-                if theme::accent_button(
-                    ui,
-                    "CONFIRM INSTALLED",
-                    app.snapshot.panel.connected && !app.snapshot.task.running,
-                )
-                .clicked()
+                // Allowed while the program runs: this is the M6 handshake the
+                // interpreter is waiting for, not motion.
+                if app.snapshot.tool_change.confirmed {
+                    ui.label(
+                        RichText::new("CONFIRMED — WAITING FOR THE MACHINE")
+                            .size(theme::font_size(11.0))
+                            .color(theme::SUCCESS),
+                    );
+                } else if theme::accent_button(ui, "CONFIRM INSTALLED", app.snapshot.panel.connected)
+                    .clicked()
                 {
                     app.send(MachineCommand::ConfirmManualToolChange { token });
                 }

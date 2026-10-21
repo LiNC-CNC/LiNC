@@ -568,10 +568,22 @@ Primary quick tool-change surface; no MDI screen required.
 - `T0` unload and manual-change confirmation are supported. `SET CURRENT`
   (`M61 Qn`) is available for a tool already in the spindle but is explicitly
   labeled as not a tool change.
-- Manual changer: after `M6` pauses for the manual change, show
-  `REMOVE current / INSTALL target` and `CONFIRM INSTALLED`. The confirmation
-  writes the declared `linc.tool-change-confirm` HAL output, which is wired to
-  the manual-toolchange chain; it is not an arbitrary HAL write.
+- Manual changer: after `M6` pauses for the manual change, a modal prompt
+  appears on every page — not only on Tools — showing `INSTALL target`,
+  `REMOVE current` and the tool's remark. It follows the `M6` request, so it
+  cannot be dismissed; the only action is confirming that the tool is in.
+- Confirming is a handshake, not motion, so it is allowed while the program is
+  running or paused, and it does not need cycle start. It raises the declared
+  `linc.tool-change-confirm` HAL output and **holds it** until `iocontrol.0.tool-change`
+  drops — a pulse shorter than the EMCIO cycle can be missed. It is not an
+  arbitrary HAL write.
+- The acknowledgement token is derived from a counter that increments on the
+  rising edge of the request, so it is stable for one change episode and a late
+  press cannot confirm the next one.
+- Cycle start is gated on `halui.program.is-idle`; a program that is reading or
+  waiting for a tool change is neither idle nor paused, and starting it again
+  produces `EMC_TASK_PLAN_RUN` errors. Resume is the command for a paused
+  program.
 - ATC/turret: optional and lower priority. Use the existing `toolchange.ngc`
   and `m6_tool_call_*` routines, updated to use the standard tool-table pocket
   column rather than ad-hoc pocket parameters. Show carousel/rack pockets,

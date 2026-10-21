@@ -1606,6 +1606,7 @@ impl LincApp {
                 );
             });
         self.draw_modal(ui.ctx());
+        self.draw_tool_change_prompt(ui.ctx());
         self.draw_toasts(ui.ctx());
         self.save_preferences(false);
         if self.quit_requested {
@@ -2077,6 +2078,87 @@ impl LincApp {
                 "PROGRAM CHANGED EXTERNALLY — unsaved buffer preserved. Save will use the current revision.",
             );
             ui.add_space(4.0);
+        }
+    }
+
+    /// The manual tool-change prompt, on every page.
+    ///
+    /// Probe Basic's equivalent is an application-modal dialog driven by the
+    /// HAL request, so the operator sees it wherever they are and cannot close
+    /// it without confirming. This is the same idea: it follows
+    /// `tool.change_active` rather than a page, and has no dismiss action.
+    fn draw_tool_change_prompt(&mut self, ctx: &egui::Context) {
+        if self.snapshot.tool_change.status != linc_core::model::ToolChangeStatus::ManualPrompt {
+            return;
+        }
+        let state = self.snapshot.tool_change.clone();
+        let remark = self
+            .snapshot
+            .tool_table
+            .rows
+            .iter()
+            .find(|row| row.tool == state.prepared_tool)
+            .map(|row| row.description.clone())
+            .unwrap_or_default();
+        let mut confirm = false;
+        egui::Window::new("MANUAL TOOL CHANGE")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .max_width(560.0)
+            .frame(
+                Frame::new()
+                    .fill(theme::PANEL_RAISED)
+                    .stroke(Stroke::new(1.0, theme::WARNING))
+                    .inner_margin(Margin::same(18)),
+            )
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new(format!("INSTALL T{}", state.prepared_tool))
+                        .size(theme::font_size(20.0))
+                        .strong()
+                        .color(theme::FG),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(format!("REMOVE T{}", state.current_tool))
+                        .size(theme::font_size(12.0))
+                        .color(theme::MUTED),
+                );
+                if !remark.is_empty() {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(remark).size(theme::font_size(13.0)));
+                }
+                ui.add_space(12.0);
+                if state.confirmed {
+                    ui.label(
+                        RichText::new("CONFIRMED — WAITING FOR THE MACHINE")
+                            .size(theme::font_size(12.0))
+                            .strong()
+                            .color(theme::SUCCESS),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new("Change the tool by hand, then confirm. The program continues by itself.")
+                            .size(theme::font_size(10.0))
+                            .color(theme::MUTED),
+                    );
+                    ui.add_space(8.0);
+                    if theme::accent_button(
+                        ui,
+                        "TOOL INSTALLED",
+                        self.snapshot.panel.connected && state.token.is_some(),
+                    )
+                    .clicked()
+                    {
+                        confirm = true;
+                    }
+                }
+            });
+        if confirm {
+            if let Some(token) = state.token.clone() {
+                self.send(MachineCommand::ConfirmManualToolChange { token });
+            }
         }
     }
 
@@ -2707,6 +2789,9 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         let token = app.snapshot.tool_change.token.clone().unwrap();
         app.send(MachineCommand::ConfirmManualToolChange { token });
         app.poll_backend();
+        // The simulator models an instantaneous handshake, so it completes at
+        // once. The LinuxCNC backend holds the prompt until `iocontrol` drops
+        // the request; that level is covered in linc-linuxcnc.
         assert_eq!(
             app.snapshot.tool_change.status,
             linc_core::model::ToolChangeStatus::Complete
