@@ -625,6 +625,20 @@ class Bridge:
             parts.append(f"R{float(rotation):.6f}")
         return self.issue({"origin": "write", "blocks": [" ".join(parts)]})
 
+    def zero_work_offset(self, command):
+        """Touch off: make the current position read zero for the given axes.
+
+        Uses `G10 L20`, which sets the offset to a value calculated to make the
+        current coordinates read as given, rather than `G10 L2` which sets the
+        offset directly. Sending zero is the standard "set zero here".
+        """
+        index = int(command.get("index", 1))
+        axes = [str(axis).upper() for axis in command.get("axes", [])]
+        if not axes:
+            return {"ok": False, "error": "no axes selected"}
+        blocks = [f"G10 L20 P{index} " + " ".join(f"{axis}0.0" for axis in axes)]
+        return self.issue({"origin": "write", "blocks": blocks})
+
     def set_g92(self, command):
         error = self.require("mdi")
         if error:
@@ -697,6 +711,8 @@ class Bridge:
                     result = self.load_program(command)
                 elif kind == "set_work_offset":
                     result = self.set_work_offset(command)
+                elif kind == "zero_work_offset":
+                    result = self.zero_work_offset(command)
                 elif kind == "set_g92":
                     result = self.set_g92(command)
                 elif kind == "set_current_tool":

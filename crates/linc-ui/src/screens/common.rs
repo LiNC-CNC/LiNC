@@ -1146,6 +1146,59 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
 }
 
 /// Large work/machine/DTG readout, shared by the Manual and Homing screens.
+/// Touch-off card shared by every live mode.
+///
+/// Sets the current position as the zero of the active work offset for one axis
+/// or all of them. The work is done by `G10 L20`, so LinuxCNC calculates the
+/// offset from the position it holds rather than the HMI deriving it from a
+/// snapshot that may already be a cycle old.
+pub fn zero_point_card(app: &mut crate::shell::LincApp, ui: &mut Ui) {
+    let index = app.snapshot.offsets.active_index;
+    let axes: Vec<String> = app.axes();
+    // `writes_allowed` already covers machine ON, idle, not running, program
+    // protect and an E-stopped or offline panel.
+    let allowed = app.snapshot.writes_allowed() && index.is_some();
+    let mut chosen: Option<Vec<String>> = None;
+    // One compact row so the control stays above the fold next to the DRO.
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("SET ZERO")
+                .monospace()
+                .size(theme::font_size(10.0))
+                .color(theme::MUTED),
+        );
+        for axis in &axes {
+            let response = ui
+                .add_enabled(
+                    allowed,
+                    egui::Button::new(RichText::new(format!("{axis}0")).monospace()),
+                )
+                .on_disabled_hover_text("machine must be ON, homed and idle");
+            if response.clicked() {
+                chosen = Some(vec![axis.clone()]);
+            }
+        }
+        let response = ui
+            .add_enabled(
+                allowed,
+                egui::Button::new(RichText::new("ALL0").monospace().strong()),
+            )
+            .on_disabled_hover_text("machine must be ON, homed and idle");
+        if response.clicked() {
+            chosen = Some(axes.clone());
+        }
+        ui.label(
+            RichText::new(app.active_wcs_label())
+                .monospace()
+                .size(theme::font_size(10.0))
+                .color(theme::ACCENT),
+        );
+    });
+    if let (Some(axes), Some(index)) = (chosen, index) {
+        app.send(linc_core::command::MachineCommand::ZeroWorkOffset { index, axes });
+    }
+}
+
 pub fn live_coordinates_card(
     ui: &mut Ui,
     header: &str,

@@ -141,6 +141,13 @@ pub enum MachineCommand {
     SetG92Offset {
         values: AxisMap<f64>,
     },
+    /// Touch off: make the current position read zero in work offset `index`
+    /// for `axes`. Issues `G10 L20`, so LinuxCNC computes the offset itself
+    /// rather than the HMI deriving it from a possibly stale snapshot.
+    ZeroWorkOffset {
+        index: u8,
+        axes: Vec<String>,
+    },
     SetToolTableRow {
         row: ToolRow,
         expected_revision: u64,
@@ -170,6 +177,7 @@ impl MachineCommand {
             Self::SaveProgram { .. } => "Save program",
             Self::SetWorkOffset { .. } => "Set work offset",
             Self::SetG92Offset { .. } => "Set G92 offset",
+            Self::ZeroWorkOffset { .. } => "Zero work offset",
             Self::SetToolTableRow { .. } => "Set tool table row",
             Self::ApplyProbeResult { .. } => "Apply probe result",
             Self::ResetProbeCalibration => "Reset probe calibration",

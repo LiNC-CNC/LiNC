@@ -1059,6 +1059,55 @@ impl MachineBackend for SimBackend {
                     Err(MachineError::Invalid("unknown work offset".into()))
                 }
             }
+            MachineCommand::ZeroWorkOffset { index, axes } => {
+                if !self.snapshot.writes_allowed() {
+                    if self.snapshot.panel.protect_effective() {
+                        return Err(MachineError::ProgramProtected);
+                    }
+                    return Err(MachineError::NotIdle);
+                }
+                if !(1..=6).contains(&index) {
+                    return Err(MachineError::Invalid("work offset must be G54-G59".into()));
+                }
+                // `G10 L20` makes the current position read zero, so the new
+                // offset is the machine coordinate for each selected axis.
+                let machines: Vec<(String, f64)> = axes
+                    .iter()
+                    .map(|axis| {
+                        let machine = self
+                            .snapshot
+                            .positions
+                            .axes
+                            .get(axis)
+                            .map(|position| position.machine)
+                            .unwrap_or(0.0);
+                        (axis.clone(), machine)
+                    })
+                    .collect();
+                if let Some(offset) = self
+                    .snapshot
+                    .offsets
+                    .offsets
+                    .iter_mut()
+                    .find(|offset| offset.index == index)
+                {
+                    let selected: Vec<String> = machines.iter().map(|(a, _)| a.clone()).collect();
+                    for (axis, machine) in machines {
+                        offset.values.insert(axis, machine);
+                    }
+                    self.snapshot.offsets.revision += 1;
+                    // After a touch-off the work coordinate is zero by
+                    // definition, so the DRO reads zero immediately.
+                    for axis in &selected {
+                        if let Some(position) = self.snapshot.positions.axes.get_mut(axis) {
+                            position.work = 0.0;
+                        }
+                    }
+                    Ok(())
+                } else {
+                    Err(MachineError::Invalid("unknown work offset".into()))
+                }
+            }
             MachineCommand::SetG92Offset { values } => {
                 if !self.snapshot.writes_allowed() {
                     return Err(MachineError::NotIdle);

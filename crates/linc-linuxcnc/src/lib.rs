@@ -752,6 +752,29 @@ impl MachineBackend for PythonBridgeBackend {
                     Duration::from_secs(5),
                 )
             }
+            MachineCommand::ZeroWorkOffset { index, axes } => {
+                self.validate_write()?;
+                if !(1..=6).contains(&index) {
+                    return Err(MachineError::Invalid("work offset must be G54-G59".into()));
+                }
+                if axes.is_empty() {
+                    return Err(MachineError::Invalid("no axes selected".into()));
+                }
+                for axis in &axes {
+                    self.profile
+                        .machine_ini
+                        .validate_axis_value(axis, 0.0)
+                        .map_err(MachineError::Invalid)?;
+                }
+                self.request(
+                    serde_json::json!({
+                        "cmd": "zero_work_offset",
+                        "index": index,
+                        "axes": axes,
+                    }),
+                    Duration::from_secs(5),
+                )
+            }
             MachineCommand::SetG92Offset { values } => {
                 self.validate_write()?;
                 let map: HashMap<&str, f64> =

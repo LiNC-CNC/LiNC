@@ -37,6 +37,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             common::live_graph_card(app, ui, height);
         },
         |app, ui| {
+            common::zero_point_card(app, ui);
             common::live_coordinates_card(
                 ui,
                 "WORK COORDINATES",
