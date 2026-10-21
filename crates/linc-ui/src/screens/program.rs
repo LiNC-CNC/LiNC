@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use egui::{text::LayoutJob, Align, Color32, FontId, Galley, RichText, TextFormat, Ui, Vec2};
 use linc_core::gcode::{lex_line, TokenKind};
-use linc_core::model::{PanelMode, SyntaxIssue};
 
 use crate::screens::common;
 use crate::shell::LincApp;
@@ -25,161 +24,42 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     {
         // The lathe profile may disable the probe; Program is unaffected.
     }
-    let mode = app.snapshot.panel.mode.mode();
-    if mode == Some(PanelMode::Edit)
-        && app.program.view != ProgramView::Code
-        && app.snapshot.program_editing_allowed()
-    {
-        app.program.view = ProgramView::Code;
-    }
-    header(app, ui);
-    ui.add_space(4.0);
+    // No page header: the panes start at the top of the page. The view flags
+    // and RUN FROM LINE live in the editor pane's header, next to the file they
+    // belong to.
+    common::focus_anchor(ui, "program-page-focus");
     match app.program.view {
         ProgramView::Split => split(app, ui),
         ProgramView::Code => code(app, ui),
     }
 }
 
-fn header(app: &mut LincApp, ui: &mut Ui) {
-    // The file name and current line are already in the top bar, so only the
-    // state flags and the view tabs are worth a row here.
-    common::focus_anchor(ui, "program-page-focus");
-    ui.horizontal(|ui| {
-        // The CODE/SPLIT toggle is a keyboard command now; the binding is
-        // listed in the bottom hint row with the other page commands.
-        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            // A line number cannot come from the panel, so this is the one
-            // program start the HMI issues. It is still gated on the panel
-            // being in AUTO and on the machine being ready to run.
-            let block = app.run_from_line_block();
-            let button = egui::Button::new(
-                RichText::new("RUN FROM LINE")
-                    .size(theme::font_size(10.0))
-                    .strong(),
-            )
-            .min_size(egui::vec2(0.0, 26.0));
-            let response = ui.add_enabled(block.is_none(), button);
-            let response = match block {
-                Some(reason) => response.on_disabled_hover_text(reason),
-                None => response,
-            };
-            if response.clicked() {
-                let line = app.snapshot.program.current_line.max(1) as u32;
-                let block_text = app
-                    .snapshot
-                    .program
-                    .content
-                    .as_deref()
-                    .and_then(|text| text.lines().nth(line as usize - 1))
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
-                app.modal = Some(crate::state::Modal::ConfirmRunFromLine {
-                    line,
-                    block: block_text,
-                });
-            }
-            ui.add_space(8.0);
-            ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
-                if app.program.editor.dirty {
-                    ui.label(
-                        RichText::new("* UNSAVED")
-                            .size(theme::font_size(10.0))
-                            .strong()
-                            .color(theme::WARNING),
-                    );
-                }
-                if app.snapshot.task.running {
-                    ui.label(
-                        RichText::new("RUNNING / READ-ONLY")
-                            .size(theme::font_size(10.0))
-                            .color(theme::SUCCESS),
-                    );
-                }
-                if app.program_protected() {
-                    ui.label(
-                        RichText::new("PROTECT ON")
-                            .size(theme::font_size(10.0))
-                            .color(theme::WARNING),
-                    );
-                }
-            });
-        });
-    });
-}
 
-fn search_bar(app: &mut LincApp, ui: &mut Ui) {
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("FIND")
-                .size(theme::font_size(10.0))
-                .color(theme::MUTED),
-        );
-        let response = ui.add(
-            egui::TextEdit::singleline(&mut app.program.search_needle)
-                .hint_text("search G-code")
-                .desired_width(260.0),
-        );
-        if app.program.focus_editor {
-            response.request_focus();
-            app.program.focus_editor = false;
-        }
-        let needle = app.program.search_needle.clone();
-        if response.changed() {
-            app.program.search_matches = app.program.editor.find_all(&needle);
-            app.program.search_index = 0;
-        }
-        if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !needle.is_empty() {
-            app.program.search_matches = app.program.editor.find_all(&needle);
-            if !app.program.search_matches.is_empty() {
-                let index = app.program.search_index % app.program.search_matches.len();
-                app.program.selected_line = app.program.search_matches[index];
-                app.program.code_scroll_to_line = Some(app.program.selected_line);
-                app.program.search_index = index + 1;
-            }
-        }
-        if theme::action_button(ui, "NEXT", !app.program.search_matches.is_empty()).clicked() {
-            if !app.program.search_matches.is_empty() {
-                let index = app.program.search_index % app.program.search_matches.len();
-                app.program.selected_line = app.program.search_matches[index];
-                app.program.code_scroll_to_line = Some(app.program.selected_line);
-                app.program.search_index = index + 1;
-            }
-        }
-        ui.label(
-            RichText::new(format!(
-                "{} MATCH{}",
-                app.program.search_matches.len(),
-                if app.program.search_matches.len() == 1 {
-                    ""
-                } else {
-                    "ES"
-                }
-            ))
-            .monospace()
-            .size(theme::font_size(10.0))
-            .color(theme::MUTED),
-        );
-        if theme::action_button(ui, "CLOSE", true).clicked() {
-            app.program.search_open = false;
-            app.program.focus_editor = false;
-        }
-    });
-}
 
 fn split(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
     // `theme::card` adds 12 px of inner margin on each side, and the heights
     // asked for are *content* heights, so reserve that overhead or the columns
     // render taller than their slots and the last one is clipped.
-    const CARD_OVERHEAD: f32 = 26.0;
-    let main_height = (available.y - CARD_OVERHEAD - 4.0).max(220.0);
-    let editor_width = (available.x * 0.58).max(480.0);
+    // `theme::card` adds 12 px of inner margin per side. A card that also draws
+    // a `section_header` adds a header row on top of that. Heights passed to
+    // `graph_card` are the *view* height, so the chrome has to be reserved
+    // separately or the stack overflows the page and clips what is last.
+    const CARD_CHROME: f32 = 28.0;
+    const HEADER_CHROME: f32 = 24.0;
+    // The MODAL pane is its own card with a header and one row of cells.
+    const MODAL_CONTENT: f32 = 46.0;
+    let graph_chrome = CARD_CHROME + HEADER_CHROME;
+    let modal_total = CARD_CHROME + HEADER_CHROME + MODAL_CONTENT;
+    let main_height = (available.y - 4.0).max(220.0);
+    // Equal halves: the two panes describe the same program and neither is
+    // subordinate to the other.
+    let editor_width = (available.x * 0.5 - 6.0).max(400.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
             Vec2::new(editor_width, main_height),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| editor_pane(app, ui, main_height - CARD_OVERHEAD - 4.0),
+            |ui| editor_pane(app, ui, main_height - CARD_CHROME - 4.0),
         );
         ui.add_space(8.0);
         ui.allocate_ui_with_layout(
@@ -189,7 +69,7 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
                 graph_card(
                     app,
                     ui,
-                    (main_height - CARD_OVERHEAD - 96.0).max(240.0),
+                    (main_height - graph_chrome - modal_total - 8.0).max(160.0),
                     ViewKind::Full,
                 );
                 common::modal_pane(app, ui, 6, "split-modal");
@@ -200,26 +80,27 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
 
 fn code(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
-    let editor_width = (available.x * 0.75).max(620.0);
+    // Matches `split`: the editor takes half, the graph column the other half.
+    let editor_width = (available.x * 0.5 - 6.0).max(400.0);
+    // The graph card's chrome, the MODAL card in full, and the gap between.
+    const GRAPH_CHROME: f32 = 52.0;
+    const MODAL_TOTAL: f32 = 98.0;
+    let path_height = (available.y - GRAPH_CHROME - MODAL_TOTAL - 8.0).max(160.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
             Vec2::new(editor_width, available.y),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| editor_pane(app, ui, available.y - 4.0),
+            |ui| editor_pane(app, ui, available.y - 28.0),
         );
         ui.add_space(8.0);
         ui.allocate_ui_with_layout(
             Vec2::new((available.x - editor_width - 8.0).max(250.0), available.y),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                graph_card(app, ui, 150.0, ViewKind::MiniXy);
+                // PATH is the whole point of the column; with the program info
+                // card gone it fills the space above MODAL.
+                graph_card(app, ui, path_height, ViewKind::MiniXy);
                 common::modal_pane(app, ui, 4, "program-modal");
-                // Whatever the cards above actually took, not a guessed 178.
-                let info_height = ui.available_height().max(120.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("program-info-scroll")
-                    .max_height(info_height)
-                    .show(ui, |ui| info_card(app, ui));
             },
         );
     });
@@ -288,79 +169,7 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, height: f32, kind: ViewKind) {
     });
 }
 
-fn info_card(app: &mut LincApp, ui: &mut Ui) {
-    theme::card(ui, |ui| {
-        theme::section_header(ui, "PROGRAM INFO");
-        if let Some(error) = &app.program.preview.error {
-            syntax_issue(ui, error);
-        }
-        let line = app.snapshot.program.current_line.max(1);
-        ui.label(
-            RichText::new(format!(
-                "CURSOR LN {} / {}",
-                app.program.selected_line,
-                app.program.editor.line_count()
-            ))
-            .monospace()
-            .size(theme::font_size(10.0))
-            .color(theme::MUTED),
-        );
-        common::token_ui(
-            ui,
-            &app.program.editor.line(app.program.selected_line),
-            12.0,
-        );
-        theme::separator(ui);
-        ui.label(
-            RichText::new("CURRENT")
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-        );
-        common::token_ui(ui, &app.snapshot.program.current_block, 11.0);
-        if let Some(next) = &app.snapshot.program.next_line {
-            ui.label(
-                RichText::new("NEXT")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-            common::token_ui(ui, next, 11.0);
-        }
-        theme::separator(ui);
-        theme::kv_row(
-            ui,
-            "BUFFER",
-            if app.program.editor.dirty {
-                "DIRTY"
-            } else {
-                "SAVED"
-            },
-        );
-        theme::kv_row(ui, "LINES", app.program.editor.line_count().to_string());
-        theme::kv_row(
-            ui,
-            "PREVIEW",
-            if app.program.preview_due.is_some() {
-                "DEBOUNCED".into()
-            } else if app.program.preview.error.is_some() {
-                format!(
-                    "ERROR LN {}",
-                    app.program.preview.error.as_ref().unwrap().line
-                )
-            } else {
-                "VALID".into()
-            },
-        );
-        let _ = line;
-    });
-}
 
-fn syntax_issue(ui: &mut Ui, issue: &SyntaxIssue) {
-    ui.label(
-        RichText::new(format!("SYNTAX ERROR LN {}: {}", issue.line, issue.message))
-            .size(theme::font_size(11.0))
-            .color(theme::WARNING),
-    );
-}
 
 fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
     let editable = app.editing_allowed();
@@ -392,6 +201,14 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 ui.label(RichText::new("*").color(theme::WARNING));
             }
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                ui.add_space(8.0);
+                if app.snapshot.task.running {
+                    ui.label(
+                        RichText::new("RUNNING")
+                            .size(theme::font_size(9.0))
+                            .color(theme::SUCCESS),
+                    );
+                }
                 ui.label(
                     RichText::new(if editable { "EDITABLE" } else { "READ-ONLY" })
                         .size(theme::font_size(9.0))

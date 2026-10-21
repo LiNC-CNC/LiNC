@@ -800,9 +800,9 @@ pub fn focus_anchor(ui: &mut Ui, salt: &str) {
     if requested {
         response.request_focus();
     }
-    if response.has_focus() {
-        theme::focus_ring(ui, &response);
-    }
+    // No focus ring: the anchor exists only so arrow-key navigation has
+    // somewhere to start, and a ring around an empty full-width strip reads as
+    // a stray empty control. Real widgets still draw their own rings.
 }
 
 pub fn page_header(ui: &mut Ui, title: &str, subtitle: &str) {
