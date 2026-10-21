@@ -7,7 +7,7 @@ use linc_core::model::{MachineVariant, ToolChangeStatus, ToolChangerKind};
 use crate::screens::common;
 use crate::shell::LincApp;
 use crate::state::ToolDraft;
-use crate::table::{Column as TableColumn, Table};
+use egui_extras::{Column as ExtraColumn, TableBuilder};
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
@@ -127,7 +127,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
     let writable = app.snapshot.writes_allowed();
     let rows = app.snapshot.tool_table.rows.clone();
     let current_tool = app.snapshot.tool_change.current_tool;
-    let mut written = None;
+    let mut written_tool = None;
     theme::card(ui, |ui| {
         ui.horizontal(|ui| {
             theme::section_header(ui, "TOOL TABLE");
@@ -146,134 +146,177 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
         if let Some(error) = &app.snapshot.tool_table.error {
             ui.label(RichText::new(error).color(theme::ERROR));
         }
-        // One grid: every heading and every cell is given exactly its column
-        // width, so the rows line up instead of each widget finding its own x.
+        // `egui_extras::TableBuilder` owns the grid: measured widths, one
+        // remainder column, a sticky header and vertical scrolling.
         let pad = theme::CELL_PAD;
         let tool_width = theme::measure(ui, "T00", 12.0) + pad;
         let number_width = theme::measure(ui, "-000.00", 11.0) + 12.0;
         let kind_width = theme::measure(ui, "DRILL", 9.0) + 12.0;
-        // `theme::action_button` will not go below 96 points, so the column has
-        // to be at least that or the button is clipped by the table edge.
         let write_width = 96.0;
-        // A minimum the card can actually afford; the column flexes above it.
         let description_min = theme::measure(ui, "DESCRIPTION_DESCRIPTION", 11.0);
-        let mut columns = Vec::with_capacity(8);
-        columns.push(TableColumn::new("T", tool_width));
-        columns.push(TableColumn::flex("DESCRIPTION", description_min));
+        let mut headings: Vec<&str> = vec!["T", "DESCRIPTION"];
         if lathe {
-            for label in ["X", "Z", "NOSE R", "ORIENT"] {
-                columns.push(TableColumn::new(label, number_width));
-            }
+            headings.extend(["X", "Z", "NOSE R", "ORIENT"]);
         } else {
-            columns.push(TableColumn::new("Ø", number_width));
-            columns.push(TableColumn::new("LENGTH", number_width));
-            columns.push(TableColumn::new("TYPE", kind_width));
+            headings.extend(["Ø", "LENGTH", "TYPE"]);
         }
         if pocket {
-            columns.push(TableColumn::new(
-                if lathe { "STATION" } else { "POCKET" },
-                number_width,
-            ));
+            headings.push(if lathe { "STATION" } else { "POCKET" });
         }
-        columns.push(TableColumn::new("WRITE", write_width));
-        let table = Table::new(&columns, ui.available_width());
-        let mut next_column = 1usize;
-        {
-            egui::ScrollArea::horizontal()
-                .id_salt("tool-table-scroll")
-                .show(ui, |ui| {
-                    table.header(ui);
-                    for (index, row) in rows.iter().enumerate() {
-                        let selected = app.tools.selected_row == index;
-                        let current = row.tool == current_tool;
-                        let response = table.row(ui, selected, |ui, cells| {
-                            cells.cell(ui, 0, egui::Align::Min, |ui| {
-                                ui.label(
-                                    RichText::new(format!("T{}", row.tool))
-                                        .monospace()
-                                        .size(theme::font_size(12.0))
-                                        .color(if current { theme::SUCCESS } else { theme::FG }),
-                                );
-                            });
+        headings.push("WRITE");
+
+        let written = std::cell::Cell::new(None::<u16>);
+        let clicked = std::cell::Cell::new(None::<usize>);
+        if rows.is_empty() {
+            ui.label(
+                RichText::new("no tools in the table")
+                    .size(theme::font_size(10.0))
+                    .color(theme::MUTED),
+            );
+        } else {
+            let mut builder = TableBuilder::new(ui)
+                .striped(true)
+                .resizable(false)
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .column(ExtraColumn::exact(tool_width))
+                .column(ExtraColumn::remainder().at_least(description_min));
+            let numbers = if lathe { 4 } else { 3 };
+            for index in 0..numbers {
+                let width = if !lathe && index == 2 { kind_width } else { number_width };
+                builder = builder.column(ExtraColumn::exact(width));
+            }
+            if pocket {
+                builder = builder.column(ExtraColumn::exact(number_width));
+            }
+            builder = builder.column(ExtraColumn::exact(write_width));
+            builder
+                .header(16.0, |mut header| {
+                    for label in &headings {
+                        header.col(|ui| {
+                            ui.label(
+                                RichText::new(*label)
+                                    .size(theme::font_size(9.0))
+                                    .strong()
+                                    .color(theme::MUTED),
+                            );
+                        });
+                    }
+                })
+                .body(|body| {
+                    body.rows(30.0, rows.len(), |mut row| {
+                        let index = row.index();
+                        let entry = &rows[index];
+                        row.set_selected(app.tools.selected_row == index);
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(format!("T{}", entry.tool))
+                                    .monospace()
+                                    .size(theme::font_size(12.0))
+                                    .color(if entry.tool == current_tool {
+                                        theme::SUCCESS
+                                    } else {
+                                        theme::FG
+                                    }),
+                            );
+                        });
+                        row.col(|ui| {
                             let draft = app
                                 .tools
                                 .drafts
-                                .entry(row.tool)
-                                .or_insert_with(|| ToolDraft::from_row(row));
-                            cells.cell(ui, 1, egui::Align::Min, |ui| {
-                                text_cell(ui, writable, &mut draft.description, cells.width(1));
-                            });
-                            next_column = 2;
-                            if lathe {
-                                for axis in ["X", "Z"] {
+                                .entry(entry.tool)
+                                .or_insert_with(|| ToolDraft::from_row(entry));
+                            let width = ui.available_width();
+                            text_cell(ui, writable, &mut draft.description, width);
+                        });
+                        if lathe {
+                            for axis in ["X", "Z"] {
+                                row.col(|ui| {
+                                    let draft = app
+                                        .tools
+                                        .drafts
+                                        .entry(entry.tool)
+                                        .or_insert_with(|| ToolDraft::from_row(entry));
                                     let text = draft.axes.entry(axis.into()).or_default();
-                                    cells.cell(ui, next_column, egui::Align::Min, |ui| {
-                                        number_cell(ui, writable, text, number_width);
-                                    });
-                                    next_column += 1;
-                                }
-                                cells.cell(ui, next_column, egui::Align::Min, |ui| {
-                                    number_cell(ui, writable, &mut draft.nose_radius, number_width);
+                                    number_cell(ui, writable, text, number_width);
                                 });
-                                next_column += 1;
-                                cells.cell(ui, next_column, egui::Align::Min, |ui| {
-                                    number_cell(ui, writable, &mut draft.orientation, number_width);
-                                });
-                                next_column += 1;
-                            } else {
-                                cells.cell(ui, next_column, egui::Align::Min, |ui| {
-                                    number_cell(ui, writable, &mut draft.diameter, number_width);
-                                });
-                                next_column += 1;
-                                cells.cell(ui, next_column, egui::Align::Min, |ui| {
-                                    number_cell(ui, writable, &mut draft.length, number_width);
-                                });
-                                next_column += 1;
-                                cells.cell(ui, next_column, egui::Align::Min, |ui| {
-                                    ui.label(
-                                        RichText::new(if row.kind.is_empty() {
-                                            "—"
-                                        } else {
-                                            &row.kind
-                                        })
-                                        .size(theme::font_size(9.0))
-                                        .color(theme::MUTED),
-                                    );
-                                });
-                                next_column += 1;
                             }
-                            if pocket {
-                                cells.cell(ui, next_column, egui::Align::Min, |ui| {
-                                    number_cell(ui, writable, &mut draft.pocket, number_width);
-                                });
-                                next_column += 1;
-                            }
-                            let mut write = false;
-                            cells.cell(ui, next_column, egui::Align::Min, |ui| {
-                                write = theme::action_button(ui, "WRITE", writable).clicked();
+                            row.col(|ui| {
+                                let draft = app
+                                    .tools
+                                    .drafts
+                                    .entry(entry.tool)
+                                    .or_insert_with(|| ToolDraft::from_row(entry));
+                                number_cell(ui, writable, &mut draft.nose_radius, number_width);
                             });
-                            if write {
-                                written = Some(row.tool);
+                            row.col(|ui| {
+                                let draft = app
+                                    .tools
+                                    .drafts
+                                    .entry(entry.tool)
+                                    .or_insert_with(|| ToolDraft::from_row(entry));
+                                number_cell(ui, writable, &mut draft.orientation, number_width);
+                            });
+                        } else {
+                            row.col(|ui| {
+                                let draft = app
+                                    .tools
+                                    .drafts
+                                    .entry(entry.tool)
+                                    .or_insert_with(|| ToolDraft::from_row(entry));
+                                number_cell(ui, writable, &mut draft.diameter, number_width);
+                            });
+                            row.col(|ui| {
+                                let draft = app
+                                    .tools
+                                    .drafts
+                                    .entry(entry.tool)
+                                    .or_insert_with(|| ToolDraft::from_row(entry));
+                                number_cell(ui, writable, &mut draft.length, number_width);
+                            });
+                            row.col(|ui| {
+                                ui.label(
+                                    RichText::new(if entry.kind.is_empty() {
+                                        "—"
+                                    } else {
+                                        &entry.kind
+                                    })
+                                    .size(theme::font_size(9.0))
+                                    .color(theme::MUTED),
+                                );
+                            });
+                        }
+                        if pocket {
+                            row.col(|ui| {
+                                let draft = app
+                                    .tools
+                                    .drafts
+                                    .entry(entry.tool)
+                                    .or_insert_with(|| ToolDraft::from_row(entry));
+                                number_cell(ui, writable, &mut draft.pocket, number_width);
+                            });
+                        }
+                        row.col(|ui| {
+                            if theme::action_button(ui, "WRITE", writable).clicked() {
+                                written.set(Some(entry.tool));
                             }
                         });
-                        if response.clicked() {
-                            app.tools.selected_row = index;
+                        if row.response().clicked() {
+                            clicked.set(Some(index));
                         }
-                    }
-                    if rows.is_empty() {
-                        ui.label(
-                            RichText::new("no tools in the table")
-                                .size(theme::font_size(10.0))
-                                .color(theme::MUTED),
-                        );
-                    }
+                    });
                 });
+        }
+        if let Some(index) = clicked.get() {
+            app.tools.selected_row = index;
+        }
+        if let Some(tool) = written.get() {
+            written_tool = Some(tool);
         }
         if let Some(error) = &app.tools.error {
             ui.label(RichText::new(error).color(theme::ERROR));
         }
     });
-    if let Some(tool) = written {
+    if let Some(tool) = written_tool {
         save_tool_row(app, tool);
     }
 }
