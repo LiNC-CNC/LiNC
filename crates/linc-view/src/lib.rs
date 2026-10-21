@@ -56,6 +56,10 @@ pub struct TrajectoryView<'a> {
     pub live_trail: &'a [[f64; 3]],
     pub tool_tip: Option<[f64; 3]>,
     pub machine_bounds: Option<Bounds3>,
+    /// Where the work-zero cross is drawn, in the frame the view uses. The
+    /// machine origin stays at zero; touching off moves this marker instead of
+    /// moving the part and the tool.
+    pub origin: [f64; 3],
     pub selected_line: Option<usize>,
     pub current_line: Option<usize>,
     pub variant: MachineVariant,
@@ -80,6 +84,7 @@ pub struct TrajectoryView<'a> {
 impl<'a> TrajectoryView<'a> {
     pub fn new(preview: &'a Preview, live_trail: &'a [[f64; 3]], variant: MachineVariant) -> Self {
         Self {
+            origin: [0.0; 3],
             preview,
             live_trail,
             tool_tip: None,
@@ -301,7 +306,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     if view.show_grid {
         draw_grid(&painter, &projection, bounds);
     }
-    draw_axes(&painter, &projection, view.variant, &view.axis_labels);
+    draw_axes(&painter, &projection, view.variant, &view.axis_labels, view.origin);
 
     // Machine bounds.
     if view.show_machine_bounds {
@@ -734,8 +739,8 @@ fn draw_axes(
     projection: &Projection,
     variant: MachineVariant,
     axis_labels: &[String],
+    origin: [f64; 3],
 ) {
-    let origin = [0.0, 0.0, 0.0];
     let origin_pos = projection.project(origin);
     let length = match projection.mode {
         ViewMode::Iso3d => 24.0,

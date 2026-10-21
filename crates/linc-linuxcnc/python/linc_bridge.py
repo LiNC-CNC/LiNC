@@ -147,6 +147,10 @@ class Bridge:
         self.last_program_text = None
         self.last_program_mtime = None
         self.alarms = []
+        # Offsets this session has written, so the table shows its own writes
+        # before the parameter file is rewritten at exit.
+        self.offset_overrides = {}
+        self.rotation_overrides = {}
         self.bitmap_cache = {"buttons": 0, "leds": 0, "sseg_tool": 0, "sseg_next": 0}
         self.bitmap_last = 0.0
         self.start_error_thread()
@@ -265,17 +269,46 @@ class Bridge:
         return values
 
     def read_offsets(self, params):
+        """The six work offsets, live where the controller can tell us.
+
+        The parameter file on disk is only written when LinuxCNC exits, so
+        reading it alone showed stale numbers after a `G10` write — the DRO moved
+        and the table did not. `stat.g5x_offset` is the live value, but only for
+        the active system, so that one is overlaid on the file values, and writes
+        made through this bridge are remembered so their own rows stay current.
+        """
         offsets = []
+        try:
+            self.stat.poll()
+        except Exception:
+            pass
+        active = int(getattr(self.stat, "g5x_index", 1) or 1)
+        live = list(getattr(self.stat, "g5x_offset", ()) or ())
+        live_rotation = getattr(self.stat, "rotation_xy", None)
         for index in range(1, 7):
             base = 5220 + (index - 1) * 20
             values = {}
             for axis_index, axis in enumerate(self.axes):
                 values[axis] = params.get(base + 1 + axis_index, 0.0)
+            rotation = params.get(base, 0.0)
+            # Overlay what this session has written, then the active system from
+            # the live status, which is the most trustworthy of the three.
+            remembered = self.offset_overrides.get(index)
+            if remembered:
+                for axis, value in remembered.items():
+                    values[axis] = value
+                rotation = self.rotation_overrides.get(index, rotation)
+            if index == active:
+                for axis_index, axis in enumerate(self.axes):
+                    if axis_index < len(live):
+                        values[axis] = live[axis_index]
+                if live_rotation is not None:
+                    rotation = float(live_rotation)
             offsets.append(
                 {
                     "index": index,
                     "values": values,
-                    "rotation": params.get(base, 0.0),
+                    "rotation": rotation,
                 }
             )
         g92 = {axis: params.get(5201 + i, 0.0) for i, axis in enumerate(self.axes)}
@@ -644,7 +677,14 @@ class Bridge:
             parts.append(f"{axis}{float(value):.6f}")
         if rotation is not None:
             parts.append(f"R{float(rotation):.6f}")
-        return self.issue({"origin": "write", "blocks": [" ".join(parts)]})
+        result = self.issue({"origin": "write", "blocks": [" ".join(parts)]})
+        if result.get("ok"):
+            self.offset_overrides[index] = {
+                str(axis).upper(): float(value) for axis, value in values.items()
+            }
+            if rotation is not None:
+                self.rotation_overrides[index] = float(rotation)
+        return result
 
     def run_from_line(self, command):
         """Start the loaded program at a line, skipping what comes before it.
