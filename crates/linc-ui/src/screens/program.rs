@@ -282,6 +282,7 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
         scroll_editor(app, &mut child, editor_height, editable);
+        ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(format!(
@@ -442,6 +443,9 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     );
                 }
             }
+            // A little room under the last line, so it does not sit flush
+            // against the bottom of the scroll viewport.
+            ui.add_space(6.0);
             let _ = output.state;
             let _ = available;
             let _ = wrap_width_unused();
