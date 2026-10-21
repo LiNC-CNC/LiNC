@@ -378,11 +378,20 @@ class Bridge:
         dtg = list(getattr(s, "dtg", ()) or ())
         g5x = list(getattr(s, "g5x_offset", ()) or ())
         g92_offset = list(getattr(s, "g92_offset", ()) or ())
+        tool = list(getattr(s, "tool_offset", ()) or ())
         positions = []
         for index, axis in enumerate(self.axes[:9]):
-            work = actual[index] if index < len(actual) else 0.0
-            mach = work + (g5x[index] if index < len(g5x) else 0.0) + (
-                g92_offset[index] if index < len(g92_offset) else 0.0
+            # `actual_position` is in machine coordinates; the work position is
+            # what is left after the offsets are taken off. Adding them instead
+            # meant setting a work zero changed nothing on screen, because the
+            # machine position moved by exactly the offset that was meant to
+            # cancel it.
+            mach = actual[index] if index < len(actual) else 0.0
+            work = (
+                mach
+                - (g5x[index] if index < len(g5x) else 0.0)
+                - (g92_offset[index] if index < len(g92_offset) else 0.0)
+                - (tool[index] if index < len(tool) else 0.0)
             )
             positions.append(
                 {
