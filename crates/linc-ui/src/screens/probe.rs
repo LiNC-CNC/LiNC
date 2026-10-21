@@ -12,11 +12,8 @@ use crate::shell::LincApp;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
-    common::page_header(
-        ui,
-        "TOUCH PROBE",
-        "Probe Basic-compatible routines. Explicit RUN PROBE; no second stage or cycle-start.",
-    );
+    // No page title: the navigation names the page.
+    common::focus_anchor(ui, "probe-page-focus");
     if !app.snapshot.probe.enabled || app.profile.variant == MachineVariant::Lathe {
         theme::banner(
             ui,

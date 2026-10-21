@@ -13,11 +13,8 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         ui.label(RichText::new("HELP BUNDLE UNAVAILABLE").color(theme::ERROR));
         return;
     };
-    common::page_header(
-        ui,
-        "G-CODE HELP",
-        "Offline LinuxCNC reference. Read-only and available while a program runs.",
-    );
+    // No page title: the navigation names the page.
+    common::focus_anchor(ui, "help-page-focus");
     let filtered = bundle.filter(&app.help.query);
     ui.horizontal(|ui| {
         ui.label(

@@ -8,11 +8,8 @@ use crate::state::SettingsUi;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
-    common::page_header(
-        ui,
-        "SETTINGS",
-        "User preferences are separate from the machine profile; safety policy is not a preference.",
-    );
+    // No page title: the navigation names the page.
+    common::focus_anchor(ui, "settings-page-focus");
     let tabs = ["DISPLAY", "KEYBOARD", "MACHINE", "PANEL", "ABOUT"];
     ui.horizontal(|ui| {
         for (index, tab) in tabs.iter().enumerate() {

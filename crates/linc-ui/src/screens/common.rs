@@ -808,43 +808,6 @@ pub fn focus_anchor(ui: &mut Ui, salt: &str) {
     // a stray empty control. Real widgets still draw their own rings.
 }
 
-pub fn page_header(ui: &mut Ui, title: &str, subtitle: &str) {
-    ui.horizontal(|ui| {
-        ui.vertical(|ui| {
-            let title_response = ui.label(
-                RichText::new(title)
-                    .size(theme::font_size(14.0))
-                    .strong()
-                    .color(theme::FG),
-            );
-            let title_focus = ui.interact(
-                title_response.rect,
-                ui.scope_id().with("page-title-focus"),
-                Sense::focusable_noninteractive(),
-            );
-            let requested = ui.ctx().data_mut(|data| {
-                data.remove_temp::<bool>(egui::Id::unique("linc-page-focus"))
-                    .unwrap_or(false)
-            });
-            if requested {
-                title_focus.request_focus();
-            }
-            if title_focus.has_focus() {
-                theme::focus_ring(ui, &title_focus);
-            }
-            // A page with nothing to say gets no subtitle line at all; drawing
-            // an empty label still costs a row of vertical space.
-            if !subtitle.is_empty() {
-                ui.label(
-                    RichText::new(subtitle)
-                        .size(theme::font_size(11.0))
-                        .color(theme::MUTED),
-                );
-            }
-        });
-    });
-    ui.add_space(4.0);
-}
 
 pub fn mode_label(app: &LincApp) -> String {
     app.snapshot

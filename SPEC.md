@@ -345,6 +345,11 @@ Fixed shell, no right-hand status column:
 
 - **Top status bar**: machine name, physical mode, program, tool, spindle,
   feed, work offset, panel link, alarm/message counts, time.
+- **No page titles.** The navigation names the page and the top bar names the
+  machine state, so a heading above the content only costs vertical space.
+  Each page keeps an invisible focus anchor at the top so arrow-key navigation
+  has a starting point. Banners stay: they carry live state (E-stop, panel
+  offline, program protect), not page descriptions.
 - **Left navigation**: Machine, Program, Tools, Offsets, Diagnostics, G-code
   Help. Keyboard-focusable; `MAIN`/`FILE`/`OFFSET`/`TOOL`/`WIN` jump directly.
 - **Central page**: active screen.

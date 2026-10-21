@@ -10,11 +10,8 @@ use crate::shell::LincApp;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
-    common::page_header(
-        ui,
-        "MDI",
-        "Manual Data Input. One block; Enter issues via issue_mdi. No physical cycle start required.",
-    );
+    // No page title: the navigation names the page.
+    common::focus_anchor(ui, "mdi-page-focus");
     let mode = app.snapshot.panel.mode.mode();
     let in_mdi = mode == Some(PanelMode::Mdi);
     ui.horizontal(|ui| {

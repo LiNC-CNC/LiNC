@@ -9,11 +9,8 @@ use crate::state::DiagnosticsTab;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
-    common::page_header(
-        ui,
-        "DIAGNOSTICS",
-        "Read-only detail. No reset, acknowledge, cycle, jog, override or E-stop controls.",
-    );
+    // No page title: the navigation names the page.
+    common::focus_anchor(ui, "diagnostics-page-focus");
     if app.diagnostics_clear_view {
         app.diagnostics_clear_view = false;
     }
