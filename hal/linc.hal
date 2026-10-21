@@ -16,7 +16,7 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 # ---------------------------------------------------------------------------
 # Logic and conversion components
 # ---------------------------------------------------------------------------
-loadrt and2 names=and2.cycle_gate,and2.cycle_idle,and2.cycle_run,and2.cycle_resume,and2.jxp_cont,and2.jxn_cont,and2.jyp_cont,and2.jyn_cont,and2.jzp_cont,and2.jzn_cont,and2.jxp_inc,and2.jxn_inc,and2.jyp_inc,and2.jyn_inc,and2.jzp_inc,and2.jzn_inc
+loadrt and2 names=and2.cycle_gate,and2.cycle_run,and2.cycle_resume,and2.jxp_cont,and2.jxn_cont,and2.jyp_cont,and2.jyn_cont,and2.jzp_cont,and2.jzn_cont,and2.jxp_inc,and2.jxn_inc,and2.jyp_inc,and2.jyn_inc,and2.jzp_inc,and2.jzn_inc
 # `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
 # with "or2: already exists". Instances only used by the simulation
 # (or2.estop_reset) are created here and wired in linc-sim.hal.
@@ -110,12 +110,7 @@ net mode-manual-request or2.manual_req.out => halui.mode.manual
 net is-auto halui.mode.is-auto => and2.cycle_gate.in0
 net is-paused halui.program.is-paused => not.paused.in and2.cycle_resume.in0
 net not-paused not.paused.out => and2.cycle_gate.in1
-# Run only from idle. A program that is reading or waiting for a manual tool
-# change is neither idle nor paused, and starting it again is what produced the
-# EMC_TASK_PLAN_RUN errors; resume is the command for a paused program.
-net cycle-gate and2.cycle_gate.out => and2.cycle_idle.in0
-net program-idle halui.program.is-idle => and2.cycle_idle.in1
-net cycle-idle and2.cycle_idle.out => and2.cycle_run.in0
+net cycle-gate and2.cycle_gate.out => and2.cycle_run.in0
 net cycle-start cnc_panel.cycle_start => and2.cycle_run.in1 and2.cycle_resume.in1
 net cycle-run and2.cycle_run.out => halui.program.run
 
