@@ -101,7 +101,11 @@ net mode-jog-any or2.jog_b.out => halui.mode.teleop or2.manual_req.in0
 # PROG.HOME is deliberately NOT wired here: it issues its G0 through the
 # panel/LiNC issue_mdi path, which selects MDI itself, and asserting MANUAL
 # would fight that switch.
-net mode-manual-home cnc_panel.mode_home => or2.manual_req.in1
+# HOME also drops motion out of teleop. Jogging asserts `halui.mode.teleop`, and
+# motion refuses `EMC_JOINT_HOME` with "must be in joint mode to home" while it
+# is teleop — `halui.mode.joint` sends EMC_TRAJ_SET_TELEOP_ENABLE(0), which is
+# MOTION_FREE. Manual mode alone does not.
+net mode-manual-home cnc_panel.mode_home => or2.manual_req.in1 halui.mode.joint
 net mode-manual-request or2.manual_req.out => halui.mode.manual
 
 # ---------------------------------------------------------------------------
