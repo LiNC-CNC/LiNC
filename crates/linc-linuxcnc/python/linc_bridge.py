@@ -284,6 +284,31 @@ class Bridge:
     def read_parameters(self):
         return self.parameters
 
+    def capture_live_offsets(self):
+        """Record the active system's offsets from the live status.
+
+        The file is only useful if it matches the controller, and the controller
+        is the authority on the active system: `G10 L20` computes its value, and
+        a program can move G54 without telling us.
+        """
+        try:
+            self.stat.poll()
+            index = int(getattr(self.stat, "g5x_index", 1) or 1)
+            if not (1 <= index <= 9):
+                return
+            live = list(getattr(self.stat, "g5x_offset", ()) or ())
+            values = {}
+            for axis_index, axis in enumerate(self.axes):
+                if axis_index < len(live):
+                    values[axis] = live[axis_index]
+            if values:
+                self.offset_overrides.setdefault(index, {}).update(values)
+            rotation = getattr(self.stat, "rotation_xy", None)
+            if rotation is not None:
+                self.rotation_overrides[index] = float(rotation)
+        except Exception:
+            pass
+
     def save_parameters(self):
         """Write the offsets this session changed back to the parameter file.
 
@@ -712,6 +737,12 @@ class Bridge:
         if int(getattr(self.stat, "interp_state", 1)) != linuxcnc.INTERP_IDLE:
             return {"ok": False, "error": "interpreter is not idle"}
         try:
+            # `program_open` re-initialises the interpreter, and that re-reads the
+            # parameter file. Without this the file's old values replace whatever
+            # the operator has set, which looked like "the offset is discarded at
+            # program load".
+            self.capture_live_offsets()
+            self.save_parameters()
             self.cmd.program_open(path)
             self.cmd.wait_complete(2.0)
             self.last_program_path = path
@@ -728,7 +759,11 @@ class Bridge:
         index = int(command.get("index", 1))
         values = command.get("values", {})
         rotation = command.get("rotation")
-        error = self.require("mdi")
+        # `issue` switches to MDI for the block and restores the previous mode,
+        # so requiring the panel to already be in MDI rejected every write from
+        # the OFFSETS page — the table then showed the typed draft and lost it
+        # when the snapshot rebuilt the row.
+        error = self.require("write")
         if error:
             return {"ok": False, "error": error}
         parts = [f"G10 L2 P{index}"]
@@ -785,8 +820,13 @@ class Bridge:
         blocks = [f"G10 L20 P{index} " + " ".join(f"{axis}0.0" for axis in axes)]
         result = self.issue({"origin": "write", "blocks": blocks})
         if result.get("ok"):
-            # The controller computes the offset; read it back rather than
-            # deriving it, then persist it with the other writes.
+            # The controller computes the offset, and the block is asynchronous:
+            # wait for it before reading the value back, or the old offset is
+            # what gets persisted.
+            try:
+                self.cmd.wait_complete(2.0)
+            except Exception:
+                pass
             try:
                 self.stat.poll()
                 live = list(getattr(self.stat, "g5x_offset", ()) or ())
@@ -807,7 +847,7 @@ class Bridge:
         return result
 
     def set_g92(self, command):
-        error = self.require("mdi")
+        error = self.require("write")
         if error:
             return {"ok": False, "error": error}
         parts = ["G92"]
