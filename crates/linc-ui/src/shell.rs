@@ -1068,12 +1068,15 @@ impl LincApp {
                     nav_page = Some(Page::Program);
                 }
             }
-            // Separate, displayable binding for CODE/SPLIT: the F-keys the
-            // navigation uses are implicit and never listed in the hint row.
-            if input.consume_key(
-                self.keymap.program_cycle_view.modifiers,
-                self.keymap.program_cycle_view.key,
-            ) {
+            // Page-local: CODE/SPLIT only exists where there is a program view.
+            // Shortcuts that mean nothing on the page in front of the operator
+            // are not consumed, so they cannot shadow another page's command.
+            if self.page == Page::Program
+                && input.consume_key(
+                    self.keymap.program_cycle_view.modifiers,
+                    self.keymap.program_cycle_view.key,
+                )
+            {
                 cycle_view = true;
             }
             if input.consume_key(self.keymap.tools.modifiers, self.keymap.tools.key) {
@@ -1212,13 +1215,9 @@ impl LincApp {
             }
         }
         if cycle_view {
-            if self.page == Page::Program {
-                self.cycle_program_view();
-                let view = self.program.view;
-                self.remember_program_view(view);
-            } else {
-                self.request_page(Page::Program);
-            }
+            self.cycle_program_view();
+            let view = self.program.view;
+            self.remember_program_view(view);
         }
         if let Some(page) = nav_page {
             self.request_page(page);

@@ -82,6 +82,37 @@ Hard limitations:
 - `Ctrl+Q` must not quit during motion or a running program; confirm and/or
   ignore while busy.
 
+#### Shortcut scope
+
+Shortcuts are split into two classes. Treat this as a rule when adding one:
+a shortcut that only has meaning on one page must not be consumed anywhere
+else, so it cannot shadow another page's command.
+
+**Global** — these work from every page:
+
+| Key | Action |
+|---|---|
+| `F5` `F6` `F7` `F8` `Ctrl+Esc` | Go to Machine / Program / Tools / Offsets / Diagnostics |
+| `Esc` | Back, cancel, close detail |
+| `Ctrl+Q` | Guarded quit |
+| Arrows, `PageUp`/`PageDown`, `Home`/`End` | Focus, page, first/last item |
+| `Enter` | Select / apply / issue MDI |
+| `Backspace` | Edit text |
+| `Ctrl+O` | Open the Files page |
+
+**Page-local** — consumed only while that page is in front:
+
+| Page | Keys |
+|---|---|
+| Program | `Ctrl+S` save, `Ctrl+F` find, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE` |
+| Files | `Ctrl+R` refresh, `Enter` open, `Backspace` up a folder |
+| MDI | `Enter` issue, `Up`/`Down` history, `Esc` clear the unissued block |
+| Help | `/` focus search, `Backspace` back through link history |
+| Offsets, Tools, Probe | Arrows select a row |
+
+A page-local binding is only shown in the bottom hint row while its page is in
+front; nav keys are never listed.
+
 ### 3.2 Physical panel
 
 Source: existing panel driver sources, migrated into LiNC's `linc-panel` crate.
@@ -818,7 +849,7 @@ Implementation:
 - `FILE`: Program.
 - `TOOL`: Tools.
 - `OFFSET`: Offsets.
-- `WIN`: cycle `SPLIT`/`CODE` when Program is in front, nothing elsewhere.
+- `WIN`: cycle `SPLIT`/`CODE`, page-local to Program (see 3.1 shortcut scope).
 - `Ctrl+Esc`: Diagnostics.
 - `HELP` action: G-code Help; no dedicated function key.
 - `LOAD` / `Ctrl+O`: Files, when idle and allowed.
