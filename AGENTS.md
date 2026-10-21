@@ -41,9 +41,15 @@ capture taken with one is not a valid layout reference.
 - **No page titles.** The navigation names the page; banners stay because they
   carry live state. Pages keep an invisible focus anchor so arrow-key navigation
   has a starting point.
-- **Bound cards with an exact rect.** A `theme::card` inside a shared column
-  grows to fit its content, so header + body + footer drift past the slot and
-  the bottom is clipped. `allocate_exact_size` + `new_child` prevents it.
+- **Bound cards with an exact rect, and force them to that size.** A
+  `theme::card` inside a shared column grows to fit its content, so header +
+  body + footer drift past the slot. `allocate_exact_size` + `new_child` +
+  `set_clip_rect` bounds it, and the card must also be told to fill the rect
+  (`set_min_size`) — otherwise it ends at its content height, a few pixels above
+  the rect, and the column beside it ends on a different line.
+- **`available_height()` inside a frame is not bounded by that frame.** Sizing a
+  child from it lets the child ask for more than the card has; size from the
+  card's rect instead.
 - **Measure, do not guess, chrome.** `graph_card`'s chrome is ~86 px and a
   MODAL card ~135 px; the cards report their own height back and the next frame
   uses it.

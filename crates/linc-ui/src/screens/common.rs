@@ -112,15 +112,38 @@ pub fn modal_grid(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str) {
 }
 
 /// A MODAL pane of its own, for pages that have room for a side column.
-pub fn modal_pane(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str) {
-    theme::card(ui, |ui| {
-        // A grid sizes to its content, which leaves the card short of the
-        // column when only a few codes are active.
-        ui.set_min_width(ui.available_width());
+/// MODAL pane drawn into an exact rect.
+///
+/// The card is forced to the rect's size rather than to its content: a frame
+/// sizes to content, and the few pixels of difference were enough to leave the
+/// column beside the editor ending on a different line.
+pub fn modal_pane_in(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str, rect: egui::Rect) {
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    child.set_clip_rect(rect);
+    let inner = Vec2::new((rect.width() - 24.0).max(40.0), (rect.height() - 24.0).max(24.0));
+    theme::card(&mut child, |ui| {
+        ui.set_min_size(inner);
         theme::section_header(ui, "MODAL");
         modal_grid(app, ui, columns, id_salt);
     });
 }
+
+/// MODAL pane with an exact height, so the column that holds it ends where the
+
+/// Height a MODAL pane needs for `codes` G-code cells at `columns` wide.
+///
+/// Measured from the card: 45 px of chrome (margins plus header) and 45 px per
+/// row of cells. Derived rather than observed so it cannot lag a frame and
+/// leave the column short.
+pub fn modal_height(codes: usize, columns: usize) -> f32 {
+    let rows = codes.max(1).div_ceil(columns.max(1));
+    45.0 + rows as f32 * 45.0
+}
+
 
 pub fn modal_text(key: &str, value: &str) -> String {
     if value.is_empty() {

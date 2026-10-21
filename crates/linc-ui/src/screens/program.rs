@@ -49,44 +49,69 @@ fn chrome_key(view: &str) -> egui::Id {
 
 fn split(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
-    // Heights passed to `graph_card` are the *view* height, so the card chrome
-    // has to be reserved. The cards report their own chrome back, so the
-    // numbers cannot rot.
-    let main_height = (available.y - 4.0).max(220.0);
-    // Equal halves: the two panes describe the same program and neither is
-    // subordinate to the other.
-    let editor_width = (available.x * 0.5 - 6.0).max(400.0);
-    ui.horizontal_top(|ui| {
-        ui.allocate_ui_with_layout(
-            Vec2::new(editor_width, main_height),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| editor_pane(app, ui, main_height),
-        );
-        ui.add_space(8.0);
-        ui.allocate_ui_with_layout(
-            Vec2::new((available.x - editor_width - 8.0).max(300.0), main_height),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                let (graph_chrome, modal_total) = ui
-                    .ctx()
-                    .data(|data| data.get_temp::<(f32, f32)>(chrome_key("split")))
-                    .unwrap_or((86.0, 110.0));
-                let path_height = (main_height - graph_chrome - modal_total).max(120.0);
-                let top = ui.cursor().top();
-                graph_card(app, ui, path_height, ViewKind::Full);
-                let after_graph = ui.cursor().top();
-                common::modal_pane(app, ui, 8, "split-modal");
-                let after_modal = ui.cursor().top();
-                ui.ctx().data_mut(|data| {
-                    data.insert_temp(
-                        chrome_key("split"),
-                        (after_graph - top - path_height, after_modal - after_graph),
-                    )
-                });
+    let height = (available.y - 4.0).max(220.0);
+    let half = ((available.x - 8.0) * 0.5).max(300.0);
+    let top = ui.cursor().top();
+    let left_rect =
+        egui::Rect::from_min_size(egui::pos2(ui.cursor().left(), top), Vec2::new(half, height));
+    let right_rect = egui::Rect::from_min_size(
+        egui::pos2(left_rect.right() + 8.0, top),
+        Vec2::new(half, height),
+    );
+    // Both cards are positioned from rects rather than stacked: the graph's
+    // rendered height drifts by a few pixels, and stacking let that drift move
+    // the pane below it, so the two columns never ended together.
+    let mut left = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(left_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    editor_pane(app, &mut left, height);
 
-            },
-        );
+    let graph_chrome = ui
+        .ctx()
+        .data(|data| data.get_temp::<f32>(chrome_key("split")))
+        .unwrap_or(50.0);
+    let codes = app
+        .snapshot
+        .program
+        .modal
+        .iter()
+        .filter(|(key, _)| key.starts_with('G'))
+        .count();
+    let modal_h = common::modal_height(codes, 8);
+    let modal_rect = egui::Rect::from_min_size(
+        egui::pos2(right_rect.left(), right_rect.bottom() - modal_h),
+        Vec2::new(half, modal_h),
+    );
+    let graph_rect = egui::Rect::from_min_max(
+        right_rect.min,
+        egui::pos2(right_rect.right(), modal_rect.top() - 4.0),
+    );
+    let mut graph_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(graph_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    graph_card(
+        app,
+        &mut graph_ui,
+        (graph_rect.height() - graph_chrome).max(120.0),
+        ViewKind::Full,
+    );
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(
+            chrome_key("split"),
+            graph_ui.cursor().top() - graph_rect.top(),
+        )
     });
+    let mut modal_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(modal_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    common::modal_pane_in(app, &mut modal_ui, 8, "split-modal", modal_rect);
+    ui.advance_cursor_after_rect(egui::Rect::from_min_max(left_rect.min, right_rect.max));
 }
 
 fn code(app: &mut LincApp, ui: &mut Ui) {
@@ -101,8 +126,9 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
             |ui| editor_pane(app, ui, available.y),
         );
         ui.add_space(8.0);
+        let width = (available.x - editor_width - 8.0).max(220.0);
         ui.allocate_ui_with_layout(
-            Vec2::new((available.x - editor_width - 8.0).max(220.0), available.y),
+            Vec2::new(width, available.y),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 // Both cards are sized from what they actually render at, not
@@ -110,22 +136,53 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
                 // the height of the MODAL card change with the font scale and
                 // the number of active codes. The first frame uses these
                 // defaults and the next corrects them.
-                let (graph_chrome, modal_height) = ui
+                let graph_chrome = ui
                     .ctx()
-                    .data(|data| data.get_temp::<(f32, f32)>(chrome_key("code")))
-                    .unwrap_or((86.0, 135.0));
-                let path_height = (available.y - graph_chrome - modal_height).max(120.0);
-                let top = ui.cursor().top();
-                graph_card(app, ui, path_height, ViewKind::MiniXy);
-                let after_graph = ui.cursor().top();
-                common::modal_pane(app, ui, 4, "program-modal");
-                let after_modal = ui.cursor().top();
+                    .data(|data| data.get_temp::<f32>(chrome_key("code")))
+                    .unwrap_or(50.0);
+                let codes = app
+                    .snapshot
+                    .program
+                    .modal
+                    .iter()
+                    .filter(|(key, _)| key.starts_with('G'))
+                    .count();
+                let modal_h = common::modal_height(codes, 4);
+                let column = egui::Rect::from_min_size(
+                    ui.cursor().min,
+                    Vec2::new(width, available.y),
+                );
+                let modal_rect = egui::Rect::from_min_size(
+                    egui::pos2(column.left(), column.bottom() - modal_h),
+                    Vec2::new(width, modal_h),
+                );
+                let graph_rect = egui::Rect::from_min_max(
+                    column.min,
+                    egui::pos2(column.right(), modal_rect.top() - 4.0),
+                );
+                let mut graph_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(graph_rect)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                graph_card(
+                    app,
+                    &mut graph_ui,
+                    (graph_rect.height() - graph_chrome).max(120.0),
+                    ViewKind::MiniXy,
+                );
                 ui.ctx().data_mut(|data| {
                     data.insert_temp(
                         chrome_key("code"),
-                        (after_graph - top - path_height, after_modal - after_graph),
+                        graph_ui.cursor().top() - graph_rect.top(),
                     )
                 });
+                let mut modal_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(modal_rect)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                common::modal_pane_in(app, &mut modal_ui, 4, "program-modal", modal_rect);
             },
         );
     });
@@ -212,7 +269,12 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
             .max_rect(rect)
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
+    // `max_rect` bounds the layout but does not clip what the frame draws, so
+    // a few pixels of overflow would still show below the column.
+    child.set_clip_rect(rect);
+    let card_top = rect.top();
     theme::card(&mut child, |ui| {
+        let content_top = ui.cursor().top();
         ui.horizontal(|ui| {
             let file = app
                 .program
@@ -277,11 +339,18 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
             });
         });
         theme::separator(ui);
-        // Reserve an exact rect for the editor: the scroll area otherwise adds
-        // its own chrome on top of the height it was given, and the card grows
-        // past the slot it was allocated until the bottom is clipped.
+        // Sized from the card's rect, not from `available_height`: a frame does
+        // not bound what it gives its content, so the editor asked for more
+        // than the card had and pushed the card past the column beside it.
         const FOOTER_HEIGHT: f32 = 32.0;
-        let editor_height = (ui.available_height() - FOOTER_HEIGHT).max(80.0);
+        let header_height = ui.cursor().top() - content_top;
+        let editor_height = (rect.bottom()
+            - card_top
+            - 24.0
+            - header_height
+            - FOOTER_HEIGHT
+            - 6.0)
+            .max(80.0);
         let (rect, _) = ui.allocate_exact_size(
             Vec2::new(ui.available_width(), editor_height),
             egui::Sense::hover(),
