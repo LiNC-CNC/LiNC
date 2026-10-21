@@ -36,21 +36,24 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 
 
 
+/// Scratch key for the measured chrome of a Program graph column.
+///
+/// The cards report their own height, so the layout does not carry constants
+/// that silently rot when the font scale or the code count changes.
+fn chrome_key(view: &str) -> egui::Id {
+    egui::Id::unique(match view {
+        "code" => "linc-program-chrome-code",
+        _ => "linc-program-chrome-split",
+    })
+}
+
 fn split(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
-    // `theme::card` adds 12 px of inner margin on each side, and the heights
-    // asked for are *content* heights, so reserve that overhead or the columns
-    // render taller than their slots and the last one is clipped.
     // `theme::card` adds 12 px of inner margin per side. A card that also draws
-    // a `section_header` adds a header row on top of that. Heights passed to
-    // `graph_card` are the *view* height, so the chrome has to be reserved
-    // separately or the stack overflows the page and clips what is last.
+    // a `section_header` adds a header row on top. Heights passed to
+    // `graph_card` are the *view* height, so the chrome has to be reserved, and
+    // the cards report their own so the numbers cannot rot.
     const CARD_CHROME: f32 = 28.0;
-    const HEADER_CHROME: f32 = 24.0;
-    // The MODAL pane is its own card with a header and one row of cells.
-    const MODAL_CONTENT: f32 = 46.0;
-    let graph_chrome = CARD_CHROME + HEADER_CHROME;
-    let modal_total = CARD_CHROME + HEADER_CHROME + MODAL_CONTENT;
     let main_height = (available.y - 4.0).max(220.0);
     // Equal halves: the two panes describe the same program and neither is
     // subordinate to the other.
@@ -66,13 +69,23 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
             Vec2::new((available.x - editor_width - 8.0).max(300.0), main_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                graph_card(
-                    app,
-                    ui,
-                    (main_height - graph_chrome - modal_total - 8.0).max(160.0),
-                    ViewKind::Full,
-                );
+                let (graph_chrome, modal_total) = ui
+                    .ctx()
+                    .data(|data| data.get_temp::<(f32, f32)>(chrome_key("split")))
+                    .unwrap_or((86.0, 110.0));
+                let path_height =
+                    (main_height - graph_chrome - modal_total - 8.0).max(120.0);
+                let top = ui.cursor().top();
+                graph_card(app, ui, path_height, ViewKind::Full);
+                let after_graph = ui.cursor().top();
                 common::modal_pane(app, ui, 8, "split-modal");
+                let after_modal = ui.cursor().top();
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(
+                        chrome_key("split"),
+                        (after_graph - top - path_height, after_modal - after_graph),
+                    )
+                });
             },
         );
     });
@@ -94,25 +107,28 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
             Vec2::new((available.x - editor_width - 8.0).max(220.0), available.y),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                // MODAL needs its own height: two columns wrap the G-codes onto
-                // several rows, so count them instead of guessing.
-                let codes = app
-                    .snapshot
-                    .program
-                    .modal
-                    .iter()
-                    .filter(|(key, _)| key.starts_with('G'))
-                    .count()
-                    .max(1);
-                let modal_rows = codes.div_ceil(2);
-                const MODAL_ROW: f32 = 26.0;
-                // Card margins (24) plus the section header (24).
-                const MODAL_CHROME: f32 = 52.0;
-                let modal_total = MODAL_CHROME + modal_rows as f32 * MODAL_ROW;
+                // Both cards are sized from what they actually render at, not
+                // from guessed constants: the chrome inside `graph_card` and
+                // the height of the MODAL card change with the font scale and
+                // the number of active codes. The first frame uses these
+                // defaults and the next corrects them.
+                let (graph_chrome, modal_height) = ui
+                    .ctx()
+                    .data(|data| data.get_temp::<(f32, f32)>(chrome_key("code")))
+                    .unwrap_or((86.0, 135.0));
                 let path_height =
-                    (available.y - 52.0 - modal_total - 8.0).max(140.0);
+                    (available.y - graph_chrome - modal_height - 8.0).max(120.0);
+                let top = ui.cursor().top();
                 graph_card(app, ui, path_height, ViewKind::MiniXy);
-                common::modal_pane(app, ui, 2, "program-modal");
+                let after_graph = ui.cursor().top();
+                common::modal_pane(app, ui, 4, "program-modal");
+                let after_modal = ui.cursor().top();
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(
+                        chrome_key("code"),
+                        (after_graph - top - path_height, after_modal - after_graph),
+                    )
+                });
             },
         );
     });
@@ -186,7 +202,7 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, height: f32, kind: ViewKind) {
 fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
     let editable = app.editing_allowed();
     theme::card(ui, |ui| {
-        ui.set_min_height(height);
+        ui.set_min_height((height - 24.0).max(120.0));
         ui.horizontal(|ui| {
             let file = app
                 .program
@@ -251,7 +267,21 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
             });
         });
         theme::separator(ui);
-        scroll_editor(app, ui, height - 92.0, editable);
+        // Reserve an exact rect for the editor: the scroll area otherwise adds
+        // its own chrome on top of the height it was given, and the card grows
+        // past the slot it was allocated until the bottom is clipped.
+        const FOOTER_HEIGHT: f32 = 32.0;
+        let editor_height = (ui.available_height() - FOOTER_HEIGHT).max(80.0);
+        let (rect, _) = ui.allocate_exact_size(
+            Vec2::new(ui.available_width(), editor_height),
+            egui::Sense::hover(),
+        );
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        scroll_editor(app, &mut child, editor_height, editable);
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(format!(
