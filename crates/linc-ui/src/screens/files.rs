@@ -6,6 +6,7 @@ use egui::{RichText, Ui, Vec2};
 use linc_core::model::InterpState;
 
 use crate::files::{self, format_modified, format_size};
+use crate::screens::common;
 use crate::shell::LincApp;
 use crate::state::{CopyJob, CopyProgress, FileEntry, MountState};
 use crate::theme;
@@ -13,6 +14,10 @@ use crate::theme;
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
     app.files.poll_mount();
     poll_copy(app);
+    // Take keyboard focus off whatever had it: the Program editor is a text
+    // widget and consumes Enter and the arrows, so the file lists never saw
+    // the keys.
+    common::focus_anchor(ui, "files-page-focus");
     // Page-local commands; the bottom hint row lists them.
     ui.input_mut(|input| {
         if input.consume_key(
@@ -39,6 +44,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             app.files.usb_focused = false;
         }
     });
+    handle_keys(app, ui);
     let available = ui.available_size();
     // Leave one line for the copy/error status.
     let content_height = (available.y - 22.0).max(200.0);
@@ -57,6 +63,112 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         );
     });
     copy_status(app, ui);
+}
+
+/// Page keys, consumed before the lists draw.
+///
+/// Handling them inside the list let a focused row widget take Enter and the
+/// arrows for itself, so opening a program from NC_FILES did nothing.
+fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
+    let usb = app.files.usb_focused;
+    let entries: Vec<FileEntry> = if usb {
+        app.files.usb_entries.clone()
+    } else {
+        app.files.nc_entries.clone()
+    };
+    let current = if usb {
+        app.files.usb_current.clone()
+    } else {
+        Some(app.files.nc_current.clone())
+    };
+    let root = if usb {
+        app.files.usb_root.clone()
+    } else {
+        Some(app.files.nc_root.clone())
+    };
+    let mut selected = if usb {
+        app.files.usb_selected
+    } else {
+        app.files.nc_selected
+    };
+    let mut open_dir: Option<PathBuf> = None;
+    let mut load: Option<PathBuf> = None;
+    let mut copy = false;
+    let mut delete: Option<PathBuf> = None;
+    let mut up = false;
+    ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            selected = (selected + 1).min(entries.len().saturating_sub(1));
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            selected = selected.saturating_sub(1);
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace) {
+            up = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+            if let Some(entry) = entries.get(selected) {
+                if entry.is_dir {
+                    open_dir = Some(entry.path.clone());
+                } else if usb {
+                    // Enter on a USB file copies it into NC_FILES.
+                    copy = true;
+                } else {
+                    load = Some(entry.path.clone());
+                }
+            }
+        }
+        let delete_pressed = input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+            || input.consume_key(egui::Modifiers::CTRL, egui::Key::X);
+        if delete_pressed {
+            if let Some(entry) = entries.get(selected) {
+                if !entry.is_dir {
+                    delete = Some(entry.path.clone());
+                }
+            }
+        }
+    });
+    if up {
+        let can_up = current
+            .as_deref()
+            .zip(root.as_deref())
+            .map(|(current, root)| current != root)
+            .unwrap_or(false);
+        if can_up {
+            if let Some(parent) = current.as_deref().and_then(Path::parent) {
+                open_dir = Some(parent.to_path_buf());
+            }
+        }
+    }
+    if usb {
+        app.files.usb_selected = selected;
+    } else {
+        app.files.nc_selected = selected;
+    }
+    if let Some(dir) = open_dir {
+        if usb {
+            app.files.usb_current = Some(dir.clone());
+            app.files.usb_entries = crate::state::read_dir_entries(&dir);
+            app.files.usb_selected = 0;
+        } else {
+            app.files.nc_current = dir.clone();
+            app.files.nc_entries = crate::state::read_dir_entries(&dir);
+            app.files.nc_selected = 0;
+        }
+    }
+    if let Some(path) = load {
+        load_selected(app, &path);
+    }
+    if copy && copy_to_nc_allowed(app) {
+        copy_usb_to_nc(app);
+    }
+    if let Some(path) = delete {
+        let label = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        app.modal = Some(crate::state::Modal::ConfirmDelete { path, label, usb });
+    }
 }
 
 fn copy_to_usb_allowed(app: &LincApp) -> bool {
@@ -240,50 +352,6 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
     };
     let mut open_dir: Option<PathBuf> = None;
     let mut load_file: Option<PathBuf> = None;
-    let mut copy_file: Option<PathBuf> = None;
-    let mut delete_file: Option<PathBuf> = None;
-    let mut up = false;
-    let focused = (pane == Pane::Usb) == app.files.usb_focused;
-    // Keyboard only drives the focused pane.
-    if focused {
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-            selected = (selected + 1).min(entries.len().saturating_sub(1));
-        }
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowUp)) {
-            selected = selected.saturating_sub(1);
-        }
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
-            if let Some(entry) = entries.get(selected) {
-                if entry.is_dir {
-                    open_dir = Some(entry.path.clone());
-                } else if pane == Pane::Nc {
-                    // Enter on a program opens it; `load_selected` returns to
-                    // the Program page once the backend confirms the load.
-                    load_file = Some(entry.path.clone());
-                } else {
-                    // Enter on a USB file copies it into NC_FILES, which is
-                    // what the pane is for.
-                    copy_file = Some(entry.path.clone());
-                }
-            }
-        }
-        if ui.ctx().input(|i| i.key_pressed(egui::Key::Backspace)) {
-            up = true;
-        }
-        // Delete is configurable; the CNC keyboard has no Delete key, so Ctrl+X
-        // is accepted as the same command.
-        let delete_pressed = ui.ctx().input(|i| {
-            i.key_pressed(egui::Key::Delete)
-                || (i.modifiers.command && i.key_pressed(egui::Key::X))
-        });
-        if delete_pressed && app.files.copy.is_none() {
-            if let Some(entry) = entries.get(selected) {
-                if !entry.is_dir {
-                    delete_file = Some(entry.path.clone());
-                }
-            }
-        }
-    }
     // Scrollable list.
     egui::ScrollArea::vertical()
         .id_salt(("file-list", pane as u8))
@@ -321,7 +389,11 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
                     if can_up {
                         if ui.selectable_label(false, "..").clicked() {
                             app.files.usb_focused = pane == Pane::Usb;
-                            up = true;
+                            if let Some(parent) = current.as_deref().and_then(Path::parent) {
+                                if root.as_deref().map(|root| parent.starts_with(root)).unwrap_or(false) {
+                                    open_dir = Some(parent.to_path_buf());
+                                }
+                            }
                         }
                         ui.label("");
                         ui.label("");
@@ -377,17 +449,6 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
                     }
                 });
         });
-    if up {
-        if let (Some(current), Some(root)) = (current.as_deref(), root.as_deref()) {
-            if current != root {
-                if let Some(parent) = current.parent() {
-                    if parent.starts_with(root) {
-                        open_dir = Some(parent.to_path_buf());
-                    }
-                }
-            }
-        }
-    }
     if let Some(dir) = open_dir {
         if pane == Pane::Usb {
             app.files.usb_current = Some(dir.clone());
@@ -407,20 +468,6 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
         if pane == Pane::Nc {
             load_selected(app, &path);
         }
-    }
-    if copy_file.is_some() && pane == Pane::Usb {
-        copy_usb_to_nc(app);
-    }
-    if let Some(path) = delete_file {
-        let label = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.display().to_string());
-        app.modal = Some(crate::state::Modal::ConfirmDelete {
-            path,
-            label,
-            usb: pane == Pane::Usb,
-        });
     }
 }
 

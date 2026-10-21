@@ -1305,9 +1305,12 @@ impl LincApp {
             if input.consume_key(self.keymap.help_search.modifiers, self.keymap.help_search.key) {
                 help_search = true;
             }
-            if input.consume_key(self.keymap.mdi_issue.modifiers, self.keymap.mdi_issue.key)
-                && self.page == Page::Mdi
+            // The page test comes first: `consume_key` swallows the key whether
+            // or not the rest of the condition holds, and this binding is plain
+            // Enter, so on every other page it ate the key that opens a file.
+            if self.page == Page::Mdi
                 && self.profile.config.mdi.execute_on_enter
+                && input.consume_key(self.keymap.mdi_issue.modifiers, self.keymap.mdi_issue.key)
             {
                 mdi_issue = true;
             }

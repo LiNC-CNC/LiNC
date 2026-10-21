@@ -65,6 +65,12 @@ capture taken with one is not a valid layout reference.
   toolpath card, which uses a 4 px `egui::Frame`, a plain label, and
   `interact_size.y = 14` / `item_spacing.y = 0`. Copy the shell, not just the
   contents, or the rows stop looking like the same widget.
+- **Test the page before calling `consume_key`.** It swallows the key whether or
+  not the rest of the condition holds, so `consume_key(..) && self.page == X`
+  eats the key on every other page. `mdi_issue` is bound to plain Enter and did
+  exactly that, which is why Enter never opened a file from NC_FILES.
+- **Page keys belong before the widgets draw.** Handling them inside a list
+  lets a focused row take Enter and the arrows first.
 - `[ui] pages` selects the navigation entries and their order; it must match
   the keyboard (`MAIN` F5, `FILE` F6, `TOOL` F7, `OFFSET` F8, `WIN` F10).
 - `hal.allowed_outputs` is validated for **exact** equality, so adding a
