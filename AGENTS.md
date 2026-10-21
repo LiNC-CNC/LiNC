@@ -57,9 +57,9 @@ capture taken with one is not a valid layout reference.
 - **Never feed a measured height back into the next frame's layout.** Measuring
   the chrome and passing it back next frame makes the card oscillate between
   two sizes. Lay out from rects and measure within the same frame.
-- **Measure, do not guess, chrome.** `graph_card`'s chrome is ~86 px and a
-  MODAL card ~135 px; the cards report their own height back and the next frame
-  uses it.
+- **No card needs a chrome constant any more.** Cards are laid out from rects
+  and the tools inside them are sized from the rect they were given, so there
+  is nothing to measure and nothing to drift.
 - **Toolpath cards share one shell.** `theme::card` (12 px margin) plus
   `section_header` gives a visibly fatter title bar than the Machine page's
   toolpath card, which uses a 4 px `egui::Frame`, a plain label, and
