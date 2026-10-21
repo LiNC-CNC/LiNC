@@ -131,6 +131,19 @@ fn mode_context_card(app: &mut LincApp, ui: &mut Ui) {
                     app.snapshot.positions.units
                 ),
             );
+            // What the controller was actually given. If this is zero or far
+            // below FEED, the write never arrived and the jog is slow for a
+            // reason outside this page.
+            theme::kv_row(
+                ui,
+                "SENT",
+                match app.snapshot.hal.jog_speed {
+                    Some(value) => {
+                        format!("{value:.1} {}/s", app.snapshot.positions.units)
+                    }
+                    None => "—".to_string(),
+                },
+            );
         }
         match mode {
             Some(linc_core::model::PanelMode::Jog) => {
