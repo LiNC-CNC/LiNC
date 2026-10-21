@@ -24,6 +24,11 @@ pub mod theme {
     pub const WARNING: Color32 = Color32::from_rgb(0xff, 0xb0, 0x20);
     pub const ERROR: Color32 = Color32::from_rgb(0xff, 0x5c, 0x5c);
     pub const CYAN: Color32 = Color32::from_rgb(0x67, 0xe8, 0xf9);
+    /// Stock envelope: a neutral grey block that stays behind the toolpath.
+    /// Live toolhead marker.
+    pub const TOOL: Color32 = Color32::from_rgb(0xfb, 0xbf, 0x24);
+    pub const STOCK_FILL: Color32 = Color32::from_rgba_premultiplied(0x4a, 0x50, 0x57, 0x3c);
+    pub const STOCK_EDGE: Color32 = Color32::from_rgb(0x5a, 0x62, 0x6b);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +66,9 @@ pub struct TrajectoryView<'a> {
     pub show_live_trail: bool,
     pub show_program_bounds: bool,
     pub show_machine_bounds: bool,
+    /// Draw the stock envelope. SPEC §6.1 lists stock alongside the program
+    /// path, live trail and bounds in the mill toolpath.
+    pub show_stock: bool,
     pub show_selected_line: bool,
     pub show_legend: bool,
     pub selected_line_color: Color32,
@@ -90,6 +98,7 @@ impl<'a> TrajectoryView<'a> {
             show_live_trail: true,
             show_program_bounds: true,
             show_machine_bounds: true,
+            show_stock: true,
             show_selected_line: true,
             show_legend: true,
             selected_line_color: theme::ACCENT,
@@ -150,7 +159,10 @@ impl Projection {
         let (x, y) = match self.mode {
             ViewMode::Iso3d => {
                 let sx = (local[0] - local[1]) * 0.866;
-                let sy = (local[0] + local[1]) * 0.5 - local[2];
+                // Screen y grows downwards, so a positive Z must *subtract*
+                // from it. The sign was inverted, which drew +Z downwards —
+                // the opposite of the machine convention and of the mockup.
+                let sy = (local[0] + local[1]) * 0.5 + local[2];
                 (sx, -sy)
             }
             ViewMode::TopXy => (local[0], -local[1]),
@@ -307,6 +319,29 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         }
     }
 
+    // Stock envelope: the block the program cuts out of. Derived from the
+    // program extents so it tracks the loaded program, and drawn translucent
+    // so it never hides the toolpath.
+    let mut stock_drawn = false;
+    if view.show_stock && has_data {
+        if let Some(bounds) = view.preview.bounds.as_ref().and_then(stock_bounds) {
+            stock_drawn = true;
+            // A translucent solid reads as a block, matching the mockup; the
+            // toolpath is drawn after it so it is never hidden.
+            draw_bounds_filled(&painter, &projection, bounds, theme::STOCK_FILL);
+            draw_bounds(&painter, &projection, bounds, theme::STOCK_EDGE, 1.0, false);
+            if let Some(label) = view_label(view.view, bounds) {
+                painter.text(
+                    projection.project(label.0),
+                    Align2::LEFT_BOTTOM,
+                    "STOCK",
+                    FontId::monospace(10.0 * FONT_SCALE),
+                    theme::MUTED,
+                );
+            }
+        }
+    }
+
     // Program cut and rapid paths.
     if has_data {
         for segment in &view.preview.segments {
@@ -377,16 +412,18 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             .collect();
         painter.add(egui::Shape::line(points, Stroke::new(2.0, theme::SUCCESS)));
     }
+    // Live tool position. Amber, matching the accepted mockup, so the toolhead
+    // is distinguishable from the green live trail it sits on.
     if let Some(tip) = view.tool_tip.or_else(|| view.live_trail.last().copied()) {
         let pos = projection.project(tip);
-        painter.circle_stroke(pos, 6.0, Stroke::new(1.5, theme::SUCCESS));
+        painter.circle_stroke(pos, 6.0, Stroke::new(1.5, theme::TOOL));
         painter.line_segment(
             [pos - Vec2::new(9.0, 0.0), pos + Vec2::new(9.0, 0.0)],
-            Stroke::new(1.0, theme::SUCCESS),
+            Stroke::new(1.0, theme::TOOL),
         );
         painter.line_segment(
             [pos - Vec2::new(0.0, 9.0), pos + Vec2::new(0.0, 9.0)],
-            Stroke::new(1.0, theme::SUCCESS),
+            Stroke::new(1.0, theme::TOOL),
         );
     }
 
@@ -402,7 +439,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         // Legend.
         let legend_rect = Rect::from_min_size(
             rect.left_top() + Vec2::new(12.0, 12.0),
-            Vec2::new(214.0, 54.0),
+            Vec2::new(214.0, 90.0),
         );
         painter.rect_filled(
             legend_rect,
@@ -443,8 +480,49 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             FontId::monospace(10.0 * FONT_SCALE),
             theme::FG,
         );
+        // Stock key: only meaningful when the envelope is drawn.
+        if view.show_stock && stock_drawn {
+            painter.rect_filled(
+                Rect::from_min_size(
+                    legend_rect.left_top() + Vec2::new(10.0, 41.0),
+                    Vec2::new(22.0, 9.0),
+                ),
+                CornerRadius::same(1),
+                theme::STOCK_FILL,
+            );
+            painter.rect_stroke(
+                Rect::from_min_size(
+                    legend_rect.left_top() + Vec2::new(10.0, 41.0),
+                    Vec2::new(22.0, 9.0),
+                ),
+                CornerRadius::same(1),
+                Stroke::new(1.0, theme::STOCK_EDGE),
+                StrokeKind::Inside,
+            );
+            painter.text(
+                legend_rect.left_top() + Vec2::new(40.0, 38.0),
+                Align2::LEFT_TOP,
+                "STOCK",
+                FontId::monospace(10.0 * FONT_SCALE),
+                theme::FG,
+            );
+        }
+        if view.tool_tip.is_some() {
+            painter.circle_stroke(
+                legend_rect.left_top() + Vec2::new(21.0, 61.0),
+                5.0,
+                Stroke::new(1.5, theme::TOOL),
+            );
+            painter.text(
+                legend_rect.left_top() + Vec2::new(40.0, 55.0),
+                Align2::LEFT_TOP,
+                "TOOL",
+                FontId::monospace(10.0 * FONT_SCALE),
+                theme::FG,
+            );
+        }
         painter.text(
-            legend_rect.left_top() + Vec2::new(10.0, 40.0),
+            legend_rect.left_top() + Vec2::new(10.0, 74.0),
             Align2::LEFT_TOP,
             format!("{}  •  ZOOM {:.1}x", view.view.label(), view.zoom),
             FontId::monospace(9.0 * FONT_SCALE),
@@ -472,6 +550,63 @@ fn view_label(mode: ViewMode, bounds: Bounds3) -> Option<([f64; 3], &'static str
         ViewMode::SideXz | ViewMode::LatheXz => {
             Some(([bounds.min[0], 0.0, bounds.max[2]], "MACHINE"))
         }
+    }
+}
+
+/// Stock envelope derived from the program extents: the program's XY footprint
+/// extended down to the lowest Z it reaches, with a small margin. Returns
+/// `None` when the program has no usable extents.
+fn stock_bounds(program: &Bounds3) -> Option<Bounds3> {
+    let (min, max) = (program.min, program.max);
+    if !min.iter().chain(max.iter()).all(|value| value.is_finite()) {
+        return None;
+    }
+    let span_x = (max[0] - min[0]).abs();
+    let span_y = (max[1] - min[1]).abs();
+    if span_x <= f64::EPSILON && span_y <= f64::EPSILON {
+        return None;
+    }
+    let margin = 2.0;
+    let floor = min[2].min(max[2]) - margin;
+    Some(Bounds3 {
+        min: [min[0] - margin, min[1] - margin, floor],
+        max: [max[0] + margin, max[1] + margin, max[2].max(min[2]) + margin],
+    })
+}
+
+/// Translucent solid for the stock envelope: the three visible faces of the
+/// box, so it reads as a block rather than a wireframe.
+fn draw_bounds_filled(painter: &Painter, projection: &Projection, bounds: Bounds3, fill: Color32) {
+    let min = bounds.min;
+    let max = bounds.max;
+    let corner = |x: f64, y: f64, z: f64| projection.project([x, y, z]);
+    let top = [
+        corner(min[0], min[1], max[2]),
+        corner(max[0], min[1], max[2]),
+        corner(max[0], max[1], max[2]),
+        corner(min[0], max[1], max[2]),
+    ];
+    // Top face plus the two side faces nearest the viewer.
+    for face in [
+        top.to_vec(),
+        vec![
+            corner(min[0], min[1], min[2]),
+            corner(max[0], min[1], min[2]),
+            corner(max[0], min[1], max[2]),
+            corner(min[0], min[1], max[2]),
+        ],
+        vec![
+            corner(min[0], min[1], min[2]),
+            corner(min[0], max[1], min[2]),
+            corner(min[0], max[1], max[2]),
+            corner(min[0], min[1], max[2]),
+        ],
+    ] {
+        painter.add(egui::Shape::convex_polygon(
+            face,
+            fill,
+            Stroke::NONE,
+        ));
     }
 }
 
