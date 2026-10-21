@@ -16,7 +16,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     let mode = app.snapshot.panel.mode.mode();
     let program_zero = mode == Some(PanelMode::ProgHome);
     let on_screen = matches!(mode, Some(PanelMode::Home) | Some(PanelMode::ProgHome));
-    // No page title or subtitle: `live_mode_header` names the mode and the
+    // No page title: the mode key names the mode and the
     // context card explains what the keys do.
     if !on_screen {
         theme::banner(
@@ -26,13 +26,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         );
         ui.add_space(4.0);
     }
-    let mode_label = mode.map(|mode| mode.label()).unwrap_or("UNKNOWN");
-    common::live_mode_header(
-        ui,
-        mode_label,
-        on_screen,
-        "NO ON-SCREEN HOME, UNHOME, JOG OR OVERRIDE CONTROLS",
-    );
+    // No mode banner here either: the mode key shows the mode.
 
     let rows = axis_rows(&app.snapshot, &app.profile.machine_ini.axes);
     let readout = homing_readout(app, &rows);

@@ -1123,46 +1123,10 @@ pub fn live_split<R1, R2>(
     });
 }
 
-/// `PANEL MODE: <mode>` banner plus the read-only reminder, shared by the
-/// Manual and Homing screens.
-pub fn live_mode_header(
-    ui: &mut Ui,
-    mode_label: &str,
-    mode_known: bool,
-    reminder: &str,
-) {
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(format!("PANEL MODE: {mode_label}"))
-                .monospace()
-                .size(theme::font_size(14.0))
-                .color(if mode_known {
-                    theme::ACCENT
-                } else {
-                    theme::WARNING
-                }),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                RichText::new(reminder)
-                    .monospace()
-                    .size(theme::font_size(10.0))
-                    .color(theme::MUTED),
-            );
-        });
-    });
-    ui.add_space(4.0);
-}
-
-/// Dominant live graph card with the shared view controls. Uses the single
-/// live-view state on `app.manual`, so the view is preserved when the operator
-/// moves between the Manual and Homing positions.
 /// Live toolpath card for the manual modes.
 ///
-/// Same status line and no legend, so it reads like the Machine page's
-/// toolpath card: `— CUT`, `-- RAPID`, `— LIVE`, `○ TOOL` on the left, the view
-/// and `ZOOM` on the right. FIT and CLEAR TRAIL are keyboard commands, so the
-/// header carries no buttons.
+/// `FIT` and `CLEAR TRAIL` are keyboard commands, so the header carries no
+/// buttons.
 pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), card_height.max(160.0)),
@@ -1206,6 +1170,13 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
 /// next to the other machine actions rather than at the bottom of the page.
 pub fn limits_override_row(app: &mut crate::shell::LincApp, ui: &mut Ui) {
     let overridden = app.snapshot.limits_overridden;
+    // Blinking red while active: the state means the limit switches are being
+    // ignored, so it must not be possible to miss. Repaints are requested for as
+    // long as it is on, because egui only animates when asked.
+    let blink_on = ((ui.input(|input| input.time) * 2.0) as i64) % 2 == 0;
+    if overridden {
+        ui.ctx().request_repaint();
+    }
     ui.horizontal(|ui| {
         ui.label(
             RichText::new("LIMITS")
@@ -1214,20 +1185,28 @@ pub fn limits_override_row(app: &mut crate::shell::LincApp, ui: &mut Ui) {
                 .color(theme::MUTED),
         );
         let label = if overridden { "OVERRIDE ON" } else { "OVERRIDE" };
-        let clicked = if overridden {
-            theme::accent_button(ui, label, true).clicked()
+        let clicked = if overridden && blink_on {
+            theme::danger_button(ui, label, true).clicked()
+        } else if overridden {
+            theme::action_button(ui, label, true).clicked()
         } else {
             theme::action_button(ui, label, true).clicked()
         };
         if clicked {
             app.send(linc_core::command::MachineCommand::ToggleLimitsOverride);
         }
+        ui.label(
+            RichText::new("O")
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
         if overridden {
             ui.label(
                 RichText::new("SWITCHES IGNORED")
                     .monospace()
                     .size(theme::font_size(9.0))
-                    .color(theme::WARNING),
+                    .color(theme::ERROR),
             );
         }
     });

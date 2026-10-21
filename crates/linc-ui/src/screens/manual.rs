@@ -13,21 +13,9 @@ use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
     handle_zero_keys(app, ui);
-    let mode = app
-        .snapshot
-        .panel
-        .mode
-        .mode()
-        .filter(|mode| mode.is_manual());
-    let mode_label = mode.map(|mode| mode.label()).unwrap_or("UNKNOWN");
-    // No page title: `live_mode_header` already names the mode, and a heading
-    // above it only costs vertical space.
-    common::live_mode_header(
-        ui,
-        mode_label,
-        mode.is_some(),
-        "NO ON-SCREEN JOG OR MODE CONTROLS",
-    );
+    // No mode banner: the panel's mode key and the navigation already say which
+    // mode this is, and the row cost vertical space on a 720-line screen. The
+    // mode itself still drives the context card below.
     let readout = coordinates_readout(app);
     common::live_split(
         app,
@@ -40,7 +28,6 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         },
         |app, ui| {
             common::limits_override_row(app, ui);
-            common::zero_point_card(app, ui);
             common::live_coordinates_card(
                 ui,
                 "WORK COORDINATES",
@@ -101,11 +88,19 @@ fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
         .mode()
         .map(|mode| mode.is_manual())
         .unwrap_or(false);
-    if !jogging || ui.ctx().memory(|memory| memory.focused()).is_some() {
+    // Only a text field keeps these keys for itself. The page holds focus on an
+    // anchor widget for arrow navigation, so any focus at all is too broad a
+    // test and made the keys dead.
+    let text_focused = ui.memory(|memory| {
+        memory.has_focus(egui::Id::unique("linc-program-editor"))
+            || memory.has_focus(egui::Id::unique("linc-tool-cell"))
+    });
+    if !jogging || text_focused {
         return;
     }
     let axes = app.axes();
     let mut zero: Option<Vec<String>> = None;
+    let mut toggle_limits = false;
     ui.input_mut(|input| {
         for (key, axis) in [(egui::Key::X, "X"), (egui::Key::Y, "Y"), (egui::Key::Z, "Z")] {
             if input.consume_key(egui::Modifiers::NONE, key) {
@@ -117,7 +112,13 @@ fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::A) {
             zero = Some(axes.clone());
         }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::O) {
+            toggle_limits = true;
+        }
     });
+    if toggle_limits {
+        app.send(linc_core::command::MachineCommand::ToggleLimitsOverride);
+    }
     if let Some(axes) = zero {
         common::zero_axes(app, axes);
     }
