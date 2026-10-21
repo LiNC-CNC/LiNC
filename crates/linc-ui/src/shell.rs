@@ -66,6 +66,10 @@ pub struct LincApp {
     pub toasts: Vec<Toast>,
     pub quit_requested: bool,
     pub last_snapshot_ms: u64,
+    /// Highest alarm id the operator has been told about. Controller errors used
+    /// to appear only in the Machine page's message card, so a program that
+    /// aborted looked like it had simply jumped to the end.
+    pub alarm_id_seen: u64,
     pub last_connection: Option<bool>,
     pub last_protect: Option<bool>,
     pub panel_offline_toast: bool,
@@ -231,6 +235,7 @@ impl LincApp {
             preferences_dirty: false,
             preferences_saved_at: std::time::Instant::now(),
             last_snapshot_ms: now_ms(),
+            alarm_id_seen: 0,
             last_connection: Some(snapshot.panel.connected),
             last_protect: Some(snapshot.panel.protect_effective()),
             panel_offline_toast: false,
@@ -322,6 +327,34 @@ impl LincApp {
 
     pub fn poll_backend(&mut self) {
         self.snapshot = self.backend.snapshot();
+        // Tell the operator about controller errors wherever they are. An
+        // aborted program used to leave the console as the only witness.
+        let newest = self
+            .snapshot
+            .alarms
+            .iter()
+            .map(|alarm| alarm.id)
+            .max()
+            .unwrap_or(0);
+        if newest > self.alarm_id_seen {
+            let fresh: Vec<linc_core::model::Alarm> = self
+                .snapshot
+                .alarms
+                .iter()
+                .filter(|alarm| alarm.id > self.alarm_id_seen)
+                .cloned()
+                .collect();
+            for alarm in fresh {
+                let colour = match alarm.severity {
+                    linc_core::model::AlarmSeverity::Critical
+                    | linc_core::model::AlarmSeverity::Error => theme::ERROR,
+                    linc_core::model::AlarmSeverity::Warning => theme::WARNING,
+                    linc_core::model::AlarmSeverity::Info => theme::MUTED,
+                };
+                self.toast(alarm.message, colour);
+            }
+            self.alarm_id_seen = newest;
+        }
         let mut loaded = false;
         let mut load_failed = false;
         self.last_snapshot_ms = now_ms();
