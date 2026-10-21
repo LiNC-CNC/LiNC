@@ -6,43 +6,107 @@ use egui::{RichText, Ui, Vec2};
 use linc_core::model::InterpState;
 
 use crate::files::{self, format_modified, format_size};
-use crate::screens::common;
 use crate::shell::LincApp;
 use crate::state::{CopyJob, CopyProgress, FileEntry, MountState};
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
-    common::page_header(
-        ui,
-        "FILES",
-        "Program storage and removable media. Folder navigation only; no auto-run.",
-    );
     app.files.poll_mount();
     poll_copy(app);
-    let available = ui.available_width();
-    let content_height = (ui.available_height() - 54.0).max(260.0);
+    // Page-local commands; the bottom hint row lists them.
+    ui.input_mut(|input| {
+        if input.consume_key(
+            app.keymap.files_copy_to_usb.modifiers,
+            app.keymap.files_copy_to_usb.key,
+        ) && copy_to_usb_allowed(app)
+        {
+            copy_nc_to_usb(app);
+        }
+        if input.consume_key(
+            app.keymap.files_copy_to_nc.modifiers,
+            app.keymap.files_copy_to_nc.key,
+        ) && copy_to_nc_allowed(app)
+        {
+            copy_usb_to_nc(app);
+        }
+    });
+    // Left/Right move between the panes, mirroring the two columns.
+    ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
+            app.files.usb_focused = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
+            app.files.usb_focused = false;
+        }
+    });
+    let available = ui.available_size();
+    // Leave one line for the copy/error status.
+    let content_height = (available.y - 22.0).max(200.0);
+    let pane_width = ((available.x - 8.0) * 0.5).max(300.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
-            Vec2::new(available * 0.5, content_height),
+            Vec2::new(pane_width, content_height),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| usb_pane(app, ui),
+            |ui| usb_pane(app, ui, content_height - 26.0),
         );
         ui.add_space(8.0);
         ui.allocate_ui_with_layout(
-            Vec2::new(
-                (available - available * 0.5 - 8.0).max(320.0),
-                content_height,
-            ),
+            Vec2::new(pane_width, content_height),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| nc_pane(app, ui),
+            |ui| nc_pane(app, ui, content_height - 26.0),
         );
     });
-    ui.add_space(6.0);
-    actions(app, ui);
+    copy_status(app, ui);
 }
 
-fn usb_pane(app: &mut LincApp, ui: &mut Ui) {
+fn copy_to_usb_allowed(app: &LincApp) -> bool {
+    matches!(app.files.mount_state, MountState::Mounted) && app.files.copy.is_none()
+}
+
+fn copy_to_nc_allowed(app: &LincApp) -> bool {
+    let running = app.snapshot.task.interp != InterpState::Idle || app.snapshot.task.running;
+    copy_to_usb_allowed(app) && !running && !app.program_protected()
+}
+
+/// One line of feedback where the buttons used to be: progress, error, or the
+/// note about how a copy is written.
+fn copy_status(app: &LincApp, ui: &mut Ui) {
+    ui.horizontal(|ui| {
+        if let Some(error) = &app.files.error {
+            ui.label(
+                RichText::new(error)
+                    .size(theme::font_size(10.0))
+                    .color(theme::ERROR),
+            );
+        } else if let Some(job) = &app.files.copy {
+            let label = match app.files.copy_progress {
+                Some((copied, total)) => format!(
+                    "COPYING {}  {} / {}",
+                    job.label,
+                    format_size(copied),
+                    format_size(total)
+                ),
+                None => format!("COPYING {}  STARTING", job.label),
+            };
+            ui.label(
+                RichText::new(label)
+                    .monospace()
+                    .size(theme::font_size(10.0))
+                    .color(theme::ACCENT),
+            );
+        } else {
+            ui.label(
+                RichText::new("COPY USES TEMP FILE + ATOMIC RENAME")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+        }
+    });
+}
+
+fn usb_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
+        ui.set_min_height(height);
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new("USB MEDIA")
@@ -128,8 +192,9 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui) {
     });
 }
 
-fn nc_pane(app: &mut LincApp, ui: &mut Ui) {
+fn nc_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
+        ui.set_min_height(height);
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new("NC_FILES")
@@ -175,6 +240,8 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
     };
     let mut open_dir: Option<PathBuf> = None;
     let mut load_file: Option<PathBuf> = None;
+    let mut copy_file: Option<PathBuf> = None;
+    let mut delete_file: Option<PathBuf> = None;
     let mut up = false;
     let focused = (pane == Pane::Usb) == app.files.usb_focused;
     // Keyboard only drives the focused pane.
@@ -190,18 +257,37 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
                 if entry.is_dir {
                     open_dir = Some(entry.path.clone());
                 } else if pane == Pane::Nc {
+                    // Enter on a program opens it; `load_selected` returns to
+                    // the Program page once the backend confirms the load.
                     load_file = Some(entry.path.clone());
+                } else {
+                    // Enter on a USB file copies it into NC_FILES, which is
+                    // what the pane is for.
+                    copy_file = Some(entry.path.clone());
                 }
             }
         }
         if ui.ctx().input(|i| i.key_pressed(egui::Key::Backspace)) {
             up = true;
         }
+        // Delete is configurable; the CNC keyboard has no Delete key, so Ctrl+X
+        // is accepted as the same command.
+        let delete_pressed = ui.ctx().input(|i| {
+            i.key_pressed(egui::Key::Delete)
+                || (i.modifiers.command && i.key_pressed(egui::Key::X))
+        });
+        if delete_pressed && app.files.copy.is_none() {
+            if let Some(entry) = entries.get(selected) {
+                if !entry.is_dir {
+                    delete_file = Some(entry.path.clone());
+                }
+            }
+        }
     }
     // Scrollable list.
     egui::ScrollArea::vertical()
         .id_salt(("file-list", pane as u8))
-        .max_height(430.0)
+        .max_height(ui.available_height().max(120.0))
         .show(ui, |ui| {
             egui::Grid::new(format!("file-grid-{:?}", pane as u8))
                 .num_columns(3)
@@ -322,74 +408,22 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
             load_selected(app, &path);
         }
     }
+    if copy_file.is_some() && pane == Pane::Usb {
+        copy_usb_to_nc(app);
+    }
+    if let Some(path) = delete_file {
+        let label = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        app.modal = Some(crate::state::Modal::ConfirmDelete {
+            path,
+            label,
+            usb: pane == Pane::Usb,
+        });
+    }
 }
 
-fn actions(app: &mut LincApp, ui: &mut Ui) {
-    ui.horizontal(|ui| {
-        let running = app.snapshot.task.interp != InterpState::Idle || app.snapshot.task.running;
-        let usb_mounted = matches!(app.files.mount_state, MountState::Mounted);
-        let copy_active = app.files.copy.is_some();
-        let protect = app.program_protected();
-        if theme::action_button(ui, "COPY TO USB", usb_mounted && !copy_active).clicked() {
-            copy_nc_to_usb(app);
-        }
-        if theme::action_button(
-            ui,
-            "COPY TO NC_FILES",
-            usb_mounted && !copy_active && !running && !protect,
-        )
-        .clicked()
-        {
-            copy_usb_to_nc(app);
-        }
-        if theme::accent_button(ui, "LOAD", !running).clicked() {
-            if let Some(entry) = app.files.nc_entries.get(app.files.nc_selected) {
-                if !entry.is_dir {
-                    let path = entry.path.clone();
-                    load_selected(app, &path);
-                }
-            }
-        }
-        if theme::action_button(ui, "REFRESH", true).clicked() {
-            app.files.refresh();
-        }
-        if theme::action_button(ui, "ESC BACK", true).clicked() {
-            app.set_page(app.files_return_page);
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if let Some(error) = &app.files.error {
-                ui.label(
-                    RichText::new(error)
-                        .size(theme::font_size(10.0))
-                        .color(theme::ERROR),
-                );
-            }
-            if let Some(job) = &app.files.copy {
-                let label = match app.files.copy_progress {
-                    Some((copied, total)) => format!(
-                        "COPYING {}  {} / {}",
-                        job.label,
-                        format_size(copied),
-                        format_size(total)
-                    ),
-                    None => format!("COPYING {}  STARTING", job.label),
-                };
-                ui.label(
-                    RichText::new(label)
-                        .monospace()
-                        .size(theme::font_size(10.0))
-                        .color(theme::ACCENT),
-                );
-            } else {
-                ui.label(
-                    RichText::new("COPY USES TEMP FILE + ATOMIC RENAME")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-            }
-        });
-    });
-}
 
 fn load_selected(app: &mut LincApp, path: &Path) {
     let extension = path
