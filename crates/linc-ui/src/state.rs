@@ -675,9 +675,15 @@ pub struct OffsetDraft {
 
 pub struct OffsetsUi {
     pub selected: u8,
+    /// Selected cell, the way the tool table tracks it: row is the index into
+    /// the offsets list, column 0 is the WCS label and the rest are the value
+    /// cells.
+    pub selected_row: usize,
+    pub selected_column: usize,
     pub rows: HashMap<u8, OffsetDraft>,
     pub g92: Vec<String>,
     pub editing: bool,
+    pub edit_buffer: String,
     pub error: Option<String>,
     pub revision_seen: u64,
 }
@@ -686,8 +692,11 @@ impl Default for OffsetsUi {
     fn default() -> Self {
         Self {
             selected: 1,
+            selected_row: 0,
+            selected_column: 1,
             rows: HashMap::new(),
             g92: Vec::new(),
+            edit_buffer: String::new(),
             editing: false,
             error: None,
             revision_seen: 0,
