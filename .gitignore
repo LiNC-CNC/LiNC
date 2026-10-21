@@ -8,3 +8,6 @@ __pycache__/
 *.pyc
 configs/halshow.preferences
 *.halshow
+# LinuxCNC writes the parameter file (work offsets, G92) on exit; it is machine
+# state, not source. Tracking it made `git checkout` restore stale offsets.
+configs/sim.var
