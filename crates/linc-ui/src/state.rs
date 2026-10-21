@@ -289,6 +289,9 @@ pub struct FilesUi {
     pub last_mount_attempt: Instant,
     pub pending_overwrite: Option<(PathBuf, PathBuf, PathBuf)>,
     pub safe_to_remove: bool,
+    /// Latest copy progress. `poll_copy` drains the channel every frame, so the
+    /// value has to be latched here or the progress label never renders.
+    pub copy_progress: Option<(u64, u64)>,
     pub last_refresh: Instant,
 }
 
@@ -314,6 +317,7 @@ impl FilesUi {
             last_mount_attempt: Instant::now() - Duration::from_secs(10),
             pending_overwrite: None,
             safe_to_remove: false,
+            copy_progress: None,
             last_refresh: Instant::now() - Duration::from_secs(10),
         };
         ui.refresh();
@@ -336,6 +340,9 @@ impl FilesUi {
                 self.usb_label = usb.label;
                 self.usb_free = usb.free;
                 self.mount_state = MountState::Mounted;
+                // A freshly mounted device is in use again: the previous
+                // eject's SAFE TO REMOVE must not carry over to it.
+                self.safe_to_remove = false;
                 self.usb_current = Some(usb.path.clone());
                 self.usb_entries = read_dir_entries(&usb.path);
                 self.usb_selected = self
@@ -747,6 +754,7 @@ pub struct GraphStyle {
     pub show_live_trail: bool,
     pub show_program_bounds: bool,
     pub show_machine_bounds: bool,
+    pub show_stock: bool,
     pub highlight_selected_line: bool,
     pub show_legend: bool,
     pub trail_max_points: usize,
@@ -764,6 +772,7 @@ impl GraphStyle {
         view.show_live_trail = self.show_live_trail;
         view.show_program_bounds = self.show_program_bounds;
         view.show_machine_bounds = self.show_machine_bounds;
+        view.show_stock = self.show_stock;
         view.show_selected_line = self.highlight_selected_line;
         view.show_legend = self.show_legend;
         view.selected_line = selected_line;
@@ -817,8 +826,12 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
         show_live_trail: profile.config.toolpath.show_live_trail,
         show_program_bounds: profile.config.toolpath.show_program_bounds,
         show_machine_bounds: profile.config.toolpath.show_machine_bounds,
+        show_stock: profile.config.toolpath.show_stock,
         highlight_selected_line: profile.config.toolpath.highlight_selected_line,
-        show_legend: false,
+        // SPEC §6.2: the legend must identify the loaded program path and the
+        // live trail as separate layers. It was hardcoded off, so the two
+        // colours were never keyed anywhere in the UI.
+        show_legend: true,
         trail_max_points: profile.config.toolpath.trail_max_points,
         perspective: profile.config.toolpath.perspective,
     }
@@ -826,4 +839,336 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
 
 pub fn selected_line_color() -> egui::Color32 {
     view_theme::ACCENT
+}
+
+// ---------------------------------------------------------------------------
+// Configured keymap
+//
+// `[keys]` in the profile is the operator-facing key reference. It used to be
+// display-only: the real bindings were hardcoded, so a profile that rebound a
+// key loaded cleanly and silently did nothing (CONFIGURATION.md §1.7 exists to
+// prevent exactly that). The keymap is now parsed once and drives the shell.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Binding {
+    pub key: egui::Key,
+    pub modifiers: egui::Modifiers,
+}
+
+impl Binding {
+    pub const fn new(key: egui::Key, modifiers: egui::Modifiers) -> Self {
+        Self { key, modifiers }
+    }
+
+    /// Short display form, e.g. `F5`, `Ctrl+Q`, `Esc`, `/`. Used by the
+    /// bottom bar's keyboard-command hints.
+    pub fn label(&self) -> String {
+        let mut out = String::new();
+        if self.modifiers.ctrl {
+            out.push_str("Ctrl+");
+        }
+        if self.modifiers.alt {
+            out.push_str("Alt+");
+        }
+        if self.modifiers.shift {
+            out.push_str("Shift+");
+        }
+        out.push_str(key_name(self.key));
+        out
+    }
+
+    /// Parse a binding such as `F5`, `Escape`, `Ctrl+Q`, `Ctrl+ArrowUp`, `/`.
+    /// Returns `None` for an unparseable value; the caller keeps its default.
+    pub fn parse(text: &str) -> Option<Self> {
+        let mut modifiers = egui::Modifiers::NONE;
+        let mut key_text = text.trim();
+        loop {
+            let lower = key_text.to_ascii_lowercase();
+            if let Some(rest) = lower.strip_prefix("ctrl+") {
+                modifiers.ctrl = true;
+                modifiers.command = true;
+                key_text = &key_text[key_text.len() - rest.len()..];
+            } else if let Some(rest) = lower.strip_prefix("shift+") {
+                modifiers.shift = true;
+                key_text = &key_text[key_text.len() - rest.len()..];
+            } else if let Some(rest) = lower.strip_prefix("alt+") {
+                modifiers.alt = true;
+                key_text = &key_text[key_text.len() - rest.len()..];
+            } else {
+                break;
+            }
+        }
+        let key = parse_key(key_text.trim())?;
+        Some(Self { key, modifiers })
+    }
+}
+
+/// Inverse of [`parse_key`] for the hints in the bottom bar.
+pub fn key_name(key: egui::Key) -> &'static str {
+    use egui::Key;
+    match key {
+        Key::A => "A",
+        Key::B => "B",
+        Key::C => "C",
+        Key::D => "D",
+        Key::E => "E",
+        Key::F => "F",
+        Key::G => "G",
+        Key::H => "H",
+        Key::I => "I",
+        Key::J => "J",
+        Key::K => "K",
+        Key::L => "L",
+        Key::M => "M",
+        Key::N => "N",
+        Key::O => "O",
+        Key::P => "P",
+        Key::Q => "Q",
+        Key::R => "R",
+        Key::S => "S",
+        Key::T => "T",
+        Key::U => "U",
+        Key::V => "V",
+        Key::W => "W",
+        Key::X => "X",
+        Key::Y => "Y",
+        Key::Z => "Z",
+        Key::Num0 => "0",
+        Key::Num1 => "1",
+        Key::Num2 => "2",
+        Key::Num3 => "3",
+        Key::Num4 => "4",
+        Key::Num5 => "5",
+        Key::Num6 => "6",
+        Key::Num7 => "7",
+        Key::Num8 => "8",
+        Key::Num9 => "9",
+        Key::F1 => "F1",
+        Key::F2 => "F2",
+        Key::F3 => "F3",
+        Key::F4 => "F4",
+        Key::F5 => "F5",
+        Key::F6 => "F6",
+        Key::F7 => "F7",
+        Key::F8 => "F8",
+        Key::F9 => "F9",
+        Key::F10 => "F10",
+        Key::F11 => "F11",
+        Key::F12 => "F12",
+        Key::Escape => "Esc",
+        Key::Enter => "Enter",
+        Key::Tab => "Tab",
+        Key::Backspace => "Bksp",
+        Key::Delete => "Del",
+        Key::ArrowUp => "Up",
+        Key::ArrowDown => "Down",
+        Key::ArrowLeft => "Left",
+        Key::ArrowRight => "Right",
+        Key::Home => "Home",
+        Key::End => "End",
+        Key::PageUp => "PgUp",
+        Key::PageDown => "PgDn",
+        Key::Slash => "/",
+        Key::Space => "Space",
+        _ => "?",
+    }
+}
+
+fn parse_key(text: &str) -> Option<egui::Key> {
+    use egui::Key;
+    let upper = text.trim().to_ascii_uppercase();
+    Some(match upper.as_str() {
+        "A" => Key::A,
+        "B" => Key::B,
+        "C" => Key::C,
+        "D" => Key::D,
+        "E" => Key::E,
+        "F" => Key::F,
+        "G" => Key::G,
+        "H" => Key::H,
+        "I" => Key::I,
+        "J" => Key::J,
+        "K" => Key::K,
+        "L" => Key::L,
+        "M" => Key::M,
+        "N" => Key::N,
+        "O" => Key::O,
+        "P" => Key::P,
+        "Q" => Key::Q,
+        "R" => Key::R,
+        "S" => Key::S,
+        "T" => Key::T,
+        "U" => Key::U,
+        "V" => Key::V,
+        "W" => Key::W,
+        "X" => Key::X,
+        "Y" => Key::Y,
+        "Z" => Key::Z,
+        "0" => Key::Num0,
+        "1" => Key::Num1,
+        "2" => Key::Num2,
+        "3" => Key::Num3,
+        "4" => Key::Num4,
+        "5" => Key::Num5,
+        "6" => Key::Num6,
+        "7" => Key::Num7,
+        "8" => Key::Num8,
+        "9" => Key::Num9,
+        "F1" => Key::F1,
+        "F2" => Key::F2,
+        "F3" => Key::F3,
+        "F4" => Key::F4,
+        "F5" => Key::F5,
+        "F6" => Key::F6,
+        "F7" => Key::F7,
+        "F8" => Key::F8,
+        "F9" => Key::F9,
+        "F10" => Key::F10,
+        "F11" => Key::F11,
+        "F12" => Key::F12,
+        "ESC" | "ESCAPE" => Key::Escape,
+        "ENTER" | "RETURN" => Key::Enter,
+        "TAB" => Key::Tab,
+        "BACKSPACE" => Key::Backspace,
+        "DELETE" | "DEL" => Key::Delete,
+        "UP" | "ARROWUP" => Key::ArrowUp,
+        "DOWN" | "ARROWDOWN" => Key::ArrowDown,
+        "LEFT" | "ARROWLEFT" => Key::ArrowLeft,
+        "RIGHT" | "ARROWRIGHT" => Key::ArrowRight,
+        "HOME" => Key::Home,
+        "END" => Key::End,
+        "PAGEUP" | "PGUP" => Key::PageUp,
+        "PAGEDOWN" | "PGDN" => Key::PageDown,
+        "/" | "SLASH" => Key::Slash,
+        "SPACE" => Key::Space,
+        _ => return None,
+    })
+}
+
+/// Resolved key bindings for the shell. Every entry falls back to the spec
+/// default when the profile value is missing or unparseable.
+#[derive(Clone, Debug)]
+pub struct Keymap {
+    pub machine: Binding,
+    pub program: Binding,
+    pub tools: Binding,
+    pub offsets: Binding,
+    pub diagnostics: Binding,
+    pub back: Binding,
+    pub quit: Binding,
+    pub activate: Binding,
+    pub open: Binding,
+    pub save: Binding,
+    pub undo: Binding,
+    pub redo: Binding,
+    pub find: Binding,
+    pub refresh: Binding,
+    pub mdi_issue: Binding,
+    pub mdi_history_up: Binding,
+    pub mdi_history_down: Binding,
+    pub help_search: Binding,
+    /// Bindings from the profile that could not be parsed, reported in Settings.
+    pub rejected: Vec<String>,
+}
+
+fn binding(value: &str, default: Binding, rejected: &mut Vec<String>) -> Binding {
+    match Binding::parse(value) {
+        Some(binding) => binding,
+        None => {
+            rejected.push(value.to_string());
+            default
+        }
+    }
+}
+
+impl Keymap {
+    pub fn from_config(keys: &linc_core::config::KeysConfig) -> Self {
+        use egui::{Key, Modifiers};
+        let mut rejected = Vec::new();
+        let none = Modifiers::NONE;
+        let ctrl = Modifiers::CTRL;
+        let keymap = Self {
+            machine: binding(&keys.machine, Binding::new(Key::F5, none), &mut rejected),
+            program: binding(&keys.program, Binding::new(Key::F6, none), &mut rejected),
+            tools: binding(&keys.tools, Binding::new(Key::F7, none), &mut rejected),
+            offsets: binding(&keys.offsets, Binding::new(Key::F8, none), &mut rejected),
+            diagnostics: binding(
+                &keys.diagnostics,
+                Binding::new(Key::F10, none),
+                &mut rejected,
+            ),
+            back: binding(&keys.back, Binding::new(Key::Escape, none), &mut rejected),
+            quit: binding(&keys.quit, Binding::new(Key::Q, ctrl), &mut rejected),
+            activate: binding(&keys.activate, Binding::new(Key::Enter, none), &mut rejected),
+            open: binding(&keys.open, Binding::new(Key::O, ctrl), &mut rejected),
+            save: binding(&keys.save, Binding::new(Key::S, ctrl), &mut rejected),
+            undo: binding(&keys.undo, Binding::new(Key::Z, ctrl), &mut rejected),
+            redo: binding(&keys.redo, Binding::new(Key::Y, ctrl), &mut rejected),
+            find: binding(&keys.find, Binding::new(Key::F, ctrl), &mut rejected),
+            refresh: binding(&keys.refresh, Binding::new(Key::R, ctrl), &mut rejected),
+            mdi_issue: binding(&keys.mdi_issue, Binding::new(Key::Enter, none), &mut rejected),
+            mdi_history_up: binding(
+                &keys.mdi_history_up,
+                Binding::new(Key::ArrowUp, none),
+                &mut rejected,
+            ),
+            mdi_history_down: binding(
+                &keys.mdi_history_down,
+                Binding::new(Key::ArrowDown, none),
+                &mut rejected,
+            ),
+            help_search: binding(&keys.help_search, Binding::new(Key::Slash, none), &mut rejected),
+            rejected,
+        };
+        keymap
+    }
+}
+
+#[cfg(test)]
+mod keymap_tests {
+    use super::*;
+
+    #[test]
+    fn parses_the_documented_binding_forms() {
+        assert_eq!(
+            Binding::parse("F5"),
+            Some(Binding::new(egui::Key::F5, egui::Modifiers::NONE))
+        );
+        assert_eq!(
+            Binding::parse("Escape"),
+            Some(Binding::new(egui::Key::Escape, egui::Modifiers::NONE))
+        );
+        let ctrl_q = Binding::parse("Ctrl+Q").expect("ctrl+q");
+        assert_eq!(ctrl_q.key, egui::Key::Q);
+        assert!(ctrl_q.modifiers.ctrl);
+        let ctrl_up = Binding::parse("Ctrl+ArrowUp").expect("ctrl+arrowup");
+        assert_eq!(ctrl_up.key, egui::Key::ArrowUp);
+        assert!(ctrl_up.modifiers.ctrl);
+        assert_eq!(
+            Binding::parse("/"),
+            Some(Binding::new(egui::Key::Slash, egui::Modifiers::NONE))
+        );
+        assert!(Binding::parse("NotAKey").is_none());
+    }
+
+    #[test]
+    fn a_rebound_profile_key_changes_the_binding() {
+        // The whole point of `[keys]`: a profile that rebinds a key must
+        // actually rebind it, not just change the on-screen reference.
+        let mut keys = linc_core::config::KeysConfig::spec_default();
+        keys.tools = "F9".to_string();
+        let keymap = Keymap::from_config(&keys);
+        assert_eq!(keymap.tools.key, egui::Key::F9);
+        assert!(keymap.rejected.is_empty());
+    }
+
+    #[test]
+    fn an_unparseable_binding_falls_back_and_is_reported() {
+        let mut keys = linc_core::config::KeysConfig::spec_default();
+        keys.machine = "Hyper+Z".to_string();
+        let keymap = Keymap::from_config(&keys);
+        assert_eq!(keymap.machine.key, egui::Key::F5);
+        assert_eq!(keymap.rejected, vec!["Hyper+Z".to_string()]);
+    }
 }

@@ -26,7 +26,10 @@ pub const COMMENT: Color32 = Color32::from_rgb(0x94, 0xa3, 0xb8);
 pub const LINE_NUMBER: Color32 = Color32::from_rgb(0x6b, 0x72, 0x80);
 
 pub const TOP_BAR_HEIGHT: f32 = 48.0;
-pub const BOTTOM_BAR_HEIGHT: f32 = 44.0;
+/// A single read-only status line: one text row plus a small frame margin.
+/// It carries no buttons, so it does not need a target-sized row.
+pub const BOTTOM_BAR_HEIGHT: f32 = 36.0;
+pub const STATUS_LINE_HEIGHT: f32 = 20.0;
 pub const NAV_WIDTH: f32 = 172.0;
 pub const MIN_TARGET: f32 = 44.0;
 /// Baseline layout is 1280x720. Text is enlarged slightly relative to the
@@ -67,6 +70,12 @@ pub fn apply_design_zoom(ctx: &egui::Context, multiplier: f32) {
 }
 
 pub fn apply(ctx: &egui::Context) {
+    // SPEC §5 requires a visible focus ring at all times. egui's default drops
+    // focus when the operator clicks empty chrome, which would leave the shell
+    // with no focus stop and no ring until Tab was pressed.
+    ctx.options_mut(|options| {
+        options.input_options.surrender_focus_on = egui::SurrenderFocusOn::Never;
+    });
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = SURFACE;
     visuals.window_fill = SURFACE;

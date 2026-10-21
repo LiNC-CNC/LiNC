@@ -71,6 +71,16 @@ pub struct LincApp {
     pub panel_offline_toast: bool,
     pub preview_ticks: u64,
     pub confirm_token: Option<linc_core::model::ToolChangeToken>,
+    /// A program load is in flight; navigation waits for the backend verdict.
+    pub pending_load: bool,
+    /// Resolved `[keys]` bindings. The profile owns the keymap; the shell
+    /// consumes it instead of hardcoding keys.
+    pub keymap: crate::state::Keymap,
+    /// Runtime UI preferences (CONFIGURATION.md §9). Machine identity, HAL
+    /// pins, safety flags and the INI path are never stored here.
+    pub preferences: linc_core::preferences::Preferences,
+    preferences_dirty: bool,
+    preferences_saved_at: std::time::Instant,
 }
 
 impl LincApp {
@@ -113,6 +123,32 @@ impl LincApp {
         );
         let graph_style = graph_style(&profile);
         let probe_params = ProbeParameters::from_config(&profile.config.probe);
+        // Runtime preferences are separate from the machine profile. They may
+        // restore the last page and view, never machine data.
+        let preferences = linc_core::preferences::Preferences::load(&profile.preferences_path);
+        let remembered_page = preferences
+            .last_page
+            .as_deref()
+            .map(page_from_config)
+            .filter(|page| !page.is_mode_driven());
+        let initial_page = if initial_page.is_mode_driven() {
+            initial_page
+        } else {
+            remembered_page.unwrap_or(initial_page)
+        };
+        let program_view = preferences
+            .program_view
+            .as_deref()
+            .and_then(|value| match value {
+                "code" => Some(ProgramView::Code),
+                "split" => Some(ProgramView::Split),
+                _ => None,
+            });
+        let graph_view = preferences
+            .toolpath_view
+            .as_deref()
+            .map(|value| view_from_config(value, profile.variant == MachineVariant::Lathe));
+        let graph_zoom = preferences.toolpath_zoom;
         let mut app = Self {
             snapshot: snapshot.clone(),
             page: initial_page,
@@ -172,6 +208,11 @@ impl LincApp {
             modal: None,
             toasts: Vec::new(),
             quit_requested: false,
+            pending_load: false,
+            keymap: crate::state::Keymap::from_config(&profile.config.keys),
+            preferences,
+            preferences_dirty: false,
+            preferences_saved_at: std::time::Instant::now(),
             last_snapshot_ms: now_ms(),
             last_connection: Some(snapshot.panel.connected),
             last_protect: Some(snapshot.panel.protect_effective()),
@@ -181,6 +222,23 @@ impl LincApp {
             profile,
             backend,
         };
+        // Restore the remembered view state. Only UI presentation is restored;
+        // no machine data ever comes from preferences.
+        if let Some(view) = graph_view {
+            app.program.graph_view = view;
+            app.manual.view = view;
+        }
+        if let Some(zoom) = graph_zoom.filter(|zoom| zoom.is_finite() && *zoom > 0.0) {
+            app.program.graph_zoom = zoom;
+            app.manual.zoom = zoom;
+        }
+        if let Some(view) = program_view {
+            app.program.view = view;
+        }
+        // Seed the preference with the page we actually opened, so the file is
+        // written even if the operator never navigates.
+        let opening_page = app.page;
+        app.remember_page(opening_page);
         app.help.ensure_loaded();
         app.offsets = OffsetsUi::default();
         app.sync_offsets_from_snapshot(true);
@@ -210,6 +268,8 @@ impl LincApp {
 
     pub fn poll_backend(&mut self) {
         self.snapshot = self.backend.snapshot();
+        let mut loaded = false;
+        let mut load_failed = false;
         self.last_snapshot_ms = now_ms();
         let events = self.backend.drain_events();
         for event in events {
@@ -218,6 +278,9 @@ impl LincApp {
                     command, result, ..
                 }) => match result {
                     Ok(()) => {
+                        if command == "Load program" {
+                            loaded = true;
+                        }
                         self.log_ui(
                             AlarmSeverity::Info,
                             AlarmSource::Ui,
@@ -226,6 +289,9 @@ impl LincApp {
                         );
                     }
                     Err(error) => {
+                        if command == "Load program" {
+                            load_failed = true;
+                        }
                         self.toast(error.to_string(), theme::ERROR);
                         self.log_ui(
                             AlarmSeverity::Error,
@@ -243,6 +309,14 @@ impl LincApp {
         }
         while self.ui_log.len() > 1000 {
             self.ui_log.pop_back();
+        }
+        if self.pending_load {
+            if loaded {
+                self.commit_load();
+            } else if load_failed {
+                // Stay in Files so the operator sees the error next to the file.
+                self.pending_load = false;
+            }
         }
     }
 
@@ -317,6 +391,7 @@ impl LincApp {
     }
 
     pub fn set_page(&mut self, page: Page) {
+        self.remember_page(page);
         if page == Page::Files {
             self.files_return_page = if self.page == Page::Files {
                 Page::Program
@@ -385,19 +460,78 @@ impl LincApp {
             path,
             expected_revision: None,
         });
-        // A successful load always returns to Program in SPLIT, fitted, not started.
-        if self.snapshot.task.interp == linc_core::model::InterpState::Idle {
-            self.program.view = ProgramView::Split;
-            self.program.graph_view = if self.profile.variant == MachineVariant::Lathe {
-                linc_view::ViewMode::LatheXz
-            } else {
-                linc_view::ViewMode::Iso3d
-            };
-            self.program.graph_zoom = 1.0;
-            self.program.graph_pan = Vec2::ZERO;
-            self.program.follow_current = true;
-            self.program.focus_editor = false;
-            self.set_page(Page::Program);
+        // Do not navigate yet: SPEC §6.7 requires that a failed load stays in
+        // Files and shows the error. The navigation is committed in
+        // `poll_backend` when the backend confirms the load.
+        self.pending_load = true;
+    }
+
+    /// A successful load always returns to Program in SPLIT, fitted and not
+    /// started, overriding any remembered layout.
+    fn commit_load(&mut self) {
+        self.pending_load = false;
+        if let Some(path) = self.snapshot.program.path.clone() {
+            let text = path.to_string_lossy().to_string();
+            self.preferences.remember_file(&text, 12);
+            self.preferences_dirty = true;
+        }
+        if self.snapshot.task.interp != linc_core::model::InterpState::Idle {
+            return;
+        }
+        self.program.view = ProgramView::Split;
+        self.program.graph_view = if self.profile.variant == MachineVariant::Lathe {
+            linc_view::ViewMode::LatheXz
+        } else {
+            linc_view::ViewMode::Iso3d
+        };
+        self.program.graph_zoom = 1.0;
+        self.program.graph_pan = Vec2::ZERO;
+        self.program.follow_current = true;
+        self.program.focus_editor = false;
+        self.set_page(Page::Program);
+    }
+
+    /// Remember the last operator-selected, non-mode-driven page.
+    fn remember_page(&mut self, page: Page) {
+        if page.is_mode_driven() {
+            return;
+        }
+        let key = page_key(page);
+        if self.preferences.last_page.as_deref() != Some(key) {
+            self.preferences.last_page = Some(key.to_string());
+            self.preferences_dirty = true;
+        }
+    }
+
+    fn remember_program_view(&mut self, view: ProgramView) {
+        let key = match view {
+            ProgramView::Split => "split",
+            ProgramView::Code => "code",
+        };
+        if self.preferences.program_view.as_deref() != Some(key) {
+            self.preferences.program_view = Some(key.to_string());
+            self.preferences_dirty = true;
+        }
+    }
+
+    /// Flush preferences at most every two seconds while running, so a crash
+    /// cannot lose more than a couple of seconds of UI state.
+    pub fn save_preferences(&mut self, force: bool) {
+        if !self.preferences_dirty {
+            return;
+        }
+        if !force && self.preferences_saved_at.elapsed() < Duration::from_secs(2) {
+            return;
+        }
+        match self.preferences.save(&self.profile.preferences_path) {
+            Ok(()) => {
+                self.preferences_dirty = false;
+                self.preferences_saved_at = std::time::Instant::now();
+            }
+            Err(error) => {
+                log::warn!("cannot write preferences: {error}");
+                self.preferences_dirty = false;
+            }
         }
     }
 
@@ -858,35 +992,35 @@ impl LincApp {
         let mut move_line_down = false;
 
         ui.input_mut(|input| {
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::F5) {
+            if input.consume_key(self.keymap.machine.modifiers, self.keymap.machine.key) {
                 nav_page = Some(Page::Machine);
             }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::F6) {
+            if input.consume_key(self.keymap.program.modifiers, self.keymap.program.key) {
                 if self.page == Page::Program {
                     cycle_view = true;
                 } else {
                     nav_page = Some(Page::Program);
                 }
             }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::F7) {
+            if input.consume_key(self.keymap.tools.modifiers, self.keymap.tools.key) {
                 nav_page = Some(Page::Tools);
             }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::F8) {
+            if input.consume_key(self.keymap.offsets.modifiers, self.keymap.offsets.key) {
                 nav_page = Some(Page::Offsets);
             }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::F10) {
+            if input.consume_key(self.keymap.diagnostics.modifiers, self.keymap.diagnostics.key) {
                 nav_page = Some(Page::Diagnostics);
             }
-            if input.consume_key(egui::Modifiers::CTRL, egui::Key::Q) {
+            if input.consume_key(self.keymap.quit.modifiers, self.keymap.quit.key) {
                 quit = true;
             }
-            if input.consume_key(egui::Modifiers::CTRL, egui::Key::O) {
+            if input.consume_key(self.keymap.open.modifiers, self.keymap.open.key) {
                 request_files = true;
             }
-            if input.consume_key(egui::Modifiers::CTRL, egui::Key::S) {
+            if input.consume_key(self.keymap.save.modifiers, self.keymap.save.key) {
                 save = true;
             }
-            if input.consume_key(egui::Modifiers::CTRL, egui::Key::F) {
+            if input.consume_key(self.keymap.find.modifiers, self.keymap.find.key) {
                 find = true;
             }
             if input.consume_key(egui::Modifiers::CTRL, egui::Key::D) {
@@ -901,16 +1035,16 @@ impl LincApp {
             if input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowDown) {
                 move_line_down = true;
             }
-            if input.consume_key(egui::Modifiers::CTRL, egui::Key::R) {
+            if input.consume_key(self.keymap.refresh.modifiers, self.keymap.refresh.key) {
                 refresh = true;
             }
-            if input.consume_key(egui::Modifiers::CTRL, egui::Key::Z) {
+            if input.consume_key(self.keymap.undo.modifiers, self.keymap.undo.key) {
                 undo = true;
             }
-            if input.consume_key(egui::Modifiers::CTRL, egui::Key::Y) {
+            if input.consume_key(self.keymap.redo.modifiers, self.keymap.redo.key) {
                 redo = true;
             }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+            if input.consume_key(self.keymap.back.modifiers, self.keymap.back.key) {
                 escape = true;
             }
             if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
@@ -931,10 +1065,10 @@ impl LincApp {
             if input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowRight) {
                 focus_right = true;
             }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::Slash) {
+            if input.consume_key(self.keymap.help_search.modifiers, self.keymap.help_search.key) {
                 help_search = true;
             }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+            if input.consume_key(self.keymap.mdi_issue.modifiers, self.keymap.mdi_issue.key)
                 && self.page == Page::Mdi
                 && self.profile.config.mdi.execute_on_enter
             {
@@ -1006,6 +1140,8 @@ impl LincApp {
         if cycle_view {
             if self.page == Page::Program {
                 self.cycle_program_view();
+                let view = self.program.view;
+                self.remember_program_view(view);
             } else {
                 self.request_page(Page::Program);
             }
@@ -1051,7 +1187,7 @@ impl LincApp {
                 if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
                     self.nav_focus = self.nav_focus.saturating_sub(1);
                 }
-                if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+                if input.consume_key(self.keymap.activate.modifiers, self.keymap.activate.key) {
                     activate = true;
                 }
             });
@@ -1148,7 +1284,7 @@ impl LincApp {
             .frame(
                 Frame::new()
                     .fill(theme::SURFACE)
-                    .inner_margin(Margin::symmetric(16, 8)),
+                    .inner_margin(Margin::symmetric(16, 4)),
             )
             .show(ui, |ui| self.bottom_bar(ui));
         egui::containers::Panel::left("linc-nav")
@@ -1202,7 +1338,9 @@ impl LincApp {
             });
         self.draw_modal(ui.ctx());
         self.draw_toasts(ui.ctx());
+        self.save_preferences(false);
         if self.quit_requested {
+            self.save_preferences(true);
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
         ui.ctx().request_repaint_after(Duration::from_millis(50));
@@ -1470,208 +1608,153 @@ impl LincApp {
         });
     }
 
+    /// Keyboard commands available on the current page, as `(key, action)`
+    /// pairs. Rendered as hints only — they are not buttons.
+    fn key_hints(&self) -> Vec<(String, &'static str)> {
+        let k = &self.keymap;
+        // Page-specific commands first: the row is truncated to the available
+        // width, and the commands for the page in front of the operator matter
+        // more than the global navigation keys.
+        let mut hints: Vec<(String, &'static str)> = Vec::new();
+        match self.page {
+            Page::Program => {
+                hints.push((k.open.label(), "LOAD"));
+                hints.push((k.save.label(), "SAVE"));
+                hints.push((k.find.label(), "FIND"));
+                hints.push((k.undo.label(), "UNDO"));
+                hints.push((k.redo.label(), "REDO"));
+            }
+            Page::Files => {
+                hints.push((k.refresh.label(), "REFRESH"));
+                hints.push(("Enter".into(), "OPEN"));
+                hints.push(("Bksp".into(), "UP"));
+            }
+            Page::Help => {
+                hints.push((k.help_search.label(), "SEARCH"));
+                hints.push(("Bksp".into(), "BACK"));
+                hints.push(("PgUp/PgDn".into(), "PAGE"));
+            }
+            Page::Diagnostics => hints.push(("PgUp/PgDn".into(), "TABS")),
+            Page::Mdi => {
+                hints.push((k.mdi_issue.label(), "ISSUE"));
+                hints.push((k.mdi_history_up.label(), "HISTORY"));
+            }
+            Page::Offsets | Page::Probe => hints.push(("Arrows".into(), "SELECT")),
+            Page::Tools => hints.push(("Arrows".into(), "SELECT")),
+            _ => {}
+        }
+        // Only page-specific commands are hinted. The physical navigation keys
+        // (F5-F10), ESC and Ctrl+Q are implicit: they are printed on the panel
+        // and in the left navigation, so repeating them here wastes the row.
+        hints
+    }
+
+    /// Bottom bar: keyboard commands on the left, read-only machine status on
+    /// the right. It carries no buttons.
     fn bottom_bar(&mut self, ui: &mut egui::Ui) {
+        let size = theme::font_size(11.0);
+        let hint_size = theme::font_size(9.5);
         ui.horizontal(|ui| {
-            self.context_actions(ui);
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            // Left: the keyboard commands available on this page, truncated to
+            // the space the right-aligned status block leaves free.
+            const STATUS_BUDGET: f32 = 500.0;
+            let hint_char = hint_size * 0.62;
+            let budget = (ui.available_width() - STATUS_BUDGET).max(140.0);
+            let mut used = 0.0_f32;
+            for (index, (key, action)) in self.key_hints().into_iter().enumerate() {
+                let width = (key.chars().count() + action.chars().count() + 1) as f32
+                    * hint_char
+                    + 10.0;
+                if used + width > budget {
+                    break;
+                }
+                used += width;
+                if index > 0 {
+                    ui.add_space(10.0);
+                }
                 ui.label(
-                    RichText::new(format!(
-                        "OVR F{:.0}% S{:.0}% R{:.0}%",
+                    RichText::new(key)
+                        .monospace()
+                        .size(hint_size)
+                        .strong()
+                        .color(theme::C3),
+                );
+                ui.label(
+                    RichText::new(action)
+                        .monospace()
+                        .size(hint_size)
+                        .color(theme::MUTED),
+                );
+            }
+
+            // Right: the read-only machine state.
+            let field = |ui: &mut egui::Ui, text: String, color: egui::Color32| {
+                ui.label(RichText::new(text).monospace().size(size).color(color));
+            };
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // Never claim OK on stale data: the controller may be latched
+                // while the last snapshot still says otherwise.
+                let (estop_text, estop_color) = if self.snapshot.meta.stale {
+                    ("E-STOP ?".to_string(), theme::WARNING)
+                } else if self.snapshot.machine.estop {
+                    ("E-STOP ACTIVE".to_string(), theme::ERROR)
+                } else {
+                    ("E-STOP OK".to_string(), theme::SUCCESS)
+                };
+                field(ui, estop_text, estop_color);
+                ui.add_space(16.0);
+                // Machine on/off sits immediately left of the E-stop state.
+                // `halui.machine.is-on` is the authority; a stale snapshot
+                // reports `?` rather than guessing.
+                let (machine_text, machine_color) = if self.snapshot.meta.stale {
+                    ("MACHINE ?".to_string(), theme::WARNING)
+                } else if self.snapshot.machine.on {
+                    ("MACHINE ON".to_string(), theme::SUCCESS)
+                } else {
+                    ("MACHINE OFF".to_string(), theme::MUTED)
+                };
+                field(ui, machine_text, machine_color);
+                ui.add_space(16.0);
+                // Protect is only worth a field when it is engaged: the off
+                // state is the normal one and the row is space-limited.
+                if self.program_protected() {
+                    field(ui, "PROTECT ON".to_string(), theme::WARNING);
+                    ui.add_space(16.0);
+                }
+                field(
+                    ui,
+                    format!(
+                        "OVR F{:.0} S{:.0} R{:.0}",
                         self.snapshot.feed.feed_override * 100.0,
                         self.snapshot.feed.spindle_override * 100.0,
                         self.snapshot.feed.rapid_override * 100.0
-                    ))
-                    .monospace()
-                    .size(theme::font_size(11.0))
-                    .color(theme::MUTED),
+                    ),
+                    theme::MUTED,
                 );
-                ui.add_space(12.0);
-                ui.label(
-                    RichText::new(if self.program_protected() {
-                        "PROTECT ON"
+                ui.add_space(16.0);
+                field(
+                    ui,
+                    self.snapshot.panel.mode.label().to_string(),
+                    if self.snapshot.panel.mode.is_valid() {
+                        theme::ACCENT
                     } else {
-                        "PROTECT OFF"
-                    })
-                    .monospace()
-                    .size(theme::font_size(11.0))
-                    .color(if self.program_protected() {
-                        theme::WARNING
-                    } else {
-                        theme::MUTED
-                    }),
-                );
-                ui.add_space(12.0);
-                let axes_homed = self
-                    .snapshot
-                    .machine
-                    .homed
-                    .values()
-                    .iter()
-                    .all(|homed| *homed);
-                if !self.snapshot.machine.homed.is_empty() {
-                    ui.label(
-                        RichText::new(if axes_homed { "HOMED" } else { "NOT HOMED" })
-                            .monospace()
-                            .size(theme::font_size(11.0))
-                            .color(if axes_homed {
-                                theme::MUTED
-                            } else {
-                                theme::WARNING
-                            }),
-                    );
-                    ui.add_space(12.0);
-                }
-                ui.label(
-                    RichText::new(if self.snapshot.machine.estop {
-                        "E-STOP ACTIVE"
-                    } else {
-                        "E-STOP OK"
-                    })
-                    .monospace()
-                    .size(theme::font_size(11.0))
-                    .color(if self.snapshot.machine.estop {
                         theme::ERROR
-                    } else {
-                        theme::SUCCESS
-                    }),
-                );
-                ui.add_space(12.0);
-                ui.label(
-                    RichText::new(format!("ALARM {}", self.snapshot.alarm_count()))
-                        .monospace()
-                        .size(theme::font_size(11.0))
-                        .color(if self.snapshot.alarm_count() > 0 {
-                            theme::ERROR
-                        } else {
-                            theme::MUTED
-                        }),
+                    },
                 );
             });
         });
     }
 
-    fn context_actions(&mut self, ui: &mut egui::Ui) {
-        match self.page {
-            Page::Machine => {}
-            Page::Program => {
-                if context_key(ui, "LOAD", !self.snapshot.task.running, false) {
-                    self.request_files();
-                }
-                if context_key(
-                    ui,
-                    "SAVE",
-                    self.program.editor.dirty && self.editing_allowed(),
-                    false,
-                ) {
-                    self.save_program();
-                }
-                if context_key(ui, "FIND", true, false) {
-                    self.program.search_open = true;
-                    self.program.focus_editor = true;
-                }
-                if context_key(ui, "HELP", true, false) {
-                    self.request_page(Page::Help);
-                }
-            }
-            Page::Offsets => {
-                if context_key(
-                    ui,
-                    "PROBE",
-                    self.snapshot.probe.enabled && !self.snapshot.task.running,
-                    false,
-                ) {
-                    self.set_page(Page::Probe);
-                }
-                if context_key(ui, "HELP", true, false) {
-                    self.request_page(Page::Help);
-                }
-            }
-            Page::Tools => {
-                if context_key(ui, "CHANGE", self.snapshot.issue_allowed().is_ok(), false) {
-                    screens::tools::issue_change(self);
-                }
-                if context_key(ui, "HELP", true, false) {
-                    self.request_page(Page::Help);
-                }
-            }
-            Page::Diagnostics => {
-                if context_key(ui, "CLEAR", true, false) {
-                    self.diagnostics_clear_view = true;
-                    self.ui_log.clear();
-                }
-                if context_key(ui, "COPY", true, false) {
-                    screens::diagnostics::copy_log(self, ui);
-                }
-                if context_key(ui, "HELP", true, false) {
-                    self.request_page(Page::Help);
-                }
-            }
-            Page::Help => {
-                if context_key(ui, "BACK", !self.help.history.is_empty(), false) {
-                    self.help.back();
-                }
-                if context_key(ui, "MACHINE", true, false) {
-                    self.request_page(Page::Machine);
-                }
-            }
-            Page::Files => {
-                if context_key(ui, "REFRESH", true, false) {
-                    self.files.refresh();
-                }
-                if context_key(ui, "BACK", true, false) {
-                    self.set_page(self.files_return_page);
-                }
-            }
-            Page::Probe => {
-                if context_key(ui, "RUN PROBE", true, true) {
-                    screens::probe::run(self);
-                }
-                if context_key(
-                    ui,
-                    "APPLY",
-                    self.snapshot.probe.last_result.is_some(),
-                    false,
-                ) {
-                    screens::probe::apply(self);
-                }
-                if context_key(ui, "BACK", true, false) {
-                    self.set_page(Page::Offsets);
-                }
-            }
-            Page::Mdi => {
-                if context_key(ui, "ISSUE", true, true) {
-                    screens::mdi::issue(self);
-                }
-                if context_key(ui, "CLEAR", true, false) {
-                    self.mdi.input.clear();
-                    self.mdi.last_error = None;
-                }
-                if context_key(ui, "ESC", true, false) {
-                    self.escape();
-                }
-            }
-            Page::Homing => {
-                if context_key(ui, "BACK", true, false) {
-                    self.set_page(self.homing_return_page);
-                }
-            }
-            Page::Manual => {
-                if context_key(ui, "TRAIL", true, false) {
-                    self.clear_trail();
-                }
-                if context_key(ui, "FIT", true, false) {
-                    self.manual.fit = true;
-                }
-            }
-            Page::Settings => {
-                if context_key(ui, "HELP", true, false) {
-                    self.request_page(Page::Help);
-                }
-            }
-        }
-    }
-
     fn banners(&mut self, ui: &mut egui::Ui) {
+        // The E-stop is the most severe state and is never hidden behind a tab.
+        if self.snapshot.machine.estop {
+            theme::banner(
+                ui,
+                theme::ERROR,
+                "EMERGENCY STOP ACTIVE — MOTION AND MACHINE ACTIONS BLOCKED",
+            );
+            ui.add_space(4.0);
+        }
         if self.panel_offline() {
             theme::banner(ui, theme::ERROR, "PANEL OFFLINE — MACHINE ACTIONS BLOCKED");
             ui.add_space(4.0);
@@ -1942,12 +2025,6 @@ fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Page, color: C
     }
 }
 
-fn context_key(ui: &mut egui::Ui, label: &str, enabled: bool, accent: bool) -> bool {
-    ui.add_enabled_ui(enabled, |ui| theme::keycap(ui, label, accent))
-        .inner
-        .clicked()
-}
-
 impl eframe::App for LincApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         theme::apply_design_zoom(ui.ctx(), self.design_scale);
@@ -1965,6 +2042,24 @@ pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
     (Page::Help, "G-CODE HELP", "HELP"),
     (Page::Settings, "SETTINGS", ""),
 ];
+
+/// Stable preferences key for a page. Mode-driven pages are never persisted.
+fn page_key(page: Page) -> &'static str {
+    match page {
+        Page::Machine => "machine",
+        Page::Program => "program",
+        Page::Offsets => "offsets",
+        Page::Tools => "tools",
+        Page::Diagnostics => "diagnostics",
+        Page::Help => "help",
+        Page::Files => "files",
+        Page::Probe => "probe",
+        Page::Settings => "settings",
+        Page::Mdi => "mdi",
+        Page::Homing => "homing",
+        Page::Manual => "manual",
+    }
+}
 
 fn page_from_config(value: &str) -> Page {
     match value.to_ascii_lowercase().as_str() {
@@ -2121,7 +2216,9 @@ kind = "virtual"
 [simulation]
 enabled = true
 panel_window = false
-"#,
+[preferences]
+file = "{root}/prefs/{{profile}}.preferences.toml"
+"#.replace("{root}", &root.to_string_lossy()),
         )
         .unwrap();
         let profile = Profile::load(&root.join("sim.toml"), None).unwrap();
