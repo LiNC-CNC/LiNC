@@ -426,7 +426,11 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
             .sum();
         let description_min = theme::measure(ui, "DESCRIPTION_DESCRIPTION", 11.0);
         let gaps = ui.spacing().item_spacing.x * columns.len().saturating_sub(1) as f32;
-        let description_width = (ui.available_width() - fixed - gaps).max(description_min);
+        // Leave room for the table's own scrollbar: without it the columns sum
+        // to more than the table has, and egui_extras rescales them, which puts
+        // each column's text into its neighbour's padding.
+        let description_width =
+            (ui.available_width() - fixed - gaps - SCROLLBAR_ALLOWANCE).max(description_min);
         for column in &mut columns {
             if column.cell == Cell::Description {
                 column.width = description_width;
@@ -442,7 +446,10 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                     .color(theme::MUTED),
             );
         } else {
-            ui.spacing_mut().item_spacing.x = 0.0;
+            // A gap between columns keeps each cell's text and selector clear of
+            // its neighbour; the row band is painted as one rect, so the gap
+            // does not break the highlight.
+            ui.spacing_mut().item_spacing.x = CELL_GAP;
             {
                 let visuals = ui.visuals_mut();
                 visuals.widgets.inactive.corner_radius = egui::CornerRadius::ZERO;
@@ -523,18 +530,46 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                         ui.add_space(SELECTION_BAR);
                                     }
                                     let text = cell_text(draft_for(app, entry.tool), &entry, column.cell);
-                                    ui.label(
+                                    // Reserve the same air on the right as on the
+                                    // left, and ellipsise rather than run under
+                                    // the selector's frame.
+                                    // Clamp the wrap width instead of sizing the
+                                    // label: `add_sized` centres it, which broke the
+                                    // left alignment.
+                                    // A touch more on the right: the glyphs carry
+                                    // no trailing bearing, so equal widths looked
+                                    // tighter on that side.
+                                    ui.set_max_width(
+                                        (column.width - CELL_TEXT_PAD * 2.0 - RIGHT_GAP).max(8.0),
+                                    );
+                                    let label = egui::Label::new(
                                         RichText::new(text)
                                             .monospace()
                                             .size(theme::font_size(11.0))
-                                            .color(if column.cell == Cell::Tool && entry.tool == current_tool {
+                                            .color(if column.cell == Cell::Tool
+                                                && entry.tool == current_tool
+                                            {
                                                 theme::SUCCESS
                                             } else if column.cell == Cell::Kind {
                                                 theme::MUTED
                                             } else {
                                                 theme::FG
                                             }),
-                                    );
+                                    )
+                                    .truncate();
+                                    // Numbers align on the right so the decimal
+                                    // points line up and a minus sign hangs into
+                                    // the padding instead of shifting the digits.
+                                    if matches!(column.cell, Cell::Number(_) | Cell::Tool) {
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.add(label);
+                                            },
+                                        );
+                                    } else {
+                                        ui.add(label);
+                                    }
                                 }
                             });
                             let rect = response.0;
@@ -629,9 +664,15 @@ const HEADER_HEIGHT: f32 = 18.0;
 const ROW_ALPHA: u8 = 34;
 const SELECTION_BAR: f32 = 3.0;
 /// Air between a cell's edge and its text.
-const CELL_TEXT_PAD: f32 = 6.0;
+const CELL_TEXT_PAD: f32 = 8.0;
+/// Gap between columns.
+const CELL_GAP: f32 = 6.0;
 /// How far the cell selector is drawn inside its cell.
-const SELECTION_INSET: f32 = 3.0;
+const SELECTION_INSET: f32 = 1.0;
+/// Room kept for the table's vertical scrollbar.
+const SCROLLBAR_ALLOWANCE: f32 = 14.0;
+/// Extra room on the right of a cell, on top of the text padding.
+const RIGHT_GAP: f32 = 0.0;
 /// Corner radius of the cell selector.
 const SELECTION_RADIUS: f32 = 4.0;
 
