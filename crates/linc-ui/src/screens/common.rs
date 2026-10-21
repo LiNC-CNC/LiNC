@@ -264,7 +264,6 @@ pub fn axis_cards(app: &LincApp, ui: &mut Ui) {
 fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact: bool) {
     let position = app.snapshot.positions.axes.get(axis);
     let work = position.map(|p| p.work).unwrap_or(0.0);
-    let machine = position.map(|p| p.machine).unwrap_or(0.0);
     let dtg = position.map(|p| p.dtg).unwrap_or(0.0);
     let active = app
         .snapshot
@@ -274,20 +273,10 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
         .as_deref()
         .map(|name| name == axis)
         .unwrap_or(false);
-    let range = app
-        .profile
-        .machine_ini
-        .axes
-        .iter()
-        .find(|axis_config| axis_config.name == axis);
-    let fraction = range
-        .map(|axis_config| {
-            let span = (axis_config.max_limit - axis_config.min_limit)
-                .abs()
-                .max(0.001);
-            ((machine - axis_config.min_limit) / span).clamp(0.0, 1.0)
-        })
-        .unwrap_or(0.0);
+    // Progress of the move in flight, not the position within the travel range:
+    // the bar starts empty when the axis sets off, fills as the distance to go
+    // shrinks, and sits full once it arrives (see `LincApp::move_progress`).
+    let fraction = app.move_progress.get(axis).copied().unwrap_or(1.0);
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 6, theme::PANEL);
     painter.rect_stroke(

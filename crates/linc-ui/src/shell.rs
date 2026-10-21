@@ -78,6 +78,12 @@ pub struct LincApp {
     /// system for a poll, and the cross would snap to the machine origin and
     /// back.
     pub graph_origin: [f64; 3],
+    /// Largest remaining distance (absolute) seen for each axis since it last
+    /// stopped, i.e. the length of the move in progress. The status only carries
+    /// the remainder, so this is what turns it into a percentage.
+    pub move_distance: linc_core::model::AxisMap<f64>,
+    /// 0..1 of the current move already travelled, per axis.
+    pub move_progress: linc_core::model::AxisMap<f64>,
     /// Whether a modal was open last frame, so a newly opened one can put the
     /// keyboard on its default button.
     pub modal_open_last_frame: bool,
@@ -249,6 +255,8 @@ impl LincApp {
             alarm_id_seen: 0,
             jog_speed_published: None,
             graph_origin: [0.0; 3],
+            move_distance: linc_core::model::AxisMap::new(),
+            move_progress: linc_core::model::AxisMap::new(),
             modal_open_last_frame: false,
             tool_prompt_open_last_frame: false,
             last_connection: Some(snapshot.panel.connected),
@@ -355,6 +363,20 @@ impl LincApp {
         self.poll_backend();
     }
 
+    /// Turn each axis's remaining distance into a fraction of its current move.
+    fn update_move_progress(&mut self) {
+        let mut updates = Vec::new();
+        for (axis, position) in self.snapshot.positions.axes.iter() {
+            let total = self.move_distance.get(axis).copied().unwrap_or(0.0);
+            let (fraction, total) = move_progress(position.dtg, total);
+            updates.push((axis.to_string(), total, fraction));
+        }
+        for (axis, total, fraction) in updates {
+            self.move_distance.insert(axis.clone(), total);
+            self.move_progress.insert(axis, fraction);
+        }
+    }
+
     pub fn poll_backend(&mut self) {
         self.snapshot = self.backend.snapshot();
         // Keep the last known work zero: loading a program can leave the
@@ -367,6 +389,7 @@ impl LincApp {
                 offset.get("Z").copied().unwrap_or(0.0),
             ];
         }
+        self.update_move_progress();
         // RAPID changes the jog ceiling, so the published speed follows it.
         // Compared against what we last sent, not against the snapshot: the
         // snapshot is rebuilt every poll, and comparing with it published on
@@ -2759,6 +2782,29 @@ pub fn mode_page(mode: &PanelModeValidity) -> Option<Page> {
     }
 }
 
+/// Fraction of the current move already travelled, from the remaining distance.
+///
+/// `remaining` is the magnitude of the DTG — the sign only says which way the
+/// move goes — and `total` is the largest remainder seen since the axis last
+/// stopped, i.e. the length of the move. The bar starts empty, fills as the
+/// remainder shrinks, and sits full once the axis arrives. A move that turns out
+/// to be longer than the one recorded resets the total, so the bar can never go
+/// past empty.
+///
+/// Returns `(fraction, total)`, where `total` is what the caller should keep for
+/// the next observation.
+pub fn move_progress(remaining: f64, total: f64) -> (f64, f64) {
+    const AT_REST: f64 = 1e-6;
+    let remaining = remaining.abs();
+    if remaining <= AT_REST {
+        // Nothing left to travel: the move is complete and the next one starts
+        // from a fresh total.
+        return (1.0, 0.0);
+    }
+    let total = total.max(remaining);
+    ((1.0 - remaining / total).clamp(0.0, 1.0), total)
+}
+
 pub fn active_offset(snapshot: &MachineSnapshot) -> Option<&linc_core::model::AxisMap<f64>> {
     let index = snapshot.offsets.active_index?;
     snapshot
@@ -3040,5 +3086,51 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         app.poll_backend();
         assert!(app.snapshot.live_trail.len() <= 1);
         assert_eq!(app.snapshot.program.line_count > 0, true);
+    }
+}
+
+#[cfg(test)]
+mod move_progress_tests {
+    use super::move_progress;
+
+    #[test]
+    fn a_move_fills_the_bar_from_empty_to_full() {
+        let (fraction, total) = move_progress(-100.0, 0.0);
+        assert_eq!(fraction, 0.0);
+        assert_eq!(total, 100.0);
+
+        let (fraction, total) = move_progress(-50.0, total);
+        assert!((fraction - 0.5).abs() < 1e-9, "{fraction}");
+
+        let (fraction, total) = move_progress(-0.0, total);
+        assert_eq!(fraction, 1.0);
+        assert_eq!(total, 0.0);
+    }
+
+    #[test]
+    fn the_sign_of_the_remaining_distance_is_ignored() {
+        let (plus, _) = move_progress(100.0, 0.0);
+        let (minus, _) = move_progress(-100.0, 0.0);
+        assert_eq!(plus, 0.0);
+        assert_eq!(minus, 0.0);
+
+        let (plus, _) = move_progress(40.0, 100.0);
+        let (minus, _) = move_progress(-40.0, 100.0);
+        assert!((plus - 0.6).abs() < 1e-9, "{plus}");
+        assert_eq!(plus, minus);
+    }
+
+    #[test]
+    fn a_longer_move_resets_the_total_instead_of_going_negative() {
+        let (fraction, total) = move_progress(-200.0, 50.0);
+        assert_eq!(fraction, 0.0);
+        assert_eq!(total, 200.0);
+    }
+
+    #[test]
+    fn an_idle_axis_shows_a_full_bar() {
+        let (fraction, total) = move_progress(0.0, 0.0);
+        assert_eq!(fraction, 1.0);
+        assert_eq!(total, 0.0);
     }
 }
