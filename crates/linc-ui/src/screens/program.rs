@@ -48,6 +48,38 @@ fn header(app: &mut LincApp, ui: &mut Ui) {
         // The CODE/SPLIT toggle is a keyboard command now; the binding is
         // listed in the bottom hint row with the other page commands.
         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+            // A line number cannot come from the panel, so this is the one
+            // program start the HMI issues. It is still gated on the panel
+            // being in AUTO and on the machine being ready to run.
+            let block = app.run_from_line_block();
+            let button = egui::Button::new(
+                RichText::new("RUN FROM LINE")
+                    .size(theme::font_size(10.0))
+                    .strong(),
+            )
+            .min_size(egui::vec2(0.0, 26.0));
+            let response = ui.add_enabled(block.is_none(), button);
+            let response = match block {
+                Some(reason) => response.on_disabled_hover_text(reason),
+                None => response,
+            };
+            if response.clicked() {
+                let line = app.snapshot.program.current_line.max(1) as u32;
+                let block_text = app
+                    .snapshot
+                    .program
+                    .content
+                    .as_deref()
+                    .and_then(|text| text.lines().nth(line as usize - 1))
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                app.modal = Some(crate::state::Modal::ConfirmRunFromLine {
+                    line,
+                    block: block_text,
+                });
+            }
+            ui.add_space(8.0);
             ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
                 if app.program.editor.dirty {
                     ui.label(

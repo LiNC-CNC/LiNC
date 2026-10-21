@@ -144,6 +144,11 @@ pub enum PendingAction {
 pub enum Modal {
     ConfirmDiscard(PendingAction),
     ConfirmQuit,
+    /// Start the loaded program at a line, with the skipped-context warning.
+    ConfirmRunFromLine {
+        line: u32,
+        block: String,
+    },
     ConfirmOverwrite(String),
     Error(String),
     Info(String),

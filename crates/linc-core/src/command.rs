@@ -161,6 +161,14 @@ pub enum MachineCommand {
         output: LincOutput,
         value: HalValue,
     },
+    /// Start the loaded program at `line`, skipping everything before it.
+    ///
+    /// This is the one program-start the HMI initiates: a line number cannot
+    /// come from the panel. It still requires the panel to be in AUTO, so the
+    /// panel remains the authority over whether the machine may run.
+    RunFromLine {
+        line: u32,
+    },
     /// View-only: clear the live tool trail and re-seed at the current tip.
     /// This never changes machine state or the loaded program.
     ClearTrail,
@@ -178,6 +186,7 @@ impl MachineCommand {
             Self::SetWorkOffset { .. } => "Set work offset",
             Self::SetG92Offset { .. } => "Set G92 offset",
             Self::ZeroWorkOffset { .. } => "Zero work offset",
+            Self::RunFromLine { .. } => "Run from line",
             Self::SetToolTableRow { .. } => "Set tool table row",
             Self::ApplyProbeResult { .. } => "Apply probe result",
             Self::ResetProbeCalibration => "Reset probe calibration",

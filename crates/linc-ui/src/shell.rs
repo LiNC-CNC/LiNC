@@ -399,6 +399,40 @@ impl LincApp {
         self.wcs_label(self.snapshot.offsets.active_index)
     }
 
+    /// Why "run from line" is unavailable, or `None` when it may run.
+    ///
+    /// A line number is the one program-start input the panel cannot supply,
+    /// so the HMI issues it; everything else that guards a program start is
+    /// still checked here rather than assumed.
+    pub fn run_from_line_block(&self) -> Option<&'static str> {
+        if self.snapshot.program.line_count == 0 {
+            return Some("no program is loaded");
+        }
+        if self.snapshot.task.running || self.snapshot.task.interp != linc_core::model::InterpState::Idle {
+            return Some("abort the running program first");
+        }
+        if self.snapshot.machine.estop {
+            return Some("emergency stop is active");
+        }
+        if self.snapshot.task.power != linc_core::model::MachinePower::On {
+            return Some("machine is not ON");
+        }
+        if self.snapshot.panel.mode.mode() != Some(PanelMode::Auto) {
+            return Some("select AUTO on the panel first");
+        }
+        if self.panel_offline() || self.snapshot.meta.stale {
+            return Some("panel state is not current");
+        }
+        if self
+            .axes()
+            .iter()
+            .any(|axis| !self.snapshot.machine.homed.get(axis).copied().unwrap_or(false))
+        {
+            return Some("home every axis first");
+        }
+        None
+    }
+
     pub fn program_protected(&self) -> bool {
         self.snapshot.panel.protect_effective()
     }
@@ -1874,6 +1908,7 @@ impl LincApp {
         let mut close = false;
         let mut action: Option<PendingAction> = None;
         let mut save_and_continue = false;
+        let mut start_line: Option<u32> = None;
         let mut quit = false;
         let mut overwrite: Option<bool> = None;
         egui::Window::new("LiNC")
@@ -1899,6 +1934,40 @@ impl LincApp {
                         }
                         if theme::accent_button(ui, "SAVE", self.editing_allowed()).clicked() {
                             save_and_continue = true;
+                        }
+                        if theme::action_button(ui, "CANCEL", true).clicked() {
+                            close = true;
+                        }
+                    });
+                }
+                Modal::ConfirmRunFromLine { line, block } => {
+                    ui.label(
+                        RichText::new("RUN FROM LINE")
+                            .size(theme::font_size(18.0))
+                            .strong()
+                            .color(theme::WARNING),
+                    );
+                    ui.add_space(6.0);
+                    ui.label(format!(
+                        "Start at line {line} of the loaded program?"
+                    ));
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(if block.is_empty() { "(empty line)" } else { block.as_str() })
+                            .monospace()
+                            .size(theme::font_size(12.0))
+                            .color(theme::FG),
+                    );
+                    ui.add_space(8.0);
+                    ui.label(
+                        "Lines before this one are skipped: work offsets, tool offsets, feed rate, \
+                         spindle and coolant state are not restored. Motion starts from the current \
+                         machine position.",
+                    );
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if theme::danger_button(ui, "RUN FROM LINE", true).clicked() {
+                            start_line = Some(*line);
                         }
                         if theme::action_button(ui, "CANCEL", true).clicked() {
                             close = true;
@@ -1954,6 +2023,10 @@ impl LincApp {
             });
         if close {
             self.modal = None;
+        }
+        if let Some(line) = start_line {
+            self.modal = None;
+            self.send(linc_core::command::MachineCommand::RunFromLine { line });
         }
         if let Some(action) = action {
             self.modal = None;

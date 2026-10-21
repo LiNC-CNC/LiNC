@@ -1059,6 +1059,32 @@ impl MachineBackend for SimBackend {
                     Err(MachineError::Invalid("unknown work offset".into()))
                 }
             }
+            MachineCommand::RunFromLine { line } => {
+                if !self.snapshot.writes_allowed() {
+                    if self.snapshot.panel.protect_effective() {
+                        return Err(MachineError::ProgramProtected);
+                    }
+                    return Err(MachineError::NotIdle);
+                }
+                // The panel must be in AUTO: a line number can only come from
+                // the HMI, but whether the machine may run is the panel's call.
+                if self.snapshot.panel.mode.mode() != Some(crate::model::PanelMode::Auto) {
+                    return Err(MachineError::Invalid("panel mode is not AUTO".into()));
+                }
+                if self.snapshot.program.line_count == 0 {
+                    return Err(MachineError::Invalid("no program is loaded".into()));
+                }
+                if line == 0 || line as usize > self.snapshot.program.line_count {
+                    return Err(MachineError::Invalid(format!(
+                        "line {line} is outside the program"
+                    )));
+                }
+                self.snapshot.task.running = true;
+                self.snapshot.task.interp = InterpState::Reading;
+                self.snapshot.task.mode = TaskMode::Auto;
+                self.snapshot.program.current_line = line as usize;
+                Ok(())
+            }
             MachineCommand::ZeroWorkOffset { index, axes } => {
                 if !self.snapshot.writes_allowed() {
                     if self.snapshot.panel.protect_effective() {

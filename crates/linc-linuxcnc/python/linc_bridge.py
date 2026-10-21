@@ -567,6 +567,8 @@ class Bridge:
             return "not all axes are homed"
         if origin == "mdi" and panel["mode"].get("mode") != "mdi":
             return "panel mode is not MDI"
+        if origin == "run" and panel["mode"].get("mode") != "auto":
+            return "panel mode is not AUTO"
         return None
 
     def issue(self, command):
@@ -624,6 +626,30 @@ class Bridge:
         if rotation is not None:
             parts.append(f"R{float(rotation):.6f}")
         return self.issue({"origin": "write", "blocks": [" ".join(parts)]})
+
+    def run_from_line(self, command):
+        """Start the loaded program at a line, skipping what comes before it.
+
+        Run only from an idle interpreter: `AUTO_RUN` on a paused program would
+        resume it instead of honouring the line, and the lines before the start
+        would not be skipped. The panel must be in AUTO, so the HMI never
+        starts a program the panel has not enabled.
+        """
+        line = int(command.get("line", 0))
+        if line < 1:
+            return {"ok": False, "error": "line must be 1 or greater"}
+        error = self.require("run")
+        if error:
+            return {"ok": False, "error": error}
+        try:
+            if int(getattr(self.stat, "task_mode", 0)) != linuxcnc.MODE_AUTO:
+                self.cmd.mode(linuxcnc.MODE_AUTO)
+                if not self.cmd.wait_complete(2.0):
+                    return {"ok": False, "error": "could not select AUTO mode"}
+            self.cmd.auto(linuxcnc.AUTO_RUN, line)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     def zero_work_offset(self, command):
         """Touch off: make the current position read zero for the given axes.
@@ -713,6 +739,8 @@ class Bridge:
                     result = self.set_work_offset(command)
                 elif kind == "zero_work_offset":
                     result = self.zero_work_offset(command)
+                elif kind == "run_from_line":
+                    result = self.run_from_line(command)
                 elif kind == "set_g92":
                     result = self.set_g92(command)
                 elif kind == "set_current_tool":

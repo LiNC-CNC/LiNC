@@ -752,6 +752,16 @@ impl MachineBackend for PythonBridgeBackend {
                     Duration::from_secs(5),
                 )
             }
+            MachineCommand::RunFromLine { line } => {
+                self.validate_write()?;
+                if line == 0 {
+                    return Err(MachineError::Invalid("line must be 1 or greater".into()));
+                }
+                self.request(
+                    serde_json::json!({ "cmd": "run_from_line", "line": line }),
+                    Duration::from_secs(5),
+                )
+            }
             MachineCommand::ZeroWorkOffset { index, axes } => {
                 self.validate_write()?;
                 if !(1..=6).contains(&index) {
