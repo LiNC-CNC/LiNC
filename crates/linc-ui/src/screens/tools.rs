@@ -7,6 +7,7 @@ use linc_core::model::{MachineVariant, ToolChangeStatus, ToolChangerKind};
 use crate::screens::common;
 use crate::shell::LincApp;
 use crate::state::ToolDraft;
+use crate::table::{Column as TableColumn, Table};
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
@@ -126,7 +127,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
     let writable = app.snapshot.writes_allowed();
     let rows = app.snapshot.tool_table.rows.clone();
     let current_tool = app.snapshot.tool_change.current_tool;
-    let mut write_tool = None;
+    let mut written = None;
     theme::card(ui, |ui| {
         ui.horizontal(|ui| {
             theme::section_header(ui, "TOOL TABLE");
@@ -145,103 +146,119 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
         if let Some(error) = &app.snapshot.tool_table.error {
             ui.label(RichText::new(error).color(theme::ERROR));
         }
-        // Columns are measured from the font and the description takes the
-        // remaining width, so the table fits the card instead of a set of
-        // guessed widths; a card too narrow for the minimums scrolls sideways
-        // rather than hiding a column.
-        let columns = 3 + if lathe { 4 } else { 3 } + usize::from(pocket);
+        // One grid: every heading and every cell is given exactly its column
+        // width, so the rows line up instead of each widget finding its own x.
         let pad = theme::CELL_PAD;
         let tool_width = theme::measure(ui, "T00", 12.0) + pad;
-        let number_width = theme::measure(ui, "-000.000", 11.0) + pad;
-        let kind_width = theme::measure(ui, "BORING", 9.0) + pad;
+        let number_width = theme::measure(ui, "-000.00", 11.0) + 12.0;
+        let kind_width = theme::measure(ui, "DRILL", 9.0) + 12.0;
+        // `theme::action_button` will not go below 96 points, so the column has
+        // to be at least that or the button is clipped by the table edge.
         let write_width = 96.0;
-        let mut fixed = tool_width + write_width + pad;
-        fixed += if lathe {
-            4.0 * number_width
+        // A minimum the card can actually afford; the column flexes above it.
+        let description_min = theme::measure(ui, "DESCRIPTION_DESCRIPTION", 11.0);
+        let mut columns = Vec::with_capacity(8);
+        columns.push(TableColumn::new("T", tool_width));
+        columns.push(TableColumn::flex("DESCRIPTION", description_min));
+        if lathe {
+            for label in ["X", "Z", "NOSE R", "ORIENT"] {
+                columns.push(TableColumn::new(label, number_width));
+            }
         } else {
-            2.0 * number_width + kind_width
-        };
-        if pocket {
-            fixed += number_width;
+            columns.push(TableColumn::new("Ø", number_width));
+            columns.push(TableColumn::new("LENGTH", number_width));
+            columns.push(TableColumn::new("TYPE", kind_width));
         }
-        let description_min = theme::measure(ui, "DESCRIPTION_DESCRIPTION", 11.0) + pad;
-        let description_width = (ui.available_width() - fixed).max(description_min);
+        if pocket {
+            columns.push(TableColumn::new(
+                if lathe { "STATION" } else { "POCKET" },
+                number_width,
+            ));
+        }
+        columns.push(TableColumn::new("WRITE", write_width));
+        let table = Table::new(&columns, ui.available_width());
+        let mut next_column = 1usize;
         {
             egui::ScrollArea::horizontal()
                 .id_salt("tool-table-scroll")
                 .show(ui, |ui| {
-            egui::Grid::new("tool-table-direct")
-                .num_columns(columns)
-                .striped(true)
-                .spacing([8.0, 5.0])
-                .show(ui, |ui| {
-                    header_label(ui, "T", tool_width);
-                    header_label(ui, "DESCRIPTION", description_width);
-                    if lathe {
-                        header_label(ui, "X", number_width);
-                        header_label(ui, "Z", number_width);
-                        header_label(ui, "NOSE R", number_width);
-                        header_label(ui, "ORIENT", number_width);
-                    } else {
-                        header_label(ui, "Ø", number_width);
-                        header_label(ui, "LENGTH", number_width);
-                        header_label(ui, "TYPE", kind_width);
-                    }
-                    if pocket {
-                        header_label(ui, if lathe { "STATION" } else { "POCKET" }, number_width);
-                    }
-                    header_label(ui, "WRITE", write_width);
-                    ui.end_row();
-
+                    table.header(ui);
                     for (index, row) in rows.iter().enumerate() {
                         let selected = app.tools.selected_row == index;
                         let current = row.tool == current_tool;
-                        let response = ui.selectable_label(
-                            selected,
-                            RichText::new(format!("T{}", row.tool))
-                                .monospace()
-                                .size(theme::font_size(12.0))
-                                .color(if current { theme::SUCCESS } else { theme::FG }),
-                        );
+                        let response = table.row(ui, selected, |ui, cells| {
+                            cells.cell(ui, 0, egui::Align::Min, |ui| {
+                                ui.label(
+                                    RichText::new(format!("T{}", row.tool))
+                                        .monospace()
+                                        .size(theme::font_size(12.0))
+                                        .color(if current { theme::SUCCESS } else { theme::FG }),
+                                );
+                            });
+                            let draft = app
+                                .tools
+                                .drafts
+                                .entry(row.tool)
+                                .or_insert_with(|| ToolDraft::from_row(row));
+                            cells.cell(ui, 1, egui::Align::Min, |ui| {
+                                text_cell(ui, writable, &mut draft.description, cells.width(1));
+                            });
+                            next_column = 2;
+                            if lathe {
+                                for axis in ["X", "Z"] {
+                                    let text = draft.axes.entry(axis.into()).or_default();
+                                    cells.cell(ui, next_column, egui::Align::Min, |ui| {
+                                        number_cell(ui, writable, text, number_width);
+                                    });
+                                    next_column += 1;
+                                }
+                                cells.cell(ui, next_column, egui::Align::Min, |ui| {
+                                    number_cell(ui, writable, &mut draft.nose_radius, number_width);
+                                });
+                                next_column += 1;
+                                cells.cell(ui, next_column, egui::Align::Min, |ui| {
+                                    number_cell(ui, writable, &mut draft.orientation, number_width);
+                                });
+                                next_column += 1;
+                            } else {
+                                cells.cell(ui, next_column, egui::Align::Min, |ui| {
+                                    number_cell(ui, writable, &mut draft.diameter, number_width);
+                                });
+                                next_column += 1;
+                                cells.cell(ui, next_column, egui::Align::Min, |ui| {
+                                    number_cell(ui, writable, &mut draft.length, number_width);
+                                });
+                                next_column += 1;
+                                cells.cell(ui, next_column, egui::Align::Min, |ui| {
+                                    ui.label(
+                                        RichText::new(if row.kind.is_empty() {
+                                            "—"
+                                        } else {
+                                            &row.kind
+                                        })
+                                        .size(theme::font_size(9.0))
+                                        .color(theme::MUTED),
+                                    );
+                                });
+                                next_column += 1;
+                            }
+                            if pocket {
+                                cells.cell(ui, next_column, egui::Align::Min, |ui| {
+                                    number_cell(ui, writable, &mut draft.pocket, number_width);
+                                });
+                                next_column += 1;
+                            }
+                            let mut write = false;
+                            cells.cell(ui, next_column, egui::Align::Min, |ui| {
+                                write = theme::action_button(ui, "WRITE", writable).clicked();
+                            });
+                            if write {
+                                written = Some(row.tool);
+                            }
+                        });
                         if response.clicked() {
                             app.tools.selected_row = index;
                         }
-                        let draft = app
-                            .tools
-                            .drafts
-                            .entry(row.tool)
-                            .or_insert_with(|| ToolDraft::from_row(row));
-                        text_cell(ui, writable, &mut draft.description, description_width);
-                        if lathe {
-                            for axis in ["X", "Z"] {
-                                let text = draft.axes.entry(axis.into()).or_default();
-                                number_cell(ui, writable, text, number_width);
-                            }
-                            number_cell(ui, writable, &mut draft.nose_radius, number_width);
-                            number_cell(ui, writable, &mut draft.orientation, number_width);
-                        } else {
-                            number_cell(ui, writable, &mut draft.diameter, number_width);
-                            number_cell(ui, writable, &mut draft.length, number_width);
-                            ui.add_sized(
-                                [kind_width, 24.0],
-                                egui::Label::new(
-                                    RichText::new(if row.kind.is_empty() {
-                                        "—"
-                                    } else {
-                                        &row.kind
-                                    })
-                                    .size(theme::font_size(9.0))
-                                    .color(theme::MUTED),
-                                ),
-                            );
-                        }
-                        if pocket {
-                            number_cell(ui, writable, &mut draft.pocket, number_width);
-                        }
-                        if theme::action_button(ui, "WRITE", writable).clicked() {
-                            write_tool = Some(row.tool);
-                        }
-                        ui.end_row();
                     }
                     if rows.is_empty() {
                         ui.label(
@@ -249,34 +266,18 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                 .size(theme::font_size(10.0))
                                 .color(theme::MUTED),
                         );
-                        ui.end_row();
                     }
-                });
                 });
         }
         if let Some(error) = &app.tools.error {
             ui.label(RichText::new(error).color(theme::ERROR));
         }
     });
-    if let Some(tool) = write_tool {
+    if let Some(tool) = written {
         save_tool_row(app, tool);
     }
 }
 
-fn header_label(ui: &mut Ui, text: &str, width: f32) {
-    ui.allocate_ui_with_layout(
-        egui::Vec2::new(width, 16.0),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.label(
-                RichText::new(text)
-                    .size(theme::font_size(9.0))
-                    .strong()
-                    .color(theme::MUTED),
-            );
-        },
-    );
-}
 
 fn text_cell(ui: &mut Ui, writable: bool, text: &mut String, width: f32) {
     ui.add_enabled_ui(writable, |ui| {

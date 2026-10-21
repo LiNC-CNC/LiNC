@@ -4,6 +4,7 @@ pub mod assets;
 pub mod files;
 pub mod screens;
 pub mod shell;
+pub mod table;
 pub mod state;
 pub mod theme;
 pub mod udisks2;
