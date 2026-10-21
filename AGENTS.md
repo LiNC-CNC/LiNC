@@ -71,6 +71,10 @@ capture taken with one is not a valid layout reference.
   exactly that, which is why Enter never opened a file from NC_FILES.
 - **Page keys belong before the widgets draw.** Handling them inside a list
   lets a focused row take Enter and the arrows first.
+- **A focused text widget keeps its own cursor keys.** Home, End, PgUp and PgDn
+  are focus navigation for the shell, but they are line and page movement for an
+  editor, so the shell checks `memory.has_focus(<editor id>)` before consuming
+  them. The editor's `TextEdit` therefore needs a stable `id`.
 - `[ui] pages` selects the navigation entries and their order; it must match
   the keyboard (`MAIN` F5, `FILE` F6, `TOOL` F7, `OFFSET` F8, `WIN` F10).
 - `hal.allowed_outputs` is validated for **exact** equality, so adding a

@@ -383,6 +383,9 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                 galley
             };
             let output = egui::TextEdit::multiline(&mut text)
+                // Fixed id so the shell can tell whether the editor holds the
+                // keyboard, and leave Home, End and the page keys to it.
+                .id(egui::Id::unique("linc-program-editor"))
                 .font(FontId::monospace(editor_font()))
                 .desired_rows(desired_rows)
                 .desired_width(available)

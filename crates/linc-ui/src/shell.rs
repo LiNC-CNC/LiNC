@@ -1168,6 +1168,9 @@ impl LincApp {
     }
 
     pub fn handle_keyboard(&mut self, ui: &mut egui::Ui) {
+        // The G-code editor keeps the cursor keys while it holds the keyboard.
+        let text_focused =
+            ui.memory(|memory| memory.has_focus(egui::Id::unique("linc-program-editor")));
         let mut nav_page = None;
         let mut escape = false;
         let mut quit = false;
@@ -1284,16 +1287,19 @@ impl LincApp {
             if input.consume_key(self.keymap.back.modifiers, self.keymap.back.key) {
                 escape = true;
             }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+            if !text_focused && input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
                 page_up = true;
             }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+            if !text_focused && input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
                 page_down = true;
             }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::Home) {
+            // Home and End are the editor's line commands while a text field
+            // has focus; taking them for focus navigation made them do nothing
+            // in the G-code editor.
+            if !text_focused && input.consume_key(egui::Modifiers::NONE, egui::Key::Home) {
                 home = true;
             }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::End) {
+            if !text_focused && input.consume_key(egui::Modifiers::NONE, egui::Key::End) {
                 end = true;
             }
             if input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowLeft) {
