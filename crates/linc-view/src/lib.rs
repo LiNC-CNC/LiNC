@@ -252,6 +252,21 @@ fn arc_points(segment: &PathSegment, arc: &ArcSpec) -> Vec<[f64; 3]> {
     points
 }
 
+/// Zoom and pan that frame `target` while the projection stays anchored on
+/// `reference`.
+///
+/// `Projection` derives its scale and centre from the box it is given, so a
+/// stable view must hand it the same box every frame. A fit is therefore a
+/// zoom/pan adjustment on top of that box, not a different box: changing the box
+/// is what made loading a program rescale the view and move the markers.
+fn fit_zoom_pan(reference: Bounds3, target: Bounds3, rect: Rect, mode: ViewMode) -> (f32, Vec2) {
+    let target_projection = Projection::new(target, rect, mode, 1.0, Vec2::ZERO);
+    let base = Projection::new(reference, rect, mode, 1.0, Vec2::ZERO);
+    let zoom = (target_projection.scale / base.scale).clamp(0.05, 40.0);
+    let centre = base.project(target.center());
+    (zoom, (rect.center() - centre) * zoom)
+}
+
 /// Draw the toolpath graph. `TrajectoryView::fit` requests a one-shot fit;
 /// zoom/pan are mutated in place so the caller can persist them.
 pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
@@ -295,16 +310,33 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             max: [10.0, 10.0, 10.0],
         };
     }
+    // The reference box is the machine envelope, not the union of everything
+    // drawn: the projection's scale and centre come from it, so using the union
+    // rescaled the whole view the moment a program was loaded, and the tool and
+    // work-zero markers appeared to jump. An explicit fit now adjusts zoom and
+    // pan instead of moving the reference, so loading a program changes what is
+    // drawn, not where the view is looking.
+    let reference = view.machine_bounds.unwrap_or(bounds);
     if view.fit {
-        view.zoom = 1.0;
-        view.pan = Vec2::ZERO;
         view.fit = false;
+        // With a program loaded, frame it. With nothing loaded the data is just
+        // the tool tip, so frame the machine envelope instead of zooming into
+        // the few millimetres around the tool.
+        let target_bounds = if view.preview.bounds.is_some() {
+            bounds
+        } else {
+            reference
+        };
+        let (zoom, pan) =
+            fit_zoom_pan(reference, target_bounds, rect.shrink(12.0), view.view);
+        view.zoom = zoom;
+        view.pan = pan;
     }
-    let projection = Projection::new(bounds, rect.shrink(12.0), view.view, view.zoom, view.pan);
+    let projection = Projection::new(reference, rect.shrink(12.0), view.view, view.zoom, view.pan);
 
     // Grid and axis labels.
     if view.show_grid {
-        draw_grid(&painter, &projection, bounds);
+        draw_grid(&painter, &projection, reference);
     }
     draw_axes(&painter, &projection, view.variant, &view.axis_labels, view.origin);
 
@@ -854,5 +886,44 @@ mod tests {
         assert_eq!(nice_step(7.0), 10.0);
         assert_eq!(nice_step(0.7), 1.0);
         assert_eq!(nice_step(270.0), 500.0);
+    }
+
+    #[test]
+    fn fitting_the_reference_box_is_identity() {
+        let envelope = Bounds3 {
+            min: [-500.0, -320.0, -250.0],
+            max: [0.0, 0.0, 0.0],
+        };
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 400.0));
+        let (zoom, pan) = fit_zoom_pan(envelope, envelope, rect, ViewMode::Iso3d);
+        assert!((zoom - 1.0).abs() < 1e-4, "zoom {zoom}");
+        assert!(pan.length() < 1e-3, "pan {pan:?}");
+    }
+
+    #[test]
+    fn fitting_a_program_centres_it_without_moving_the_reference() {
+        let envelope = Bounds3 {
+            min: [-500.0, -320.0, -250.0],
+            max: [0.0, 0.0, 0.0],
+        };
+        // A small part inside the envelope: the fit must zoom in on it.
+        let program = Bounds3 {
+            min: [-300.0, -200.0, -40.0],
+            max: [-240.0, -140.0, -20.0],
+        };
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 400.0));
+        let (zoom, pan) = fit_zoom_pan(envelope, program, rect, ViewMode::Iso3d);
+        assert!(zoom > 1.5, "zoom {zoom}");
+        let fitted = Projection::new(envelope, rect, ViewMode::Iso3d, zoom, pan);
+        let centre = fitted.project(program.center());
+        assert!((centre.x - rect.center().x).abs() < 0.5, "{centre:?}");
+        assert!((centre.y - rect.center().y).abs() < 0.5, "{centre:?}");
+        // The reference is still the envelope, so the same point projects to the
+        // same place whatever is loaded: that is what keeps the markers still.
+        let unchanged = Projection::new(envelope, rect, ViewMode::Iso3d, zoom, pan);
+        assert_eq!(
+            fitted.project([-54.35, -49.3, -27.15]),
+            unchanged.project([-54.35, -49.3, -27.15])
+        );
     }
 }
