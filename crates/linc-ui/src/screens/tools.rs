@@ -480,7 +480,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     egui::pos2(rect.left(), rect.bottom() - SELECTION_BAR),
                                     egui::vec2(rect.width(), SELECTION_BAR),
                                 ),
-                                egui::CornerRadius::ZERO,
+                                egui::CornerRadius::same(1),
                                 theme::ACCENT,
                             );
                         }
@@ -543,8 +543,8 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                             }
                             if selected_cell {
                                 painter.rect_stroke(
-                                    rect,
-                                    egui::CornerRadius::ZERO,
+                                    rect.shrink(1.0),
+                                    egui::CornerRadius::same(SELECTION_RADIUS as u8),
                                     egui::Stroke::new(1.5, theme::ACCENT),
                                     egui::StrokeKind::Inside,
                                 );
@@ -562,7 +562,11 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                 egui::pos2(left, row_rect.top()),
                                 egui::pos2(right, row_rect.bottom()),
                             );
-                            painter.rect_filled(band, egui::CornerRadius::ZERO, tint(theme::ACCENT, ROW_ALPHA));
+                            painter.rect_filled(
+                                band,
+                                egui::CornerRadius::same((SELECTION_RADIUS / 2.0) as u8),
+                                tint(theme::ACCENT, ROW_ALPHA),
+                            );
                             // Solid bar on the rim: the band alone is faint, and
                             // the bar is what the eye lands on.
                             painter.rect_filled(
@@ -570,7 +574,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     egui::pos2(left, row_rect.top()),
                                     egui::vec2(SELECTION_BAR, row_rect.height()),
                                 ),
-                                egui::CornerRadius::ZERO,
+                                egui::CornerRadius::same(1),
                                 theme::ACCENT,
                             );
                         }
@@ -620,6 +624,8 @@ const HEADER_HEIGHT: f32 = 18.0;
 /// carry the selection, so the wash must stay weak enough to read text through.
 const ROW_ALPHA: u8 = 34;
 const SELECTION_BAR: f32 = 3.0;
+/// Corner radius of the cell selector.
+const SELECTION_RADIUS: f32 = 4.0;
 
 /// A translucent version of a solid colour. `from_rgba_unmultiplied` premultiplies
 /// for us; a premultiplied constructor with a plain colour renders nearly solid.
