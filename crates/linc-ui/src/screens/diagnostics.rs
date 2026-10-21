@@ -520,14 +520,16 @@ fn hal_nml(app: &mut LincApp, ui: &mut Ui) {
                                 .unwrap_or_else(|| "—".into()),
                             linc_core::command::LincOutput::JogIncrement => app
                                 .snapshot
-                                .panel
-                                .jog
-                                .increment
+                                .hal
+                                .jog_increment
                                 .map(|value| format!("{value}"))
                                 .unwrap_or_else(|| "0 (continuous)".into()),
-                            linc_core::command::LincOutput::JogSpeed => {
-                                format!("{:.1}", app.snapshot.panel.jog.speed)
-                            }
+                            linc_core::command::LincOutput::JogSpeed => app
+                                .snapshot
+                                .hal
+                                .jog_speed
+                                .map(|value| format!("{value:.1}"))
+                                .unwrap_or_else(|| "0".into()),
                         };
                         theme::kv_row(ui, output.pin_name(), value);
                     }

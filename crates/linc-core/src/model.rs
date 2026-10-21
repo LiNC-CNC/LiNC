@@ -982,6 +982,11 @@ pub struct HalOutputs {
     pub status_display: Option<i32>,
     /// Increments whenever the backend wants one `tool-change-confirm` pulse.
     pub tool_change_confirm_seq: u64,
+    /// Jog selections the HMI owns. They live here rather than in `panel`
+    /// because `panel` is rebuilt from the panel service on every poll, which
+    /// would reset them; the bridge carries these across polls.
+    pub jog_increment: Option<f64>,
+    pub jog_speed: Option<f64>,
     pub heartbeat_seq: u64,
 }
 
@@ -992,6 +997,8 @@ impl Default for HalOutputs {
             tool_change_confirm: false,
             status_display: None,
             tool_change_confirm_seq: 0,
+            jog_increment: None,
+            jog_speed: None,
             heartbeat_seq: 0,
         }
     }

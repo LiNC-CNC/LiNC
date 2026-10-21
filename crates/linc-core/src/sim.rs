@@ -1220,13 +1220,13 @@ impl MachineBackend for SimBackend {
                     }
                     LincOutput::JogIncrement => {
                         if let HalValue::Float(value) = value {
-                            self.snapshot.panel.jog.increment =
+                            self.snapshot.hal.jog_increment =
                                 if value > 0.0 { Some(value) } else { None };
                         }
                     }
                     LincOutput::JogSpeed => {
                         if let HalValue::Float(value) = value {
-                            self.snapshot.panel.jog.speed = value;
+                            self.snapshot.hal.jog_speed = Some(value);
                         }
                     }
                 }
@@ -1294,6 +1294,31 @@ enabled = true
         assert!(snapshot.program.content.is_some());
         assert!(snapshot.program.line_count > 10);
         assert!(!snapshot.live_trail.is_empty());
+    }
+
+    #[test]
+    fn jog_selections_survive_a_poll() {
+        // Regression: the jog selections were stored in `panel`, which is
+        // rebuilt from the panel service on every poll, so they were reset to
+        // zero and jogging ran at no speed at all.
+        use crate::command::{HalValue, LincOutput, MachineCommand};
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Jog);
+        backend
+            .send(MachineCommand::SetHalOutput {
+                output: LincOutput::JogSpeed,
+                value: HalValue::Float(42.0),
+            })
+            .unwrap();
+        backend
+            .send(MachineCommand::SetHalOutput {
+                output: LincOutput::JogIncrement,
+                value: HalValue::Float(0.5),
+            })
+            .unwrap();
+        let snapshot = backend.snapshot();
+        assert_eq!(snapshot.hal.jog_speed, Some(42.0));
+        assert_eq!(snapshot.hal.jog_increment, Some(0.5));
     }
 
     #[test]

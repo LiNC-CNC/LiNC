@@ -256,7 +256,7 @@ fn run_worker(
 
             // Selected jog increment for `halui.axis.L.increment`. 0.0 means
             // continuous jog; the machine HAL routes the jog keys by mode.
-            let increment = snapshot.panel.jog.increment.unwrap_or(0.0);
+            let increment = snapshot.hal.jog_increment.unwrap_or(0.0);
             if increment != last_jog_increment {
                 last_jog_increment = increment;
                 if let Some(writer) = hal.as_mut() {
@@ -270,7 +270,7 @@ fn run_worker(
 
             // Jog speed for `halui.axis.jog-speed`, already scaled by the
             // operator's percentage in the HMI.
-            let speed = snapshot.panel.jog.speed;
+            let speed = snapshot.hal.jog_speed.unwrap_or(0.0);
             if speed != last_jog_speed {
                 last_jog_speed = speed;
                 if let Some(writer) = hal.as_mut() {
@@ -384,6 +384,57 @@ mod tests {
         }
         assert!(saw_event);
         assert!(handle.snapshot().meta.sequence > first);
+    }
+
+    #[test]
+    fn jog_speed_and_increment_are_published_from_the_snapshot() {
+        use std::sync::{Arc, Mutex};
+        struct RecordingHal(Arc<Mutex<Vec<(LincOutput, HalValue)>>>);
+        impl HalWriter for RecordingHal {
+            fn write(&mut self, output: LincOutput, value: HalValue) -> Result<(), MachineError> {
+                self.0.lock().unwrap().push((output, value));
+                Ok(())
+            }
+        }
+        struct Fixed {
+            snapshot: MachineSnapshot,
+        }
+        impl MachineBackend for Fixed {
+            fn snapshot(&mut self) -> MachineSnapshot {
+                self.snapshot.clone()
+            }
+            fn send(&mut self, _command: MachineCommand) -> Result<(), MachineError> {
+                Ok(())
+            }
+        }
+        let recording = Arc::new(Mutex::new(Vec::new()));
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.offsets.active_index = Some(1);
+        // The HMI-owned selections, as the bridge would carry them.
+        snapshot.hal.jog_speed = Some(42.0);
+        snapshot.hal.jog_increment = Some(0.5);
+        let _handle = BackendHandle::spawn(
+            Box::new(Fixed { snapshot }),
+            Some(Box::new(RecordingHal(recording.clone()))),
+            50,
+            StatusSource::Wcs,
+        );
+        thread::sleep(Duration::from_millis(200));
+        let writes = recording.lock().unwrap().clone();
+        assert!(
+            writes
+                .iter()
+                .any(|(output, value)| *output == LincOutput::JogSpeed
+                    && *value == HalValue::Float(42.0)),
+            "jog speed must reach the HAL: {writes:?}"
+        );
+        assert!(
+            writes
+                .iter()
+                .any(|(output, value)| *output == LincOutput::JogIncrement
+                    && *value == HalValue::Float(0.5)),
+            "jog increment must reach the HAL: {writes:?}"
+        );
     }
 
     #[test]

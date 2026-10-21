@@ -883,13 +883,13 @@ impl MachineBackend for PythonBridgeBackend {
                     }
                     LincOutput::JogIncrement => {
                         if let HalValue::Float(value) = value {
-                            self.shared.snapshot.lock().unwrap().panel.jog.increment =
+                            self.shared.snapshot.lock().unwrap().hal.jog_increment =
                                 if value > 0.0 { Some(value) } else { None };
                         }
                     }
                     LincOutput::JogSpeed => {
                         if let HalValue::Float(value) = value {
-                            self.shared.snapshot.lock().unwrap().panel.jog.speed = value;
+                            self.shared.snapshot.lock().unwrap().hal.jog_speed = Some(value);
                         }
                     }
                     LincOutput::HmiAlive | LincOutput::StatusDisplay => {}
@@ -1039,7 +1039,14 @@ fn read_loop(stdout: impl std::io::Read, shared: Arc<Shared>, profile: Profile) 
                     let tip = converted.tool_tip.unwrap_or([0.0; 3]);
                     converted.live_trail = Arc::new(vec![tip]);
                 }
-                *shared.snapshot.lock().unwrap() = converted;
+                // The bridge rebuilds the snapshot from the panel service on
+                // every poll, so the jog selections the HMI owns have to be
+                // carried across or jogging drops back to zero speed.
+                {
+                    let mut stored = shared.snapshot.lock().unwrap();
+                    carry_hal_selections(&mut converted, &stored);
+                    *stored = converted;
+                }
             }
             BridgeMessage::Result(reply) => {
                 if let Some(id) = reply.id {
@@ -1631,6 +1638,16 @@ fn parse_panel_mode(name: &str) -> Option<PanelMode> {
     })
 }
 
+/// Carry the HMI-owned HAL selections across a poll.
+///
+/// The bridge rebuilds the snapshot from the panel service on every poll, so
+/// anything the HMI wrote into `hal` would otherwise be reset — jogging then
+/// runs at zero speed and INC steps by nothing.
+fn carry_hal_selections(converted: &mut MachineSnapshot, stored: &MachineSnapshot) {
+    converted.hal.jog_increment = stored.hal.jog_increment;
+    converted.hal.jog_speed = stored.hal.jog_speed;
+}
+
 fn modal_lines(gcodes: &[f64], mcodes: &[f64]) -> Vec<(String, String)> {
     // Match Probe Basic/QtPyVCP `status:gcodes?text` and
     // `status:mcodes?text`: the first slot is not part of the modal display,
@@ -1682,6 +1699,21 @@ fn profile_capabilities(profile: &Profile) -> PanelCapabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jog_selections_are_carried_across_a_poll() {
+        // Regression: these used to live in `panel`, which the bridge rebuilds
+        // from the panel service, so jogging ran at zero speed.
+        let mut stored = MachineSnapshot::empty(MachineVariant::Mill);
+        stored.hal.jog_speed = Some(42.0);
+        stored.hal.jog_increment = Some(0.5);
+        // A fresh poll has no idea about them.
+        let mut converted = MachineSnapshot::empty(MachineVariant::Mill);
+        assert_eq!(converted.hal.jog_speed, None);
+        carry_hal_selections(&mut converted, &stored);
+        assert_eq!(converted.hal.jog_speed, Some(42.0));
+        assert_eq!(converted.hal.jog_increment, Some(0.5));
+    }
 
     #[test]
     fn active_gcodes_match_probe_basic_text() {
