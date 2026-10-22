@@ -372,9 +372,14 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     // The table holds the keyboard, as the tool table does, so the arrow keys
     // move its selection instead of the page navigation.
     let focus_id = egui::Id::unique("offsets-table-focus");
+    // The focus anchor must exist before the rows draw, but it must not push the
+    // card down: the table's top edge lines up with the preview pane beside it.
+    let spacing_y = ui.spacing().item_spacing.y;
+    ui.spacing_mut().item_spacing.y = 0.0;
     let (focus_rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 0.0), egui::Sense::hover());
     let focus = ui.interact(focus_rect, focus_id, egui::Sense::focusable_noninteractive());
+    ui.spacing_mut().item_spacing.y = spacing_y;
     if !app.offsets.editing && app.offsets.dro_edit.is_none() && !focus.has_focus() {
         focus.request_focus();
     }
