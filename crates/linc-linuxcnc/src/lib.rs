@@ -514,16 +514,31 @@ impl PythonBridgeBackend {
             bridge.requests += 1;
             bridge.last_request = Some(command);
         });
-        let Some(stdin) = self.stdin.as_mut() else {
+        if self.stdin.is_none() {
+            self.update_bridge(|bridge| {
+                bridge.errors += 1;
+                bridge.last_reply = Some("bridge stdin is closed".into());
+            });
             return Err(MachineError::NotConnected);
-        };
+        }
         let line = serde_json::to_string(&payload)
             .map_err(|error| MachineError::Backend(error.to_string()))?;
-        stdin
-            .write_all(line.as_bytes())
-            .and_then(|_| stdin.write_all(b"\n"))
-            .and_then(|_| stdin.flush())
-            .map_err(|error| MachineError::Backend(error.to_string()))?;
+        // The borrow of the pipe ends before the bridge counters are updated, so
+        // a write failure is visible in `linc_get_nml` like a reply failure.
+        let written = {
+            let stdin = self.stdin.as_mut().expect("checked above");
+            stdin
+                .write_all(line.as_bytes())
+                .and_then(|_| stdin.write_all(b"\n"))
+                .and_then(|_| stdin.flush())
+        };
+        if let Err(error) = written {
+            self.update_bridge(|bridge| {
+                bridge.errors += 1;
+                bridge.last_reply = Some(format!("write failed: {error}"));
+            });
+            return Err(MachineError::Backend(error.to_string()));
+        }
         let deadline = Instant::now() + timeout;
         let mut results = self.shared.results.lock().unwrap();
         loop {
