@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use egui::{RichText, Ui, Vec2};
+use egui_extras::{Column as ExtraColumn, TableBuilder};
 use linc_core::model::InterpState;
 
 use crate::files::{self, format_modified, format_size};
@@ -350,115 +351,192 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
         Pane::Usb => app.files.usb_selected,
         Pane::Nc => app.files.nc_selected,
     };
+    selected = selected.min(entries.len().saturating_sub(1));
+    let can_up = current
+        .as_deref()
+        .zip(root.as_deref())
+        .map(|(current, root)| current != root)
+        .unwrap_or(false);
+    let parent_rows = usize::from(can_up);
     let mut open_dir: Option<PathBuf> = None;
     let mut load_file: Option<PathBuf> = None;
-    // Scrollable list.
-    egui::ScrollArea::vertical()
-        .id_salt(("file-list", pane as u8))
-        .max_height(ui.available_height().max(120.0))
-        .show(ui, |ui| {
-            egui::Grid::new(format!("file-grid-{:?}", pane as u8))
-                .num_columns(3)
-                .striped(true)
-                .spacing([10.0, 3.0])
-                .show(ui, |ui| {
+
+    // Same shape as the tool table: a header, a striped row per entry, the
+    // selected row's band and rim bar, and half a text line between rows.
+    let size_width = theme::measure(ui, "0000.0 MB", 9.0) + 16.0;
+    let modified_width = theme::measure(ui, "0000-00-00 00:00", 9.0) + 16.0;
+    let row_font = egui::FontId::monospace(theme::font_size(11.0));
+    let line_height = ui
+        .painter()
+        .layout_no_wrap("0".to_string(), row_font, theme::FG)
+        .size()
+        .y;
+    let row_height = line_height + 2.0;
+    ui.spacing_mut().item_spacing.y = line_height * 0.5;
+    ui.spacing_mut().item_spacing.x = 8.0;
+    let selected_row = selected;
+    let painter = ui.painter().clone();
+    let clicked = std::cell::Cell::new(None::<usize>);
+    let double = std::cell::Cell::new(None::<usize>);
+    let parent_clicked = std::cell::Cell::new(false);
+    let first_rect = std::cell::Cell::new(None::<egui::Rect>);
+    let last_rect = std::cell::Cell::new(None::<egui::Rect>);
+
+    let list_height = ui.available_height().max(120.0);
+    let table = TableBuilder::new(ui)
+        .id_salt(("file-table", pane as u8))
+        .max_scroll_height(list_height)
+        .striped(true)
+        .resizable(false)
+        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        .column(ExtraColumn::remainder())
+        .column(ExtraColumn::exact(size_width))
+        .column(ExtraColumn::exact(modified_width))
+        .header(18.0, |mut header| {
+            for heading in ["NAME", "SIZE", "MODIFIED"] {
+                header.col(|ui| {
                     ui.label(
-                        RichText::new("NAME")
+                        RichText::new(heading)
                             .size(theme::font_size(9.0))
                             .strong()
                             .color(theme::MUTED),
                     );
-                    ui.label(
-                        RichText::new("SIZE")
-                            .size(theme::font_size(9.0))
-                            .strong()
-                            .color(theme::MUTED),
-                    );
-                    ui.label(
-                        RichText::new("MODIFIED")
-                            .size(theme::font_size(9.0))
-                            .strong()
-                            .color(theme::MUTED),
-                    );
-                    ui.end_row();
-                    let can_up = current
-                        .as_deref()
-                        .zip(root.as_deref())
-                        .map(|(current, root)| current != root)
-                        .unwrap_or(false);
-                    if can_up {
-                        if ui.selectable_label(false, "..").clicked() {
-                            app.files.usb_focused = pane == Pane::Usb;
-                            if let Some(parent) = current.as_deref().and_then(Path::parent) {
-                                if root.as_deref().map(|root| parent.starts_with(root)).unwrap_or(false) {
-                                    open_dir = Some(parent.to_path_buf());
-                                }
-                            }
-                        }
-                        ui.label("");
-                        ui.label("");
-                        ui.end_row();
+                });
+            }
+        });
+    table.body(|body| {
+        body.rows(row_height, entries.len() + parent_rows, |mut row| {
+            let row_index = row.index();
+            let entry_index = row_index.checked_sub(parent_rows);
+            let entry = entry_index.and_then(|index| entries.get(index));
+            first_rect.set(None);
+            last_rect.set(None);
+            for (position, _) in ["name", "size", "modified"].iter().enumerate() {
+                row.col(|ui| {
+                    let cell_rect = ui.max_rect();
+                    if position == 0 {
+                        first_rect.set(Some(cell_rect));
                     }
-                    for (index, entry) in entries.iter().enumerate() {
-                        let label = if entry.is_dir {
-                            format!("{}/", entry.name)
-                        } else {
-                            entry.name.clone()
-                        };
-                        // Selected rows are outlined rather than filled, like
-                        // the REFRESH button: a filled block read as a button
-                        // and hid the row's own colour.
-                        let response = ui
-                            .scope(|ui| {
-                                let visuals = ui.visuals_mut();
-                                visuals.selection.bg_fill = egui::Color32::TRANSPARENT;
-                                visuals.selection.stroke = egui::Stroke::new(1.0, theme::BORDER);
-                                ui.selectable_label(
-                                    selected == index,
-                                    RichText::new(label)
-                                        .monospace()
-                                        .size(theme::font_size(11.0))
-                                        .color(if entry.is_symlink {
-                                            theme::WARNING
-                                        } else if entry.is_dir {
-                                            theme::ACCENT
-                                        } else {
-                                            theme::FG
-                                        }),
-                                )
-                            })
-                            .inner;
-                        if response.clicked() {
-                            selected = index;
-                            app.files.usb_focused = pane == Pane::Usb;
-                        }
-                        if response.double_clicked() {
-                            if entry.is_dir {
-                                open_dir = Some(entry.path.clone());
-                            } else if pane == Pane::Nc {
-                                load_file = Some(entry.path.clone());
-                            }
-                        }
-                        ui.label(
-                            RichText::new(if entry.is_dir {
-                                "DIR".to_string()
+                    if position == 2 {
+                        last_rect.set(Some(cell_rect));
+                    }
+                    let cell = ui.interact(
+                        cell_rect,
+                        egui::Id::unique(("file-cell", pane as u8, row_index, position)),
+                        egui::Sense::click(),
+                    );
+                    let double_clicked = cell.double_clicked();
+                    if cell.clicked() || double_clicked {
+                        if let Some(index) = entry_index {
+                            if double_clicked {
+                                double.set(Some(index));
                             } else {
-                                format_size(entry.size)
-                            })
-                            .monospace()
-                            .size(theme::font_size(10.0))
-                            .color(theme::MUTED),
-                        );
-                        ui.label(
-                            RichText::new(format_modified(entry.modified))
+                                clicked.set(Some(index));
+                            }
+                        } else {
+                            parent_clicked.set(true);
+                        }
+                    }
+                    match (position, entry) {
+                        (0, Some(entry)) => {
+                            ui.label(
+                                RichText::new(if entry.is_dir {
+                                    format!("{}/", entry.name)
+                                } else {
+                                    entry.name.clone()
+                                })
+                                .monospace()
+                                .size(theme::font_size(11.0))
+                                .color(if entry.is_symlink {
+                                    theme::WARNING
+                                } else if entry.is_dir {
+                                    theme::ACCENT
+                                } else {
+                                    theme::FG
+                                }),
+                            );
+                        }
+                        (0, None) => {
+                            ui.label(
+                                RichText::new("..")
+                                    .monospace()
+                                    .size(theme::font_size(11.0))
+                                    .color(theme::ACCENT),
+                            );
+                        }
+                        (1, Some(entry)) => {
+                            ui.label(
+                                RichText::new(if entry.is_dir {
+                                    "DIR".to_string()
+                                } else {
+                                    format_size(entry.size)
+                                })
                                 .monospace()
                                 .size(theme::font_size(10.0))
                                 .color(theme::MUTED),
-                        );
-                        ui.end_row();
+                            );
+                        }
+                        (2, Some(entry)) => {
+                            ui.label(
+                                RichText::new(format_modified(entry.modified))
+                                    .monospace()
+                                    .size(theme::font_size(10.0))
+                                    .color(theme::MUTED),
+                            );
+                        }
+                        _ => {}
                     }
                 });
+            }
+            // One band across the row, like the tool table: the gaps between
+            // cells are filled, and the rim bar is what the eye lands on.
+            if entry_index == Some(selected_row) {
+                if let (Some(first), Some(last)) = (first_rect.get(), last_rect.get()) {
+                    let band = egui::Rect::from_min_max(
+                        egui::pos2(first.left(), first.top()),
+                        egui::pos2(last.right(), last.bottom()),
+                    );
+                    painter.rect_filled(
+                        band,
+                        egui::CornerRadius::same((theme::SELECTION_RADIUS / 2.0) as u8),
+                        theme::tint(theme::ACCENT, theme::SELECTION_ALPHA),
+                    );
+                    painter.rect_filled(
+                        egui::Rect::from_min_size(
+                            egui::pos2(first.left(), first.top()),
+                            egui::vec2(theme::SELECTION_BAR, band.height()),
+                        ),
+                        egui::CornerRadius::same(1),
+                        theme::ACCENT,
+                    );
+                }
+            }
         });
+    });
+
+    if let Some(index) = double.get() {
+        if let Some(entry) = entries.get(index) {
+            if entry.is_dir {
+                open_dir = Some(entry.path.clone());
+            } else if pane == Pane::Nc {
+                load_file = Some(entry.path.clone());
+            }
+        }
+    } else if let Some(index) = clicked.get() {
+        selected = index;
+        app.files.usb_focused = pane == Pane::Usb;
+    }
+    if parent_clicked.get() {
+        if let Some(parent) = current.as_deref().and_then(Path::parent) {
+            if root
+                .as_deref()
+                .map(|root| parent.starts_with(root))
+                .unwrap_or(false)
+            {
+                open_dir = Some(parent.to_path_buf());
+            }
+        }
+    }
     if let Some(dir) = open_dir {
         if pane == Pane::Usb {
             app.files.usb_current = Some(dir.clone());

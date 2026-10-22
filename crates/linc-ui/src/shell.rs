@@ -2482,11 +2482,11 @@ impl LincApp {
                     )
                     .size()
                     .y;
-                for (group_index, group) in shortcuts.iter().enumerate() {
+                for group in shortcuts.iter() {
                     if !group.title.is_empty() {
-                        if group_index > 0 {
-                            ui.add_space(hint_line * 0.5);
-                        }
+                        // Also before the first title: the pane header is not a
+                        // group, and the first one was sitting right under it.
+                        ui.add_space(hint_line * 0.5);
                         ui.label(
                             RichText::new(group.title)
                                 .size(theme::font_size(8.0))
