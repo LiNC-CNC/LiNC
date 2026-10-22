@@ -84,6 +84,14 @@ pub struct LincApp {
     /// Largest remaining distance (absolute) seen for each axis since it last
     /// stopped, i.e. the length of the move in progress. The status only carries
     /// the remainder, so this is what turns it into a percentage.
+    /// Set by `clear_trail`: the backend applies the clear on its next
+    /// conversion, and until it does its snapshot still carries the old points.
+    /// While set, those are replaced by the cleared tip so the trail cannot flash
+    /// back for a frame.
+    pub trail_cleared: bool,
+    /// Tool tip at the moment of the clear, to tell a stale trail from new
+    /// motion.
+    pub trail_cleared_tip: Option<[f64; 3]>,
     pub move_distance: linc_core::model::AxisMap<f64>,
     /// 0..1 of the current move already travelled, per axis.
     pub move_progress: linc_core::model::AxisMap<f64>,
@@ -259,6 +267,8 @@ impl LincApp {
             alarm_id_seen: 0,
             jog_speed_published: None,
             graph_origin: [0.0; 3],
+            trail_cleared: false,
+            trail_cleared_tip: None,
             move_distance: linc_core::model::AxisMap::new(),
             move_progress: linc_core::model::AxisMap::new(),
             modal_open_last_frame: false,
@@ -382,7 +392,16 @@ impl LincApp {
     }
 
     pub fn poll_backend(&mut self) {
-        self.snapshot = self.backend.snapshot();
+        let mut snapshot = self.backend.snapshot();
+        if self.trail_cleared {
+            if cleared_trail_pending(&snapshot, self.trail_cleared_tip) {
+                let tip = snapshot.tool_tip.unwrap_or([0.0; 3]);
+                snapshot.live_trail = std::sync::Arc::new(vec![tip]);
+            } else {
+                self.trail_cleared = false;
+            }
+        }
+        self.snapshot = snapshot;
         // Keep the last known work zero: loading a program can leave the
         // snapshot without an active system for a poll, and the cross must not
         // jump to the machine origin when that happens.
@@ -1323,16 +1342,14 @@ impl LincApp {
     pub fn clear_trail(&mut self) {
         // View-only action. The backend is not asked to change machine state;
         // the live trail is re-seeded at the current tool tip in the local view.
-        // The real backend's trail is owned by its sampler; clearing here only
-        // affects the current view until the next sample. Both Program and
-        // Manual views use this method.
+        // The backend applies the clear on its next conversion, so the next few
+        // snapshots still carry the old points; `trail_cleared` masks them until
+        // either that clear lands or the tool moves.
         let tip = self.tool_tip();
-        let mut trail = vec![tip];
-        if trail.len() > self.graph_style.trail_max_points {
-            trail.truncate(self.graph_style.trail_max_points);
-        }
-        self.snapshot.live_trail = std::sync::Arc::new(trail);
+        self.snapshot.live_trail = std::sync::Arc::new(vec![tip]);
         self.snapshot.tool_tip = Some(tip);
+        self.trail_cleared = true;
+        self.trail_cleared_tip = Some(tip);
         self.send(MachineCommand::ClearTrail);
         self.toast("live trail cleared", theme::MUTED);
     }
@@ -2945,6 +2962,24 @@ pub fn move_progress(remaining: f64, total: f64) -> (f64, f64) {
     ((1.0 - remaining / total).clamp(0.0, 1.0), total)
 }
 
+/// Is this snapshot's trail still the one from before `Ctrl+L`?
+///
+/// The backend applies the clear on its next conversion. Until then its
+/// snapshot carries the old points, and repainting them made the trail flash
+/// away and come straight back. The applied clear leaves a single point; a moved
+/// tool tip means the points are new and should be kept.
+fn cleared_trail_pending(snapshot: &MachineSnapshot, cleared_tip: Option<[f64; 3]>) -> bool {
+    let moved = match (snapshot.tool_tip, cleared_tip) {
+        (Some(now), Some(before)) => {
+            (now[0] - before[0]).abs() > 1e-4
+                || (now[1] - before[1]).abs() > 1e-4
+                || (now[2] - before[2]).abs() > 1e-4
+        }
+        _ => false,
+    };
+    !(snapshot.live_trail.len() <= 2 || moved)
+}
+
 pub fn active_offset(snapshot: &MachineSnapshot) -> Option<&linc_core::model::AxisMap<f64>> {
     let index = snapshot.offsets.active_index?;
     snapshot
@@ -3289,6 +3324,25 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             .map(|position| position.work)
             .unwrap_or(f64::NAN);
         assert!((work - 12.5).abs() < 1e-6, "DRO X shows {work}, expected 12.5");
+    }
+
+    #[test]
+    fn a_stale_trail_is_masked_until_the_backend_clears_it() {
+        let (_dir, app) = make_app(PanelMode::Jog);
+        let mut snapshot = app.snapshot.clone();
+        snapshot.tool_tip = Some([1.0, 2.0, 3.0]);
+        snapshot.live_trail = std::sync::Arc::new(vec![[0.0; 3]; 5]);
+        let tip = Some([1.0, 2.0, 3.0]);
+        assert!(cleared_trail_pending(&snapshot, tip), "old points masked");
+
+        // The backend applied the clear: one point left.
+        snapshot.live_trail = std::sync::Arc::new(vec![[1.0, 2.0, 3.0]]);
+        assert!(!cleared_trail_pending(&snapshot, tip), "clear accepted");
+
+        // The tool moved: the points are new, not stale.
+        snapshot.live_trail = std::sync::Arc::new(vec![[0.0; 3]; 5]);
+        snapshot.tool_tip = Some([5.0, 2.0, 3.0]);
+        assert!(!cleared_trail_pending(&snapshot, tip), "new motion kept");
     }
 }
 

@@ -1092,6 +1092,13 @@ fn read_loop(stdout: impl std::io::Read, shared: Arc<Shared>, profile: Profile) 
                 {
                     let tip = converted.tool_tip.unwrap_or([0.0; 3]);
                     converted.live_trail = Arc::new(vec![tip]);
+                    // The converter appends to its own buffer and rebuilds the
+                    // snapshot from it on every poll, so patching the snapshot
+                    // alone held only until the next conversion: the trail came
+                    // straight back. Clear the buffer too.
+                    converter.live_trail.clear();
+                    converter.live_trail.push(tip);
+                    converter.last_tool_tip = converted.tool_tip;
                 }
                 // The bridge rebuilds the snapshot from the panel service on
                 // every poll, so the jog selections the HMI owns have to be
