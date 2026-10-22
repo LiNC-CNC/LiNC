@@ -346,7 +346,8 @@ present in the real-machine build.
 Fixed shell, no right-hand status column:
 
 - **Top status bar**: machine name, physical mode, program, tool, spindle,
-  feed, work offset, panel link, alarm/message counts, time.
+  feed, work offset, panel link, alarm/message counts, render rate (`NN FPS`,
+  warning colour below 30), time.
 - **No page titles.** The navigation names the page and the top bar names the
   machine state, so a heading above the content only costs vertical space.
   Each page keeps an invisible focus anchor at the top so arrow-key navigation

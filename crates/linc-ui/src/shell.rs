@@ -38,6 +38,8 @@ pub struct LincApp {
     /// Publishes state for `linc-mcp`. `None` in tests and when the diagnostic
     /// socket could not be created.
     pub diag_bus: Option<std::sync::Arc<std::sync::Mutex<linc_core::diag::Bus>>>,
+    /// Smoothed frame rate, shown in the top bar and published for diagnostics.
+    pub fps: f32,
     /// Backend sample stamp of the last published machine snapshot.
     diag_last_sample: u64,
     pub profile: Profile,
@@ -236,6 +238,7 @@ impl LincApp {
             program_name: self.snapshot.program.display_name.clone(),
             program_dirty: self.program.editor.dirty,
             panel_online: self.snapshot.panel.connected,
+            fps: self.fps,
             toasts: self.toasts.iter().map(|toast| toast.text.clone()).collect(),
         }
     }
@@ -374,6 +377,7 @@ impl LincApp {
             toasts: Vec::new(),
             diag_bus: None,
             diag_last_sample: 0,
+            fps: 0.0,
             quit_requested: false,
             pending_load: false,
             keymap: crate::state::Keymap::from_config(&profile.config.keys),
@@ -2109,6 +2113,19 @@ impl LincApp {
                         .size(theme::font_size(13.0))
                         .color(theme::MUTED),
                 );
+                // Render rate beside the clock: the first number to ask about
+                // when the panel feels slow.
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(format!("{:.0} FPS", self.fps))
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(if self.fps < 30.0 {
+                            theme::WARNING
+                        } else {
+                            theme::MUTED
+                        }),
+                );
                 ui.add_space(14.0);
                 let alarm_color = if self.snapshot.alarm_count() > 0 {
                     theme::ERROR
@@ -3039,6 +3056,8 @@ fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Page, color: C
 impl eframe::App for LincApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         theme::apply_design_zoom(ui.ctx(), self.design_scale);
+        let dt = ui.ctx().input(|input| input.stable_dt) as f32;
+        self.fps = fps_step(self.fps, dt);
         self.apply_diag_actions();
         self.publish_diag();
         self.capture_screenshot(ui.ctx());
@@ -3052,6 +3071,18 @@ impl eframe::App for LincApp {
 
         self.handle_keyboard(ui);
         self.draw(ui);
+    }
+}
+
+/// Exponential moving average of the frame rate, biased so the first samples
+/// settle quickly without flickering.
+pub fn fps_step(previous: f32, dt: f32) -> f32 {
+    let dt = dt.clamp(1.0 / 240.0, 1.0);
+    let sample = 1.0 / dt;
+    if previous <= 0.0 {
+        sample
+    } else {
+        previous * 0.9 + sample * 0.1
     }
 }
 
@@ -3539,6 +3570,20 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             .map(|position| position.work)
             .unwrap_or(f64::NAN);
         assert!((work - 12.5).abs() < 1e-6, "DRO X shows {work}, expected 12.5");
+    }
+
+    #[test]
+    fn the_fps_average_follows_the_frame_time() {
+        assert!((fps_step(0.0, 1.0 / 60.0) - 60.0).abs() < 0.01);
+        let mut fps = 60.0;
+        for _ in 0..40 {
+            fps = fps_step(fps, 1.0 / 30.0);
+        }
+        assert!((fps - 30.0).abs() < 0.5, "{fps}");
+        // A wild frame time (a stall) cannot push the reading below zero or to
+        // infinity; the clamp keeps it in a sane range.
+        assert!(fps_step(60.0, 0.0) > 60.0);
+        assert!(fps_step(60.0, 10.0) < 60.0);
     }
 
     #[test]

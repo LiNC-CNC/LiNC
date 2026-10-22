@@ -109,6 +109,8 @@ pub struct UiSnapshot {
     pub program_name: String,
     pub program_dirty: bool,
     pub panel_online: bool,
+    /// Render rate the UI measured, for diagnosing a sluggish panel.
+    pub fps: f32,
     pub toasts: Vec<String>,
 }
 
