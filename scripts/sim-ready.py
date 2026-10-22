@@ -157,6 +157,22 @@ def is_on(linuxcnc, stat):
     return not stat.estop and stat.task_state == linuxcnc.STATE_ON
 
 
+def all_homed(stat):
+    """True when every configured joint reports homed.
+
+    `stat.homed` is a fixed 16-slot tuple; the slots past `stat.joints` belong to
+    joints this machine does not have and never home, so the whole tuple is
+    never all ones.
+    """
+    joints = stat.joints or len(stat.homed)
+    return all(int(homed) for homed in stat.homed[:joints])
+
+
+def unhomed(stat):
+    joints = min(stat.joints or len(stat.homed), len(stat.homed))
+    return [index for index in range(joints) if not stat.homed[index]]
+
+
 def hal_value(pin):
     """One HAL pin's value, for the failure report."""
     result = subprocess.run(
@@ -247,6 +263,40 @@ def power_on(linuxcnc, stat, command, timeout):
     log("machine on")
 
 
+def set_mode(linuxcnc, stat, command, mode, what, timeout):
+    """Ask for a mode and wait for the task to report it.
+
+    `command.wait_complete()` is deliberately not used anywhere here: it waits on
+    the command channel's echo, and a mode change is reported by the task state
+    anyway. Waiting on what the task says it is doing cannot miss and cannot
+    block on a channel the panel is also using.
+    """
+    command.mode(mode)
+    wait_for(stat, lambda s: s.task_mode == mode, what, timeout)
+
+
+def repeat_until(command, stat, predicate, act, what, timeout):
+    """Send `act` until `predicate(stat)` holds, then return.
+
+    A command can arrive while the task is still settling and be dropped — the
+    same reason the panel's boot-time E-stop pulse does nothing — so the request
+    is re-sent every couple of seconds instead of being trusted once.
+    """
+    deadline = time.monotonic() + timeout
+    sent = 0.0
+    while True:
+        stat.poll()
+        if predicate(stat):
+            return
+        now = time.monotonic()
+        if now - sent >= 2.0:
+            act()
+            sent = now
+        if now >= deadline:
+            sys.exit(f"sim-ready: timed out after {timeout:g} s waiting for {what}")
+        time.sleep(0.1)
+
+
 def bring_up(args):
     linuxcnc, stat, command = task(args.timeout, args.ini)
     if args.estop:
@@ -254,29 +304,35 @@ def bring_up(args):
     if args.on:
         power_on(linuxcnc, stat, command, args.timeout)
     if args.home:
-        command.mode(linuxcnc.MODE_MANUAL)
-        command.wait_complete(args.timeout)
-        command.home(-1)
-        command.wait_complete(args.timeout)
-        wait_for(
-            stat,
-            lambda s: all(int(homed) for homed in s.homed),
-            "every axis to finish homing",
-            args.timeout,
+        log("homing every axis")
+        set_mode(
+            linuxcnc, stat, command, linuxcnc.MODE_MANUAL, "MANUAL mode", args.timeout
         )
+        try:
+            repeat_until(
+                command,
+                stat,
+                all_homed,
+                lambda: command.home(-1),
+                "every axis to finish homing",
+                args.timeout,
+            )
+        except SystemExit:
+            print(f"sim-ready: joints not homed: {unhomed(stat)}", file=sys.stderr)
+            raise
         log("axes homed")
     if args.load:
         path = os.path.abspath(args.load)
         if not os.path.exists(path):
             sys.exit(f"sim-ready: no such program: {path}")
-        command.mode(linuxcnc.MODE_AUTO)
-        command.wait_complete(args.timeout)
-        command.program_open(path)
-        command.wait_complete(args.timeout)
         name = os.path.basename(path)
-        wait_for(
+        log(f"opening {name}")
+        set_mode(linuxcnc, stat, command, linuxcnc.MODE_AUTO, "AUTO mode", args.timeout)
+        repeat_until(
+            command,
             stat,
             lambda s: os.path.basename(s.file or "") == name,
+            lambda: command.program_open(path),
             f"{name} to load",
             args.timeout,
         )
