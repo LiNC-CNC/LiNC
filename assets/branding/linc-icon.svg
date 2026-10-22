@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="LiNC">
+  <defs>
+    <linearGradient id="bg" x1="72" y1="40" x2="448" y2="472" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#242a31"/>
+      <stop offset="0.52" stop-color="#15181c"/>
+      <stop offset="1" stop-color="#0c0e11"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="80" y1="64" x2="430" y2="450" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4b5560"/>
+      <stop offset="1" stop-color="#222830"/>
+    </linearGradient>
+    <linearGradient id="path" x1="352" y1="352" x2="444" y2="152" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4da3ff"/>
+      <stop offset="1" stop-color="#67e8f9"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(256 256) rotate(90) scale(238)" gradientUnits="userSpaceOnUse">
+      <stop offset="0.52" stop-color="#4da3ff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#4da3ff" stop-opacity="0.16"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Graphite shell -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="19" y="19" width="474" height="474" rx="109" fill="none" stroke="url(#edge)" stroke-width="6"/>
+  <rect x="44" y="44" width="424" height="424" rx="86" fill="url(#glow)"/>
+  <rect x="52" y="52" width="408" height="408" rx="80" fill="none" stroke="#ffffff" stroke-opacity="0.045" stroke-width="2"/>
+
+  <!-- Machined L -->
+  <path d="M154 124V342C154 354.15 163.85 364 176 364H360"
+        fill="none" stroke="#eef1f4" stroke-width="66"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Toolpath leaving the part -->
+  <path d="M360 364C407 364 438 333 438 286V186"
+        fill="none" stroke="url(#path)" stroke-width="26"
+        stroke-linecap="round"/>
+
+  <!-- Cutter -->
+  <circle cx="438" cy="186" r="18" fill="#fb923c"/>
+  <circle cx="438" cy="186" r="7" fill="#fff4e6"/>
+
+  <!-- Small registration mark, reads as a machining origin -->
+  <path d="M104 408H136M120 392V424" stroke="#9aa0a6" stroke-opacity="0.6" stroke-width="5" stroke-linecap="round"/>
+</svg>

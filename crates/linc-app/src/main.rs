@@ -68,8 +68,18 @@ fn init_logging() {
     builder.init();
 }
 
-fn main() -> Result<()> {
-    init_logging();
+fn window_icon() -> Option<egui::IconData> {
+    const ICON: &[u8] = include_bytes!("../../../assets/branding/linc-icon-256.png");
+    let image = image::load_from_memory(ICON).ok()?.to_rgba8();
+    let (width, height) = image.dimensions();
+    Some(egui::IconData {
+        rgba: image.into_raw(),
+        width,
+        height,
+    })
+}
+
+fn main() -> Result<()> {    init_logging();
     let args = parse_args();
     let config_path = args
         .config
@@ -134,6 +144,9 @@ fn main() -> Result<()> {
         .with_inner_size(size)
         .with_min_inner_size([1280.0, 720.0])
         .with_title(title.clone());
+    if let Some(icon) = window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
     if args.fullscreen || profile.config.machine.kind == "real" {
         viewport = viewport.with_fullscreen(args.fullscreen);
     }

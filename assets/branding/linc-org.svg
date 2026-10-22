@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512" role="img" aria-label="LiNC">
+  <defs>
+    <linearGradient id="bg" x1="64" y1="32" x2="448" y2="480" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#242a31"/>
+      <stop offset="0.52" stop-color="#15181c"/>
+      <stop offset="1" stop-color="#0c0e11"/>
+    </linearGradient>
+    <linearGradient id="path" x1="352" y1="352" x2="444" y2="152" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4da3ff"/>
+      <stop offset="1" stop-color="#67e8f9"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="256" cy="256" r="238" gradientUnits="userSpaceOnUse">
+      <stop offset="0.48" stop-color="#4da3ff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#4da3ff" stop-opacity="0.18"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Full bleed: GitHub crops the avatar into a circle. -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="238" fill="url(#glow)"/>
+  <circle cx="256" cy="256" r="226" fill="none" stroke="#3a424a" stroke-width="5"/>
+
+  <path d="M154 124V342C154 354.15 163.85 364 176 364H360"
+        fill="none" stroke="#eef1f4" stroke-width="66"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M360 364C407 364 438 333 438 286V186"
+        fill="none" stroke="url(#path)" stroke-width="26"
+        stroke-linecap="round"/>
+  <circle cx="438" cy="186" r="18" fill="#fb923c"/>
+  <circle cx="438" cy="186" r="7" fill="#fff4e6"/>
+  <path d="M104 408H136M120 392V424" stroke="#9aa0a6" stroke-opacity="0.6" stroke-width="5" stroke-linecap="round"/>
+</svg>

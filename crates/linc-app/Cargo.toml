@@ -14,6 +14,7 @@ clap.workspace = true
 eframe.workspace = true
 egui.workspace = true
 env_logger.workspace = true
+image.workspace = true
 log.workspace = true
 linc-core = { path = "../linc-core" }
 linc-ui = { path = "../linc-ui" }
