@@ -15,6 +15,9 @@ fn editor_font() -> f32 {
     theme::font_size(13.0)
 }
 
+/// Space between the pane's left edge and the current-line bar.
+const SELECTION_EDGE_PADDING: f32 = 4.0;
+
 fn line_height() -> f32 {
     editor_font() * 1.36
 }
@@ -419,7 +422,10 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
         .auto_shrink([false, false]);
     scroll.show(ui, |ui| {
         ui.horizontal_top(|ui| {
-            let gutter = ui.add(
+            // Lane for the current-line bar, so it sits left of the numbers
+            // instead of on top of them.
+            ui.add_space(SELECTION_EDGE_PADDING + theme::SELECTION_BAR + 4.0);
+            ui.add(
                 egui::Label::new(
                     RichText::new(numbers)
                         .monospace()
@@ -438,7 +444,6 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
                 let key: GalleyKey = (
                     app.program.editor.revision,
-                    current_line,
                     syntax_error_line,
                     search.clone(),
                     matches.clone(),
@@ -455,7 +460,6 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                 }
                 let mut job = highlight_job(
                     buffer.as_str(),
-                    current_line,
                     syntax_error_line,
                     &search,
                     &matches,
@@ -513,30 +517,41 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                 let line = text.chars().take(cursor).filter(|ch| *ch == '\n').count() + 1;
                 app.program.selected_line = line.max(1).min(line_count.max(1));
             }
-            // Mark the line the interpreter is on the way the Machine page's
-            // G-code display does: an accent bar in the gutter plus a tinted
-            // row. The cursor line keeps its underline from the layouter, so
-            // the two are distinguishable while editing.
-            let running = app.snapshot.program.executing_line().max(1);
-            let live = app.snapshot.task.running
-                || app.snapshot.program.paused
-                || app.snapshot.task.program_started;
-            if live && running <= line_count {
-                let top = output.galley_pos.y + (running as f32 - 1.0) * line_height();
-                let row = egui::Rect::from_min_size(
-                    egui::pos2(gutter.rect.left() - 6.0, top),
-                    egui::vec2(ui.available_width() + gutter.rect.width(), line_height()),
-                );
-                let row = row.intersect(ui.clip_rect());
-                if row.height() > 0.0 {
+            // The current line, styled like the tool table's selected row: a
+            // translucent accent band across the row and a solid bar on the
+            // rim. The shell keeps the selection on the executing line while a
+            // program runs, so this is also what follows the cut.
+            let current = app.program.selected_line.max(1);
+            if current <= line_count {
+                let clip = ui.clip_rect();
+                // Anchor on the galley's own rows: the font's nominal line
+                // height is not the row pitch egui lays out, and the difference
+                // accumulated into the band sitting half a line low.
+                let rows = &output.galley.rows;
+                let first_top = output.galley_pos.y + rows.first().map_or(0.0, |row| row.pos.y);
+                let pitch = if rows.len() >= 2 {
+                    rows[1].pos.y - rows[0].pos.y
+                } else {
+                    line_height()
+                };
+                let top = first_top + (current as f32 - 1.0) * pitch;
+                let band = egui::Rect::from_min_max(
+                    egui::pos2(clip.left() + SELECTION_EDGE_PADDING, top),
+                    egui::pos2(clip.right(), top + pitch),
+                )
+                .intersect(clip);
+                if band.height() > 0.0 {
                     ui.painter().rect_filled(
-                        row,
-                        2.0,
-                        theme::ACCENT.gamma_multiply(0.12),
+                        band,
+                        egui::CornerRadius::same((theme::SELECTION_RADIUS / 2.0) as u8),
+                        theme::tint(theme::ACCENT, theme::SELECTION_ALPHA),
                     );
                     ui.painter().rect_filled(
-                        egui::Rect::from_min_size(row.left_top(), egui::vec2(2.0, row.height())),
-                        1.0,
+                        egui::Rect::from_min_size(
+                            egui::pos2(band.left(), band.top()),
+                            egui::vec2(theme::SELECTION_BAR, band.height()),
+                        ),
+                        egui::CornerRadius::same(1),
                         theme::ACCENT,
                     );
                 }
@@ -562,7 +577,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
 
 /// Cache key for the editor galley: editor revision, highlight inputs, wrap
 /// width and buffer length.
-type GalleyKey = (u64, usize, Option<usize>, String, Vec<usize>, u32, usize);
+type GalleyKey = (u64, Option<usize>, String, Vec<usize>, u32, usize);
 
 /// The line-number gutter only changes when the line count does.
 fn number_gutter(ui: &egui::Ui, line_count: usize) -> String {
@@ -589,7 +604,6 @@ fn wrap_width_unused() -> f32 {
 
 fn highlight_job(
     text: &str,
-    current_line: usize,
     error_line: Option<usize>,
     search: &str,
     matches: &[usize],
@@ -606,9 +620,6 @@ fn highlight_job(
     for (index, line) in lines.iter().enumerate() {
         let line_no = index + 1;
         let mut format = base.clone();
-        if line_no == current_line {
-            format.underline = egui::Stroke::new(1.0, theme::ACCENT);
-        }
         if let Some(error) = error_line {
             if error == line_no {
                 format.background = Color32::from_rgba_premultiplied(0xff, 0xb0, 0x20, 0x2b);
@@ -669,5 +680,6 @@ fn token_color(kind: TokenKind) -> Color32 {
 
 /// Exposed for tests.
 pub fn layout_for_test(text: &str, current: usize) -> LayoutJob {
-    highlight_job(text, current, None, "", &[])
+    let _ = current;
+    highlight_job(text, None, "", &[])
 }

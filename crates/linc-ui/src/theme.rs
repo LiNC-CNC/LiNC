@@ -12,6 +12,13 @@ pub const FG: Color32 = Color32::from_rgb(0xe8, 0xea, 0xed);
 pub const MUTED: Color32 = Color32::from_rgb(0x9a, 0xa0, 0xa6);
 pub const BORDER: Color32 = Color32::from_rgb(0x30, 0x35, 0x3a);
 pub const ACCENT: Color32 = Color32::from_rgb(0x4d, 0xa3, 0xff);
+/// Translucent selection band under a selected row or G-code line. Matches the
+/// tool table's band, so a selection reads the same in every list.
+pub const SELECTION_ALPHA: u8 = 34;
+/// Solid bar on the rim of a selection.
+pub const SELECTION_BAR: f32 = 3.0;
+/// Corner radius of the selection band.
+pub const SELECTION_RADIUS: f32 = 4.0;
 pub const ACCENT_DARK: Color32 = Color32::from_rgb(0x0d, 0x2c, 0x4f);
 pub const SUCCESS: Color32 = Color32::from_rgb(0x3d, 0xdc, 0x84);
 pub const WARNING: Color32 = Color32::from_rgb(0xff, 0xb0, 0x20);
@@ -433,4 +440,9 @@ pub fn pressure_color(fraction: f64) -> Color32 {
     } else {
         SUCCESS
     }
+}
+
+/// A translucent version of `color`, for selection bands.
+pub fn tint(color: Color32, alpha: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
 }

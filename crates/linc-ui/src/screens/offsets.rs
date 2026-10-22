@@ -221,7 +221,7 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
             painter.rect_filled(
                 rect,
                 egui::CornerRadius::same(2),
-                tint(theme::ACCENT, 34),
+                theme::tint(theme::ACCENT, 34),
             );
             painter.rect_filled(
                 egui::Rect::from_min_size(
@@ -411,10 +411,6 @@ fn store_cell(app: &mut LincApp, index: u8) {
     } else {
         draft.rotation = buffer;
     }
-}
-
-fn tint(color: egui::Color32, alpha: u8) -> egui::Color32 {
-    egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
 }
 
 /// Write one work offset row, evaluating each cell as an expression.

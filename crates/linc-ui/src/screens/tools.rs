@@ -490,8 +490,8 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                             let rect = response.0;
                             painter.rect_filled(
                                 egui::Rect::from_min_size(
-                                    egui::pos2(rect.left(), rect.bottom() - SELECTION_BAR),
-                                    egui::vec2(rect.width(), SELECTION_BAR),
+                                    egui::pos2(rect.left(), rect.bottom() - theme::SELECTION_BAR),
+                                    egui::vec2(rect.width(), theme::SELECTION_BAR),
                                 ),
                                 egui::CornerRadius::same(1),
                                 theme::ACCENT,
@@ -531,7 +531,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     // the selection moves.
                                     ui.add_space(CELL_TEXT_PAD);
                                     if column.cell == Cell::Tool {
-                                        ui.add_space(SELECTION_BAR);
+                                        ui.add_space(theme::SELECTION_BAR);
                                     }
                                     let text = cell_text(draft_for(app, entry.tool), &entry, column.cell);
                                     // Reserve the same air on the right as on the
@@ -587,7 +587,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                             if selected_cell {
                                 painter.rect_stroke(
                                     rect.shrink2(egui::vec2(SELECTION_INSET, 1.0)),
-                                    egui::CornerRadius::same(SELECTION_RADIUS as u8),
+                                    egui::CornerRadius::same(theme::SELECTION_RADIUS as u8),
                                     egui::Stroke::new(1.5, theme::ACCENT),
                                     egui::StrokeKind::Inside,
                                 );
@@ -607,15 +607,15 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                             );
                             painter.rect_filled(
                                 band,
-                                egui::CornerRadius::same((SELECTION_RADIUS / 2.0) as u8),
-                                tint(theme::ACCENT, ROW_ALPHA),
+                                egui::CornerRadius::same((theme::SELECTION_RADIUS / 2.0) as u8),
+                                theme::tint(theme::ACCENT, theme::SELECTION_ALPHA),
                             );
                             // Solid bar on the rim: the band alone is faint, and
                             // the bar is what the eye lands on.
                             painter.rect_filled(
                                 egui::Rect::from_min_size(
                                     egui::pos2(left, row_rect.top()),
-                                    egui::vec2(SELECTION_BAR, row_rect.height()),
+                                    egui::vec2(theme::SELECTION_BAR, row_rect.height()),
                                 ),
                                 egui::CornerRadius::same(1),
                                 theme::ACCENT,
@@ -665,8 +665,6 @@ const HEADER_HEIGHT: f32 = 18.0;
 
 /// Faint washes under the selected row and column; the solid bars on the rim
 /// carry the selection, so the wash must stay weak enough to read text through.
-const ROW_ALPHA: u8 = 34;
-const SELECTION_BAR: f32 = 3.0;
 /// Air between a cell's edge and its text.
 const CELL_TEXT_PAD: f32 = 8.0;
 /// Gap between columns.
@@ -678,13 +676,9 @@ const SCROLLBAR_ALLOWANCE: f32 = 14.0;
 /// Extra room on the right of a cell, on top of the text padding.
 const RIGHT_GAP: f32 = 0.0;
 /// Corner radius of the cell selector.
-const SELECTION_RADIUS: f32 = 4.0;
 
 /// A translucent version of a solid colour. `from_rgba_unmultiplied` premultiplies
 /// for us; a premultiplied constructor with a plain colour renders nearly solid.
-fn tint(color: egui::Color32, alpha: u8) -> egui::Color32 {
-    egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
-}
 
 fn parse_number(text: &str, label: &str) -> Result<Option<f64>, String> {
     if text.trim().is_empty() {

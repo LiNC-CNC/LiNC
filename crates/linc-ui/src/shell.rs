@@ -610,6 +610,9 @@ impl LincApp {
         let selected = (self.program.selected_line as isize + step).clamp(1, count as isize) as usize;
         self.program.selected_line = selected;
         self.program.code_scroll_to_line = Some(selected);
+        // Choosing a line is the operator taking over; the tool must not drag
+        // the selection straight back on the next frame.
+        self.program.follow_current = false;
     }
 
     /// Select a line in the G-code view: highlight it, scroll to it and, when
@@ -620,6 +623,7 @@ impl LincApp {
         self.program.selected_line = line;
         self.program.code_scroll_to_line = Some(line);
         self.program.cursor_line = Some(line);
+        self.program.follow_current = false;
         if self.editing_allowed() {
             self.program.focus_editor = true;
         }
