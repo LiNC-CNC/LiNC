@@ -576,7 +576,10 @@ Program rules:
   markers — so an offset far from the part is still on screen; its height
   matches the table so the two panes end on the same line. The machine origin
   gets a muted triad, joined to the active work origin by a dashed green line
-  with an arrowhead at the work end.
+  with an arrowhead at the work end. A non-active row that is selected (or being
+  edited) shows its system's origin as a translucent blue triad with a blue
+  dashed arrow from the machine origin, and keeps doing so until another row is
+  selected; selecting the active row adds only its name to the active marker.
 - Tool offsets. G92 is deliberately not exposed here: it is a transient offset
   that silently shifts every WCS, and a field for it invited the operator to
   leave the machine in a state neither the DRO nor a program could explain.

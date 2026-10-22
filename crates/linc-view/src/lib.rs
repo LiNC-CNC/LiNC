@@ -429,6 +429,33 @@ fn fit_target(view: &TrajectoryView<'_>, reference: Bounds3) -> Bounds3 {
     target
 }
 
+/// A dashed line with a filled head, used for the offset arrows.
+///
+/// The head stops just short of the target so it points at the marker instead
+/// of covering it, and the line is dashed because it relates two points rather
+/// than describing a move the machine makes.
+fn draw_origin_arrow(painter: &egui::Painter, from: Pos2, to: Pos2, colour: Color32) {
+    let delta = to - from;
+    let length = delta.length();
+    if length <= 8.0 {
+        return;
+    }
+    let direction = delta / length;
+    let stroke = Stroke::new(1.5, colour);
+    let tip = to - direction * 5.0;
+    let barb = 12.0;
+    let side = Vec2::new(-direction.y, direction.x);
+    let back = tip - direction * barb;
+    painter.extend(egui::Shape::dashed_line(&[from, back], stroke, 6.0, 4.0));
+    // A filled head reads as a direction at this size; two barbs alone
+    // disappeared into the dashes.
+    painter.add(egui::Shape::convex_polygon(
+        vec![tip, back + side * (barb * 0.45), back - side * (barb * 0.45)],
+        colour,
+        Stroke::NONE,
+    ));
+}
+
 /// Draw the toolpath graph. `TrajectoryView::fit` requests a one-shot fit;
 /// zoom/pan are mutated in place so the caller can persist them.
 pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
@@ -563,35 +590,12 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             [0.0; 3],
             theme::MUTED,
         );
-        let machine = projection.project([0.0; 3]);
-        let work = projection.project(view.origin);
-        let delta = work - machine;
-        let length = delta.length();
-        if length > 8.0 {
-            let direction = delta / length;
-            let stroke = Stroke::new(1.5, theme::SUCCESS);
-            // The head stops just short of the work-origin triad so it points at
-            // the marker instead of covering it.
-            let tip = work - direction * 5.0;
-            let barb = 12.0;
-            let side = Vec2::new(-direction.y, direction.x);
-            let back = tip - direction * barb;
-            // Dashed: the line is a relationship between two points, not a move
-            // the machine makes, and a solid line read as a travel path.
-            painter.extend(egui::Shape::dashed_line(
-                &[machine, back],
-                stroke,
-                6.0,
-                4.0,
-            ));
-            // A filled head reads as a direction at this size; two barbs alone
-            // disappeared into the dashes.
-            painter.add(egui::Shape::convex_polygon(
-                vec![tip, back + side * (barb * 0.45), back - side * (barb * 0.45)],
-                theme::SUCCESS,
-                Stroke::NONE,
-            ));
-        }
+        draw_origin_arrow(
+            &painter,
+            projection.project([0.0; 3]),
+            projection.project(view.origin),
+            theme::SUCCESS,
+        );
     }
     draw_axes(
         &painter,
@@ -602,21 +606,43 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         theme::AXIS,
     );
     if let Some(highlight) = view.highlight_origin {
-        draw_axes(
-            &painter,
-            &projection,
-            view.variant,
-            &view.axis_labels,
-            highlight,
-            view.selected_line_color,
-        );
+        let same_as_active = (highlight[0] - view.origin[0]).abs() < 1e-6
+            && (highlight[1] - view.origin[1]).abs() < 1e-6
+            && (highlight[2] - view.origin[2]).abs() < 1e-6;
+        // The selected row is a temporary preview of where that system's origin
+        // is: translucent blue while it is selected, until another row is
+        // picked. The active system already has its own triad and green arrow,
+        // so only its name is added when it is the selected row.
+        let colour = if same_as_active {
+            theme::AXIS
+        } else {
+            theme::dim(theme::ACCENT, 150)
+        };
+        if !same_as_active {
+            draw_axes(
+                &painter,
+                &projection,
+                view.variant,
+                &view.axis_labels,
+                highlight,
+                colour,
+            );
+            if view.origin_tether {
+                draw_origin_arrow(
+                    &painter,
+                    projection.project([0.0; 3]),
+                    projection.project(highlight),
+                    colour,
+                );
+            }
+        }
         if let Some(label) = &view.highlight_label {
             painter.text(
                 projection.project(highlight) + Vec2::new(8.0, 26.0),
                 Align2::LEFT_TOP,
                 label,
                 FontId::monospace(9.0 * FONT_SCALE),
-                view.selected_line_color,
+                colour,
             );
         }
     }

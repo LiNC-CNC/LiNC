@@ -368,7 +368,14 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
         handle_table_keys(app, ui, &offsets, columns);
     }
 
-    let mut selected = app.offsets.selected;
+    // The selected system follows the selected row: clicking a cell in another
+    // row must move the preview marker too, not only the row band. The row is
+    // the truth on this page, so derive it here rather than trusting a stale
+    // `selected` from the last WCS-name click.
+    let mut selected = offsets
+        .get(app.offsets.selected_row)
+        .map(|offset| offset.index)
+        .unwrap_or(app.offsets.selected);
     let commit: Option<u8> = None;
     theme::card(ui, |ui| {
         ui.horizontal(|ui| {
@@ -610,6 +617,7 @@ fn cell(
         if response.clicked() {
             app.offsets.selected_row = row_index;
             app.offsets.selected_column = column;
+            app.offsets.selected = index;
         }
         if selected {
             // Outline the selected cell, as the tool table does.
