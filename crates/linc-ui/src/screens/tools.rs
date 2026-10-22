@@ -379,6 +379,13 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
             move_column += 1;
         }
+        // Page keys move by a screenful, as in every other list.
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+            move_row -= TABLE_PAGE;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+            move_row += TABLE_PAGE;
+        }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
             edit = true;
         }
@@ -669,6 +676,8 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
 
 /// Height of a table row, and of the field a cell opens for editing.
 const ROW_HEIGHT: f32 = 26.0;
+/// Rows a PageUp/PageDown moves: the table shows roughly this many at once.
+const TABLE_PAGE: isize = 8;
 const FIELD_HEIGHT: f32 = 22.0;
 const HEADER_HEIGHT: f32 = 18.0;
 

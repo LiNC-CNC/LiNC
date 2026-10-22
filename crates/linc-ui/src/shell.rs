@@ -1654,10 +1654,19 @@ impl LincApp {
             {
                 cycle_toolpath_view = true;
             }
-            if !text_focused && input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+            // The tool table pages its own cursor with these keys, so they must
+            // reach the page instead of being consumed for tab navigation.
+            let page_keys_belong_to_page = self.page == Page::Tools;
+            if !text_focused
+                && !page_keys_belong_to_page
+                && input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp)
+            {
                 page_up = true;
             }
-            if !text_focused && input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+            if !text_focused
+                && !page_keys_belong_to_page
+                && input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown)
+            {
                 page_down = true;
             }
             // Home and End are the editor's line commands while a text field
