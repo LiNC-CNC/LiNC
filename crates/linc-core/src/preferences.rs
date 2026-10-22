@@ -9,6 +9,7 @@
 //! Writes go to a temporary file in the destination directory and are renamed
 //! into place, so a crash mid-write cannot leave a torn preferences file.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -59,6 +60,13 @@ pub struct Preferences {
     /// Page keys the operator has chosen to show.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub visible_panels: Vec<String>,
+    /// LiNC-only tool type labels, keyed by tool number as text (`"12"`).
+    ///
+    /// The LinuxCNC tool table has no type column: LiNC infers MILL/DRILL from
+    /// the diameter and TURN/BORING/TOOL from the lathe geometry. The operator
+    /// can override the label here; it is presentation, never machine data.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tool_kinds: BTreeMap<String, String>,
 }
 
 impl Preferences {
@@ -128,6 +136,17 @@ mod tests {
         fs::write(&path, "last_page = \"tools\"\nlinuxcnc_ini = \"/etc/passwd\"\n").unwrap();
         let loaded = Preferences::load(&path);
         assert_eq!(loaded, Preferences::default());
+    }
+
+    #[test]
+    fn tool_kind_labels_survive_a_round_trip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("sim.preferences.toml");
+        let mut preferences = Preferences::default();
+        preferences.tool_kinds.insert("12".into(), "DRILL".into());
+        preferences.save(&path).expect("save");
+        let loaded = Preferences::load(&path);
+        assert_eq!(loaded.tool_kinds.get("12").map(String::as_str), Some("DRILL"));
     }
 
     #[test]

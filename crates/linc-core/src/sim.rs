@@ -922,6 +922,30 @@ impl MachineBackend for SimBackend {
                 }
                 Ok(())
             }
+            MachineCommand::LoadTool { tool } => {
+                self.require_issue(MdiOrigin::ToolChange)?;
+                self.snapshot.tool_change.status = ToolChangeStatus::Issuing;
+                self.snapshot.tool_change.target_tool = Some(tool);
+                self.snapshot.tool_change.prepared_tool = tool;
+                self.snapshot.tool_change.message = format!("Loading T{tool} with G43 H{tool}");
+                self.snapshot.panel.next_tool = tool;
+                // The simulator has no length compensation of its own; the load
+                // and the confirmation flow match a plain tool change.
+                if self.profile.changer == ToolChangerKind::Manual
+                    && self.profile.config.tools.manual_confirm
+                {
+                    self.snapshot.tool_change.status = ToolChangeStatus::ManualPrompt;
+                    self.snapshot.tool_change.token = Some(ToolChangeToken(now_ms()));
+                    self.snapshot.tool_change.confirm_available = true;
+                    self.snapshot.tool_change.message = format!(
+                        "REMOVE T{} / INSTALL T{tool} (G43 H{tool} after)",
+                        self.snapshot.tool_change.current_tool
+                    );
+                } else {
+                    self.complete_tool_change(tool);
+                }
+                Ok(())
+            }
             MachineCommand::ConfirmManualToolChange { token } => {
                 if !self.snapshot.panel.connected {
                     return Err(MachineError::PanelOffline);
@@ -1451,6 +1475,30 @@ enabled = true
             })
             .unwrap_err();
         assert_eq!(error, MachineError::ProgramProtected);
+    }
+
+    #[test]
+    fn loading_a_tool_runs_the_change_flow() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        backend
+            .send(MachineCommand::LoadTool { tool: 1 })
+            .expect("load tool");
+        // The fixture uses a manual changer, so the load waits for the operator
+        // exactly as a plain M6 does; G43 is issued after the confirmation.
+        assert_eq!(
+            backend.snapshot().tool_change.status,
+            ToolChangeStatus::ManualPrompt
+        );
+        let token = backend.snapshot().tool_change.token.unwrap();
+        backend
+            .send(MachineCommand::ConfirmManualToolChange { token })
+            .expect("confirm");
+        assert_eq!(
+            backend.snapshot().tool_change.status,
+            ToolChangeStatus::Complete
+        );
+        assert_eq!(backend.snapshot().tool_change.current_tool, 1);
     }
 
     #[test]

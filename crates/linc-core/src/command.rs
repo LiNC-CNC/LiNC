@@ -127,6 +127,12 @@ pub enum MachineCommand {
     IssueToolChange {
         tool: u16,
     },
+    /// Load a tool and apply its length compensation in one go: `Tn M6` then
+    /// `G43 Hn`. The TOOLS page's `T` shortcut uses this instead of a bare tool
+    /// change, so the new height offset is in effect immediately.
+    LoadTool {
+        tool: u16,
+    },
     ConfirmManualToolChange {
         token: ToolChangeToken,
     },
@@ -198,6 +204,7 @@ impl MachineCommand {
         match self {
             Self::IssueMdi { .. } => "Issue MDI",
             Self::IssueToolChange { .. } => "Tool change",
+            Self::LoadTool { .. } => "Load tool with height compensation",
             Self::ConfirmManualToolChange { .. } => "Confirm manual tool change",
             Self::SetCurrentTool { .. } => "Set current tool",
             Self::ToggleLimitsOverride => "Toggle limits override",

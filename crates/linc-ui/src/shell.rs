@@ -992,6 +992,11 @@ impl LincApp {
 
     /// Flush preferences at most every two seconds while running, so a crash
     /// cannot lose more than a couple of seconds of UI state.
+    /// Ask for the preferences file to be written on the next save window.
+    pub fn touch_preferences(&mut self) {
+        self.preferences_dirty = true;
+    }
+
     pub fn save_preferences(&mut self, force: bool) {
         if !self.preferences_dirty {
             return;
@@ -1576,6 +1581,7 @@ impl LincApp {
         let text_focused = ui.memory(|memory| {
             memory.has_focus(egui::Id::unique("linc-program-editor"))
                 || memory.has_focus(egui::Id::unique("linc-tool-cell"))
+                || memory.has_focus(egui::Id::unique("linc-offset-cell"))
                 || memory.has_focus(egui::Id::unique("linc-offsets-dro"))
         });
         let mut nav_page = None;
@@ -1695,9 +1701,10 @@ impl LincApp {
             if input.consume_key(self.keymap.redo.modifiers, self.keymap.redo.key) {
                 redo = true;
             }
-            // An edit owns Escape: it cancels the edit rather than leaving the
-            // page.
-            let editing_in_place = (self.page == Page::Tools && self.tools.editing)
+            // An edit or a page popup owns Escape: it cancels the edit (or
+            // closes the selector) rather than leaving the page.
+            let editing_in_place = (self.page == Page::Tools
+                && (self.tools.editing || self.tools.kind_popup.is_some()))
                 || (self.page == Page::Offsets
                     && (self.offsets.editing || self.offsets.dro_edit.is_some()));
             if !editing_in_place

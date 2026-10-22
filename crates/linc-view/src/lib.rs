@@ -142,6 +142,9 @@ pub struct TrajectoryView<'a> {
     /// active work origin. The Offsets page is where the distance between the
     /// two matters; the Machine page shows only the work origin.
     pub origin_tether: bool,
+    /// Show the machine envelope regardless of the Ctrl+B bounds cycle. The
+    /// Offsets preview wants the travel as context around the offset.
+    pub machine_bounds_always: bool,
     pub selected_line_color: Color32,
     pub height: f32,
     pub fit: bool,
@@ -186,6 +189,7 @@ impl<'a> TrajectoryView<'a> {
             show_legend: true,
             fit_all: false,
             origin_tether: false,
+            machine_bounds_always: false,
             selected_line_color: theme::CURRENT,
             height: 400.0,
             fit: false,
@@ -648,7 +652,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     }
 
     // Machine bounds.
-    if view.show_machine_bounds {
+    if view.show_machine_bounds || view.machine_bounds_always {
         if let Some(machine) = view.machine_bounds {
             // The machine envelope is context, not content: keep it faint enough
             // that the program, the part and the origin marks stay dominant.

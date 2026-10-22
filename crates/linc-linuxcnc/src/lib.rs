@@ -739,6 +739,14 @@ impl MachineBackend for PythonBridgeBackend {
                     Duration::from_secs(5),
                 )
             }
+            MachineCommand::LoadTool { tool } => {
+                self.validate_issue(MdiOrigin::ToolChange)?;
+                self.last_mdi = Some(format!("T{tool} M6\nG43 H{tool}"));
+                self.request(
+                    serde_json::json!({ "cmd": "load_tool", "tool": tool }),
+                    Duration::from_secs(5),
+                )
+            }
             MachineCommand::ConfirmManualToolChange { token } => {
                 let snapshot = self.current();
                 if !snapshot.panel.connected {
@@ -930,6 +938,7 @@ impl MachineBackend for PythonBridgeBackend {
                 if expected_revision != self.tool_table.revision {
                     return Err(MachineError::RevisionConflict);
                 }
+                let tool = row.tool;
                 self.tool_table
                     .upsert(row)
                     .map_err(|error| MachineError::Invalid(error.to_string()))?;
@@ -944,8 +953,12 @@ impl MachineBackend for PythonBridgeBackend {
                 let mut snapshot = self.shared.snapshot.lock().unwrap();
                 snapshot.tool_table = self.tool_table.state();
                 drop(snapshot);
+                // Reload the table into the controller, and re-apply the length
+                // compensation when the edited row is the tool in the spindle:
+                // G43 reads the table, so without this the DRO keeps the old
+                // height until the next tool change.
                 self.request(
-                    serde_json::json!({ "cmd": "load_tool_table" }),
+                    serde_json::json!({ "cmd": "load_tool_table", "reapply": tool }),
                     Duration::from_secs(5),
                 )
             }

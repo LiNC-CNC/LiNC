@@ -2,7 +2,7 @@
 
 use egui::{RichText, Ui};
 use linc_core::command::MachineCommand;
-use linc_core::model::{MachineVariant, ToolChangeStatus, ToolChangerKind};
+use linc_core::model::{MachineVariant, ToolChangeStatus};
 
 use crate::shell::LincApp;
 use crate::state::ToolDraft;
@@ -12,27 +12,26 @@ use crate::theme;
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
 
     // No page title: the navigation names the page.
+    // CURRENT; T1   PREPARED; T2 — the tool numbers carry the amber the axis
+    // labels use, so they read as data rather than prose.
     ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(format!(
-                "CURRENT T{}   PREPARED T{}   CHANGER {}",
-                app.snapshot.tool_change.current_tool,
-                app.snapshot.tool_change.prepared_tool,
-                app.profile.changer.label()
-            ))
-            .monospace()
-            .size(theme::font_size(12.0))
-            .color(theme::FG),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if app.profile.changer == ToolChangerKind::Manual {
-                ui.label(
-                    RichText::new("POCKET COLUMN HIDDEN (MANUAL CHANGER)")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-            }
-        });
+        for (label, tool) in [
+            ("CURRENT;", app.snapshot.tool_change.current_tool),
+            ("PREPARED;", app.snapshot.tool_change.prepared_tool),
+        ] {
+            ui.label(
+                RichText::new(label)
+                    .size(theme::font_size(10.0))
+                    .color(theme::MUTED),
+            );
+            ui.label(
+                RichText::new(format!("T{tool}"))
+                    .monospace()
+                    .size(theme::font_size(12.0))
+                    .color(theme::C3),
+            );
+            ui.add_space(12.0);
+        }
     });
     // Keys are taken before the table's scroll area draws: a vertical scroll
     // area is focusable and consumes the up/down keys for its own scrolling.
@@ -48,86 +47,10 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     }
     handle_keys(app, ui, &columns);
     ui.add_space(4.0);
-    let available = ui.available_width();
-    // The page must end above the status line: reserve the bottom padding and
-    // never ask for more height than is there.
-    let content_height = (ui.available_height() - 14.0).max(240.0);
-    ui.horizontal_top(|ui| {
-        ui.allocate_ui_with_layout(
-            egui::Vec2::new(available * 0.64, content_height),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| table_card(app, ui),
-        );
-        ui.add_space(8.0);
-        ui.allocate_ui_with_layout(
-            egui::Vec2::new(
-                (available - available * 0.64 - 8.0).max(300.0),
-                content_height,
-            ),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("tools-right-column")
-                    .max_height(content_height - 4.0)
-                    .show(ui, |ui| {
-                        change_card(app, ui);
-                        if let Some(atc) = app.snapshot.atc.as_ref() {
-                            theme::card(ui, |ui| {
-                                theme::section_header(ui, app.profile.changer.label());
-                                theme::kv_row(ui, "POCKETS", atc.pockets.to_string());
-                                theme::kv_row(
-                                    ui,
-                                    "CURRENT",
-                                    atc.current_pocket
-                                        .map(|p| format!("P{p}"))
-                                        .unwrap_or_else(|| "—".into()),
-                                );
-                                theme::kv_row(
-                                    ui,
-                                    "PREPARED",
-                                    atc.prepared_pocket
-                                        .map(|p| format!("P{p}"))
-                                        .unwrap_or_else(|| "—".into()),
-                                );
-                                theme::kv_row(
-                                    ui,
-                                    "CLAMP",
-                                    atc.clamped
-                                        .map(|c| if c { "CLAMPED" } else { "UNCLAMPED" })
-                                        .unwrap_or("UNKNOWN"),
-                                );
-                                theme::kv_row(
-                                    ui,
-                                    "INDEX",
-                                    if atc.indexing { "INDEXING" } else { "READY" },
-                                );
-                                if let Some(fault) = &atc.fault {
-                                    ui.label(RichText::new(fault).color(theme::ERROR));
-                                }
-                            });
-                        } else {
-                            theme::card(ui, |ui| {
-                                theme::section_header(ui, "TOOL CHANGER");
-                                ui.label(
-                                    RichText::new("NO ATC / CAROUSEL CONFIGURED")
-                                        .size(theme::font_size(9.0))
-                                        .color(theme::MUTED),
-                                );
-                                theme::kv_row(ui, "MODE", app.profile.changer.label());
-                                theme::kv_row(ui, "POCKET COLUMN", "HIDDEN");
-                                ui.label(
-                            RichText::new(
-                                "Manual change uses CHANGE TOOL and the install confirmation.",
-                            )
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
-                        );
-                            });
-                        }
-                    });
-            },
-        );
-    });
+    // No change/changer panes: the table is the page. Loading the selected tool
+    // is the `T` shortcut below, and the manual-change prompt is drawn by the
+    // shell when the controller asks for it.
+    table_card(app, ui);
     // The table holds keyboard focus, and claims the keys it needs.
     //
     // With no focused widget egui treats the arrow keys as focus navigation and
@@ -270,7 +193,12 @@ fn format_cell(text: &str) -> String {
         .unwrap_or_else(|_| text.to_string())
 }
 
-fn cell_text(draft: &ToolDraft, entry: &linc_core::model::ToolRow, cell: Cell) -> String {
+fn cell_text(
+    draft: &ToolDraft,
+    entry: &linc_core::model::ToolRow,
+    cell: Cell,
+    kind_override: Option<&str>,
+) -> String {
     match cell {
         Cell::Tool => {
             let _ = entry;
@@ -278,10 +206,13 @@ fn cell_text(draft: &ToolDraft, entry: &linc_core::model::ToolRow, cell: Cell) -
         }
         Cell::Description => draft.description.clone(),
         Cell::Kind => {
-            if entry.kind.is_empty() {
+            // The LinuxCNC tool table has no type column: the label is inferred
+            // unless the operator picked one in the TYPE selector.
+            let kind = kind_override.unwrap_or(&entry.kind);
+            if kind.is_empty() {
                 "—".to_string()
             } else {
-                entry.kind.clone()
+                kind.to_string()
             }
         }
         Cell::Number(field) => format_cell(&match field {
@@ -321,7 +252,12 @@ fn begin_edit(app: &mut LincApp, columns: &[ColumnSpec]) {
     let Some(spec) = columns.get(column) else {
         return;
     };
-    let text = cell_text(draft_for(app, entry.tool), &entry, spec.cell);
+    if spec.cell == Cell::Kind {
+        // The TYPE cell is not typed: Enter opens the selector at its rect.
+        app.tools.kind_popup_pending = true;
+        return;
+    }
+    let text = cell_text(draft_for(app, entry.tool), &entry, spec.cell, None);
     if cell_field(draft_for(app, entry.tool), spec.cell).is_some() {
         app.tools.edit_buffer = text;
         app.tools.editing = true;
@@ -392,6 +328,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     let mut move_row = 0isize;
     let mut move_column = 0isize;
     let mut edit = false;
+    let mut load = false;
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
             move_row -= 1;
@@ -415,6 +352,12 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
             edit = true;
         }
+        // Bare `T`: load the selected row's tool and its length offset. The
+        // editing branch returns above, so typing a `t` into a cell never
+        // reaches this.
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::T) {
+            load = true;
+        }
     });
     if move_row != 0 && rows > 0 {
         let target = app.tools.selected_row as isize + move_row;
@@ -430,6 +373,29 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     if edit {
         begin_edit(app, columns);
     }
+    if load {
+        load_selected_tool(app);
+    }
+}
+
+/// Load the selected row's tool with its length compensation: `Tn M6` and
+/// `G43 Hn` in one backend command.
+fn load_selected_tool(app: &mut LincApp) {
+    let tool = selected_tool(app);
+    if tool == 0 {
+        app.tools.error = Some("T0 unloads the spindle; select a tool row".into());
+        return;
+    }
+    if let Err(reason) = app.snapshot.issue_allowed() {
+        app.tools.error = Some(reason);
+        return;
+    }
+    app.tools.error = None;
+    app.toast(
+        format!("T{tool} M6 + G43 H{tool} queued"),
+        theme::ACCENT,
+    );
+    app.send(MachineCommand::LoadTool { tool });
 }
 
 fn table_card(app: &mut LincApp, ui: &mut Ui) {
@@ -497,8 +463,10 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
             }
             let painter = ui.painter().clone();
             // Room for the hint row under the table, inside the card: without a
-            // bound the table takes the whole card and pushes it out.
-            let table_height = (ui.available_height() - FOOTER_HEIGHT).max(120.0);
+            // bound the table takes the whole card and pushes it out. The card's
+            // own padding, the gap above the hint and the hint's line are part
+            // of the budget too.
+            let table_height = (ui.available_height() - FOOTER_HEIGHT - 30.0).max(120.0);
             let mut builder = TableBuilder::new(ui)
                 .id_salt("tool-table-v3")
                 .max_scroll_height(table_height)
@@ -515,6 +483,8 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                 builder = builder.scroll_to_row(selected_row, Some(egui::Align::Center));
             }
             let clicked = std::cell::Cell::new(None::<(usize, usize)>);
+            let clicked_kind = std::cell::Cell::new(None::<(usize, egui::Rect)>);
+            let pending_kind = std::cell::Cell::new(None::<(usize, egui::Rect)>);
             builder
                 .header(HEADER_HEIGHT, |mut header| {
                     for (position, column) in columns.iter().enumerate() {
@@ -554,41 +524,76 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                         for (position, column) in columns.iter().enumerate() {
                             let selected_cell = index == selected_row && position == selected_column;
                             let response = row.col(|ui| {
+                                // One inner box, both paddings reserved: the
+                                // selector then never touches a glyph on either
+                                // side. The T column leaves extra room on the
+                                // left for the row's rim bar.
+                                let left_pad = CELL_TEXT_PAD
+                                    + if column.cell == Cell::Tool {
+                                        theme::SELECTION_BAR
+                                    } else {
+                                        0.0
+                                    };
+                                let inner_width =
+                                    (column.width - left_pad - CELL_TEXT_PAD - RIGHT_GAP).max(8.0);
+                                let cell_rect = ui.max_rect();
+                                let right_aligned =
+                                    matches!(column.cell, Cell::Number(_) | Cell::Tool);
+                                let mut inner = ui.new_child(
+                                    egui::UiBuilder::new()
+                                        .max_rect(egui::Rect::from_min_size(
+                                            cell_rect.min + egui::vec2(left_pad, 0.0),
+                                            egui::vec2(inner_width, cell_rect.height()),
+                                        ))
+                                        .layout(if right_aligned {
+                                            egui::Layout::right_to_left(egui::Align::Center)
+                                        } else {
+                                            egui::Layout::left_to_right(egui::Align::Center)
+                                        }),
+                                );
                                 if selected_cell && editing {
-                                    ui.add_space(CELL_TEXT_PAD);
-                                    let edit = ui.add_sized(
-                                        [column.width - CELL_TEXT_PAD, FIELD_HEIGHT],
+                                    let edit = inner.add_sized(
+                                        [inner_width, FIELD_HEIGHT],
                                         egui::TextEdit::singleline(&mut app.tools.edit_buffer)
                                             // Stable id: the shell checks it to
                                             // leave Home and End to the cell.
                                             .id(egui::Id::unique("linc-tool-cell"))
                                             .font(egui::TextStyle::Monospace)
+                                            .frame(egui::Frame::NONE)
                                             .margin(egui::Margin::symmetric(2, 0)),
                                     );
                                     if app.tools.edit_focus {
                                         edit.request_focus();
+                                        // The whole value is selected, so typing
+                                        // replaces it: the operator is entering a
+                                        // tool dimension, not appending to one.
+                                        let id = egui::Id::unique("linc-tool-cell");
+                                        if let Some(mut state) =
+                                            egui::text_edit::TextEditState::load(ui.ctx(), id)
+                                        {
+                                            state.cursor.set_char_range(Some(
+                                                egui::text::CCursorRange::two(
+                                                    egui::text::CCursor::new(0),
+                                                    egui::text::CCursor::new(
+                                                        app.tools.edit_buffer.chars().count(),
+                                                    ),
+                                                ),
+                                            ));
+                                            state.store(ui.ctx(), id);
+                                        }
                                         app.tools.edit_focus = false;
                                     }
                                 } else {
-                                    // Air between the cell selector and the
-                                    // text, in every row so nothing shifts when
-                                    // the selection moves.
-                                    ui.add_space(CELL_TEXT_PAD);
-                                    if column.cell == Cell::Tool {
-                                        ui.add_space(theme::SELECTION_BAR);
-                                    }
-                                    let text = cell_text(draft_for(app, entry.tool), &entry, column.cell);
-                                    // Reserve the same air on the right as on the
-                                    // left, and ellipsise rather than run under
-                                    // the selector's frame.
-                                    // Clamp the wrap width instead of sizing the
-                                    // label: `add_sized` centres it, which broke the
-                                    // left alignment.
-                                    // A touch more on the right: the glyphs carry
-                                    // no trailing bearing, so equal widths looked
-                                    // tighter on that side.
-                                    ui.set_max_width(
-                                        (column.width - CELL_TEXT_PAD * 2.0 - RIGHT_GAP).max(8.0),
+                                    let kind_override = app
+                                        .preferences
+                                        .tool_kinds
+                                        .get(&entry.tool.to_string())
+                                        .cloned();
+                                    let text = cell_text(
+                                        draft_for(app, entry.tool),
+                                        &entry,
+                                        column.cell,
+                                        kind_override.as_deref(),
                                     );
                                     let label = egui::Label::new(
                                         RichText::new(text)
@@ -608,15 +613,15 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     // Numbers align on the right so the decimal
                                     // points line up and a minus sign hangs into
                                     // the padding instead of shifting the digits.
-                                    if matches!(column.cell, Cell::Number(_) | Cell::Tool) {
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                ui.add(label);
-                                            },
-                                        );
-                                    } else {
-                                        ui.add(label);
+                                    let label_response = inner.add(label);
+                                    // The label is the click target; the cell's
+                                    // own response does not see a click that a
+                                    // child consumed.
+                                    if label_response.clicked() {
+                                        clicked.set(Some((index, position)));
+                                        if column.cell == Cell::Kind {
+                                            clicked_kind.set(Some((index, cell_rect)));
+                                        }
                                     }
                                 }
                             });
@@ -629,16 +634,34 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                 });
                             }
                             if selected_cell {
+                                // The same rect and inset whether navigating or
+                                // editing; red marks the cell that is open.
                                 painter.rect_stroke(
                                     rect.shrink2(egui::vec2(SELECTION_INSET, 1.0)),
                                     egui::CornerRadius::same(theme::SELECTION_RADIUS as u8),
-                                    egui::Stroke::new(1.5, theme::ACCENT),
+                                    egui::Stroke::new(
+                                        1.5,
+                                        if selected_cell && editing {
+                                            theme::ERROR
+                                        } else {
+                                            theme::ACCENT
+                                        },
+                                    ),
                                     egui::StrokeKind::Inside,
                                 );
                             }
 
                             if response.1.clicked() {
                                 clicked.set(Some((index, position)));
+                                if column.cell == Cell::Kind {
+                                    clicked_kind.set(Some((index, response.1.rect)));
+                                }
+                            }
+                            if column.cell == Cell::Kind
+                                && selected_cell
+                                && app.tools.kind_popup_pending
+                            {
+                                pending_kind.set(Some((index, response.1.rect)));
                             }
                         }
                         if let (Some((left, right)), Some(row_rect)) = (row_span, row_rect) {
@@ -675,16 +698,91 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                     app.tools.selected_column = position;
                 }
             }
+            let opened_kind = clicked_kind.get().or_else(|| pending_kind.get());
+            if let Some((index, rect)) = opened_kind {
+                app.tools.kind_popup = Some((index, rect));
+                app.tools.kind_popup_pending = false;
+            }
+            draw_kind_popup(app, ui, opened_kind.is_some());
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("ARROWS MOVE · ENTER EDITS · ESC CANCELS")
+                RichText::new("ARROWS MOVE · ENTER EDITS · ESC CANCELS · T LOADS + G43")
                     .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
         });
     });
+}
+
+/// The types the TYPE selector offers. The LinuxCNC tool table has no type
+/// column, so these labels override the inferred one and live in preferences.
+fn kind_choices(lathe: bool) -> &'static [&'static str] {
+    if lathe {
+        &["TURN", "BORING", "TOOL"]
+    } else {
+        &["MILL", "DRILL"]
+    }
+}
+
+/// Popup selector for the TYPE cell. Opened by a click on the cell and anchored
+/// under it; a choice updates the preference and closes.
+fn draw_kind_popup(app: &mut LincApp, ui: &mut Ui, opened_now: bool) {
+    let Some((row, anchor)) = app.tools.kind_popup else {
+        return;
+    };
+    let Some(entry) = app.snapshot.tool_table.rows.get(row).cloned() else {
+        app.tools.kind_popup = None;
+        return;
+    };
+    let lathe = app.profile.variant == MachineVariant::Lathe;
+    let current = app
+        .preferences
+        .tool_kinds
+        .get(&entry.tool.to_string())
+        .cloned()
+        .unwrap_or_else(|| entry.kind.clone());
+    let mut chosen: Option<&'static str> = None;
+    let area = egui::Area::new(egui::Id::unique("tool-kind-selector"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(anchor.left_bottom() + egui::vec2(0.0, 2.0))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::new()
+                .fill(theme::PANEL)
+                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .corner_radius(egui::CornerRadius::same(4))
+                .inner_margin(egui::Margin::same(4))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    for kind in kind_choices(lathe) {
+                        if ui.selectable_label(current == *kind, *kind).clicked() {
+                            chosen = Some(*kind);
+                        }
+                    }
+                });
+        });
+    if let Some(kind) = chosen {
+        app.preferences
+            .tool_kinds
+            .insert(entry.tool.to_string(), kind.to_string());
+        app.touch_preferences();
+        app.tools.kind_popup = None;
+        return;
+    }
+    // The click that opened the popup is outside it; ignore that frame so the
+    // selector does not close the instant it appears.
+    if opened_now {
+        return;
+    }
+    let pointer = ui.input(|input| input.pointer.interact_pos());
+    let clicked_outside = ui.input(|input| input.pointer.any_click())
+        && pointer
+            .map(|point| !area.response.rect.contains(point))
+            .unwrap_or(false);
+    if clicked_outside || ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+        app.tools.kind_popup = None;
+    }
 }
 
 /// Height of a table row, and of the field a cell opens for editing.
@@ -817,101 +915,6 @@ fn save_tool_row(app: &mut LincApp, tool: u16) {
     );
 }
 
-fn change_card(app: &mut LincApp, ui: &mut Ui) {
-    theme::card(ui, |ui| {
-        theme::section_header(ui, "TOOL CHANGE");
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new("TARGET")
-                    .size(theme::font_size(10.0))
-                    .color(theme::MUTED),
-            );
-            ui.add(
-                egui::TextEdit::singleline(&mut app.tools.target)
-                    .desired_width(64.0)
-                    .font(egui::TextStyle::Monospace),
-            );
-            ui.label(
-                RichText::new("T0 UNLOADS")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-        });
-        let gate = app.snapshot.issue_allowed();
-        let can_change = gate.is_ok() && !app.snapshot.task.running;
-        if let Err(reason) = &gate {
-            ui.label(
-                RichText::new(reason)
-                    .size(theme::font_size(10.0))
-                    .color(theme::WARNING),
-            );
-        }
-        if theme::accent_button(ui, "CHANGE TOOL", can_change).clicked() {
-            issue_change(app);
-        }
-        if theme::action_button(ui, "SET CURRENT (M61)", can_change).clicked() {
-            let tool = app
-                .tools
-                .target
-                .trim()
-                .parse::<u16>()
-                .unwrap_or_else(|_| selected_tool(app));
-            app.send(MachineCommand::SetCurrentTool { tool });
-            app.toast(
-                format!("M61 Q{tool} queued (not a tool change)"),
-                theme::ACCENT,
-            );
-        }
-        ui.label(
-            RichText::new("CHANGE TOOL issues Tn M6 immediately via issue_mdi; no staging or cycle-start gate.")
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-        );
-        if let Some(error) = &app.tools.error {
-            ui.label(RichText::new(error).color(theme::ERROR));
-        }
-
-        if app.snapshot.tool_change.status == ToolChangeStatus::ManualPrompt {
-            theme::separator(ui);
-            ui.label(
-                RichText::new(&app.snapshot.tool_change.message)
-                    .size(theme::font_size(15.0))
-                    .strong()
-                    .color(theme::WARNING),
-            );
-            if let Some(token) = app.snapshot.tool_change.token.clone() {
-                // Allowed while the program runs: this is the M6 handshake the
-                // interpreter is waiting for, not motion.
-                if app.snapshot.tool_change.confirmed {
-                    ui.label(
-                        RichText::new("CONFIRMED — WAITING FOR THE MACHINE")
-                            .size(theme::font_size(11.0))
-                            .color(theme::SUCCESS),
-                    );
-                } else if theme::accent_button(ui, "CONFIRM INSTALLED", app.snapshot.panel.connected)
-                    .clicked()
-                {
-                    app.send(MachineCommand::ConfirmManualToolChange { token });
-                }
-            }
-            ui.label(
-                RichText::new("Writes linc.tool-change-confirm; never auto-confirms.")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-        } else {
-            theme::kv_row(ui, "CHANGE STATE", app.snapshot.tool_change.status.label());
-            if !app.snapshot.tool_change.message.is_empty() {
-                ui.label(
-                    RichText::new(&app.snapshot.tool_change.message)
-                        .size(theme::font_size(10.0))
-                        .color(theme::MUTED),
-                );
-            }
-        }
-    });
-}
-
 fn selected_tool(app: &LincApp) -> u16 {
     app.snapshot
         .tool_table
@@ -952,9 +955,4 @@ pub fn issue_change(app: &mut LincApp) {
     }
     app.tools.error = None;
     app.send(MachineCommand::IssueToolChange { tool });
-}
-
-pub fn set_current(app: &mut LincApp) {
-    let tool = selected_tool(app);
-    app.send(MachineCommand::SetCurrentTool { tool });
 }

@@ -12,7 +12,7 @@ commands (MDI, probe, tool change, program/offset writes). Three binaries:
 
 ```bash
 cargo build --release                       # all three binaries
-cargo test --workspace                      # 191 tests today
+cargo test --workspace                      # 197 tests today
 python3 scripts/mcp-smoke.py                # phase 3+4 acceptance, real binaries
 ./target/release/linc --config configs/sim.toml --check-config
 ./target/release/linc --config configs/baiermill.toml --check-config
@@ -105,6 +105,11 @@ LINC_SIM_IPC=/tmp/linc/panel-sim ./target/release/linc --config configs/sim.toml
   `/home/jack/CNC/tmp/profiles/` with `/home/jack/CNC/tmp/prefs/{profile}.preferences.toml`; drivers `/home/jack/CNC/tmp/cap*.sh`; output `/home/jack/CNC/tmp/shots/`.
 
 ## UI conventions
+
+- Table cells edit in place: Enter selects the whole value, Escape restores the
+  previous one, and the open cell keeps the selection border's size in red
+  (Tools, Offsets). Home/End belong to the cell while it has focus; add its id to
+  the `text_focused` list in `shell.rs` if you add another editor.
 
 - No page titles; the navigation names the page. Start each page with `common::focus_anchor(ui, "<page>-page-focus")` so arrow navigation has a
   starting point. Banners stay because they carry live state.

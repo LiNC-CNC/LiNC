@@ -1055,6 +1055,18 @@ class Bridge:
         tool = int(command.get("tool", 0))
         return self.issue({"origin": "tool-change", "blocks": [f"T{tool} M6"]})
 
+    def load_tool(self, command):
+        """Load a tool and apply its length offset: Tn M6 then G43 Hn.
+
+        Both blocks go through one MDI program so G43 runs after the change
+        (and after a manual confirmation) and reads the table row that was just
+        written.
+        """
+        tool = int(command.get("tool", 0))
+        return self.issue(
+            {"origin": "tool-change", "blocks": [f"T{tool} M6", f"G43 H{tool}"]}
+        )
+
     def toggle_limits_override(self, command):
         """Accept the limit switches that are tripped right now.
 
@@ -1078,9 +1090,23 @@ class Bridge:
     def load_tool_table(self, command):
         try:
             self.cmd.load_tool_table()
-            return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+        # Re-apply the length compensation when the edited row is the tool in
+        # the spindle: G43 reads the table as it executes, so a reload alone
+        # leaves the old height in effect for the current tool.
+        reapply = int(command.get("reapply", 0) or 0)
+        if reapply > 0:
+            try:
+                self.stat.poll()
+                current = int(getattr(self.stat, "tool_in_spindle", 0) or 0)
+            except Exception:
+                current = 0
+            if current == reapply:
+                return self.issue(
+                    {"origin": "tool-change", "blocks": [f"G43 H{reapply}"]}
+                )
+        return {"ok": True}
 
     def reset_probe_cal(self, command):
         return self.issue({"origin": "probe", "blocks": ["o<probe_cal_reset> call"]})
@@ -1259,6 +1285,8 @@ class Bridge:
                     result = self.set_current_tool(command)
                 elif kind == "issue_tool_change":
                     result = self.issue_tool_change(command)
+                elif kind == "load_tool":
+                    result = self.load_tool(command)
                 elif kind == "toggle_limits_override":
                     result = self.toggle_limits_override(command)
                 elif kind == "load_tool_table":

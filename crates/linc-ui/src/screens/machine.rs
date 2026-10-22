@@ -148,6 +148,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 false,
                 false,
                 false,
+                false,
                 None,
             );
             app.program.graph_zoom = zoom;
@@ -239,6 +240,7 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                         &mut auto_fit,
                         Some(app.program.selected_line),
                         Some(app.snapshot.program.current_line),
+                        false,
                         false,
                         false,
                         false,

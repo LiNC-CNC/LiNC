@@ -255,6 +255,7 @@ fn offset_preview(app: &mut LincApp, ui: &mut Ui, height: f32) {
         false,
         true,
         true,
+        true,
         highlight,
     );
     app.offsets.preview_zoom = zoom;
@@ -591,15 +592,32 @@ fn cell(
     };
     ui.add_space(CELL_TEXT_PAD);
     if editing {
-        let response = ui.add(
+        // Frameless and exactly the cell's height: the border below is the only
+        // frame, so opening a cell does not make it grow taller.
+        let response = ui.add_sized(
+            [
+                (ui.available_width() - CELL_TEXT_PAD).max(20.0),
+                ui.max_rect().height().max(14.0),
+            ],
             egui::TextEdit::singleline(&mut app.offsets.edit_buffer)
-                .desired_width(100.0)
                 .font(egui::TextStyle::Monospace)
-                .margin(egui::Margin::symmetric(4, 1))
+                .frame(egui::Frame::NONE)
+                .margin(egui::Margin::symmetric(2, 0))
                 .id(egui::Id::unique("linc-offset-cell")),
         );
         if !response.has_focus() {
             response.request_focus();
+        }
+        if app.offsets.edit_focus {
+            let id = egui::Id::unique("linc-offset-cell");
+            if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(app.offsets.edit_buffer.chars().count()),
+                )));
+                state.store(ui.ctx(), id);
+            }
+            app.offsets.edit_focus = false;
         }
     } else {
         // Same size as the WCS name, and clear of the table edge so a minus
@@ -619,15 +637,24 @@ fn cell(
             app.offsets.selected_column = column;
             app.offsets.selected = index;
         }
-        if selected {
-            // Outline the selected cell, as the tool table does.
-            ui.painter().rect_stroke(
-                response.rect.expand(2.0),
-                egui::CornerRadius::same(3),
-                egui::Stroke::new(1.5, theme::ACCENT),
-                egui::StrokeKind::Inside,
-            );
-        }
+    }
+    if selected {
+        // Same rect and inset as the tool table: the box keeps its size when the
+        // cell opens for editing, and red marks the open cell.
+        let rect = ui.max_rect();
+        ui.painter().rect_stroke(
+            rect.shrink2(egui::vec2(1.0, 1.0)),
+            egui::CornerRadius::same(theme::SELECTION_RADIUS as u8),
+            egui::Stroke::new(
+                1.5,
+                if editing {
+                    theme::ERROR
+                } else {
+                    theme::ACCENT
+                },
+            ),
+            egui::StrokeKind::Inside,
+        );
     }
 }
 
@@ -708,6 +735,7 @@ fn handle_table_keys(
             draft.rotation.clone()
         };
         app.offsets.editing = true;
+        app.offsets.edit_focus = true;
     }
 }
 

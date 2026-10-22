@@ -717,6 +717,9 @@ pub struct OffsetsUi {
     pub g92: Vec<String>,
     pub editing: bool,
     pub edit_buffer: String,
+    /// The cell editor was just opened: select its whole contents on the next
+    /// frame, so typing replaces the value rather than appending to it.
+    pub edit_focus: bool,
     pub error: Option<String>,
     pub revision_seen: u64,
     /// Axis whose DRO value is being typed, if any.
@@ -744,6 +747,7 @@ impl Default for OffsetsUi {
             g92: Vec::new(),
             edit_buffer: String::new(),
             editing: false,
+            edit_focus: false,
             error: None,
             revision_seen: 0,
             dro_edit: None,
@@ -832,6 +836,11 @@ pub struct ToolsUi {
     /// cursor moves by keyboard, so the view follows the cursor without fighting
     /// the operator's own scrolling.
     pub scroll_to_selected: bool,
+    /// Row and anchor rect of the open TYPE selector, if any.
+    pub kind_popup: Option<(usize, egui::Rect)>,
+    /// Enter was pressed on a TYPE cell; the cell paints the selector with its
+    /// own rect on the next frame.
+    pub kind_popup_pending: bool,
 }
 
 impl Default for ToolsUi {
@@ -848,6 +857,8 @@ impl Default for ToolsUi {
             revision_seen: 0,
             confirm_token: None,
             scroll_to_selected: false,
+            kind_popup: None,
+            kind_popup_pending: false,
         }
     }
 }

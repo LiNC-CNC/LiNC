@@ -347,7 +347,8 @@ Runtime UI state is stored separately:
 ```
 
 Allowed preference keys include window geometry, last page, program view,
-toolpath view angle, recent files and visible panels. Machine identity,
+toolpath view angle, recent files, visible panels and the per-tool type labels
+(`tool_kinds`, LiNC-only because the LinuxCNC tool table has no type column). Machine identity,
 HAL pins, safety flags and the LinuxCNC INI path are never read from
 preferences.
 

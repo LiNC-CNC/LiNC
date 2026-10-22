@@ -607,16 +607,23 @@ Primary quick tool-change surface; no MDI screen required.
   `manual` changer has no pocket column and the Tools page hides it. An
   `atc`/`turret` profile requires a standard `P` column; the loader refuses to
   start if it is missing.
-- Tool table: number, description, dimensions/geometry, optional pocket/station
-  and type. Selected row or a typed target number becomes the target tool.
-- Current tool, prepared/next tool and spindle state are always visible.
-- `CHANGE TOOL` issues `Tn M6` immediately using Probe Basic's `issue_mdi`
-  semantics: machine ON, homed axes, idle interpreter, no active program, then
-  temporary MDI mode and automatic restore. There is no staging and no
-  physical-CYCLE-START step.
-- `T0` unload and manual-change confirmation are supported. `SET CURRENT`
-  (`M61 Qn`) is available for a tool already in the spindle but is explicitly
-  labeled as not a tool change.
+- The page is the table: there is no separate change pane and no changer
+  pane. Current and prepared tool are shown above it as `CURRENT; Tn` and
+  `PREPARED; Tn` (the numbers in the axis-label amber).
+- Tool table: number, description, dimensions/geometry, optional
+  pocket/station and type. The type is LiNC's label, not machine data: the
+  LinuxCNC tool table has no type column, so it is inferred from the geometry
+  and can be overridden per tool with the TYPE selector, which is kept in the
+  preferences file.
+- `T` loads the selected row's tool: `Tn M6` followed by `G43 Hn` in one
+  backend command, so the length compensation is in effect as soon as the
+  change completes. The shortcut does not fire while a cell is being edited.
+- Editing a cell selects the whole value (Home/End move inside it). Enter
+  writes the row, reloads the tool table into the controller and re-applies
+  `G43` when the edited row is the tool in the spindle. Escape restores the
+  previous value. The open cell keeps the selection border's size and turns
+  red; the same applies to the OFFSETS table cells.
+- `T0` unload and manual-change confirmation are supported.
 - Manual changer: after `M6` pauses for the manual change, a modal prompt
   appears on every page — not only on Tools — showing `INSTALL target`,
   `REMOVE current` and the tool's remark. It follows the `M6` request, so it
