@@ -2592,15 +2592,27 @@ impl LincApp {
                 });
             }
             Page::Files => {
-                hints.push(("\u{2190}/\u{2192}".into(), "PANE"));
-                hints.push(("Enter".into(), "LOAD"));
-                hints.push(("C".into(), "COPY"));
-                hints.push(("R".into(), "RENAME"));
-                hints.push(("N".into(), "NEW"));
-                hints.push((k.refresh.label(), "REFRESH"));
-                hints.push(("E".into(), "EJECT"));
-                hints.push(("Bksp".into(), "UP"));
-                hints.push((k.files_delete.label(), "DELETE"));
+                groups.push(ShortcutGroup {
+                    title: "BROWSE",
+                    items: vec![
+                        ("\u{2190}/\u{2192}".into(), "PANE"),
+                        ("Enter".into(), "LOAD"),
+                        ("Bksp".into(), "UP"),
+                        (k.refresh.label(), "REFRESH"),
+                    ],
+                });
+                groups.push(ShortcutGroup {
+                    title: "FILE",
+                    items: vec![
+                        ("R".into(), "RENAME"),
+                        ("N".into(), "NEW"),
+                        (k.files_delete.label(), "DELETE"),
+                    ],
+                });
+                groups.push(ShortcutGroup {
+                    title: "MEDIA",
+                    items: vec![("C".into(), "COPY"), ("E".into(), "EJECT")],
+                });
             }
             Page::Help => {
                 hints.push((k.help_search.label(), "SEARCH"));
