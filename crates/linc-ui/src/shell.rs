@@ -539,8 +539,13 @@ impl LincApp {
         }
         self.update_move_progress();
         // A touch-off or a DRO entry moves the origin the preview is drawn
-        // against. The backends bump `offsets.revision` on a write.
-        if self.snapshot.offsets.revision != self.program.preview_offsets_seen {
+        // against. The backends bump `offsets.revision` on a write, but the
+        // first snapshots arrive before the offset rows do and carry revision 0,
+        // so a preview parsed with no offset is rebuilt once rows appear.
+        let offsets_changed = self.snapshot.offsets.revision != self.program.preview_offsets_seen;
+        let offset_now_available =
+            self.program.preview_offset.is_none() && !self.snapshot.offsets.offsets.is_empty();
+        if offsets_changed || offset_now_available {
             self.refresh_preview();
         }
         // RAPID changes the jog ceiling, so the published speed follows it.
@@ -1436,6 +1441,7 @@ impl LincApp {
             self.program.last_valid_preview = preview.clone();
         }
         self.program.preview = preview;
+        self.program.preview_offset = offset;
         self.program.preview_offsets_seen = self.snapshot.offsets.revision;
     }
 
@@ -1756,8 +1762,12 @@ impl LincApp {
             self.cycle_toolpath_view();
         }
         if toggle_bounds {
-            self.graph_style.show_program_bounds = !self.graph_style.show_program_bounds;
-            let shown = self.graph_style.show_program_bounds;
+            // One switch for both envelopes: the program box and the machine
+            // envelope answer the same question ("where is this in the machine").
+            let shown = !(self.graph_style.show_program_bounds
+                || self.graph_style.show_machine_bounds);
+            self.graph_style.show_program_bounds = shown;
+            self.graph_style.show_machine_bounds = shown;
             self.toast(
                 if shown { "bounds shown" } else { "bounds hidden" },
                 theme::MUTED,

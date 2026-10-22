@@ -102,6 +102,8 @@ pub struct TrajectoryView<'a> {
     /// own cross.
     pub highlight_origin: Option<[f64; 3]>,
     pub highlight_label: Option<String>,
+    /// Offset the preview was drawn with, for the corner work coordinates.
+    pub work_offset: Option<[f64; 3]>,
     pub selected_line: Option<usize>,
     pub current_line: Option<usize>,
     pub variant: MachineVariant,
@@ -139,6 +141,7 @@ impl<'a> TrajectoryView<'a> {
             origin: [0.0; 3],
             highlight_origin: None,
             highlight_label: None,
+            work_offset: None,
             preview,
             live_trail,
             tool_tip: None,
@@ -524,17 +527,8 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         if let Some(machine) = view.machine_bounds {
             // The machine envelope is context, not content: keep it faint enough
             // that the program, the part and the origin marks stay dominant.
-            let faint = theme::dim(theme::MUTED, 90);
-            draw_bounds(&painter, &projection, machine, faint, 0.8, true);
-            if let Some(label) = view_label(view.view, machine) {
-                painter.text(
-                    projection.project(label.0),
-                    Align2::LEFT_TOP,
-                    "MACHINE",
-                    FontId::monospace(9.0 * FONT_SCALE),
-                    faint,
-                );
-            }
+            let faint = theme::dim(theme::MUTED, 60);
+            draw_bounds(&painter, &projection, machine, faint, 0.8, false);
         }
     }
 
@@ -555,15 +549,6 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             );
             draw_bounds_filled(&painter, &projection, bounds, fill);
             draw_bounds(&painter, &projection, bounds, theme::STOCK_EDGE, 1.0, false);
-            if let Some(label) = view_label(view.view, bounds) {
-                painter.text(
-                    projection.project(label.0),
-                    Align2::LEFT_BOTTOM,
-                    "STOCK",
-                    FontId::monospace(10.0 * FONT_SCALE),
-                    theme::MUTED,
-                );
-            }
         }
     }
 
@@ -615,17 +600,10 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     // Program bounds.
     if view.show_program_bounds {
         if let Some(program) = view.preview.bounds {
-            draw_bounds(&painter, &projection, program, theme::CYAN, 1.0, true);
-            draw_bounds_dimensions(&painter, &projection, program);
-            if let Some(label) = view_label(view.view, program) {
-                painter.text(
-                    projection.project(label.0),
-                    Align2::LEFT_BOTTOM,
-                    "PROGRAM",
-                    FontId::monospace(10.0 * FONT_SCALE),
-                    theme::CYAN,
-                );
-            }
+            // Solid and faint: a dashed box reads as a rapid move, and the G0
+            // path is already dashed.
+            draw_bounds(&painter, &projection, program, theme::dim(theme::CYAN, 80), 1.0, false);
+            draw_bounds_dimensions(&painter, &projection, program, view.work_offset);
         }
     }
 
@@ -883,16 +861,6 @@ fn draw_axis_triad(
     }
 }
 
-fn view_label(mode: ViewMode, bounds: Bounds3) -> Option<([f64; 3], &'static str)> {
-    match mode {
-        ViewMode::Iso3d => Some(([bounds.min[0], bounds.min[1], bounds.max[2]], "MACHINE")),
-        ViewMode::TopXy => Some(([bounds.min[0], bounds.min[1], 0.0], "MACHINE")),
-        ViewMode::SideYz => Some(([bounds.min[0], bounds.min[1], bounds.max[2]], "MACHINE")),
-        ViewMode::SideXz => Some(([bounds.min[0], 0.0, bounds.max[2]], "MACHINE")),
-        ViewMode::LatheXz => Some(([bounds.min[0], 0.0, bounds.max[2]], "MACHINE")),
-    }
-}
-
 /// Stock envelope derived from the program extents: the program's XY footprint
 /// extended down to the lowest Z it reaches, with a small margin. Returns
 /// `None` when the program has no usable extents.
@@ -919,7 +887,12 @@ fn stock_bounds(program: &Bounds3) -> Option<Bounds3> {
 /// Dimension lines and labels on the program bounds, drawn the way AXIS marks
 /// an envelope: a line outside each near edge, witness lines from the corners,
 /// arrowheads at the ends, and the value in the plane of the drawing.
-fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bounds3) {
+fn draw_bounds_dimensions(
+    painter: &Painter,
+    projection: &Projection,
+    bounds: Bounds3,
+    work_offset: Option<[f64; 3]>,
+) {
     let min = bounds.min;
     let max = bounds.max;
     let size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
@@ -929,13 +902,13 @@ fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bo
     let pixels_per_unit = (projection.scale * projection.zoom).max(1e-6) as f64;
     let glyph = (18.0 / pixels_per_unit).min(smallest * 0.2);
     let gap = 22.0 / pixels_per_unit;
-    // Same family as the box outline, bright enough to read on the dark graph.
     let color = theme::dim(theme::CYAN, 190);
-    let mid_x = min[0] + size[0] * 0.5;
-    let mid_y = min[1] + size[1] * 0.5;
-    let mid_z = min[2] + size[2] * 0.5;
+    let offset = work_offset.unwrap_or([0.0; 3]);
+    let pad = glyph * 0.6;
+    let row = glyph * 1.1;
 
-    // X: on the ground plane, outside the front edge.
+    // X: outside the front edge, on the ground plane. The length sits in the
+    // middle; each end carries the work coordinate of that end.
     dimension_line(
         painter,
         projection,
@@ -944,18 +917,48 @@ fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bo
         [0.0, -gap, 0.0],
         color,
     );
-    dimension_label(
+    put_label(
         painter,
         projection,
-        [mid_x, min[1] - gap * 1.9, min[2]],
+        [min[0] + size[0] * 0.5, min[1] - gap - row, min[2]],
         [1.0, 0.0, 0.0],
         [0.0, -1.0, 0.0],
         glyph,
         &format!("{:.2}", size[0]),
         color,
     );
+    let start_text = format!("X{:.1}", min[0] - offset[0]);
+    put_label(
+        painter,
+        projection,
+        [
+            min[0] - pad - text_width(&start_text, glyph) * 0.5,
+            min[1] - gap - row,
+            min[2],
+        ],
+        [1.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0],
+        glyph,
+        &start_text,
+        color,
+    );
+    let end_text = format!("X{:.1}", max[0] - offset[0]);
+    put_label(
+        painter,
+        projection,
+        [
+            max[0] + pad + text_width(&end_text, glyph) * 0.5,
+            min[1] - gap - row,
+            min[2],
+        ],
+        [1.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0],
+        glyph,
+        &end_text,
+        color,
+    );
 
-    // Y: on the ground plane, outside the left edge, reading along Y.
+    // Y: outside the left edge, reading along Y.
     dimension_line(
         painter,
         projection,
@@ -964,36 +967,121 @@ fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bo
         [-gap, 0.0, 0.0],
         color,
     );
-    dimension_label(
+    put_label(
         painter,
         projection,
-        [min[0] - gap * 1.9, mid_y, min[2]],
+        [min[0] - gap - row, min[1] + size[1] * 0.5, min[2]],
         [0.0, 1.0, 0.0],
-        [-1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
         glyph,
         &format!("{:.2}", size[1]),
         color,
     );
+    let start_text = format!("Y{:.1}", min[1] - offset[1]);
+    put_label(
+        painter,
+        projection,
+        [
+            min[0] - gap - row,
+            min[1] - pad - text_width(&start_text, glyph) * 0.5,
+            min[2],
+        ],
+        [0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0],
+        glyph,
+        &start_text,
+        color,
+    );
+    let end_text = format!("Y{:.1}", max[1] - offset[1]);
+    put_label(
+        painter,
+        projection,
+        [
+            min[0] - gap - row,
+            max[1] + pad + text_width(&end_text, glyph) * 0.5,
+            min[2],
+        ],
+        [0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0],
+        glyph,
+        &end_text,
+        color,
+    );
 
-    // Z: up the near left corner, value turned to read along the line.
+    // Z: up the near corner, values turned to read along the line.
     dimension_line(
         painter,
         projection,
         [min[0], min[1], min[2]],
         [min[0], min[1], max[2]],
-        [-gap, -gap, 0.0],
+        [-gap * 1.4, -gap * 1.4, 0.0],
         color,
     );
-    dimension_label(
+    put_label(
         painter,
         projection,
-        [min[0] - gap * 1.9, min[1] - gap, mid_z],
+        [min[0] - gap * 2.4 - row, min[1] - gap * 1.4, min[2] + size[2] * 0.5],
         [0.0, 0.0, 1.0],
         [0.0, -1.0, 0.0],
         glyph,
         &format!("{:.2}", size[2]),
         color,
     );
+    let start_text = format!("Z{:.1}", min[2] - offset[2]);
+    put_label(
+        painter,
+        projection,
+        [
+            min[0] - gap * 2.4 - row,
+            min[1] - gap * 1.4,
+            min[2] - pad - text_width(&start_text, glyph) * 0.5,
+        ],
+        [0.0, 0.0, 1.0],
+        [0.0, -1.0, 0.0],
+        glyph,
+        &start_text,
+        color,
+    );
+    let end_text = format!("Z{:.1}", max[2] - offset[2]);
+    put_label(
+        painter,
+        projection,
+        [
+            min[0] - gap * 2.4 - row,
+            min[1] - gap * 1.4,
+            max[2] + pad + text_width(&end_text, glyph) * 0.5,
+        ],
+        [0.0, 0.0, 1.0],
+        [0.0, -1.0, 0.0],
+        glyph,
+        &end_text,
+        color,
+    );
+}
+
+/// Width of `text` at `glyph` height, in model units.
+fn text_width(text: &str, glyph: f64) -> f64 {
+    hershey::string_len(text) as f64 * glyph / 440.0
+}
+
+/// Width of `text` at `glyph` height, in model units.
+fn put_label(
+    painter: &Painter,
+    projection: &Projection,
+    center: [f64; 3],
+    right: [f64; 3],
+    up: [f64; 3],
+    glyph: f64,
+    text: &str,
+    color: Color32,
+) {
+    let width = text_width(text, glyph);
+    let origin = [
+        center[0] - right[0] * width * 0.5,
+        center[1] - right[1] * width * 0.5,
+        center[2] - right[2] * width * 0.5,
+    ];
+    hershey::plot_string(projection, origin, right, up, glyph, text, color, painter);
 }
 
 /// A dimension line with witness lines and arrowheads, in model space so it
@@ -1025,26 +1113,6 @@ fn dimension_line(
         painter.line_segment([tip, tip + direction * 7.0 * sign + normal], stroke);
         painter.line_segment([tip, tip + direction * 7.0 * sign - normal], stroke);
     }
-}
-
-/// A centred string in a plane; the text is scaled by the camera.
-fn dimension_label(
-    painter: &Painter,
-    projection: &Projection,
-    center: [f64; 3],
-    right: [f64; 3],
-    up: [f64; 3],
-    glyph: f64,
-    text: &str,
-    color: Color32,
-) {
-    let width = hershey::string_len(text) as f64 * glyph / 440.0;
-    let origin = [
-        center[0] - right[0] * width * 0.5,
-        center[1] - right[1] * width * 0.5,
-        center[2] - right[2] * width * 0.5,
-    ];
-    hershey::plot_string(projection, origin, right, up, glyph, text, color, painter);
 }
 
 fn draw_bounds_filled(painter: &Painter, projection: &Projection, bounds: Bounds3, fill: Color32) {

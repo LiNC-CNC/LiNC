@@ -399,11 +399,15 @@ Default page. The layout is selected by `machine.gui`.
   the program alone — the tool and the live trail are excluded, since a far
   marker would shrink the part — and re-fits on load and on every view switch,
   leaving a manual zoom/pan alone in between.
-- The program bounds are **off by default** and `Ctrl+B` shows them. When shown,
-  they are drawn like a technical drawing: an edge box, three dimension lines
-  with end ticks on the near faces, and the X/Y/Z lengths as Hershey stroke text
-  laid into those faces, so the labels are projected by the same camera as the
-  part instead of flat on the screen. The stock block is fully transparent by
+- The program bounds **and the machine envelope** are **off by default** and
+  `Ctrl+B` shows or hides both together. When shown, they are solid and faint —
+  never dashed, because the G0 path is dashed — and the program box is marked
+  like a technical drawing: a dimension line outside each near face, witness
+  lines from the corners, arrowheads at the ends, the X/Y/Z length in the middle
+  and the work coordinate of each end beside its arrow. The text is Hershey
+  stroke geometry (the AXIS font) laid into the plane it measures — X and Y flat
+  in XY, Z in XZ — so the camera projects it with the part. The old PROGRAM and
+  MACHINE text labels are gone; the box geometry says which is which. The stock block is fully transparent by
   default (`toolpath.stock_alpha = 0`) and configurable up to opaque.
 - Program card, feed/spindle-load gauges, machine health and alarms.
 - ATC state in Tools/Diagnostics; mill tool table uses orientation and, only

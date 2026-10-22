@@ -522,6 +522,9 @@ pub struct ProgramUi {
     pub fit_requested: bool,
     /// Keep the toolpath framed on the program until the operator pans/zooms.
     pub graph_auto_fit: bool,
+    /// Work offset the preview was parsed with, so corner labels can show work
+    /// coordinates without guessing the active system.
+    pub preview_offset: Option<linc_core::model::AxisMap<f64>>,
     pub follow_current: bool,
     pub focus_editor: bool,
     pub code_scroll_to_line: Option<usize>,
@@ -554,6 +557,7 @@ impl Default for ProgramUi {
             graph_view: ViewMode::Iso3d,
             fit_requested: true,
             graph_auto_fit: true,
+            preview_offset: None,
             follow_current: true,
             focus_editor: false,
             code_scroll_to_line: None,

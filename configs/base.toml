@@ -88,7 +88,7 @@ show_live_trail = true
 trail_max_points = 100000
 clear_trail_action = true
 show_program_bounds = false
-show_machine_bounds = true
+show_machine_bounds = false
 # Stock envelope drawn from the program extents (SPEC §6.1).
 show_stock = true
 # 0 = no stock block at all; raise it to show a translucent envelope.

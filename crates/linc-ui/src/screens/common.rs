@@ -837,6 +837,17 @@ pub fn trajectory(
         app.profile.variant,
     );
     view.origin = origin;
+    view.work_offset = app
+        .program
+        .preview_offset
+        .as_ref()
+        .map(|map| {
+            [
+                map.get("X").copied().unwrap_or(0.0),
+                map.get("Y").copied().unwrap_or(0.0),
+                map.get("Z").copied().unwrap_or(0.0),
+            ]
+        });
     if let Some((point, label)) = highlight {
         view.highlight_origin = Some(point);
         view.highlight_label = Some(label);
