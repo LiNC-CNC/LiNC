@@ -70,14 +70,6 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                     |ui| offset_preview(app, ui, PREVIEW_HEIGHT),
                 );
             });
-            ui.add_space(4.0);
-            ui.label(
-                RichText::new(
-                    "Offset writes are validated against INI travel and rechecked by the backend.",
-                )
-                .size(theme::font_size(10.0))
-                .color(theme::MUTED),
-            );
         });
 }
 
