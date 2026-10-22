@@ -12,7 +12,7 @@ commands (MDI, probe, tool change, program/offset writes). Three binaries:
 
 ```bash
 cargo build --release                       # all three binaries
-cargo test --workspace                      # 197 tests today
+cargo test --workspace                      # 198 tests today
 python3 scripts/mcp-smoke.py                # phase 3+4 acceptance, real binaries
 ./target/release/linc --config configs/sim.toml --check-config
 ./target/release/linc --config configs/baiermill.toml --check-config
@@ -87,6 +87,10 @@ LINC_SIM_IPC=/tmp/linc/panel-sim ./target/release/linc --config configs/sim.toml
 - The panel service owns `/dev/ttyUSB0`. The HMI and `linc_bridge.py` must never open it (a test asserts the bridge has no `serialport`/`/dev/tty`).
 - No on-screen mode, cycle, jog, spindle, coolant, override or software E-stop. The explicit exceptions are MDI, `RUN PROBE`, `CHANGE TOOL` and `RUN FROM LINE`.
 - Program protect fails closed on unknown/stale and is rechecked on every write. Never discard a dirty buffer when protect turns on.
+- The tool table file always carries `P`, even for a manual changer: LinuxCNC keeps one tool per
+  `P` value, and a table without `P` words loads only its last row. The UI hides the column for
+  manual, but `linc-core::tooltable` inserts and writes it. Never "clean up" a manual table by
+  dropping P.
 - Panel modes are steady one-hot; zero or several active modes decode to `Unknown` and the UI fails closed. Do not add pulse latching.
 - `Ctrl+Q` is guarded: never quit while a program runs or the machine moves.
 - Minimum window 1280×720; interactive targets at least 44 px.
@@ -94,9 +98,11 @@ LINC_SIM_IPC=/tmp/linc/panel-sim ./target/release/linc --config configs/sim.toml
 ## Verify UI work
 
 - Run `cargo test --workspace` plus the affected `--check-config` profiles, then exercise the page in the standalone sim.
-- LinuxCNC does not run in this sandbox (no realtime; `insmod` fails on a read-only `/tmp`). HAL changes are reviewed statically: read `net`/`loadrt`,
-  confirm each input pin appears in exactly one signal, confirm no pre-GUI `linc.*` net (`grep -n '^net .*linc\.' hal/linc.hal` prints nothing), and
-  confirm every output is wired post-GUI. The repo has no HAL linter; `halcmd` only works inside a live HAL.
+- LinuxCNC's sim runs here: `./scripts/start-sim.sh --detach --release-estop --power-on --home` on an Xvfb display,
+  `./scripts/stop-sim.sh` to stop. Use it to verify a command end to end (the tool-change path was verified this way:
+  the manual prompt appears, the confirm sets `tool_in_spindle`, and G43 follows). HAL changes are still reviewed statically: read
+  `net`/`loadrt`, confirm each input pin appears in exactly one signal, confirm no pre-GUI `linc.*` net
+  (`grep -n '^net .*linc\.' hal/linc.hal` prints nothing), and confirm every output is wired post-GUI.
 - Banner-free means panel `connected=true`, E-stop released, valid mode, protect off. `PANEL OFFLINE`, `EMERGENCY STOP ACTIVE` and `PROTECT ON` shift every page.
 - Capture recipe: build release; start `linc-panel --sim --no-hal --window` on a 1700×1060 Xvfb; release the E-stop (sim boots latched, power off); set
   the panel mode; start `linc --sim --no-hal` on a 1280×720 Xvfb with the same `LINC_SIM_IPC`; wait; `xdotool windowfocus`; keep the pointer over the

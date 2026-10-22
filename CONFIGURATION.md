@@ -26,7 +26,9 @@ safety validation without connecting to LinuxCNC or HAL.
    profile from silently not applying a setting.
 8. **Standard tool table only.** The tool table is the LinuxCNC file at
    `[EMCIO] TOOL_TABLE`; columns come from `TOOL_TABLE_COLUMNS`. `P` is required
-   only when `tools.changer` uses ATC/turret and must be absent for manual.
+   when `tools.changer` uses ATC/turret and optional for manual; LiNC always
+   writes it to the file because LinuxCNC holds one tool per `P` value and a
+   table without `P` words loads only its last tool.
 
 ## 2. Profiles
 
@@ -471,8 +473,9 @@ For this design repository:
 - the Homing screen exposes no software home/unhome controls;
 - `[tools] manual_confirm` is `true`;
 - the lathe profile uses `tools.changer = "turret"`;
-- manual mill profiles use a standard tool table without `P`; an ATC/turret
-  profile requires `P` in `TOOL_TABLE_COLUMNS`;
+- manual mill profiles hide the pocket column in the UI but keep `P` in the
+  tool table file; an ATC/turret profile requires `P` in
+  `TOOL_TABLE_COLUMNS`;
 - `[hal] write_policy = "declared-outputs-only"` and `allowed_outputs` is
   exactly `hmi-alive`, `tool-change-confirm`, `status-display`;
 - `[pendant] jog_only = true` and non-jog functions are ignored;

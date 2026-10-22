@@ -905,6 +905,9 @@ fn save_tool_row(app: &mut LincApp, tool: u16) {
         app.tools.error = Some(format!("T{tool}: no editable draft"));
         return;
     };
+    // A manual table has no pocket field in the UI, so an edit must keep the
+    // loaded value: dropping it would write P0 over a real pocket.
+    let uses_pockets = app.profile.changer.uses_pockets();
     let result = (|| -> Result<(), String> {
         // The tool number is editable, so a row can be renumbered; it must parse
         // and must not collide with another row.
@@ -928,7 +931,9 @@ fn save_tool_row(app: &mut LincApp, tool: u16) {
         row.geometry.nose_radius = parse_number(&draft.nose_radius, "nose radius")?;
         row.geometry.orientation = parse_number(&draft.orientation, "orientation")?
             .map(|value| value.clamp(0.0, 9.0) as u8);
-        row.pocket = parse_number(&draft.pocket, "pocket")?.map(|value| value as u16);
+        if uses_pockets {
+            row.pocket = parse_number(&draft.pocket, "pocket")?.map(|value| value as u16);
+        }
         for axis in ["X", "Z", "I", "J"] {
             let text = draft.axes.get(axis).cloned().unwrap_or_default();
             match parse_number(&text, axis)? {

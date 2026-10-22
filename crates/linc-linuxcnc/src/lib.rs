@@ -1049,13 +1049,50 @@ impl PythonBridgeBackend {
     }
 }
 
+/// Does the file carry a `P` word on any tool line?
+fn tool_table_has_p(path: &std::path::Path) -> bool {
+    std::fs::read_to_string(path)
+        .map(|text| {
+            text.lines().any(|line| {
+                line.split(';')
+                    .next()
+                    .unwrap_or("")
+                    .split_whitespace()
+                    .any(|word| {
+                        word.chars()
+                            .next()
+                            .is_some_and(|ch| ch == 'P' || ch == 'p')
+                    })
+            })
+        })
+        .unwrap_or(false)
+}
+
 fn load_tool_table(profile: &Profile) -> (ToolTableState, ToolTable) {
     match ToolTable::load(
         &profile.machine_ini.tool_table,
         &profile.machine_ini.tool_table_columns,
         profile.changer,
     ) {
-        Ok(table) => (table.state(), table),
+        Ok(mut table) => {
+            // Older LiNC versions wrote manual tables without P; LinuxCNC then
+            // keeps only the last tool, so every `T` word fails as "not in the
+            // tool table". Rewrite it once with the column present.
+            if !profile.changer.uses_pockets() && !tool_table_has_p(&table.path) {
+                let revision = table.revision;
+                match table.save(revision) {
+                    Ok(()) => log::info!(
+                        "tool table {}: added the P column LinuxCNC needs",
+                        table.path.display()
+                    ),
+                    Err(error) => log::warn!(
+                        "tool table {}: could not add the P column: {error}",
+                        table.path.display()
+                    ),
+                }
+            }
+            (table.state(), table)
+        }
         Err(error) => {
             let state = ToolTableState {
                 path: profile.machine_ini.tool_table.clone(),

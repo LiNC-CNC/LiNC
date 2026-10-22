@@ -1,8 +1,10 @@
 //! Standard LinuxCNC tool table parsing and atomic writes.
 //!
-//! Columns come from `TOOL_TABLE_COLUMNS` in the INI. `P` is parsed only when
-//! the profile uses an ATC/turret; manual tables never expose or write a
-//! pocket column.
+//! Columns come from `TOOL_TABLE_COLUMNS` in the INI. The `P` word is always
+//! written, including on a manual changer: LinuxCNC keys its in-memory table by
+//! that field, and a file without any `P` words collapses to its last tool
+//! (every tool then reads "not in the tool table"). A manual changer hides the
+//! column in the UI, not in the file.
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
@@ -77,10 +79,17 @@ impl ToolTable {
                 "ATC/turret tool table requires the standard P column".into(),
             ));
         }
-        if !changer.uses_pockets() && parsed_columns.contains(&ToolColumn::P) {
-            return Err(ToolTableError::Invalid(
-                "manual changer must not declare the P column".into(),
-            ));
+        // A manual table has no pocket column in the UI, but the file still
+        // needs one: LinuxCNC keeps a tool per P value, so a file without P
+        // words loads only its last row. Insert it after T when the INI does
+        // not list it.
+        if !parsed_columns.contains(&ToolColumn::P) {
+            let after_tool = parsed_columns
+                .iter()
+                .position(|column| *column == ToolColumn::T)
+                .map(|index| index + 1)
+                .unwrap_or(parsed_columns.len());
+            parsed_columns.insert(after_tool, ToolColumn::P);
         }
 
         let mut rows = Vec::new();
@@ -104,11 +113,9 @@ impl ToolTable {
                 )));
             }
             let tool = tool as u16;
-            let pocket = if changer.uses_pockets() {
-                fields.get(&ToolColumn::P).map(|value| *value as u16)
-            } else {
-                None
-            };
+            // Parsed for every changer so a save writes the values back; the
+            // UI only shows the column when the changer uses pockets.
+            let pocket = fields.get(&ToolColumn::P).map(|value| *value as u16);
             let mut geometry = ToolGeometry::default();
             for (column, value) in &fields {
                 match column {
@@ -326,13 +333,9 @@ fn render_row(row: &ToolRow, columns: &[ToolColumn], changer: ToolChangerKind) -
     for column in columns {
         let value: Option<f64> = match column {
             ToolColumn::T => Some(row.tool as f64),
-            ToolColumn::P => {
-                if changer.uses_pockets() {
-                    row.pocket.map(|pocket| pocket as f64)
-                } else {
-                    None
-                }
-            }
+            // Always emit P, defaulting to 0: a manual table written without
+            // it would lose every tool but the last when LinuxCNC loads it.
+            ToolColumn::P => Some(row.pocket.unwrap_or(0) as f64),
             ToolColumn::D => row.geometry.diameter,
             ToolColumn::Z => row
                 .geometry
@@ -396,30 +399,33 @@ mod tests {
     const MILL: &str = ";Tool Pocket Z Offset Diameter Remark\nT1 P0 Z-56.068 D+6.0 ; 6mm end mill\nT2 P0 Z0 D+17.3 ; face mill\n";
 
     #[test]
-    fn parses_standard_table_and_exposes_pocket_only_for_atc() {
+    fn parses_standard_table_and_keeps_the_pocket_for_every_changer() {
         let table =
             ToolTable::parse(Path::new("tool.tbl"), MILL, "TZDR", ToolChangerKind::Manual).unwrap();
         assert_eq!(table.rows.len(), 2);
         assert_eq!(table.rows[0].tool, 1);
-        assert!(table.rows[0].pocket.is_none());
+        assert_eq!(table.rows[0].pocket, Some(0));
         assert_eq!(table.rows[0].geometry.length, Some(-56.068));
         assert_eq!(table.rows[0].geometry.diameter, Some(6.0));
-        assert!(!table.columns.contains(&ToolColumn::P));
+        // The manual UI hides P, but the file keeps it.
+        assert!(table.columns.contains(&ToolColumn::P));
         let atc =
             ToolTable::parse(Path::new("tool.tbl"), MILL, "TZPDR", ToolChangerKind::Atc).unwrap();
         assert_eq!(atc.rows[0].pocket, Some(0));
     }
 
     #[test]
-    fn manual_rejects_p_column() {
-        let error = ToolTable::parse(
+    fn manual_accepts_and_preserves_the_p_column() {
+        let table = ToolTable::parse(
             Path::new("tool.tbl"),
             MILL,
             "TZPDR",
             ToolChangerKind::Manual,
         )
-        .unwrap_err();
-        assert!(error.to_string().contains("must not declare"));
+        .unwrap();
+        let rendered = table.render();
+        assert!(rendered.contains("T1 Z-56.068000 P0 D+6 "), "{rendered}");
+        assert!(rendered.contains("T2 Z+0 P0 D+17.300000 "), "{rendered}");
     }
 
     #[test]
@@ -440,7 +446,8 @@ mod tests {
         table.save(revision).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("updated"));
-        assert!(!text.contains("P0"));
+        // A manual table still writes P, or LinuxCNC would load one tool.
+        assert!(text.contains("P0"));
         assert!(matches!(
             table.save(revision),
             Err(ToolTableError::RevisionConflict)

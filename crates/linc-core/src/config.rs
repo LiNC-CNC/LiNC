@@ -965,12 +965,8 @@ fn validate(config: &Config, ini: &MachineIni) -> Result<(), ConfigError> {
             config.tools.changer, ini.tool_table_columns
         )));
     }
-    if changer == ToolChangerKind::Manual && ini.tool_table_columns.contains('P') {
-        return Err(ConfigError::Invalid(format!(
-            "tools.changer=manual must not declare the P column ({} found)",
-            ini.tool_table_columns
-        )));
-    }
+    // A manual machine may still declare P: the column is hidden in the UI,
+    // but LinuxCNC needs it in the file to hold more than one tool.
     if changer == ToolChangerKind::Manual && config.tools.atc_pockets != "ini" {
         return Err(ConfigError::Invalid(
             "tools.atc_pockets must be ini or absent for manual changers".into(),
@@ -1145,7 +1141,7 @@ panel_scale = 1.0
     }
 
     #[test]
-    fn manual_changer_rejects_a_p_column() {
+    fn manual_changer_accepts_a_p_column() {
         let dir = temp_dir();
         write(&dir.path().join("base.toml"), base_config());
         make_fixture(dir.path(), true);
@@ -1170,8 +1166,10 @@ kind = "virtual"
 enabled = true
 "#,
         );
-        let error = Profile::load(&profile, None).unwrap_err();
-        assert!(error.to_string().contains("must not declare"), "{error}");
+        // The column is hidden in the UI but belongs in the file: LinuxCNC
+        // keeps a tool per P value and loads only the last one without it.
+        let loaded = Profile::load(&profile, None).expect("manual changer accepts P");
+        assert!(loaded.machine_ini.tool_table_columns.contains('P'));
     }
 
     #[test]

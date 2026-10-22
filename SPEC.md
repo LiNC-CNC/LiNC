@@ -603,10 +603,12 @@ Primary quick tool-change surface; no MDI screen required.
 - Tool table backend is the **standard LinuxCNC tool table**, read/written at
   the path in INI `[EMCIO] TOOL_TABLE`. Columns come from
   `TOOL_TABLE_COLUMNS`; the HMI uses that schema directly.
-- **Pocket column:** present only when an ATC/turret changer is used. A
-  `manual` changer has no pocket column and the Tools page hides it. An
-  `atc`/`turret` profile requires a standard `P` column; the loader refuses to
-  start if it is missing.
+- **Pocket column:** shown only when an ATC/turret changer is used; a
+  `manual` changer hides it in the Tools page. The `P` word stays in the file
+  for every changer: LinuxCNC keeps one tool per `P` value, and a file without
+  `P` words loads only its last tool (every other `T` word then fails as "not
+  in the tool table"). An `atc`/`turret` profile requires `P` in
+  `TOOL_TABLE_COLUMNS`; the loader refuses to start if it is missing.
 - The page is the table: there is no separate change pane and no changer
   pane. Current and prepared tool are shown above it as `CURRENT; Tn` and
   `PREPARED; Tn` (the numbers in the axis-label amber).
