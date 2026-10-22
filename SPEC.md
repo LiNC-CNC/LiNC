@@ -108,7 +108,7 @@ else, so it cannot shadow another page's command.
 | Program | `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
 | Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Ctrl+X` delete |
 | MDI | `Enter` issue, `Up`/`Down` history, `Esc` clear the unissued block |
-| Help | `/` focus search, `Backspace` back through link history |
+| Help | `/` focus search, `Up`/`Down` select, `Enter` open the reference, `Backspace` back in the reference dialog |
 | Offsets, Tools, Probe | Arrows select a row |
 
 A page-local binding is only listed in the sidebar's `SHORTCUTS` pane while its
@@ -688,13 +688,16 @@ No fault reset, acknowledge, cycle, jog, override, or E-stop controls here.
 Offline LinuxCNC G-code reference, available without network access and without
 stopping a running program.
 
-- Quick-reference index grouped by Motion, Canned cycles, M-codes, O-words and
-  Other codes.
+- One quick-reference table grouped by Motion, Canned cycles, M-codes, O-words
+  and Other codes, with Probe Basic's columns: Code, Parameters, Description,
+  Meaning. Group rows span the table; the focused row carries the selection band
+  and rim bar.
 - Search matches code, parameters, description and meaning. Code matching
   ignores spaces and commas, so `g2g3` finds `G2, G3`.
-- Detail pane: title, description, parameter table, figures, notes and related
-  codes. Internal links navigate within the reference; Backspace returns through
-  link history.
+- `Enter` or a double-click opens the full section in a near-fullscreen dialog:
+  title, description, parameter table, figures, notes and related codes. `Esc`
+  or `CLOSE` closes it; related links navigate inside it and `Backspace` returns
+  through that history. It blocks the page behind it while open.
 - Current bundle: 125 sections, 89 index rows, 14 figures, generated from the
   pinned LinuxCNC online documentation.
 - Read-only; no machine-control actions. The top-level HELP action opens this

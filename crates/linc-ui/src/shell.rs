@@ -1134,6 +1134,7 @@ impl LincApp {
     /// underneath it: the dialog's button holds focus and takes Enter.
     pub fn overlay_open(&self) -> bool {
         self.modal.is_some()
+            || self.help.dialog.is_some()
             || self.snapshot.tool_change.status
                 == linc_core::model::ToolChangeStatus::ManualPrompt
     }
@@ -1145,7 +1146,8 @@ impl LincApp {
         }
         match self.page {
             Page::Help => {
-                if self.help.back() {
+                if self.help.dialog.is_some() {
+                    self.help.close_dialog();
                 } else if !self.help.query.is_empty() {
                     self.help.query.clear();
                 } else {
@@ -1735,7 +1737,8 @@ impl LincApp {
                 && (self.tools.editing || self.tools.kind_popup.is_some()))
                 || (self.page == Page::Offsets
                     && (self.offsets.editing || self.offsets.dro_edit.is_some()))
-                || (self.page == Page::Files && self.files.rename.is_some());
+                || (self.page == Page::Files && self.files.rename.is_some())
+                || self.help.dialog.is_some();
             if !editing_in_place
                 && input.consume_key(self.keymap.back.modifiers, self.keymap.back.key)
             {
@@ -2137,6 +2140,7 @@ impl LincApp {
         self.diag_viewport.height = self.diag_viewport.height.max(bottom);
         self.draw_modal(ui.ctx());
         self.draw_tool_change_prompt(ui.ctx());
+        crate::screens::help::draw_dialog(self, ui.ctx());
         self.draw_toasts(ui.ctx());
         self.save_preferences(false);
         if self.quit_requested {
@@ -2649,6 +2653,7 @@ impl LincApp {
             }
             Page::Help => {
                 hints.push((k.help_search.label(), "SEARCH"));
+                hints.push(("Enter".into(), "READ"));
                 hints.push(("Bksp".into(), "BACK"));
                 hints.push(("PgUp/PgDn".into(), "PAGE"));
             }

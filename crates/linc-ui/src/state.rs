@@ -212,6 +212,14 @@ impl UiBackend for LocalBackend {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct HelpDialog {
+    pub anchor: String,
+    pub history: Vec<String>,
+    pub position: usize,
+    pub scroll_to_top: bool,
+}
+
 #[derive(Default)]
 pub struct HelpUi {
     pub bundle: Option<std::sync::Arc<HelpBundle>>,
@@ -219,9 +227,11 @@ pub struct HelpUi {
     pub focus_search: bool,
     pub selected_anchor: Option<String>,
     pub selected_row: usize,
-    pub history: Vec<String>,
+    /// Full-screen reference dialog opened from the table.
+    pub dialog: Option<HelpDialog>,
     pub textures: HashMap<String, egui::TextureHandle>,
-    pub scroll_to_anchor: bool,
+    /// Bring the selected table row into view on the next draw.
+    pub scroll_to_selection: bool,
 }
 
 impl HelpUi {
@@ -234,22 +244,46 @@ impl HelpUi {
         }
     }
 
-    pub fn open(&mut self, anchor: &str) {
-        if let Some(current) = self.selected_anchor.clone() {
-            self.history.push(current);
-        }
+    pub fn open_dialog(&mut self, anchor: &str) {
         self.selected_anchor = Some(anchor.to_string());
-        self.scroll_to_anchor = true;
+        self.dialog = Some(HelpDialog {
+            anchor: anchor.to_string(),
+            history: vec![anchor.to_string()],
+            position: 0,
+            scroll_to_top: true,
+        });
     }
 
-    pub fn back(&mut self) -> bool {
-        if let Some(previous) = self.history.pop() {
-            self.selected_anchor = Some(previous);
-            self.scroll_to_anchor = true;
-            true
-        } else {
-            false
+    pub fn close_dialog(&mut self) {
+        self.dialog = None;
+    }
+
+    pub fn dialog_link(&mut self, anchor: &str) {
+        let Some(dialog) = self.dialog.as_mut() else {
+            return;
+        };
+        dialog.history.truncate(dialog.position + 1);
+        if dialog.history.last().map(String::as_str) != Some(anchor) {
+            dialog.history.push(anchor.to_string());
+            dialog.position += 1;
         }
+        dialog.anchor = anchor.to_string();
+        dialog.scroll_to_top = true;
+        self.selected_anchor = Some(anchor.to_string());
+    }
+
+    pub fn dialog_back(&mut self) -> bool {
+        let Some(dialog) = self.dialog.as_mut() else {
+            return false;
+        };
+        if dialog.position == 0 {
+            return false;
+        }
+        dialog.position -= 1;
+        dialog.anchor = dialog.history[dialog.position].clone();
+        dialog.scroll_to_top = true;
+        self.selected_anchor = Some(dialog.anchor.clone());
+        true
     }
 
     pub fn texture(&mut self, ctx: &egui::Context, name: &str) -> Option<egui::TextureHandle> {
@@ -1642,5 +1676,30 @@ mod keymap_tests {
         let keymap = Keymap::from_config(&keys);
         assert_eq!(keymap.machine.key, egui::Key::F5);
         assert_eq!(keymap.rejected, vec!["Hyper+Z".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod help_dialog_tests {
+    use super::HelpUi;
+
+    #[test]
+    fn the_help_dialog_walks_back_and_stops() {
+        let mut help = HelpUi::default();
+        help.open_dialog("gcode:g0");
+        assert_eq!(
+            help.dialog.as_ref().map(|dialog| dialog.anchor.as_str()),
+            Some("gcode:g0")
+        );
+        help.dialog_link("gcode:g90");
+        assert_eq!(help.dialog.as_ref().unwrap().position, 1);
+        assert!(help.dialog_back());
+        assert_eq!(
+            help.dialog.as_ref().map(|dialog| dialog.anchor.as_str()),
+            Some("gcode:g0")
+        );
+        assert!(!help.dialog_back());
+        help.close_dialog();
+        assert!(help.dialog.is_none());
     }
 }
