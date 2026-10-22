@@ -136,11 +136,11 @@ fn overview(app: &mut LincApp, ui: &mut Ui) {
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 ui.allocate_ui_with_layout(
-                    egui::Vec2::new(ui.available_width(), 170.0),
+                    egui::Vec2::new(ui.available_width(), 174.0),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         theme::card(ui, |ui| {
-                            ui.set_max_height(166.0);
+                            ui.set_max_height(170.0);
                             ui.horizontal(|ui| {
                                 theme::section_header(ui, "ACTIVE ALARMS & MESSAGES");
                                 ui.with_layout(
@@ -172,12 +172,13 @@ fn overview(app: &mut LincApp, ui: &mut Ui) {
                     },
                 );
                 ui.allocate_ui_with_layout(
-                    egui::Vec2::new(ui.available_width(), 170.0),
+                    egui::Vec2::new(ui.available_width(), 174.0),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         theme::card(ui, |ui| {
-                            ui.set_max_height(166.0);
+                            ui.set_max_height(170.0);
                             theme::section_header(ui, "MOTION HEALTH");
+                            compact_rows(ui);
                             theme::kv_row(ui, "POWER", app.snapshot.task.power.label());
                             theme::kv_row(
                                 ui,
@@ -214,12 +215,13 @@ fn overview(app: &mut LincApp, ui: &mut Ui) {
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 ui.allocate_ui_with_layout(
-                    egui::Vec2::new(ui.available_width(), 195.0),
+                    egui::Vec2::new(ui.available_width(), 178.0),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         theme::card(ui, |ui| {
-                            ui.set_max_height(190.0);
+                            ui.set_max_height(174.0);
                             theme::section_header(ui, "PANEL SUMMARY");
+                            compact_rows(ui);
                             theme::kv_row(ui, "MODE", app.snapshot.panel.mode.label());
                             theme::kv_row(
                                 ui,
@@ -271,11 +273,11 @@ fn overview(app: &mut LincApp, ui: &mut Ui) {
                     },
                 );
                 ui.allocate_ui_with_layout(
-                    egui::Vec2::new(ui.available_width(), 160.0),
+                    egui::Vec2::new(ui.available_width(), 170.0),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         theme::card(ui, |ui| {
-                            ui.set_max_height(156.0);
+                            ui.set_max_height(166.0);
                             theme::section_header(ui, "EVENT LOG");
                             let logs = app.logs();
                             log_table(ui, "overview-events", &logs, 5);
@@ -285,6 +287,17 @@ fn overview(app: &mut LincApp, ui: &mut Ui) {
             },
         );
     });
+}
+
+/// Compact the key/value rows of a summary card.
+///
+/// The default row pitch (text plus `item_spacing.y`) is too tall for a card
+/// with eight rows in the smallest window: the layout ran out of card and the
+/// last rows were drawn on top of one another. The spacing is set on the card's
+/// own `Ui`, so it does not leak to the rest of the page.
+fn compact_rows(ui: &mut Ui) {
+    ui.spacing_mut().interact_size.y = 14.0;
+    ui.spacing_mut().item_spacing.y = 2.0;
 }
 
 fn health_card(ui: &mut Ui, title: &str, value: &str, fault: bool, detail: &str) {
