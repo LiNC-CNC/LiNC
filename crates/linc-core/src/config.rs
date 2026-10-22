@@ -210,6 +210,10 @@ pub struct ToolpathConfig {
     pub show_program_bounds: bool,
     pub show_machine_bounds: bool,
     pub show_stock: bool,
+    /// Stock fill opacity, 0-255. 0 draws no stock at all; the default is fully
+    /// transparent so the block cannot hide the toolpath.
+    #[serde(default)]
+    pub stock_alpha: u8,
     pub show_program_labels: bool,
     pub show_machine_labels: bool,
     pub show_program_ticks: bool,
@@ -227,6 +231,8 @@ pub struct KeysConfig {
     pub program_cycle_view: String,
     /// Cycle the toolpath view ISO -> X -> Y -> Z.
     pub view_cycle: String,
+    /// Show or hide the program bounding box and its dimensions.
+    pub toggle_bounds: String,
     pub graph_fit: String,
     pub graph_clear: String,
     /// Page-local to Program: jump to a line number.
@@ -269,6 +275,7 @@ impl KeysConfig {
             program: "F6".into(),
             program_cycle_view: "F10".into(),
             view_cycle: "Ctrl+F10".into(),
+            toggle_bounds: "Ctrl+B".into(),
             graph_fit: "Ctrl+0".into(),
             graph_clear: "Ctrl+L".into(),
             goto_line: "Ctrl+G".into(),

@@ -5,6 +5,8 @@
 
 const FONT_SCALE: f32 = 1.25;
 
+pub(crate) mod hershey;
+
 use egui::{
     Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Response, Sense, Stroke,
     StrokeKind, Ui, Vec2,
@@ -113,6 +115,8 @@ pub struct TrajectoryView<'a> {
     /// Draw the stock envelope. SPEC §6.1 lists stock alongside the program
     /// path, live trail and bounds in the mill toolpath.
     pub show_stock: bool,
+    /// Stock fill opacity, 0-255. Zero draws no stock at all.
+    pub stock_alpha: u8,
     pub show_selected_line: bool,
     pub show_legend: bool,
     pub selected_line_color: Color32,
@@ -152,6 +156,7 @@ impl<'a> TrajectoryView<'a> {
             show_program_bounds: true,
             show_machine_bounds: true,
             show_stock: true,
+            stock_alpha: 0,
             show_selected_line: true,
             show_legend: true,
             selected_line_color: theme::CURRENT,
@@ -530,12 +535,18 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     // program extents so it tracks the loaded program, and drawn translucent
     // so it never hides the toolpath.
     let mut stock_drawn = false;
-    if view.show_stock && has_data {
+    if view.show_stock && view.stock_alpha > 0 && has_data {
         if let Some(bounds) = view.preview.bounds.as_ref().and_then(stock_bounds) {
             stock_drawn = true;
-            // A translucent solid reads as a block, matching the mockup; the
-            // toolpath is drawn after it so it is never hidden.
-            draw_bounds_filled(&painter, &projection, bounds, theme::STOCK_FILL);
+            // The fill is configurable and defaults to fully transparent: the
+            // block used to wash out the part it was supposed to help place.
+            let fill = Color32::from_rgba_premultiplied(
+                theme::STOCK_FILL.r(),
+                theme::STOCK_FILL.g(),
+                theme::STOCK_FILL.b(),
+                view.stock_alpha,
+            );
+            draw_bounds_filled(&painter, &projection, bounds, fill);
             draw_bounds(&painter, &projection, bounds, theme::STOCK_EDGE, 1.0, false);
             if let Some(label) = view_label(view.view, bounds) {
                 painter.text(
@@ -898,73 +909,144 @@ fn stock_bounds(program: &Bounds3) -> Option<Bounds3> {
 
 /// Translucent solid for the stock envelope: the three visible faces of the
 /// box, so it reads as a block rather than a wireframe.
-/// Dimension lines along the program bounds: X on the near bottom edge, Y beside
-/// it and Z up the near vertical edge, each labelled with its length in program
-/// units.
+/// Dimension lines and labels on the program bounds.
+///
+/// The text is the AXIS Hershey stroke font, placed with its own right/up axes
+/// on the face it measures, so it is projected by the camera like the box: an
+/// orbit turns the letters with the part instead of leaving them flat on top.
 fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bounds3) {
     let min = bounds.min;
     let max = bounds.max;
     let size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
-    let font = FontId::monospace(9.0 * FONT_SCALE);
+    let largest = size[0].max(size[1]).max(size[2]).max(1.0);
+    let gap = (largest * 0.05).max(0.5);
+    let glyph = (largest * 0.09).clamp(1.5, 14.0);
     let color = theme::MUTED;
-    let origin = [min[0], min[1], min[2]];
-    draw_dimension(
+    let mid_x = min[0] + size[0] * 0.5;
+    let mid_y = min[1] + size[1] * 0.5;
+    let mid_z = min[2] + size[2] * 0.5;
+
+    // X: along the near bottom edge, on the XZ plane.
+    dimension_line(
         painter,
         projection,
-        origin,
-        [max[0], min[1], min[2]],
-        Vec2::new(0.0, 14.0),
-        format!("X {:.1}", size[0]),
-        font.clone(),
+        [min[0], min[1], min[2] - gap],
+        [max[0], min[1], min[2] - gap],
+        [0.0, 0.0, 1.0],
+        gap * 0.5,
         color,
     );
-    draw_dimension(
+    dimension_label(
         painter,
         projection,
-        origin,
-        [min[0], max[1], min[2]],
-        Vec2::new(-14.0, 10.0),
-        format!("Y {:.1}", size[1]),
-        font.clone(),
+        [mid_x, min[1], min[2] - gap - glyph * 0.35],
+        [1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+        glyph,
+        &format!("{:.1}", size[0]),
         color,
     );
-    draw_dimension(
+
+    // Y: along the near left edge, on the YZ plane.
+    dimension_line(
         painter,
         projection,
-        origin,
-        [min[0], min[1], max[2]],
-        Vec2::new(16.0, 0.0),
-        format!("Z {:.1}", size[2]),
-        font,
+        [min[0] - gap, min[1], min[2] - gap],
+        [min[0] - gap, max[1], min[2] - gap],
+        [0.0, 0.0, 1.0],
+        gap * 0.5,
+        color,
+    );
+    dimension_label(
+        painter,
+        projection,
+        [min[0] - gap * 2.0 - glyph * 0.2, mid_y, min[2] - gap],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        glyph,
+        &format!("{:.1}", size[1]),
+        color,
+    );
+
+    // Z: up the near left edge, on the YZ plane as well.
+    dimension_line(
+        painter,
+        projection,
+        [min[0] - gap, min[1] - gap, min[2]],
+        [min[0] - gap, min[1] - gap, max[2]],
+        [1.0, 0.0, 0.0],
+        gap * 0.5,
+        color,
+    );
+    dimension_label(
+        painter,
+        projection,
+        [min[0] - gap * 2.0 - glyph * 0.2, min[1] - gap, mid_z],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        glyph,
+        &format!("{:.1}", size[2]),
         color,
     );
 }
 
-fn draw_dimension(
+/// A dimension line with end ticks, all in model space so it shares the box's
+/// perspective.
+fn dimension_line(
     painter: &Painter,
     projection: &Projection,
-    a: [f64; 3],
-    b: [f64; 3],
-    offset: Vec2,
-    text: String,
-    font: FontId,
+    from: [f64; 3],
+    to: [f64; 3],
+    tick: [f64; 3],
+    tick_len: f64,
     color: Color32,
 ) {
-    let pa = projection.project(a) + offset;
-    let pb = projection.project(b) + offset;
-    if (pb - pa).length() < 8.0 {
+    let a = projection.project(from);
+    let b = projection.project(to);
+    if (b - a).length() < 4.0 {
         return;
     }
-    painter.line_segment([pa, pb], Stroke::new(0.8, color));
-    let direction = (pb - pa).normalized();
-    let normal = Vec2::new(-direction.y, direction.x) * 3.0;
-    painter.line_segment([pa - normal, pa + normal], Stroke::new(0.8, color));
-    painter.line_segment([pb - normal, pb + normal], Stroke::new(0.8, color));
-    // A chip behind the value keeps it readable where the part or stock is.
-    let position = pa + (pb - pa) * 0.5 + normal * 2.0;
-    let rect = painter.text(position, Align2::CENTER_CENTER, &text, font.clone(), color);
-    painter.rect_filled(rect.expand(2.5), CornerRadius::same(2), theme::SURFACE);
-    painter.text(position, Align2::CENTER_CENTER, text, font, color);
+    painter.line_segment([a, b], Stroke::new(0.8, color));
+    for end in [from, to] {
+        let offset = [
+            tick[0] * tick_len,
+            tick[1] * tick_len,
+            tick[2] * tick_len,
+        ];
+        let p = projection.project(end);
+        let q = projection.project([
+            end[0] + offset[0],
+            end[1] + offset[1],
+            end[2] + offset[2],
+        ]);
+        painter.line_segment([p, q], Stroke::new(0.8, color));
+        let q = projection.project([
+            end[0] - offset[0],
+            end[1] - offset[1],
+            end[2] - offset[2],
+        ]);
+        painter.line_segment([p, q], Stroke::new(0.8, color));
+    }
+}
+
+/// A centred string in a plane; the text is scaled by the camera.
+fn dimension_label(
+    painter: &Painter,
+    projection: &Projection,
+    center: [f64; 3],
+    right: [f64; 3],
+    up: [f64; 3],
+    glyph: f64,
+    text: &str,
+    color: Color32,
+) {
+    let width = hershey::string_len(text) as f64 * glyph / 440.0;
+    let origin = [
+        center[0] - right[0] * width * 0.5,
+        center[1] - right[1] * width * 0.5,
+        center[2] - right[2] * width * 0.5,
+    ];
+    hershey::plot_string(projection, origin, right, up, glyph, text, color, painter);
 }
 
 fn draw_bounds_filled(painter: &Painter, projection: &Projection, bounds: Bounds3, fill: Color32) {

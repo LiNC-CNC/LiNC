@@ -973,6 +973,7 @@ pub struct GraphStyle {
     pub show_program_bounds: bool,
     pub show_machine_bounds: bool,
     pub show_stock: bool,
+    pub stock_alpha: u8,
     pub highlight_selected_line: bool,
     pub show_legend: bool,
     pub trail_max_points: usize,
@@ -991,6 +992,7 @@ impl GraphStyle {
         view.show_program_bounds = self.show_program_bounds;
         view.show_machine_bounds = self.show_machine_bounds;
         view.show_stock = self.show_stock;
+        view.stock_alpha = self.stock_alpha;
         view.show_selected_line = self.highlight_selected_line;
         view.show_legend = self.show_legend;
         view.selected_line = selected_line;
@@ -1045,6 +1047,7 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
         show_program_bounds: profile.config.toolpath.show_program_bounds,
         show_machine_bounds: profile.config.toolpath.show_machine_bounds,
         show_stock: profile.config.toolpath.show_stock,
+        stock_alpha: profile.config.toolpath.stock_alpha,
         highlight_selected_line: profile.config.toolpath.highlight_selected_line,
         // SPEC §6.2: the legend must identify the loaded program path and the
         // live trail as separate layers. It was hardcoded off, so the two
@@ -1276,6 +1279,8 @@ pub struct Keymap {
     pub program_cycle_view: Binding,
     /// Pages with a toolpath: cycle the view ISO, X, Y, Z.
     pub view_cycle: Binding,
+    /// Pages with a toolpath: show or hide the program bounding box.
+    pub toggle_bounds: Binding,
     /// Page-local to Program: fit the toolpath and clear the live trail.
     pub graph_fit: Binding,
     pub graph_clear: Binding,
@@ -1327,6 +1332,7 @@ impl Keymap {
             machine: binding(&keys.machine, Binding::new(Key::F5, none), &mut rejected),
             program: binding(&keys.program, Binding::new(Key::F6, none), &mut rejected),
             view_cycle: binding(&keys.view_cycle, Binding::new(Key::F10, ctrl), &mut rejected),
+            toggle_bounds: binding(&keys.toggle_bounds, Binding::new(Key::B, ctrl), &mut rejected),
             program_cycle_view: binding(
                 &keys.program_cycle_view,
                 Binding::new(Key::F10, none),

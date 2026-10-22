@@ -87,10 +87,12 @@ show_grid = false
 show_live_trail = true
 trail_max_points = 100000
 clear_trail_action = true
-show_program_bounds = true
+show_program_bounds = false
 show_machine_bounds = true
 # Stock envelope drawn from the program extents (SPEC §6.1).
 show_stock = true
+# 0 = no stock block at all; raise it to show a translucent envelope.
+stock_alpha = 0
 show_program_labels = true
 show_machine_labels = false
 show_program_ticks = false
@@ -106,6 +108,8 @@ program = "F6"
 # an F-key: F5-F10 are implicit navigation keys and are never listed.
 program_cycle_view = "F10"
 view_cycle = "Ctrl+F10"
+# Show the program bounding box with its dimension lines.
+toggle_bounds = "Ctrl+B"
 # Page-local to Program: fit the toolpath, clear the live trail.
 graph_fit = "Ctrl+0"
 graph_clear = "Ctrl+L"
