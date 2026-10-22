@@ -359,7 +359,6 @@ pub(crate) fn commit_dro_edit(app: &mut LincApp) -> bool {
 fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     const WCS: f32 = 64.0;
     const VALUE: f32 = 100.0;
-    const ROW_HEIGHT: f32 = 26.0;
     let axes = app.axes();
     let offsets = app.snapshot.offsets.offsets.clone();
     let active_index = app.snapshot.offsets.active_index;
@@ -404,6 +403,17 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
             }
             app.offsets.g92 = values;
         }
+        // Half a line of air between rows, not a whole one: the rows are text
+        // and a band, and nine systems at the old pitch (row height plus the
+        // table's full item spacing) grew the card past the page.
+        let row_font = egui::FontId::monospace(theme::font_size(12.0));
+        let line_height = ui
+            .painter()
+            .layout_no_wrap("0".to_string(), row_font, theme::FG)
+            .size()
+            .y;
+        let row_height = line_height + 2.0;
+        ui.spacing_mut().item_spacing.y = line_height * 0.5;
         let table = egui_extras::TableBuilder::new(ui)
             .id_salt("work-offsets-table")
             .column(egui_extras::Column::exact(WCS))
@@ -458,7 +468,7 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                     let index = offset.index;
                     let is_active = active_index == Some(index);
                     let is_selected_row = app.offsets.selected_row == row_index;
-                    body.row(ROW_HEIGHT, |mut row| {
+                    body.row(row_height, |mut row| {
                         let (_wcs_rect, _) = row.col(|ui| {
                             ui.add_space(WCS_TEXT_PAD);
                             // No solid selection fill here: the row band and the
