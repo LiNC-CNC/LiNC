@@ -327,18 +327,42 @@ fn begin_edit(app: &mut LincApp, columns: &[ColumnSpec]) {
     }
 }
 
+/// Commit the edited cell and write the row.
+///
+/// There is no separate write button: Enter edits and writes in one step. When
+/// writes are locked the edit is refused before the draft changes, so the table
+/// never shows a value that was not written.
 fn commit_edit(app: &mut LincApp, columns: &[ColumnSpec]) {
     let row = app.tools.selected_row;
     let column = app.tools.selected_column;
-    if let Some(entry) = app.snapshot.tool_table.rows.get(row).cloned() {
-        if let Some(spec) = columns.get(column) {
-            let buffer = std::mem::take(&mut app.tools.edit_buffer);
-            if let Some(field) = cell_field(draft_for(app, entry.tool), spec.cell) {
-                *field = buffer;
-            }
+    let Some(entry) = app.snapshot.tool_table.rows.get(row).cloned() else {
+        app.tools.editing = false;
+        return;
+    };
+    if !app.snapshot.writes_allowed() {
+        app.tools.error = Some(write_refusal(app));
+        app.tools.edit_buffer.clear();
+        app.tools.editing = false;
+        return;
+    }
+    if let Some(spec) = columns.get(column) {
+        let buffer = std::mem::take(&mut app.tools.edit_buffer);
+        if let Some(field) = cell_field(draft_for(app, entry.tool), spec.cell) {
+            *field = buffer;
         }
     }
     app.tools.editing = false;
+    save_tool_row(app, entry.tool);
+}
+
+fn write_refusal(app: &LincApp) -> String {
+    if app.snapshot.panel.protect_effective() {
+        "PROTECT ON — tool table writes are locked".into()
+    } else if !app.snapshot.panel.connected || app.snapshot.panel.communication_error {
+        "PANEL OFFLINE — tool table writes are locked".into()
+    } else {
+        "machine must be ON and idle in EDIT — tool table writes are locked".into()
+    }
 }
 
 /// Table keys, consumed before the table draws so no widget takes them first.
@@ -409,10 +433,8 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
 fn table_card(app: &mut LincApp, ui: &mut Ui) {
     let pocket = app.profile.changer.uses_pockets();
     let lathe = app.profile.variant == MachineVariant::Lathe;
-    let writable = app.snapshot.writes_allowed();
     let rows = app.snapshot.tool_table.rows.clone();
     let current_tool = app.snapshot.tool_change.current_tool;
-    let mut write_selected = false;
     theme::card(ui, |ui| {
         let mut columns = column_specs(ui, lathe, pocket);
         ui.horizontal(|ui| {
@@ -650,15 +672,6 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            let tool = rows
-                .get(app.tools.selected_row)
-                .map(|row| row.tool)
-                .unwrap_or(0);
-            if theme::action_button(ui, &format!("WRITE T{tool}"), writable && !rows.is_empty())
-                .clicked()
-            {
-                write_selected = true;
-            }
             ui.label(
                 RichText::new("ARROWS MOVE · ENTER EDITS · ESC CANCELS")
                     .size(theme::font_size(9.0))
@@ -666,12 +679,6 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
             );
         });
     });
-    if write_selected {
-        if let Some(row) = rows.get(app.tools.selected_row) {
-            let tool = row.tool;
-            save_tool_row(app, tool);
-        }
-    }
 }
 
 /// Height of a table row, and of the field a cell opens for editing.
