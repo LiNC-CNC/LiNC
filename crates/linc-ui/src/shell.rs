@@ -151,6 +151,36 @@ impl LincApp {
         bus.publish_ui(self.diag_ui_snapshot());
     }
 
+    /// Apply the intents an agent queued through `diag.ui_action`.
+    ///
+    /// These land before the frame draws, so a page switch and the following
+    /// screenshot show the same state.
+    fn apply_diag_actions(&mut self) {
+        let Some(bus) = &self.diag_bus else { return };
+        let actions = bus
+            .lock()
+            .map(|mut bus| bus.take_ui_actions())
+            .unwrap_or_default();
+        for action in actions {
+            match action {
+                linc_core::diag::UiAction::Page { page } => {
+                    if let Some(page) = page_from_name(&page) {
+                        self.request_page(page);
+                    } else {
+                        self.toast(format!("unknown page {page}"), theme::WARNING);
+                    }
+                }
+                linc_core::diag::UiAction::CycleView => self.cycle_toolpath_view(),
+                linc_core::diag::UiAction::ShowBounds { visible } => {
+                    self.graph_style.show_program_bounds = visible;
+                }
+                linc_core::diag::UiAction::Fit => self.fit_graph(),
+                linc_core::diag::UiAction::ClearTrail => self.clear_trail(),
+                linc_core::diag::UiAction::SelectLine { line } => self.jump_to_line(line),
+            }
+        }
+    }
+
     /// Answer a pending `diag.screenshot`.
     ///
     /// egui delivers the capture through a callback after the frame is painted,
@@ -3009,6 +3039,7 @@ fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Page, color: C
 impl eframe::App for LincApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         theme::apply_design_zoom(ui.ctx(), self.design_scale);
+        self.apply_diag_actions();
         self.publish_diag();
         self.capture_screenshot(ui.ctx());
         if self.diag_bus.is_some() {
@@ -3022,6 +3053,32 @@ impl eframe::App for LincApp {
         self.handle_keyboard(ui);
         self.draw(ui);
     }
+}
+
+/// Parse a page name as the diagnostic tools spell it. Accepts the navigation
+/// label and the enum-ish spelling, so `G-CODE HELP` and `HELP` both work.
+pub fn page_from_name(name: &str) -> Option<Page> {
+    let wanted = name.trim().to_ascii_uppercase().replace(['-', '_', ' '], " ");
+    for page in [
+        Page::Machine,
+        Page::Program,
+        Page::Files,
+        Page::Tools,
+        Page::Offsets,
+        Page::Diagnostics,
+        Page::Help,
+        Page::Probe,
+        Page::Mdi,
+        Page::Homing,
+        Page::Manual,
+        Page::Settings,
+    ] {
+        let label = page.label().to_ascii_uppercase().replace(['-', '_'], " ");
+        if label == wanted || format!("{page:?}").to_ascii_uppercase() == wanted {
+            return Some(page);
+        }
+    }
+    None
 }
 
 /// Navigation entries in display order, with their label and keycap hint.
@@ -3482,6 +3539,16 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             .map(|position| position.work)
             .unwrap_or(f64::NAN);
         assert!((work - 12.5).abs() < 1e-6, "DRO X shows {work}, expected 12.5");
+    }
+
+    #[test]
+    fn page_names_parse_the_way_the_diagnostic_tools_spell_them() {
+        assert_eq!(page_from_name("MACHINE"), Some(Page::Machine));
+        assert_eq!(page_from_name("program"), Some(Page::Program));
+        assert_eq!(page_from_name("G-CODE HELP"), Some(Page::Help));
+        assert_eq!(page_from_name("HELP"), Some(Page::Help));
+        assert_eq!(page_from_name("Diagnostics"), Some(Page::Diagnostics));
+        assert_eq!(page_from_name("NOPE"), None);
     }
 
     #[test]

@@ -154,7 +154,7 @@ impl Source for BusSource {
         if method == "diag.screenshot" {
             return self.screenshot();
         }
-        let bus = self.bus.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut bus = self.bus.lock().unwrap_or_else(|poison| poison.into_inner());
         match method {
             "diag.hello" => Ok(json!({
                 "protocol": 1,
@@ -162,7 +162,7 @@ impl Source for BusSource {
                 "source": self.process.role,
                 "capabilities": [
                     "snapshot", "summary", "ui", "why_blocked", "offsets", "tools", "program",
-                    "logs", "events", "config", "metrics", "snapshot_at", "snapshot_diff", "timeline", "export_bundle"
+                    "logs", "events", "config", "metrics", "snapshot_at", "snapshot_diff", "timeline", "export_bundle", "ui_action"
                 ],
                 "limits": {
                     "max_frame": crate::MAX_FRAME,
@@ -261,6 +261,14 @@ impl Source for BusSource {
                 "dropped": bus.dropped(),
                 "captured_at_ms": bus.captured_at_ms(),
             })),
+            "diag.ui_action" => {
+                let action: linc_core::diag::UiAction = serde_json::from_value(params.clone())
+                    .map_err(|error| {
+                        DiagError::invalid_argument(format!("bad ui action: {error}"))
+                    })?;
+                bus.request_ui_action(action);
+                Ok(json!({ "queued": true }))
+            }
             "diag.cancel" => Ok(json!({ "cancelled": params.get("id").cloned().unwrap_or(Value::Null) })),
             other => Err(DiagError::not_found(format!("unknown method {other:?}"))),
         }

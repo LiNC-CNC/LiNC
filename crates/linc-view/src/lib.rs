@@ -928,7 +928,10 @@ fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bo
     // Annotation size in pixels, converted to model units, so the dimensions
     // stay readable at any zoom the way a drawing's text does.
     let pixels_per_unit = (projection.scale * projection.zoom).max(1e-6) as f64;
-    let glyph = 18.0 / pixels_per_unit;
+    let smallest = size[0].min(size[1]).min(size[2]).max(0.5);
+    // Never let the annotation grow past a fifth of the box's smallest side, so
+    // a flat axis view cannot turn the numbers into the largest thing on screen.
+    let glyph = (18.0 / pixels_per_unit).min(smallest * 0.2);
     let gap = 22.0 / pixels_per_unit;
     // Same family as the box outline, bright enough to read on the dark graph.
     let color = theme::dim(theme::CYAN, 190);

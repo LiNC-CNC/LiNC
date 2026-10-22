@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolClass {
     Read,
+    /// Writes a file under a fixed directory, or changes the HMI's own view.
     Export,
     Write,
 }
@@ -258,6 +259,26 @@ pub fn catalog() -> Vec<ToolDef> {
             class: ToolClass::Read,
         },
         ToolDef {
+            name: "linc_ui_action",
+            title: "Drive the HMI",
+            description: "Queue an HMI intent: go to a page, cycle the view, show/hide bounds, fit, clear the trail, select a line.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["page", "cycle_view", "show_bounds", "fit", "clear_trail", "select_line"]
+                    },
+                    "page": { "type": "string", "description": "For action=page: MACHINE, PROGRAM, FILES, TOOLS, OFFSETS, DIAGNOSTICS, HELP, SETTINGS, MANUAL, HOMING, MDI, PROBE" },
+                    "visible": { "type": "boolean", "description": "For action=show_bounds" },
+                    "line": { "type": "integer", "minimum": 1, "description": "For action=select_line" }
+                },
+                "required": ["action"],
+                "additionalProperties": false
+            }),
+            class: ToolClass::Export,
+        },
+        ToolDef {
             name: "linc_screenshot",
             title: "Screenshot of the HMI",
             description: "Captures the window as PNG (image content plus the file path).",
@@ -447,6 +468,25 @@ pub fn call(
             client.call("diag.timeline", params)
         }
         "linc_export_bundle" => client.call("diag.export_bundle", Value::Null),
+        "linc_ui_action" => {
+            let action = args.get("action").and_then(Value::as_str).unwrap_or("");
+            let params = match action {
+                "page" => json!({ "action": "page", "page": args.get("page").cloned().unwrap_or(Value::Null) }),
+                "cycle_view" => json!({ "action": "cycle_view" }),
+                "show_bounds" => json!({
+                    "action": "show_bounds",
+                    "visible": args.get("visible").and_then(Value::as_bool).unwrap_or(false)
+                }),
+                "fit" => json!({ "action": "fit" }),
+                "clear_trail" => json!({ "action": "clear_trail" }),
+                "select_line" => json!({
+                    "action": "select_line",
+                    "line": args.get("line").and_then(Value::as_u64).unwrap_or(1)
+                }),
+                other => return Err(DiagError::invalid_argument(format!("unknown ui action {other:?}"))),
+            };
+            client.call("diag.ui_action", params)
+        }
         "linc_screenshot" => client.call("diag.screenshot", Value::Null),
         "linc_get_panel_state" | "linc_get_panel_frames" => {
             let panel = panel.ok_or_else(|| {

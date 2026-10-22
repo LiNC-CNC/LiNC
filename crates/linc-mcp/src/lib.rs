@@ -195,6 +195,26 @@ mod tests {
     }
 
     #[test]
+    fn a_ui_action_is_queued_on_the_hmi() {
+        let (mut session, handle) = session("ui");
+        let replies = round_trip(
+            &mut session,
+            &[
+                json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"linc_ui_action","arguments":{"action":"page","page":"PROGRAM"}}}),
+                json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"linc_ui_action","arguments":{"action":"show_bounds","visible":true}}}),
+                json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"linc_ui_action","arguments":{"action":"nope"}}}),
+            ],
+        );
+        assert_eq!(replies[0]["result"]["isError"], false, "{replies:?}");
+        let envelope: Value =
+            serde_json::from_str(replies[0]["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(envelope["data"]["queued"], true);
+        assert_eq!(replies[2]["result"]["isError"], true, "unknown actions fail cleanly");
+        drop(handle);
+    }
+
+    #[test]
     fn a_dropped_diagnostic_server_surfaces_as_an_error_not_a_panic() {
         let (mut session, handle) = session("dropped");
         drop(handle);

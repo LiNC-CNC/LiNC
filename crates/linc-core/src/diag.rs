@@ -112,6 +112,28 @@ pub struct UiSnapshot {
     pub toasts: Vec<String>,
 }
 
+/// An HMI intent an agent may trigger through the diagnostic socket.
+///
+/// These are view/state operations, not machine commands: pressing a page key or
+/// showing the bounds cannot move an axis. Anything that can is a separate
+/// command with its own gate.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum UiAction {
+    /// Go to a page by its navigation name (`MACHINE`, `PROGRAM`, ...).
+    Page { page: String },
+    /// Cycle the toolpath view ISO -> X -> Y -> Z.
+    CycleView,
+    /// Show or hide the program bounding box.
+    ShowBounds { visible: bool },
+    /// Frame the program in the toolpath.
+    Fit,
+    /// Clear the live trail.
+    ClearTrail,
+    /// Select and reveal a program line (1-based).
+    SelectLine { line: usize },
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LogRecord {
     pub sequence: u64,
@@ -263,6 +285,7 @@ pub struct Bus {
     last_history_ms: i64,
     screenshot_requested: bool,
     screenshot: Option<Screenshot>,
+    ui_actions: VecDeque<UiAction>,
 }
 
 /// A PNG the UI thread captured for `diag.screenshot`.
@@ -302,6 +325,7 @@ impl Bus {
             last_history_ms: 0,
             screenshot_requested: false,
             screenshot: None,
+            ui_actions: VecDeque::new(),
         }
     }
 
@@ -545,6 +569,19 @@ impl Bus {
         for (kind, severity, message) in transitions {
             self.push_event(kind, severity, message);
         }
+    }
+
+    /// Queue an intent for the UI thread. The queue is capped: a burst of
+    /// requests must not replay a minute of keystrokes later.
+    pub fn request_ui_action(&mut self, action: UiAction) {
+        if self.ui_actions.len() >= 32 {
+            self.ui_actions.pop_front();
+        }
+        self.ui_actions.push_back(action);
+    }
+
+    pub fn take_ui_actions(&mut self) -> Vec<UiAction> {
+        self.ui_actions.drain(..).collect()
     }
 
     /// Ask the UI thread to capture the next frame.
@@ -1069,6 +1106,23 @@ mod tests {
         let after_ui = bus.sequence();
         bus.publish_ui(ui);
         assert_eq!(bus.sequence(), after_ui, "a repeated UI snapshot is a no-op");
+    }
+
+    #[test]
+    fn ui_actions_are_queued_capped_and_drained() {
+        let mut bus = Bus::new(snapshot());
+        bus.request_ui_action(UiAction::Fit);
+        bus.request_ui_action(UiAction::Page {
+            page: "PROGRAM".into(),
+        });
+        let actions = bus.take_ui_actions();
+        assert_eq!(actions.len(), 2);
+        assert!(bus.take_ui_actions().is_empty(), "draining empties the queue");
+
+        for _ in 0..40 {
+            bus.request_ui_action(UiAction::CycleView);
+        }
+        assert_eq!(bus.take_ui_actions().len(), 32, "the queue is capped");
     }
 
     #[test]

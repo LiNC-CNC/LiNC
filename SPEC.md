@@ -1460,7 +1460,8 @@ Methods implemented: `diag.hello`, `diag.ping`, `diag.snapshot`, `diag.summary`,
 `diag.snapshot_at`, `diag.snapshot_diff`, `diag.timeline`, `diag.ui`,
 `diag.why_blocked`, `diag.offsets`, `diag.tools`, `diag.program`, `diag.logs`,
 `diag.events`, `diag.config`, `diag.metrics`, `diag.export_bundle`,
-`diag.screenshot`, `diag.subscribe`, `diag.unsubscribe`, `diag.cancel`.
+`diag.screenshot`, `diag.ui_action`, `diag.subscribe`, `diag.unsubscribe`,
+`diag.cancel`.
 Unknown methods return `NOT_FOUND` and keep the connection open.
 
 The bus retains 60 snapshots at 1 Hz (a minute of history) for
@@ -1501,9 +1502,12 @@ are prefixed `linc_` and read-only except where noted: `linc_ping`,
 `linc_get_ui_state`, `linc_get_program`, `linc_get_offsets`, `linc_get_tools`,
 `linc_get_config`, `linc_get_logs`, `linc_get_events`, `linc_get_metrics`,
 `linc_get_panel_state`, `linc_get_panel_frames`, `linc_screenshot` (returns MCP
-image content) and `linc_export_bundle` (writes only under the export
-directory; annotated `readOnlyHint: false`, `destructiveHint: false`). Tools that
-could move the machine are gated behind `--allow-writes --sim`; none exist yet.
+image content), `linc_export_bundle` (writes only under the export directory) and
+`linc_ui_action`. The UI action tool queues an HMI intent — go to a page, cycle
+the view, show or hide the bounds, fit, clear the trail, select a line — and the
+UI applies it before the frame draws, so an agent can drive verification without
+synthetic X input. It changes the HMI's view, never the machine; tools that could
+move the machine are gated behind `--allow-writes --sim`, and none exist yet.
 Resources mirror the same state by URI; prompts start the two diagnostic
 sequences in `docs/MCP-SERVER-HANDOFF.md`.
 
