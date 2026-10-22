@@ -311,13 +311,19 @@ impl Projection {
         )
     }
 
-    fn draw_line(painter: &Painter, start: Pos2, end: Pos2, stroke: Stroke, dashed: bool) {
-        if dashed {
-            draw_dashed(painter, start, end, stroke, 6.0, 4.0);
+    fn draw_line(painter: &Painter, start: Pos2, end: Pos2, stroke: Stroke, dotted: bool) {
+        if dotted {
+            draw_dotted(painter, start, end, stroke);
         } else {
             painter.line_segment([start, end], stroke);
         }
     }
+}
+
+/// Rapids are dotted: short dots read as a rapid at any zoom, where a dash
+/// pattern can look like a solid line on a long move.
+fn draw_dotted(painter: &Painter, start: Pos2, end: Pos2, stroke: Stroke) {
+    draw_dashed(painter, start, end, stroke, 1.6, 3.4);
 }
 
 fn draw_dashed(painter: &Painter, start: Pos2, end: Pos2, stroke: Stroke, dash: f32, gap: f32) {
@@ -657,7 +663,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             // The machine envelope is context, not content: keep it faint enough
             // that the program, the part and the origin marks stay dominant.
             let faint = theme::dim(theme::MUTED, 60);
-            draw_bounds(&painter, &projection, machine, faint, 0.8, false);
+            draw_bounds(&painter, &projection, machine, faint, 0.8);
         }
     }
 
@@ -677,7 +683,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
                 view.stock_alpha,
             );
             draw_bounds_filled(&painter, &projection, bounds, fill);
-            draw_bounds(&painter, &projection, bounds, theme::STOCK_EDGE, 1.0, false);
+            draw_bounds(&painter, &projection, bounds, theme::STOCK_EDGE, 1.0);
         }
     }
 
@@ -694,13 +700,14 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             };
             if let Some(arc) = &segment.arc {
                 let points = arc_points(segment, arc);
+                let dotted = segment.kind == SegmentKind::Rapid;
                 for pair in points.windows(2) {
                     Projection::draw_line(
                         &painter,
                         projection.project(pair[0]),
                         projection.project(pair[1]),
                         stroke,
-                        false,
+                        dotted,
                     );
                 }
             } else {
@@ -731,14 +738,13 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         if let Some(program) = view.preview.bounds {
             if view.show_program_box {
                 // Solid and faint: a dashed box reads as a rapid move, and the
-                // G0 path is already dashed.
+                // G0 path is dotted.
                 draw_bounds(
                     &painter,
                     &projection,
                     program,
                     theme::dim(theme::CYAN, 80),
                     1.0,
-                    false,
                 );
             }
             draw_bounds_dimensions(&painter, &projection, program, view.work_offset);
@@ -1317,7 +1323,6 @@ fn draw_bounds(
     bounds: Bounds3,
     color: Color32,
     width: f32,
-    dashed: bool,
 ) {
     let stroke = Stroke::new(width, color);
     let min = bounds.min;
@@ -1352,7 +1357,7 @@ fn draw_bounds(
             projection.project(corners[a]),
             projection.project(corners[b]),
             stroke,
-            dashed,
+            false,
         );
     }
 }
