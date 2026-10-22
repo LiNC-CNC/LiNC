@@ -945,7 +945,11 @@ fn draw_bounds_dimensions(
     put_label(
         painter,
         projection,
-        [min[0] - pad, min[1] - gap, min[2]],
+        [
+            min[0] - pad,
+            min[1] - gap + pad - text_width(&start_text, glyph) * 0.5,
+            min[2],
+        ],
         [0.0, -1.0, 0.0],
         [-1.0, 0.0, 0.0],
         glyph,
@@ -956,7 +960,11 @@ fn draw_bounds_dimensions(
     put_label(
         painter,
         projection,
-        [max[0] + pad, min[1] - gap, min[2]],
+        [
+            max[0] + pad,
+            min[1] - gap + pad - text_width(&end_text, glyph) * 0.5,
+            min[2],
+        ],
         [0.0, -1.0, 0.0],
         [-1.0, 0.0, 0.0],
         glyph,
