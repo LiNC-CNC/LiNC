@@ -16,8 +16,8 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // labels use, so they read as data rather than prose.
     ui.horizontal(|ui| {
         for (label, tool) in [
-            ("CURRENT;", app.snapshot.tool_change.current_tool),
-            ("PREPARED;", app.snapshot.tool_change.prepared_tool),
+            ("CURRENT:", app.snapshot.tool_change.current_tool),
+            ("PREPARED:", app.snapshot.tool_change.prepared_tool),
         ] {
             ui.label(
                 RichText::new(label)
@@ -65,7 +65,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // focus every frame, and it was stealing it back from the dialog's buttons.
     let overlay_open = app.modal.is_some()
         || app.snapshot.tool_change.status == ToolChangeStatus::ManualPrompt;
-    if !app.tools.editing && !overlay_open && !focus.has_focus() {
+    if !app.tools.editing
+        && app.tools.kind_popup.is_none()
+        && !overlay_open
+        && !focus.has_focus()
+    {
         focus.request_focus();
     }
     ui.memory_mut(|memory| {
@@ -305,6 +309,11 @@ fn write_refusal(app: &LincApp) -> String {
 
 /// Table keys, consumed before the table draws so no widget takes them first.
 fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
+    if app.tools.kind_popup.is_some() {
+        // The selector handles its own keys; the table must not move or edit
+        // underneath it while it is open.
+        return;
+    }
     if app.tools.editing {
         let mut commit = false;
         let mut cancel = false;
@@ -466,7 +475,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
             // bound the table takes the whole card and pushes it out. The card's
             // own padding, the gap above the hint and the hint's line are part
             // of the budget too.
-            let table_height = (ui.available_height() - FOOTER_HEIGHT - 30.0).max(120.0);
+            let table_height = (ui.available_height() - FOOTER_HEIGHT - 44.0).max(120.0);
             let mut builder = TableBuilder::new(ui)
                 .id_salt("tool-table-v3")
                 .max_scroll_height(table_height)
@@ -519,8 +528,12 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                         let entry = rows[index].clone();
                         // `TableRow::response` may only be called after a cell
                         // exists, so the row's geometry is taken from the cells.
-                        let mut row_rect: Option<egui::Rect> = None;
-                        let mut row_span: Option<(f32, f32)> = None;
+                        // `row.col` returns the cell Ui's content rect, which
+                        // is empty when the content lives in a child Ui; take
+                        // the cell's own rect from `ui.max_rect()` instead.
+                        let first_rect = std::cell::Cell::new(None::<egui::Rect>);
+                        let last_rect = std::cell::Cell::new(None::<egui::Rect>);
+                        let selected_rect = std::cell::Cell::new(None::<egui::Rect>);
                         for (position, column) in columns.iter().enumerate() {
                             let selected_cell = index == selected_row && position == selected_column;
                             let response = row.col(|ui| {
@@ -537,6 +550,21 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                 let inner_width =
                                     (column.width - left_pad - CELL_TEXT_PAD - RIGHT_GAP).max(8.0);
                                 let cell_rect = ui.max_rect();
+                                if position == 0 {
+                                    first_rect.set(Some(cell_rect));
+                                }
+                                if position + 1 == columns.len() {
+                                    last_rect.set(Some(cell_rect));
+                                }
+                                if selected_cell {
+                                    selected_rect.set(Some(cell_rect));
+                                }
+                                if column.cell == Cell::Kind
+                                    && selected_cell
+                                    && app.tools.kind_popup_pending
+                                {
+                                    pending_kind.set(Some((index, cell_rect)));
+                                }
                                 let right_aligned =
                                     matches!(column.cell, Cell::Number(_) | Cell::Tool);
                                 let mut inner = ui.new_child(
@@ -625,15 +653,8 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     }
                                 }
                             });
-                            let rect = response.0;
-                            row_rect.get_or_insert(rect);
-                            if index == selected_row {
-                                row_span = Some(match row_span {
-                                    Some((left, right)) => (left.min(rect.left()), right.max(rect.right())),
-                                    None => (rect.left(), rect.right()),
-                                });
-                            }
-                            if selected_cell {
+                            let _ = response;
+                            if let Some(rect) = selected_rect.get() {
                                 // The same rect and inset whether navigating or
                                 // editing; red marks the cell that is open.
                                 painter.rect_stroke(
@@ -641,52 +662,40 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     egui::CornerRadius::same(theme::SELECTION_RADIUS as u8),
                                     egui::Stroke::new(
                                         1.5,
-                                        if selected_cell && editing {
-                                            theme::ERROR
-                                        } else {
-                                            theme::ACCENT
-                                        },
+                                        if editing { theme::ERROR } else { theme::ACCENT },
                                     ),
                                     egui::StrokeKind::Inside,
                                 );
                             }
 
-                            if response.1.clicked() {
-                                clicked.set(Some((index, position)));
-                                if column.cell == Cell::Kind {
-                                    clicked_kind.set(Some((index, response.1.rect)));
-                                }
-                            }
-                            if column.cell == Cell::Kind
-                                && selected_cell
-                                && app.tools.kind_popup_pending
-                            {
-                                pending_kind.set(Some((index, response.1.rect)));
-                            }
                         }
-                        if let (Some((left, right)), Some(row_rect)) = (row_span, row_rect) {
-                            // One band across the row, so the gaps between
-                            // columns are filled and the highlight is
-                            // continuous instead of a row of boxes.
-                            let band = egui::Rect::from_min_max(
-                                egui::pos2(left, row_rect.top()),
-                                egui::pos2(right, row_rect.bottom()),
-                            );
-                            painter.rect_filled(
-                                band,
-                                egui::CornerRadius::same((theme::SELECTION_RADIUS / 2.0) as u8),
-                                theme::tint(theme::ACCENT, theme::SELECTION_ALPHA),
-                            );
-                            // Solid bar on the rim: the band alone is faint, and
-                            // the bar is what the eye lands on.
-                            painter.rect_filled(
-                                egui::Rect::from_min_size(
-                                    egui::pos2(left, row_rect.top()),
-                                    egui::vec2(theme::SELECTION_BAR, row_rect.height()),
-                                ),
-                                egui::CornerRadius::same(1),
-                                theme::ACCENT,
-                            );
+                        if index == selected_row {
+                            if let (Some(first), Some(last)) =
+                                (first_rect.get(), last_rect.get())
+                            {
+                                // One band across the row, so the gaps between
+                                // columns are filled and the highlight is
+                                // continuous instead of a row of boxes.
+                                let band = egui::Rect::from_min_max(
+                                    egui::pos2(first.left(), first.top()),
+                                    egui::pos2(last.right(), last.bottom()),
+                                );
+                                painter.rect_filled(
+                                    band,
+                                    egui::CornerRadius::same((theme::SELECTION_RADIUS / 2.0) as u8),
+                                    theme::tint(theme::ACCENT, theme::SELECTION_ALPHA),
+                                );
+                                // Solid bar on the rim: the band alone is faint,
+                                // and the bar is what the eye lands on.
+                                painter.rect_filled(
+                                    egui::Rect::from_min_size(
+                                        egui::pos2(first.left(), first.top()),
+                                        egui::vec2(theme::SELECTION_BAR, band.height()),
+                                    ),
+                                    egui::CornerRadius::same(1),
+                                    theme::ACCENT,
+                                );
+                            }
                         }
                         let _ = &clicked;
                     });
@@ -743,7 +752,31 @@ fn draw_kind_popup(app: &mut LincApp, ui: &mut Ui, opened_now: bool) {
         .get(&entry.tool.to_string())
         .cloned()
         .unwrap_or_else(|| entry.kind.clone());
+    let choices = kind_choices(lathe);
+    if opened_now {
+        app.tools.kind_popup_index = choices
+            .iter()
+            .position(|kind| *kind == current.as_str())
+            .unwrap_or(0);
+    }
+    let mut index = app.tools.kind_popup_index.min(choices.len().saturating_sub(1));
     let mut chosen: Option<&'static str> = None;
+    let mut close = false;
+    ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            index = (index + 1) % choices.len();
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            index = (index + choices.len() - 1) % choices.len();
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+            chosen = Some(choices[index]);
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+            close = true;
+        }
+    });
+    app.tools.kind_popup_index = index;
     let area = egui::Area::new(egui::Id::unique("tool-kind-selector"))
         .order(egui::Order::Foreground)
         .fixed_pos(anchor.left_bottom() + egui::vec2(0.0, 2.0))
@@ -755,8 +788,9 @@ fn draw_kind_popup(app: &mut LincApp, ui: &mut Ui, opened_now: bool) {
                 .inner_margin(egui::Margin::same(4))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
-                    for kind in kind_choices(lathe) {
-                        if ui.selectable_label(current == *kind, *kind).clicked() {
+                    for (choice_index, kind) in choices.iter().enumerate() {
+                        let selected = choice_index == index;
+                        if ui.selectable_label(selected, *kind).clicked() {
                             chosen = Some(*kind);
                         }
                     }
@@ -767,6 +801,10 @@ fn draw_kind_popup(app: &mut LincApp, ui: &mut Ui, opened_now: bool) {
             .tool_kinds
             .insert(entry.tool.to_string(), kind.to_string());
         app.touch_preferences();
+        app.tools.kind_popup = None;
+        return;
+    }
+    if close {
         app.tools.kind_popup = None;
         return;
     }

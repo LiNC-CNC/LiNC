@@ -841,6 +841,8 @@ pub struct ToolsUi {
     /// Enter was pressed on a TYPE cell; the cell paints the selector with its
     /// own rect on the next frame.
     pub kind_popup_pending: bool,
+    /// Highlighted choice in the open TYPE selector.
+    pub kind_popup_index: usize,
 }
 
 impl Default for ToolsUi {
@@ -859,6 +861,7 @@ impl Default for ToolsUi {
             scroll_to_selected: false,
             kind_popup: None,
             kind_popup_pending: false,
+            kind_popup_index: 0,
         }
     }
 }
