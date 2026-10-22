@@ -311,6 +311,10 @@ pub struct FilesUi {
     pub nc_parent_selected: bool,
     /// Show `..` in NC_FILES at its root; from `[files] show_parent_above_root`.
     pub allow_parent_above_root: bool,
+    /// Rows a PageUp/PageDown moves, measured from the last drawn list.
+    pub page_rows: usize,
+    /// Bring the selected row into view on the next draw (keyboard moves).
+    pub scroll_to_selection: bool,
     /// In-place rename in one of the lists, if any.
     pub rename: Option<FileRename>,
     pub nc_root: PathBuf,
@@ -344,6 +348,8 @@ impl FilesUi {
             usb_parent_selected: false,
             nc_parent_selected: false,
             allow_parent_above_root,
+            page_rows: 10,
+            scroll_to_selection: false,
             rename: None,
             nc_root: nc_root.clone(),
             nc_current: nc_root,

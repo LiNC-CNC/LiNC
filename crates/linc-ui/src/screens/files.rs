@@ -126,6 +126,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     let mut new_file = false;
     let mut eject_media = false;
     let mut delete: Option<PathBuf> = None;
+    let mut scroll_selection = false;
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::C) {
             copy_side = true;
@@ -148,6 +149,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
             } else {
                 selected = (selected + 1).min(entries.len().saturating_sub(1));
             }
+            scroll_selection = true;
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
             if !on_parent {
@@ -157,6 +159,32 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
                     selected = selected.saturating_sub(1);
                 }
             }
+            scroll_selection = true;
+        }
+        let page = app.files.page_rows.max(1);
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+            if on_parent {
+                if !entries.is_empty() {
+                    on_parent = false;
+                    selected = page.saturating_sub(1).min(entries.len() - 1);
+                }
+            } else if !entries.is_empty() {
+                selected = (selected + page).min(entries.len() - 1);
+            }
+            scroll_selection = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+            if !on_parent {
+                if selected >= page {
+                    selected -= page;
+                } else {
+                    selected = 0;
+                    if parent_available {
+                        on_parent = true;
+                    }
+                }
+            }
+            scroll_selection = true;
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
             if on_parent {
@@ -190,6 +218,9 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     } else {
         app.files.nc_selected = selected;
         app.files.nc_parent_selected = on_parent;
+    }
+    if scroll_selection {
+        app.files.scroll_to_selection = true;
     }
     if let Some(dir) = open_dir {
         if usb {
@@ -541,11 +572,6 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                     .size(theme::font_size(11.0))
                     .color(theme::FG),
                 );
-                ui.label(
-                    RichText::new("MOUNTED BY UDISKS2 / USER SESSION")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
                 file_list(app, ui, Pane::Usb);
             }
         }
@@ -678,7 +704,22 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
     let last_rect = std::cell::Cell::new(None::<egui::Rect>);
 
     let list_height = ui.available_height().max(120.0);
-    let table = TableBuilder::new(ui)
+    let row_pitch = row_height + line_height * 0.5;
+    app.files.page_rows = (((list_height - 18.0) / row_pitch).floor() as usize).max(1);
+    let scroll_row = if app.files.scroll_to_selection
+        && ((pane == Pane::Usb) == app.files.usb_focused)
+    {
+        app.files.scroll_to_selection = false;
+        let row = if parent_selected {
+            0
+        } else {
+            parent_rows + selected.min(entries.len().saturating_sub(1))
+        };
+        Some(row)
+    } else {
+        None
+    };
+    let mut table = TableBuilder::new(ui)
         .id_salt(("file-table", pane as u8))
         .max_scroll_height(list_height)
         .striped(true)
@@ -686,19 +727,22 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .column(ExtraColumn::remainder())
         .column(ExtraColumn::exact(size_width))
-        .column(ExtraColumn::exact(modified_width))
-        .header(18.0, |mut header| {
-            for heading in ["NAME", "SIZE", "MODIFIED"] {
-                header.col(|ui| {
-                    ui.label(
-                        RichText::new(heading)
-                            .size(theme::font_size(9.0))
-                            .strong()
-                            .color(theme::MUTED),
-                    );
-                });
-            }
-        });
+        .column(ExtraColumn::exact(modified_width));
+    if let Some(row) = scroll_row {
+        table = table.scroll_to_row(row, None);
+    }
+    let table = table.header(18.0, |mut header| {
+        for heading in ["NAME", "SIZE", "MODIFIED"] {
+            header.col(|ui| {
+                ui.label(
+                    RichText::new(heading)
+                        .size(theme::font_size(9.0))
+                        .strong()
+                        .color(theme::MUTED),
+                );
+            });
+        }
+    });
     table.body(|body| {
         body.rows(row_height, entries.len() + parent_rows, |mut row| {
             let row_index = row.index();

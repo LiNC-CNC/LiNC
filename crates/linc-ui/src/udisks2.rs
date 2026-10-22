@@ -140,6 +140,12 @@ pub fn eject_mount(mount_path: &str) -> Result<(), String> {
         )
         .map_err(|error| error.to_string())?;
         let options: HashMap<String, OwnedValue> = HashMap::new();
+        // Drive.Eject refuses a drive that still has a mounted filesystem
+        // ("drive is in use"). Unmount first, without force; the caller gets
+        // the busy error if a process really holds it.
+        let _: () = filesystem
+            .call("Unmount", &options)
+            .map_err(|error| error.to_string())?;
         let _: () = drive
             .call("Eject", &options)
             .map_err(|error| error.to_string())?;

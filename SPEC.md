@@ -106,7 +106,7 @@ else, so it cannot shadow another page's command.
 |---|---|
 | Machine (MAIN) | `Ctrl+F10`/`Ctrl+▢` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail, `Ctrl+R` run from line, `Ctrl+G` go to a line number |
 | Program | `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
-| Files | `Left`/`Right` switch pane, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Ctrl+X` delete |
+| Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Ctrl+X` delete |
 | MDI | `Enter` issue, `Up`/`Down` history, `Esc` clear the unissued block |
 | Help | `/` focus search, `Backspace` back through link history |
 | Offsets, Tools, Probe | Arrows select a row |
@@ -712,7 +712,8 @@ previous page.
 - Two equal panes, no page header and no button row: every action is a key.
   `Left`/`Right` move the focus between the panes — the focused pane's title
   turns accent and the other pane's row band dims; `Up`/`Down` move the
-  selection; `Enter` opens a program from `NC_FILES` or copies a file from USB
+  selection and `PageUp`/`PageDown` move a page, with the list scrolling the
+  cursor into view; `Enter` opens a program from `NC_FILES` or copies a file from USB
   into `NC_FILES`; `Backspace` goes up a folder; `C` copies the selected entry to
   the other pane; `R` renames it in place (the NAME cell becomes a field with the
   name without its extension selected; Enter commits, Escape restores);
@@ -732,8 +733,8 @@ previous page.
 - Copy requires free space, rejects symlinks/path escapes, confirms overwrite,
   writes to a temporary file in the destination and renames atomically.
 - Copy progress and errors are visible; `E` is refused while a copy is active.
-- `E` unmounts and powers off the device; never force-unmount by default. Show
-  `SAFE TO REMOVE` after success.
+- `E` unmounts the filesystem and then powers off the drive; never
+  force-unmount by default. Show `SAFE TO REMOVE` after success.
 - The overwrite dialog keeps the keyboard on its two buttons: arrows cycle
   between OVERWRITE and CANCEL and cannot move focus to the page behind it.
 - `N` creates a new program in the current `NC_FILES` directory, named
@@ -1010,7 +1011,7 @@ Implementation:
 - `ESC`: back/cancel; on Help, clear search or return from detail history.
 - Arrows: focus/list/scroll.
 - `/`: focus G-code Help search when Help is active.
-- `PageUp`/`PageDown`: tabs/pages.
+- `PageUp`/`PageDown`: tabs/pages; a page in the tool table and file lists.
 - `Home`/`End`: first/last item.
 - `Enter`: select/apply/MDI execute; on Help, open the selected code; in Files,
   open a folder or load an `NC_FILES` file.
