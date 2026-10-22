@@ -1,32 +1,47 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512" role="img" aria-label="LiNC">
   <defs>
     <linearGradient id="bg" x1="64" y1="32" x2="448" y2="480" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#242a31"/>
-      <stop offset="0.52" stop-color="#15181c"/>
-      <stop offset="1" stop-color="#0c0e11"/>
+      <stop offset="0" stop-color="#1b1e22"/>
+      <stop offset="0.52" stop-color="#141619"/>
+      <stop offset="1" stop-color="#0f1114"/>
     </linearGradient>
-    <linearGradient id="path" x1="352" y1="352" x2="444" y2="152" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#4da3ff"/>
-      <stop offset="1" stop-color="#67e8f9"/>
+    <linearGradient id="frame" x1="120" y1="104" x2="392" y2="424" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="0.45" stop-color="#4da3ff"/>
+      <stop offset="1" stop-color="#2f7fe0"/>
+    </linearGradient>
+    <linearGradient id="table" x1="208" y1="322" x2="336" y2="348" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="1" stop-color="#4da3ff"/>
     </linearGradient>
     <radialGradient id="glow" cx="256" cy="256" r="238" gradientUnits="userSpaceOnUse">
       <stop offset="0.48" stop-color="#4da3ff" stop-opacity="0"/>
-      <stop offset="1" stop-color="#4da3ff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#4da3ff" stop-opacity="0.16"/>
     </radialGradient>
+    <clipPath id="tool">
+      <path d="M260 252H284V306L272 318L260 306Z"/>
+    </clipPath>
   </defs>
 
-  <!-- Full bleed: GitHub crops the avatar into a circle. -->
   <rect width="512" height="512" fill="url(#bg)"/>
   <circle cx="256" cy="256" r="238" fill="url(#glow)"/>
-  <circle cx="256" cy="256" r="226" fill="none" stroke="#3a424a" stroke-width="5"/>
+  <circle cx="256" cy="256" r="226" fill="none" stroke="#30353a" stroke-width="5"/>
 
-  <path d="M154 124V342C154 354.15 163.85 364 176 364H360"
-        fill="none" stroke="#eef1f4" stroke-width="66"
-        stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M360 364C407 364 438 333 438 286V186"
-        fill="none" stroke="url(#path)" stroke-width="26"
-        stroke-linecap="round"/>
-  <circle cx="438" cy="186" r="18" fill="#fb923c"/>
-  <circle cx="438" cy="186" r="7" fill="#fff4e6"/>
-  <path d="M104 408H136M120 392V424" stroke="#9aa0a6" stroke-opacity="0.6" stroke-width="5" stroke-linecap="round"/>
+  <path d="M158 104H222V170H176V358H392V424H176L122 382V142Z"
+        fill="url(#frame)"/>
+  <rect x="322" y="104" width="70" height="66" fill="url(#frame)"/>
+
+  <rect x="230" y="94" width="84" height="100" rx="6" fill="#e8eaed"/>
+  <path d="M230 194H314L305 212H239Z" fill="#4da3ff"/>
+
+  <rect x="254" y="222" width="36" height="22" rx="3" fill="#9aa0a6"/>
+
+  <path d="M260 252H284V306L272 318L260 306Z" fill="#fb923c"/>
+  <g clip-path="url(#tool)" stroke="#141619" stroke-width="5" stroke-linecap="butt">
+    <path d="M260 270L284 258"/>
+    <path d="M260 286L284 274"/>
+    <path d="M260 302L284 290"/>
+  </g>
+
+  <path d="M208 322H254L272 336L290 322H336V348H208Z" fill="url(#table)"/>
 </svg>
