@@ -12,7 +12,7 @@ commands (MDI, probe, tool change, program/offset writes). Three binaries:
 
 ```bash
 cargo build --release                       # all three binaries
-cargo test --workspace                      # 141 tests today
+cargo test --workspace                      # 145 tests today
 ./target/release/linc --config configs/sim.toml --check-config
 ./target/release/linc --config configs/baiermill.toml --check-config
 ```
