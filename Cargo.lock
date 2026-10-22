@@ -1687,10 +1687,12 @@ dependencies = [
  "env_logger",
  "image",
  "linc-core",
+ "linc-diag",
  "linc-hal",
  "linc-linuxcnc",
  "linc-ui",
  "log",
+ "serde_json",
 ]
 
 [[package]]
@@ -1706,6 +1708,16 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "toml",
+]
+
+[[package]]
+name = "linc-diag"
+version = "0.1.0"
+dependencies = [
+ "linc-core",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1729,6 +1741,20 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "linc-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "env_logger",
+ "linc-core",
+ "linc-diag",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

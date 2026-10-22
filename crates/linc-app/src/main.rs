@@ -46,6 +46,9 @@ struct Args {
     /// Start fullscreen/kiosk.
     #[arg(long)]
     fullscreen: bool,
+    /// Do not create the diagnostic socket for linc-mcp.
+    #[arg(long)]
+    no_diag: bool,
 }
 
 /// Install logging. `RUST_LOG` wins; without it LiNC's own crates log at info
@@ -137,6 +140,46 @@ fn main() -> Result<()> {    init_logging();
     let handle: Box<dyn UiBackend> =
         Box::new(BackendHandle::spawn(backend, hal, status_hz, status_source));
 
+    // Diagnostic socket for linc-mcp. It is created before the window so an
+    // agent can attach as soon as the process exists; it carries state only, so
+    // a failure here never stops the HMI.
+    let diag_bus = std::sync::Arc::new(std::sync::Mutex::new(linc_core::diag::Bus::new(
+        linc_core::model::MachineSnapshot::empty(profile.variant),
+    )));
+    let _diag = if args.no_diag {
+        None
+    } else {
+        let process = linc_core::diag::ProcessInfo {
+            pid: std::process::id(),
+            role: "hmi".into(),
+            build: linc_core::diag::BuildInfo {
+                version: env!("CARGO_PKG_VERSION").into(),
+                git_commit: option_env!("LINC_GIT_COMMIT").unwrap_or("").into(),
+                git_dirty: option_env!("LINC_GIT_DIRTY").is_some(),
+                profile: profile.config.machine.name.clone(),
+                backend: if use_linuxcnc { "linuxcnc".into() } else { "sim".into() },
+            },
+        };
+        let config = serde_json::json!({
+            "config_path": config_path.display().to_string(),
+            "ini": profile.config.machine.linuxcnc_ini,
+            "summary": profile.summary(),
+        });
+        let source = std::sync::Arc::new(
+            linc_diag::BusSource::new(diag_bus.clone(), process).with_config(config),
+        );
+        match linc_diag::serve(linc_diag::discovery::runtime_dir(), "hmi", source) {
+            Ok(handle) => {
+                log::info!("diagnostic socket at {}", handle.socket.display());
+                Some(handle)
+            }
+            Err(error) => {
+                log::warn!("diagnostic socket unavailable: {error}");
+                None
+            }
+        }
+    };
+
     let title = profile.config.ui.window_title.clone();
     // The shell is designed at 1280x720 and scales up from that baseline.
     let size = [1280.0, 720.0];
@@ -158,7 +201,8 @@ fn main() -> Result<()> {    init_logging();
         &title,
         options,
         Box::new(move |cc| {
-            let app = LincApp::new(profile.clone(), handle, &cc.egui_ctx);
+            let mut app = LincApp::new(profile.clone(), handle, &cc.egui_ctx);
+            app.set_diag_bus(diag_bus.clone());
             Ok(Box::new(app))
         }),
     );

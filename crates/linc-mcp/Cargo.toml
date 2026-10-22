@@ -1,0 +1,24 @@
+[package]
+name = "linc-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MCP server exposing LiNC diagnostics to agents"
+
+[dependencies]
+linc-core = { path = "../linc-core" }
+linc-diag = { path = "../linc-diag" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+
+[lib]
+name = "linc_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "linc-mcp"
+path = "src/main.rs"

@@ -1419,3 +1419,65 @@ Rules:
 `linc --check-config` must validate the merge and path resolution without
 connecting to LinuxCNC or HAL. The full schema, launch snippets and validation
 contract are in `CONFIGURATION.md`.
+
+## 16. Diagnostic socket and MCP server
+
+`linc` publishes a read-only diagnostic state for agents. It is state plus a
+shared gate report, not a second control path: nothing here can move an axis,
+start a program or write an offset.
+
+### 16.1 Socket and discovery
+
+- `linc` creates `hmi.sock` under `$LINC_DIAG_DIR`, else
+  `$XDG_RUNTIME_DIR/linc/<instance>/`, else `/tmp/linc-<uid>/<instance>/`.
+  `LINC_INSTANCE` names the instance and defaults to `default`.
+- The directory is mode `0700`, the socket `0600`; same-user only, with no
+  in-band authentication.
+- `instance.json` records schema version, pid, role, source, socket path, start
+  time, profile and build. A reader validates the pid before connecting and a
+  socket file is only removed when nothing answers on it.
+- `linc --no-diag` starts without the socket.
+
+### 16.2 Protocol
+
+Unix stream socket, JSON-RPC 2.0, one JSON object per line, 8 MB frame limit.
+Every response is an envelope: `schema_version`, `source`, `process` (pid, role,
+build), `sequence`, `captured_at_ms`, `age_ms`, `stale`, `dropped` and `data`.
+`age_ms` is computed at response time from `captured_at_ms`; `stale` follows the
+source's threshold, and a write decision fails closed on a stale envelope.
+
+Methods implemented: `diag.hello`, `diag.ping`, `diag.snapshot`, `diag.summary`,
+`diag.ui`, `diag.why_blocked`, `diag.offsets`, `diag.tools`, `diag.program`,
+`diag.logs`, `diag.events`, `diag.config`, `diag.metrics`, `diag.cancel`.
+Unknown methods return `NOT_FOUND` and keep the connection open.
+
+The bus publishes on every backend sample and refreshes at 5 Hz, so `age_ms`
+stays small while the window is idle: `egui` repaints on demand, and a publisher
+without that refresh would look stale between frames.
+
+### 16.3 Gates
+
+`diag.why_blocked` is the single answer to "why is this blocked": panel link and
+communication errors, unknown panel mode, e-stop, power, fault, protect, unhomed
+axes, a busy interpreter, tool-table load errors, a missing program, a mode
+mismatch and a missing WCS row. Each blocker carries a stable code, severity,
+source and, where one exists, a remediation. The list is exhaustive rather than
+first-failure, so an agent sees the whole picture.
+
+### 16.4 `linc-mcp`
+
+MCP over stdio, built without the UI, HAL, LinuxCNC or the panel driver. Tools
+are prefixed `linc_` and read-only in this phase: `linc_ping`,
+`linc_get_build_info`, `linc_get_environment`, `linc_health_check`,
+`linc_get_state_summary`, `linc_get_snapshot`, `linc_why_blocked`,
+`linc_get_ui_state`, `linc_get_program`, `linc_get_offsets`, `linc_get_tools`,
+`linc_get_config`, `linc_get_logs`, `linc_get_events`, `linc_get_metrics`.
+Resources mirror the same state by URI; prompts start the two diagnostic
+sequences in `docs/MCP-SERVER-HANDOFF.md`.
+
+Every call is audited (stderr plus `--audit <file>`), and writes are refused with
+`WRITE_DISABLED` unless the server was started with `--allow-writes --sim`.
+
+Not in this phase: the `linc-panel` socket, screenshots, simulator fault
+injection, subscriptions, snapshot diffs and the NML/HAL sections. They extend
+this envelope rather than replace it.

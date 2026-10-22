@@ -2,16 +2,17 @@
 
 LiNC is a Rust/`egui` HMI for LinuxCNC. The physical CNC panel and QMK keyboard
 drive the machine; the screen reads state and issues only explicit, validated
-commands (MDI, probe, tool change, program/offset writes). Two binaries:
+commands (MDI, probe, tool change, program/offset writes). Three binaries:
 
 - `linc` (`crates/linc-app`) — display/UI; loads the profile, selects the backend, creates the `linc.*` outputs.
 - `linc-panel` (`crates/linc-panel`) — panel service; owns RS-485 or the sim window, creates `cnc_panel.*`, and runs separately so a UI crash cannot remove panel control.
+- `linc-mcp` (`crates/linc-mcp`) — MCP server for diagnostics; speaks the `linc-diag` socket protocol and never links the UI, HAL, LinuxCNC or the panel driver.
 
 ## Build, test, run
 
 ```bash
-cargo build --release                       # both binaries
-cargo test --workspace                      # 107 tests today
+cargo build --release                       # all three binaries
+cargo test --workspace                      # 141 tests today
 ./target/release/linc --config configs/sim.toml --check-config
 ./target/release/linc --config configs/baiermill.toml --check-config
 ```
@@ -39,7 +40,9 @@ LINC_SIM_IPC=/tmp/linc/panel-sim ./target/release/linc --config configs/sim.toml
 - `linc-linuxcnc` — `MachineBackend` over a supervised `python3` helper (`python/linc_bridge.py`, embedded with `include_str!`). `linc-core`.
 - `linc-panel` — `PanelDriver`, RS-485 protocol, sim panel, `cnc_panel.*` pins. `linc-core` + `linc-hal`.
 - `linc-ui` — shell, keymap, theme, pages, files/USB. `linc-core` + `linc-view`; never HAL, LinuxCNC, serial or Python.
-- `linc-app` — `main`, CLI, backend selection, window. The only crate that wires `linc-ui`, `linc-hal` and `linc-linuxcnc` together.
+- `linc-diag` — Unix-socket diagnostic protocol: discovery, envelope, `BusSource` over `linc_core::diag`. Depends only on `linc-core`.
+- `linc-mcp` — MCP adapter over `linc-diag`: tools, resources, prompts, audit, read-only policy. Depends only on `linc-core` and `linc-diag`.
+- `linc-app` — `main`, CLI, backend selection, window. The only crate that wires `linc-ui`, `linc-hal` and `linc-linuxcnc` together, and the one that starts the diagnostic socket.
 
 ## Sources of truth
 

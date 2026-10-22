@@ -3,6 +3,7 @@
 pub mod backend;
 pub mod command;
 pub mod config;
+pub mod diag;
 pub mod editor;
 pub mod gcode;
 pub mod help;

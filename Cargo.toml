@@ -6,6 +6,8 @@ members = [
     "crates/linc-panel",
     "crates/linc-linuxcnc",
     "crates/linc-ui",
+    "crates/linc-diag",
+    "crates/linc-mcp",
     "crates/linc-app",
 ]
 resolver = "2"

@@ -1,0 +1,12 @@
+[package]
+name = "linc-diag"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Unix-socket diagnostic protocol shared by linc and linc-mcp"
+
+[dependencies]
+linc-core = { path = "../linc-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }

@@ -16,7 +16,9 @@ egui.workspace = true
 env_logger.workspace = true
 image.workspace = true
 log.workspace = true
+serde_json.workspace = true
 linc-core = { path = "../linc-core" }
+linc-diag = { path = "../linc-diag" }
 linc-ui = { path = "../linc-ui" }
 linc-hal = { path = "../linc-hal" }
 linc-linuxcnc = { path = "../linc-linuxcnc" }

@@ -35,6 +35,11 @@ pub enum FocusRegion {
 const LINE_PAGE: isize = 10;
 
 pub struct LincApp {
+    /// Publishes state for `linc-mcp`. `None` in tests and when the diagnostic
+    /// socket could not be created.
+    pub diag_bus: Option<std::sync::Arc<std::sync::Mutex<linc_core::diag::Bus>>>,
+    /// Backend sample stamp of the last published machine snapshot.
+    diag_last_sample: u64,
     pub profile: Profile,
     pub backend: Box<dyn UiBackend>,
     pub snapshot: MachineSnapshot,
@@ -129,6 +134,64 @@ pub struct LincApp {
 }
 
 impl LincApp {
+    /// Publish the latest state for the diagnostic server.
+    ///
+    /// A new backend sample is published at once; between samples the bus is
+    /// refreshed at 5 Hz so `age_ms` stays small and a waiting agent can rely on
+    /// it, without cloning the snapshot on every repaint.
+    fn publish_diag(&mut self) {
+        let Some(bus) = &self.diag_bus else { return };
+        let Ok(mut bus) = bus.lock() else { return };
+        let sample = self.snapshot.meta.captured_at_ms;
+        let stale = linc_core::diag::now_ms() - bus.captured_at_ms() >= 200;
+        if sample != self.diag_last_sample || stale {
+            self.diag_last_sample = sample;
+            bus.publish_machine(self.snapshot.clone());
+        }
+        bus.publish_ui(self.diag_ui_snapshot());
+    }
+
+    /// The UI-side state an agent needs; mirrors `linc_core::diag::UiSnapshot`.
+    fn diag_ui_snapshot(&self) -> linc_core::diag::UiSnapshot {
+        use linc_core::diag::UiSnapshot;
+        let layout = match self.profile.variant {
+            linc_core::model::MachineVariant::Lathe => "lathe",
+            linc_core::model::MachineVariant::Mill => "mill",
+        };
+        // The controller mode is what the top bar shows; a panel mode that has
+        // not decoded yet must not hide it.
+        let mode = format!("{:?}", self.snapshot.task.mode);
+        UiSnapshot {
+            page: self.page.label().into(),
+            layout: layout.into(),
+            mode,
+            program_view: match self.program.view {
+                crate::state::ProgramView::Split => "SPLIT".into(),
+                crate::state::ProgramView::Code => "CODE".into(),
+            },
+            view: self.program.graph_view.label().into(),
+            zoom: self.program.graph_zoom,
+            selected_line: (self.program.selected_line > 0).then_some(self.program.selected_line),
+            current_line: {
+                let line = self.snapshot.program.executing_line();
+                (line > 0).then_some(line)
+            },
+            selected_axis: None,
+            program_name: self.snapshot.program.display_name.clone(),
+            program_dirty: self.program.editor.dirty,
+            panel_online: self.snapshot.panel.connected,
+            toasts: self.toasts.iter().map(|toast| toast.text.clone()).collect(),
+        }
+    }
+
+    /// Attach the diagnostic bus the app server publishes into.
+    pub fn set_diag_bus(
+        &mut self,
+        bus: std::sync::Arc<std::sync::Mutex<linc_core::diag::Bus>>,
+    ) {
+        self.diag_bus = Some(bus);
+    }
+
     pub fn new(profile: Profile, mut backend: Box<dyn UiBackend>, ctx: &egui::Context) -> Self {
         theme::apply(ctx);
         theme::apply_design_zoom(ctx, profile.ui_scale().unwrap_or(1.0));
@@ -253,6 +316,8 @@ impl LincApp {
             page_focus_requested: true,
             modal: None,
             toasts: Vec::new(),
+            diag_bus: None,
+            diag_last_sample: 0,
             quit_requested: false,
             pending_load: false,
             keymap: crate::state::Keymap::from_config(&profile.config.keys),
@@ -2910,6 +2975,14 @@ fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Page, color: C
 impl eframe::App for LincApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         theme::apply_design_zoom(ui.ctx(), self.design_scale);
+        self.publish_diag();
+        if self.diag_bus.is_some() {
+            // egui repaints on demand, so an idle window would stop publishing
+            // and every diagnostic response would read as stale. Four times a
+            // second is cheap and keeps `age_ms` honest.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(250));
+        }
 
         self.handle_keyboard(ui);
         self.draw(ui);
