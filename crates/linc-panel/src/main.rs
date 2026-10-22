@@ -195,6 +195,15 @@ fn run_simulated(
         state.sseg_status = 54;
         state.last_cycle_ms = cycle.as_secs_f64() * 1000.0;
     });
+    // A launcher can start the cabinet further along the power-up sequence than
+    // a real one is found in: `LINC_SIM_READY=estop` releases the mushroom and
+    // `power` also presses POWER ON. The pulses are the ones the window
+    // buttons raise, so HAL sees an operator's press.
+    let start = linc_panel::sim::SimStart::from_env();
+    if start != linc_panel::sim::SimStart::Cold {
+        log::info!("simulated panel starts ready: {start:?} (LINC_SIM_READY)");
+        handle.set(|state| state.apply_start(start));
+    }
     let mut driver = linc_panel::SimPanelDriver::new(handle.clone(), cycle);
     let show_window =
         !no_window && (window || profile.config.simulation.panel_window.unwrap_or(false));

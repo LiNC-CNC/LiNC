@@ -38,6 +38,59 @@ pub struct SimPanelState {
     pub last_cycle_ms: f64,
 }
 
+/// How far through its power-up sequence a simulated cabinet starts.
+///
+/// The default is the state a real cabinet is found in before the operator
+/// touches it: E-stop latched, power off. A launcher that wants the machine
+/// ready to use can ask for a later point with `LINC_SIM_READY`; the panel then
+/// raises the same one-shots the window's buttons raise, so the HAL sees an
+/// operator's press rather than a special case.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SimStart {
+    /// E-stop latched, machine off.
+    #[default]
+    Cold,
+    /// The mushroom has been pulled out; the machine is still off.
+    EstopReleased,
+    /// Mushroom released and POWER ON pressed.
+    Powered,
+}
+
+impl SimStart {
+    /// `LINC_SIM_READY=estop` or `=power`; anything else starts cold.
+    pub fn from_env() -> Self {
+        Self::from_value(&std::env::var("LINC_SIM_READY").unwrap_or_default())
+    }
+
+    pub fn from_value(value: &str) -> Self {
+        match value.trim() {
+            "estop" => Self::EstopReleased,
+            "power" => Self::Powered,
+            _ => Self::Cold,
+        }
+    }
+}
+
+impl SimPanelState {
+    /// Move the cabinet to `start`, as if the operator had already pulled the
+    /// mushroom out (`estop`) or also pressed POWER ON (`power`).
+    pub fn apply_start(&mut self, start: SimStart) {
+        match start {
+            SimStart::Cold => {}
+            SimStart::EstopReleased => {
+                self.estop = false;
+                self.estop_reset_pulse = true;
+            }
+            SimStart::Powered => {
+                self.estop = false;
+                self.power = true;
+                self.power_on_pulse = true;
+                self.power_off_pulse = false;
+            }
+        }
+    }
+}
+
 impl Default for SimPanelState {
     fn default() -> Self {
         Self {
@@ -1685,6 +1738,38 @@ fn draw_key_grid(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_ready_sim_raises_the_power_up_one_shots() {
+        let mut released = SimPanelState::default();
+        released.apply_start(SimStart::EstopReleased);
+        assert!(!released.estop);
+        assert!(released.estop_reset_pulse);
+        assert!(!released.power);
+        assert!(!released.power_on_pulse);
+
+        let mut powered = SimPanelState::default();
+        powered.apply_start(SimStart::Powered);
+        assert!(!powered.estop);
+        assert!(powered.power);
+        assert!(powered.power_on_pulse);
+        assert!(!powered.power_off_pulse);
+
+        // A cold cabinet keeps the latched state a real one is found in.
+        let mut cold = SimPanelState::default();
+        cold.apply_start(SimStart::Cold);
+        assert!(cold.estop);
+        assert!(!cold.power);
+        assert!(!cold.estop_reset_pulse);
+    }
+
+    #[test]
+    fn the_ready_environment_variable_names_the_starting_point() {
+        assert_eq!(SimStart::from_value("estop"), SimStart::EstopReleased);
+        assert_eq!(SimStart::from_value(" power "), SimStart::Powered);
+        assert_eq!(SimStart::from_value(""), SimStart::Cold);
+        assert_eq!(SimStart::from_value("ready"), SimStart::Cold);
+    }
 
     #[test]
     fn simulator_exposes_one_hot_mode_and_home_mapping() {

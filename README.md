@@ -46,10 +46,18 @@ cargo build --release
 ./scripts/start-sim.sh          # foreground; Ctrl+C stops the session
 ./scripts/start-sim.sh --detach # background
 ./scripts/stop-sim.sh
+
+# ready to run: released E-stop, powered on, homed, demo part loaded, window
+# floated at 1280x720 for Hyprland
+./scripts/start-sim.sh --detach --release-estop --power-on --home --load --float
 ```
 
 `start-sim.sh` launches a real LinuxCNC process with the in-repo simulation
-HAL (`hal/rio_sim.hal`) and the LiNC HMI/panel pair. The HMI enforces a minimum 1280×720 window,
+HAL (`hal/rio_sim.hal`) and the LiNC HMI/panel pair. The cabinet still boots the
+way a real one is found — E-stop latched, power off — unless you ask for more:
+`--release-estop`, `--power-on`, `--home`, `--load [FILE]` and `--float` each
+imply the step before, because the E-stop mushroom and POWER ON belong to the
+panel and cannot be pressed behind its back. The HMI enforces a minimum 1280×720 window,
 scales proportionally above it, and preserves the SVG font ratios. `linc --check-config --config configs/baiermill.toml` validates
 a profile, its LinuxCNC INI and safety policy without opening the display or
 HAL.
@@ -235,6 +243,7 @@ LiNC/
 ├── scripts/
 │   ├── start-sim.sh
 │   ├── start-panel-sim.sh
+│   ├── sim-ready.py       # start-up steps the launcher waits for
 │   └── stop-sim.sh
 ├── tools/
 │   └── generate_help.py

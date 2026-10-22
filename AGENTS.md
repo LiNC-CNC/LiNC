@@ -28,6 +28,9 @@ scripts/build-deb.sh                        # Debian packages, amd64 + arm64
 - `lathe-sim.toml` is expected to fail `--check-config` until its tool table has `P`; that is the turret guard.
 - `./scripts/start-sim.sh` (`--detach`; stop with `./scripts/stop-sim.sh`) runs `linuxcnc configs/sim.ini` from `configs/`, exports
   `LINC_CONFIG=configs/sim.toml`, builds only when a release binary is missing, and needs `DISPLAY`/`WAYLAND_DISPLAY`.
+  `--release-estop`, `--power-on`, `--home`, `--load [FILE]`, `--float` bring the session up ready; the E-stop and POWER ON keys
+  travel as `LINC_SIM_READY` to the panel (the HAL `loadusr` line cannot take the flag), and `scripts/sim-ready.py` does the rest
+  (wait for the controller, home, open the program, float the window under Hyprland).
 - Standalone, no LinuxCNC or HAL. Panel and HMI must share `LINC_SIM_IPC`:
 
 ```bash

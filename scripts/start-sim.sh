@@ -4,6 +4,17 @@
 #   ./scripts/start-sim.sh                 foreground (Ctrl+C stops LinuxCNC)
 #   ./scripts/start-sim.sh --detach        background, PID in $XDG_RUNTIME_DIR/linc/sim.pid
 #
+# Optional start-up, in this order (each step implies the one before it):
+#   --release-estop   start the simulated cabinet with the E-stop released
+#   --power-on        and with POWER ON pressed, so the machine is on
+#   --home            home every axis
+#   --load [FILE]     load a program; FILE defaults to the demo mill program
+#   --float           float the HMI window under Hyprland at 1280x720
+#
+# The E-stop and POWER ON keys are panel inputs, so they are asked of the panel
+# (`LINC_SIM_READY`) rather than pressed behind its back; start-sim.sh then runs
+# scripts/sim-ready.py for the steps that need the controller.
+#
 # LinuxCNC loads the simulation's software FPGA HAL (hal/rio_sim.hal) and the
 # LiNC panel service. LiNC is the [DISPLAY] program; linc-panel is the CNC
 # control panel window.
@@ -46,9 +57,45 @@ if [[ ! -x "$BIN" || ! -x "$PANEL_BIN" ]]; then
 fi
 
 DETACH=0
-if [[ "${1:-}" == "--detach" ]]; then
-    DETACH=1
+RELEASE_ESTOP=0
+POWER_ON=0
+HOME_AXES=0
+LOAD_PROGRAM=""
+FLOAT_WINDOW=0
+READY_TIMEOUT="${LINC_READY_TIMEOUT:-60}"
+ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --detach) DETACH=1 ;;
+        --release-estop) RELEASE_ESTOP=1 ;;
+        --power-on) POWER_ON=1 ;;
+        --home) HOME_AXES=1 ;;
+        --load)
+            LOAD_PROGRAM="$ROOT/configs/gcode/linc-demo-mill.ngc"
+            # An optional path: `--load part.ngc`, or nothing for the demo.
+            if [[ -n "${2:-}" && "${2:0:1}" != "-" ]]; then
+                LOAD_PROGRAM="$2"
+                shift
+            fi
+            ;;
+        --load=*) LOAD_PROGRAM="${1#--load=}" ;;
+        --float) FLOAT_WINDOW=1 ;;
+        --timeout) READY_TIMEOUT="${2:?--timeout needs seconds}"; shift ;;
+        *) ARGS+=("$1") ;;
+    esac
     shift
+done
+# The power-up sequence only makes sense whole: POWER ON releases the mushroom
+# (as the panel's own key does), and homing or loading needs the machine on.
+(( HOME_AXES )) && POWER_ON=1
+[[ -n "$LOAD_PROGRAM" ]] && POWER_ON=1
+(( POWER_ON )) && RELEASE_ESTOP=1
+if (( RELEASE_ESTOP )); then
+    if (( POWER_ON )); then
+        export LINC_SIM_READY=power
+    else
+        export LINC_SIM_READY=estop
+    fi
 fi
 
 export LINC_CONFIG="$PROFILE"
@@ -92,8 +139,23 @@ fi
 # start from there so a relative path in this script matches.
 cd "$ROOT/configs"
 
+# The steps that need the controller, once it is up. LinuxCNC's [DISPLAY] starts
+# the HMI, so the window exists a few seconds after the process does; sim-ready
+# waits for it.
+sim_ready() {
+    local args=(--timeout "$READY_TIMEOUT")
+    (( POWER_ON )) && args+=(--on)
+    (( HOME_AXES )) && args+=(--home)
+    [[ -n "$LOAD_PROGRAM" ]] && args+=(--load "$LOAD_PROGRAM")
+    (( FLOAT_WINDOW )) && args+=(--float)
+    if (( ${#args[@]} == 2 )); then
+        return 0
+    fi
+    python3 "$SCRIPT_DIR/sim-ready.py" "${args[@]}"
+}
+
 if (( DETACH )); then
-    nohup linuxcnc "$INI" "$@" >"$LOG_FILE" 2>&1 &
+    nohup linuxcnc "$INI" "${ARGS[@]}" >"$LOG_FILE" 2>&1 &
     PID=$!
     echo "$PID" >"$PID_FILE"
     sleep 2
@@ -110,7 +172,20 @@ if (( DETACH )); then
     echo "  display: $LINC_PID_FILE"
     echo "  log:     $LOG_FILE"
     echo "  stop:    $SCRIPT_DIR/stop-sim.sh"
+    if (( RELEASE_ESTOP || FLOAT_WINDOW )); then
+        # The session is in the background, so its log is the only place these
+        # steps will be read.
+        if ! sim_ready 2>&1 | tee -a "$LOG_FILE"; then
+            echo "simulation started, but the ready steps failed; see $LOG_FILE" >&2
+            exit 1
+        fi
+    fi
 else
     trap '"$SCRIPT_DIR/stop-sim.sh"' EXIT INT TERM
-    linuxcnc "$INI" "$@"
+    if (( RELEASE_ESTOP || FLOAT_WINDOW )); then
+        # linuxcnc blocks in the foreground, so the ready steps run beside it
+        # and report to this terminal.
+        sim_ready &
+    fi
+    linuxcnc "$INI" "${ARGS[@]}"
 fi
