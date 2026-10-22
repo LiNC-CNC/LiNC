@@ -813,7 +813,13 @@ fn draw_kind_popup(app: &mut LincApp, ui: &mut Ui, opened_now: bool) {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     for (choice_index, kind) in choices.iter().enumerate() {
                         let selected = choice_index == index;
-                        if ui.selectable_label(selected, *kind).clicked() {
+                        // Same face and size as the TYPE cells it edits, so the
+                        // popup reads as an extension of the row.
+                        let label = RichText::new(*kind)
+                            .monospace()
+                            .size(theme::font_size(11.0))
+                            .color(if selected { theme::FG } else { theme::MUTED });
+                        if ui.selectable_label(selected, label).clicked() {
                             chosen = Some(*kind);
                         }
                     }
