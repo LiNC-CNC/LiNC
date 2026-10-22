@@ -1047,21 +1047,21 @@ fn draw_axes(
         axes.push((
             "X",
             Vec2::new(length * 0.866, length * 0.5),
-            Color32::from_rgb(0xfb, 0xbf, 0x24),
+            color,
         ));
     }
     if axis_labels.iter().any(|axis| axis == "Y") || variant == MachineVariant::Mill {
         axes.push((
             "Y",
             Vec2::new(-length * 0.866, length * 0.5),
-            Color32::from_rgb(0xfb, 0xbf, 0x24),
+            color,
         ));
     }
     if axis_labels.iter().any(|axis| axis == "Z") || variant == MachineVariant::Mill {
         axes.push((
             "Z",
             Vec2::new(0.0, -length),
-            Color32::from_rgb(0xfb, 0xbf, 0x24),
+            color,
         ));
     }
     painter.circle_filled(origin_pos, 2.0, theme::MUTED);

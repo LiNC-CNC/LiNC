@@ -6,7 +6,6 @@ use linc_core::model::AxisMap;
 
 use crate::screens::common;
 use crate::shell::LincApp;
-use crate::state::Page;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
