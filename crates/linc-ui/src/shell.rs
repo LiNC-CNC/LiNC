@@ -2366,10 +2366,9 @@ impl LincApp {
         theme::separator(ui);
         ui.add_space(8.0);
         // Page-local keyboard commands live here: the bottom bar had one row and
-        // truncated the list, and the sidebar has the height. Measure before the
-        // frame, so the list gets the sidebar's remainder and the safety note
-        // under it still fits.
-        let shortcuts_height = (ui.available_height() - 52.0).max(80.0);
+        // truncated the list, and the sidebar has the height. The list takes the
+        // sidebar's remainder, less the frame's own margins and header.
+        let shortcuts_height = (ui.available_height() - 32.0).max(80.0);
         let shortcuts = self.key_hints();
         if !shortcuts.is_empty() {
         Frame::new()
@@ -2412,13 +2411,6 @@ impl LincApp {
                     });
             });
         }
-        ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
-            ui.label(
-                RichText::new("NO ON-SCREEN\nMACHINE CONTROLS")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-        });
     }
 
     /// Keyboard commands available on the current page, as `(key, action)`
