@@ -32,7 +32,11 @@ pub mod theme {
     /// The segment of the line highlighted in the G-code pane. Yellow, so it is
     /// distinct from the cut path's blue and the live trail's green.
     pub const CURRENT: Color32 = Color32::from_rgb(0xf7, 0xd7, 0x4a);
-    pub const STOCK_FILL: Color32 = Color32::from_rgba_premultiplied(0x4a, 0x50, 0x57, 0x14);
+    pub fn dim(color: Color32, alpha: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
+}
+
+pub const STOCK_FILL: Color32 = Color32::from_rgba_premultiplied(0x4a, 0x50, 0x57, 0x14);
     pub const STOCK_EDGE: Color32 = Color32::from_rgb(0x5a, 0x62, 0x6b);
 }
 
@@ -918,10 +922,13 @@ fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bo
     let min = bounds.min;
     let max = bounds.max;
     let size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
-    let largest = size[0].max(size[1]).max(size[2]).max(1.0);
-    let gap = (largest * 0.05).max(0.5);
-    let glyph = (largest * 0.09).clamp(1.5, 14.0);
-    let color = theme::MUTED;
+    // Annotation size in pixels, converted to model units, so the dimensions
+    // stay readable at any zoom the way a drawing's text does.
+    let pixels_per_unit = (projection.scale * projection.zoom).max(1e-6) as f64;
+    let glyph = 18.0 / pixels_per_unit;
+    let gap = 12.0 / pixels_per_unit;
+    // Same family as the box outline, bright enough to read on the dark graph.
+    let color = theme::dim(theme::CYAN, 190);
     let mid_x = min[0] + size[0] * 0.5;
     let mid_y = min[1] + size[1] * 0.5;
     let mid_z = min[2] + size[2] * 0.5;
@@ -939,9 +946,9 @@ fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bo
     dimension_label(
         painter,
         projection,
-        [mid_x, min[1], min[2] - gap - glyph * 0.35],
+        [mid_x, min[1] - gap * 1.4, min[2] - gap],
         [1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0],
+        [0.0, 1.0, 0.0],
         glyph,
         &format!("{:.1}", size[0]),
         color,
@@ -960,9 +967,9 @@ fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bo
     dimension_label(
         painter,
         projection,
-        [min[0] - gap * 2.0 - glyph * 0.2, mid_y, min[2] - gap],
+        [min[0] - gap * 1.4, mid_y, min[2] - gap],
         [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0],
         glyph,
         &format!("{:.1}", size[1]),
         color,
@@ -981,8 +988,8 @@ fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bo
     dimension_label(
         painter,
         projection,
-        [min[0] - gap * 2.0 - glyph * 0.2, min[1] - gap, mid_z],
-        [0.0, 1.0, 0.0],
+        [min[0] - gap * 1.4, min[1] - gap, mid_z],
+        [1.0, 0.0, 0.0],
         [0.0, 0.0, 1.0],
         glyph,
         &format!("{:.1}", size[2]),
