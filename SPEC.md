@@ -399,15 +399,18 @@ Default page. The layout is selected by `machine.gui`.
   the program alone — the tool and the live trail are excluded, since a far
   marker would shrink the part — and re-fits on load and on every view switch,
   leaving a manual zoom/pan alone in between.
-- The program bounds **and the machine envelope** are **off by default** and
-  `Ctrl+B` shows or hides both together. When shown, they are solid and faint —
-  never dashed, because the G0 path is dashed — and the program box is marked
-  like a technical drawing: a dimension line outside each near face, witness
-  lines from the corners, arrowheads at the ends, the X/Y/Z length in the middle
-  and the work coordinate of each end beside its arrow. The text is Hershey
-  stroke geometry (the AXIS font) laid into the plane it measures — X and Y flat
-  in XY, Z in XZ — so the camera projects it with the part. The old PROGRAM and
-  MACHINE text labels are gone; the box geometry says which is which. The stock block is fully transparent by
+- `Ctrl+B` cycles what the toolpath draws: (1) the program dimensions alone —
+  the default — (2) plus the machine envelope, (3) plus the program box outline,
+  (4) everything off, then back to (1). The position is saved in the preferences,
+  so it survives a restart. When drawn, the boxes are solid and faint, never
+  dashed, because the G0 path is dashed.
+- The program bounds are marked like a technical drawing: a dimension line
+  outside each near face, witness lines from the corners, arrowheads at the ends,
+  the X/Y/Z length in the middle and the work coordinate of each end beside its
+  arrow. The text is Hershey stroke geometry (the AXIS font) laid into the plane
+  it measures — X and Y flat in XY, Z in YZ — so the camera projects it with the
+  part. There are no PROGRAM or MACHINE captions; the geometry says which is
+  which. The stock block is fully transparent by
   default (`toolpath.stock_alpha = 0`) and configurable up to opaque.
 - Program card, feed/spindle-load gauges, machine health and alarms.
 - ATC state in Tools/Diagnostics; mill tool table uses orientation and, only
