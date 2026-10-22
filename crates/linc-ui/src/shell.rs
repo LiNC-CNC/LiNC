@@ -385,7 +385,10 @@ impl LincApp {
             probe: ProbeUi::new(probe_params, profile.config.probe.wcs.clone()),
             mdi: MdiUi::new(profile.config.mdi.quick_commands.clone()),
             help: HelpUi::default(),
-            files: FilesUi::new(profile.machine_ini.program_prefix.clone()),
+            files: FilesUi::new(
+                profile.machine_ini.program_prefix.clone(),
+                profile.config.files.show_parent_above_root,
+            ),
             homing_return_page: start_page,
             manual: ManualUi {
                 view: if profile.variant == MachineVariant::Lathe {
@@ -3115,15 +3118,53 @@ impl LincApp {
                     ui.label(format!("{name} already exists in the destination. Replace it atomically?"));
                     ui.add_space(12.0);
                     ui.horizontal(|ui| {
-                        if theme::danger_button(ui, "OVERWRITE", true).clicked() {
+                        let replace = theme::danger_button(ui, "OVERWRITE", true);
+                        if replace.clicked() {
                             overwrite = Some(true);
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
-                        if focus_default {
-                            cancel.request_focus();
-                        }
                         if cancel.clicked() {
                             overwrite = Some(false);
+                        }
+                        // The dialog owns the keyboard: arrows flip between the
+                        // two choices instead of walking out to the page behind.
+                        for button in [&replace, &cancel] {
+                            ui.memory_mut(|memory| {
+                                memory.set_focus_lock_filter(
+                                    button.id,
+                                    egui::EventFilter {
+                                        tab: true,
+                                        horizontal_arrows: true,
+                                        vertical_arrows: true,
+                                        escape: false,
+                                    },
+                                );
+                            });
+                        }
+                        if focus_default
+                            || (!replace.has_focus() && !cancel.has_focus())
+                        {
+                            cancel.request_focus();
+                        }
+                        let mut flip = false;
+                        ui.input_mut(|input| {
+                            for key in [
+                                egui::Key::ArrowLeft,
+                                egui::Key::ArrowRight,
+                                egui::Key::ArrowUp,
+                                egui::Key::ArrowDown,
+                            ] {
+                                if input.consume_key(egui::Modifiers::NONE, key) {
+                                    flip = true;
+                                }
+                            }
+                        });
+                        if flip {
+                            if replace.has_focus() {
+                                cancel.request_focus();
+                            } else {
+                                replace.request_focus();
+                            }
                         }
                     });
                 }

@@ -721,6 +721,12 @@ previous page.
   full path.
 - The lists are rows like the tool table: NAME/SIZE/MODIFIED header, a striped
   row per entry, the selected row's band and rim bar, and no column selection.
+- Inside a directory the list starts with a `..` row. It is selectable with the
+  arrows and `Enter` opens the parent; a single click selects it, a double click
+  opens it. At the `NC_FILES` root it is hidden, because that is where the
+  configured tree starts; `[files] show_parent_above_root = true` shows it there
+  and allows browsing above `PROGRAM_PREFIX` (loading a program still requires a
+  file inside `NC_FILES`).
 - Copy and delete selected regular files with `C`: from `NC_FILES` to USB, from
   USB to `NC_FILES`. Folder navigation only; no recursive folder copy in v1.
 - Copy requires free space, rejects symlinks/path escapes, confirms overwrite,
@@ -728,6 +734,8 @@ previous page.
 - Copy progress and errors are visible; `E` is refused while a copy is active.
 - `E` unmounts and powers off the device; never force-unmount by default. Show
   `SAFE TO REMOVE` after success.
+- The overwrite dialog keeps the keyboard on its two buttons: arrows cycle
+  between OVERWRITE and CANCEL and cannot move focus to the page behind it.
 - `N` creates a new program in the current `NC_FILES` directory, named
   `untitled.ngc` (or the next free `untitled-N.ngc`), containing a header
   comment, a modal setup line with the machine's units and the active work

@@ -306,6 +306,11 @@ pub struct FilesUi {
     pub usb_entries: Vec<FileEntry>,
     pub usb_selected: usize,
     pub usb_focused: bool,
+    /// The `..` row is selected in that pane (it is above the entries).
+    pub usb_parent_selected: bool,
+    pub nc_parent_selected: bool,
+    /// Show `..` in NC_FILES at its root; from `[files] show_parent_above_root`.
+    pub allow_parent_above_root: bool,
     /// In-place rename in one of the lists, if any.
     pub rename: Option<FileRename>,
     pub nc_root: PathBuf,
@@ -326,7 +331,7 @@ pub struct FilesUi {
 }
 
 impl FilesUi {
-    pub fn new(nc_root: PathBuf) -> Self {
+    pub fn new(nc_root: PathBuf, allow_parent_above_root: bool) -> Self {
         let mut ui = Self {
             mount_state: MountState::NoUsb,
             usb_root: None,
@@ -336,6 +341,9 @@ impl FilesUi {
             usb_entries: Vec::new(),
             usb_selected: 0,
             usb_focused: false,
+            usb_parent_selected: false,
+            nc_parent_selected: false,
+            allow_parent_above_root,
             rename: None,
             nc_root: nc_root.clone(),
             nc_current: nc_root,
@@ -357,7 +365,7 @@ impl FilesUi {
 
     pub fn refresh(&mut self) {
         self.last_refresh = Instant::now();
-        if !self.nc_current.starts_with(&self.nc_root) {
+        if !self.nc_current.starts_with(&self.nc_root) && !self.allow_parent_above_root {
             self.nc_current = self.nc_root.clone();
         }
         self.nc_entries = read_dir_entries(&self.nc_current);

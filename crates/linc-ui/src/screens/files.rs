@@ -100,6 +100,24 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     } else {
         app.files.nc_selected
     };
+    // `..` is reachable when inside the tree, and in NC_FILES at its root when
+    // `show_parent_above_root` is enabled.
+    let parent_available = current
+        .as_deref()
+        .zip(root.as_deref())
+        .map(|(current, root)| {
+            current != root
+                || (!usb
+                    && app.files.allow_parent_above_root
+                    && current.parent().is_some())
+        })
+        .unwrap_or(false);
+    let mut on_parent = parent_available
+        && if usb {
+            app.files.usb_parent_selected
+        } else {
+            app.files.nc_parent_selected
+        };
     let mut open_dir: Option<PathBuf> = None;
     let mut load: Option<PathBuf> = None;
     let mut copy_enter = false;
@@ -123,16 +141,33 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
             eject_media = true;
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-            selected = (selected + 1).min(entries.len().saturating_sub(1));
+            if on_parent {
+                if !entries.is_empty() {
+                    on_parent = false;
+                    selected = 0;
+                }
+            } else {
+                selected = (selected + 1).min(entries.len().saturating_sub(1));
+            }
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
-            selected = selected.saturating_sub(1);
+            if !on_parent {
+                if selected == 0 && parent_available {
+                    on_parent = true;
+                } else {
+                    selected = selected.saturating_sub(1);
+                }
+            }
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace) {
             up = true;
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
-            if let Some(entry) = entries.get(selected) {
+            if on_parent {
+                if let Some(parent) = current.as_deref().and_then(Path::parent) {
+                    open_dir = Some(parent.to_path_buf());
+                }
+            } else if let Some(entry) = entries.get(selected) {
                 if entry.is_dir {
                     open_dir = Some(entry.path.clone());
                 } else if usb {
@@ -145,7 +180,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
         }
         let delete_pressed = input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
             || input.consume_key(egui::Modifiers::CTRL, egui::Key::X);
-        if delete_pressed {
+        if delete_pressed && !on_parent {
             if let Some(entry) = entries.get(selected) {
                 if !entry.is_dir {
                     delete = Some(entry.path.clone());
@@ -153,32 +188,29 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
             }
         }
     });
-    if up {
-        let can_up = current
-            .as_deref()
-            .zip(root.as_deref())
-            .map(|(current, root)| current != root)
-            .unwrap_or(false);
-        if can_up {
-            if let Some(parent) = current.as_deref().and_then(Path::parent) {
-                open_dir = Some(parent.to_path_buf());
-            }
+    if up && parent_available {
+        if let Some(parent) = current.as_deref().and_then(Path::parent) {
+            open_dir = Some(parent.to_path_buf());
         }
     }
     if usb {
         app.files.usb_selected = selected;
+        app.files.usb_parent_selected = on_parent;
     } else {
         app.files.nc_selected = selected;
+        app.files.nc_parent_selected = on_parent;
     }
     if let Some(dir) = open_dir {
         if usb {
             app.files.usb_current = Some(dir.clone());
             app.files.usb_entries = crate::state::read_dir_entries(&dir);
             app.files.usb_selected = 0;
+            app.files.usb_parent_selected = false;
         } else {
             app.files.nc_current = dir.clone();
             app.files.nc_entries = crate::state::read_dir_entries(&dir);
             app.files.nc_selected = 0;
+            app.files.nc_parent_selected = false;
         }
     }
     if let Some(path) = load {
@@ -187,10 +219,10 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     if copy_enter && copy_to_nc_allowed(app) {
         copy_usb_to_nc(app);
     }
-    if copy_side {
+    if copy_side && !on_parent {
         copy_selected(app);
     }
-    if rename {
+    if rename && !on_parent {
         begin_rename(app);
     }
     if new_file {
@@ -210,6 +242,15 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
 
 /// `C`: copy the focused pane's selection to the other side.
 fn copy_selected(app: &mut LincApp) {
+    let on_parent = if app.files.usb_focused {
+        app.files.usb_parent_selected
+    } else {
+        app.files.nc_parent_selected
+    };
+    if on_parent {
+        app.toast("select a file, not the parent row", theme::WARNING);
+        return;
+    }
     if app.files.usb_focused {
         if copy_to_nc_allowed(app) {
             copy_usb_to_nc(app);
@@ -251,6 +292,15 @@ fn start_rename(
 
 fn begin_rename(app: &mut LincApp) {
     let usb = app.files.usb_focused;
+    let on_parent = if usb {
+        app.files.usb_parent_selected
+    } else {
+        app.files.nc_parent_selected
+    };
+    if on_parent {
+        app.toast("select a file, not the parent row", theme::WARNING);
+        return;
+    }
     let entry = if usb {
         app.files.usb_entries.get(app.files.usb_selected).cloned()
     } else {
@@ -383,6 +433,7 @@ fn new_program(app: &mut LincApp) {
         .position(|entry| entry.path == path)
         .unwrap_or(0);
     app.files.usb_focused = false;
+    app.files.nc_parent_selected = false;
     app.files.error = None;
     app.toast(format!("created {name}"), theme::ACCENT);
     start_rename(app, false, path, name, false);
@@ -569,11 +620,24 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
     let can_up = current
         .as_deref()
         .zip(root.as_deref())
-        .map(|(current, root)| current != root)
+        .map(|(current, root)| {
+            current != root
+                || (pane == Pane::Nc
+                    && app.files.allow_parent_above_root
+                    && current.parent().is_some())
+        })
         .unwrap_or(false);
     let parent_rows = usize::from(can_up);
+    let parent_selected = can_up
+        && if pane == Pane::Usb {
+            app.files.usb_parent_selected
+        } else {
+            app.files.nc_parent_selected
+        };
     let mut open_dir: Option<PathBuf> = None;
     let mut load_file: Option<PathBuf> = None;
+    let mut select_parent = false;
+    let mut open_parent = false;
 
     // Same shape as the tool table: a header, a striped row per entry, the
     // selected row's band and rim bar, and half a text line between rows.
@@ -618,6 +682,7 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
     let clicked = std::cell::Cell::new(None::<usize>);
     let double = std::cell::Cell::new(None::<usize>);
     let parent_clicked = std::cell::Cell::new(false);
+    let parent_double = std::cell::Cell::new(false);
     let first_rect = std::cell::Cell::new(None::<egui::Rect>);
     let last_rect = std::cell::Cell::new(None::<egui::Rect>);
 
@@ -718,6 +783,8 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
                             } else {
                                 clicked.set(Some(index));
                             }
+                        } else if double_clicked {
+                            parent_double.set(true);
                         } else {
                             parent_clicked.set(true);
                         }
@@ -777,7 +844,12 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
             }
             // One band across the row, like the tool table: the gaps between
             // cells are filled, and the rim bar is what the eye lands on.
-            if entry_index == Some(selected_row) {
+            let band_selected = if row_index == 0 && parent_rows == 1 {
+                parent_selected
+            } else {
+                entry_index == Some(selected_row) && !parent_selected
+            };
+            if band_selected {
                 if let (Some(first), Some(last)) = (first_rect.get(), last_rect.get()) {
                     let band = egui::Rect::from_min_max(
                         egui::pos2(first.left(), first.top()),
@@ -829,14 +901,47 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
     } else if let Some(index) = clicked.get() {
         selected = index;
         app.files.usb_focused = pane == Pane::Usb;
+        if pane == Pane::Usb {
+            app.files.usb_parent_selected = false;
+        } else {
+            app.files.nc_parent_selected = false;
+        }
     }
     if parent_clicked.get() {
+        select_parent = true;
+        app.files.usb_focused = pane == Pane::Usb;
+    }
+    if parent_double.get() {
+        open_parent = true;
+    }
+    if !can_up {
+        if pane == Pane::Usb {
+            app.files.usb_parent_selected = false;
+        } else {
+            app.files.nc_parent_selected = false;
+        }
+    }
+    if select_parent {
+        if pane == Pane::Usb {
+            app.files.usb_parent_selected = true;
+        } else {
+            app.files.nc_parent_selected = true;
+        }
+    }
+    if open_parent {
         if let Some(parent) = current.as_deref().and_then(Path::parent) {
-            if root
-                .as_deref()
-                .map(|root| parent.starts_with(root))
-                .unwrap_or(false)
-            {
+            let allowed = if pane == Pane::Usb {
+                root.as_deref()
+                    .map(|root| parent.starts_with(root))
+                    .unwrap_or(false)
+            } else {
+                app.files.allow_parent_above_root
+                    || root
+                        .as_deref()
+                        .map(|root| parent.starts_with(root))
+                        .unwrap_or(false)
+            };
+            if allowed {
                 open_dir = Some(parent.to_path_buf());
             }
         }
@@ -846,10 +951,12 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
             app.files.usb_current = Some(dir.clone());
             app.files.usb_entries = crate::state::read_dir_entries(&dir);
             app.files.usb_selected = 0;
+            app.files.usb_parent_selected = false;
         } else {
             app.files.nc_current = dir.clone();
             app.files.nc_entries = crate::state::read_dir_entries(&dir);
             app.files.nc_selected = 0;
+            app.files.nc_parent_selected = false;
         }
     }
     match pane {

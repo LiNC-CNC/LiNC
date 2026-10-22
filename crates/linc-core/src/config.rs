@@ -147,6 +147,10 @@ pub struct FilesConfig {
     pub load_extensions: Vec<String>,
     pub overwrite: String,
     pub copy_while_running: bool,
+    /// Show the `..` row in NC_FILES at its root, so the browser can read the
+    /// tree above PROGRAM_PREFIX. Loading is still limited to NC_FILES.
+    #[serde(default)]
+    pub show_parent_above_root: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]

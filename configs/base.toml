@@ -41,6 +41,10 @@ usb_mount_options = ["nosuid", "nodev", "noexec"]  # loader floor; cannot remove
 load_extensions = [".ngc", ".nc", ".tap", ".txt"]
 overwrite = "confirm"
 copy_while_running = false
+# NC_FILES normally stops at PROGRAM_PREFIX. Enable this to show its `..` row
+# at the root and browse (read-only) above it; loading still requires a file
+# inside NC_FILES.
+show_parent_above_root = false
 
 [probe]
 enabled = true
