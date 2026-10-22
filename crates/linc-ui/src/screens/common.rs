@@ -176,11 +176,18 @@ pub fn toolpath_header(ui: &mut Ui, view: &str, zoom: f32) {
                 .color(theme::SUCCESS),
         );
         let (marker, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-        ui.painter().circle_stroke(
-            marker.center(),
-            4.0,
-            egui::Stroke::new(1.5, linc_view::theme::TOOL),
-        );
+        // The same inverted triangle as the live tool marker, so the key reads
+        // as the tool rather than as another line style.
+        let tip = marker.center_bottom() - egui::vec2(0.0, 1.0);
+        ui.painter().add(egui::Shape::convex_polygon(
+            vec![
+                tip + egui::vec2(-4.0, -8.0),
+                tip + egui::vec2(4.0, -8.0),
+                tip,
+            ],
+            linc_view::theme::TOOL,
+            egui::Stroke::new(1.0, linc_view::theme::TOOL),
+        ));
         ui.label(
             RichText::new("TOOL")
                 .monospace()

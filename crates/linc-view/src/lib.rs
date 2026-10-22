@@ -27,6 +27,9 @@ pub mod theme {
     /// Stock envelope: a neutral grey block that stays behind the toolpath.
     /// Live toolhead marker.
     pub const TOOL: Color32 = Color32::from_rgb(0xfb, 0xbf, 0x24);
+    /// The segment of the line highlighted in the G-code pane. Yellow, so it is
+    /// distinct from the cut path's blue and the live trail's green.
+    pub const CURRENT: Color32 = Color32::from_rgb(0xf7, 0xd7, 0x4a);
     pub const STOCK_FILL: Color32 = Color32::from_rgba_premultiplied(0x4a, 0x50, 0x57, 0x3c);
     pub const STOCK_EDGE: Color32 = Color32::from_rgb(0x5a, 0x62, 0x6b);
 }
@@ -106,7 +109,7 @@ impl<'a> TrajectoryView<'a> {
             show_stock: true,
             show_selected_line: true,
             show_legend: true,
-            selected_line_color: theme::ACCENT,
+            selected_line_color: theme::CURRENT,
             height: 400.0,
             fit: false,
             axis_labels: vec!["X".into(), "Y".into(), "Z".into()],

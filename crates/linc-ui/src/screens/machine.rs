@@ -121,64 +121,10 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
             ui.spacing_mut().interact_size.y = 14.0;
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.set_max_height(height);
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("TOOLPATH")
-                        .size(theme::font_size(10.0))
-                        .strong()
-                        .color(theme::MUTED),
-                );
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new("— CUT")
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::ACCENT),
-                );
-                ui.label(
-                    RichText::new("-- RAPID")
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                ui.label(
-                    RichText::new("— LIVE")
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::SUCCESS),
-                );
-                // Tool key, matching the amber crosshair on the graph. The rest
-                // of the old legend (colours for cut, rapid, live) is already
-                // this line, and the stock box needs no key.
-                let (marker, _) =
-                    ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                ui.painter().circle_stroke(
-                    marker.center(),
-                    4.0,
-                    egui::Stroke::new(1.5, linc_view::theme::TOOL),
-                );
-                ui.label(
-                    RichText::new("TOOL")
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::FG),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(format!("ZOOM {:.1}x", app.program.graph_zoom))
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
-                    );
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(view.label())
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
-                    );
-                });
-            });
+            // One legend implementation for every toolpath card: the
+            // main window had its own copy, which is why its tool key was a
+            // circle while the others were already a triangle.
+            common::toolpath_header(ui, view.label(), app.program.graph_zoom);
             let mut zoom = app.program.graph_zoom;
             let mut pan = app.program.graph_pan;
             let mut fit = app.program.fit_requested;
