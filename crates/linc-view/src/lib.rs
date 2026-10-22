@@ -1121,10 +1121,11 @@ fn dimension_line(
     // Witness lines: from the corner the dimension measures to its line.
     painter.line_segment([a, oa], Stroke::new(0.6, theme::dim(color, 120)));
     painter.line_segment([b, ob], Stroke::new(0.6, theme::dim(color, 120)));
-    // Arrowheads at both ends, pointing outwards.
+    // Arrowheads at both ends, pointing inwards (<---> style): the legs run
+    // towards the middle so the tips meet at the witness lines.
     let direction = (ob - oa).normalized();
     let normal = Vec2::new(-direction.y, direction.x) * 3.0;
-    for (tip, sign) in [(oa, -1.0), (ob, 1.0)] {
+    for (tip, sign) in [(oa, 1.0), (ob, -1.0)] {
         painter.line_segment([tip, tip + direction * 7.0 * sign + normal], stroke);
         painter.line_segment([tip, tip + direction * 7.0 * sign - normal], stroke);
     }
