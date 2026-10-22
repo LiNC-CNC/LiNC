@@ -160,6 +160,13 @@ pub enum MachineCommand {
         index: u8,
         axes: Vec<String>,
     },
+    /// Set the current position to read `values` in work offset `index`:
+    /// `G10 L20` with those coordinates, so the controller computes the offset
+    /// from the position it holds instead of the HMI deriving it.
+    SetWorkPosition {
+        index: u8,
+        values: AxisMap<f64>,
+    },
     SetToolTableRow {
         row: ToolRow,
         expected_revision: u64,
@@ -199,6 +206,7 @@ impl MachineCommand {
             Self::SetWorkOffset { .. } => "Set work offset",
             Self::SetG92Offset { .. } => "Set G92 offset",
             Self::ZeroWorkOffset { .. } => "Zero work offset",
+            Self::SetWorkPosition { .. } => "Set work position",
             Self::RunFromLine { .. } => "Run from line",
             Self::SetToolTableRow { .. } => "Set tool table row",
             Self::ApplyProbeResult { .. } => "Apply probe result",

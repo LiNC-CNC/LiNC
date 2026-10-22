@@ -1349,6 +1349,7 @@ impl LincApp {
         let text_focused = ui.memory(|memory| {
             memory.has_focus(egui::Id::unique("linc-program-editor"))
                 || memory.has_focus(egui::Id::unique("linc-tool-cell"))
+                || memory.has_focus(egui::Id::unique("linc-offsets-dro"))
         });
         let mut nav_page = None;
         let mut escape = false;
@@ -1465,9 +1466,12 @@ impl LincApp {
             if input.consume_key(self.keymap.redo.modifiers, self.keymap.redo.key) {
                 redo = true;
             }
-            // A cell edit owns Escape: it cancels the edit rather than leaving
-            // the page.
-            if !(self.page == Page::Tools && self.tools.editing)
+            // An edit owns Escape: it cancels the edit rather than leaving the
+            // page.
+            let editing_in_place = (self.page == Page::Tools && self.tools.editing)
+                || (self.page == Page::Offsets
+                    && (self.offsets.editing || self.offsets.dro_edit.is_some()));
+            if !editing_in_place
                 && input.consume_key(self.keymap.back.modifiers, self.keymap.back.key)
             {
                 escape = true;
@@ -3264,6 +3268,27 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         let (_dir, app) = make_app(PanelMode::Edit);
         assert!(app.keymap.goto_line.modifiers.ctrl);
         assert_eq!(app.keymap.goto_line.key, egui::Key::G);
+    }
+
+    #[test]
+    fn dro_entry_sets_the_position_it_was_given() {
+        let (_dir, mut app) = make_app(PanelMode::Jog);
+        app.poll_backend();
+        app.offsets.dro_edit = Some(crate::state::DroEdit {
+            axis: "X".into(),
+            buffer: "10+2.5".into(),
+            focus: false,
+        });
+        assert!(crate::screens::offsets::commit_dro_edit(&mut app));
+        app.poll_backend();
+        let work = app
+            .snapshot
+            .positions
+            .axes
+            .get("X")
+            .map(|position| position.work)
+            .unwrap_or(f64::NAN);
+        assert!((work - 12.5).abs() < 1e-6, "DRO X shows {work}, expected 12.5");
     }
 }
 

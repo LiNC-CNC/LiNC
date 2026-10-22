@@ -806,6 +806,39 @@ impl MachineBackend for PythonBridgeBackend {
                     Duration::from_secs(5),
                 )
             }
+            MachineCommand::SetWorkPosition { index, values } => {
+                self.validate_write()?;
+                if !(1..=6).contains(&index) {
+                    return Err(MachineError::Invalid("work offset must be G54-G59".into()));
+                }
+                if values.iter().next().is_none() {
+                    return Err(MachineError::Invalid("no axes given".into()));
+                }
+                // The entered value is a work coordinate, not a machine
+                // position: with a negative offset the work reading is routinely
+                // outside the travel range, so only the axis name is checked.
+                for axis in values.iter().map(|(axis, _)| axis) {
+                    if !self
+                        .profile
+                        .machine_ini
+                        .axes
+                        .iter()
+                        .any(|config| config.name == axis)
+                    {
+                        return Err(MachineError::Invalid(format!("unknown axis {axis}")));
+                    }
+                }
+                let map: HashMap<&str, f64> =
+                    values.iter().map(|(axis, value)| (axis, *value)).collect();
+                self.request(
+                    serde_json::json!({
+                        "cmd": "set_work_position",
+                        "index": index,
+                        "values": map,
+                    }),
+                    Duration::from_secs(5),
+                )
+            }
             MachineCommand::SetG92Offset { values } => {
                 self.validate_write()?;
                 let map: HashMap<&str, f64> =

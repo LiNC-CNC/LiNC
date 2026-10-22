@@ -979,37 +979,63 @@ class Bridge:
         axes = [str(axis).upper() for axis in command.get("axes", [])]
         if not axes:
             return {"ok": False, "error": "no axes selected"}
-        blocks = [f"G10 L20 P{index} " + " ".join(f"{axis}0.0" for axis in axes)]
-        result = self.issue({"origin": "write", "blocks": blocks})
-        if result.get("ok"):
-            # The controller computes the offset, and the block is asynchronous:
-            # wait for it before reading the value back, or the old offset is
-            # what gets persisted.
+        return self.apply_work_position(index, {axis: 0.0 for axis in axes})
+
+    def set_work_position(self, command):
+        """Make the current position read the given work coordinates.
+
+        This is the DRO entry path: the operator types `X-12.5` and the position
+        must read that, so the offset is left to `G10 L20` exactly as a touch
+        off is; only the target differs.
+        """
+        index = int(command.get("index", 1))
+        values = {}
+        for axis, value in (command.get("values") or {}).items():
             try:
-                self.cmd.wait_complete(2.0)
-            except Exception:
-                pass
-            try:
-                self.stat.poll()
-                live = list(getattr(self.stat, "g5x_offset", ()) or ())
-                values = {}
-                for axis_index, axis in enumerate(self.axes):
-                    if axis in axes and axis_index < len(live):
-                        values[axis] = live[axis_index]
-                if values:
-                    # Merge: a touch off changes only the axes it names, and the
-                    # rest of that row must keep what was recorded before.
-                    self.offset_overrides.setdefault(index, {}).update(values)
-                rotation = getattr(self.stat, "rotation_xy", None)
-                if rotation is not None:
-                    self.rotation_overrides[index] = float(rotation)
-                if not self.save_parameters():
-                    return {
-                        "ok": False,
-                        "error": self.last_save_error or "could not persist the offset",
-                    }
-            except Exception as exc:
-                return {"ok": False, "error": "touch off could not be persisted: %s" % exc}
+                values[str(axis).upper()] = float(value)
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "invalid value for axis %s" % axis}
+        if not values:
+            return {"ok": False, "error": "no axes given"}
+        return self.apply_work_position(index, values)
+
+    def apply_work_position(self, index, values):
+        """`G10 L20 P<index> <axis><value>`: the position reads `values`.
+
+        The controller computes the offset from the position it holds, so the
+        HMI never has to derive one from a snapshot that may be behind.
+        """
+        parts = " ".join("%s%.6f" % (axis, value) for axis, value in values.items())
+        result = self.issue({"origin": "write", "blocks": ["G10 L20 P%d %s" % (index, parts)]})
+        if not result.get("ok"):
+            return result
+        # The block is asynchronous: wait before reading the value back, or the
+        # old offset is what gets persisted.
+        try:
+            self.cmd.wait_complete(2.0)
+        except Exception:
+            pass
+        try:
+            self.stat.poll()
+            live = list(getattr(self.stat, "g5x_offset", ()) or ())
+            merged = {}
+            for axis_index, axis in enumerate(self.axes):
+                if axis in values and axis_index < len(live):
+                    merged[axis] = live[axis_index]
+            if merged:
+                # Merge: a write changes only the axes it names, and the rest of
+                # that row must keep what was recorded before.
+                self.offset_overrides.setdefault(index, {}).update(merged)
+            rotation = getattr(self.stat, "rotation_xy", None)
+            if rotation is not None:
+                self.rotation_overrides[index] = float(rotation)
+            if not self.save_parameters():
+                return {
+                    "ok": False,
+                    "error": self.last_save_error or "could not persist the offset",
+                }
+        except Exception as exc:
+            return {"ok": False, "error": "position write could not be persisted: %s" % exc}
         return result
 
     def set_g92(self, command):
@@ -1223,6 +1249,8 @@ class Bridge:
                     result = self.set_work_offset(command)
                 elif kind == "zero_work_offset":
                     result = self.zero_work_offset(command)
+                elif kind == "set_work_position":
+                    result = self.set_work_position(command)
                 elif kind == "run_from_line":
                     result = self.run_from_line(command)
                 elif kind == "set_g92":
@@ -1376,6 +1404,28 @@ def check_offset_sync():
     print("linc_bridge selftest: live offsets are captured only after the sync")
 
 
+def check_work_position():
+    """A DRO entry must go out as `G10 L20` with the typed value."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "sim.var")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("5220\t1.000000\n5221\t0.000000\n")
+        bridge = _fake_bridge(linuxcnc.STATE_ON, {}, apply_reset=True, apply_mdi=False)
+        bridge.param_file = path
+        bridge.offset_overrides = {}
+        bridge.rotation_overrides = {}
+        # The panel/HAL checks belong to `issue`, which is exercised against a
+        # real controller; this checks the block the DRO entry produces.
+        sent = []
+        bridge.issue = lambda command: (sent.extend(command["blocks"]), {"ok": True})[1]
+        result = bridge.apply_work_position(1, {"X": 12.5})
+        assert result.get("ok"), result
+        assert sent == ["G10 L20 P1 X12.500000"], sent
+        print("linc_bridge selftest: a position entry goes out as G10 L20 with its value")
+
+
 def check_parameter_keys():
     """The file must keep its ascending order and its active-system index."""
     import tempfile
@@ -1444,6 +1494,7 @@ def selftest():
     print(f"linc_bridge selftest: {len(cases)} coordinate cases OK")
     check_offset_sync()
     check_parameter_keys()
+    check_work_position()
 
 
 if __name__ == "__main__":

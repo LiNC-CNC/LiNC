@@ -541,9 +541,14 @@ Program rules:
   leave the machine in a state neither the DRO nor a program could explain.
 - Mill: X/Y/Z and rotary offsets; lathe: X/Z geometry and wear, tool nose
   radius, tip orientation, C/Y offsets and turret station.
+- A DRO row on top: the active system's work coordinates, large, with the
+  machine coordinate small underneath. A work value is editable in place and
+  accepts arithmetic (`-12.5`, `10+2.5`); committing writes the position with
+  `G10 L20`, so the DRO then reads the entered value and the offset moves to
+  match. It is a work coordinate, so it is not checked against machine travel.
 - Current axis values and distance-to-go.
 - Read-only while running; blocked when program protect is active.
-- Edits validated against LinuxCNC limits and units.
+- Offsets edited in the table are validated against LinuxCNC limits and units.
 - A `PROBE` action opens the Touch Probe page; probing results can update the
   selected work offset only after an explicit `APPLY RESULT`.
 

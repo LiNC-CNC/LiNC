@@ -27,6 +27,8 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         common::read_only_hint(ui, reason);
     }
     ui.add_space(2.0);
+    work_position_dro(app, ui, writable);
+    ui.add_space(6.0);
     egui::ScrollArea::vertical()
         .id_salt("offsets-body")
         .max_height(ui.available_height())
@@ -62,6 +64,179 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         });
 }
 
+/// DRO cards at the top of the page: the active system's work coordinates,
+/// big, with the machine coordinate small underneath — the same shape as the
+/// live DROs elsewhere. Clicking a value edits it; the entry takes arithmetic,
+/// and committing writes the position, so the machine reports what was typed.
+fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
+    let axes = app.axes();
+    if axes.is_empty() {
+        return;
+    }
+    let active = app.snapshot.offsets.active_index;
+    let gap = 8.0;
+    let width = ((ui.available_width() - gap * (axes.len() as f32 - 1.0))
+        / axes.len() as f32)
+        .max(120.0);
+    const HEIGHT: f32 = 84.0;
+
+    handle_dro_keys(app, ui);
+
+    let mut start: Option<(String, f64)> = None;
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        for axis in &axes {
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(width, HEIGHT), egui::Sense::click());
+            let editing = app
+                .offsets
+                .dro_edit
+                .as_ref()
+                .map(|edit| edit.axis == *axis)
+                .unwrap_or(false);
+            let position = app.snapshot.positions.axes.get(axis);
+            let work = position.map(|p| p.work).unwrap_or(0.0);
+            let machine = position.map(|p| p.machine).unwrap_or(0.0);
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 6, theme::PANEL);
+            painter.rect_stroke(
+                rect,
+                6,
+                egui::Stroke::new(1.0, if editing { theme::ACCENT } else { theme::BORDER }),
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                rect.left_top() + egui::vec2(14.0, 9.0),
+                egui::Align2::LEFT_TOP,
+                axis,
+                egui::FontId::proportional(theme::font_size(13.0)),
+                theme::C3,
+            );
+            painter.text(
+                rect.left_bottom() + egui::vec2(14.0, -11.0),
+                egui::Align2::LEFT_BOTTOM,
+                format!("MACH {machine:.3}"),
+                egui::FontId::monospace(theme::font_size(9.0)),
+                theme::MUTED,
+            );
+            if editing {
+                let field = egui::Rect::from_min_max(
+                    egui::pos2(rect.left() + 10.0, rect.top() + 30.0),
+                    egui::pos2(rect.right() - 10.0, rect.top() + 60.0),
+                );
+                let mut child = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(field)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
+                let mut buffer = app
+                    .offsets
+                    .dro_edit
+                    .as_ref()
+                    .map(|edit| edit.buffer.clone())
+                    .unwrap_or_default();
+                let edit = child.add_sized(
+                    [field.width(), 28.0],
+                    egui::TextEdit::singleline(&mut buffer)
+                        // Stable id so the shell can leave keys to the field.
+                        .id(egui::Id::unique("linc-offsets-dro"))
+                        .font(egui::FontId::monospace(theme::font_size(20.0)))
+                        .margin(egui::Margin::symmetric(4, 0)),
+                );
+                if app
+                    .offsets
+                    .dro_edit
+                    .as_ref()
+                    .map(|edit| edit.focus)
+                    .unwrap_or(false)
+                {
+                    edit.request_focus();
+                    // Pre-select the value: the operator is replacing a reading,
+                    // not appending to it.
+                    let id = egui::Id::unique("linc-offsets-dro");
+                    if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(buffer.chars().count()),
+                        )));
+                        state.store(ui.ctx(), id);
+                    }
+                    if let Some(slot) = app.offsets.dro_edit.as_mut() {
+                        slot.focus = false;
+                    }
+                }
+                if edit.changed() {
+                    if let Some(slot) = app.offsets.dro_edit.as_mut() {
+                        slot.buffer = buffer;
+                    }
+                }
+            } else {
+                painter.text(
+                    rect.left_top() + egui::vec2(14.0, 32.0),
+                    egui::Align2::LEFT_TOP,
+                    theme::format_position(work, 3),
+                    egui::FontId::monospace(theme::font_size(23.0)),
+                    theme::FG,
+                );
+                if response.clicked() && writable && active.is_some() {
+                    start = Some((axis.clone(), work));
+                }
+            }
+        }
+    });
+    if let Some((axis, work)) = start {
+        app.offsets.dro_edit = Some(crate::state::DroEdit {
+            axis,
+            buffer: format!("{work:.3}"),
+            focus: true,
+        });
+    }
+}
+
+/// Enter commits the typed position, Escape drops it. Both are consumed before
+/// the field is drawn, so the number cannot be committed twice.
+fn handle_dro_keys(app: &mut LincApp, ui: &mut Ui) {
+    if app.offsets.dro_edit.is_none() {
+        return;
+    }
+    let mut commit = false;
+    let mut cancel = false;
+    ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+            commit = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+            cancel = true;
+        }
+    });
+    if commit {
+        commit_dro_edit(app);
+    } else if cancel {
+        app.offsets.dro_edit = None;
+    }
+}
+
+/// Send the typed position. `G10 L20` computes the offset from the position the
+/// machine holds, so the DRO then reads the entered value.
+pub(crate) fn commit_dro_edit(app: &mut LincApp) -> bool {
+    let Some(edit) = app.offsets.dro_edit.clone() else {
+        return false;
+    };
+    let Some(value) = crate::state::eval_expression(&edit.buffer) else {
+        app.toast("not a number or expression", theme::WARNING);
+        return false;
+    };
+    let Some(index) = app.snapshot.offsets.active_index else {
+        app.toast("no active work offset", theme::WARNING);
+        return false;
+    };
+    let mut values = AxisMap::new();
+    values.insert(edit.axis.clone(), value);
+    app.send(MachineCommand::SetWorkPosition { index, values });
+    app.offsets.dro_edit = None;
+    true
+}
+
 /// G54-G59 as an editable table, built and driven like the tool table: one band
 /// and a rim bar mark the selected row, an outline marks the cell, the arrow keys
 /// move between cells, Enter edits and Escape cancels.
@@ -85,10 +260,12 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     let (focus_rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
     let focus = ui.interact(focus_rect, focus_id, egui::Sense::focusable_noninteractive());
-    if !app.offsets.editing && !focus.has_focus() {
+    if !app.offsets.editing && app.offsets.dro_edit.is_none() && !focus.has_focus() {
         focus.request_focus();
     }
-    handle_table_keys(app, ui, &offsets, columns);
+    if app.offsets.dro_edit.is_none() {
+        handle_table_keys(app, ui, &offsets, columns);
+    }
 
     let mut selected = app.offsets.selected;
     let commit: Option<u8> = None;

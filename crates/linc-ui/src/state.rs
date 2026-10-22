@@ -681,6 +681,15 @@ pub struct OffsetDraft {
     pub rotation: String,
 }
 
+/// Inline editor for one axis of the Offsets page DRO.
+#[derive(Clone, Debug, Default)]
+pub struct DroEdit {
+    pub axis: String,
+    pub buffer: String,
+    /// Put the keyboard in the field on the next frame.
+    pub focus: bool,
+}
+
 pub struct OffsetsUi {
     pub selected: u8,
     /// Selected cell, the way the tool table tracks it: row is the index into
@@ -694,6 +703,8 @@ pub struct OffsetsUi {
     pub edit_buffer: String,
     pub error: Option<String>,
     pub revision_seen: u64,
+    /// Axis whose DRO value is being typed, if any.
+    pub dro_edit: Option<DroEdit>,
 }
 
 impl Default for OffsetsUi {
@@ -708,6 +719,7 @@ impl Default for OffsetsUi {
             editing: false,
             error: None,
             revision_seen: 0,
+            dro_edit: None,
         }
     }
 }
