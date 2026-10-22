@@ -835,6 +835,7 @@ fn io(app: &mut LincApp, ui: &mut Ui) {
             |ui| {
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "MACHINE I/O");
+                    compact_rows(ui);
                     theme::kv_row(ui, "FLOOD", on_off(app.snapshot.machine.coolant_flood));
                     theme::kv_row(ui, "MIST", on_off(app.snapshot.machine.coolant_mist));
                     theme::kv_row(ui, "LUBE", on_off(app.snapshot.machine.lube));
@@ -873,6 +874,7 @@ fn io(app: &mut LincApp, ui: &mut Ui) {
                 });
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "PANEL LEDs");
+                    compact_rows(ui);
                     ui.label(
                         RichText::new(format!("0x{:016X}", app.snapshot.panel.leds))
                             .monospace()
