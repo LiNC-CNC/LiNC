@@ -321,6 +321,7 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                     let is_selected_row = app.offsets.selected_row == row_index;
                     body.row(ROW_HEIGHT, |mut row| {
                         let (_wcs_rect, _) = row.col(|ui| {
+                            ui.add_space(WCS_TEXT_PAD);
                             // No solid selection fill here: the row band and the
                             // rim bar already mark the selection, and a blue box
                             // behind the name read as a second, contradictory
@@ -330,7 +331,7 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                                 egui::Label::new(
                                     RichText::new(format!("G{}", 53 + index))
                                         .monospace()
-                                        .size(theme::font_size(11.0))
+                                        .size(theme::font_size(12.0))
                                         .color(colour),
                                 )
                                 .sense(egui::Sense::click()),
@@ -411,6 +412,11 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     }
 }
 
+/// Air between a cell's edge and its text, so the rim bar never touches a glyph
+/// and a minus sign is not clipped.
+const WCS_TEXT_PAD: f32 = 8.0;
+const CELL_TEXT_PAD: f32 = 6.0;
+
 #[derive(Clone)]
 enum CellField {
     Axis(String),
@@ -441,6 +447,7 @@ fn cell(
             .or_insert_with(|| "0.0000".into()),
         CellField::Rotation => &mut draft.rotation,
     };
+    ui.add_space(CELL_TEXT_PAD);
     if editing {
         let response = ui.add(
             egui::TextEdit::singleline(&mut app.offsets.edit_buffer)
@@ -453,12 +460,14 @@ fn cell(
             response.request_focus();
         }
     } else {
+        // Same size as the WCS name, and clear of the table edge so a minus
+        // sign cannot be clipped by the cell's padding.
         let response = ui.add_enabled(
             writable,
             egui::Label::new(
                 RichText::new(text.as_str())
                     .monospace()
-                    .size(theme::font_size(11.0))
+                    .size(theme::font_size(12.0))
                     .color(theme::FG),
             )
             .sense(egui::Sense::click()),
