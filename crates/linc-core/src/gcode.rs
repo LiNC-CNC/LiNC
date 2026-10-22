@@ -702,7 +702,6 @@ pub fn parse_preview(
     let mut tool: Option<u16> = None;
     let mut wcs = "G54".to_string();
     let mut units = "G21".to_string();
-    let mut first_point = current_position;
     let mut saw_motion = false;
     let mut line_count = 0;
 
@@ -885,10 +884,7 @@ pub fn parse_preview(
             }
         }
 
-        if !saw_motion {
-            first_point = position;
-            saw_motion = true;
-        }
+        saw_motion = true;
 
         let start = position;
         let mut segment = PathSegment {
@@ -936,14 +932,13 @@ pub fn parse_preview(
     }
 
     preview.line_count = line_count;
+    // Destination points only: the first segment starts at the tool's position
+    // when the program was parsed, and including it made the program bounds (and
+    // the stock) stretch out to wherever the tool happened to be, then shrink as
+    // it moved in. The approach line is still drawn; it just does not define the
+    // part's extents.
     preview.bounds = if saw_motion {
-        Bounds3::from_points(
-            preview
-                .segments
-                .iter()
-                .flat_map(|segment| [segment.start, segment.end])
-                .chain([first_point]),
-        )
+        Bounds3::from_points(preview.segments.iter().map(|segment| segment.end))
     } else {
         None
     };
@@ -1031,6 +1026,38 @@ mod tests {
             .find(|token| token.kind == TokenKind::Comment)
             .unwrap();
         assert_eq!(comment.display(), "(Rough Pass)");
+    }
+
+    #[test]
+    fn the_demo_program_has_sane_bounds() {
+        let text = include_str!("../assets/demo_mill.ngc");
+        let preview = parse_preview(
+            text,
+            &["X".into(), "Y".into(), "Z".into()],
+            None,
+            [0.0, 0.0, 0.0],
+        );
+        println!("bounds = {:?}", preview.bounds);
+        println!("segments = {}", preview.segments.len());
+        let bounds = preview.bounds.expect("bounds");
+        assert!(bounds.size()[0] > 100.0, "{bounds:?}");
+    }
+
+    #[test]
+    fn the_program_bounds_ignore_where_the_tool_was() {
+        // The tool stands far away; the program only reaches X20 Y10 Z-2. The
+        // bounds must describe the part, not the approach from the tool.
+        let preview = parse_preview(
+            "G21 G90\nG0 X10 Y5 Z0\nG1 X20 Y10 Z-2 F100\n",
+            &["X".into(), "Y".into(), "Z".into()],
+            None,
+            [500.0, -400.0, 300.0],
+        );
+        let bounds = preview.bounds.expect("bounds");
+        assert!(bounds.max[0] <= 20.0 + 1e-6, "{bounds:?}");
+        assert!(bounds.max[1] <= 10.0 + 1e-6, "{bounds:?}");
+        assert!(bounds.min[2] >= -2.0 - 1e-6, "{bounds:?}");
+        assert!(bounds.min[0] >= 10.0 - 1e-6, "{bounds:?}");
     }
 
     #[test]

@@ -30,7 +30,7 @@ pub mod theme {
     /// The segment of the line highlighted in the G-code pane. Yellow, so it is
     /// distinct from the cut path's blue and the live trail's green.
     pub const CURRENT: Color32 = Color32::from_rgb(0xf7, 0xd7, 0x4a);
-    pub const STOCK_FILL: Color32 = Color32::from_rgba_premultiplied(0x4a, 0x50, 0x57, 0x3c);
+    pub const STOCK_FILL: Color32 = Color32::from_rgba_premultiplied(0x4a, 0x50, 0x57, 0x14);
     pub const STOCK_EDGE: Color32 = Color32::from_rgb(0x5a, 0x62, 0x6b);
 }
 
@@ -118,6 +118,10 @@ pub struct TrajectoryView<'a> {
     pub selected_line_color: Color32,
     pub height: f32,
     pub fit: bool,
+    /// Keep the view framed on the program until the operator pans or zooms. A
+    /// one-shot fit is computed for one rect; when the card's rect is not final
+    /// yet (first frame, resize) that pan puts the part outside the real card.
+    pub auto_fit: bool,
     pub axis_labels: Vec<String>,
 }
 
@@ -153,6 +157,7 @@ impl<'a> TrajectoryView<'a> {
             selected_line_color: theme::CURRENT,
             height: 400.0,
             fit: false,
+            auto_fit: false,
             axis_labels: vec!["X".into(), "Y".into(), "Z".into()],
         }
     }
@@ -360,7 +365,14 @@ fn fit_zoom_pan(
 /// Draw the toolpath graph. `TrajectoryView::fit` requests a one-shot fit;
 /// zoom/pan are mutated in place so the caller can persist them.
 pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
-    let desired = Vec2::new(ui.available_width(), view.height.max(120.0));
+    // The first frame of a page can report an unbounded card, and a fit computed
+    // for that rect leaves a pan that puts the part outside the real one. Clamp
+    // to the viewport so a fit is always computed for a size the screen can hold.
+    let screen = ui.ctx().input(|input| input.viewport_rect());
+    let desired = Vec2::new(
+        ui.available_width().min(screen.width().max(320.0)),
+        view.height.max(120.0).min(screen.height().max(120.0)),
+    );
     let (rect, response) = ui.allocate_exact_size(desired, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, CornerRadius::same(6), theme::SURFACE);
@@ -375,6 +387,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         let scroll = ui.input(|input| input.smooth_scroll_delta.y);
         if scroll.abs() > 0.0 {
             view.zoom = (view.zoom * (1.0 + scroll * 0.002)).clamp(0.05, 40.0);
+            view.auto_fit = false;
         }
     }
     // Blender-style navigation: the middle button orbits, Shift+middle pans, and
@@ -383,6 +396,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     if response.dragged_by(egui::PointerButton::Middle) {
         let delta = response.drag_delta();
         let shift = ui.input(|input| input.modifiers.shift);
+        view.auto_fit = false;
         if shift || view.view != ViewMode::Iso3d {
             view.pan += delta;
         } else {
@@ -398,9 +412,11 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         view.zoom = 1.0;
         view.pan = Vec2::ZERO;
         view.fit = true;
+        view.auto_fit = true;
     }
     if response.dragged_by(egui::PointerButton::Primary) {
         view.pan += response.drag_delta();
+        view.auto_fit = false;
     }
 
     let mut bounds = view.preview.bounds.unwrap_or(Bounds3 {
@@ -429,8 +445,13 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     // pan instead of moving the reference, so loading a program changes what is
     // drawn, not where the view is looking.
     let reference = view.machine_bounds.unwrap_or(bounds);
-    if view.fit {
+    // The first frame of a layout can report an unbounded card; a fit computed
+    // for that rect leaves a pan that puts the part outside the real one. Wait
+    // for a rect the screen can actually hold, then fit once.
+    let plausible = rect.width() <= screen.width() + 1.0 && rect.height() <= screen.height() + 1.0;
+    if (view.fit || view.auto_fit) && plausible {
         view.fit = false;
+        view.auto_fit = true;
         // Frame the program, and only the program: the tool and the live trail
         // can be far from the part, and including them shrank the part to make
         // room for a marker. With nothing loaded frame the machine envelope
@@ -577,6 +598,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     if view.show_program_bounds {
         if let Some(program) = view.preview.bounds {
             draw_bounds(&painter, &projection, program, theme::CYAN, 1.0, true);
+            draw_bounds_dimensions(&painter, &projection, program);
             if let Some(label) = view_label(view.view, program) {
                 painter.text(
                     projection.project(label.0),
@@ -876,6 +898,75 @@ fn stock_bounds(program: &Bounds3) -> Option<Bounds3> {
 
 /// Translucent solid for the stock envelope: the three visible faces of the
 /// box, so it reads as a block rather than a wireframe.
+/// Dimension lines along the program bounds: X on the near bottom edge, Y beside
+/// it and Z up the near vertical edge, each labelled with its length in program
+/// units.
+fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bounds3) {
+    let min = bounds.min;
+    let max = bounds.max;
+    let size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+    let font = FontId::monospace(9.0 * FONT_SCALE);
+    let color = theme::MUTED;
+    let origin = [min[0], min[1], min[2]];
+    draw_dimension(
+        painter,
+        projection,
+        origin,
+        [max[0], min[1], min[2]],
+        Vec2::new(0.0, 14.0),
+        format!("X {:.1}", size[0]),
+        font.clone(),
+        color,
+    );
+    draw_dimension(
+        painter,
+        projection,
+        origin,
+        [min[0], max[1], min[2]],
+        Vec2::new(-14.0, 10.0),
+        format!("Y {:.1}", size[1]),
+        font.clone(),
+        color,
+    );
+    draw_dimension(
+        painter,
+        projection,
+        origin,
+        [min[0], min[1], max[2]],
+        Vec2::new(16.0, 0.0),
+        format!("Z {:.1}", size[2]),
+        font,
+        color,
+    );
+}
+
+fn draw_dimension(
+    painter: &Painter,
+    projection: &Projection,
+    a: [f64; 3],
+    b: [f64; 3],
+    offset: Vec2,
+    text: String,
+    font: FontId,
+    color: Color32,
+) {
+    let pa = projection.project(a) + offset;
+    let pb = projection.project(b) + offset;
+    if (pb - pa).length() < 8.0 {
+        return;
+    }
+    painter.line_segment([pa, pb], Stroke::new(0.8, color));
+    let direction = (pb - pa).normalized();
+    let normal = Vec2::new(-direction.y, direction.x) * 3.0;
+    painter.line_segment([pa - normal, pa + normal], Stroke::new(0.8, color));
+    painter.line_segment([pb - normal, pb + normal], Stroke::new(0.8, color));
+    // A chip behind the value keeps it readable where the part or stock is.
+    let position = pa + (pb - pa) * 0.5 + normal * 2.0;
+    let rect = painter.text(position, Align2::CENTER_CENTER, &text, font.clone(), color);
+    painter.rect_filled(rect.expand(2.5), CornerRadius::same(2), theme::SURFACE);
+    painter.text(position, Align2::CENTER_CENTER, text, font, color);
+}
+
 fn draw_bounds_filled(painter: &Painter, projection: &Projection, bounds: Bounds3, fill: Color32) {
     let min = bounds.min;
     let max = bounds.max;
@@ -1142,6 +1233,24 @@ mod tests {
             let pos = projection.project(point);
             assert!(rect.contains(pos), "{pos:?} outside {rect:?}");
         }
+    }
+
+    #[test]
+    fn the_fit_for_the_demo_program_is_sane() {
+        let machine = Bounds3 {
+            min: [-367.0, -341.0, -248.0],
+            max: [2.0, 1.0, 16.0],
+        };
+        let program = Bounds3 {
+            min: [-250.0, -210.0, -6.0],
+            max: [-70.0, -70.0, 50.0],
+        };
+        let rect = Rect::from_min_max(Pos2::new(205.0, 288.0), Pos2::new(924.0, 499.0));
+        let (zoom, pan) =
+            fit_zoom_pan(machine, program, rect, ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        println!("zoom={zoom} pan={pan:?}");
+        assert!(zoom > 1.0 && zoom < 10.0, "{zoom}");
+        assert!(pan.y.abs() < rect.height(), "{pan:?}");
     }
 
     #[test]

@@ -130,6 +130,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
             let mut yaw = app.program.graph_yaw;
             let mut pitch = app.program.graph_pitch;
             let mut fit = app.program.fit_requested;
+            let mut auto_fit = app.program.graph_auto_fit;
             common::trajectory(
                 app,
                 ui,
@@ -141,6 +142,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 &mut yaw,
                 &mut pitch,
                 &mut fit,
+                &mut auto_fit,
                 Some(app.program.selected_line),
                 Some(app.snapshot.program.current_line),
                 false,
@@ -151,6 +153,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
             app.program.graph_yaw = yaw;
             app.program.graph_pitch = pitch;
             app.program.fit_requested = false;
+            app.program.graph_auto_fit = auto_fit;
             ui.horizontal(|ui| {
                 let program = if app.snapshot.program.display_name.is_empty() {
                     "NO PROGRAM".to_string()
@@ -219,6 +222,7 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                     let mut yaw = app.program.graph_yaw;
                     let mut pitch = app.program.graph_pitch;
                     let mut fit = app.program.fit_requested;
+                    let mut auto_fit = app.program.graph_auto_fit;
                     common::trajectory(
                         app,
                         ui,
@@ -230,6 +234,7 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                         &mut yaw,
                         &mut pitch,
                         &mut fit,
+                        &mut auto_fit,
                         Some(app.program.selected_line),
                         Some(app.snapshot.program.current_line),
                         false,

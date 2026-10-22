@@ -819,6 +819,7 @@ pub fn trajectory(
     yaw: &mut f32,
     pitch: &mut f32,
     fit: &mut bool,
+    auto_fit: &mut bool,
     selected_line: Option<usize>,
     current_line: Option<usize>,
     // Legends name the colours; a thumbnail too small to read them omits it.
@@ -848,6 +849,7 @@ pub fn trajectory(
     view.yaw = *yaw;
     view.pitch = *pitch;
     view.fit = *fit;
+    view.auto_fit = *auto_fit;
     view.selected_line = selected_line;
     view.current_line = current_line;
     view.axis_labels = app.axes();
@@ -861,6 +863,7 @@ pub fn trajectory(
     *yaw = view.yaw;
     *pitch = view.pitch;
     *fit = view.fit;
+    *auto_fit = view.auto_fit;
     response
 }
 
@@ -1115,6 +1118,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
         let mut yaw = app.manual.yaw;
         let mut pitch = app.manual.pitch;
         let mut fit = app.manual.fit;
+        let mut auto_fit = app.manual.auto_fit;
         trajectory(
             app,
             ui,
@@ -1126,6 +1130,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
             &mut yaw,
             &mut pitch,
             &mut fit,
+            &mut auto_fit,
             None,
             Some(current_line),
             false,
@@ -1136,6 +1141,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
         app.manual.yaw = yaw;
         app.manual.pitch = pitch;
         app.manual.fit = fit;
+        app.manual.auto_fit = auto_fit;
     });
 }
 

@@ -258,6 +258,7 @@ fn offset_preview(app: &mut LincApp, ui: &mut Ui, height: f32) {
     let mut yaw = app.offsets.preview_yaw;
     let mut pitch = app.offsets.preview_pitch;
     let mut fit = app.offsets.preview_fit;
+    let mut auto_fit = app.offsets.preview_auto_fit;
     common::trajectory(
         app,
         ui,
@@ -269,6 +270,7 @@ fn offset_preview(app: &mut LincApp, ui: &mut Ui, height: f32) {
         &mut yaw,
         &mut pitch,
         &mut fit,
+        &mut auto_fit,
         None,
         None,
         false,
@@ -279,6 +281,7 @@ fn offset_preview(app: &mut LincApp, ui: &mut Ui, height: f32) {
     app.offsets.preview_yaw = yaw;
     app.offsets.preview_pitch = pitch;
     app.offsets.preview_fit = fit;
+    app.offsets.preview_auto_fit = auto_fit;
 }
 
 /// The selected system's origin, taken from the draft so an edit previews as it

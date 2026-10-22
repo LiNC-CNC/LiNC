@@ -520,6 +520,8 @@ pub struct ProgramUi {
     pub graph_pitch: f32,
     pub graph_view: ViewMode,
     pub fit_requested: bool,
+    /// Keep the toolpath framed on the program until the operator pans/zooms.
+    pub graph_auto_fit: bool,
     pub follow_current: bool,
     pub focus_editor: bool,
     pub code_scroll_to_line: Option<usize>,
@@ -551,6 +553,7 @@ impl Default for ProgramUi {
             graph_pitch: linc_view::DEFAULT_PITCH,
             graph_view: ViewMode::Iso3d,
             fit_requested: true,
+            graph_auto_fit: true,
             follow_current: true,
             focus_editor: false,
             code_scroll_to_line: None,
@@ -724,6 +727,7 @@ pub struct OffsetsUi {
     pub preview_yaw: f32,
     pub preview_pitch: f32,
     pub preview_fit: bool,
+    pub preview_auto_fit: bool,
 }
 
 impl Default for OffsetsUi {
@@ -745,6 +749,7 @@ impl Default for OffsetsUi {
             preview_yaw: linc_view::DEFAULT_YAW,
             preview_pitch: linc_view::DEFAULT_PITCH,
             preview_fit: true,
+            preview_auto_fit: true,
         }
     }
 }
@@ -928,6 +933,8 @@ pub struct ManualUi {
     pub pitch: f32,
     pub view: ViewMode,
     pub fit: bool,
+    /// Keep the live toolpath framed until the operator pans/zooms.
+    pub auto_fit: bool,
 }
 
 impl Default for ManualUi {
@@ -939,6 +946,7 @@ impl Default for ManualUi {
             pitch: linc_view::DEFAULT_PITCH,
             view: ViewMode::Iso3d,
             fit: true,
+            auto_fit: true,
         }
     }
 }
