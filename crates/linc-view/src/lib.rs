@@ -522,14 +522,17 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     // Machine bounds.
     if view.show_machine_bounds {
         if let Some(machine) = view.machine_bounds {
-            draw_bounds(&painter, &projection, machine, theme::MUTED, 1.0, true);
+            // The machine envelope is context, not content: keep it faint enough
+            // that the program, the part and the origin marks stay dominant.
+            let faint = theme::dim(theme::MUTED, 90);
+            draw_bounds(&painter, &projection, machine, faint, 0.8, true);
             if let Some(label) = view_label(view.view, machine) {
                 painter.text(
                     projection.project(label.0),
                     Align2::LEFT_TOP,
                     "MACHINE",
-                    FontId::monospace(10.0 * FONT_SCALE),
-                    theme::MUTED,
+                    FontId::monospace(9.0 * FONT_SCALE),
+                    faint,
                 );
             }
         }
