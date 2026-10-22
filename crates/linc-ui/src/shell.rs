@@ -2538,7 +2538,11 @@ impl LincApp {
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
             }
             Page::Probe => hints.push(("Arrows".into(), "SELECT")),
-            Page::Tools => hints.push(("Arrows".into(), "SELECT")),
+            Page::Tools => {
+                hints.push(("Arrows".into(), "SELECT"));
+                hints.push(("Enter".into(), "EDIT"));
+                hints.push(("T".into(), "LOAD + G43"));
+            }
             _ => {}
         }
         // Only page-specific commands are hinted. The physical navigation keys

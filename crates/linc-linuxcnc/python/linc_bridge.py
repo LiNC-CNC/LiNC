@@ -165,6 +165,10 @@ class Bridge:
         self.last_panel_heartbeat = None
         self.last_panel_heartbeat_time = 0.0
         self.pending_restore = None
+        self.pending_restore_at = 0.0
+        # Tool whose `G43 Hn` is still to be applied after its M6 completes.
+        self.pending_height_comp = None
+        self.pending_height_comp_at = 0.0
         self.last_program_path = None
         self.last_program_text = None
         self.last_program_mtime = None
@@ -265,6 +269,7 @@ class Bridge:
                     self.cmd.mdi(command)
                     if previous != linuxcnc.MODE_MDI and self.pending_restore is None:
                         self.pending_restore = previous
+                        self.pending_restore_at = time.monotonic()
                 except Exception as error:
                     self.alarms.append(
                         {
@@ -859,6 +864,7 @@ class Bridge:
                 self.cmd.mdi(block.strip())
             if previous != linuxcnc.MODE_MDI:
                 self.pending_restore = previous
+                self.pending_restore_at = time.monotonic()
             return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -1056,16 +1062,24 @@ class Bridge:
         return self.issue({"origin": "tool-change", "blocks": [f"T{tool} M6"]})
 
     def load_tool(self, command):
-        """Load a tool and apply its length offset: Tn M6 then G43 Hn.
+        """Load a tool; G43 Hn follows once the change has completed.
 
-        Both blocks go through one MDI program so G43 runs after the change
-        (and after a manual confirmation) and reads the table row that was just
-        written.
+        Two `cmd.mdi()` calls in a row race the interpreter's MDI slot, so the
+        change is issued alone and `poll_height_comp` applies the offset after
+        the handshake. Reload first: the HMI reads the table file, the
+        controller holds the copy it loaded at startup, and a `T` word for a
+        tool only in the file fails as "not in the tool table".
         """
         tool = int(command.get("tool", 0))
-        return self.issue(
-            {"origin": "tool-change", "blocks": [f"T{tool} M6", f"G43 H{tool}"]}
-        )
+        try:
+            self.cmd.load_tool_table()
+        except Exception:
+            pass
+        result = self.issue({"origin": "tool-change", "blocks": [f"T{tool} M6"]})
+        if result.get("ok"):
+            self.pending_height_comp = tool
+            self.pending_height_comp_at = time.monotonic()
+        return result
 
     def toggle_limits_override(self, command):
         """Accept the limit switches that are tripped right now.
@@ -1115,6 +1129,12 @@ class Bridge:
     def poll_restore(self):
         if self.pending_restore is None:
             return
+        # Give the queued MDI block time to start before looking at the
+        # interpreter: for a few milliseconds after `cmd.mdi()` the interpreter
+        # still reports IDLE, and restoring the panel's mode then aborts the
+        # block — a `T` word that appeared queued but never ran.
+        if time.monotonic() - self.pending_restore_at < 0.4:
+            return
         self.stat.poll()
         if int(getattr(self.stat, "interp_state", 1)) == linuxcnc.INTERP_IDLE and not getattr(self.stat, "probing", False):
             try:
@@ -1122,6 +1142,27 @@ class Bridge:
             except Exception:
                 pass
             self.pending_restore = None
+
+    def poll_height_comp(self):
+        """Apply the pending `G43 Hn` once the tool is in and the task is idle.
+
+        A short grace period covers a change to the tool already in the
+        spindle, where every state looks finished before the M6 has run.
+        """
+        if self.pending_height_comp is None:
+            return
+        if time.monotonic() - self.pending_height_comp_at < 1.5:
+            return
+        tool = self.pending_height_comp
+        self.stat.poll()
+        if int(getattr(self.stat, "tool_in_spindle", 0) or 0) != tool:
+            return
+        if int(getattr(self.stat, "interp_state", 1)) != linuxcnc.INTERP_IDLE:
+            return
+        if bool(pin_bool("iocontrol.0.tool-change", False)):
+            return
+        self.pending_height_comp = None
+        self.issue({"origin": "tool-change", "blocks": [f"G43 H{tool}"]})
 
     def offsets_match_stored(self):
         """Does the live controller hold the parameter file's active offsets?"""
@@ -1221,6 +1262,7 @@ class Bridge:
             self.cmd.wait_complete(2.0)
             if previous != linuxcnc.MODE_MDI:
                 self.pending_restore = previous
+                self.pending_restore_at = time.monotonic()
             time.sleep(0.3)
         except Exception as error:
             print("linc bridge: could not apply stored %s offsets: %s"
@@ -1245,6 +1287,7 @@ class Bridge:
         last_status = 0.0
         while True:
             self.poll_restore()
+            self.poll_height_comp()
             self.sync_work_offsets()
             now = time.time()
             if now - last_status >= 1.0 / STATUS_HZ:
@@ -1364,6 +1407,7 @@ def _fake_bridge(task_state, values, apply_reset, apply_mdi):
     bridge.offset_sync_attempts = 0
     bridge.offset_sync_next = 0.0
     bridge.pending_restore = None
+    bridge.pending_restore_at = 0.0
     index = min(max(int(round(values.get(5220, 1.0) or 1.0)), 1), 9)
     base = 5200 + index * 20
     bridge.cmd = _FakeCommand(

@@ -431,6 +431,13 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
         if let Some(error) = &app.snapshot.tool_table.error {
             ui.label(RichText::new(error).color(theme::ERROR));
         }
+        if let Some(error) = &app.tools.error {
+            ui.label(
+                RichText::new(error)
+                    .size(theme::font_size(10.0))
+                    .color(theme::ERROR),
+            );
+        }
         // The description takes what the fixed columns leave.
         let fixed: f32 = columns
             .iter()
@@ -564,6 +571,22 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     && app.tools.kind_popup_pending
                                 {
                                     pending_kind.set(Some((index, cell_rect)));
+                                }
+                                // The label only covers the glyphs; a click on
+                                // the rest of the cell selects it too, so the
+                                // row under the pointer is the row `T` loads.
+                                if !(selected_cell && editing) {
+                                    let cell_response = ui.interact(
+                                        cell_rect,
+                                        egui::Id::unique(("tool-cell", index, position)),
+                                        egui::Sense::click(),
+                                    );
+                                    if cell_response.clicked() {
+                                        clicked.set(Some((index, position)));
+                                        if column.cell == Cell::Kind {
+                                            clicked_kind.set(Some((index, cell_rect)));
+                                        }
+                                    }
                                 }
                                 let right_aligned =
                                     matches!(column.cell, Cell::Number(_) | Cell::Tool);
@@ -717,7 +740,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("ARROWS MOVE · ENTER EDITS · ESC CANCELS · T LOADS + G43")
+                RichText::new("ARROWS MOVE · ENTER EDITS · ESC CANCELS · T LOADS + G43 · + - * / ACCEPTED")
                     .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
@@ -853,10 +876,11 @@ fn parse_number(text: &str, label: &str) -> Result<Option<f64>, String> {
     if text.trim().is_empty() {
         return Ok(None);
     }
-    text.trim()
-        .parse::<f64>()
+    // Tool dimensions take the same arithmetic as the offset table: a copied
+    // `-25.15/2` can be typed straight into OFFSET or Ø.
+    crate::state::eval_expression(text)
         .map(Some)
-        .map_err(|_| format!("{label}: invalid number {text:?}"))
+        .ok_or_else(|| format!("{label}: invalid number or expression {text:?}"))
 }
 
 fn save_tool_row(app: &mut LincApp, tool: u16) {
@@ -947,6 +971,9 @@ fn save_tool_row(app: &mut LincApp, tool: u16) {
             app.tools.drafts.insert(written, draft);
         }
     }
+    // Drop the draft so the cell shows the written value, not the expression
+    // that produced it (`10+2` must read `12.0000` after Enter).
+    app.tools.drafts.remove(&written);
     app.toast(
         format!("T{written} tool table write queued"),
         theme::ACCENT,
@@ -993,4 +1020,19 @@ pub fn issue_change(app: &mut LincApp) {
     }
     app.tools.error = None;
     app.send(MachineCommand::IssueToolChange { tool });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_number;
+
+    #[test]
+    fn tool_dimensions_accept_arithmetic() {
+        assert_eq!(parse_number("10+2.5", "offset").unwrap(), Some(12.5));
+        assert_eq!(parse_number("6/2", "diameter").unwrap(), Some(3.0));
+        assert_eq!(parse_number("-(1+2)*2", "offset").unwrap(), Some(-6.0));
+        assert_eq!(parse_number("  ", "offset").unwrap(), None);
+        assert!(parse_number("1/0", "offset").is_err());
+        assert!(parse_number("12mm", "offset").is_err());
+    }
 }

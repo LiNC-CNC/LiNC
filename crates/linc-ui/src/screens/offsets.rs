@@ -590,15 +590,24 @@ fn cell(
             .or_insert_with(|| "0.0000".into()),
         CellField::Rotation => &mut draft.rotation,
     };
-    ui.add_space(CELL_TEXT_PAD);
+    // Captured before any content: the border must use this rect whether the
+    // cell shows a label or the editor, so opening it cannot change its size.
+    let cell_rect = ui.max_rect();
     if editing {
-        // Frameless and exactly the cell's height: the border below is the only
-        // frame, so opening a cell does not make it grow taller.
-        let response = ui.add_sized(
-            [
-                (ui.available_width() - CELL_TEXT_PAD).max(20.0),
-                ui.max_rect().height().max(14.0),
-            ],
+        // Place the field in an exact interior rect. `add_sized` let the field's
+        // minimum height grow the row, and the red border grew with it.
+        let inner_rect = egui::Rect::from_min_max(
+            egui::pos2(
+                cell_rect.left() + CELL_TEXT_PAD,
+                cell_rect.top() + 1.0,
+            ),
+            egui::pos2(
+                (cell_rect.right() - CELL_TEXT_PAD).max(cell_rect.left() + 24.0),
+                cell_rect.bottom() - 1.0,
+            ),
+        );
+        let response = ui.put(
+            inner_rect,
             egui::TextEdit::singleline(&mut app.offsets.edit_buffer)
                 .font(egui::TextStyle::Monospace)
                 .frame(egui::Frame::NONE)
@@ -620,6 +629,7 @@ fn cell(
             app.offsets.edit_focus = false;
         }
     } else {
+        ui.add_space(CELL_TEXT_PAD);
         // Same size as the WCS name, and clear of the table edge so a minus
         // sign cannot be clipped by the cell's padding.
         let response = ui.add_enabled(
@@ -641,9 +651,8 @@ fn cell(
     if selected {
         // Same rect and inset as the tool table: the box keeps its size when the
         // cell opens for editing, and red marks the open cell.
-        let rect = ui.max_rect();
         ui.painter().rect_stroke(
-            rect.shrink2(egui::vec2(1.0, 1.0)),
+            cell_rect.shrink2(egui::vec2(1.0, 1.0)),
             egui::CornerRadius::same(theme::SELECTION_RADIUS as u8),
             egui::Stroke::new(
                 1.5,
