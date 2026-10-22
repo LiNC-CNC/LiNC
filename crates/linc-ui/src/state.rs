@@ -403,7 +403,10 @@ impl FilesUi {
                 self.usb_free = None;
                 // Try udisks2 auto-mount in the background; a polkit prompt or
                 // D-Bus timeout must never block the UI.
-                if self.mount_job.is_none()
+                // LINC_USB_DIR names the media explicitly (tests, a fixed
+                // mount); never let udisks2 mount something else over it.
+                if std::env::var_os("LINC_USB_DIR").is_none()
+                    && self.mount_job.is_none()
                     && self.last_mount_attempt.elapsed() > Duration::from_secs(5)
                 {
                     self.last_mount_attempt = Instant::now();
@@ -426,7 +429,8 @@ impl FilesUi {
     }
 
     pub fn poll_mount(&mut self) {
-        if self.mount_job.is_none()
+        if std::env::var_os("LINC_USB_DIR").is_none()
+            && self.mount_job.is_none()
             && self.usb_root.is_none()
             && self.last_mount_attempt.elapsed() > Duration::from_secs(5)
         {

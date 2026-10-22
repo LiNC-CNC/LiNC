@@ -40,13 +40,19 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         ui.allocate_ui_with_layout(
             Vec2::new(pane_width, content_height),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| usb_pane(app, ui, content_height - 26.0),
+            |ui| {
+                ui.set_min_width(pane_width);
+                usb_pane(app, ui, content_height - 26.0);
+            },
         );
         ui.add_space(8.0);
         ui.allocate_ui_with_layout(
             Vec2::new(pane_width, content_height),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| nc_pane(app, ui, content_height - 26.0),
+            |ui| {
+                ui.set_min_width(pane_width);
+                nc_pane(app, ui, content_height - 26.0);
+            },
         );
     });
     copy_status(app, ui);
@@ -508,6 +514,7 @@ fn copy_status(app: &LincApp, ui: &mut Ui) {
 
 fn usb_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
+        ui.set_min_width(ui.available_width());
         ui.set_min_height(height);
         ui.horizontal(|ui| {
             ui.label(
@@ -578,6 +585,7 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
 
 fn nc_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
+        ui.set_min_width(ui.available_width());
         ui.set_min_height(height);
         ui.horizontal(|ui| {
             ui.label(
