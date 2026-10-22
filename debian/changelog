@@ -1,0 +1,6 @@
+linc (0.1.0) unstable; urgency=medium
+
+  * Initial packaging: linc, linc-panel and linc-mcp with the example sim
+    profile and HAL snippets.
+
+ -- LiNC contributors <linc@example.invalid>  Wed, 22 Oct 2026 12:00:00 +0700

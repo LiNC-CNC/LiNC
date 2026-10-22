@@ -1,0 +1,28 @@
+#!/usr/bin/make -f
+# Native source build: dpkg-buildpackage. For cross builds (aarch64 on amd64)
+# use scripts/build-deb.sh, which drives cargo per target and stages the tree
+# itself.
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release --locked
+
+override_dh_auto_test:
+	cargo test --release --workspace --locked
+
+override_dh_auto_install:
+	install -Dm755 target/release/linc debian/linc/usr/bin/linc
+	install -Dm755 target/release/linc-panel debian/linc/usr/bin/linc-panel
+	install -Dm755 target/release/linc-mcp debian/linc/usr/bin/linc-mcp
+	install -d debian/linc/usr/share/linc/configs debian/linc/usr/share/linc/hal
+	install -m644 configs/base.toml configs/sim.toml configs/sim.ini debian/linc/usr/share/linc/configs/
+	install -m644 hal/*.hal debian/linc/usr/share/linc/hal/
+	install -Dm644 assets/branding/linc-icon-256.png debian/linc/usr/share/icons/hicolor/256x256/apps/linc.png
+	install -Dm644 packaging/linc.desktop debian/linc/usr/share/applications/linc.desktop
+	install -Dm644 README.md debian/linc/usr/share/doc/linc/README.md
+	install -Dm644 debian/copyright debian/linc/usr/share/doc/linc/copyright
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -rf target/release target/debug

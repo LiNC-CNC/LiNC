@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=LiNC
+GenericName=CNC control panel HMI
+Comment=Touch-first HMI for LinuxCNC
+Exec=linc --config /usr/share/linc/configs/sim.toml
+Icon=linc
+Terminal=false
+Categories=Engineering;CNC;
+Keywords=cnc;linuxcnc;mill;lathe;hmi;

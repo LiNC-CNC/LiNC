@@ -1,0 +1,32 @@
+Source: linc
+Section: misc
+Priority: optional
+Maintainer: LiNC contributors <linc@example.invalid>
+Rules-Requires-Root: no
+Build-Depends: debhelper-compat (= 13), cargo, rustc, pkg-config,
+ libxkbcommon-dev, libwayland-dev, libx11-dev, libxi-dev, libxcursor-dev,
+ libxrandr-dev, libgl1-mesa-dev
+Standards-Version: 4.6.2
+Homepage: https://example.invalid/linc
+
+Package: linc
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, linuxcnc (>= 2.9) | linuxcnc-uspace
+Recommends: fonts-dejavu-core
+Suggests: linuxcnc-doc-en
+Description: touch-first HMI for LinuxCNC
+ LiNC is a Rust/egui control-panel HMI for LinuxCNC. It reads machine state and
+ issues only explicit, validated commands (MDI, probe, tool change, program and
+ offset writes); the physical CNC panel remains authoritative for mode, cycle,
+ jog, spindle and coolant.
+ .
+ The package ships three programs:
+ .
+  * linc        - the display/HMI window
+  * linc-panel  - the panel service (RS-485 or simulator), run separately so a
+                  UI crash cannot remove panel control
+  * linc-mcp    - a read-only diagnostic server for agents, over a same-user
+                  Unix socket
+ .
+ Example profiles are installed under /usr/share/linc; a machine profile is
+ supplied by the machine vendor and selected with --config or LINC_CONFIG.

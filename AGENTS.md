@@ -15,7 +15,14 @@ cargo build --release                       # all three binaries
 cargo test --workspace                      # 145 tests today
 ./target/release/linc --config configs/sim.toml --check-config
 ./target/release/linc --config configs/baiermill.toml --check-config
+scripts/build-deb.sh                        # Debian packages, amd64 + arm64
 ```
+
+- `scripts/build-deb.sh` builds one `.deb` per architecture by default. arm64
+  needs `rustup target add aarch64-unknown-linux-gnu` and
+  `gcc-aarch64-linux-gnu`; the script names them when they are missing.
+  `--stage` lays out the tree without `dpkg-deb` (useful where dpkg is absent),
+  and `debian/` still supports a native `dpkg-buildpackage`.
 
 - `--check-config` merges the profile, reads the INI, resolves paths and checks safety without a window or HAL; it fails if the INI or a `../../` sibling checkout is missing.
 - `lathe-sim.toml` is expected to fail `--check-config` until its tool table has `P`; that is the turret guard.
