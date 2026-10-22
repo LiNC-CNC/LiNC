@@ -1011,13 +1011,16 @@ fn draw_bounds_dimensions(
         &format!("{:.2}", size[1]),
         color,
     );
+    // Each end value stays at its own end: the ends of a dimension are not
+    // interchangeable, so the near coordinate belongs at the near end even
+    // though the mirrored drawing moved which end of the line appears where.
     let start_text = format!("Y{:.1}", min[1] - offset[1]);
     put_label(
         painter,
         projection,
         [
             min[0] - gap - row - text_width(&start_text, glyph) * 0.5,
-            max[1] + pad,
+            min[1] - pad,
             min[2],
         ],
         [1.0, 0.0, 0.0],
@@ -1032,7 +1035,7 @@ fn draw_bounds_dimensions(
         projection,
         [
             min[0] - gap - row - text_width(&end_text, glyph) * 0.5,
-            min[1] - pad,
+            max[1] + pad,
             min[2],
         ],
         [1.0, 0.0, 0.0],
