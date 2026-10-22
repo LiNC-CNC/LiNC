@@ -132,6 +132,10 @@ LINC_SIM_IPC=/tmp/linc/panel-sim ./target/release/linc --config configs/sim.toml
   plain Enter everywhere and broke opening a file from NC_FILES.
 - A focused editor keeps Home/End/PgUp/PgDn. Check `memory.has_focus(egui::Id::unique("linc-program-editor"))` first, and keep that id stable.
 - Use `theme` constants and the `SPEC.md §7` palette, not literals.
+- The program editor does not soft-wrap: one galley row per G-code line, so the
+  line-number gutter, the selection band and the graph's selected line agree. A
+  wrapped line occupies several rows and shifted both by the number of wrapped
+  rows above the selection.
 
 ## Keyboard reality
 

@@ -720,7 +720,24 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
                 );
             }
             if is_selected {
-                let tag = projection.project(segment.end);
+                // Mark the middle of the move, not its end: the end of one
+                // block is the start of the next, and a tag sitting on that
+                // joint looked like it labelled the following move.
+                let tag = if let Some(arc) = &segment.arc {
+                    let points = arc_points(segment, arc);
+                    projection.project(
+                        points
+                            .get(points.len() / 2)
+                            .copied()
+                            .unwrap_or(segment.end),
+                    )
+                } else {
+                    projection.project([
+                        (segment.start[0] + segment.end[0]) / 2.0,
+                        (segment.start[1] + segment.end[1]) / 2.0,
+                        (segment.start[2] + segment.end[2]) / 2.0,
+                    ])
+                };
                 painter.circle_filled(tag, 3.0, view.selected_line_color);
                 painter.text(
                     tag + Vec2::new(6.0, -6.0),

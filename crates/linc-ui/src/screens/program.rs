@@ -451,13 +451,18 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             // revision plus the highlight inputs, so a still buffer is laid
             // out once (SPEC §7.3 "cache tokens by buffer revision", §10
             // "cache text layout and visible-line tokens").
-            let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
+            // No soft wrap: a wrapped line occupies several galley rows, while
+            // the line numbers and the selection band are one row per G-code
+            // line. Wrapping therefore shifted both by the number of wrapped
+            // rows above the selection, and the graph (which uses logical line
+            // numbers) appeared one line ahead of the editor. Long lines are
+            // clipped; G-code stays one numbered row per line.
+            let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
                 let key: GalleyKey = (
                     app.program.editor.revision,
                     syntax_error_line,
                     search.clone(),
                     matches.clone(),
-                    wrap_width.to_bits(),
                     buffer.as_str().len(),
                 );
                 let cache_id = egui::Id::unique("linc-editor-galley");
@@ -474,7 +479,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     &search,
                     &matches,
                 );
-                job.wrap.max_width = wrap_width;
+                job.wrap.max_width = f32::INFINITY;
                 let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
                 ui.ctx()
                     .data_mut(|data| data.insert_temp(cache_id, (key, galley.clone())));
@@ -556,7 +561,6 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             ui.add_space(6.0);
             let _ = output.state;
             let _ = available;
-            let _ = wrap_width_unused();
         });
         if let Some(line) = scroll_to {
             let content = ui.min_rect();
@@ -572,7 +576,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
 
 /// Cache key for the editor galley: editor revision, highlight inputs, wrap
 /// width and buffer length.
-type GalleyKey = (u64, Option<usize>, String, Vec<usize>, u32, usize);
+type GalleyKey = (u64, Option<usize>, String, Vec<usize>, usize);
 
 /// The line-number gutter only changes when the line count does.
 fn number_gutter(ui: &egui::Ui, line_count: usize) -> String {
@@ -591,10 +595,6 @@ fn number_gutter(ui: &egui::Ui, line_count: usize) -> String {
     ui.ctx()
         .data_mut(|data| data.insert_temp(cache_id, (line_count, text.clone())));
     text
-}
-
-fn wrap_width_unused() -> f32 {
-    0.0
 }
 
 fn highlight_job(
