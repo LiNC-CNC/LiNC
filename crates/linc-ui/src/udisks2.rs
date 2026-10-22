@@ -89,11 +89,14 @@ pub fn mount_first_removable() -> Result<Option<String>, String> {
             .try_into()
             .map_err(|error: zbus::zvariant::Error| error.to_string())?;
         options.insert("options".into(), value);
-        let mounted: Vec<Vec<u8>> = filesystem
+        // Mount() returns one path (s), unlike the MountPoints property (aay).
+        // udisks mounts before replying, so misreading this used to report a
+        // signature error even though the filesystem mounted.
+        let mounted: String = filesystem
             .call("Mount", &options)
             .map_err(|error| error.to_string())?;
-        if let Some(point) = mounted.first() {
-            return Ok(Some(as_path(point)));
+        if !mounted.is_empty() {
+            return Ok(Some(mounted));
         }
     }
     Ok(None)
