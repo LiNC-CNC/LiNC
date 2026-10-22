@@ -204,7 +204,7 @@ impl ToolTable {
         }
         out.push_str(" Remark\n");
         for row in &self.rows {
-            out.push_str(&render_row(row, &self.columns, self.changer));
+            out.push_str(&render_row(row, &self.columns));
             out.push('\n');
         }
         out
@@ -328,7 +328,7 @@ fn parse_words(text: &str) -> std::collections::BTreeMap<ToolColumn, f64> {
     fields
 }
 
-fn render_row(row: &ToolRow, columns: &[ToolColumn], changer: ToolChangerKind) -> String {
+fn render_row(row: &ToolRow, columns: &[ToolColumn]) -> String {
     let mut out = String::new();
     for column in columns {
         let value: Option<f64> = match column {
