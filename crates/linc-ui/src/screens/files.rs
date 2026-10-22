@@ -529,13 +529,6 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                         .strong()
                         .color(theme::MUTED),
                 );
-                ui.label(
-                    RichText::new(
-                        "Auto-mount on insert via udisks2; mounts are nosuid,nodev,noexec.",
-                    )
-                    .size(theme::font_size(10.0))
-                    .color(theme::MUTED),
-                );
             }
             MountState::Mounting => {
                 ui.label(
