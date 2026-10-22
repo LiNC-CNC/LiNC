@@ -54,19 +54,23 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         .show(ui, |ui| {
             let available = ui.available_width();
             let table_width = (available * 0.62).max(420.0);
+            // The preview must end on the table's bottom edge, not on a fixed
+            // height: the table grows with the number of systems.
+            let mut table_height = PREVIEW_HEIGHT;
             ui.horizontal_top(|ui| {
                 ui.allocate_ui_with_layout(
                     egui::Vec2::new(table_width, PREVIEW_HEIGHT),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         work_offsets_card(app, ui, writable);
+                        table_height = ui.min_rect().height().max(PREVIEW_HEIGHT);
                     },
                 );
                 ui.add_space(8.0);
                 ui.allocate_ui_with_layout(
-                    egui::Vec2::new((available - table_width - 8.0).max(260.0), PREVIEW_HEIGHT),
+                    egui::Vec2::new((available - table_width - 8.0).max(260.0), table_height),
                     egui::Layout::top_down(egui::Align::Min),
-                    |ui| offset_preview(app, ui, PREVIEW_HEIGHT),
+                    |ui| offset_preview(app, ui, table_height),
                 );
             });
         });
@@ -238,7 +242,7 @@ fn offset_preview(app: &mut LincApp, ui: &mut Ui, height: f32) {
         app,
         ui,
         &preview,
-        (height - 4.0).max(140.0),
+        height.max(140.0),
         app.program.graph_view,
         &mut zoom,
         &mut pan,
@@ -249,6 +253,7 @@ fn offset_preview(app: &mut LincApp, ui: &mut Ui, height: f32) {
         None,
         None,
         false,
+        true,
         highlight,
     );
     app.offsets.preview_zoom = zoom;

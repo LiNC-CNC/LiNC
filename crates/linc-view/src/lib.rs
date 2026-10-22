@@ -133,6 +133,11 @@ pub struct TrajectoryView<'a> {
     pub stock_alpha: u8,
     pub show_selected_line: bool,
     pub show_legend: bool,
+    /// Frame everything that is drawn, not just the program: the live trail,
+    /// the tool tip and the work-zero markers. The Offsets preview uses this so
+    /// an offset far from the part is still on screen; the Machine page keeps
+    /// the program-only fit.
+    pub fit_all: bool,
     pub selected_line_color: Color32,
     pub height: f32,
     pub fit: bool,
@@ -175,6 +180,7 @@ impl<'a> TrajectoryView<'a> {
             stock_alpha: 0,
             show_selected_line: true,
             show_legend: true,
+            fit_all: false,
             selected_line_color: theme::CURRENT,
             height: 400.0,
             fit: false,
@@ -390,6 +396,31 @@ fn fit_zoom_pan(
     (zoom, (rect.center() - centre) * zoom)
 }
 
+/// The box a fit frames.
+///
+/// By default it is the program and only the program: the tool and the live
+/// trail can be far from the part, and including them shrank the part to make
+/// room for a marker. With nothing loaded the machine envelope is used instead
+/// of zooming into the millimetres around the tool. `fit_all` asks for exactly
+/// the opposite: everything drawn, so an offset far from the part still shows.
+fn fit_target(view: &TrajectoryView<'_>, reference: Bounds3) -> Bounds3 {
+    let mut target = view.preview.bounds.unwrap_or(reference);
+    if !view.fit_all {
+        return target;
+    }
+    for point in view.live_trail {
+        target.include(*point);
+    }
+    if let Some(tip) = view.tool_tip {
+        target.include(tip);
+    }
+    target.include(view.origin);
+    if let Some(highlight) = view.highlight_origin {
+        target.include(highlight);
+    }
+    target
+}
+
 /// Draw the toolpath graph. `TrajectoryView::fit` requests a one-shot fit;
 /// zoom/pan are mutated in place so the caller can persist them.
 pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
@@ -460,6 +491,12 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         bounds.include(tip);
         has_data = true;
     }
+    // The markers are actors too: they are what the operator is looking at on
+    // the Offsets page.
+    bounds.include(view.origin);
+    if let Some(highlight) = view.highlight_origin {
+        bounds.include(highlight);
+    }
     if !has_data {
         bounds = Bounds3 {
             min: [-10.0, -10.0, -10.0],
@@ -480,11 +517,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     if (view.fit || view.auto_fit) && plausible {
         view.fit = false;
         view.auto_fit = true;
-        // Frame the program, and only the program: the tool and the live trail
-        // can be far from the part, and including them shrank the part to make
-        // room for a marker. With nothing loaded frame the machine envelope
-        // instead of zooming into the millimetres around the tool.
-        let target_bounds = view.preview.bounds.unwrap_or(reference);
+        let target_bounds = fit_target(view, reference);
         let (zoom, pan) = fit_zoom_pan(
             reference,
             target_bounds,
@@ -1601,6 +1634,34 @@ mod tests {
         let (zoom, pan) = fit_zoom_pan(envelope, envelope, rect, ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
         assert!((zoom - 1.0).abs() < 1e-4, "zoom {zoom}");
         assert!(pan.length() < 1e-3, "pan {pan:?}");
+    }
+
+    #[test]
+    fn fit_all_frames_the_tool_and_the_markers() {
+        let mut preview = Preview::empty();
+        preview.bounds = Some(Bounds3 {
+            min: [-30.0, -20.0, -10.0],
+            max: [-10.0, 0.0, 0.0],
+        });
+        let reference = Bounds3 {
+            min: [-500.0, -320.0, -250.0],
+            max: [0.0, 0.0, 0.0],
+        };
+        let mut view = TrajectoryView::new(&preview, &[], MachineVariant::Mill);
+
+        let program_only = fit_target(&view, reference);
+        assert_eq!(program_only.min[0], -30.0);
+        assert_eq!(program_only.max[0], -10.0);
+
+        view.fit_all = true;
+        view.tool_tip = Some([200.0, 0.0, 0.0]);
+        view.origin = [0.0, -200.0, 0.0];
+        view.highlight_origin = Some([0.0, 0.0, 100.0]);
+        let all = fit_target(&view, reference);
+        assert_eq!(all.max[0], 200.0, "the tool is inside the fit");
+        assert_eq!(all.min[1], -200.0, "the work zero is inside the fit");
+        assert_eq!(all.max[2], 100.0, "the highlighted system is inside the fit");
+        assert_eq!(all.min[0], -30.0, "the program is still inside the fit");
     }
 
     #[test]

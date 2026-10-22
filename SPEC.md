@@ -571,7 +571,10 @@ Program rules:
 - The toolpath preview is drawn in machine space in the work system the program
   selects (`G54`..`G59.3`, first selection in the file), falling back to the
   active system when the program selects none, so the part sits at the origin it
-  will be cut from.
+  will be cut from. The preview beside the table frames every actor — the
+  program, the live trail, the tool tip and both origin markers — so an offset
+  far from the part is still on screen; its height matches the table so the two
+  panes end on the same line.
 - Tool offsets. G92 is deliberately not exposed here: it is a transient offset
   that silently shifts every WCS, and a field for it invited the operator to
   leave the machine in a state neither the DRO nor a program could explain.

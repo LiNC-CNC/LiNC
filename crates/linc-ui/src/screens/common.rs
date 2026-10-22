@@ -1022,6 +1022,8 @@ pub fn trajectory(
     current_line: Option<usize>,
     // Legends name the colours; a thumbnail too small to read them omits it.
     show_legend: bool,
+    // Frame the tool tip, trail and origin markers as well as the program.
+    fit_all: bool,
     // A second origin marker, in the current-line colour: the OFFSETS page
     // highlights the row being edited without moving the active cross.
     highlight: Option<([f64; 3], String)>,
@@ -1059,6 +1061,7 @@ pub fn trajectory(
     view.pitch = *pitch;
     view.fit = *fit;
     view.auto_fit = *auto_fit;
+    view.fit_all = fit_all;
     view.selected_line = selected_line;
     view.current_line = current_line;
     view.axis_labels = app.axes();
@@ -1342,6 +1345,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
             &mut auto_fit,
             None,
             Some(current_line),
+            false,
             false,
             None,
         );
