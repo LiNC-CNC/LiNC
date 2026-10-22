@@ -929,7 +929,7 @@ fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bo
     // stay readable at any zoom the way a drawing's text does.
     let pixels_per_unit = (projection.scale * projection.zoom).max(1e-6) as f64;
     let glyph = 18.0 / pixels_per_unit;
-    let gap = 12.0 / pixels_per_unit;
+    let gap = 22.0 / pixels_per_unit;
     // Same family as the box outline, bright enough to read on the dark graph.
     let color = theme::dim(theme::CYAN, 190);
     let mid_x = min[0] + size[0] * 0.5;
@@ -949,9 +949,9 @@ fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bo
     dimension_label(
         painter,
         projection,
-        [mid_x, min[1] - gap * 1.4, min[2] - gap],
+        [mid_x, min[1] - gap * 1.8, min[2] - gap],
         [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
         glyph,
         &format!("{:.1}", size[0]),
         color,
@@ -970,9 +970,9 @@ fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bo
     dimension_label(
         painter,
         projection,
-        [min[0] - gap * 1.4, mid_y, min[2] - gap],
+        [min[0] - gap * 1.8, mid_y, min[2] - gap],
         [0.0, 1.0, 0.0],
-        [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
         glyph,
         &format!("{:.1}", size[1]),
         color,
@@ -991,8 +991,8 @@ fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bo
     dimension_label(
         painter,
         projection,
-        [min[0] - gap * 1.4, min[1] - gap, mid_z],
-        [1.0, 0.0, 0.0],
+        [min[0] - gap * 1.8, min[1] - gap, mid_z],
+        [0.0, 1.0, 0.0],
         [0.0, 0.0, 1.0],
         glyph,
         &format!("{:.1}", size[2]),
