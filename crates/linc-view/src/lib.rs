@@ -947,7 +947,7 @@ fn draw_bounds_dimensions(
         projection,
         [
             min[0] - pad,
-            min[1] - gap + pad + row - text_width(&start_text, glyph) * 0.5,
+            min[1] - gap - row - pad - text_width(&start_text, glyph) * 0.5,
             min[2],
         ],
         [0.0, -1.0, 0.0],
@@ -962,7 +962,7 @@ fn draw_bounds_dimensions(
         projection,
         [
             max[0] + pad,
-            min[1] - gap + pad + row - text_width(&end_text, glyph) * 0.5,
+            min[1] - gap - row - pad - text_width(&end_text, glyph) * 0.5,
             min[2],
         ],
         [0.0, -1.0, 0.0],
