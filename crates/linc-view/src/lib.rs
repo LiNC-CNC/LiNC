@@ -713,7 +713,101 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         );
     }
 
+    draw_axis_triad(
+        &painter,
+        rect,
+        view.view,
+        view.yaw,
+        view.pitch,
+        &view.axis_labels,
+    );
+
     response
+}
+
+/// The axes present in `labels`, as a screen direction or `None` when the axis
+/// points straight at or away from the viewer.
+pub fn axis_triad(
+    mode: ViewMode,
+    yaw: f32,
+    pitch: f32,
+    labels: &[String],
+) -> Vec<(&'static str, Option<Vec2>)> {
+    let mut out = Vec::new();
+    for (label, unit) in [
+        ("X", [1.0f32, 0.0, 0.0]),
+        ("Y", [0.0, 1.0, 0.0]),
+        ("Z", [0.0, 0.0, 1.0]),
+    ] {
+        if !labels.iter().any(|axis| axis == label) {
+            continue;
+        }
+        let (dx, dy) = view_xy(unit, mode, yaw, pitch);
+        let length = (dx * dx + dy * dy).sqrt();
+        let direction = if length < 0.2 {
+            None
+        } else {
+            Some(Vec2::new(dx / length, dy / length))
+        };
+        out.push((label, direction));
+    }
+    out
+}
+
+/// A small X/Y/Z indicator in the graph's top-right corner.
+///
+/// The arrow direction comes from the same projection as the part, so it turns
+/// with the orbit. An axis that points at the viewer has no screen direction and
+/// is drawn as a circle instead.
+fn draw_axis_triad(
+    painter: &Painter,
+    rect: Rect,
+    mode: ViewMode,
+    yaw: f32,
+    pitch: f32,
+    labels: &[String],
+) {
+    let center = rect.right_top() + Vec2::new(-46.0, 42.0);
+    let length = 18.0;
+    let font = FontId::monospace(9.0 * FONT_SCALE);
+    for (label, direction) in axis_triad(mode, yaw, pitch, labels) {
+        match direction {
+            Some(direction) => {
+                let tip = center + direction * length;
+                painter.line_segment([center, tip], Stroke::new(1.4, theme::MUTED));
+                // Arrowhead: two short legs back from the tip.
+                let side = Vec2::new(-direction.y, direction.x) * 3.0;
+                let back = direction * 5.0;
+                painter.line_segment(
+                    [tip, tip - back + side],
+                    Stroke::new(1.4, theme::MUTED),
+                );
+                painter.line_segment(
+                    [tip, tip - back - side],
+                    Stroke::new(1.4, theme::MUTED),
+                );
+                painter.text(
+                    tip + direction * 7.0,
+                    Align2::CENTER_CENTER,
+                    label,
+                    font.clone(),
+                    theme::MUTED,
+                );
+            }
+            None => {
+                // Pointing at the viewer: a circle with a dot.
+                painter.circle_stroke(center, 4.0, Stroke::new(1.2, theme::MUTED));
+                painter.circle_filled(center, 1.2, theme::MUTED);
+                painter.text(
+                    center + Vec2::new(9.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    label,
+                    font.clone(),
+                    theme::MUTED,
+                );
+            }
+        }
+    }
 }
 
 fn view_label(mode: ViewMode, bounds: Bounds3) -> Option<([f64; 3], &'static str)> {
@@ -1014,6 +1108,33 @@ mod tests {
             let pos = projection.project(point);
             assert!(rect.contains(pos), "{pos:?} outside {rect:?}");
         }
+    }
+
+    #[test]
+    fn the_axis_triad_follows_the_orbit() {
+        let labels = vec!["X".to_string(), "Y".to_string(), "Z".to_string()];
+        // Front view: X across, Z up, Y at the viewer (a circle).
+        let triad = axis_triad(ViewMode::SideXz, DEFAULT_YAW, DEFAULT_PITCH, &labels);
+        assert_eq!(triad.len(), 3);
+        let x = triad[0].1.expect("X has a direction");
+        assert!(x.x > 0.9, "X points right: {x:?}");
+        let z = triad[2].1.expect("Z has a direction");
+        assert!(z.y < -0.9, "Z points up: {z:?}");
+        assert!(triad[1].1.is_none(), "Y is at the viewer: {:?}", triad[1]);
+
+        // Top view: X right, Y down, Z at the viewer.
+        let triad = axis_triad(ViewMode::TopXy, DEFAULT_YAW, DEFAULT_PITCH, &labels);
+        assert!(triad[0].1.unwrap().x > 0.9);
+        assert!(triad[1].1.unwrap().y < -0.9, "+Y points up on screen");
+        assert!(triad[2].1.is_none(), "Z is at the viewer: {:?}", triad[2]);
+
+        // ISO: every axis projects, none is a circle.
+        let triad = axis_triad(ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH, &labels);
+        assert!(triad.iter().all(|(_, direction)| direction.is_some()));
+
+        // An axis the machine does not have is not drawn.
+        let two = vec!["X".to_string(), "Z".to_string()];
+        assert_eq!(axis_triad(ViewMode::SideXz, DEFAULT_YAW, DEFAULT_PITCH, &two).len(), 2);
     }
 
     #[test]
