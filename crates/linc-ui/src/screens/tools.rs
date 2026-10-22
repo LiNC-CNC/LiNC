@@ -2,7 +2,7 @@
 
 use egui::{RichText, Ui};
 use linc_core::command::MachineCommand;
-use linc_core::model::{MachineVariant, ToolChangeStatus};
+use linc_core::model::MachineVariant;
 
 use crate::shell::LincApp;
 use crate::state::ToolDraft;
@@ -63,8 +63,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     let focus = ui.interact(focus_rect, focus_id, egui::Sense::focusable_noninteractive());
     // Never while a dialog or the tool-change prompt is up: this widget claims
     // focus every frame, and it was stealing it back from the dialog's buttons.
-    let overlay_open = app.modal.is_some()
-        || app.snapshot.tool_change.status == ToolChangeStatus::ManualPrompt;
+    let overlay_open = app.overlay_open();
     if !app.tools.editing
         && app.tools.kind_popup.is_none()
         && !overlay_open
@@ -309,6 +308,11 @@ fn write_refusal(app: &LincApp) -> String {
 
 /// Table keys, consumed before the table draws so no widget takes them first.
 fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
+    if app.overlay_open() {
+        // The manual-change dialog owns the keyboard: no cursor movement, no
+        // cell editor and no T underneath it.
+        return;
+    }
     if app.tools.kind_popup.is_some() {
         // The selector handles its own keys; the table must not move or edit
         // underneath it while it is open.

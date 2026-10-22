@@ -184,7 +184,7 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
 /// X, Y and Z start editing that axis's DRO, so the operator does not have to
 /// reach for the mouse to enter a coordinate.
 fn handle_axis_keys(app: &mut LincApp, ui: &mut Ui) {
-    if app.offsets.dro_edit.is_some() || app.offsets.editing {
+    if app.overlay_open() || app.offsets.dro_edit.is_some() || app.offsets.editing {
         return;
     }
     let axes = app.axes();
@@ -294,6 +294,9 @@ fn selected_highlight(app: &LincApp) -> Option<([f64; 3], String)> {
 /// Enter commits the typed position, Escape drops it. Both are consumed before
 /// the field is drawn, so the number cannot be committed twice.
 fn handle_dro_keys(app: &mut LincApp, ui: &mut Ui) {
+    if app.overlay_open() {
+        return;
+    }
     if app.offsets.dro_edit.is_none() {
         return;
     }
@@ -675,6 +678,9 @@ fn handle_table_keys(
     offsets: &[linc_core::model::WorkOffset],
     columns: usize,
 ) {
+    if app.overlay_open() {
+        return;
+    }
     if app.offsets.editing {
         let mut commit = false;
         let mut cancel = false;

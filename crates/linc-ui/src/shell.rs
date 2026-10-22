@@ -1117,6 +1117,16 @@ impl LincApp {
         }
     }
 
+    /// A dialog or the manual tool-change prompt owns the keyboard.
+    ///
+    /// Page-local key handlers must not move, edit or load the control
+    /// underneath it: the dialog's button holds focus and takes Enter.
+    pub fn overlay_open(&self) -> bool {
+        self.modal.is_some()
+            || self.snapshot.tool_change.status
+                == linc_core::model::ToolChangeStatus::ManualPrompt
+    }
+
     pub fn escape(&mut self) {
         if self.modal.is_some() {
             self.modal = None;
