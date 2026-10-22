@@ -116,9 +116,6 @@ graph_clear = "Ctrl+L"
 goto_line = "Ctrl+G"
 # Page-local to Program: start the loaded program at a line.
 program_run_from_line = "Ctrl+R"
-# Page-local to Files: copy the selection between the two panes.
-files_copy_to_usb = "Ctrl+U"
-files_copy_to_nc = "Ctrl+N"
 # The CNC keyboard has no Delete key; Ctrl+X is accepted as the same command.
 files_delete = "Delete"
 tools = "F7"

@@ -276,6 +276,19 @@ pub struct FileEntry {
     pub modified: Option<std::time::SystemTime>,
 }
 
+/// An in-place file rename: the NAME cell becomes a text field with the
+/// stem selected, like the tool table's description cell.
+#[derive(Clone, Debug)]
+pub struct FileRename {
+    /// True for the USB list, false for NC_FILES.
+    pub usb: bool,
+    pub path: PathBuf,
+    pub buffer: String,
+    /// Characters to select when the field opens (the name without extension).
+    pub select_len: usize,
+    pub focus: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MountState {
     NoUsb,
@@ -293,6 +306,8 @@ pub struct FilesUi {
     pub usb_entries: Vec<FileEntry>,
     pub usb_selected: usize,
     pub usb_focused: bool,
+    /// In-place rename in one of the lists, if any.
+    pub rename: Option<FileRename>,
     pub nc_root: PathBuf,
     pub nc_current: PathBuf,
     pub nc_entries: Vec<FileEntry>,
@@ -321,6 +336,7 @@ impl FilesUi {
             usb_entries: Vec::new(),
             usb_selected: 0,
             usb_focused: false,
+            rename: None,
             nc_root: nc_root.clone(),
             nc_current: nc_root,
             nc_entries: Vec::new(),
@@ -1352,9 +1368,6 @@ pub struct Keymap {
     pub goto_line: Binding,
     /// Page-local to Program: start the loaded program at the current line.
     pub program_run_from_line: Binding,
-    /// Page-local to Files: copy the selection between the panes.
-    pub files_copy_to_usb: Binding,
-    pub files_copy_to_nc: Binding,
     pub files_delete: Binding,
     pub tools: Binding,
     pub offsets: Binding,
@@ -1408,16 +1421,6 @@ impl Keymap {
             program_run_from_line: binding(
                 &keys.program_run_from_line,
                 Binding::new(Key::R, ctrl),
-                &mut rejected,
-            ),
-            files_copy_to_usb: binding(
-                &keys.files_copy_to_usb,
-                Binding::new(Key::U, ctrl),
-                &mut rejected,
-            ),
-            files_copy_to_nc: binding(
-                &keys.files_copy_to_nc,
-                Binding::new(Key::N, ctrl),
                 &mut rejected,
             ),
             files_delete: binding(

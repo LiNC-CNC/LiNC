@@ -19,32 +19,18 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // widget and consumes Enter and the arrows, so the file lists never saw
     // the keys.
     common::focus_anchor(ui, "files-page-focus");
-    // Page-local commands; the bottom hint row lists them.
-    ui.input_mut(|input| {
-        if input.consume_key(
-            app.keymap.files_copy_to_usb.modifiers,
-            app.keymap.files_copy_to_usb.key,
-        ) && copy_to_usb_allowed(app)
-        {
-            copy_nc_to_usb(app);
-        }
-        if input.consume_key(
-            app.keymap.files_copy_to_nc.modifiers,
-            app.keymap.files_copy_to_nc.key,
-        ) && copy_to_nc_allowed(app)
-        {
-            copy_usb_to_nc(app);
-        }
-    });
-    // Left/Right move between the panes, mirroring the two columns.
-    ui.input_mut(|input| {
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
-            app.files.usb_focused = true;
-        }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
-            app.files.usb_focused = false;
-        }
-    });
+    // Left/Right move between the panes, mirroring the two columns. A rename
+    // field owns the arrows while it is open.
+    if app.files.rename.is_none() && !app.overlay_open() {
+        ui.input_mut(|input| {
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
+                app.files.usb_focused = true;
+            }
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
+                app.files.usb_focused = false;
+            }
+        });
+    }
     handle_keys(app, ui);
     let available = ui.available_size();
     // Leave one line for the copy/error status.
@@ -71,6 +57,28 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 /// Handling them inside the list let a focused row widget take Enter and the
 /// arrows for itself, so opening a program from NC_FILES did nothing.
 fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
+    // The rename field owns Enter/Escape; typing is left to the TextEdit.
+    if app.files.rename.is_some() {
+        let mut commit = false;
+        let mut cancel = false;
+        ui.input_mut(|input| {
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+                commit = true;
+            }
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+                cancel = true;
+            }
+        });
+        if commit {
+            commit_rename(app);
+        } else if cancel {
+            app.files.rename = None;
+        }
+        return;
+    }
+    if app.overlay_open() {
+        return;
+    }
     let usb = app.files.usb_focused;
     let entries: Vec<FileEntry> = if usb {
         app.files.usb_entries.clone()
@@ -94,10 +102,26 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     };
     let mut open_dir: Option<PathBuf> = None;
     let mut load: Option<PathBuf> = None;
-    let mut copy = false;
+    let mut copy_enter = false;
+    let mut copy_side = false;
+    let mut rename = false;
+    let mut new_file = false;
+    let mut eject_media = false;
     let mut delete: Option<PathBuf> = None;
     let mut up = false;
     ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::C) {
+            copy_side = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::R) {
+            rename = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::N) {
+            new_file = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::E) {
+            eject_media = true;
+        }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
             selected = (selected + 1).min(entries.len().saturating_sub(1));
         }
@@ -113,7 +137,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
                     open_dir = Some(entry.path.clone());
                 } else if usb {
                     // Enter on a USB file copies it into NC_FILES.
-                    copy = true;
+                    copy_enter = true;
                 } else {
                     load = Some(entry.path.clone());
                 }
@@ -160,8 +184,20 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     if let Some(path) = load {
         load_selected(app, &path);
     }
-    if copy && copy_to_nc_allowed(app) {
+    if copy_enter && copy_to_nc_allowed(app) {
         copy_usb_to_nc(app);
+    }
+    if copy_side {
+        copy_selected(app);
+    }
+    if rename {
+        begin_rename(app);
+    }
+    if new_file {
+        new_program(app);
+    }
+    if eject_media {
+        eject(app);
     }
     if let Some(path) = delete {
         let label = path
@@ -170,6 +206,186 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
             .unwrap_or_else(|| path.display().to_string());
         app.modal = Some(crate::state::Modal::ConfirmDelete { path, label, usb });
     }
+}
+
+/// `C`: copy the focused pane's selection to the other side.
+fn copy_selected(app: &mut LincApp) {
+    if app.files.usb_focused {
+        if copy_to_nc_allowed(app) {
+            copy_usb_to_nc(app);
+        } else {
+            app.toast("copy to NC_FILES is blocked", theme::WARNING);
+        }
+    } else if copy_to_usb_allowed(app) {
+        copy_nc_to_usb(app);
+    } else {
+        app.toast("copy to USB is blocked", theme::WARNING);
+    }
+}
+
+/// Open the NAME cell of `path` as a text field. The stem is selected so typing
+/// replaces the name and leaves the extension.
+fn start_rename(
+    app: &mut LincApp,
+    usb: bool,
+    path: PathBuf,
+    name: String,
+    is_dir: bool,
+) {
+    let select_len = if is_dir {
+        name.chars().count()
+    } else {
+        Path::new(&name)
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().chars().count())
+            .unwrap_or_else(|| name.chars().count())
+    };
+    app.files.rename = Some(crate::state::FileRename {
+        usb,
+        path,
+        buffer: name,
+        select_len,
+        focus: true,
+    });
+}
+
+fn begin_rename(app: &mut LincApp) {
+    let usb = app.files.usb_focused;
+    let entry = if usb {
+        app.files.usb_entries.get(app.files.usb_selected).cloned()
+    } else {
+        app.files.nc_entries.get(app.files.nc_selected).cloned()
+    };
+    let Some(entry) = entry else {
+        app.toast("select a file to rename", theme::WARNING);
+        return;
+    };
+    start_rename(app, usb, entry.path, entry.name, entry.is_dir);
+}
+
+fn commit_rename(app: &mut LincApp) {
+    let Some(rename) = app.files.rename.take() else {
+        return;
+    };
+    let name = rename.buffer.trim().to_string();
+    let invalid = name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0');
+    if invalid {
+        app.files.error = Some("invalid file name".into());
+        app.files.rename = Some(crate::state::FileRename { focus: true, ..rename });
+        return;
+    }
+    let Some(parent) = rename.path.parent().map(Path::to_path_buf) else {
+        app.files.error = Some("cannot rename without a parent directory".into());
+        return;
+    };
+    let destination = parent.join(&name);
+    if destination != rename.path {
+        if destination.exists() {
+            app.files.error = Some(format!("{name} already exists"));
+            app.files.rename = Some(crate::state::FileRename { focus: true, ..rename });
+            return;
+        }
+        if let Err(error) = std::fs::rename(&rename.path, &destination) {
+            app.files.error = Some(format!("rename failed: {error}"));
+            app.files.rename = Some(crate::state::FileRename { focus: true, ..rename });
+            return;
+        }
+    }
+    let entries = crate::state::read_dir_entries(&parent);
+    let index = entries
+        .iter()
+        .position(|entry| entry.path == destination)
+        .unwrap_or(0);
+    if rename.usb {
+        app.files.usb_entries = entries;
+        app.files.usb_current = Some(parent);
+        app.files.usb_selected = index;
+    } else {
+        app.files.nc_entries = entries;
+        app.files.nc_current = parent;
+        app.files.nc_selected = index;
+    }
+    app.files.error = None;
+    app.toast(format!("renamed to {name}"), theme::ACCENT);
+}
+
+/// A new G-code file: header comment, modal setup with the machine's units and
+/// the active work system, blank space for the body, and a program end. It
+/// deliberately contains no motion, tool call or spindle start.
+fn program_skeleton(units: &str, wcs: &str) -> String {
+    format!(
+        "(LiNC new program)\n\
+         {units} G90 {wcs} G17 G40 G49 G80\n\
+         G94\n\
+         \n\
+         (program body)\n\
+         \n\
+         M5\n\
+         M30\n"
+    )
+}
+
+fn unique_name(directory: &Path, stem: &str, extension: &str) -> String {
+    let mut index = 1;
+    loop {
+        let name = if index == 1 {
+            format!("{stem}.{extension}")
+        } else {
+            format!("{stem}-{index}.{extension}")
+        };
+        if !directory.join(&name).exists() {
+            return name;
+        }
+        index += 1;
+    }
+}
+
+/// `N`: create a skeleton program in the current NC_FILES directory and put its
+/// stem in rename mode so the operator can name it immediately.
+fn new_program(app: &mut LincApp) {
+    if app.program_protected() {
+        app.toast("PROTECT ON — new files are locked", theme::WARNING);
+        return;
+    }
+    let directory = app.files.nc_current.clone();
+    if !directory.starts_with(&app.files.nc_root) {
+        app.files.error = Some("NC_FILES directory is outside the root".into());
+        return;
+    }
+    let name = unique_name(&directory, "untitled", "ngc");
+    let path = directory.join(&name);
+    let units = if app
+        .profile
+        .machine_ini
+        .linear_units
+        .to_ascii_lowercase()
+        .starts_with("in")
+    {
+        "G20"
+    } else {
+        "G21"
+    };
+    let wcs = linc_core::model::wcs_name(app.snapshot.offsets.active_index.unwrap_or(1));
+    if let Err(error) = std::fs::write(&path, program_skeleton(units, &wcs)) {
+        app.files.error = Some(format!("could not create {name}: {error}"));
+        return;
+    }
+    app.files.nc_entries = crate::state::read_dir_entries(&directory);
+    app.files.nc_selected = app
+        .files
+        .nc_entries
+        .iter()
+        .position(|entry| entry.path == path)
+        .unwrap_or(0);
+    app.files.usb_focused = false;
+    app.files.error = None;
+    app.toast(format!("created {name}"), theme::ACCENT);
+    start_rename(app, false, path, name, false);
 }
 
 fn copy_to_usb_allowed(app: &LincApp) -> bool {
@@ -225,18 +441,12 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 RichText::new("USB MEDIA")
                     .size(theme::font_size(16.0))
                     .strong()
-                    .color(theme::FG),
+                    .color(if app.files.usb_focused {
+                        theme::ACCENT
+                    } else {
+                        theme::FG
+                    }),
             );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let eject_enabled = matches!(app.files.mount_state, MountState::Mounted)
-                    && app.files.copy.is_none();
-                if theme::action_button(ui, "EJECT", eject_enabled).clicked() {
-                    eject(app);
-                }
-                if theme::action_button(ui, "REFRESH", true).clicked() {
-                    app.files.refresh();
-                }
-            });
         });
         match &app.files.mount_state {
             MountState::NoUsb => {
@@ -313,7 +523,11 @@ fn nc_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 RichText::new("NC_FILES")
                     .size(theme::font_size(16.0))
                     .strong()
-                    .color(theme::FG),
+                    .color(if app.files.usb_focused {
+                        theme::FG
+                    } else {
+                        theme::ACCENT
+                    }),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
@@ -375,6 +589,28 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
     ui.spacing_mut().item_spacing.y = line_height * 0.5;
     ui.spacing_mut().item_spacing.x = 8.0;
     let selected_row = selected;
+    let focused = (pane == Pane::Usb) == app.files.usb_focused;
+    // The rename field lives in the NAME cell of the entry being renamed.
+    let rename = app.files.rename.clone();
+    let rename_path = rename
+        .as_ref()
+        .filter(|rename| rename.usb == (pane == Pane::Usb))
+        .map(|rename| rename.path.clone());
+    let rename_focus = rename
+        .as_ref()
+        .filter(|rename| rename.usb == (pane == Pane::Usb))
+        .map(|rename| rename.focus)
+        .unwrap_or(false);
+    let rename_select = rename
+        .as_ref()
+        .filter(|rename| rename.usb == (pane == Pane::Usb))
+        .map(|rename| rename.select_len)
+        .unwrap_or(0);
+    let mut rename_buffer = rename
+        .as_ref()
+        .filter(|rename| rename.usb == (pane == Pane::Usb))
+        .map(|rename| rename.buffer.clone());
+    let rename_focused = std::cell::Cell::new(false);
     let painter = ui.painter().clone();
     let clicked = std::cell::Cell::new(None::<usize>);
     let double = std::cell::Cell::new(None::<usize>);
@@ -419,6 +655,51 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
                     }
                     if position == 2 {
                         last_rect.set(Some(cell_rect));
+                    }
+                    let renaming_here = position == 0
+                        && matches!(
+                            (rename_path.as_ref(), entry),
+                            (Some(path), Some(entry)) if path == &entry.path
+                        );
+                    if renaming_here {
+                        if let Some(buffer) = rename_buffer.as_mut() {
+                            let field = ui.add_sized(
+                                [
+                                    (ui.max_rect().width() - 4.0).max(40.0),
+                                    (row_height - 2.0).max(12.0),
+                                ],
+                                egui::TextEdit::singleline(buffer)
+                                    .id(egui::Id::unique("linc-file-rename"))
+                                    .font(egui::TextStyle::Monospace)
+                                    .frame(egui::Frame::NONE)
+                                    .margin(egui::Margin::symmetric(2, 0)),
+                            );
+                            if rename_focus {
+                                field.request_focus();
+                                // The stem is selected, so typing replaces the
+                                // name and leaves the extension.
+                                let id = egui::Id::unique("linc-file-rename");
+                                if let Some(mut state) =
+                                    egui::text_edit::TextEditState::load(ui.ctx(), id)
+                                {
+                                    state.cursor.set_char_range(Some(
+                                        egui::text::CCursorRange::two(
+                                            egui::text::CCursor::new(0),
+                                            egui::text::CCursor::new(rename_select),
+                                        ),
+                                    ));
+                                    state.store(ui.ctx(), id);
+                                }
+                                rename_focused.set(true);
+                            }
+                            ui.painter().rect_stroke(
+                                cell_rect.shrink2(egui::vec2(1.0, 1.0)),
+                                egui::CornerRadius::same(theme::SELECTION_RADIUS as u8),
+                                egui::Stroke::new(1.5, theme::ERROR),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+                        return;
                     }
                     let cell = ui.interact(
                         cell_rect,
@@ -496,24 +777,41 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
                         egui::pos2(first.left(), first.top()),
                         egui::pos2(last.right(), last.bottom()),
                     );
+                    let alpha = if focused {
+                        theme::SELECTION_ALPHA
+                    } else {
+                        theme::SELECTION_ALPHA / 2
+                    };
                     painter.rect_filled(
                         band,
                         egui::CornerRadius::same((theme::SELECTION_RADIUS / 2.0) as u8),
-                        theme::tint(theme::ACCENT, theme::SELECTION_ALPHA),
+                        theme::tint(theme::ACCENT, alpha),
                     );
-                    painter.rect_filled(
-                        egui::Rect::from_min_size(
-                            egui::pos2(first.left(), first.top()),
-                            egui::vec2(theme::SELECTION_BAR, band.height()),
-                        ),
-                        egui::CornerRadius::same(1),
-                        theme::ACCENT,
-                    );
+                    if focused {
+                        painter.rect_filled(
+                            egui::Rect::from_min_size(
+                                egui::pos2(first.left(), first.top()),
+                                egui::vec2(theme::SELECTION_BAR, band.height()),
+                            ),
+                            egui::CornerRadius::same(1),
+                            theme::ACCENT,
+                        );
+                    }
                 }
             }
         });
     });
 
+    if let Some(buffer) = rename_buffer {
+        if let Some(rename) = app.files.rename.as_mut() {
+            if rename.usb == (pane == Pane::Usb) {
+                rename.buffer = buffer;
+                if rename_focused.get() {
+                    rename.focus = false;
+                }
+            }
+        }
+    }
     if let Some(index) = double.get() {
         if let Some(entry) = entries.get(index) {
             if entry.is_dir {
@@ -723,6 +1021,7 @@ fn eject(app: &mut LincApp) {
         return;
     }
     let Some(root) = app.files.usb_root.clone() else {
+        app.toast("no USB media mounted", theme::MUTED);
         return;
     };
     let udisks_result = crate::udisks2::eject_mount(&root.to_string_lossy());
@@ -749,6 +1048,34 @@ fn eject(app: &mut LincApp) {
         app.toast(
             format!("eject failed: {detail}. Close files and retry."),
             theme::ERROR,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_program_skeleton_has_header_setup_and_end() {
+        let text = program_skeleton("G21", "G55");
+        assert!(text.starts_with("(LiNC new program)\n"), "{text}");
+        assert!(
+            text.contains("G21 G90 G55 G17 G40 G49 G80\nG94\n"),
+            "{text}"
+        );
+        assert!(text.contains("\n\n(program body)\n\n"), "{text}");
+        assert!(text.trim_end().ends_with("M30"), "{text}");
+    }
+
+    #[test]
+    fn unique_name_skips_existing_files() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("untitled.ngc"), "").unwrap();
+        std::fs::write(directory.path().join("untitled-2.ngc"), "").unwrap();
+        assert_eq!(
+            unique_name(directory.path(), "untitled", "ngc"),
+            "untitled-3.ngc"
         );
     }
 }

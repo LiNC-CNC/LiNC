@@ -1600,6 +1600,7 @@ impl LincApp {
                 || memory.has_focus(egui::Id::unique("linc-tool-cell"))
                 || memory.has_focus(egui::Id::unique("linc-offset-cell"))
                 || memory.has_focus(egui::Id::unique("linc-offsets-dro"))
+                || memory.has_focus(egui::Id::unique("linc-file-rename"))
         });
         let mut nav_page = None;
         let mut escape = false;
@@ -1726,7 +1727,8 @@ impl LincApp {
             let editing_in_place = (self.page == Page::Tools
                 && (self.tools.editing || self.tools.kind_popup.is_some()))
                 || (self.page == Page::Offsets
-                    && (self.offsets.editing || self.offsets.dro_edit.is_some()));
+                    && (self.offsets.editing || self.offsets.dro_edit.is_some()))
+                || (self.page == Page::Files && self.files.rename.is_some());
             if !editing_in_place
                 && input.consume_key(self.keymap.back.modifiers, self.keymap.back.key)
             {
@@ -2590,10 +2592,13 @@ impl LincApp {
                 });
             }
             Page::Files => {
-                hints.push((k.files_copy_to_nc.label(), "COPY NC"));
-                hints.push((k.files_copy_to_usb.label(), "COPY USB"));
-                hints.push((k.refresh.label(), "REFRESH"));
+                hints.push(("\u{2190}/\u{2192}".into(), "PANE"));
                 hints.push(("Enter".into(), "LOAD"));
+                hints.push(("C".into(), "COPY"));
+                hints.push(("R".into(), "RENAME"));
+                hints.push(("N".into(), "NEW"));
+                hints.push((k.refresh.label(), "REFRESH"));
+                hints.push(("E".into(), "EJECT"));
                 hints.push(("Bksp".into(), "UP"));
                 hints.push((k.files_delete.label(), "DELETE"));
             }

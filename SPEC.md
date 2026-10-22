@@ -106,7 +106,7 @@ else, so it cannot shadow another page's command.
 |---|---|
 | Machine (MAIN) | `Ctrl+F10`/`Ctrl+▢` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail, `Ctrl+R` run from line, `Ctrl+G` go to a line number |
 | Program | `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
-| Files | `Left`/`Right` switch pane, `Enter` open or copy to `NC_FILES`, `Backspace` up a folder, `Ctrl+U` copy to USB, `Ctrl+N` copy to `NC_FILES`, `Ctrl+R` refresh, `Delete`/`Ctrl+X` delete |
+| Files | `Left`/`Right` switch pane, `Enter` open or copy to `NC_FILES`, `Backspace` up a folder, `C` copy to the other pane, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Ctrl+X` delete |
 | MDI | `Enter` issue, `Up`/`Down` history, `Esc` clear the unissued block |
 | Help | `/` focus search, `Backspace` back through link history |
 | Offsets, Tools, Probe | Arrows select a row |
@@ -703,25 +703,35 @@ previous page.
   D-Bus; no `sudo`, no shell commands.
 - Right pane: `NC_FILES`, resolved from LinuxCNC `PROGRAM_PREFIX`; never a
   duplicated path in HMI config.
-- Show device label/capacity, free space, mount state (`MOUNTING`, `MOUNTED`,
-  `NO USB`, `ERROR`) and a clear `EJECT`.
+- Show device label/capacity, free space and mount state (`MOUNTING`, `MOUNTED`,
+  `NO USB`, `ERROR`). No button row: `E` ejects.
 - Mount removable filesystems with `nosuid,nodev,noexec`; never auto-run files
   from USB.
 - Two equal panes, no page header and no button row: every action is a key.
-  `Left`/`Right` move between the panes; `Up`/`Down` move the selection;
-  `Enter` opens a program from `NC_FILES` or copies a file from USB into
-  `NC_FILES`; `Backspace` goes up a folder; `Ctrl+U` copies to USB and `Ctrl+N`
-  copies to `NC_FILES`; `Delete` (or `Ctrl+X`, since the CNC keyboard has no
-  Delete key) deletes the selected file after a confirmation naming its full
-  path; `Ctrl+R` refreshes.
-- Copy and delete selected regular files: `Ctrl+U` from `NC_FILES` and `Ctrl+N`
-  from USB. Folder navigation only; no recursive folder copy in v1.
+  `Left`/`Right` move the focus between the panes — the focused pane's title
+  turns accent and the other pane's row band dims; `Up`/`Down` move the
+  selection; `Enter` opens a program from `NC_FILES` or copies a file from USB
+  into `NC_FILES`; `Backspace` goes up a folder; `C` copies the selected entry to
+  the other pane; `R` renames it in place (the NAME cell becomes a field with the
+  name without its extension selected; Enter commits, Escape restores);
+  `Ctrl+R` refreshes; `E` ejects; `Delete` (or `Ctrl+X`, since the CNC keyboard
+  has no Delete key) deletes the selected file after a confirmation naming its
+  full path.
+- The lists are rows like the tool table: NAME/SIZE/MODIFIED header, a striped
+  row per entry, the selected row's band and rim bar, and no column selection.
+- Copy and delete selected regular files with `C`: from `NC_FILES` to USB, from
+  USB to `NC_FILES`. Folder navigation only; no recursive folder copy in v1.
 - Copy requires free space, rejects symlinks/path escapes, confirms overwrite,
   writes to a temporary file in the destination and renames atomically.
-- Copy progress and errors are visible; `EJECT` is disabled while a copy is
-  active.
-- `EJECT` unmounts and powers off the device; never force-unmount by default.
-  Show `SAFE TO REMOVE` after success.
+- Copy progress and errors are visible; `E` is refused while a copy is active.
+- `E` unmounts and powers off the device; never force-unmount by default. Show
+  `SAFE TO REMOVE` after success.
+- `N` creates a new program in the current `NC_FILES` directory, named
+  `untitled.ngc` (or the next free `untitled-N.ngc`), containing a header
+  comment, a modal setup line with the machine's units and the active work
+  system (`G21 G90 G54 G17 G40 G49 G80`), `G94`, blank body space, `M5` and
+  `M30`. It then opens the name in rename mode. No motion, tool call or spindle
+  start is written. Creation is blocked by program protect.
 - `Enter` on a program accepts only configured G-code extensions from
   `NC_FILES`; it loads but never starts the program. Loading and writes to `NC_FILES` are disabled
   while running, and imports are blocked by program protect.
