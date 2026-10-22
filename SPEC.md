@@ -520,6 +520,10 @@ Program rules:
   **live toolpath** as separate layers. The program path uses the program
   colour (cut) and muted dotted rapids; the live trail uses a distinct
   `--success` stroke.
+- A leading rapid that only approaches the program from the live tool position
+  is not drawn: the path starts at the program's first move, so no dotted
+  connector crosses the part. A program whose only move is that rapid still
+  draws it.
 - The toolpath card's status line is the key: `— CUT`, `-- RAPID`, `— LIVE`
   and an amber `▽ TOOL`, with the view (`3D / ISO`) and `ZOOM` on the right. A
   legend box inside the graph is not drawn — it repeated that line and covered

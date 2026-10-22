@@ -485,6 +485,44 @@ impl Preview {
         }
     }
 
+    /// Drop a leading rapid that only approaches the program from the tool's
+    /// current position. The first program move starts the drawn path; the
+    /// approach from wherever the machine happened to be is not part of it.
+    /// Returns whether a segment was removed.
+    pub fn trim_approach(&mut self, start: [f64; 3]) -> bool {
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-9;
+        // Keep a lone move: it is the whole program, not an approach to it.
+        if self.segments.len() < 2 {
+            return false;
+        }
+        let Some(first) = self.segments.first() else {
+            return false;
+        };
+        if first.kind != SegmentKind::Rapid
+            || !near(first.start[0], start[0])
+            || !near(first.start[1], start[1])
+            || !near(first.start[2], start[2])
+            // A zero-length rapid draws nothing, so it needs no trimming.
+            || (near(first.start[0], first.end[0])
+                && near(first.start[1], first.end[1])
+                && near(first.start[2], first.end[2]))
+        {
+            return false;
+        }
+        self.segments.remove(0);
+        self.rapids = self.rapids.saturating_sub(1);
+        let old = std::mem::take(&mut self.line_bounds);
+        for (line, (from, to)) in old {
+            let from = from.saturating_sub(1).min(self.segments.len());
+            let to = to.saturating_sub(1).min(self.segments.len());
+            self.line_bounds.insert(line, (from, to));
+        }
+        self.bounds = Bounds3::from_points(
+            self.segments.iter().map(|segment| segment.end),
+        );
+        true
+    }
+
     pub fn segments_for_line(&self, line: usize) -> impl Iterator<Item = &PathSegment> {
         self.segments
             .iter()
@@ -1399,6 +1437,30 @@ mod tests {
         };
         assert_eq!(feed_start(plain), Some(2.0));
         assert_eq!(feed_start(higher), Some(4.0));
+    }
+    #[test]
+    fn trim_approach_drops_the_rapid_from_the_tool_to_the_first_move() {
+        let text = "G21 G90\nG0 X10 Y0 Z5\nG1 X20 Y0 Z-1 F100\n";
+        let mut preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.trim_approach([0.0, 0.0, 0.0]));
+        assert_eq!(preview.segments.len(), 1, "{:?}", preview.segments);
+        assert_eq!(preview.segments[0].kind, SegmentKind::Feed);
+        assert_eq!(preview.segments[0].line, 3);
+        assert_eq!(preview.line_bounds.get(&2), Some(&(0, 0)));
+        assert_eq!(preview.line_bounds.get(&3), Some(&(0, 1)));
+        assert!(preview.bounds.is_some());
+    }
+
+    #[test]
+    fn trim_approach_keeps_a_feed_or_an_unrelated_rapid() {
+        let feed = "G21 G90\nG1 X10 F100\n";
+        let mut preview = parse_preview(feed, &preview_axes(), None, [0.0; 3]);
+        assert!(!preview.trim_approach([0.0, 0.0, 0.0]));
+
+        let rapid = "G21 G90\nG0 X10 Y0 Z5\n";
+        let mut preview = parse_preview(rapid, &preview_axes(), None, [0.0; 3]);
+        assert!(!preview.trim_approach([99.0, 0.0, 0.0]));
+        assert_eq!(preview.segments.len(), 1);
     }
 
 }

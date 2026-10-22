@@ -309,6 +309,7 @@ impl LincApp {
             let axes = profile.machine_ini.axis_names();
             let offset = active_offset(&snapshot);
             preview = parse_preview(text, &axes, offset, [0.0; 3]);
+            preview.trim_approach([0.0; 3]);
         }
         editor.set_saved_text(
             snapshot
@@ -1490,7 +1491,10 @@ impl LincApp {
         // cut), falling back to the controller's active system for a program that
         // selects none.
         let offset = self.preview_offset(&text);
-        let preview = parse_preview(&text, &axes, offset.as_ref(), self.tool_tip());
+        let mut preview = parse_preview(&text, &axes, offset.as_ref(), self.tool_tip());
+        // The first rapid is the approach from the live tool position to the
+        // program start. Keep the program geometry; do not draw that connector.
+        preview.trim_approach(self.tool_tip());
         let valid = preview.error.is_none();
         if valid {
             self.program.last_valid_preview = preview.clone();
