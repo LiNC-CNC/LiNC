@@ -1109,6 +1109,13 @@ pub fn work_positions(app: &LincApp) -> AxisMap<f64> {
 /// start there (egui only bootstraps focus from Tab). Pages that do not want a
 /// visible title use this instead of [`page_header`].
 pub fn focus_anchor(ui: &mut Ui, salt: &str) {
+    let _ = focus_anchor_locked(ui, salt, false);
+}
+
+/// Like [`focus_anchor`], but returns the response. `lock_arrows` keeps the
+/// arrow keys on the page instead of letting egui walk the focus into another
+/// widget (the Help table uses Up/Down for its own selection).
+pub fn focus_anchor_locked(ui: &mut Ui, salt: &str, lock_arrows: bool) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
     let response = ui.interact(rect, ui.scope_id().with(salt), Sense::focusable_noninteractive());
     let requested = ui.ctx().data_mut(|data| {
@@ -1118,9 +1125,23 @@ pub fn focus_anchor(ui: &mut Ui, salt: &str) {
     if requested {
         response.request_focus();
     }
+    if lock_arrows {
+        let _ = ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                response.id,
+                egui::EventFilter {
+                    tab: true,
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    escape: false,
+                },
+            )
+        });
+    }
     // No focus ring: the anchor exists only so arrow-key navigation has
     // somewhere to start, and a ring around an empty full-width strip reads as
     // a stray empty control. Real widgets still draw their own rings.
+    response
 }
 
 

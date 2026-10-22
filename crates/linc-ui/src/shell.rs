@@ -1930,7 +1930,7 @@ impl LincApp {
         if let Some(page) = nav_page {
             self.request_page(page);
         }
-        if help_search && self.page == Page::Help {
+        if (help_search || find) && self.page == Page::Help && !self.overlay_open() {
             self.help.focus_search = true;
         }
         if page_up {
@@ -2663,7 +2663,10 @@ impl LincApp {
                 });
             }
             Page::Help => {
-                hints.push((k.help_search.label(), "SEARCH"));
+                hints.push((
+                    format!("{} / {}", k.help_search.label(), k.find.label()),
+                    "SEARCH",
+                ));
                 hints.push(("Enter".into(), "READ"));
                 hints.push(("Bksp".into(), "BACK"));
                 hints.push(("PgUp/PgDn".into(), "PAGE"));

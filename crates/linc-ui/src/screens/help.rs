@@ -16,7 +16,10 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         ui.label(RichText::new("HELP BUNDLE UNAVAILABLE").color(theme::ERROR));
         return;
     };
-    common::focus_anchor(ui, "help-page-focus");
+    let anchor = common::focus_anchor_locked(ui, "help-page-focus", true);
+    if ui.memory(|memory| memory.focused().is_none()) {
+        anchor.request_focus();
+    }
     let filtered = bundle.filter(&app.help.query);
     let anchors: Vec<String> = filtered
         .iter()
@@ -33,7 +36,14 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         }
     }
 
-    let mut search_active = false;
+    let search_id = egui::Id::unique("linc-help-search");
+    let search_had_focus = ui.memory(|memory| memory.has_focus(search_id));
+    // Enter in the search bar belongs to the search: it hands the keyboard
+    // back to the table and must not open the selected row in the same frame.
+    if search_had_focus && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
+        anchor.request_focus();
+    }
+    let mut search_active = search_had_focus;
     ui.horizontal(|ui| {
         ui.label(
             RichText::new("SEARCH")
@@ -42,6 +52,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         );
         let response = ui.add(
             egui::TextEdit::singleline(&mut app.help.query)
+                .id(search_id)
                 .hint_text("G2, G3, M6, o sub, arc …  ( / )")
                 .desired_width(360.0),
         );
@@ -49,7 +60,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             response.request_focus();
             app.help.focus_search = false;
         }
-        search_active = response.has_focus();
+        search_active = search_active || response.has_focus();
         ui.label(
             RichText::new(format!(
                 "{} SECTIONS / {} INDEX ROWS / {} FIGURES",
@@ -126,8 +137,10 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                         if response.clicked() {
                             app.help.selected_row = index;
                             app.help.selected_anchor = Some(row.anchor.clone());
+                            ui.memory_mut(|memory| memory.request_focus(anchor.id));
                         }
                         if response.double_clicked() {
+                            ui.memory_mut(|memory| memory.request_focus(anchor.id));
                             open_anchor = Some(row.anchor.clone());
                         }
                         index += 1;
@@ -411,6 +424,7 @@ fn render_section(
     section: &HelpSection,
 ) -> Option<String> {
     let mut related = None;
+    ui.set_max_width(ui.available_width());
     for (block_index, block) in section.blocks.iter().enumerate() {
         match block {
             HelpBlock::Heading { text, level } => {
@@ -428,10 +442,13 @@ fn render_section(
                 );
             }
             HelpBlock::Para { text } => {
-                ui.label(
-                    RichText::new(flow(text))
-                        .size(theme::font_size(12.0))
-                        .color(theme::FG),
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(flow(text))
+                            .size(theme::font_size(12.0))
+                            .color(theme::FG),
+                    )
+                    .wrap(),
                 );
             }
             HelpBlock::Code { text } => {
@@ -441,15 +458,26 @@ fn render_section(
                     .corner_radius(4)
                     .inner_margin(8)
                     .show(ui, |ui| {
-                        ui.label(
-                            RichText::new(text)
-                                .monospace()
-                                .size(theme::font_size(11.0))
-                                .color(theme::FG),
+                        ui.set_min_width(ui.available_width());
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(text)
+                                    .monospace()
+                                    .size(theme::font_size(11.0))
+                                    .color(theme::FG),
+                            )
+                            .wrap(),
                         );
                     });
             }
             HelpBlock::Table { rows } => {
+                let columns = rows
+                    .iter()
+                    .map(Vec::len)
+                    .max()
+                    .unwrap_or(1)
+                    .max(1);
+                let cell_width = (ui.available_width() / columns as f32 - 8.0).max(80.0);
                 egui::Grid::new(format!(
                     "help-table-{}-{block_index}-{}",
                     section.title,
@@ -460,10 +488,20 @@ fn render_section(
                 .show(ui, |ui| {
                     for row in rows {
                         for cell in row {
-                            ui.label(
-                                RichText::new(cell)
-                                    .size(theme::font_size(10.5))
-                                    .color(theme::FG),
+                            ui.allocate_ui_with_layout(
+                                Vec2::new(cell_width, 0.0),
+                                egui::Layout::top_down(Align::Min),
+                                |ui| {
+                                    ui.set_min_width(cell_width);
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(cell)
+                                                .size(theme::font_size(10.5))
+                                                .color(theme::FG),
+                                        )
+                                        .wrap(),
+                                    );
+                                },
                             );
                         }
                         ui.end_row();
@@ -476,10 +514,13 @@ fn render_section(
                         HelpItem::ListItem { text } => {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new("•").color(theme::ACCENT));
-                                ui.label(
-                                    RichText::new(flow(text))
-                                        .size(theme::font_size(12.0))
-                                        .color(theme::FG),
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(flow(text))
+                                            .size(theme::font_size(12.0))
+                                            .color(theme::FG),
+                                    )
+                                    .wrap(),
                                 );
                             });
                         }
