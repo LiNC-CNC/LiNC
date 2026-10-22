@@ -47,7 +47,7 @@ Available navigation keys:
 | `FILE` | `F6` | Program page; press again for the Files browser, and again to return |
 | `TOOL` | `F7` | Tools page |
 | `OFFSET` | `F8` | Offsets page |
-| `WIN` | `F10` | Toggle `SPLIT`/`CODE` on the Program page, shown as `▢` in the hint row |
+| `WIN` | `F10` | Toggle `SPLIT`/`CODE` on the Program page, shown as `▢` in the sidebar shortcuts |
 | `ESC` | `Esc` | Back / cancel / close detail |
 | `Ctrl+Esc` | `Ctrl+Esc` | Diagnostics |
 | `Ctrl+Q` | `Ctrl+Q` | Guarded quit |
@@ -110,8 +110,10 @@ else, so it cannot shadow another page's command.
 | Help | `/` focus search, `Backspace` back through link history |
 | Offsets, Tools, Probe | Arrows select a row |
 
-A page-local binding is only shown in the bottom hint row while its page is in
-front; nav keys are never listed.
+A page-local binding is only listed in the sidebar's `SHORTCUTS` pane while its
+page is in front (the pane scrolls when a page has more commands than the
+sidebar holds); nav keys are never listed. The bottom bar carries only live
+machine state.
 
 ### 3.2 Physical panel
 

@@ -113,7 +113,7 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
   arrows/Page/Home/End, Enter. `[keys]` drives the shell; `Keymap::from_config` is the only source.
 - Everything else is page-local and consumed only on that page: `Ctrl+S`, `Ctrl+Z/Y`, editor keys, `Ctrl+R` run-from-line, `Ctrl+0` fit, `Ctrl+L`
   clear trail, Files copy/delete, MDI history. A page-local key consumed elsewhere shadows another page's command.
-- The hint row lists page-local commands only; navigation keys are never listed.
+- The sidebar SHORTCUTS pane lists page-local commands only; navigation keys are never listed. The bottom bar carries live machine state only.
 - `Ctrl+F` is a dead binding: `[keys].find` exists and Settings advertises it, but no find UI is implemented. Do not add one without changing SPEC §6.2.
 - `[ui] pages` selects and orders nav entries but does not unbind keys. If you hide a page, decide what its `[keys]` binding does. The Diagnostics
   keycap reads `WIN` while its binding is `Ctrl+Esc`; `[keys]` is authoritative.

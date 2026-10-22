@@ -2198,49 +2198,53 @@ impl LincApp {
         ui.add_space(10.0);
         theme::separator(ui);
         ui.add_space(8.0);
+        // Page-local keyboard commands live here: the bottom bar had one row and
+        // truncated the list, and the sidebar has the height. Measure before the
+        // frame, so the list gets the sidebar's remainder and the safety note
+        // under it still fits.
+        let shortcuts_height = (ui.available_height() - 52.0).max(80.0);
+        let shortcuts = self.key_hints();
+        if !shortcuts.is_empty() {
         Frame::new()
             .fill(theme::PANEL)
             .stroke(Stroke::new(1.0, theme::BORDER))
             .corner_radius(4)
-            .inner_margin(Margin::same(8))
+            .inner_margin(Margin::same(6))
             .show(ui, |ui| {
+                // The list can be longer than the sidebar: scroll it, and keep
+                // the safety note under it on screen.
+                ui.spacing_mut().item_spacing.y = 0.0;
                 ui.label(
-                    RichText::new("FOCUS / NAVIGATION")
+                    RichText::new("SHORTCUTS")
                         .size(theme::font_size(9.0))
                         .strong()
                         .color(theme::MUTED),
                 );
-                ui.label(
-                    RichText::new("ARROWS MOVE")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                ui.label(
-                    RichText::new("ENTER SELECT")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                ui.label(
-                    RichText::new("ESC BACK")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                ui.label(
-                    RichText::new("PGUP / PGDN")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                ui.label(
-                    RichText::new("HOME / END")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                ui.label(
-                    RichText::new("CTRL+LEFT NAV")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
+                egui::ScrollArea::vertical()
+                    .id_salt("sidebar-shortcuts")
+                    .max_height((shortcuts_height - 20.0).max(60.0))
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                for (key, action) in &shortcuts {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(key.clone())
+                                .monospace()
+                                .size(theme::font_size(9.0))
+                                .color(theme::C3),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(
+                                RichText::new(*action)
+                                    .size(theme::font_size(9.0))
+                                    .color(theme::MUTED),
+                            );
+                        });
+                    });
+                }
+                    });
             });
+        }
         ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
             ui.label(
                 RichText::new("NO ON-SCREEN\nMACHINE CONTROLS")
@@ -2384,39 +2388,8 @@ impl LincApp {
     /// the right. It carries no buttons.
     fn bottom_bar(&mut self, ui: &mut egui::Ui) {
         let size = theme::font_size(11.0);
-        let hint_size = theme::font_size(9.5);
         ui.horizontal(|ui| {
-            // Left: the keyboard commands available on this page, truncated to
-            // the space the right-aligned status block leaves free.
-            const STATUS_BUDGET: f32 = 500.0;
-            let hint_char = hint_size * 0.62;
-            let budget = (ui.available_width() - STATUS_BUDGET).max(140.0);
-            let mut used = 0.0_f32;
-            for (index, (key, action)) in self.key_hints().into_iter().enumerate() {
-                let width = (key.chars().count() + action.chars().count() + 1) as f32
-                    * hint_char
-                    + 10.0;
-                if used + width > budget {
-                    break;
-                }
-                used += width;
-                if index > 0 {
-                    ui.add_space(10.0);
-                }
-                ui.label(
-                    RichText::new(key)
-                        .monospace()
-                        .size(hint_size)
-                        .strong()
-                        .color(theme::C3),
-                );
-                ui.label(
-                    RichText::new(action)
-                        .monospace()
-                        .size(hint_size)
-                        .color(theme::MUTED),
-                );
-            }
+
 
             // Right: the read-only machine state.
             let field = |ui: &mut egui::Ui, text: String, color: egui::Color32| {
