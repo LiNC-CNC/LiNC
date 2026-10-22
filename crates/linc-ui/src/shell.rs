@@ -2306,7 +2306,11 @@ impl LincApp {
                 hints.push(("X/Y/Z".into(), "ZERO AXIS"));
                 hints.push(("A".into(), "ZERO ALL"));
             }
-            Page::Offsets | Page::Probe => hints.push(("Arrows".into(), "SELECT")),
+            Page::Offsets => {
+                hints.push(("Arrows".into(), "SELECT"));
+                hints.push(("X/Y/Z".into(), "EDIT DRO"));
+            }
+            Page::Probe => hints.push(("Arrows".into(), "SELECT")),
             Page::Tools => hints.push(("Arrows".into(), "SELECT")),
             _ => {}
         }

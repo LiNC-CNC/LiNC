@@ -61,6 +61,7 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
         .max(120.0);
     const HEIGHT: f32 = 84.0;
 
+    handle_axis_keys(app, ui);
     handle_dro_keys(app, ui);
 
     let mut start: Option<(String, f64)> = None;
@@ -172,6 +173,46 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
             focus: true,
         });
     }
+}
+
+/// X, Y and Z start editing that axis's DRO, so the operator does not have to
+/// reach for the mouse to enter a coordinate.
+fn handle_axis_keys(app: &mut LincApp, ui: &mut Ui) {
+    if app.offsets.dro_edit.is_some() || app.offsets.editing {
+        return;
+    }
+    let axes = app.axes();
+    let mut start: Option<String> = None;
+    ui.input_mut(|input| {
+        for (axis, key) in [
+            ("X", egui::Key::X),
+            ("Y", egui::Key::Y),
+            ("Z", egui::Key::Z),
+        ] {
+            if axes.iter().any(|present| present == axis)
+                && input.consume_key(egui::Modifiers::NONE, key)
+            {
+                start = Some(axis.to_string());
+            }
+        }
+    });
+    let Some(axis) = start else { return };
+    if !app.snapshot.writes_allowed() || app.snapshot.offsets.active_index.is_none() {
+        app.toast("offset writes are blocked", theme::WARNING);
+        return;
+    }
+    let work = app
+        .snapshot
+        .positions
+        .axes
+        .get(&axis)
+        .map(|position| position.work)
+        .unwrap_or(0.0);
+    app.offsets.dro_edit = Some(crate::state::DroEdit {
+        axis,
+        buffer: format!("{work:.3}"),
+        focus: true,
+    });
 }
 
 /// Enter commits the typed position, Escape drops it. Both are consumed before
