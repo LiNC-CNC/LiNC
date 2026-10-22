@@ -518,7 +518,7 @@ Program rules:
 - G-code is token-highlighted (see §7.3).
 - The graph always draws the **loaded program's full toolpath** and the
   **live toolpath** as separate layers. The program path uses the program
-  colour (cut) and muted dashed rapids; the live trail uses a distinct
+  colour (cut) and muted dotted rapids; the live trail uses a distinct
   `--success` stroke.
 - The toolpath card's status line is the key: `— CUT`, `-- RAPID`, `— LIVE`
   and an amber `▽ TOOL`, with the view (`3D / ISO`) and `ZOOM` on the right. A
@@ -540,7 +540,13 @@ Program rules:
   same view transform as the toolpath.
 - The selected/current G-code line is highlighted in the graph: its segment or
   arc uses a brighter stroke and a line-number tag, distinct from the execution
-  marker.
+  marker. The tag sits at the middle of the move (the end of one block is the
+  start of the next), once per line.
+- Canned drilling cycles are previewed as geometry: G81/G82/G83/G73 rapid to
+  the R plane, rapid to the hole at R, feed to the depth (a solid cutting move)
+  and rapid retract (G98 to the initial Z, G99 to R). Each block with X/Y is
+  another hole; G80 or an ordinary motion mode cancels the cycle. G83 pecking
+  and G82 dwelling are not drawn as separate moves.
 - On editor changes, wait for the debounce, run the preview syntax check, then
   replace the graph only if it succeeds. On failure, keep the last valid graph,
   mark the offending line and show a syntax error; never move the machine.

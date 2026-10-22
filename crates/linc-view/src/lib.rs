@@ -689,6 +689,9 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
 
     // Program cut and rapid paths.
     if has_data {
+        // One tag per line: a canned cycle can contribute several segments to
+        // the same line, and a tag on each of them repeated `LN n`.
+        let mut tagged_lines: Vec<usize> = Vec::new();
         for segment in &view.preview.segments {
             let is_selected = view.show_selected_line && view.selected_line == Some(segment.line);
             let stroke = if is_selected {
@@ -719,7 +722,8 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
                     segment.kind == SegmentKind::Rapid,
                 );
             }
-            if is_selected {
+            if is_selected && !tagged_lines.contains(&segment.line) {
+                tagged_lines.push(segment.line);
                 // Mark the middle of the move, not its end: the end of one
                 // block is the start of the next, and a tag sitting on that
                 // joint looked like it labelled the following move.
