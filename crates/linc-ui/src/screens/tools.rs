@@ -474,6 +474,16 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
             // its neighbour; the row band is painted as one rect, so the gap
             // does not break the highlight.
             ui.spacing_mut().item_spacing.x = CELL_GAP;
+            // One text line per row with half a line between rows, the same
+            // pitch as the offset and file tables.
+            let row_font = egui::FontId::monospace(theme::font_size(11.0));
+            let line_height = ui
+                .painter()
+                .layout_no_wrap("0".to_string(), row_font, theme::FG)
+                .size()
+                .y;
+            let row_height = line_height.max(16.0);
+            ui.spacing_mut().item_spacing.y = line_height * 0.5;
             {
                 let visuals = ui.visuals_mut();
                 visuals.widgets.inactive.corner_radius = egui::CornerRadius::ZERO;
@@ -534,7 +544,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                     }
                 })
                 .body(|body| {
-                    body.rows(ROW_HEIGHT, rows.len(), |mut row| {
+                    body.rows(row_height, rows.len(), |mut row| {
                         let index = row.index();
                         let entry = rows[index].clone();
                         // `TableRow::response` may only be called after a cell
@@ -608,7 +618,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                 );
                                 if selected_cell && editing {
                                     let edit = inner.add_sized(
-                                        [inner_width, FIELD_HEIGHT],
+                                        [inner_width, row_height],
                                         egui::TextEdit::singleline(&mut app.tools.edit_buffer)
                                             // Stable id: the shell checks it to
                                             // leave Home and End to the cell.
@@ -856,13 +866,10 @@ fn draw_kind_popup(app: &mut LincApp, ui: &mut Ui, opened_now: bool) {
     }
 }
 
-/// Height of a table row, and of the field a cell opens for editing.
-const ROW_HEIGHT: f32 = 26.0;
 /// Rows a PageUp/PageDown moves: the table shows roughly this many at once.
 const TABLE_PAGE: isize = 8;
 /// Space kept under the table for the key hint, inside the card.
 const FOOTER_HEIGHT: f32 = 26.0;
-const FIELD_HEIGHT: f32 = 22.0;
 const HEADER_HEIGHT: f32 = 18.0;
 
 /// Faint washes under the selected row and column; the solid bars on the rim
