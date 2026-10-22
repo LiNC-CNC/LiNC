@@ -2060,6 +2060,16 @@ Do not add MCP dependencies to `linc-ui` or `linc-core`.
   - no writes issued
   - `linc-mcp` never opens serial
 
+### Acceptance script
+
+`scripts/mcp-smoke.py` runs the two phases against the real binaries: phase 3
+starts a headless `linc-panel --allow-sim-control` and a fake HMI socket, then
+presses, patches, faults, compares and reads events through `linc-mcp`; phase 4
+starts panel + HMI under Xvfb and checks the screen model, motion history,
+NML/HAL/IO, crash records, a thirteen-file redacted bundle and a screenshot. It
+exits non-zero on any failed check and is the first thing to run after touching
+the socket or the UI publisher.
+
 ### Definition of done
 
 - [ ] All read-only tools implemented and documented.

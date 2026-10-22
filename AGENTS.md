@@ -13,6 +13,7 @@ commands (MDI, probe, tool change, program/offset writes). Three binaries:
 ```bash
 cargo build --release                       # all three binaries
 cargo test --workspace                      # 191 tests today
+python3 scripts/mcp-smoke.py                # phase 3+4 acceptance, real binaries
 ./target/release/linc --config configs/sim.toml --check-config
 ./target/release/linc --config configs/baiermill.toml --check-config
 scripts/build-deb.sh                        # Debian packages, amd64 + arm64
@@ -42,6 +43,9 @@ LINC_SIM_IPC=/tmp/linc/panel-sim ./target/release/linc --config configs/sim.toml
 - Raw panel: `./target/release/linc-panel --config configs/sim.toml --sim --no-hal --window` (`--sim` forces sim, `--no-hal` skips `cnc_panel.*`).
 - `--demo-mode <edit|auto|mdi|jog|inc|mpg|home|proghome>` (or `LINC_DEMO_MODE`) sets the starting mode; it does not replace a connected panel.
 - `--backend linuxcnc` attaches to running LinuxCNC; `auto` uses sim for sim profiles. `scripts/linc-display.sh` is the `[DISPLAY]` entry.
+- `scripts/mcp-smoke.py` drives the release binaries end to end: phase 3 starts a headless panel with `--allow-sim-control`
+  plus a fake HMI socket, phase 4 starts panel + HMI under Xvfb. `--phase 3|4`, `--debug` and `--keep` are available; it needs
+  `Xvfb` for phase 4 and exits non-zero on a failed check.
 - Diagnostics: `linc` and `linc-panel` each publish a socket under `${XDG_RUNTIME_DIR:-/tmp}/linc/diag-<uid>/`; `./target/release/linc-mcp` attaches to both.
   Simulator writes need `linc-panel --allow-sim-control` **and** `linc-mcp --allow-sim-control --sim`; either one alone leaves
   the tools closed (`WRITE_DISABLED` / `SIM_CONTROL_DISABLED`). A refused write is still audited. `linc_test_wait_for` polls
@@ -143,6 +147,9 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
 - **Embedded bridge.** `python/linc_bridge.py` is compiled in via `include_str!`; rebuild after editing it.
 - **Standalone IPC.** With `--sim --no-hal`, panel and HMI only see each other through `LINC_SIM_IPC` JSON files; different paths give a
   `PANEL OFFLINE` banner, not an error dialog.
+- **Wayland in headless runs.** Setting `DISPLAY` is not enough to put a window on Xvfb: winit prefers Wayland while `WAYLAND_DISPLAY` is set
+  (and falls back to `wayland-0` even when it is unset), so the window opens on the operator's desktop and the size under test is the compositor's.
+  Remove `WAYLAND_DISPLAY` from the child environment when a capture or smoke test must use Xvfb's 1280×720 screen.
 - **Profile selection.** `--config` or `LINC_CONFIG` is mandatory; there is no default. Under LinuxCNC they must match the `[DISPLAY]` line, and
   `-ini` overrides `machine.linuxcnc_ini`.
 - **Sibling checkouts.** `sim.toml` is self-contained (`configs/` + `hal/`), but `baiermill.toml` and `lathe-sim.toml` point outside the repo
