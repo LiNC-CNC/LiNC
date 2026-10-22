@@ -254,6 +254,7 @@ fn offset_preview(app: &mut LincApp, ui: &mut Ui, height: f32) {
         None,
         false,
         true,
+        true,
         highlight,
     );
     app.offsets.preview_zoom = zoom;

@@ -138,6 +138,10 @@ pub struct TrajectoryView<'a> {
     /// an offset far from the part is still on screen; the Machine page keeps
     /// the program-only fit.
     pub fit_all: bool,
+    /// Draw the machine-origin triad in a muted colour and a line from it to the
+    /// active work origin. The Offsets page is where the distance between the
+    /// two matters; the Machine page shows only the work origin.
+    pub origin_tether: bool,
     pub selected_line_color: Color32,
     pub height: f32,
     pub fit: bool,
@@ -181,6 +185,7 @@ impl<'a> TrajectoryView<'a> {
             show_selected_line: true,
             show_legend: true,
             fit_all: false,
+            origin_tether: false,
             selected_line_color: theme::CURRENT,
             height: 400.0,
             fit: false,
@@ -415,6 +420,9 @@ fn fit_target(view: &TrajectoryView<'_>, reference: Bounds3) -> Bounds3 {
         target.include(tip);
     }
     target.include(view.origin);
+    if view.origin_tether {
+        target.include([0.0; 3]);
+    }
     if let Some(highlight) = view.highlight_origin {
         target.include(highlight);
     }
@@ -542,6 +550,48 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     // Grid and axis labels.
     if view.show_grid {
         draw_grid(&painter, &projection, reference);
+    }
+    // The machine origin is context for the offset: a muted triad with a green
+    // line to the active work origin, so the distance the table is editing is
+    // visible in the picture rather than only in the numbers.
+    if view.origin_tether {
+        draw_axes(
+            &painter,
+            &projection,
+            view.variant,
+            &view.axis_labels,
+            [0.0; 3],
+            theme::MUTED,
+        );
+        let machine = projection.project([0.0; 3]);
+        let work = projection.project(view.origin);
+        let delta = work - machine;
+        let length = delta.length();
+        if length > 8.0 {
+            let direction = delta / length;
+            let stroke = Stroke::new(1.5, theme::SUCCESS);
+            // The head stops just short of the work-origin triad so it points at
+            // the marker instead of covering it.
+            let tip = work - direction * 5.0;
+            let barb = 12.0;
+            let side = Vec2::new(-direction.y, direction.x);
+            let back = tip - direction * barb;
+            // Dashed: the line is a relationship between two points, not a move
+            // the machine makes, and a solid line read as a travel path.
+            painter.extend(egui::Shape::dashed_line(
+                &[machine, back],
+                stroke,
+                6.0,
+                4.0,
+            ));
+            // A filled head reads as a direction at this size; two barbs alone
+            // disappeared into the dashes.
+            painter.add(egui::Shape::convex_polygon(
+                vec![tip, back + side * (barb * 0.45), back - side * (barb * 0.45)],
+                theme::SUCCESS,
+                Stroke::NONE,
+            ));
+        }
     }
     draw_axes(
         &painter,
@@ -1662,6 +1712,29 @@ mod tests {
         assert_eq!(all.min[1], -200.0, "the work zero is inside the fit");
         assert_eq!(all.max[2], 100.0, "the highlighted system is inside the fit");
         assert_eq!(all.min[0], -30.0, "the program is still inside the fit");
+    }
+
+    #[test]
+    fn the_tether_frames_the_machine_origin() {
+        let mut preview = Preview::empty();
+        preview.bounds = Some(Bounds3 {
+            min: [100.0, 100.0, 0.0],
+            max: [110.0, 110.0, 10.0],
+        });
+        let reference = Bounds3 {
+            min: [-500.0, -320.0, -250.0],
+            max: [0.0, 0.0, 0.0],
+        };
+        let mut view = TrajectoryView::new(&preview, &[], MachineVariant::Mill);
+        view.fit_all = true;
+        view.origin = [100.0, 100.0, 0.0];
+        assert_eq!(fit_target(&view, reference).min[0], 100.0);
+
+        // The tether is drawn from machine zero, so zero must be in frame.
+        view.origin_tether = true;
+        let target = fit_target(&view, reference);
+        assert_eq!(target.min[0], 0.0);
+        assert_eq!(target.min[1], 0.0);
     }
 
     #[test]
