@@ -14,14 +14,22 @@ use crate::policy::Policy;
 
 pub struct Session {
     pub client: linc_diag::Client,
+    /// The panel socket, when the panel service is running.
+    pub panel: Option<linc_diag::Client>,
     pub policy: Policy,
     pub audit: Audit,
 }
 
 impl Session {
-    pub fn new(client: linc_diag::Client, policy: Policy, audit: Audit) -> Self {
+    pub fn new(
+        client: linc_diag::Client,
+        panel: Option<linc_diag::Client>,
+        policy: Policy,
+        audit: Audit,
+    ) -> Self {
         Self {
             client,
+            panel,
             policy,
             audit,
         }
@@ -141,13 +149,14 @@ fn call_tool(session: &mut Session, params: &Value) -> Result<Value, JsonRpcErro
             message: "tools/call needs a tool name".into(),
         })?;
     let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
-    if crate::tools::is_write(name) {
+    if crate::tools::is_gated(name) {
         if let Err(error) = session.policy.check_write(name) {
             return Ok(tool_error(&error));
         }
     }
     let started = Instant::now();
-    let result = crate::tools::call(&mut session.client, name, &args);
+    let panel = session.panel.as_mut();
+    let result = crate::tools::call(&mut session.client, panel, name, &args);
     let duration_ms = started.elapsed().as_millis();
     let audit_id = match &result {
         Ok(_) => session.audit.record(name, &args, "ok", duration_ms),
@@ -157,9 +166,28 @@ fn call_tool(session: &mut Session, params: &Value) -> Result<Value, JsonRpcErro
     };
     match result {
         Ok(envelope) => {
-            let text = serde_json::to_string_pretty(&envelope).unwrap_or_default();
+            let mut content = Vec::new();
+            if let Some(image) = envelope
+                .get("data")
+                .and_then(|data| data.get("png_base64"))
+                .and_then(Value::as_str)
+            {
+                // MCP image content, plus the JSON metadata without the blob.
+                content.push(json!({ "type": "image", "data": image, "mimeType": "image/png" }));
+                let mut meta = envelope.clone();
+                if let Some(data) = meta.get_mut("data").and_then(Value::as_object_mut) {
+                    data.remove("png_base64");
+                }
+                content.push(json!({
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&meta).unwrap_or_default(),
+                }));
+            } else {
+                let text = serde_json::to_string_pretty(&envelope).unwrap_or_default();
+                content.push(json!({ "type": "text", "text": text }));
+            }
             Ok(json!({
-                "content": [{ "type": "text", "text": text }],
+                "content": content,
                 "audit_id": audit_id,
                 "isError": false,
             }))

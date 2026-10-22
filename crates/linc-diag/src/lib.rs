@@ -11,6 +11,7 @@
 
 pub mod client;
 pub mod discovery;
+pub mod panel;
 pub mod source;
 
 use std::io::{Read, Write};
@@ -24,6 +25,7 @@ use linc_core::diag::{DiagError, Dropped, Envelope};
 use serde_json::{json, Value};
 
 pub use client::Client;
+pub use panel::{PanelBus, PanelSource};
 pub use source::{BusSource, Source};
 
 /// One request line larger than this is rejected instead of buffered.
@@ -34,6 +36,7 @@ pub const MAX_FRAME: usize = 8 * 1024 * 1024;
 pub struct ServerHandle {
     pub socket: PathBuf,
     pub dir: PathBuf,
+    role: String,
     stop: Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
 }
@@ -47,7 +50,7 @@ impl Drop for ServerHandle {
             let _ = join.join();
         }
         let _ = std::fs::remove_file(&self.socket);
-        let _ = std::fs::remove_file(discovery::instance_path(&self.dir));
+        let _ = std::fs::remove_file(discovery::instance_path(&self.dir, &self.role));
     }
 }
 
@@ -97,6 +100,7 @@ pub fn serve(dir: PathBuf, role: &str, source: Arc<dyn Source>) -> std::io::Resu
     Ok(ServerHandle {
         socket,
         dir,
+        role: role.to_string(),
         stop,
         join: Some(join),
     })
@@ -104,11 +108,49 @@ pub fn serve(dir: PathBuf, role: &str, source: Arc<dyn Source>) -> std::io::Resu
 
 fn handle_connection(mut stream: UnixStream, source: &dyn Source, source_name: &str) -> std::io::Result<()> {
     let mut reader = std::io::BufReader::new(stream.try_clone()?);
+    let mut subscribed = false;
+    let mut last_sequence = 0u64;
+    let poll = std::time::Duration::from_millis(250);
+    stream.set_read_timeout(Some(poll))?;
     loop {
         let mut line = String::new();
         match read_line_limited(&mut reader, &mut line, MAX_FRAME) {
             Ok(0) => break,
             Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                // No request within the poll window: push a notification when
+                // the sequence moved, which is what `diag.subscribe` promises.
+                if subscribed {
+                    let meta = source.meta();
+                    if meta.sequence != last_sequence {
+                        last_sequence = meta.sequence;
+                        let notify = json!({
+                            "jsonrpc": "2.0",
+                            "method": "diag.notify",
+                            "params": {
+                                "topic": "snapshot",
+                                "sequence": meta.sequence,
+                                "captured_at_ms": meta.captured_at_ms,
+                                "data": json!({
+                                    "summary": {
+                                        "sequence": meta.sequence,
+                                        "captured_at_ms": meta.captured_at_ms,
+                                    }
+                                }),
+                            },
+                        });
+                        if write_response(&mut stream, &notify).is_err() {
+                            break;
+                        }
+                    }
+                }
+                continue;
+            }
             Err(error) => {
                 let _ = write_response(&mut stream, &error_response(Value::Null, &DiagError::new(
                     "INVALID_ARGUMENT",
@@ -144,19 +186,38 @@ fn handle_connection(mut stream: UnixStream, source: &dyn Source, source_name: &
             continue;
         };
         let params = request.get("params").cloned().unwrap_or(Value::Null);
+        if method == "diag.subscribe" {
+            subscribed = true;
+            last_sequence = source.meta().sequence;
+            let response = json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": envelope_for(
+                    source_name,
+                    source,
+                    json!({ "subscribed": true, "since_sequence": last_sequence }),
+                ),
+            });
+            let _ = write_response(&mut stream, &response);
+            continue;
+        }
+        if method == "diag.unsubscribe" {
+            subscribed = false;
+            let response = json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": envelope_for(source_name, source, json!({ "subscribed": false })),
+            });
+            let _ = write_response(&mut stream, &response);
+            continue;
+        }
         match source.call(method, &params) {
             Ok(data) => {
-                let meta = source.meta();
-                let envelope = Envelope::new(
-                    source_name,
-                    source.process(),
-                    meta.sequence,
-                    meta.captured_at_ms,
-                    meta.stale_after_ms,
-                    meta.dropped,
-                    data,
-                );
-                let response = json!({ "jsonrpc": "2.0", "id": id, "result": envelope });
+                let response = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": envelope_for(source_name, source, data),
+                });
                 let _ = write_response(&mut stream, &response);
             }
             Err(error) => {
@@ -165,6 +226,19 @@ fn handle_connection(mut stream: UnixStream, source: &dyn Source, source_name: &
         }
     }
     Ok(())
+}
+
+fn envelope_for(source_name: &str, source: &dyn Source, data: Value) -> Envelope {
+    let meta = source.meta();
+    Envelope::new(
+        source_name,
+        source.process(),
+        meta.sequence,
+        meta.captured_at_ms,
+        meta.stale_after_ms,
+        meta.dropped,
+        data,
+    )
 }
 
 fn error_response(id: Value, error: &DiagError) -> Value {
@@ -317,7 +391,7 @@ mod tests {
         let socket = handle.socket.clone();
         drop(handle);
         assert!(!socket.exists(), "the socket is removed on drop");
-        assert!(!discovery::instance_path(&dir).exists());
+        assert!(!discovery::instance_path(&dir, "hmi").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

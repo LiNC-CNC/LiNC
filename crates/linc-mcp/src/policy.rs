@@ -37,8 +37,8 @@ impl Policy {
 }
 
 /// MCP annotations per tool class (§8.3). Returned with every tool.
-pub fn annotations(read_only: bool) -> serde_json::Value {
-    if read_only {
+pub fn annotations(class: crate::tools::ToolClass) -> serde_json::Value {
+    if class.read_only() {
         json!({
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -48,7 +48,7 @@ pub fn annotations(read_only: bool) -> serde_json::Value {
     } else {
         json!({
             "readOnlyHint": false,
-            "destructiveHint": true,
+            "destructiveHint": class.destructive(),
             "idempotentHint": false,
             "openWorldHint": false,
         })

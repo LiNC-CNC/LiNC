@@ -9,10 +9,10 @@ egui.workspace = true
 egui_extras.workspace = true
 eframe.workspace = true
 
-image.workspace = true
 libc.workspace = true
 tempfile.workspace = true
 log.workspace = true
 linc-core = { path = "../linc-core" }
 linc-view = { path = "../linc-view" }
+image.workspace = true
 zbus = "4.4"

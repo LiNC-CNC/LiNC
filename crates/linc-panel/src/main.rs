@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -34,6 +34,9 @@ struct Args {
     /// Do not create the cnc_panel HAL component (development only).
     #[arg(long)]
     no_hal: bool,
+    /// Do not create the diagnostic socket for linc-mcp.
+    #[arg(long)]
+    no_diag: bool,
     /// Do not exchange standalone simulation state files; use only HAL.
     #[arg(long)]
     no_ipc: bool,
@@ -93,6 +96,37 @@ fn main() -> Result<()> {
         cycle
     );
 
+    // Panel diagnostic socket. The panel owns its own state, so it publishes
+    // its own socket instead of routing through the HMI. A failure here never
+    // stops the panel loop.
+    let panel_bus = Arc::new(Mutex::new(linc_diag::PanelBus::new()));
+    let _panel_diag = if args.no_diag {
+        None
+    } else {
+        let process = linc_core::diag::ProcessInfo {
+            pid: std::process::id(),
+            role: "panel".into(),
+            build: linc_core::diag::BuildInfo {
+                version: env!("CARGO_PKG_VERSION").into(),
+                git_commit: option_env!("LINC_GIT_COMMIT").unwrap_or("").into(),
+                git_dirty: option_env!("LINC_GIT_DIRTY").is_some(),
+                profile: profile.config.machine.name.clone(),
+                backend: if simulated { "sim".into() } else { "serial".into() },
+            },
+        };
+        let source = Arc::new(linc_diag::PanelSource::new(panel_bus.clone(), process));
+        match linc_diag::serve(linc_diag::discovery::runtime_dir(), "panel", source) {
+            Ok(handle) => {
+                log::info!("panel diagnostic socket at {}", handle.socket.display());
+                Some(handle)
+            }
+            Err(error) => {
+                log::warn!("panel diagnostic socket unavailable: {error}");
+                None
+            }
+        }
+    };
+
     if simulated {
         run_simulated(
             profile,
@@ -103,9 +137,10 @@ fn main() -> Result<()> {
             args.no_ipc,
             args.once,
             shutdown,
+            panel_bus,
         )
     } else {
-        run_physical(profile, cycle, args.no_hal, args.once, shutdown)
+        run_physical(profile, cycle, args.no_hal, args.once, shutdown, panel_bus)
     }
 }
 
@@ -115,6 +150,7 @@ fn run_physical(
     no_hal: bool,
     once: bool,
     shutdown: Arc<AtomicBool>,
+    panel_bus: Arc<Mutex<linc_diag::PanelBus>>,
 ) -> Result<()> {
     let port = profile
         .config
@@ -125,9 +161,10 @@ fn run_physical(
         .unwrap_or_else(|| "/dev/ttyUSB0".into());
     let baud = profile.config.panel.link.baud.unwrap_or(115200);
     let mut driver = linc_panel::CncPanelDriver::new(port, baud, cycle);
-    run_loop(&mut driver, cycle, no_hal, once, shutdown, None)
+    run_loop(&mut driver, cycle, no_hal, once, shutdown, None, Some(panel_bus))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_simulated(
     profile: Profile,
     cycle: Duration,
@@ -137,6 +174,7 @@ fn run_simulated(
     no_ipc: bool,
     once: bool,
     shutdown: Arc<AtomicBool>,
+    panel_bus: Arc<Mutex<linc_diag::PanelBus>>,
 ) -> Result<()> {
     let ipc = if no_ipc {
         None
@@ -171,10 +209,18 @@ fn run_simulated(
         let loop_handle = handle.clone();
         let loop_shutdown = shutdown.clone();
         let loop_ipc = ipc.clone();
+        let loop_bus = panel_bus.clone();
         let run_thread = thread::spawn(move || {
             let mut driver = linc_panel::SimPanelDriver::new(loop_handle, cycle);
-            if let Err(error) = run_loop(&mut driver, cycle, no_hal, false, loop_shutdown, loop_ipc)
-            {
+            if let Err(error) = run_loop(
+                &mut driver,
+                cycle,
+                no_hal,
+                false,
+                loop_shutdown,
+                loop_ipc,
+                Some(loop_bus),
+            ) {
                 log::error!("simulator panel loop stopped: {error:#}");
             }
         });
@@ -185,10 +231,11 @@ fn run_simulated(
         window_result.map_err(|error| anyhow::anyhow!("simulator window: {error}"))?;
         Ok(())
     } else {
-        run_loop(&mut driver, cycle, no_hal, once, shutdown, ipc)
+        run_loop(&mut driver, cycle, no_hal, once, shutdown, ipc, Some(panel_bus))
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_loop(
     driver: &mut dyn linc_panel::PanelDriver,
     cycle: Duration,
@@ -196,6 +243,7 @@ fn run_loop(
     once: bool,
     shutdown: Arc<AtomicBool>,
     mut ipc: Option<SimPanelIpc>,
+    panel_bus: Option<Arc<Mutex<linc_diag::PanelBus>>>,
 ) -> Result<()> {
     let mut hal = if no_hal {
         None
@@ -218,6 +266,11 @@ fn run_loop(
             log::warn!("panel poll failed: {error}");
             PanelSnapshot::default()
         });
+        if let Some(bus) = panel_bus.as_ref() {
+            if let Ok(mut bus) = bus.lock() {
+                bus.publish(snapshot.clone());
+            }
+        }
         if let Some(ipc) = ipc.as_ref() {
             if let Err(error) = ipc.publish(&snapshot) {
                 log::warn!("cannot publish simulation panel state: {error}");

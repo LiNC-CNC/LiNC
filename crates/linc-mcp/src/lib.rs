@@ -50,7 +50,7 @@ mod tests {
         let source = Arc::new(linc_diag::BusSource::new(bus, process));
         let handle = linc_diag::serve(dir, "hmi", source).expect("serve");
         let client = linc_diag::Client::connect(&handle.socket).expect("connect");
-        let session = server::Session::new(client, policy::Policy::default(), audit::Audit::new(None));
+        let session = server::Session::new(client, None, policy::Policy::default(), audit::Audit::new(None));
         (session, handle)
     }
 
@@ -84,6 +84,7 @@ mod tests {
         assert_eq!(replies[0]["result"]["protocolVersion"], PROTOCOL_VERSION);
         let tools = replies[1]["result"]["tools"].as_array().unwrap();
         assert!(tools.iter().any(|tool| tool["name"] == "linc_get_snapshot"));
+        assert!(tools.iter().any(|tool| tool["name"] == "linc_screenshot"));
         assert_eq!(tools[0]["annotations"]["readOnlyHint"], true);
 
         let content = replies[2]["result"]["content"][0]["text"].as_str().unwrap();
@@ -116,7 +117,7 @@ mod tests {
     fn tools_are_read_only_by_default_and_unknown_names_fail_cleanly() {
         let (mut session, handle) = session("readonly");
         assert!(!session.policy.allow_writes);
-        assert!(tools::is_write("linc_get_snapshot") == false);
+        assert!(!tools::is_gated("linc_get_snapshot"));
 
         let replies = round_trip(
             &mut session,
@@ -131,6 +132,66 @@ mod tests {
         assert_eq!(error["code"], "NOT_FOUND");
         assert!(error["audit_id"].as_str().is_some(), "every call is audited: {error}");
         drop(handle);
+    }
+
+    #[test]
+    fn history_diff_and_timeline_answer_from_the_bus() {
+        let dir = std::env::temp_dir().join(format!("linc-mcp-{}-history", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let bus = Arc::new(Mutex::new(Bus::new(MachineSnapshot::empty(
+            MachineVariant::Mill,
+        ))));
+        let mut first = MachineSnapshot::empty(MachineVariant::Mill);
+        first.machine_name = "Before".into();
+        bus.lock().unwrap().publish_machine(first);
+        let from = bus.lock().unwrap().sequence();
+        let mut second = MachineSnapshot::empty(MachineVariant::Mill);
+        second.machine_name = "After".into();
+        second.machine.estop = true;
+        bus.lock().unwrap().publish_machine(second);
+
+        let process = ProcessInfo {
+            pid: std::process::id(),
+            role: "hmi".into(),
+            build: BuildInfo {
+                version: "test".into(),
+                ..BuildInfo::default()
+            },
+        };
+        let source = Arc::new(linc_diag::BusSource::new(bus, process));
+        let handle = linc_diag::serve(dir, "hmi", source).expect("serve");
+        let client = linc_diag::Client::connect(&handle.socket).expect("connect");
+        let mut session =
+            server::Session::new(client, None, policy::Policy::default(), audit::Audit::new(None));
+
+        let replies = round_trip(
+            &mut session,
+            &[
+                json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"linc_diff_snapshots","arguments":{"from_sequence":from}}}),
+                json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"linc_get_timeline","arguments":{"limit":10}}}),
+                json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"linc_get_snapshot_at","arguments":{"sequence":from}}}),
+            ],
+        );
+        for reply in &replies {
+            assert_eq!(reply["result"]["isError"], false, "{reply}");
+        }
+        let diff = json_from(&replies[0]);
+        let changes = diff["data"]["changes"].as_array().unwrap();
+        assert!(
+            changes.iter().any(|change| change["path"] == "machine_name"),
+            "{changes:?}"
+        );
+        assert!(json_from(&replies[1])["data"]["timeline"].is_array());
+        assert_eq!(
+            json_from(&replies[2])["data"]["machine"]["machine_name"],
+            "Before"
+        );
+        drop(handle);
+    }
+
+    fn json_from(reply: &Value) -> Value {
+        let text = reply["result"]["content"][0]["text"].as_str().unwrap();
+        serde_json::from_str(text).unwrap()
     }
 
     #[test]

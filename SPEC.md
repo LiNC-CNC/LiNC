@@ -1436,7 +1436,9 @@ start a program or write an offset.
 - `instance.json` records schema version, pid, role, source, socket path, start
   time, profile and build. A reader validates the pid before connecting and a
   socket file is only removed when nothing answers on it.
-- `linc --no-diag` starts without the socket.
+- `linc --no-diag` and `linc-panel --no-diag` start without their sockets.
+- Each role writes `instance-<role>.json`: the two share one directory, and a
+  single `instance.json` would be overwritten by whichever started last.
 
 ### 16.2 Protocol
 
@@ -1447,9 +1449,26 @@ build), `sequence`, `captured_at_ms`, `age_ms`, `stale`, `dropped` and `data`.
 source's threshold, and a write decision fails closed on a stale envelope.
 
 Methods implemented: `diag.hello`, `diag.ping`, `diag.snapshot`, `diag.summary`,
-`diag.ui`, `diag.why_blocked`, `diag.offsets`, `diag.tools`, `diag.program`,
-`diag.logs`, `diag.events`, `diag.config`, `diag.metrics`, `diag.cancel`.
+`diag.snapshot_at`, `diag.snapshot_diff`, `diag.timeline`, `diag.ui`,
+`diag.why_blocked`, `diag.offsets`, `diag.tools`, `diag.program`, `diag.logs`,
+`diag.events`, `diag.config`, `diag.metrics`, `diag.export_bundle`,
+`diag.screenshot`, `diag.subscribe`, `diag.unsubscribe`, `diag.cancel`.
 Unknown methods return `NOT_FOUND` and keep the connection open.
+
+The bus retains 60 snapshots at 1 Hz (a minute of history) for
+`diag.snapshot_at` and `diag.snapshot_diff`; the diff reports changed leaf paths
+and ignores fields that move on every sample (`meta.age_ms`, `live_trail`,
+`program.content`, ...), so a diff is a diagnosis rather than noise. A subscribed
+connection receives `diag.notify` at most every 250 ms when the sequence moves.
+
+`diag.screenshot` asks the UI thread for a capture and waits up to 3 s. The
+capture goes through egui's screenshot callback, which runs after the frame is
+painted — reading the window's frame buffer during layout returns the cleared
+buffer. The PNG is written to the export directory and returned as base64.
+
+`diag.export_bundle` writes nine JSON files (hello, summary, snapshot, gates,
+offsets, tools, config, logs, events) to a fixed directory:
+`$LINC_EXPORT_DIR`, else `$XDG_STATE_HOME/linc/exports`, else `~/.local/state/linc/exports`.
 
 The bus publishes on every backend sample and refreshes at 5 Hz, so `age_ms`
 stays small while the window is idle: `egui` repaints on demand, and a publisher
@@ -1467,17 +1486,26 @@ first-failure, so an agent sees the whole picture.
 ### 16.4 `linc-mcp`
 
 MCP over stdio, built without the UI, HAL, LinuxCNC or the panel driver. Tools
-are prefixed `linc_` and read-only in this phase: `linc_ping`,
+are prefixed `linc_` and read-only except where noted: `linc_ping`,
 `linc_get_build_info`, `linc_get_environment`, `linc_health_check`,
-`linc_get_state_summary`, `linc_get_snapshot`, `linc_why_blocked`,
+`linc_get_state_summary`, `linc_get_snapshot`, `linc_get_snapshot_at`,
+`linc_diff_snapshots`, `linc_get_timeline`, `linc_why_blocked`,
 `linc_get_ui_state`, `linc_get_program`, `linc_get_offsets`, `linc_get_tools`,
-`linc_get_config`, `linc_get_logs`, `linc_get_events`, `linc_get_metrics`.
+`linc_get_config`, `linc_get_logs`, `linc_get_events`, `linc_get_metrics`,
+`linc_get_panel_state`, `linc_get_panel_frames`, `linc_screenshot` (returns MCP
+image content) and `linc_export_bundle` (writes only under the export
+directory; annotated `readOnlyHint: false`, `destructiveHint: false`). Tools that
+could move the machine are gated behind `--allow-writes --sim`; none exist yet.
 Resources mirror the same state by URI; prompts start the two diagnostic
 sequences in `docs/MCP-SERVER-HANDOFF.md`.
 
 Every call is audited (stderr plus `--audit <file>`), and writes are refused with
 `WRITE_DISABLED` unless the server was started with `--allow-writes --sim`.
 
-Not in this phase: the `linc-panel` socket, screenshots, simulator fault
-injection, subscriptions, snapshot diffs and the NML/HAL sections. They extend
-this envelope rather than replace it.
+The panel service publishes its own socket (`panel-role` discovery) with
+`diag.panel`, `diag.panel_frames` and `diag.metrics`: link state, mode,
+overrides, buttons, protect and a raw-frame ring. `linc-mcp` connects to it when
+it is running and reports `PANEL_NOT_RUNNING` when it is not.
+
+Not in this phase: simulator fault injection, the NML/bridge and HAL sections.
+They extend this envelope rather than replace it.

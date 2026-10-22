@@ -41,6 +41,12 @@ fn main() -> Result<()> {
     )?;
     let client = linc_diag::Client::connect(&socket)
         .with_context(|| format!("cannot connect to {}", socket.display()))?;
+    // The panel is optional: its tools answer PANEL_NOT_RUNNING when it is absent.
+    let panel = args
+        .panel_socket
+        .clone()
+        .or_else(|| linc_diag::discovery::discover("panel", None))
+        .and_then(|path| linc_diag::Client::connect(&path).ok());
     let policy = linc_mcp::policy::Policy {
         allow_writes: args.allow_writes,
         allow_sim_writes: args.allow_writes && args.sim,
@@ -49,7 +55,7 @@ fn main() -> Result<()> {
         log::warn!("write tools enabled (sim only); every call is audited");
     }
     let audit = linc_mcp::audit::Audit::new(args.audit.clone());
-    let mut session = linc_mcp::server::Session::new(client, policy, audit);
+    let mut session = linc_mcp::server::Session::new(client, panel, policy, audit);
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     linc_mcp::serve(stdin.lock(), stdout.lock(), &mut session)?;

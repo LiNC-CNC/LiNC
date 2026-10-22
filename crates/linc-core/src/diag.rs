@@ -258,6 +258,31 @@ pub struct Bus {
     dropped: Dropped,
     log_limit: usize,
     event_limit: usize,
+    history: VecDeque<HistoryEntry>,
+    history_limit: usize,
+    last_history_ms: i64,
+    screenshot_requested: bool,
+    screenshot: Option<Screenshot>,
+}
+
+/// A PNG the UI thread captured for `diag.screenshot`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Screenshot {
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub at_ms: i64,
+}
+
+/// One retained snapshot for `diag.snapshot_at` and `diag.snapshot_diff`.
+///
+/// Kept at 1 Hz: enough to answer "what changed just before this error" without
+/// holding a copy of the trail more often than needed.
+#[derive(Clone, Debug)]
+pub struct HistoryEntry {
+    pub sequence: u64,
+    pub captured_at_ms: i64,
+    pub snapshot: MachineSnapshot,
 }
 
 impl Bus {
@@ -272,6 +297,11 @@ impl Bus {
             dropped: Dropped::default(),
             log_limit: 2_000,
             event_limit: 1_000,
+            history: VecDeque::new(),
+            history_limit: 60,
+            last_history_ms: 0,
+            screenshot_requested: false,
+            screenshot: None,
         }
     }
 
@@ -302,6 +332,105 @@ impl Bus {
         self.machine = snapshot;
         self.sequence += 1;
         self.captured_at_ms = now_ms();
+        self.record_history();
+    }
+
+    /// Retain a snapshot at 1 Hz; `history_limit` entries is one minute.
+    fn record_history(&mut self) {
+        if self.captured_at_ms - self.last_history_ms < 1_000 && !self.history.is_empty() {
+            return;
+        }
+        self.last_history_ms = self.captured_at_ms;
+        if self.history.len() >= self.history_limit {
+            self.history.pop_front();
+        }
+        self.history.push_back(HistoryEntry {
+            sequence: self.sequence,
+            captured_at_ms: self.captured_at_ms,
+            snapshot: self.machine.clone(),
+        });
+    }
+
+    pub fn history_len(&self) -> usize {
+        self.history.len()
+    }
+
+    /// The snapshot at `sequence`, or the newest one at or before it.
+    ///
+    /// A sequence at or after the live state returns the live snapshot, so a
+    /// caller can diff "one second ago" against "now" without waiting for the
+    /// sampler to record again.
+    pub fn snapshot_at(&self, sequence: u64) -> Option<HistoryEntry> {
+        if sequence >= self.sequence {
+            return Some(HistoryEntry {
+                sequence: self.sequence,
+                captured_at_ms: self.captured_at_ms,
+                snapshot: self.machine.clone(),
+            });
+        }
+        self.history
+            .iter()
+            .rev()
+            .find(|entry| entry.sequence <= sequence)
+            .cloned()
+    }
+
+    /// Field-level differences between two retained snapshots.
+    pub fn snapshot_diff(&self, from_sequence: u64, to_sequence: u64) -> Result<Value, String> {
+        let from = self
+            .snapshot_at(from_sequence)
+            .ok_or_else(|| format!("no snapshot at or before {from_sequence}"))?;
+        let to = self
+            .snapshot_at(to_sequence)
+            .ok_or_else(|| format!("no snapshot at or before {to_sequence}"))?;
+        let mut changes = Vec::new();
+        let from_value = serde_json::to_value(&from.snapshot).map_err(|e| e.to_string())?;
+        let to_value = serde_json::to_value(&to.snapshot).map_err(|e| e.to_string())?;
+        diff_json(&from_value, &to_value, "", &mut changes, 0);
+        Ok(json!({
+            "from": { "sequence": from.sequence, "captured_at_ms": from.captured_at_ms },
+            "to": { "sequence": to.sequence, "captured_at_ms": to.captured_at_ms },
+            "changes": changes,
+        }))
+    }
+
+    /// Events and logs merged by time, around a moment or after a sequence.
+    pub fn timeline(
+        &self,
+        around_ms: Option<i64>,
+        window_ms: i64,
+        since_sequence: Option<u64>,
+        limit: usize,
+    ) -> Value {
+        let limit = limit.clamp(1, 1_000);
+        let low = around_ms.map(|center| center - window_ms);
+        let high = around_ms.map(|center| center + window_ms);
+        let mut entries: Vec<(i64, &'static str, Value)> = Vec::new();
+        for log in self.logs.iter().filter(|log| {
+            low.map(|low| log.at_ms >= low).unwrap_or(true)
+                && high.map(|high| log.at_ms <= high).unwrap_or(true)
+                && since_sequence
+                    .map(|since| log.sequence > since)
+                    .unwrap_or(true)
+        }) {
+            entries.push((log.at_ms, "log", serde_json::to_value(log).unwrap_or(Value::Null)));
+        }
+        for event in self.events.iter().filter(|event| {
+            low.map(|low| event.at_ms >= low).unwrap_or(true)
+                && high.map(|high| event.at_ms <= high).unwrap_or(true)
+                && since_sequence
+                    .map(|since| event.sequence > since)
+                    .unwrap_or(true)
+        }) {
+            entries.push((event.at_ms, "event", serde_json::to_value(event).unwrap_or(Value::Null)));
+        }
+        entries.sort_by_key(|(at, _, _)| *at);
+        let entries: Vec<Value> = entries
+            .into_iter()
+            .take(limit)
+            .map(|(at, kind, record)| json!({ "at_ms": at, "kind": kind, "record": record }))
+            .collect();
+        json!({ "timeline": entries, "next_cursor": Value::Null })
     }
 
     /// Publish UI state. An unchanged snapshot does not advance the sequence, so
@@ -416,6 +545,25 @@ impl Bus {
         for (kind, severity, message) in transitions {
             self.push_event(kind, severity, message);
         }
+    }
+
+    /// Ask the UI thread to capture the next frame.
+    pub fn request_screenshot(&mut self) {
+        self.screenshot_requested = true;
+        self.screenshot = None;
+    }
+
+    /// The UI thread takes the request; `None` means nothing was asked for.
+    pub fn take_screenshot_request(&mut self) -> bool {
+        std::mem::take(&mut self.screenshot_requested)
+    }
+
+    pub fn put_screenshot(&mut self, screenshot: Screenshot) {
+        self.screenshot = Some(screenshot);
+    }
+
+    pub fn take_screenshot(&mut self) -> Option<Screenshot> {
+        self.screenshot.take()
     }
 
     /// `{ machine, ui }`, with the live trail trimmed to what was asked for.
@@ -583,6 +731,60 @@ impl Bus {
             .map(|record| serde_json::to_value(record).unwrap_or(Value::Null))
             .collect();
         json!({ "events": records, "next_cursor": Value::Null })
+    }
+}
+
+/// Paths that change on every sample, or that are too large to diff usefully.
+const DIFF_IGNORE: &[&str] = &[
+    "meta.captured_at_ms",
+    "meta.age_ms",
+    "meta.sequence",
+    "meta.stale",
+    "live_trail",
+    "tool_tip",
+    "hal.heartbeat_seq",
+    "program.content",
+    "program.progress",
+    "program.loaded_at_ms",
+];
+
+/// Collect changed leaf paths between two JSON values.
+///
+/// Objects recurse; arrays and scalars are reported whole. Paths in
+/// [`DIFF_IGNORE`] are skipped: a diff where every entry is `meta.age_ms` is
+/// noise, not a diagnosis.
+fn diff_json(from: &Value, to: &Value, prefix: &str, out: &mut Vec<Value>, depth: usize) {
+    if depth > 8 {
+        return;
+    }
+    let (Some(from_object), Some(to_object)) = (from.as_object(), to.as_object()) else {
+        return;
+    };
+    let mut keys: Vec<&String> = from_object.keys().chain(to_object.keys()).collect();
+    keys.sort();
+    keys.dedup();
+    for key in keys {
+        let path = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        if DIFF_IGNORE
+            .iter()
+            .any(|ignore| path == *ignore || path.starts_with(&format!("{ignore}.")))
+        {
+            continue;
+        }
+        let before = from_object.get(key).unwrap_or(&Value::Null);
+        let after = to_object.get(key).unwrap_or(&Value::Null);
+        if before == after {
+            continue;
+        }
+        if before.is_object() && after.is_object() {
+            diff_json(before, after, &path, out, depth + 1);
+            continue;
+        }
+        out.push(json!({ "path": path, "from": before, "to": after }));
     }
 }
 

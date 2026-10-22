@@ -151,6 +151,32 @@ impl LincApp {
         bus.publish_ui(self.diag_ui_snapshot());
     }
 
+    /// Answer a pending `diag.screenshot`.
+    ///
+    /// egui delivers the capture through a callback after the frame is painted,
+    /// which is the only point where the rendered image exists: reading the
+    /// window's frame buffer during layout returns the cleared buffer.
+    fn capture_screenshot(&self, ctx: &egui::Context) {
+        let Some(bus) = &self.diag_bus else { return };
+        let requested = bus
+            .lock()
+            .map(|mut bus| bus.take_screenshot_request())
+            .unwrap_or(false);
+        if !requested {
+            return;
+        }
+        let bus = bus.clone();
+        ctx.request_screenshot(move |image| {
+            let Some(screenshot) = png_from_color_image(&image) else {
+                log::warn!("screenshot captured but could not be encoded");
+                return;
+            };
+            if let Ok(mut bus) = bus.lock() {
+                bus.put_screenshot(screenshot);
+            }
+        });
+    }
+
     /// The UI-side state an agent needs; mirrors `linc_core::diag::UiSnapshot`.
     fn diag_ui_snapshot(&self) -> linc_core::diag::UiSnapshot {
         use linc_core::diag::UiSnapshot;
@@ -2976,6 +3002,7 @@ impl eframe::App for LincApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         theme::apply_design_zoom(ui.ctx(), self.design_scale);
         self.publish_diag();
+        self.capture_screenshot(ui.ctx());
         if self.diag_bus.is_some() {
             // egui repaints on demand, so an idle window would stop publishing
             // and every diagnostic response would read as stale. Four times a
@@ -3544,6 +3571,30 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             assert!(app.manual.fit, "each view refits: {expected:?}");
         }
     }
+}
+
+
+/// Encode an egui capture as a PNG.
+fn png_from_color_image(image: &egui::ColorImage) -> Option<linc_core::diag::Screenshot> {
+    let [width, height] = image.size;
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(width * height * 4);
+    for pixel in &image.pixels {
+        bytes.extend_from_slice(&pixel.to_array());
+    }
+    let image = image::RgbaImage::from_raw(width as u32, height as u32, bytes)?;
+    let mut png = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .ok()?;
+    Some(linc_core::diag::Screenshot {
+        png,
+        width: width as u32,
+        height: height as u32,
+        at_ms: linc_core::diag::now_ms(),
+    })
 }
 
 #[cfg(test)]

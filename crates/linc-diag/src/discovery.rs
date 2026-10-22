@@ -7,8 +7,6 @@ use std::path::{Path, PathBuf};
 use linc_core::diag::{BuildInfo, ProcessInfo};
 use serde::{Deserialize, Serialize};
 
-pub const INSTANCE_FILE: &str = "instance.json";
-
 /// `$LINC_DIAG_DIR`, else `$XDG_RUNTIME_DIR/linc/<instance>`, else
 /// `/tmp/linc-<uid>/<instance>`.
 ///
@@ -44,8 +42,10 @@ pub fn socket_path(dir: &Path, role: &str) -> PathBuf {
     dir.join(format!("{role}.sock"))
 }
 
-pub fn instance_path(dir: &Path) -> PathBuf {
-    dir.join(INSTANCE_FILE)
+/// `instance-<role>.json`: the HMI and the panel share one directory, so a
+/// single `instance.json` would be overwritten by whichever started last.
+pub fn instance_path(dir: &Path, role: &str) -> PathBuf {
+    dir.join(format!("instance-{role}.json"))
 }
 
 /// Create the runtime directory with mode `0700`.
@@ -117,7 +117,7 @@ pub fn write_instance(
         profile: process.build.profile.clone(),
         build: process.build,
     };
-    let path = instance_path(dir);
+    let path = instance_path(dir, role);
     let temp = path.with_extension("json.tmp");
     let mut file = std::fs::File::create(&temp)?;
     serde_json::to_writer_pretty(&mut file, &instance)?;
@@ -129,7 +129,7 @@ pub fn write_instance(
 
 /// Read `instance.json` for a role, refusing a record whose process is gone.
 pub fn read_instance(dir: &Path, role: &str) -> std::io::Result<Instance> {
-    let path = instance_path(dir);
+    let path = instance_path(dir, role);
     let text = std::fs::read_to_string(&path)?;
     let instance: Instance = serde_json::from_str(&text)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;

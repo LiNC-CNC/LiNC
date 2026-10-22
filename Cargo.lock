@@ -1767,6 +1767,7 @@ dependencies = [
  "egui",
  "env_logger",
  "linc-core",
+ "linc-diag",
  "linc-hal",
  "log",
  "serialport",

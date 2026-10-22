@@ -8,12 +8,35 @@ use linc_core::diag::DiagError;
 use linc_diag::Client;
 use serde_json::{json, Value};
 
+/// What a tool is allowed to do. `Export` writes a file under a fixed directory
+/// and needs no opt-in; `Write` can move the machine and is gated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolClass {
+    Read,
+    Export,
+    Write,
+}
+
+impl ToolClass {
+    pub fn read_only(self) -> bool {
+        matches!(self, ToolClass::Read)
+    }
+
+    pub fn destructive(self) -> bool {
+        matches!(self, ToolClass::Write)
+    }
+
+    pub fn gated(self) -> bool {
+        matches!(self, ToolClass::Write)
+    }
+}
+
 pub struct ToolDef {
     pub name: &'static str,
     pub title: &'static str,
     pub description: &'static str,
     pub schema: Value,
-    pub read_only: bool,
+    pub class: ToolClass,
 }
 
 fn no_args() -> Value {
@@ -37,21 +60,21 @@ pub fn catalog() -> Vec<ToolDef> {
             title: "Ping the LiNC diagnostic socket",
             description: "Liveness and clock sample. Use before a long series of calls.",
             schema: no_args(),
-            read_only: true,
+            class: ToolClass::Read,
         },
         ToolDef {
             name: "linc_get_build_info",
             title: "Build and protocol information",
             description: "Server metadata, protocol version, capabilities and limits.",
             schema: no_args(),
-            read_only: true,
+            class: ToolClass::Read,
         },
         ToolDef {
             name: "linc_get_environment",
             title: "Runtime environment",
             description: "Allowlisted process environment, profile, runtime directory and display.",
             schema: no_args(),
-            read_only: true,
+            class: ToolClass::Read,
         },
         ToolDef {
             name: "linc_health_check",
@@ -64,14 +87,14 @@ pub fn catalog() -> Vec<ToolDef> {
                 },
                 "additionalProperties": false
             }),
-            read_only: true,
+            class: ToolClass::Read,
         },
         ToolDef {
             name: "linc_get_state_summary",
             title: "Operator state summary",
             description: "Mode, interpreter, power, panel, homing, program, tool, WCS, alarms and blockers.",
             schema: no_args(),
-            read_only: true,
+            class: ToolClass::Read,
         },
         ToolDef {
             name: "linc_get_snapshot",
@@ -85,21 +108,21 @@ pub fn catalog() -> Vec<ToolDef> {
                 },
                 "additionalProperties": false
             }),
-            read_only: true,
+            class: ToolClass::Read,
         },
         ToolDef {
             name: "linc_why_blocked",
             title: "Why is an action blocked?",
             description: "The shared gate report: every blocker with code, severity, source and remediation.",
             schema: no_args(),
-            read_only: true,
+            class: ToolClass::Read,
         },
         ToolDef {
             name: "linc_get_ui_state",
             title: "UI state",
             description: "Page, mode, program view, toolpath view, zoom, selected line and toasts.",
             schema: no_args(),
-            read_only: true,
+            class: ToolClass::Read,
         },
         ToolDef {
             name: "linc_get_program",
@@ -113,28 +136,28 @@ pub fn catalog() -> Vec<ToolDef> {
                 },
                 "additionalProperties": false
             }),
-            read_only: true,
+            class: ToolClass::Read,
         },
         ToolDef {
             name: "linc_get_offsets",
             title: "Work offsets",
             description: "Active system, all rows, rotations and the G92 offsets.",
             schema: no_args(),
-            read_only: true,
+            class: ToolClass::Read,
         },
         ToolDef {
             name: "linc_get_tools",
             title: "Tool table and tool change",
             description: "Tool table rows, columns, load error, current/prepared tool and ATC state.",
             schema: no_args(),
-            read_only: true,
+            class: ToolClass::Read,
         },
         ToolDef {
             name: "linc_get_config",
             title: "Configuration",
             description: "Profile summary, INI paths and validation result.",
             schema: no_args(),
-            read_only: true,
+            class: ToolClass::Read,
         },
         ToolDef {
             name: "linc_get_logs",
@@ -149,7 +172,7 @@ pub fn catalog() -> Vec<ToolDef> {
                 },
                 "additionalProperties": false
             }),
-            read_only: true,
+            class: ToolClass::Read,
         },
         ToolDef {
             name: "linc_get_events",
@@ -164,14 +187,89 @@ pub fn catalog() -> Vec<ToolDef> {
                 },
                 "additionalProperties": false
             }),
-            read_only: true,
+            class: ToolClass::Read,
+        },
+        ToolDef {
+            name: "linc_get_snapshot_at",
+            title: "Snapshot at a sequence",
+            description: "A retained snapshot (at most one minute of history, 1 Hz).",
+            schema: json!({
+                "type": "object",
+                "properties": { "sequence": { "type": "integer", "minimum": 0 } },
+                "required": ["sequence"],
+                "additionalProperties": false
+            }),
+            class: ToolClass::Read,
+        },
+        ToolDef {
+            name: "linc_diff_snapshots",
+            title: "Diff two retained snapshots",
+            description: "Field-level changes between two sequences; volatile fields are ignored.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "from_sequence": { "type": "integer", "minimum": 0 },
+                    "to_sequence": { "type": "integer", "minimum": 0 }
+                },
+                "required": ["from_sequence"],
+                "additionalProperties": false
+            }),
+            class: ToolClass::Read,
+        },
+        ToolDef {
+            name: "linc_get_timeline",
+            title: "Merged log and event timeline",
+            description: "Logs and state transitions in time order.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "around_ms": { "type": "integer" },
+                    "window_ms": { "type": "integer", "minimum": 1, "default": 5000 },
+                    "since_sequence": { "type": "integer" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100 }
+                },
+                "additionalProperties": false
+            }),
+            class: ToolClass::Read,
+        },
+        ToolDef {
+            name: "linc_export_bundle",
+            title: "Export a diagnostic bundle",
+            description: "Writes snapshot, summary, gates, offsets, tools, config, logs and events to a fixed export directory.",
+            schema: no_args(),
+            class: ToolClass::Export,
+        },
+        ToolDef {
+            name: "linc_get_panel_state",
+            title: "Panel state",
+            description: "The panel service's own snapshot: link, mode, overrides, buttons and protect.",
+            schema: no_args(),
+            class: ToolClass::Read,
+        },
+        ToolDef {
+            name: "linc_get_panel_frames",
+            title: "Raw panel frames",
+            description: "Recent raw frames tapped from the panel link, newest first.",
+            schema: json!({
+                "type": "object",
+                "properties": { "limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 } },
+                "additionalProperties": false
+            }),
+            class: ToolClass::Read,
+        },
+        ToolDef {
+            name: "linc_screenshot",
+            title: "Screenshot of the HMI",
+            description: "Captures the window as PNG (image content plus the file path).",
+            schema: no_args(),
+            class: ToolClass::Export,
         },
         ToolDef {
             name: "linc_get_metrics",
             title: "Diagnostic metrics",
             description: "Sequence, ring sizes, drop counters and capture time.",
             schema: no_args(),
-            read_only: true,
+            class: ToolClass::Read,
         },
     ]
 }
@@ -185,7 +283,12 @@ fn rewrap(envelope: &Value, data: Value) -> Value {
     out
 }
 
-pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<Value, DiagError> {
+pub fn call(
+    client: &mut Client,
+    panel: Option<&mut Client>,
+    name: &str,
+    args: &Value,
+) -> Result<Value, DiagError> {
     match name {
         "linc_ping" => client.call("diag.ping", Value::Null),
         "linc_get_build_info" => {
@@ -322,18 +425,58 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<Value, Diag
             });
             client.call("diag.events", params)
         }
+        "linc_get_snapshot_at" => {
+            let sequence = args.get("sequence").and_then(Value::as_u64).unwrap_or(0);
+            client.call("diag.snapshot_at", json!({ "sequence": sequence }))
+        }
+        "linc_diff_snapshots" => {
+            let from = args.get("from_sequence").and_then(Value::as_u64).unwrap_or(0);
+            let params = json!({
+                "from_sequence": from,
+                "to_sequence": args.get("to_sequence").cloned().unwrap_or(Value::Null),
+            });
+            client.call("diag.snapshot_diff", params)
+        }
+        "linc_get_timeline" => {
+            let params = json!({
+                "around_ms": args.get("around_ms").cloned().unwrap_or(Value::Null),
+                "window_ms": args.get("window_ms").and_then(Value::as_u64).unwrap_or(5_000),
+                "since_sequence": args.get("since_sequence").cloned().unwrap_or(Value::Null),
+                "limit": args.get("limit").and_then(Value::as_u64).unwrap_or(100),
+            });
+            client.call("diag.timeline", params)
+        }
+        "linc_export_bundle" => client.call("diag.export_bundle", Value::Null),
+        "linc_screenshot" => client.call("diag.screenshot", Value::Null),
+        "linc_get_panel_state" | "linc_get_panel_frames" => {
+            let panel = panel.ok_or_else(|| {
+                DiagError::new(
+                    "PANEL_NOT_RUNNING",
+                    "no panel diagnostic socket; start linc-panel (or pass --panel-socket)",
+                    true,
+                )
+            })?;
+            if name == "linc_get_panel_state" {
+                panel.call("diag.panel", Value::Null)
+            } else {
+                panel.call(
+                    "diag.panel_frames",
+                    json!({ "limit": args.get("limit").and_then(Value::as_u64).unwrap_or(100) }),
+                )
+            }
+        }
         "linc_get_metrics" => client.call("diag.metrics", Value::Null),
         other => Err(DiagError::not_found(format!("unknown tool {other:?}"))),
     }
 }
 
-/// Which tools are writes, so the policy gate can refuse them by name.
-pub fn is_write(name: &str) -> bool {
-    !catalog()
+/// Tools that can move the machine, which the policy gate refuses by name.
+pub fn is_gated(name: &str) -> bool {
+    catalog()
         .iter()
         .find(|tool| tool.name == name)
-        .map(|tool| tool.read_only)
-        .unwrap_or(true)
+        .map(|tool| tool.class.gated())
+        .unwrap_or(false)
 }
 
 /// The MCP `tools/list` payload.
@@ -346,7 +489,7 @@ pub fn list() -> Value {
                 "title": tool.title,
                 "description": tool.description,
                 "inputSchema": tool.schema,
-                "annotations": crate::policy::annotations(tool.read_only),
+                "annotations": crate::policy::annotations(tool.class),
             }))
             .collect::<Vec<_>>()
     })

@@ -18,6 +18,7 @@ env_logger.workspace = true
 log.workspace = true
 serialport.workspace = true
 linc-core = { path = "../linc-core" }
+linc-diag = { path = "../linc-diag" }
 linc-hal = { path = "../linc-hal" }
 signal-hook.workspace = true
 
