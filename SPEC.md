@@ -452,8 +452,10 @@ and end of the program when it is shorter than one.
 - `MODAL` is its own pane under the toolpath, up to eight columns so a full set
   of active codes stays on one row. Its cells carry the group label, the active
   code and a short mnemonic for what that code means (`UNITS` / `G21` / `MM`),
-  with a gap between rows where the codes wrap. The Machine dashboard keeps the
-  two-line cell: its strip has no height to spare.
+  with a mnemonic line of clearance under each cell so wrapped rows read as
+  rows. The Machine dashboard draws the same cells under its G-code; the code
+  window there is sized from the height the strip leaves, so the strip is never
+  clipped.
 - `FIT` (`Ctrl+0`) reframes the toolpath and `CLEAR TRAIL` (`Ctrl+L`) clears
   only the live trail; both are page-local commands, not buttons.
 
