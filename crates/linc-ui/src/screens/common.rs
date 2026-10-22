@@ -83,16 +83,25 @@ fn token_line_ui(ui: &mut Ui, text: &str, size: f32) {
 }
 
 
-/// Space under a cell, so a wrapped row of cells reads as its own row: one
-/// mnemonic line.
-const ROW_GAP: f32 = 10.0;
+/// Space under a cell that has a mnemonic: half a mnemonic line, a little more
+/// than the spacing between the lines inside a cell. Enough to separate wrapped
+/// rows without leaving a hole.
+const ROW_GAP: f32 = 5.0;
 
-/// Active G-code modal groups as cells of group label, active code and the
-/// code's meaning in one word (`G21` → `MM`).
+/// Active G-code modal groups as cells of group label and active code.
 ///
 /// The Machine dashboard and the Program side pane share the cells; the column
-/// count changes with the width available.
-pub fn modal_grid(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str) {
+/// count changes with the width available, and `mnemonics` adds the third line
+/// naming what the code means (`G21` → `MM`). The dashboard leaves it off: that
+/// strip sits under sixteen lines of G-code and its two-line cells are what the
+/// card is sized for.
+pub fn modal_grid(
+    app: &LincApp,
+    ui: &mut Ui,
+    columns: usize,
+    mnemonics: bool,
+    id_salt: &str,
+) {
     let codes = app
         .snapshot
         .program
@@ -137,7 +146,7 @@ pub fn modal_grid(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str) {
                             .size(theme::font_size(8.0))
                             .color(theme::FG),
                     );
-                    if !mnemonic.is_empty() {
+                    if mnemonics && !mnemonic.is_empty() {
                         ui.label(
                             RichText::new(*mnemonic)
                                 .size(theme::font_size(7.0))
@@ -264,7 +273,7 @@ pub fn toolpath_header(ui: &mut Ui, view: &str, zoom: f32) {
 pub fn modal_pane_in(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str, rect: egui::Rect) {
     shell_card(ui, rect, |ui| {
         card_title(ui, "MODAL");
-        modal_grid(app, ui, columns, id_salt);
+        modal_grid(app, ui, columns, true, id_salt);
     });
 }
 
@@ -272,13 +281,14 @@ pub fn modal_pane_in(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str, 
 
 /// Height a MODAL pane needs for `codes` G-code cells at `columns` wide.
 ///
-/// Measured from the card: 26 px of chrome (margins plus title) and 46 px per
-/// row of cells — group label, code, mnemonic and the gap under it. Derived
-/// rather than observed so it cannot lag a frame and leave the column short.
+/// Measured from the card: 26 px of chrome (margins plus title) and 41 px per
+/// row of cells — group label, code, mnemonic and half a line of clearance.
+/// Derived rather than observed so it cannot lag a frame and leave the column
+/// short.
 pub fn modal_height(codes: usize, columns: usize) -> f32 {
     let rows = codes.max(1).div_ceil(columns.max(1));
-    // 8 px frame, an 18 px title row, and 46 px per row of cells.
-    26.0 + rows as f32 * 46.0
+    // 8 px frame, an 18 px title row, and 41 px per row of cells.
+    26.0 + rows as f32 * 41.0
 }
 
 
@@ -668,7 +678,7 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                     .iter()
                     .filter(|(key, _)| key.starts_with('G'))
                     .count();
-                let strip = codes.max(1).div_ceil(6) as f32 * 46.0;
+                let strip = codes.max(1).div_ceil(6) as f32 * 26.0;
                 let window_len =
                     (((height - 24.0) - 26.0 - 12.0 - strip - 46.0) / (row_height + 2.0))
                         .floor()
@@ -747,7 +757,7 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                 }
                 theme::separator(ui);
                 field_label(ui, "MODAL");
-                modal_grid(app, ui, 6, "program_modal_fields");
+                modal_grid(app, ui, 6, false, "program_modal_fields");
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                     ui.horizontal(|ui| {
