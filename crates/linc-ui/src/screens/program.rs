@@ -169,6 +169,8 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
         };
         let mut zoom = app.program.graph_zoom;
         let mut pan = app.program.graph_pan;
+        let mut yaw = app.program.graph_yaw;
+        let mut pitch = app.program.graph_pitch;
         let mut fit = app.program.fit_requested;
         common::trajectory(
             app,
@@ -178,6 +180,8 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
             view,
             &mut zoom,
             &mut pan,
+            &mut yaw,
+            &mut pitch,
             &mut fit,
             Some(app.program.selected_line),
             Some(app.snapshot.program.executing_line()),
@@ -185,6 +189,8 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
         );
         app.program.graph_zoom = zoom;
         app.program.graph_pan = pan;
+        app.program.graph_yaw = yaw;
+        app.program.graph_pitch = pitch;
         app.program.fit_requested = false;
     });
 }

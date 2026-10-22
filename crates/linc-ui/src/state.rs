@@ -515,6 +515,9 @@ pub struct ProgramUi {
     pub cursor_line: Option<usize>,
     pub graph_zoom: f32,
     pub graph_pan: egui::Vec2,
+    /// Orbit of the 3D toolpath: yaw about the vertical, pitch above the plane.
+    pub graph_yaw: f32,
+    pub graph_pitch: f32,
     pub graph_view: ViewMode,
     pub fit_requested: bool,
     pub follow_current: bool,
@@ -544,6 +547,8 @@ impl Default for ProgramUi {
             cursor_line: None,
             graph_zoom: 1.0,
             graph_pan: egui::Vec2::ZERO,
+            graph_yaw: linc_view::DEFAULT_YAW,
+            graph_pitch: linc_view::DEFAULT_PITCH,
             graph_view: ViewMode::Iso3d,
             fit_requested: true,
             follow_current: true,
@@ -898,6 +903,8 @@ impl MdiUi {
 pub struct ManualUi {
     pub zoom: f32,
     pub pan: egui::Vec2,
+    pub yaw: f32,
+    pub pitch: f32,
     pub view: ViewMode,
     pub fit: bool,
 }
@@ -907,6 +914,8 @@ impl Default for ManualUi {
         Self {
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
+            yaw: linc_view::DEFAULT_YAW,
+            pitch: linc_view::DEFAULT_PITCH,
             view: ViewMode::Iso3d,
             fit: true,
         }

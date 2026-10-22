@@ -387,6 +387,10 @@ Default page. The layout is selected by `machine.gui`.
 - Large 3D toolpath: stock, loaded program path, live tool trail in a distinct
   color, rapid path, tool marker, axes, zoom, program/machine bounds and
   selected-line highlight. `CLEAR TRAIL` clears only the live trail.
+- 3D navigation follows Blender: middle-drag orbits (yaw about the vertical,
+  pitch above the XY plane), Shift+middle-drag pans, the wheel zooms, and a
+  double-click returns to the default isometric view. The top and side views
+  keep their fixed direction; primary drag pans on every view.
 - Program card, feed/spindle-load gauges, machine health and alarms.
 - ATC state in Tools/Diagnostics; mill tool table uses orientation and, only
   when ATC is enabled, the standard `P` pocket column.

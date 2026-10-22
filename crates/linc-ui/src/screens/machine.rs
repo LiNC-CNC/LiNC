@@ -127,6 +127,8 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
             common::toolpath_header(ui, view.label(), app.program.graph_zoom);
             let mut zoom = app.program.graph_zoom;
             let mut pan = app.program.graph_pan;
+            let mut yaw = app.program.graph_yaw;
+            let mut pitch = app.program.graph_pitch;
             let mut fit = app.program.fit_requested;
             common::trajectory(
                 app,
@@ -136,6 +138,8 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 view,
                 &mut zoom,
                 &mut pan,
+                &mut yaw,
+                &mut pitch,
                 &mut fit,
                 Some(app.program.selected_line),
                 Some(app.snapshot.program.current_line),
@@ -143,6 +147,8 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
             );
             app.program.graph_zoom = zoom;
             app.program.graph_pan = pan;
+            app.program.graph_yaw = yaw;
+            app.program.graph_pitch = pitch;
             app.program.fit_requested = false;
             ui.horizontal(|ui| {
                 let program = if app.snapshot.program.display_name.is_empty() {
@@ -209,6 +215,8 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                     let preview = app.program.last_valid_preview.clone();
                     let mut zoom = app.program.graph_zoom;
                     let mut pan = app.program.graph_pan;
+                    let mut yaw = app.program.graph_yaw;
+                    let mut pitch = app.program.graph_pitch;
                     let mut fit = app.program.fit_requested;
                     common::trajectory(
                         app,
@@ -218,6 +226,8 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                         ViewMode::LatheXz,
                         &mut zoom,
                         &mut pan,
+                        &mut yaw,
+                        &mut pitch,
                         &mut fit,
                         Some(app.program.selected_line),
                         Some(app.snapshot.program.current_line),

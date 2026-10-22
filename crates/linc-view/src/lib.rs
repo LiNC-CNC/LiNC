@@ -53,6 +53,11 @@ impl ViewMode {
     }
 }
 
+/// Blender's default-ish orbit: 45° around, ~35° above the XY plane, the classic
+/// isometric reading of a mill table.
+pub const DEFAULT_YAW: f32 = std::f32::consts::FRAC_PI_4;
+pub const DEFAULT_PITCH: f32 = 0.615;
+
 #[derive(Clone, Debug)]
 pub struct TrajectoryView<'a> {
     pub preview: &'a Preview,
@@ -69,6 +74,10 @@ pub struct TrajectoryView<'a> {
     pub view: ViewMode,
     pub zoom: f32,
     pub pan: Vec2,
+    /// Orbit of the 3D view: rotation about the vertical axis and elevation.
+    /// Ignored by the flat views, which have a fixed direction.
+    pub yaw: f32,
+    pub pitch: f32,
     pub show_grid: bool,
     pub show_live_trail: bool,
     pub show_program_bounds: bool,
@@ -102,6 +111,8 @@ impl<'a> TrajectoryView<'a> {
             },
             zoom: 1.0,
             pan: Vec2::ZERO,
+            yaw: DEFAULT_YAW,
+            pitch: DEFAULT_PITCH,
             show_grid: true,
             show_live_trail: true,
             show_program_bounds: true,
@@ -125,23 +136,69 @@ struct Projection {
     zoom: f32,
     pan: Vec2,
     mode: ViewMode,
+    yaw: f32,
+    pitch: f32,
+}
+
+/// The screen-plane coordinates of a point in the view's frame.
+///
+/// The 3D view is an orthographic camera: `yaw` turns it about the vertical
+/// axis, `pitch` raises it above the XY plane. Screen y grows downwards, so the
+/// vertical component is negated — the opposite sign drew +Z downwards.
+fn view_xy(local: [f32; 3], mode: ViewMode, yaw: f32, pitch: f32) -> (f32, f32) {
+    match mode {
+        ViewMode::Iso3d => {
+            let (sin_yaw, cos_yaw) = yaw.sin_cos();
+            let (sin_pitch, cos_pitch) = pitch.sin_cos();
+            let right = local[0] * cos_yaw - local[1] * sin_yaw;
+            let depth = local[0] * sin_yaw + local[1] * cos_yaw;
+            let up = local[2] * cos_pitch - depth * sin_pitch;
+            (right, -up)
+        }
+        ViewMode::TopXy => (local[0], -local[1]),
+        ViewMode::SideXz | ViewMode::LatheXz => (local[2], -local[0]),
+    }
 }
 
 impl Projection {
-    fn new(bounds: Bounds3, rect: Rect, mode: ViewMode, zoom: f32, pan: Vec2) -> Self {
+    fn new(
+        bounds: Bounds3,
+        rect: Rect,
+        mode: ViewMode,
+        yaw: f32,
+        pitch: f32,
+        zoom: f32,
+        pan: Vec2,
+    ) -> Self {
         let expanded = bounds.expanded(1.0);
-        let size = expanded.size();
-        let (world_w, world_h) = match mode {
-            ViewMode::Iso3d => {
-                let w = (size[0] + size[1]) * 0.866;
-                let h = (size[0] + size[1]) * 0.5 + size[2];
-                (w.max(1.0), h.max(1.0))
-            }
-            ViewMode::TopXy => (size[0].max(1.0), size[1].max(1.0)),
-            ViewMode::SideXz | ViewMode::LatheXz => (size[2].max(1.0), size[0].max(1.0)),
-        };
+        let center = [
+            (expanded.min[0] + expanded.max[0]) * 0.5,
+            (expanded.min[1] + expanded.max[1]) * 0.5,
+            (expanded.min[2] + expanded.max[2]) * 0.5,
+        ];
+        // Fit the box that is actually on screen: project its eight corners with
+        // the current orbit, so a rotated view still frames the whole machine.
+        let mut min = [f32::INFINITY, f32::INFINITY];
+        let mut max = [f32::NEG_INFINITY, f32::NEG_INFINITY];
+        for corner in 0..8 {
+            let point = [
+                if corner & 1 == 0 { expanded.min[0] } else { expanded.max[0] },
+                if corner & 2 == 0 { expanded.min[1] } else { expanded.max[1] },
+                if corner & 4 == 0 { expanded.min[2] } else { expanded.max[2] },
+            ];
+            let local = [
+                (point[0] - center[0]) as f32,
+                (point[1] - center[1]) as f32,
+                (point[2] - center[2]) as f32,
+            ];
+            let (x, y) = view_xy(local, mode, yaw, pitch);
+            min = [min[0].min(x), min[1].min(y)];
+            max = [max[0].max(x), max[1].max(y)];
+        }
+        let world_w = (max[0] - min[0]).max(1.0);
+        let world_h = (max[1] - min[1]).max(1.0);
         let scale =
-            ((rect.width() / world_w as f32).min(rect.height() / world_h as f32) * 0.82).max(0.01);
+            ((rect.width() / world_w).min(rect.height() / world_h) * 0.82).max(0.01);
         Self {
             min: expanded.min,
             max: expanded.max,
@@ -150,6 +207,8 @@ impl Projection {
             zoom: zoom.clamp(0.05, 40.0),
             pan,
             mode,
+            yaw,
+            pitch,
         }
     }
 
@@ -164,18 +223,7 @@ impl Projection {
             (point[1] - center[1]) as f32,
             (point[2] - center[2]) as f32,
         ];
-        let (x, y) = match self.mode {
-            ViewMode::Iso3d => {
-                let sx = (local[0] - local[1]) * 0.866;
-                // Screen y grows downwards, so a positive Z must *subtract*
-                // from it. The sign was inverted, which drew +Z downwards —
-                // the opposite of the machine convention and of the mockup.
-                let sy = (local[0] + local[1]) * 0.5 + local[2];
-                (sx, -sy)
-            }
-            ViewMode::TopXy => (local[0], -local[1]),
-            ViewMode::SideXz | ViewMode::LatheXz => (local[2], -local[0]),
-        };
+        let (x, y) = view_xy(local, self.mode, self.yaw, self.pitch);
         let center_screen = self.rect.center() + self.pan;
         Pos2::new(
             center_screen.x + x * self.scale * self.zoom,
@@ -262,9 +310,16 @@ fn arc_points(segment: &PathSegment, arc: &ArcSpec) -> Vec<[f64; 3]> {
 /// stable view must hand it the same box every frame. A fit is therefore a
 /// zoom/pan adjustment on top of that box, not a different box: changing the box
 /// is what made loading a program rescale the view and move the markers.
-fn fit_zoom_pan(reference: Bounds3, target: Bounds3, rect: Rect, mode: ViewMode) -> (f32, Vec2) {
-    let target_projection = Projection::new(target, rect, mode, 1.0, Vec2::ZERO);
-    let base = Projection::new(reference, rect, mode, 1.0, Vec2::ZERO);
+fn fit_zoom_pan(
+    reference: Bounds3,
+    target: Bounds3,
+    rect: Rect,
+    mode: ViewMode,
+    yaw: f32,
+    pitch: f32,
+) -> (f32, Vec2) {
+    let target_projection = Projection::new(target, rect, mode, yaw, pitch, 1.0, Vec2::ZERO);
+    let base = Projection::new(reference, rect, mode, yaw, pitch, 1.0, Vec2::ZERO);
     let zoom = (target_projection.scale / base.scale).clamp(0.05, 40.0);
     let centre = base.project(target.center());
     (zoom, (rect.center() - centre) * zoom)
@@ -289,6 +344,28 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         if scroll.abs() > 0.0 {
             view.zoom = (view.zoom * (1.0 + scroll * 0.002)).clamp(0.05, 40.0);
         }
+    }
+    // Blender-style navigation: the middle button orbits, Shift+middle pans, and
+    // the wheel zooms. The primary button still pans, which is what a touch
+    // screen and a left-handed operator have.
+    if response.dragged_by(egui::PointerButton::Middle) {
+        let delta = response.drag_delta();
+        let shift = ui.input(|input| input.modifiers.shift);
+        if shift || view.view != ViewMode::Iso3d {
+            view.pan += delta;
+        } else {
+            view.yaw += delta.x * 0.01;
+            // Drag up to look from above, drag down to look from below.
+            view.pitch = (view.pitch - delta.y * 0.01).clamp(-1.48, 1.48);
+        }
+    }
+    if response.double_clicked() {
+        // Back to the default isometric view.
+        view.yaw = DEFAULT_YAW;
+        view.pitch = DEFAULT_PITCH;
+        view.zoom = 1.0;
+        view.pan = Vec2::ZERO;
+        view.fit = true;
     }
     if response.dragged_by(egui::PointerButton::Primary) {
         view.pan += response.drag_delta();
@@ -330,12 +407,26 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         } else {
             reference
         };
-        let (zoom, pan) =
-            fit_zoom_pan(reference, target_bounds, rect.shrink(12.0), view.view);
+        let (zoom, pan) = fit_zoom_pan(
+            reference,
+            target_bounds,
+            rect.shrink(12.0),
+            view.view,
+            view.yaw,
+            view.pitch,
+        );
         view.zoom = zoom;
         view.pan = pan;
     }
-    let projection = Projection::new(reference, rect.shrink(12.0), view.view, view.zoom, view.pan);
+    let projection = Projection::new(
+        reference,
+        rect.shrink(12.0),
+        view.view,
+        view.yaw,
+        view.pitch,
+        view.zoom,
+        view.pan,
+    );
 
     // Grid and axis labels.
     if view.show_grid {
@@ -576,7 +667,15 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         painter.text(
             legend_rect.left_top() + Vec2::new(10.0, 74.0),
             Align2::LEFT_TOP,
-            format!("{}  •  ZOOM {:.1}x", view.view.label(), view.zoom),
+            if view.view == ViewMode::Iso3d {
+                format!(
+                    "{}  •  ZOOM {:.1}x  •  MMB ORBIT",
+                    view.view.label(),
+                    view.zoom
+                )
+            } else {
+                format!("{}  •  ZOOM {:.1}x", view.view.label(), view.zoom)
+            },
             FontId::monospace(9.0 * FONT_SCALE),
             theme::MUTED,
         );
@@ -873,7 +972,7 @@ mod tests {
             max: [100.0, 100.0, 100.0],
         };
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
-        let projection = Projection::new(bounds, rect, ViewMode::Iso3d, 1.0, Vec2::ZERO);
+        let projection = Projection::new(bounds, rect, ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH, 1.0, Vec2::ZERO);
         for point in [
             [0.0, 0.0, 0.0],
             [100.0, 100.0, 100.0],
@@ -882,6 +981,25 @@ mod tests {
             let pos = projection.project(point);
             assert!(rect.contains(pos), "{pos:?} outside {rect:?}");
         }
+    }
+
+    #[test]
+    fn the_orbit_turns_the_view_about_the_vertical_axis() {
+        let point = [1.0f32, 0.0, 0.0];
+        let (x0, y0) = view_xy(point, ViewMode::Iso3d, 0.0, 0.0);
+        assert!((x0 - 1.0).abs() < 1e-6, "{x0}");
+        assert!(y0.abs() < 1e-6, "{y0}");
+
+        // A quarter turn puts the X axis exactly into the depth, so it stops
+        // contributing to the screen position.
+        let (x90, _) = view_xy(point, ViewMode::Iso3d, std::f32::consts::FRAC_PI_2, 0.0);
+        assert!(x90.abs() < 1e-6, "{x90}");
+
+        // +Z is up on screen, and raising the camera flattens it.
+        let (_, up) = view_xy([0.0, 0.0, 1.0], ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        assert!(up < 0.0, "z must project upwards, got {up}");
+        let (_, flat) = view_xy([0.0, 0.0, 1.0], ViewMode::Iso3d, DEFAULT_YAW, 0.0);
+        assert!(flat.abs() > up.abs(), "{flat} vs {up}");
     }
 
     #[test]
@@ -898,7 +1016,7 @@ mod tests {
             max: [0.0, 0.0, 0.0],
         };
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 400.0));
-        let (zoom, pan) = fit_zoom_pan(envelope, envelope, rect, ViewMode::Iso3d);
+        let (zoom, pan) = fit_zoom_pan(envelope, envelope, rect, ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
         assert!((zoom - 1.0).abs() < 1e-4, "zoom {zoom}");
         assert!(pan.length() < 1e-3, "pan {pan:?}");
     }
@@ -915,15 +1033,17 @@ mod tests {
             max: [-240.0, -140.0, -20.0],
         };
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 400.0));
-        let (zoom, pan) = fit_zoom_pan(envelope, program, rect, ViewMode::Iso3d);
+        let (zoom, pan) =
+            fit_zoom_pan(envelope, program, rect, ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
         assert!(zoom > 1.5, "zoom {zoom}");
-        let fitted = Projection::new(envelope, rect, ViewMode::Iso3d, zoom, pan);
+        let fitted = Projection::new(envelope, rect, ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH, zoom, pan);
         let centre = fitted.project(program.center());
         assert!((centre.x - rect.center().x).abs() < 0.5, "{centre:?}");
         assert!((centre.y - rect.center().y).abs() < 0.5, "{centre:?}");
         // The reference is still the envelope, so the same point projects to the
         // same place whatever is loaded: that is what keeps the markers still.
-        let unchanged = Projection::new(envelope, rect, ViewMode::Iso3d, zoom, pan);
+        let unchanged =
+            Projection::new(envelope, rect, ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH, zoom, pan);
         assert_eq!(
             fitted.project([-54.35, -49.3, -27.15]),
             unchanged.project([-54.35, -49.3, -27.15])

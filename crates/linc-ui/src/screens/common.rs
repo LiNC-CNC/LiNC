@@ -861,6 +861,8 @@ pub fn trajectory(
     view_mode: ViewMode,
     zoom: &mut f32,
     pan: &mut Vec2,
+    yaw: &mut f32,
+    pitch: &mut f32,
     fit: &mut bool,
     selected_line: Option<usize>,
     current_line: Option<usize>,
@@ -881,6 +883,8 @@ pub fn trajectory(
     view.machine_bounds = app.machine_bounds();
     view.zoom = *zoom;
     view.pan = *pan;
+    view.yaw = *yaw;
+    view.pitch = *pitch;
     view.fit = *fit;
     view.selected_line = selected_line;
     view.current_line = current_line;
@@ -892,6 +896,8 @@ pub fn trajectory(
     let response = draw_trajectory(ui, &mut view);
     *zoom = view.zoom;
     *pan = view.pan;
+    *yaw = view.yaw;
+    *pitch = view.pitch;
     *fit = view.fit;
     response
 }
@@ -1144,6 +1150,8 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
         let view = app.manual.view;
         let mut zoom = app.manual.zoom;
         let mut pan = app.manual.pan;
+        let mut yaw = app.manual.yaw;
+        let mut pitch = app.manual.pitch;
         let mut fit = app.manual.fit;
         trajectory(
             app,
@@ -1153,6 +1161,8 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
             view,
             &mut zoom,
             &mut pan,
+            &mut yaw,
+            &mut pitch,
             &mut fit,
             None,
             Some(current_line),
@@ -1160,6 +1170,8 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
         );
         app.manual.zoom = zoom;
         app.manual.pan = pan;
+        app.manual.yaw = yaw;
+        app.manual.pitch = pitch;
         app.manual.fit = fit;
     });
 }
