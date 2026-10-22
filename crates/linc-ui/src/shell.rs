@@ -1347,6 +1347,19 @@ impl LincApp {
         );
     }
 
+    /// Cycle the toolpath view through ISO, X, Y and Z, refitting each time so
+    /// the new projection frames the program instead of inheriting a zoom that
+    /// only suited the old one.
+    pub fn cycle_toolpath_view(&mut self) {
+        let next = linc_view::cycle_view(self.program.graph_view, self.profile.variant);
+        self.program.graph_view = next;
+        self.program.fit_requested = true;
+        // The manual and homing pages keep their own view state; keep it in step
+        // so the key does the same thing wherever a toolpath is on screen.
+        self.manual.view = next;
+        self.manual.fit = true;
+    }
+
     /// Fit the program toolpath: reset zoom/pan and ask the view to reframe.
     pub fn fit_graph(&mut self) {
         // The manual modes draw their own view state.
@@ -1417,6 +1430,7 @@ impl LincApp {
         let mut move_line_down = false;
         let mut line_step = 0isize;
         let mut goto_line = false;
+        let mut cycle_toolpath_view = false;
 
         ui.input_mut(|input| {
             if input.consume_key(self.keymap.machine.modifiers, self.keymap.machine.key) {
@@ -1540,6 +1554,15 @@ impl LincApp {
             {
                 goto_line = true;
             }
+            // Every page with a toolpath: ISO -> X -> Y -> Z. F10 on its own
+            // already toggles SPLIT/CODE on the Program page.
+            if matches!(
+                self.page,
+                Page::Machine | Page::Program | Page::Manual | Page::Homing
+            ) && input.consume_key(self.keymap.view_cycle.modifiers, self.keymap.view_cycle.key)
+            {
+                cycle_toolpath_view = true;
+            }
             if !text_focused && input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
                 page_up = true;
             }
@@ -1584,6 +1607,9 @@ impl LincApp {
             } else {
                 self.request_files();
             }
+        }
+        if cycle_toolpath_view {
+            self.cycle_toolpath_view();
         }
         if goto_line && self.page == Page::Program {
             self.modal = Some(crate::state::Modal::GoToLine {
@@ -2149,6 +2175,7 @@ impl LincApp {
                 hints.push((k.graph_fit.label(), "FIT"));
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
                 hints.push((k.goto_line.label(), "GOTO"));
+                hints.push((k.view_cycle.label(), "VIEW"));
                 hints.push((k.save.label(), "SAVE"));
                 hints.push((k.undo.label(), "UNDO"));
                 hints.push((k.redo.label(), "REDO"));
@@ -2173,6 +2200,7 @@ impl LincApp {
             }
             Page::Manual | Page::Homing => {
                 hints.push((k.graph_fit.label(), "FIT"));
+                hints.push((k.view_cycle.label(), "VIEW"));
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
                 hints.push(("Arrows".into(), "SELECT"));
                 hints.push(("X/Y/Z".into(), "ZERO AXIS"));
@@ -3421,6 +3449,27 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             .map(|segment| segment.end)
             .unwrap_or_default();
         assert!((end[0] + 54.35).abs() < 1e-6, "active X {}", end[0]);
+    }
+    #[test]
+    fn the_view_cycle_key_steps_iso_x_y_z_and_refits() {
+        let (_dir, mut app) = make_app(PanelMode::Jog);
+        assert!(app.keymap.view_cycle.modifiers.ctrl);
+        assert_eq!(app.keymap.view_cycle.key, egui::Key::F10);
+        let order = [
+            linc_view::ViewMode::SideYz,
+            linc_view::ViewMode::SideXz,
+            linc_view::ViewMode::TopXy,
+            linc_view::ViewMode::Iso3d,
+        ];
+        for expected in order {
+            app.program.fit_requested = false;
+            app.manual.fit = false;
+            app.cycle_toolpath_view();
+            assert_eq!(app.program.graph_view, expected, "{expected:?}");
+            assert_eq!(app.manual.view, expected, "{expected:?}");
+            assert!(app.program.fit_requested, "each view refits: {expected:?}");
+            assert!(app.manual.fit, "each view refits: {expected:?}");
+        }
     }
 }
 

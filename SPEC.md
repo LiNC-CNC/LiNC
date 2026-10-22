@@ -104,7 +104,7 @@ else, so it cannot shadow another page's command.
 
 | Page | Keys |
 |---|---|
-| Program | `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
+| Program | `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
 | Files | `Left`/`Right` switch pane, `Enter` open or copy to `NC_FILES`, `Backspace` up a folder, `Ctrl+U` copy to USB, `Ctrl+N` copy to `NC_FILES`, `Ctrl+R` refresh, `Delete`/`Ctrl+X` delete |
 | MDI | `Enter` issue, `Up`/`Down` history, `Esc` clear the unissued block |
 | Help | `/` focus search, `Backspace` back through link history |
@@ -391,6 +391,11 @@ Default page. The layout is selected by `machine.gui`.
   pitch above the XY plane), Shift+middle-drag pans, the wheel zooms, and a
   double-click returns to the default isometric view. The top and side views
   keep their fixed direction; primary drag pans on every view.
+- `Ctrl+F10` cycles ISO → X (looking along X) → Y (looking along Y) → Z
+  (looking down); the lathe toggles between ISO and its XZ view. A fit frames
+  the program alone — the tool and the live trail are excluded, since a far
+  marker would shrink the part — and re-fits on load and on every view switch,
+  leaving a manual zoom/pan alone in between.
 - Program card, feed/spindle-load gauges, machine health and alarms.
 - ATC state in Tools/Diagnostics; mill tool table uses orientation and, only
   when ATC is enabled, the standard `P` pocket column.

@@ -37,8 +37,12 @@ pub mod theme {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewMode {
     Iso3d,
-    TopXy,
+    /// Looking along X at the YZ plane.
+    SideYz,
+    /// Looking along Y at the XZ plane.
     SideXz,
+    /// Looking down Z at the XY plane.
+    TopXy,
     LatheXz,
 }
 
@@ -46,10 +50,29 @@ impl ViewMode {
     pub fn label(self) -> &'static str {
         match self {
             Self::Iso3d => "3D / ISO",
+            Self::SideYz => "YZ / SIDE",
+            Self::SideXz => "XZ / FRONT",
             Self::TopXy => "XY / TOP",
-            Self::SideXz => "XZ / SIDE",
             Self::LatheXz => "XZ / TURN",
         }
+    }
+}
+
+/// The next view in the `Ctrl+F10` cycle: ISO, X, Y, Z and back.
+///
+/// The lathe has one flat view, so it toggles between it and ISO.
+pub fn cycle_view(mode: ViewMode, variant: MachineVariant) -> ViewMode {
+    if variant == MachineVariant::Lathe {
+        return match mode {
+            ViewMode::Iso3d => ViewMode::LatheXz,
+            _ => ViewMode::Iso3d,
+        };
+    }
+    match mode {
+        ViewMode::Iso3d => ViewMode::SideYz,
+        ViewMode::SideYz => ViewMode::SideXz,
+        ViewMode::SideXz => ViewMode::TopXy,
+        _ => ViewMode::Iso3d,
     }
 }
 
@@ -155,8 +178,10 @@ fn view_xy(local: [f32; 3], mode: ViewMode, yaw: f32, pitch: f32) -> (f32, f32) 
             let up = local[2] * cos_pitch - depth * sin_pitch;
             (right, -up)
         }
+        ViewMode::SideYz => (local[1], -local[2]),
+        ViewMode::SideXz => (local[0], -local[2]),
         ViewMode::TopXy => (local[0], -local[1]),
-        ViewMode::SideXz | ViewMode::LatheXz => (local[2], -local[0]),
+        ViewMode::LatheXz => (local[2], -local[0]),
     }
 }
 
@@ -399,14 +424,11 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     let reference = view.machine_bounds.unwrap_or(bounds);
     if view.fit {
         view.fit = false;
-        // With a program loaded, frame it. With nothing loaded the data is just
-        // the tool tip, so frame the machine envelope instead of zooming into
-        // the few millimetres around the tool.
-        let target_bounds = if view.preview.bounds.is_some() {
-            bounds
-        } else {
-            reference
-        };
+        // Frame the program, and only the program: the tool and the live trail
+        // can be far from the part, and including them shrank the part to make
+        // room for a marker. With nothing loaded frame the machine envelope
+        // instead of zooming into the millimetres around the tool.
+        let target_bounds = view.preview.bounds.unwrap_or(reference);
         let (zoom, pan) = fit_zoom_pan(
             reference,
             target_bounds,
@@ -698,9 +720,9 @@ fn view_label(mode: ViewMode, bounds: Bounds3) -> Option<([f64; 3], &'static str
     match mode {
         ViewMode::Iso3d => Some(([bounds.min[0], bounds.min[1], bounds.max[2]], "MACHINE")),
         ViewMode::TopXy => Some(([bounds.min[0], bounds.min[1], 0.0], "MACHINE")),
-        ViewMode::SideXz | ViewMode::LatheXz => {
-            Some(([bounds.min[0], 0.0, bounds.max[2]], "MACHINE"))
-        }
+        ViewMode::SideYz => Some(([bounds.min[0], bounds.min[1], bounds.max[2]], "MACHINE")),
+        ViewMode::SideXz => Some(([bounds.min[0], 0.0, bounds.max[2]], "MACHINE")),
+        ViewMode::LatheXz => Some(([bounds.min[0], 0.0, bounds.max[2]], "MACHINE")),
     }
 }
 
@@ -835,7 +857,22 @@ fn draw_grid(painter: &Painter, projection: &Projection, bounds: Bounds3) {
                         ([bounds.min[0], value, 0.0], [bounds.max[0], value, 0.0])
                     }
                 }
-                ViewMode::SideXz | ViewMode::LatheXz => {
+                ViewMode::SideYz => {
+                    // Horizontal axis Y, vertical Z, drawn at the near X face.
+                    if mode_axis == 0 {
+                        ([bounds.min[0], value, bounds.min[2]], [bounds.min[0], value, bounds.max[2]])
+                    } else {
+                        ([bounds.min[0], bounds.min[1], value], [bounds.max[0], bounds.min[1], value])
+                    }
+                }
+                ViewMode::SideXz => {
+                    if mode_axis == 0 {
+                        ([bounds.min[0], 0.0, value], [bounds.max[0], 0.0, value])
+                    } else {
+                        ([value, 0.0, bounds.min[2]], [value, 0.0, bounds.max[2]])
+                    }
+                }
+                ViewMode::LatheXz => {
                     if mode_axis == 0 {
                         ([bounds.min[0], 0.0, value], [bounds.max[0], 0.0, value])
                     } else {
@@ -876,11 +913,7 @@ fn draw_axes(
     origin: [f64; 3],
 ) {
     let origin_pos = projection.project(origin);
-    let length = match projection.mode {
-        ViewMode::Iso3d => 24.0,
-        ViewMode::TopXy => 24.0,
-        ViewMode::SideXz | ViewMode::LatheXz => 24.0,
-    };
+    let length = 24.0;
     let mut axes = Vec::new();
     if axis_labels.iter().any(|axis| axis == "X") {
         axes.push((
@@ -980,6 +1013,68 @@ mod tests {
         ] {
             let pos = projection.project(point);
             assert!(rect.contains(pos), "{pos:?} outside {rect:?}");
+        }
+    }
+
+    #[test]
+    fn the_view_cycle_runs_iso_x_y_z() {
+        use MachineVariant::Mill;
+        assert_eq!(cycle_view(ViewMode::Iso3d, Mill), ViewMode::SideYz);
+        assert_eq!(cycle_view(ViewMode::SideYz, Mill), ViewMode::SideXz);
+        assert_eq!(cycle_view(ViewMode::SideXz, Mill), ViewMode::TopXy);
+        assert_eq!(cycle_view(ViewMode::TopXy, Mill), ViewMode::Iso3d);
+        assert_eq!(cycle_view(ViewMode::LatheXz, Mill), ViewMode::Iso3d);
+
+        // The lathe has one flat view.
+        assert_eq!(cycle_view(ViewMode::Iso3d, MachineVariant::Lathe), ViewMode::LatheXz);
+        assert_eq!(cycle_view(ViewMode::LatheXz, MachineVariant::Lathe), ViewMode::Iso3d);
+    }
+
+    #[test]
+    fn the_axis_views_look_along_one_axis_each() {
+        // Looking along X: Y is horizontal, Z is vertical.
+        let (x, y) = view_xy([1.0, 2.0, 3.0], ViewMode::SideYz, DEFAULT_YAW, DEFAULT_PITCH);
+        assert!((x - 2.0).abs() < 1e-6 && (y + 3.0).abs() < 1e-6, "{x},{y}");
+        // Looking along Y: X is horizontal, Z is vertical.
+        let (x, y) = view_xy([1.0, 2.0, 3.0], ViewMode::SideXz, DEFAULT_YAW, DEFAULT_PITCH);
+        assert!((x - 1.0).abs() < 1e-6 && (y + 3.0).abs() < 1e-6, "{x},{y}");
+        // Looking down Z: X is horizontal, Y is vertical (downwards).
+        let (x, y) = view_xy([1.0, 2.0, 3.0], ViewMode::TopXy, DEFAULT_YAW, DEFAULT_PITCH);
+        assert!((x - 1.0).abs() < 1e-6 && (y + 2.0).abs() < 1e-6, "{x},{y}");
+    }
+
+    #[test]
+    fn a_fit_frames_the_program_inside_the_rect() {
+        // The program box alone, projected in the current view, must land
+        // inside the card: that is what puts most of the toolpath in the window.
+        let machine = Bounds3 {
+            min: [-500.0, -320.0, -250.0],
+            max: [0.0, 0.0, 0.0],
+        };
+        let program = Bounds3 {
+            min: [-300.0, -200.0, -40.0],
+            max: [-60.0, -40.0, 10.0],
+        };
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 400.0));
+        for mode in [
+            ViewMode::Iso3d,
+            ViewMode::SideYz,
+            ViewMode::SideXz,
+            ViewMode::TopXy,
+        ] {
+            let (zoom, pan) =
+                fit_zoom_pan(machine, program, rect, mode, DEFAULT_YAW, DEFAULT_PITCH);
+            let projection =
+                Projection::new(machine, rect, mode, DEFAULT_YAW, DEFAULT_PITCH, zoom, pan);
+            for corner in 0..8 {
+                let point = [
+                    if corner & 1 == 0 { program.min[0] } else { program.max[0] },
+                    if corner & 2 == 0 { program.min[1] } else { program.max[1] },
+                    if corner & 4 == 0 { program.min[2] } else { program.max[2] },
+                ];
+                let pos = projection.project(point);
+                assert!(rect.contains(pos), "{mode:?}: {pos:?} outside {rect:?}");
+            }
         }
     }
 

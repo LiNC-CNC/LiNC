@@ -225,6 +225,8 @@ pub struct KeysConfig {
     pub machine: String,
     pub program: String,
     pub program_cycle_view: String,
+    /// Cycle the toolpath view ISO -> X -> Y -> Z.
+    pub view_cycle: String,
     pub graph_fit: String,
     pub graph_clear: String,
     /// Page-local to Program: jump to a line number.
@@ -266,6 +268,7 @@ impl KeysConfig {
             machine: "F5".into(),
             program: "F6".into(),
             program_cycle_view: "F10".into(),
+            view_cycle: "Ctrl+F10".into(),
             graph_fit: "Ctrl+0".into(),
             graph_clear: "Ctrl+L".into(),
             goto_line: "Ctrl+G".into(),
