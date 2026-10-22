@@ -449,9 +449,11 @@ and end of the program when it is shorter than one.
 - Current line synchronized with the graph, and the running line marked in the
   editor the way the Machine page's G-code display marks it: an accent bar in
   the gutter plus a tinted row. There is no separate current/next pane.
-- `MODAL` is its own pane under the toolpath, using the same abbreviated cells
-  as the Machine dashboard, up to eight columns so a full set of active codes
-  stays on one row.
+- `MODAL` is its own pane under the toolpath, up to eight columns so a full set
+  of active codes stays on one row. Its cells carry the group label, the active
+  code and a short mnemonic for what that code means (`UNITS` / `G21` / `MM`),
+  with a gap between rows where the codes wrap. The Machine dashboard keeps the
+  two-line cell: its strip has no height to spare.
 - `FIT` (`Ctrl+0`) reframes the toolpath and `CLEAR TRAIL` (`Ctrl+L`) clears
   only the live trail; both are page-local commands, not buttons.
 

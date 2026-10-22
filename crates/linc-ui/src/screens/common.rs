@@ -83,18 +83,37 @@ fn token_line_ui(ui: &mut Ui, text: &str, size: f32) {
 }
 
 
-/// Active G-code modal groups as abbreviated cells.
+/// Space under a cell in the MODAL pane that carries a mnemonic, so each row of
+/// cells reads as its own row.
+const ROW_GAP: f32 = 8.0;
+
+/// Active G-code modal groups as cells of group label and active code.
 ///
-/// The Machine dashboard and the Program side pane use the same cells; only the
-/// column count changes with the width available.
-pub fn modal_grid(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str) {
+/// The Machine dashboard and the Program side pane share the cells; the column
+/// count changes with the width available. `mnemonics` adds the third line
+/// saying what the code means (`G21` → `MM`). The Machine card leaves it off:
+/// its strip sits under sixteen lines of G-code and has no height to spare, and
+/// there the cells are already tight against each other.
+pub fn modal_grid(
+    app: &LincApp,
+    ui: &mut Ui,
+    columns: usize,
+    mnemonics: bool,
+    id_salt: &str,
+) {
     let codes = app
         .snapshot
         .program
         .modal
         .iter()
         .filter(|(key, _)| key.starts_with('G'))
-        .map(|(key, value)| (modal_abbreviation(key), modal_text(key, value)))
+        .map(|(key, value)| {
+            (
+                modal_abbreviation(key),
+                modal_text(key, value),
+                modal_mnemonic(key),
+            )
+        })
         .collect::<Vec<_>>();
     if codes.is_empty() {
         ui.label(
@@ -113,7 +132,7 @@ pub fn modal_grid(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str) {
         .spacing([4.0, 1.0])
         .min_col_width(column_width)
         .show(ui, |ui| {
-            for (index, (abbreviation, code)) in codes.iter().enumerate() {
+            for (index, (abbreviation, code, mnemonic)) in codes.iter().enumerate() {
                 ui.vertical(|ui| {
                     ui.label(
                         RichText::new(*abbreviation)
@@ -126,6 +145,16 @@ pub fn modal_grid(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str) {
                             .size(theme::font_size(8.0))
                             .color(theme::FG),
                     );
+                    if mnemonics && !mnemonic.is_empty() {
+                        ui.label(
+                            RichText::new(*mnemonic)
+                                .size(theme::font_size(7.0))
+                                .color(theme::COMMENT),
+                        );
+                        // The third line runs straight into the next row's group
+                        // label otherwise, and the rows stop reading as rows.
+                        ui.add_space(ROW_GAP);
+                    }
                 });
                 if (index + 1) % columns == 0 {
                     ui.end_row();
@@ -243,7 +272,7 @@ pub fn toolpath_header(ui: &mut Ui, view: &str, zoom: f32) {
 pub fn modal_pane_in(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str, rect: egui::Rect) {
     shell_card(ui, rect, |ui| {
         card_title(ui, "MODAL");
-        modal_grid(app, ui, columns, id_salt);
+        modal_grid(app, ui, columns, true, id_salt);
     });
 }
 
@@ -251,13 +280,13 @@ pub fn modal_pane_in(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str, 
 
 /// Height a MODAL pane needs for `codes` G-code cells at `columns` wide.
 ///
-/// Measured from the card: 45 px of chrome (margins plus header) and 45 px per
-/// row of cells. Derived rather than observed so it cannot lag a frame and
-/// leave the column short.
+/// Measured from the card: 26 px of chrome (margins plus title) and 44 px per
+/// row of cells — group label, code, mnemonic and the gap under it. Derived
+/// rather than observed so it cannot lag a frame and leave the column short.
 pub fn modal_height(codes: usize, columns: usize) -> f32 {
     let rows = codes.max(1).div_ceil(columns.max(1));
-    // 8 px frame, an 18 px title row, and 26 px per row of cells.
-    26.0 + rows as f32 * 26.0
+    // 8 px frame, an 18 px title row, and 44 px per row of cells.
+    26.0 + rows as f32 * 44.0
 }
 
 
@@ -520,6 +549,91 @@ fn modal_abbreviation(key: &str) -> &'static str {
     }
 }
 
+/// What the active code in a modal group means, in one short word.
+///
+/// The cell's first line names the group and the second names the code, so
+/// `UNITS G21` still left the operator to remember which of G20/G21 is which.
+/// This is the third line: `MM`. Kept to seven characters — the MAIN card's
+/// cells are about 40 px wide — and empty when the code has no short meaning,
+/// in which case the cell keeps the two lines it had.
+///
+/// Meanings follow the LinuxCNC G-code reference: `G94` is feed per minute
+/// whatever the program's units, so it says `PER MIN`, not `MM/MIN`.
+fn modal_mnemonic(key: &str) -> &'static str {
+    match key.trim().trim_start_matches('G').trim() {
+        // Motion.
+        "0" => "RAPID",
+        "1" => "FEED",
+        "2" => "CW",
+        "3" => "CCW",
+        "4" => "DWELL",
+        "5" | "5.1" => "SPLINE",
+        "5.2" | "5.3" => "NURBS",
+        "38.2" | "38.3" | "38.4" | "38.5" => "PROBE",
+        // Dimensional and plane modes.
+        "7" => "X DIA",
+        "8" => "X RAD",
+        "10" => "SET",
+        "15" => "OFF",
+        "16" => "ON",
+        "17" => "XY",
+        "18" => "ZX",
+        "19" => "YZ",
+        "20" => "INCH",
+        "21" => "MM",
+        // Dwell, homing and threading.
+        "28" => "HOME 1",
+        "30" => "HOME 2",
+        "33" | "33.1" | "76" => "THREAD",
+        // Cutter and tool-length compensation.
+        "40" | "40.1" | "49" => "OFF",
+        "41" | "41.1" => "LEFT",
+        "42" | "42.1" => "RIGHT",
+        "43" => "APPLY",
+        "43.1" => "DYNAMIC",
+        // Machine coordinates and work offsets.
+        "53" => "MOVE",
+        "54" => "CS 1",
+        "55" => "CS 2",
+        "56" => "CS 3",
+        "57" => "CS 4",
+        "58" => "CS 5",
+        "59" => "CS 6",
+        "54.1" | "55.1" | "56.1" | "57.1" | "58.1" => "SAVED",
+        "59.1" => "CS 7",
+        "59.2" => "CS 8",
+        "59.3" => "CS 9",
+        // Path control.
+        "61" | "61.1" => "EXACT",
+        "64" => "BLEND",
+        // Canned cycles.
+        "73" => "CHIP",
+        "74" => "TAP LH",
+        "80" => "OFF",
+        "81" => "DRILL",
+        "82" => "DWELL",
+        "83" => "PECK",
+        "84" => "TAP",
+        "85" | "86" | "88" | "89" => "BORE",
+        "87" => "BACK",
+        // Distance modes and offsets.
+        "90" | "90.1" => "ABS",
+        "91" | "91.1" => "INC",
+        "92" => "SET",
+        "92.1" | "92.2" => "OFF",
+        "92.3" => "ON",
+        // Feed and spindle modes.
+        "93" => "INVERSE",
+        "94" => "PER MIN",
+        "95" => "PER REV",
+        "96" => "CSS",
+        "97" => "RPM",
+        "98" => "INIT",
+        "99" => "R PLANE",
+        _ => "",
+    }
+}
+
 fn field_label(ui: &mut Ui, text: &str) {
     ui.label(
         RichText::new(text)
@@ -625,7 +739,7 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                 }
                 theme::separator(ui);
                 field_label(ui, "MODAL");
-                modal_grid(app, ui, 6, "program_modal_fields");
+                modal_grid(app, ui, 6, false, "program_modal_fields");
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                     ui.horizontal(|ui| {
@@ -1407,4 +1521,53 @@ pub fn live_coordinates_card(
             });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::modal_mnemonic;
+
+    #[test]
+    fn the_modal_mnemonic_says_what_the_code_means() {
+        assert_eq!(modal_mnemonic("G21"), "MM");
+        assert_eq!(modal_mnemonic("G20"), "INCH");
+        assert_eq!(modal_mnemonic("G90"), "ABS");
+        assert_eq!(modal_mnemonic("G91"), "INC");
+        assert_eq!(modal_mnemonic("G17"), "XY");
+        assert_eq!(modal_mnemonic("G54"), "CS 1");
+        assert_eq!(modal_mnemonic("G59.3"), "CS 9");
+        assert_eq!(modal_mnemonic("G83"), "PECK");
+        // Words, not the group's own jargon: G21 is the units group, but the
+        // line has to say which unit.
+        assert_ne!(modal_mnemonic("G21"), "UNITS");
+    }
+
+    #[test]
+    fn a_code_outside_the_table_gets_no_mnemonic_line() {
+        // Better a two-line cell than an invented meaning.
+        assert_eq!(modal_mnemonic("G999"), "");
+        assert_eq!(modal_mnemonic("M3"), "");
+    }
+
+    #[test]
+    fn every_mnemonic_stays_short_enough_for_a_column() {
+        // The SPLIT pane's eight columns are about 37 px wide, so a mnemonic
+        // has to stay around seven characters or it widens its column past the
+        // card.
+        let codes = [
+            "G0", "G1", "G2", "G3", "G4", "G5", "G5.1", "G5.2", "G38.2", "G7", "G8", "G10",
+            "G15", "G16", "G17", "G18", "G19", "G20", "G21", "G28", "G30", "G33", "G40", "G41",
+            "G42", "G43", "G43.1", "G49", "G53", "G54", "G54.1", "G59.3", "G61", "G64", "G73",
+            "G74", "G76", "G80", "G81", "G82", "G83", "G84", "G85", "G87", "G90", "G91", "G92",
+            "G93", "G94", "G95", "G96", "G97", "G98", "G99",
+        ];
+        for key in codes {
+            let mnemonic = modal_mnemonic(key);
+            assert!(!mnemonic.is_empty(), "{key} has no mnemonic");
+            assert!(
+                mnemonic.chars().count() <= 7,
+                "{key}: {mnemonic} is wider than a cell"
+            );
+        }
+    }
 }
