@@ -67,6 +67,17 @@ def parse(argv):
         help="float the HMI window under Hyprland at 1280x720",
     )
     parser.add_argument(
+        "--ini",
+        metavar="FILE",
+        help="LinuxCNC INI of the session; without it the NML defaults are guessed",
+    )
+    parser.add_argument(
+        "--settle",
+        type=float,
+        default=3.0,
+        help="seconds to let the session start before asking for anything (default 3)",
+    )
+    parser.add_argument(
         "--window-match",
         default="linc",
         help="case-insensitive class or title text of the HMI window (default: linc)",
@@ -85,7 +96,7 @@ def parse(argv):
     return args
 
 
-def task(timeout):
+def task(timeout, ini):
     """The LinuxCNC command channel, retried until the NML channels are up."""
     try:
         import linuxcnc
@@ -94,6 +105,24 @@ def task(timeout):
             "sim-ready: python3 cannot import linuxcnc; run it with the "
             "interpreter LinuxCNC installed"
         )
+    if ini:
+        # The python module talks to the NML file named in `linuxcnc.nmlfile`,
+        # whose default is the machine-wide one. A session started from an INI
+        # gets its own; point the module at the same file and run from the INI's
+        # directory, as every LinuxCNC component does.
+        ini = os.path.abspath(ini)
+        if not os.path.exists(ini):
+            sys.exit(f"sim-ready: no such INI: {ini}")
+        try:
+            section = linuxcnc.ini(ini)
+            nml = section.find("EMC", "NML_FILE")
+            if nml:
+                linuxcnc.nmlfile = nml
+        except Exception as error:
+            sys.exit(f"sim-ready: cannot read {ini}: {error}")
+        os.environ["INI_FILE_NAME"] = ini
+        os.chdir(os.path.dirname(ini))
+        log(f"talk to LinuxCNC through {ini} (nml {linuxcnc.nmlfile})")
     deadline = time.monotonic() + timeout
     reason = "no answer"
     while True:
@@ -128,7 +157,35 @@ def is_on(linuxcnc, stat):
     return not stat.estop and stat.task_state == linuxcnc.STATE_ON
 
 
-def leave_estop(linuxcnc, stat, command, timeout):
+def hal_value(pin):
+    """One HAL pin's value, for the failure report."""
+    result = subprocess.run(
+        ["halcmd", "getp", pin], capture_output=True, text=True, check=False
+    )
+    if result.returncode != 0:
+        return "unavailable"
+    return result.stdout.strip().split()[-1] if result.stdout.strip() else "?"
+
+
+def report_blocked(stat):
+    """Say what the session looks like when a step does not happen."""
+    for pin in (
+        "cnc_panel.estop",
+        "rio.estop-in.bit",
+        "halui.estop.activate",
+        "or2.estop_reset.out",
+        "iocontrol.0.user-enable-out",
+        "iocontrol.0.emc-enable-in",
+        "halui.estop.is-activated",
+    ):
+        print(f"sim-ready:   {pin} = {hal_value(pin)}", file=sys.stderr)
+    print(
+        f"sim-ready:   task_state = {stat.task_state}, estop = {stat.estop}",
+        file=sys.stderr,
+    )
+
+
+def leave_estop(linuxcnc, stat, command, timeout, settle):
     """Ask the task to leave E-stop until it does.
 
     The panel's own release reaches the controller as a 150 ms HAL pulse. At
@@ -140,8 +197,15 @@ def leave_estop(linuxcnc, stat, command, timeout):
     stat.poll()
     if not stat.estop:
         return
+    # Give the session the moment it needs to have iocontrol, halui and the
+    # panel all running before asking for anything: the reset sent during the
+    # first HAL cycles is what the panel's own pulse loses.
+    if settle > 0:
+        log(f"waiting {settle:g} s for the session to settle")
+        time.sleep(settle)
     deadline = time.monotonic() + timeout
     last_sent = 0.0
+    attempt = 0
     while True:
         stat.poll()
         if not stat.estop:
@@ -149,13 +213,18 @@ def leave_estop(linuxcnc, stat, command, timeout):
             return
         now = time.monotonic()
         if now - last_sent >= 1.0:
+            attempt += 1
+            log(f"asking the controller to leave E-stop (attempt {attempt})")
             command.state(linuxcnc.STATE_ESTOP_RESET)
             last_sent = now
         if now >= deadline:
-            sys.exit(
+            print(
                 "sim-ready: the controller stayed in E-stop; "
-                "is the panel's mushroom released?"
+                "is the panel's mushroom released?",
+                file=sys.stderr,
             )
+            report_blocked(stat)
+            sys.exit(1)
         time.sleep(0.1)
 
 
@@ -165,19 +234,23 @@ def power_on(linuxcnc, stat, command, timeout):
         return
     command.state(linuxcnc.STATE_ON)
     command.wait_complete(timeout)
-    wait_for(
-        stat,
-        lambda s: is_on(linuxcnc, s),
-        "the machine to power on (POWER ON in the panel)",
-        timeout,
-    )
+    try:
+        wait_for(
+            stat,
+            lambda s: is_on(linuxcnc, s),
+            "the machine to power on (POWER ON in the panel)",
+            timeout,
+        )
+    except SystemExit:
+        report_blocked(stat)
+        raise
     log("machine on")
 
 
 def bring_up(args):
-    linuxcnc, stat, command = task(args.timeout)
+    linuxcnc, stat, command = task(args.timeout, args.ini)
     if args.estop:
-        leave_estop(linuxcnc, stat, command, args.timeout)
+        leave_estop(linuxcnc, stat, command, args.timeout, args.settle)
     if args.on:
         power_on(linuxcnc, stat, command, args.timeout)
     if args.home:
@@ -288,7 +361,7 @@ def float_window(args):
 
 def main(argv):
     args = parse(argv)
-    if args.on or args.home or args.load:
+    if args.estop or args.on or args.home or args.load:
         bring_up(args)
     if args.float:
         float_window(args)

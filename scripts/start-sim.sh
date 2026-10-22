@@ -146,7 +146,7 @@ cd "$ROOT/configs"
 # the HMI, so the window exists a few seconds after the process does; sim-ready
 # waits for it.
 sim_ready() {
-    local args=(--timeout "$READY_TIMEOUT")
+    local args=(--timeout "$READY_TIMEOUT" --ini "$INI")
     (( RELEASE_ESTOP )) && args+=(--estop)
     (( POWER_ON )) && args+=(--on)
     (( HOME_AXES )) && args+=(--home)
