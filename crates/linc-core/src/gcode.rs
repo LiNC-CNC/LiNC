@@ -675,16 +675,20 @@ fn apply_arc(
 
 /// Modal state of a drilling canned cycle (G81/G82/G83/G73).
 ///
-/// The preview models the geometry only: X/Y moves at the level the tool was
-/// at before the first cycle block, a feed from that level to the Z depth, and
-/// a rapid retract to the same level. The R word is not the plunge height (on
-/// this machine it is a radius), so it is not used. G83's pecks and G82's
-/// dwell are not drawn as separate moves; the plunge still cuts.
+/// The preview models the geometry only: X/Y moves at the current Z, a rapid
+/// to the R plane, a feed from R to the Z depth, and a rapid to clear Z (the
+/// initial Z for G98 when it is above R, otherwise R; always R for G99). G83's
+/// pecks and G82's dwell are not drawn as separate moves; the plunge still
+/// cuts.
 struct DrillCycle {
     kind: u16,
     depth: f64,
-    /// Z at the start of the cycle: the top level every move returns to.
+    /// Retract plane (R word); it is a Z height, not a radius.
+    r: f64,
+    /// Z at the start of the cycle series, used by G98.
     initial_z: f64,
+    /// G99 retracts to R instead of the initial Z.
+    retract_to_r: bool,
 }
 
 fn push_cycle_segment(
@@ -742,6 +746,8 @@ pub fn parse_preview(
     // Drilling canned cycle: modal, one hole per block with X/Y.
     let mut drill_cycle: Option<DrillCycle> = None;
     let mut cycle_request: Option<u16> = None;
+    // G98 (initial Z) is the default retract mode; G99 retracts to R.
+    let mut retract_to_r = false;
 
     for (line_index, raw_line) in text.lines().enumerate() {
         let line_no = line_index + 1;
@@ -831,6 +837,10 @@ pub fn parse_preview(
                         drill_cycle = None;
                     } else if value == 80.0 {
                         drill_cycle = None;
+                    } else if value == 98.0 {
+                        retract_to_r = false;
+                    } else if value == 99.0 {
+                        retract_to_r = true;
                     } else if value == 81.0 || value == 82.0 || value == 83.0 || value == 73.0 {
                         cycle_request = Some(value as u16);
                     } else if value == 20.0 {
@@ -896,10 +906,10 @@ pub fn parse_preview(
                     .is_some_and(|ch| "XYZUVW".contains(ch.to_ascii_uppercase()))
         });
 
-        // Drilling cycle: the block's X/Y is the next hole. X/Y moves happen at
-        // the top level (the Z the tool had before the first cycle block), the
-        // plunge from there to the Z word is a feed, and the retract returns to
-        // that top level. The R word does not set any height.
+        // Drilling cycle: the block's X/Y is the next hole. Preliminary motion
+        // moves X/Y at the current Z, then rapids to the R plane; the feed is
+        // from R to the Z depth; the retract clears to the initial Z (G98,
+        // when above R) or R (G99). See G81 in the LinuxCNC G-code reference.
         let requested_cycle = cycle_request.take();
         if let Some(kind) = requested_cycle {
             match drill_cycle.as_mut() {
@@ -908,17 +918,28 @@ pub fn parse_preview(
                     drill_cycle = Some(DrillCycle {
                         kind,
                         depth: position[2],
+                        r: position[2],
                         initial_z: position[2],
+                        retract_to_r,
                     });
                 }
             }
         }
         if let Some(cycle) = drill_cycle.as_mut() {
+            cycle.retract_to_r = retract_to_r;
+            // R first: in incremental mode the Z depth is measured from R.
+            if let Some(value) = word_value(&tokens, 'r') {
+                cycle.r = if absolute {
+                    value + offset_values("Z")
+                } else {
+                    position[2] + value
+                };
+            }
             if let Some(value) = word_value(&tokens, 'z') {
                 cycle.depth = if absolute {
                     value + offset_values("Z")
                 } else {
-                    position[2] + value
+                    cycle.r + value
                 };
             }
             let mut hole = position;
@@ -937,9 +958,22 @@ pub fn parse_preview(
             // modal repeat needs an X or Y to name a new hole.
             let drill = (requested_cycle.is_some() && has_axis_word) || has_hole_axis;
             if drill {
-                let top = cycle.initial_z;
                 let depth = cycle.depth;
-                // 1. Rapid to the hole at the top level.
+                let r = cycle.r;
+                let initial = cycle.initial_z;
+                // 1. If the tool starts below R, move Z to R before X/Y.
+                if position[2] < r - 1e-9 {
+                    push_cycle_segment(
+                        &mut preview,
+                        position,
+                        [position[0], position[1], r],
+                        SegmentKind::Rapid,
+                        line_no,
+                        tool,
+                    );
+                    position[2] = r;
+                }
+                // 2. Rapid to the hole at the current Z.
                 if (hole[0] - position[0]).abs() > 1e-9
                     || (hole[1] - position[1]).abs() > 1e-9
                 {
@@ -954,8 +988,19 @@ pub fn parse_preview(
                     position[0] = hole[0];
                     position[1] = hole[1];
                 }
-                // 2. Feed from the tool's level down to the depth: the whole
-                // downward spike cuts, so it is one solid feed segment.
+                // 3. Rapid down to the R plane.
+                if (position[2] - r).abs() > 1e-9 {
+                    push_cycle_segment(
+                        &mut preview,
+                        position,
+                        [hole[0], hole[1], r],
+                        SegmentKind::Rapid,
+                        line_no,
+                        tool,
+                    );
+                    position[2] = r;
+                }
+                // 4. Feed from R to the depth: this is the cutting move.
                 if (position[2] - depth).abs() > 1e-9 {
                     push_cycle_segment(
                         &mut preview,
@@ -967,18 +1012,24 @@ pub fn parse_preview(
                     );
                     position[2] = depth;
                 }
-                // 3. Rapid back to the top level; the next hole moves there.
-                if (position[2] - top).abs() > 1e-9 {
+                // 5. Rapid to clear Z: G98 keeps the initial Z when it is
+                // above R, G99 (and a lower initial Z) clear to R.
+                let clear = if !cycle.retract_to_r && initial > r + 1e-9 {
+                    initial
+                } else {
+                    r
+                };
+                if (position[2] - clear).abs() > 1e-9 {
                     push_cycle_segment(
                         &mut preview,
                         position,
-                        [hole[0], hole[1], top],
+                        [hole[0], hole[1], clear],
                         SegmentKind::Rapid,
                         line_no,
                         tool,
                     );
                 }
-                position = [hole[0], hole[1], top];
+                position = [hole[0], hole[1], clear];
                 saw_motion = true;
                 preview
                     .line_bounds
@@ -1263,7 +1314,7 @@ mod tests {
     }
 
     #[test]
-    fn g81_moves_at_the_top_and_feeds_the_whole_descent() {
+    fn g81_moves_xy_then_feeds_from_the_r_plane_and_clears_g98() {
         let text = "G21 G90\nG0 Z5\nG0 X0 Y0\nG81 X10 Y0 Z-5 R2 F100\nX20\nG80\n";
         let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
         let line4: Vec<_> = preview
@@ -1272,14 +1323,11 @@ mod tests {
             .filter(|segment| segment.line == 4)
             .map(|segment| (segment.start, segment.end, segment.kind))
             .collect();
-        assert_eq!(line4.len(), 3, "{line4:?}");
-        assert_eq!(line4[0].2, SegmentKind::Rapid);
-        assert_eq!(line4[0].0, [0.0, 0.0, 5.0]);
-        assert_eq!(line4[0].1, [10.0, 0.0, 5.0], "X/Y move at the top");
-        assert_eq!(line4[1].2, SegmentKind::Feed, "the plunge cuts");
-        assert_eq!(line4[1].0, [10.0, 0.0, 5.0]);
-        assert_eq!(line4[1].1, [10.0, 0.0, -5.0]);
-        assert_eq!(line4[2].1, [10.0, 0.0, 5.0], "retract to the top");
+        assert_eq!(line4.len(), 4, "{line4:?}");
+        assert_eq!(line4[0], ([0.0, 0.0, 5.0], [10.0, 0.0, 5.0], SegmentKind::Rapid));
+        assert_eq!(line4[1], ([10.0, 0.0, 5.0], [10.0, 0.0, 2.0], SegmentKind::Rapid));
+        assert_eq!(line4[2], ([10.0, 0.0, 2.0], [10.0, 0.0, -5.0], SegmentKind::Feed));
+        assert_eq!(line4[3], ([10.0, 0.0, -5.0], [10.0, 0.0, 5.0], SegmentKind::Rapid));
 
         let line5: Vec<_> = preview
             .segments
@@ -1287,34 +1335,71 @@ mod tests {
             .filter(|segment| segment.line == 5)
             .map(|segment| (segment.start, segment.end, segment.kind))
             .collect();
-        assert_eq!(line5.len(), 3, "{line5:?}");
-        assert_eq!(line5[0].0, [10.0, 0.0, 5.0]);
-        assert_eq!(line5[0].1, [20.0, 0.0, 5.0], "the next hole moves at the top");
-        assert_eq!(line5[1].2, SegmentKind::Feed);
-        assert_eq!(line5[1].1, [20.0, 0.0, -5.0]);
-        assert_eq!(line5[2].1, [20.0, 0.0, 5.0]);
+        assert_eq!(line5.len(), 4, "{line5:?}");
+        assert_eq!(line5[0], ([10.0, 0.0, 5.0], [20.0, 0.0, 5.0], SegmentKind::Rapid));
+        assert_eq!(line5[1], ([20.0, 0.0, 5.0], [20.0, 0.0, 2.0], SegmentKind::Rapid));
+        assert_eq!(line5[2], ([20.0, 0.0, 2.0], [20.0, 0.0, -5.0], SegmentKind::Feed));
+        assert_eq!(line5[3], ([20.0, 0.0, -5.0], [20.0, 0.0, 5.0], SegmentKind::Rapid));
     }
 
     #[test]
-    fn g81_r_word_does_not_set_the_plunge_height() {
+    fn g81_g99_retracts_and_moves_at_the_r_plane() {
+        let text = "G21 G90\nG0 Z5\nG99\nG81 X10 Y0 Z-5 R2\nX20\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        let line4: Vec<_> = preview
+            .segments
+            .iter()
+            .filter(|segment| segment.line == 4)
+            .map(|segment| (segment.start, segment.end))
+            .collect();
+        assert_eq!(line4.len(), 4, "{line4:?}");
+        assert_eq!(line4[3].1, [10.0, 0.0, 2.0], "G99 clears to R");
+        let line5: Vec<_> = preview
+            .segments
+            .iter()
+            .filter(|segment| segment.line == 5)
+            .map(|segment| (segment.start, segment.end))
+            .collect();
+        assert_eq!(line5[0].0, [10.0, 0.0, 2.0], "the next hole moves at R");
+        assert_eq!(line5[0].1, [20.0, 0.0, 2.0]);
+        assert_eq!(line5[1].1, [20.0, 0.0, -5.0]);
+        assert_eq!(line5[2].1, [20.0, 0.0, 2.0]);
+    }
+
+    #[test]
+    fn g81_below_r_moves_to_r_first_and_clears_to_r() {
+        let text = "G21 G90\nG0 Z1\nG81 X10 Y0 Z-2 R3\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        let line3: Vec<_> = preview
+            .segments
+            .iter()
+            .filter(|segment| segment.line == 3)
+            .map(|segment| (segment.start, segment.end, segment.kind))
+            .collect();
+        assert_eq!(line3.len(), 4, "{line3:?}");
+        assert_eq!(line3[0], ([0.0, 0.0, 1.0], [0.0, 0.0, 3.0], SegmentKind::Rapid));
+        assert_eq!(line3[0].1, [0.0, 0.0, 3.0], "below R: move Z before X/Y");
+        assert_eq!(line3[1].0, [0.0, 0.0, 3.0]);
+        assert_eq!(line3[1].1, [10.0, 0.0, 3.0]);
+        assert_eq!(line3[2], ([10.0, 0.0, 3.0], [10.0, 0.0, -2.0], SegmentKind::Feed));
+        assert_eq!(line3[3].1, [10.0, 0.0, 3.0], "initial Z below R clears to R");
+    }
+
+    #[test]
+    fn g81_r_word_is_the_retract_plane() {
         let plain = "G21 G90\nG0 Z5\nG81 X10 Y0 Z-5 R2\n";
-        let other = "G21 G90\nG0 Z5\nG81 X10 Y0 Z-5 R50\n";
-        let a = parse_preview(plain, &preview_axes(), None, [0.0; 3]);
-        let b = parse_preview(other, &preview_axes(), None, [0.0; 3]);
-        let moves = |preview: &Preview| {
+        let higher = "G21 G90\nG0 Z5\nG81 X10 Y0 Z-5 R4\n";
+        let feed_start = |text: &str| {
+            let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
             preview
                 .segments
                 .iter()
-                .map(|segment| (segment.start, segment.end, segment.kind))
-                .collect::<Vec<_>>()
+                .find(|segment| segment.kind == SegmentKind::Feed)
+                .map(|segment| segment.start[2])
         };
-        assert_eq!(moves(&a), moves(&b), "R must not change the drill height");
-        let line3: Vec<_> = a.segments.iter().filter(|s| s.line == 3).collect();
-        assert!(line3.iter().any(|segment| {
-            segment.kind == SegmentKind::Feed
-                && segment.start[2] == 5.0
-                && segment.end[2] == -5.0
-        }), "{line3:?}");
+        assert_eq!(feed_start(plain), Some(2.0));
+        assert_eq!(feed_start(higher), Some(4.0));
     }
 
 }
+
