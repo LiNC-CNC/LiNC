@@ -146,7 +146,7 @@ fn overview(app: &mut LincApp, ui: &mut Ui) {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        let logs = combined_logs(app);
+                                        let logs = app.logs();
                                         let alarms =
                                             logs.iter().filter(|a| a.severity.is_alarm()).count();
                                         let messages = logs.len().saturating_sub(alarms);
@@ -166,7 +166,7 @@ fn overview(app: &mut LincApp, ui: &mut Ui) {
                                     },
                                 );
                             });
-                            let logs = combined_logs(app);
+                            let logs = app.logs();
                             log_table(ui, "overview-alarms", &logs, 5);
                         });
                     },
@@ -277,7 +277,7 @@ fn overview(app: &mut LincApp, ui: &mut Ui) {
                         theme::card(ui, |ui| {
                             ui.set_max_height(156.0);
                             theme::section_header(ui, "EVENT LOG");
-                            let logs = combined_logs(app);
+                            let logs = app.logs();
                             log_table(ui, "overview-events", &logs, 5);
                         });
                     },
@@ -977,7 +977,7 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
-                RichText::new(format!("{} EVENTS", combined_logs(app).len()))
+                RichText::new(format!("{} EVENTS", app.logs().len()))
                     .monospace()
                     .size(theme::font_size(10.0))
                     .color(theme::MUTED),
@@ -986,7 +986,7 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
     });
     ui.add_space(4.0);
     theme::card(ui, |ui| {
-        let logs: Vec<Alarm> = combined_logs(app)
+        let logs: Vec<Alarm> = app.logs()
             .into_iter()
             .filter(|alarm| {
                 app.diagnostics_severity
@@ -1013,7 +1013,7 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
 }
 
 pub fn copy_log(app: &mut LincApp, ui: &mut Ui) {
-    let logs = combined_logs(app);
+    let logs = app.logs();
     let text = logs
         .iter()
         .map(|alarm| {
@@ -1030,13 +1030,6 @@ pub fn copy_log(app: &mut LincApp, ui: &mut Ui) {
         .join("\n");
     ui.ctx().copy_text(text);
     app.toast("log copied to clipboard", theme::SUCCESS);
-}
-
-fn combined_logs(app: &LincApp) -> Vec<Alarm> {
-    let mut logs: Vec<Alarm> = app.snapshot.alarms.iter().cloned().collect();
-    logs.extend(app.ui_log.iter().cloned());
-    logs.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
-    logs
 }
 
 /// The alarm table.

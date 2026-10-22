@@ -13,8 +13,9 @@ use linc_core::command::{BackendEvent, CommandResult, MachineCommand};
 use linc_core::config::Profile;
 use linc_core::gcode::{parse_preview, Bounds3, Preview};
 use linc_core::model::{
-    format_clock, now_ms, Alarm, AlarmSeverity, AlarmSource, MachinePower, MachineSnapshot,
-    MachineVariant, PanelMode, PanelModeValidity, TaskMode,
+    format_clock, now_ms, Alarm, AlarmSeverity, AlarmSource, AxisMap, MachinePower,
+    MachineSnapshot, MachineVariant, PanelMode, PanelModeValidity, PositionSet, ProgramState,
+    TaskMode, ToolChangeState, ToolChangeStatus,
 };
 use linc_core::probe::ProbeParameters;
 
@@ -2105,6 +2106,8 @@ impl LincApp {
             });
             ui.add_space(18.0);
             metric(ui, "PROGRAM", self.program_label(), 13.0);
+            let (state_word, state_color) = program_state_word(&self.snapshot.program);
+            metric_colored(ui, "STATE", state_word.into(), 13.0, state_color);
             metric(
                 ui,
                 "TOOL",
@@ -2149,22 +2152,27 @@ impl LincApp {
                         }),
                 );
                 ui.add_space(14.0);
-                let alarm_color = if self.snapshot.alarm_count() > 0 {
+                let (messages, alarms) = self.log_counts();
+                let alarm_color = if alarms > 0 {
                     theme::ERROR
                 } else {
                     theme::MUTED
                 };
                 ui.label(
-                    RichText::new(format!("ALARM {}", self.snapshot.alarm_count()))
+                    RichText::new(format!("ALARM {alarms}"))
                         .monospace()
                         .size(theme::font_size(12.0))
                         .color(alarm_color),
                 );
                 ui.label(
-                    RichText::new(format!("MSG {}", self.snapshot.message_count()))
+                    RichText::new(format!("MSG {messages}"))
                         .monospace()
                         .size(theme::font_size(12.0))
-                        .color(theme::MUTED),
+                        .color(if messages > 0 {
+                            theme::FG
+                        } else {
+                            theme::MUTED
+                        }),
                 );
                 ui.add_space(14.0);
                 theme::status_dot(
@@ -2182,6 +2190,78 @@ impl LincApp {
                 );
             });
         });
+    }
+
+    /// The log the operator sees: the controller's alarms plus the HMI's own
+    /// notices, newest first. Diagnostics and the status bars share this list
+    /// so one of them cannot report messages the other shows as zero.
+    pub fn logs(&self) -> Vec<Alarm> {
+        let mut logs: Vec<Alarm> = self.snapshot.alarms.iter().cloned().collect();
+        logs.extend(self.ui_log.iter().cloned());
+        logs.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
+        logs
+    }
+
+    /// The newest `limit` entries of [`Self::logs`], for cards that show a few
+    /// rows every frame: bounded work per frame instead of cloning the whole
+    /// log. Each source is already newest-first, so only `limit` entries of
+    /// each are copied before the merge.
+    pub fn recent_logs(&self, limit: usize) -> Vec<Alarm> {
+        let mut logs: Vec<Alarm> = self.ui_log.iter().take(limit).cloned().collect();
+        logs.extend(self.snapshot.alarms.iter().take(limit).cloned());
+        logs.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
+        logs.truncate(limit);
+        logs
+    }
+
+    /// `(messages, alarms)` over [`Self::logs`], split once by
+    /// `AlarmSeverity::is_alarm`: a warning is an alarm in the top bar and in
+    /// the diagnostics table alike.
+    pub fn log_counts(&self) -> (usize, usize) {
+        let mut alarms = 0;
+        let mut messages = 0;
+        for entry in self.snapshot.alarms.iter().chain(self.ui_log.iter()) {
+            if entry.severity.is_alarm() {
+                alarms += 1;
+            } else {
+                messages += 1;
+            }
+        }
+        (messages, alarms)
+    }
+
+    /// The live fields the bottom bar shows on its left, in reading order:
+    /// program progress, homing, limits, a pending manual tool change and the
+    /// axis with the most left to go. Empty entries are omitted rather than
+    /// drawn as placeholders, so a quiet machine gives a quiet row.
+    fn status_fields(&self) -> Vec<(String, Color32)> {
+        let mut fields: Vec<(String, Color32)> = Vec::new();
+        let program = &self.snapshot.program;
+        if program.line_count > 0 {
+            let line = program.executing_line().max(1);
+            let percent = (program.progress.clamp(0.0, 1.0) * 100.0).round() as i32;
+            fields.push((
+                format!("LN {line}/{} {percent}%", program.line_count),
+                theme::MUTED,
+            ));
+        }
+        if let Some(field) = homing_field(&self.snapshot.machine.homed) {
+            fields.push(field);
+        }
+        // A held limit switch is never quiet: it blocks motion and says why.
+        if !self.snapshot.machine.limits.is_empty() {
+            fields.push((
+                format!("LIMIT {}", self.snapshot.machine.limits.join(" ")),
+                theme::ERROR,
+            ));
+        }
+        if let Some(field) = tool_change_field(&self.snapshot.tool_change) {
+            fields.push(field);
+        }
+        if let Some((axis, dtg)) = moving_axis(&self.snapshot.positions.axes) {
+            fields.push((format!("DTG {axis} {dtg:+.3}"), theme::MUTED));
+        }
+        fields
     }
 
     fn program_label(&self) -> String {
@@ -2480,12 +2560,18 @@ impl LincApp {
     fn bottom_bar(&mut self, ui: &mut egui::Ui) {
         let size = theme::font_size(11.0);
         ui.horizontal(|ui| {
-
-
-            // Right: the read-only machine state.
             let field = |ui: &mut egui::Ui, text: String, color: egui::Color32| {
                 ui.label(RichText::new(text).monospace().size(size).color(color));
             };
+            // Left: what the machine is doing, in fields that appear only when
+            // they have something to say. The bottom bar carries live machine
+            // state alone; nothing here is an action.
+            for (text, color) in self.status_fields() {
+                field(ui, text, color);
+                ui.add_space(16.0);
+            }
+
+            // Right: the read-only machine state.
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // Never claim OK on stale data: the controller may be latched
                 // while the last snapshot still says otherwise.
@@ -3288,6 +3374,12 @@ pub fn machine_bounds(profile: &Profile) -> Option<Bounds3> {
 }
 
 fn metric(ui: &mut egui::Ui, label: &str, value: String, size: f32) {
+    metric_colored(ui, label, value, size, theme::FG);
+}
+
+/// A top-bar metric whose value carries a state colour: the label stays quiet,
+/// the value is what has to be read at a glance.
+fn metric_colored(ui: &mut egui::Ui, label: &str, value: String, size: f32, color: Color32) {
     ui.add_space(6.0);
     ui.vertical(|ui| {
         ui.label(
@@ -3295,8 +3387,67 @@ fn metric(ui: &mut egui::Ui, label: &str, value: String, size: f32) {
                 .size(theme::font_size(9.0))
                 .color(theme::MUTED),
         );
-        ui.label(RichText::new(value).monospace().size(size).color(theme::FG));
+        ui.label(RichText::new(value).monospace().size(size).color(color));
     });
+}
+
+/// The program state word for the top bar.
+///
+/// Paused is the state that needs attention - the machine is waiting with a
+/// line in hand - so it is the only one that earns a warning colour. Idle and
+/// running are both normal and stay quiet.
+fn program_state_word(program: &ProgramState) -> (&'static str, Color32) {
+    if program.paused {
+        ("PAUSED", theme::WARNING)
+    } else if program.running {
+        ("RUNNING", theme::SUCCESS)
+    } else {
+        ("IDLE", theme::MUTED)
+    }
+}
+
+/// Homing progress for the status line.
+///
+/// Moves fail closed until every axis is homed, so a partly homed machine is a
+/// warning that names the axes it already trusts; the fully homed case is the
+/// normal one and stays muted.
+fn homing_field(homed: &AxisMap<bool>) -> Option<(String, Color32)> {
+    if homed.is_empty() {
+        return None;
+    }
+    let total = homed.len();
+    let done: Vec<&str> = homed
+        .iter()
+        .filter(|(_, is_homed)| **is_homed)
+        .map(|(axis, _)| axis)
+        .collect();
+    if done.len() == total {
+        Some(("HOMED".into(), theme::MUTED))
+    } else if done.is_empty() {
+        Some(("NOT HOMED".into(), theme::WARNING))
+    } else {
+        Some((format!("HOMED {}", done.join(" ")), theme::WARNING))
+    }
+}
+
+/// The axis with the most left to go, for the status line's DTG field.
+///
+/// A settled machine has no field; during a move or a jog the largest distance
+/// wins, which is the axis the operator is watching.
+fn moving_axis(axes: &AxisMap<PositionSet>) -> Option<(&str, f64)> {
+    axes.iter()
+        .filter(|(_, position)| position.dtg.abs() > 0.001)
+        .max_by(|a, b| a.1.dtg.abs().total_cmp(&b.1.dtg.abs()))
+        .map(|(axis, position)| (axis, position.dtg))
+}
+
+/// The field for a manual tool change that is waiting on the operator.
+fn tool_change_field(tool_change: &ToolChangeState) -> Option<(String, Color32)> {
+    if tool_change.status != ToolChangeStatus::ManualPrompt {
+        return None;
+    }
+    let target = tool_change.target_tool.unwrap_or(tool_change.current_tool);
+    Some((format!("TC T{target} PENDING"), theme::WARNING))
 }
 
 pub fn state_label(power: MachinePower) -> &'static str {
@@ -3328,6 +3479,78 @@ mod tests {
             ])),
             None
         );
+    }
+
+    #[test]
+    fn the_program_state_word_reads_the_controller() {
+        let mut program = ProgramState::default();
+        assert_eq!(program_state_word(&program).0, "IDLE");
+        program.running = true;
+        assert_eq!(program_state_word(&program).0, "RUNNING");
+        program.paused = true;
+        assert_eq!(program_state_word(&program).0, "PAUSED");
+    }
+
+    #[test]
+    fn homing_names_the_axes_it_cannot_trust() {
+        let mut homed = AxisMap::new();
+        assert!(homing_field(&homed).is_none(), "no axes, no field");
+        homed.insert("X", false);
+        homed.insert("Y", false);
+        assert_eq!(homing_field(&homed).unwrap().0, "NOT HOMED");
+        homed.insert("X", true);
+        assert_eq!(homing_field(&homed).unwrap().0, "HOMED X");
+        homed.insert("Y", true);
+        assert_eq!(homing_field(&homed).unwrap().0, "HOMED");
+    }
+
+    #[test]
+    fn the_status_line_names_the_axis_that_is_moving() {
+        let mut axes = AxisMap::new();
+        axes.insert(
+            "X",
+            PositionSet {
+                dtg: 0.0,
+                ..PositionSet::default()
+            },
+        );
+        axes.insert(
+            "Y",
+            PositionSet {
+                dtg: 0.0,
+                ..PositionSet::default()
+            },
+        );
+        assert!(moving_axis(&axes).is_none(), "a settled machine is quiet");
+        axes.insert(
+            "Y",
+            PositionSet {
+                dtg: -12.34,
+                ..PositionSet::default()
+            },
+        );
+        assert_eq!(moving_axis(&axes), Some(("Y", -12.34)));
+        axes.insert(
+            "X",
+            PositionSet {
+                dtg: 40.0,
+                ..PositionSet::default()
+            },
+        );
+        assert_eq!(moving_axis(&axes).map(|(axis, _)| axis), Some("X"));
+    }
+
+    #[test]
+    fn a_pending_tool_change_is_named() {
+        let mut tool_change = ToolChangeState::default();
+        assert!(tool_change_field(&tool_change).is_none());
+        tool_change.status = ToolChangeStatus::ManualPrompt;
+        tool_change.target_tool = Some(7);
+        assert_eq!(tool_change_field(&tool_change).unwrap().0, "TC T7 PENDING");
+        // Without a target the current tool is the best name available.
+        tool_change.target_tool = None;
+        tool_change.current_tool = 3;
+        assert_eq!(tool_change_field(&tool_change).unwrap().0, "TC T3 PENDING");
     }
 
     #[test]

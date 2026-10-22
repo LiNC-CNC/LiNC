@@ -1007,7 +1007,8 @@ No F1–F8 mapping. The bottom keycap highlight reflects the current page:
   MANUAL. `halui.axis.jog-speed` defaults to 0 and must be set from the INI
   (LiNC uses `[DISPLAY] DEFAULT_LINEAR_VELOCITY`); without it the jog pins are
   asserted and the machine does not move. `halui.mode.manual` is one pin, so
-  the JOG and HOME requests are ORed into a single request.
+  the JOG, INC, MPG and HOME requests are ORed into a single request: INC and
+  MPG jog just like JOG and are refused in AUTO or MDI for the same reason.
 - MDI, probe and tool-change actions use Probe Basic's `issue_mdi` semantics:
   after an explicit operator action and validation (machine ON, homed, idle, no
   active program), the HMI may temporarily select MDI, issue the specific

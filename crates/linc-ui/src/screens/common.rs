@@ -372,19 +372,17 @@ pub fn alarm_card(app: &LincApp, ui: &mut Ui, height: f32) {
         ui.horizontal(|ui| {
             theme::section_header(ui, "MESSAGES");
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let (messages, alarms) = app.log_counts();
                 ui.label(
-                    RichText::new(format!(
-                        "ALARM {} / MSG {}",
-                        app.snapshot.alarm_count(),
-                        app.snapshot.message_count()
-                    ))
-                    .monospace()
-                    .size(theme::font_size(10.0))
-                    .color(theme::MUTED),
+                    RichText::new(format!("ALARM {alarms} / MSG {messages}"))
+                        .monospace()
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
                 );
             });
         });
-        if app.snapshot.alarms.is_empty() {
+        let logs = app.recent_logs(20);
+        if logs.is_empty() {
             ui.label(
                 RichText::new("NO ACTIVE ALARMS")
                     .monospace()
@@ -405,7 +403,7 @@ pub fn alarm_card(app: &LincApp, ui: &mut Ui, height: f32) {
                     // Rows of one message sit tight: the default spacing plus an
                     // explicit gap made every entry look double-spaced.
                     ui.spacing_mut().item_spacing.y = 1.0;
-                    for alarm in app.snapshot.alarms.iter().take(20) {
+                    for alarm in &logs {
                         let color = match alarm.severity {
                             linc_core::model::AlarmSeverity::Critical
                             | linc_core::model::AlarmSeverity::Error => theme::ERROR,
