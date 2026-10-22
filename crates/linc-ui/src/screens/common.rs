@@ -644,6 +644,21 @@ fn field_label(ui: &mut Ui, text: &str) {
     );
 }
 
+/// Rows of G-code the PROGRAM card shows at `height`.
+///
+/// The card is a fixed height, so the listing takes what the rest of the card
+/// leaves: the header and rule above it, the MODAL label, the strip (26 px per
+/// row of two-line cells) and the progress line below it. Nothing is held back
+/// for the strip beyond what it needs, so the surplus goes to the listing.
+fn program_window_rows(height: f32, codes: usize, row_height: f32) -> usize {
+    const HEADER: f32 = 26.0;
+    const MODAL_LABEL: f32 = 12.0;
+    const PROGRESS: f32 = 46.0;
+    let strip = codes.max(1).div_ceil(6) as f32 * 26.0;
+    let budget = (height - 24.0) - HEADER - MODAL_LABEL - strip - PROGRESS;
+    (budget / (row_height + 2.0)).floor().max(6.0) as usize
+}
+
 pub fn program_card(app: &LincApp, ui: &mut Ui) {
     program_card_sized(app, ui, ui.available_height());
 }
@@ -666,11 +681,6 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
 
                 let content = app.snapshot.program.content.as_deref();
                 let row_height = ui.spacing().interact_size.y.max(16.0);
-                // The card is a fixed height, so the window is the height the
-                // rest of the card leaves: the header and rule above it, the
-                // MODAL label, the strip (44 px per row of cells: group label,
-                // code, meaning and the gap under it) and the progress line.
-                // Sixteen rows stays the ceiling.
                 let codes = app
                     .snapshot
                     .program
@@ -678,11 +688,7 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                     .iter()
                     .filter(|(key, _)| key.starts_with('G'))
                     .count();
-                let strip = codes.max(1).div_ceil(6) as f32 * 26.0;
-                let window_len =
-                    (((height - 24.0) - 26.0 - 12.0 - strip - 46.0) / (row_height + 2.0))
-                        .floor()
-                        .clamp(6.0, 16.0) as usize;
+                let window_len = program_window_rows(height, codes, row_height);
                 if let Some(content) = content {
                     // Follow the line motion is cutting, not the interpreter's
                     // read-ahead, which reaches the end of the program first.
@@ -1543,7 +1549,7 @@ pub fn live_coordinates_card(
 
 #[cfg(test)]
 mod tests {
-    use super::modal_mnemonic;
+    use super::{modal_mnemonic, program_window_rows};
 
     #[test]
     fn the_modal_mnemonic_says_what_the_code_means() {
@@ -1587,5 +1593,25 @@ mod tests {
                 "{key}: {mnemonic} is wider than a cell"
             );
         }
+    }
+
+    #[test]
+    fn the_program_window_gives_its_surplus_to_the_listing() {
+        // The MAIN card at a 720-high window.
+        let height = 486.0;
+        let row_height = 18.0;
+        let rows = program_window_rows(height, 5, row_height);
+        // The listing fills the card down to the progress line rather than
+        // stopping at a round number of rows.
+        let used = 26.0 + rows as f32 * (row_height + 2.0) + 12.0 + 26.0 + 46.0;
+        let inner = height - 24.0;
+        assert!(used <= inner, "{used} > {inner}");
+        assert!(
+            used + row_height + 2.0 > inner,
+            "another row would have fitted"
+        );
+
+        // A strip that wraps to two rows gives one back.
+        assert_eq!(program_window_rows(height, 7, row_height), rows - 1);
     }
 }
