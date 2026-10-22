@@ -1685,6 +1685,7 @@ dependencies = [
  "eframe",
  "egui",
  "env_logger",
+ "image",
  "linc-core",
  "linc-hal",
  "linc-linuxcnc",
