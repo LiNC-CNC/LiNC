@@ -803,6 +803,10 @@ pub struct ToolsUi {
     pub error: Option<String>,
     pub revision_seen: u64,
     pub confirm_token: Option<linc_core::model::ToolChangeToken>,
+    /// Scroll the table to the selected row on the next frame. Set only when the
+    /// cursor moves by keyboard, so the view follows the cursor without fighting
+    /// the operator's own scrolling.
+    pub scroll_to_selected: bool,
 }
 
 impl Default for ToolsUi {
@@ -818,6 +822,7 @@ impl Default for ToolsUi {
             error: None,
             revision_seen: 0,
             confirm_token: None,
+            scroll_to_selected: false,
         }
     }
 }

@@ -386,6 +386,9 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     if move_row != 0 && rows > 0 {
         let target = app.tools.selected_row as isize + move_row;
         app.tools.selected_row = target.clamp(0, rows as isize - 1) as usize;
+        // The table scrolls to follow the keyboard cursor; a click on a visible
+        // row needs no scroll.
+        app.tools.scroll_to_selected = true;
     }
     if move_column != 0 {
         let target = app.tools.selected_column as isize + move_column;
@@ -469,6 +472,12 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
             for column in &columns {
                 builder = builder.column(ExtraColumn::exact(column.width));
+            }
+            if app.tools.scroll_to_selected {
+                app.tools.scroll_to_selected = false;
+                // `scroll_to_row` lives on the builder: the table computes its
+                // scroll offsets before the body runs.
+                builder = builder.scroll_to_row(selected_row, Some(egui::Align::Center));
             }
             let clicked = std::cell::Cell::new(None::<(usize, usize)>);
             builder
