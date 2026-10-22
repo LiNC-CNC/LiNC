@@ -717,6 +717,13 @@ pub struct OffsetsUi {
     /// When the page last drew: a gap means the operator just arrived, which is
     /// when the selection should jump to the active system.
     pub last_frame_ms: i64,
+    /// The page's own toolpath view: the offset being edited is shown there, so
+    /// it keeps separate zoom/pan from the Program page.
+    pub preview_zoom: f32,
+    pub preview_pan: egui::Vec2,
+    pub preview_yaw: f32,
+    pub preview_pitch: f32,
+    pub preview_fit: bool,
 }
 
 impl Default for OffsetsUi {
@@ -733,6 +740,11 @@ impl Default for OffsetsUi {
             revision_seen: 0,
             dro_edit: None,
             last_frame_ms: 0,
+            preview_zoom: 1.0,
+            preview_pan: egui::Vec2::ZERO,
+            preview_yaw: linc_view::DEFAULT_YAW,
+            preview_pitch: linc_view::DEFAULT_PITCH,
+            preview_fit: true,
         }
     }
 }

@@ -53,7 +53,23 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         .id_salt("offsets-body")
         .max_height(ui.available_height())
         .show(ui, |ui| {
-            work_offsets_card(app, ui, writable);
+            let available = ui.available_width();
+            let table_width = (available * 0.62).max(420.0);
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::Vec2::new(table_width, PREVIEW_HEIGHT),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        work_offsets_card(app, ui, writable);
+                    },
+                );
+                ui.add_space(8.0);
+                ui.allocate_ui_with_layout(
+                    egui::Vec2::new((available - table_width - 8.0).max(260.0), PREVIEW_HEIGHT),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| offset_preview(app, ui, PREVIEW_HEIGHT),
+                );
+            });
             ui.add_space(4.0);
             ui.label(
                 RichText::new(
@@ -233,6 +249,70 @@ fn handle_axis_keys(app: &mut LincApp, ui: &mut Ui) {
         buffer: format!("{work:.3}"),
         focus: true,
     });
+}
+
+/// Height of the toolpath panel beside the table.
+const PREVIEW_HEIGHT: f32 = 260.0;
+
+/// The toolpath beside the work-offset table.
+///
+/// The active system keeps its own cross; the selected row (including an edit
+/// that has not been written yet) is drawn in the current-line colour, so the
+/// operator can see where the offset sits in the machine envelope.
+fn offset_preview(app: &mut LincApp, ui: &mut Ui, height: f32) {
+    let preview = app.program.last_valid_preview.clone();
+    let highlight = selected_highlight(app);
+    let mut zoom = app.offsets.preview_zoom;
+    let mut pan = app.offsets.preview_pan;
+    let mut yaw = app.offsets.preview_yaw;
+    let mut pitch = app.offsets.preview_pitch;
+    let mut fit = app.offsets.preview_fit;
+    common::trajectory(
+        app,
+        ui,
+        &preview,
+        (height - 4.0).max(140.0),
+        app.program.graph_view,
+        &mut zoom,
+        &mut pan,
+        &mut yaw,
+        &mut pitch,
+        &mut fit,
+        None,
+        None,
+        false,
+        highlight,
+    );
+    app.offsets.preview_zoom = zoom;
+    app.offsets.preview_pan = pan;
+    app.offsets.preview_yaw = yaw;
+    app.offsets.preview_pitch = pitch;
+    app.offsets.preview_fit = fit;
+}
+
+/// The selected system's origin, taken from the draft so an edit previews as it
+/// is typed.
+fn selected_highlight(app: &LincApp) -> Option<([f64; 3], String)> {
+    let index = app.offsets.selected;
+    let row = app
+        .snapshot
+        .offsets
+        .offsets
+        .iter()
+        .find(|offset| offset.index == index)?;
+    let mut point = [0.0; 3];
+    for (slot, axis) in ["X", "Y", "Z"].iter().enumerate() {
+        let drafted = app
+            .offsets
+            .rows
+            .get(&index)
+            .and_then(|draft| draft.values.get(*axis))
+            .and_then(|text| text.trim().parse::<f64>().ok());
+        point[slot] = drafted
+            .or_else(|| row.values.get(axis).copied())
+            .unwrap_or(0.0);
+    }
+    Some((point, format!("G{}", 53 + index)))
 }
 
 /// Enter commits the typed position, Escape drops it. Both are consumed before

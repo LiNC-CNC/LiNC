@@ -186,6 +186,7 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
             Some(app.program.selected_line),
             Some(app.snapshot.program.executing_line()),
             false,
+            None,
         );
         app.program.graph_zoom = zoom;
         app.program.graph_pan = pan;

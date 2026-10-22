@@ -823,6 +823,9 @@ pub fn trajectory(
     current_line: Option<usize>,
     // Legends name the colours; a thumbnail too small to read them omits it.
     show_legend: bool,
+    // A second origin marker, in the current-line colour: the OFFSETS page
+    // highlights the row being edited without moving the active cross.
+    highlight: Option<([f64; 3], String)>,
 ) -> egui::Response {
     // Machine coordinates throughout: the part, the trail and the tool stay put
     // when the operator touches off, and the work-zero cross moves instead.
@@ -833,6 +836,10 @@ pub fn trajectory(
         app.profile.variant,
     );
     view.origin = origin;
+    if let Some((point, label)) = highlight {
+        view.highlight_origin = Some(point);
+        view.highlight_label = Some(label);
+    }
     view.view = view_mode;
     view.height = height;
     view.machine_bounds = app.machine_bounds();
@@ -1122,6 +1129,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
             None,
             Some(current_line),
             false,
+            None,
         );
         app.manual.zoom = zoom;
         app.manual.pan = pan;

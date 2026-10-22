@@ -91,6 +91,11 @@ pub struct TrajectoryView<'a> {
     /// machine origin stays at zero; touching off moves this marker instead of
     /// moving the part and the tool.
     pub origin: [f64; 3],
+    /// A second origin marker, drawn in the current-line colour: the OFFSETS
+    /// page shows the row being edited here while the active system keeps its
+    /// own cross.
+    pub highlight_origin: Option<[f64; 3]>,
+    pub highlight_label: Option<String>,
     pub selected_line: Option<usize>,
     pub current_line: Option<usize>,
     pub variant: MachineVariant,
@@ -120,6 +125,8 @@ impl<'a> TrajectoryView<'a> {
     pub fn new(preview: &'a Preview, live_trail: &'a [[f64; 3]], variant: MachineVariant) -> Self {
         Self {
             origin: [0.0; 3],
+            highlight_origin: None,
+            highlight_label: None,
             preview,
             live_trail,
             tool_tip: None,
@@ -454,7 +461,33 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     if view.show_grid {
         draw_grid(&painter, &projection, reference);
     }
-    draw_axes(&painter, &projection, view.variant, &view.axis_labels, view.origin);
+    draw_axes(
+        &painter,
+        &projection,
+        view.variant,
+        &view.axis_labels,
+        view.origin,
+        theme::MUTED,
+    );
+    if let Some(highlight) = view.highlight_origin {
+        draw_axes(
+            &painter,
+            &projection,
+            view.variant,
+            &view.axis_labels,
+            highlight,
+            view.selected_line_color,
+        );
+        if let Some(label) = &view.highlight_label {
+            painter.text(
+                projection.project(highlight) + Vec2::new(8.0, 26.0),
+                Align2::LEFT_TOP,
+                label,
+                FontId::monospace(9.0 * FONT_SCALE),
+                view.selected_line_color,
+            );
+        }
+    }
 
     // Machine bounds.
     if view.show_machine_bounds {
@@ -1005,6 +1038,7 @@ fn draw_axes(
     variant: MachineVariant,
     axis_labels: &[String],
     origin: [f64; 3],
+    color: Color32,
 ) {
     let origin_pos = projection.project(origin);
     let length = 24.0;

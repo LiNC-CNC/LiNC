@@ -144,6 +144,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 Some(app.program.selected_line),
                 Some(app.snapshot.program.current_line),
                 false,
+                None,
             );
             app.program.graph_zoom = zoom;
             app.program.graph_pan = pan;
@@ -232,6 +233,7 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                         Some(app.program.selected_line),
                         Some(app.snapshot.program.current_line),
                         false,
+                        None,
                     );
                     app.program.graph_zoom = zoom;
                     app.program.graph_pan = pan;
