@@ -34,18 +34,6 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         .max_height(ui.available_height())
         .show(ui, |ui| {
             work_offsets_card(app, ui, writable);
-            ui.add_space(6.0);
-            let available = ui.available_width();
-            ui.horizontal_top(|ui| {
-                ui.add_space(8.0);
-                ui.allocate_ui_with_layout(
-                    egui::Vec2::new((available - available * 0.58 - 8.0).max(300.0), 230.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        tool_offset_card(app, ui);
-                    },
-                );
-            });
             ui.add_space(4.0);
             ui.label(
                 RichText::new(
@@ -628,65 +616,4 @@ fn apply_work_offset(app: &mut LincApp, index: u8) {
         format!("G{} offset written", 53 + index),
         theme::ACCENT,
     );
-}
-
-fn tool_offset_card(app: &mut LincApp, ui: &mut Ui) {
-    theme::card(ui, |ui| {
-        theme::section_header(ui, "TOOL OFFSET");
-        let tool = app.snapshot.tool_change.current_tool;
-        let Some(row) = app
-            .snapshot
-            .tool_table
-            .rows
-            .iter()
-            .find(|row| row.tool == tool)
-        else {
-            ui.label(RichText::new(format!("T{tool}: not in tool table")).color(theme::MUTED));
-            return;
-        };
-        ui.label(
-            RichText::new(format!("T{} {}", row.tool, row.description))
-                .monospace()
-                .size(theme::font_size(12.0))
-                .color(theme::FG),
-        );
-        if app.profile.variant == linc_core::model::MachineVariant::Lathe {
-            let get = |axis: &str| row.geometry.values.get(axis).copied().unwrap_or(0.0);
-            for (label, value) in [
-                ("X", get("X")),
-                ("Z", get("Z")),
-                ("NOSE R", row.geometry.nose_radius.unwrap_or(0.0)),
-                ("ORIENT", row.geometry.orientation.unwrap_or(0) as f64),
-            ] {
-                theme::kv_row(ui, label, format!("{value:+.4}"));
-            }
-            theme::kv_row(
-                ui,
-                "STATION",
-                row.pocket
-                    .map(|p| format!("P{p}"))
-                    .unwrap_or_else(|| "—".into()),
-            );
-        } else {
-            theme::kv_row(
-                ui,
-                "DIAMETER",
-                row.geometry
-                    .diameter
-                    .map(|value| format!("{value:.4}"))
-                    .unwrap_or_else(|| "—".into()),
-            );
-            theme::kv_row(
-                ui,
-                "LENGTH",
-                row.geometry
-                    .length
-                    .map(|value| format!("{value:+.4}"))
-                    .unwrap_or_else(|| "—".into()),
-            );
-        }
-        if theme::action_button(ui, "EDIT IN TOOLS", true).clicked() {
-            app.set_page(Page::Tools);
-        }
-    });
 }

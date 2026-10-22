@@ -808,62 +808,6 @@ pub fn turret_card(app: &LincApp, ui: &mut Ui) {
     });
 }
 
-pub fn positions_table(app: &LincApp, ui: &mut Ui) {
-    theme::card(ui, |ui| {
-        theme::section_header(ui, "POSITION");
-        egui::Grid::new("positions-table")
-            .num_columns(4)
-            .spacing([16.0, 4.0])
-            .show(ui, |ui| {
-                ui.label(
-                    RichText::new("AXIS")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                ui.label(
-                    RichText::new("WORK")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                ui.label(
-                    RichText::new("MACHINE")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                ui.label(
-                    RichText::new("DTG")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                ui.end_row();
-                for axis in app.axes() {
-                    let position = app.snapshot.positions.axes.get(&axis);
-                    ui.label(RichText::new(&axis).monospace().color(theme::C3));
-                    ui.label(
-                        RichText::new(format!("{:+.3}", position.map(|p| p.work).unwrap_or(0.0)))
-                            .monospace()
-                            .color(theme::FG),
-                    );
-                    ui.label(
-                        RichText::new(format!(
-                            "{:+.3}",
-                            position.map(|p| p.machine).unwrap_or(0.0)
-                        ))
-                        .monospace()
-                        .color(theme::MUTED),
-                    );
-                    ui.label(
-                        RichText::new(format!("{:.3}", position.map(|p| p.dtg).unwrap_or(0.0)))
-                            .monospace()
-                            .color(theme::MUTED),
-                    );
-                    ui.end_row();
-                }
-            });
-    });
-}
-
-/// Draw the loaded program path + live trail.
 pub fn trajectory(
     app: &LincApp,
     ui: &mut Ui,
