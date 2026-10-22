@@ -1522,6 +1522,7 @@ impl LincApp {
         let mut line_step = 0isize;
         let mut goto_line = false;
         let mut cycle_toolpath_view = false;
+        let mut toggle_bounds = false;
 
         ui.input_mut(|input| {
             if input.consume_key(self.keymap.machine.modifiers, self.keymap.machine.key) {
@@ -1654,6 +1655,15 @@ impl LincApp {
             {
                 cycle_toolpath_view = true;
             }
+            if matches!(
+                self.page,
+                Page::Machine | Page::Program | Page::Manual | Page::Homing | Page::Offsets
+            ) && input.consume_key(
+                self.keymap.toggle_bounds.modifiers,
+                self.keymap.toggle_bounds.key,
+            ) {
+                toggle_bounds = true;
+            }
             // The tool table pages its own cursor with these keys, so they must
             // reach the page instead of being consumed for tab navigation.
             let page_keys_belong_to_page = self.page == Page::Tools;
@@ -1710,6 +1720,14 @@ impl LincApp {
         }
         if cycle_toolpath_view {
             self.cycle_toolpath_view();
+        }
+        if toggle_bounds {
+            self.graph_style.show_program_bounds = !self.graph_style.show_program_bounds;
+            let shown = self.graph_style.show_program_bounds;
+            self.toast(
+                if shown { "bounds shown" } else { "bounds hidden" },
+                theme::MUTED,
+            );
         }
         if goto_line && self.page == Page::Program {
             self.modal = Some(crate::state::Modal::GoToLine {
@@ -2280,6 +2298,7 @@ impl LincApp {
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
                 hints.push((k.goto_line.label(), "GOTO"));
                 hints.push((k.view_cycle.label(), "VIEW"));
+                hints.push((k.toggle_bounds.label(), "BOUNDS"));
                 hints.push((k.save.label(), "SAVE"));
                 hints.push((k.undo.label(), "UNDO"));
                 hints.push((k.redo.label(), "REDO"));
@@ -2297,6 +2316,7 @@ impl LincApp {
                 hints.push(("Bksp".into(), "BACK"));
                 hints.push(("PgUp/PgDn".into(), "PAGE"));
             }
+            Page::Machine => hints.push((k.toggle_bounds.label(), "BOUNDS")),
             Page::Diagnostics => hints.push(("PgUp/PgDn".into(), "TABS")),
             Page::Mdi => {
                 hints.push((k.mdi_issue.label(), "ISSUE"));
@@ -2305,6 +2325,7 @@ impl LincApp {
             Page::Manual | Page::Homing => {
                 hints.push((k.graph_fit.label(), "FIT"));
                 hints.push((k.view_cycle.label(), "VIEW"));
+                hints.push((k.toggle_bounds.label(), "BOUNDS"));
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
                 hints.push(("Arrows".into(), "SELECT"));
                 hints.push(("X/Y/Z".into(), "ZERO AXIS"));
@@ -2313,6 +2334,7 @@ impl LincApp {
             Page::Offsets => {
                 hints.push(("Arrows".into(), "SELECT"));
                 hints.push(("X/Y/Z".into(), "EDIT DRO"));
+                hints.push((k.toggle_bounds.label(), "BOUNDS"));
             }
             Page::Probe => hints.push(("Arrows".into(), "SELECT")),
             Page::Tools => hints.push(("Arrows".into(), "SELECT")),

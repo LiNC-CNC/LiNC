@@ -104,7 +104,7 @@ else, so it cannot shadow another page's command.
 
 | Page | Keys |
 |---|---|
-| Program | `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
+| Program | `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
 | Files | `Left`/`Right` switch pane, `Enter` open or copy to `NC_FILES`, `Backspace` up a folder, `Ctrl+U` copy to USB, `Ctrl+N` copy to `NC_FILES`, `Ctrl+R` refresh, `Delete`/`Ctrl+X` delete |
 | MDI | `Enter` issue, `Up`/`Down` history, `Esc` clear the unissued block |
 | Help | `/` focus search, `Backspace` back through link history |
@@ -398,6 +398,12 @@ Default page. The layout is selected by `machine.gui`.
   the program alone — the tool and the live trail are excluded, since a far
   marker would shrink the part — and re-fits on load and on every view switch,
   leaving a manual zoom/pan alone in between.
+- The program bounds are **off by default** and `Ctrl+B` shows them. When shown,
+  they are drawn like a technical drawing: an edge box, three dimension lines
+  with end ticks on the near faces, and the X/Y/Z lengths as Hershey stroke text
+  laid into those faces, so the labels are projected by the same camera as the
+  part instead of flat on the screen. The stock block is fully transparent by
+  default (`toolpath.stock_alpha = 0`) and configurable up to opaque.
 - Program card, feed/spindle-load gauges, machine health and alarms.
 - ATC state in Tools/Diagnostics; mill tool table uses orientation and, only
   when ATC is enabled, the standard `P` pocket column.
