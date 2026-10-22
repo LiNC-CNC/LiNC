@@ -31,6 +31,9 @@ pub enum FocusRegion {
     Actions,
 }
 
+/// Lines a PageUp/PageDown moves the selection in a read-only G-code view.
+const LINE_PAGE: isize = 10;
+
 pub struct LincApp {
     pub profile: Profile,
     pub backend: Box<dyn UiBackend>,
@@ -205,6 +208,7 @@ impl LincApp {
                 program_revision_seen: snapshot.program.revision,
                 loaded_path: program_path,
                 selected_line: snapshot.program.current_line.max(1),
+                cursor_line: None,
                 graph_view: if profile.variant == MachineVariant::Lathe {
                     linc_view::ViewMode::LatheXz
                 } else {
@@ -592,6 +596,32 @@ impl LincApp {
                 self.files.refresh();
             }
             Err(error) => self.toast(error.to_string(), theme::ERROR),
+        }
+    }
+
+    /// Move the G-code selection by `step` lines, clamped to the buffer. Used by
+    /// the arrows and page keys in a read-only view, where there is no text
+    /// cursor to move.
+    pub fn step_selected_line(&mut self, step: isize) {
+        let count = self.program.editor.line_count();
+        if count == 0 {
+            return;
+        }
+        let selected = (self.program.selected_line as isize + step).clamp(1, count as isize) as usize;
+        self.program.selected_line = selected;
+        self.program.code_scroll_to_line = Some(selected);
+    }
+
+    /// Select a line in the G-code view: highlight it, scroll to it and, when
+    /// the program is editable, put the text cursor there as well.
+    pub fn jump_to_line(&mut self, line: usize) {
+        let count = self.program.editor.line_count().max(1);
+        let line = line.clamp(1, count);
+        self.program.selected_line = line;
+        self.program.code_scroll_to_line = Some(line);
+        self.program.cursor_line = Some(line);
+        if self.editing_allowed() {
+            self.program.focus_editor = true;
         }
     }
 
@@ -1341,6 +1371,8 @@ impl LincApp {
         let mut delete_line = false;
         let mut move_line_up = false;
         let mut move_line_down = false;
+        let mut line_step = 0isize;
+        let mut goto_line = false;
 
         ui.input_mut(|input| {
             if input.consume_key(self.keymap.machine.modifiers, self.keymap.machine.key) {
@@ -1436,6 +1468,31 @@ impl LincApp {
             {
                 escape = true;
             }
+            // A read-only G-code pane has no text cursor, so the arrows and the
+            // page keys move the selected line there; an editable pane leaves
+            // them to the editor.
+            if self.page == Page::Program
+                && !self.editing_allowed()
+                && self.focus_region == FocusRegion::Page
+            {
+                if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                    line_step -= 1;
+                }
+                if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                    line_step += 1;
+                }
+                if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+                    line_step -= LINE_PAGE;
+                }
+                if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+                    line_step += LINE_PAGE;
+                }
+            }
+            if self.page == Page::Program
+                && input.consume_key(self.keymap.goto_line.modifiers, self.keymap.goto_line.key)
+            {
+                goto_line = true;
+            }
             if !text_focused && input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
                 page_up = true;
             }
@@ -1480,6 +1537,14 @@ impl LincApp {
             } else {
                 self.request_files();
             }
+        }
+        if goto_line && self.page == Page::Program {
+            self.modal = Some(crate::state::Modal::GoToLine {
+                buffer: String::new(),
+            });
+        }
+        if line_step != 0 && self.page == Page::Program {
+            self.step_selected_line(line_step);
         }
         if save && self.page == Page::Program {
             self.save_program();
@@ -2036,6 +2101,7 @@ impl LincApp {
                 hints.push((k.program_run_from_line.label(), "RUN LINE"));
                 hints.push((k.graph_fit.label(), "FIT"));
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
+                hints.push((k.goto_line.label(), "GOTO"));
                 hints.push((k.save.label(), "SAVE"));
                 hints.push((k.undo.label(), "UNDO"));
                 hints.push((k.redo.label(), "REDO"));
@@ -2383,6 +2449,8 @@ impl LincApp {
         let mut delete: Option<(std::path::PathBuf, bool)> = None;
         let mut quit = false;
         let mut overwrite: Option<bool> = None;
+        let mut goto_buffer: Option<String> = None;
+        let mut goto_accept = false;
         egui::Window::new("LiNC")
             .collapsible(false)
             .resizable(false)
@@ -2504,6 +2572,53 @@ impl LincApp {
                         }
                     });
                 }
+                Modal::GoToLine { buffer } => {
+                    ui.label(
+                        RichText::new("GO TO LINE")
+                            .size(theme::font_size(18.0))
+                            .strong()
+                            .color(theme::FG),
+                    );
+                    ui.add_space(6.0);
+                    ui.label(format!(
+                        "Line number (1-{}):",
+                        self.program.editor.line_count().max(1)
+                    ));
+                    ui.add_space(6.0);
+                    let mut text = buffer.clone();
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut text)
+                            .id(egui::Id::unique("linc-goto-line-input"))
+                            .desired_width(120.0)
+                            .hint_text("line"),
+                    );
+                    if focus_default {
+                        field.request_focus();
+                    }
+                    if field.changed() {
+                        // Digits only, so the field cannot hold something the
+                        // jump would have to reject.
+                        goto_buffer = Some(
+                            text.chars()
+                                .filter(char::is_ascii_digit)
+                                .take(7)
+                                .collect::<String>(),
+                        );
+                    }
+                    if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        goto_accept = true;
+                    }
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if theme::accent_button(ui, "GO", true).clicked() {
+                            goto_accept = true;
+                        }
+                        let cancel = theme::action_button(ui, "CANCEL", true);
+                        if cancel.clicked() {
+                            close = true;
+                        }
+                    });
+                }
                 Modal::ConfirmOverwrite(name) => {
                     ui.label(RichText::new("OVERWRITE FILE?").size(theme::font_size(18.0)).strong().color(theme::FG));
                     ui.add_space(6.0);
@@ -2541,6 +2656,19 @@ impl LincApp {
                     }
                 }
             });
+        if let Some(text) = goto_buffer {
+            self.modal = Some(Modal::GoToLine { buffer: text });
+        }
+        if goto_accept {
+            let line = match self.modal.as_ref() {
+                Some(Modal::GoToLine { buffer }) => buffer.trim().parse::<usize>().ok(),
+                _ => None,
+            };
+            if let Some(line) = line {
+                self.modal = None;
+                self.jump_to_line(line);
+            }
+        }
         if close {
             self.modal = None;
         }
@@ -3090,6 +3218,48 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         app.poll_backend();
         assert!(app.snapshot.live_trail.len() <= 1);
         assert_eq!(app.snapshot.program.line_count > 0, true);
+    }
+    #[test]
+    fn jump_to_line_clamps_and_selects() {
+        let (_dir, mut app) = make_app(PanelMode::Edit);
+        app.program.editor.replace_text("L1\nL2\nL3\nL4\n".into());
+        app.jump_to_line(3);
+        assert_eq!(app.program.selected_line, 3);
+        assert_eq!(app.program.code_scroll_to_line, Some(3));
+        assert_eq!(app.program.cursor_line, Some(3));
+        app.jump_to_line(0);
+        assert_eq!(app.program.selected_line, 1);
+        app.jump_to_line(9999);
+        assert_eq!(
+            app.program.selected_line,
+            app.program.editor.line_count().max(1)
+        );
+    }
+
+    #[test]
+    fn stepping_the_selection_clamps_at_both_ends() {
+        let (_dir, mut app) = make_app(PanelMode::Auto);
+        let text: String = (1..=40).map(|n| format!("L{n}\n")).collect();
+        app.program.editor.replace_text(text);
+        let count = app.program.editor.line_count();
+        app.program.selected_line = 1;
+        app.step_selected_line(-1);
+        assert_eq!(app.program.selected_line, 1);
+        app.step_selected_line(LINE_PAGE);
+        assert_eq!(
+            app.program.selected_line,
+            (1 + LINE_PAGE as usize).min(count)
+        );
+        app.step_selected_line(10_000);
+        assert_eq!(app.program.selected_line, count);
+        assert_eq!(app.program.code_scroll_to_line, Some(count));
+    }
+
+    #[test]
+    fn goto_line_is_bound_to_ctrl_g() {
+        let (_dir, app) = make_app(PanelMode::Edit);
+        assert!(app.keymap.goto_line.modifiers.ctrl);
+        assert_eq!(app.keymap.goto_line.key, egui::Key::G);
     }
 }
 

@@ -227,6 +227,8 @@ pub struct KeysConfig {
     pub program_cycle_view: String,
     pub graph_fit: String,
     pub graph_clear: String,
+    /// Page-local to Program: jump to a line number.
+    pub goto_line: String,
     pub program_run_from_line: String,
     pub files_copy_to_usb: String,
     pub files_copy_to_nc: String,
@@ -266,6 +268,7 @@ impl KeysConfig {
             program_cycle_view: "F10".into(),
             graph_fit: "Ctrl+0".into(),
             graph_clear: "Ctrl+L".into(),
+            goto_line: "Ctrl+G".into(),
             program_run_from_line: "Ctrl+R".into(),
             files_copy_to_usb: "Ctrl+U".into(),
             files_copy_to_nc: "Ctrl+N".into(),

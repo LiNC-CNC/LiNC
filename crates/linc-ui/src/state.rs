@@ -149,6 +149,10 @@ pub enum Modal {
         line: u32,
         block: String,
     },
+    /// Ask for a line number to jump to in the G-code view.
+    GoToLine {
+        buffer: String,
+    },
     /// Delete a file from one of the Files panes.
     ConfirmDelete {
         path: std::path::PathBuf,
@@ -506,6 +510,9 @@ pub struct ProgramUi {
     pub search_matches: Vec<usize>,
     pub search_index: usize,
     pub selected_line: usize,
+    /// Line whose caret should be placed in the editor on the next frame. A jump
+    /// can only move the highlight; the text cursor lives in `egui`'s edit state.
+    pub cursor_line: Option<usize>,
     pub graph_zoom: f32,
     pub graph_pan: egui::Vec2,
     pub graph_view: ViewMode,
@@ -531,6 +538,7 @@ impl Default for ProgramUi {
             search_matches: Vec::new(),
             search_index: 0,
             selected_line: 1,
+            cursor_line: None,
             graph_zoom: 1.0,
             graph_pan: egui::Vec2::ZERO,
             graph_view: ViewMode::Iso3d,
@@ -1215,6 +1223,8 @@ pub struct Keymap {
     /// Page-local to Program: fit the toolpath and clear the live trail.
     pub graph_fit: Binding,
     pub graph_clear: Binding,
+    /// Page-local to Program: ask for a line number and jump there.
+    pub goto_line: Binding,
     /// Page-local to Program: start the loaded program at the current line.
     pub program_run_from_line: Binding,
     /// Page-local to Files: copy the selection between the panes.
@@ -1267,6 +1277,7 @@ impl Keymap {
             ),
             graph_fit: binding(&keys.graph_fit, Binding::new(Key::Num0, ctrl), &mut rejected),
             graph_clear: binding(&keys.graph_clear, Binding::new(Key::L, ctrl), &mut rejected),
+            goto_line: binding(&keys.goto_line, Binding::new(Key::G, ctrl), &mut rejected),
             program_run_from_line: binding(
                 &keys.program_run_from_line,
                 Binding::new(Key::R, ctrl),

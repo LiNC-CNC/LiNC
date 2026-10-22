@@ -466,6 +466,24 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     .data_mut(|data| data.insert_temp(cache_id, (key, galley.clone())));
                 galley
             };
+            // A jump (Ctrl+G) has to move the text cursor, not just the
+            // highlight: the cursor feeds `selected_line` back every frame while
+            // the editor has focus, so a highlight-only move would be undone on
+            // the next frame.
+            if let Some(line) = app.program.cursor_line.take() {
+                let id = egui::Id::unique("linc-program-editor");
+                let char_index: usize = text
+                    .lines()
+                    .take(line.saturating_sub(1))
+                    .map(|row| row.chars().count() + 1)
+                    .sum();
+                let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id)
+                    .unwrap_or_default();
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                    egui::text::CCursor::new(char_index),
+                )));
+                state.store(ui.ctx(), id);
+            }
             let output = egui::TextEdit::multiline(&mut text)
                 // Fixed id so the shell can tell whether the editor holds the
                 // keyboard, and leave Home, End and the page keys to it.
