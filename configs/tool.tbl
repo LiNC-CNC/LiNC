@@ -1,4 +1,4 @@
-;T Z D R  Remark
+;T P Z D R  Remark
 T1 P0 Z-56.068000 D+6 ; 6mm 3 Flute 30 deg Helix
 T2 P0 Z+0 D+17.300000 ; 6mm 3 Flute ballnose
 T3 P0 Z-59.815000 D+6 ; 6mm 90deg chamfermill

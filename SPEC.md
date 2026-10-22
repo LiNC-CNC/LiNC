@@ -47,7 +47,7 @@ Available navigation keys:
 | `FILE` | `F6` | Program page; press again for the Files browser, and again to return |
 | `TOOL` | `F7` | Tools page |
 | `OFFSET` | `F8` | Offsets page |
-| `WIN` | `F10` | Toggle `SPLIT`/`CODE` on the Program page, shown as `▢` in the sidebar shortcuts |
+| `WIN` | `F10` | Toggle `SPLIT`/`CODE` on the Program page, shown as `▢` in the sidebar shortcuts; `Ctrl+▢` cycles the toolpath view |
 | `ESC` | `Esc` | Back / cancel / close detail |
 | `Ctrl+Esc` | `Ctrl+Esc` | Diagnostics |
 | `Ctrl+Q` | `Ctrl+Q` | Guarded quit |
@@ -104,6 +104,7 @@ else, so it cannot shadow another page's command.
 
 | Page | Keys |
 |---|---|
+| Machine (MAIN) | `Ctrl+F10`/`Ctrl+▢` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail, `Ctrl+R` run from line, `Ctrl+G` go to a line number |
 | Program | `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
 | Files | `Left`/`Right` switch pane, `Enter` open or copy to `NC_FILES`, `Backspace` up a folder, `Ctrl+U` copy to USB, `Ctrl+N` copy to `NC_FILES`, `Ctrl+R` refresh, `Delete`/`Ctrl+X` delete |
 | MDI | `Enter` issue, `Up`/`Down` history, `Esc` clear the unissued block |
@@ -112,8 +113,9 @@ else, so it cannot shadow another page's command.
 
 A page-local binding is only listed in the sidebar's `SHORTCUTS` pane while its
 page is in front (the pane scrolls when a page has more commands than the
-sidebar holds); nav keys are never listed. The bottom bar carries only live
-machine state.
+sidebar holds); nav keys are never listed. The list is grouped by purpose
+(`VIEW`, `PROGRAM`) with half a text line between entries; the view toggles read
+`▢` and `Ctrl+▢`. The bottom bar carries only live machine state.
 
 ### 3.2 Physical panel
 

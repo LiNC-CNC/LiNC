@@ -35,6 +35,13 @@ pub enum FocusRegion {
 /// Lines a PageUp/PageDown moves the selection in a read-only G-code view.
 const LINE_PAGE: isize = 10;
 
+/// One titled group of page-local keyboard commands shown in the sidebar.
+/// An empty title means the group has no header (most pages).
+struct ShortcutGroup {
+    title: &'static str,
+    items: Vec<(String, &'static str)>,
+}
+
 pub struct LincApp {
     /// Publishes state for `linc-mcp`. `None` in tests and when the diagnostic
     /// socket could not be created.
@@ -1650,7 +1657,10 @@ impl LincApp {
                 cycle_view = true;
             }
             // Page-local to the pages that draw a toolpath.
-            if matches!(self.page, Page::Program | Page::Manual | Page::Homing) {
+            if matches!(
+                self.page,
+                Page::Machine | Page::Program | Page::Manual | Page::Homing
+            ) {
                 if input.consume_key(self.keymap.graph_fit.modifiers, self.keymap.graph_fit.key) {
                     graph_fit = true;
                 }
@@ -1742,7 +1752,7 @@ impl LincApp {
                     line_step += LINE_PAGE;
                 }
             }
-            if self.page == Page::Program
+            if matches!(self.page, Page::Program | Page::Machine)
                 && input.consume_key(self.keymap.goto_line.modifiers, self.keymap.goto_line.key)
             {
                 goto_line = true;
@@ -1825,7 +1835,7 @@ impl LincApp {
         if toggle_bounds {
             self.cycle_bounds();
         }
-        if goto_line && self.page == Page::Program {
+        if goto_line && matches!(self.page, Page::Program | Page::Machine) {
             self.modal = Some(crate::state::Modal::GoToLine {
                 buffer: String::new(),
             });
@@ -2461,58 +2471,123 @@ impl LincApp {
                     .max_height((shortcuts_height - 20.0).max(60.0))
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                for (key, action) in &shortcuts {
-                    ui.horizontal(|ui| {
+                // Half a text line between entries: the rows are dense enough
+                // to read as a list, with air that does not waste the pane.
+                let hint_line = ui
+                    .painter()
+                    .layout_no_wrap(
+                        "Ag".to_string(),
+                        egui::FontId::monospace(theme::font_size(9.0)),
+                        theme::MUTED,
+                    )
+                    .size()
+                    .y;
+                for (group_index, group) in shortcuts.iter().enumerate() {
+                    if !group.title.is_empty() {
+                        if group_index > 0 {
+                            ui.add_space(hint_line * 0.5);
+                        }
                         ui.label(
-                            RichText::new(key.clone())
-                                .monospace()
-                                .size(theme::font_size(9.0))
-                                .color(theme::C3),
+                            RichText::new(group.title)
+                                .size(theme::font_size(8.0))
+                                .strong()
+                                .color(theme::MUTED),
                         );
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(
-                                RichText::new(*action)
-                                    .size(theme::font_size(9.0))
-                                    .color(theme::MUTED),
-                            );
-                        });
-                    });
+                        ui.add_space(hint_line * 0.35);
+                    }
+                    for (index, (key, action)) in group.items.iter().enumerate() {
+                        // One line per command, exactly; `ui.horizontal`
+                        // inherited the 44 px touch target and left large air
+                        // between two 9 pt rows.
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width(), hint_line),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                ui.label(
+                                    RichText::new(key.clone())
+                                        .monospace()
+                                        .size(theme::font_size(9.0))
+                                        .color(theme::C3),
+                                );
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    ui.label(
+                                        RichText::new(*action)
+                                            .size(theme::font_size(9.0))
+                                            .color(theme::MUTED),
+                                    );
+                                });
+                            },
+                        );
+                        if index + 1 < group.items.len() {
+                            ui.add_space(hint_line * 0.5);
+                        }
+                    }
                 }
                     });
             });
         }
     }
 
-    /// Keyboard commands available on the current page, as `(key, action)`
-    /// pairs. Rendered as hints only — they are not buttons.
-    fn key_hints(&self) -> Vec<(String, &'static str)> {
+    /// Keyboard commands available on the current page, grouped and titled for
+    /// the sidebar. Rendered as hints only — they are not buttons.
+    fn key_hints(&self) -> Vec<ShortcutGroup> {
         let k = &self.keymap;
-        // Page-specific commands first: the row is truncated to the available
-        // width, and the commands for the page in front of the operator matter
-        // more than the global navigation keys.
+        // The square is the key glyph for the view toggles: F10 alone flips
+        // SPLIT/CODE, Ctrl+F10 cycles the toolpath view. Both sit at the top of
+        // the pane so the display commands are the first things in reach.
+        let square = "\u{25a2}";
+        let mut groups: Vec<ShortcutGroup> = Vec::new();
         let mut hints: Vec<(String, &'static str)> = Vec::new();
         match self.page {
             Page::Program => {
-                // The square is the key glyph (the toggle sits on an F-key,
-                // which is implicit everywhere else); the label names the view
-                // the press would switch to, so the row reads as an action.
-                hints.push((
-                    "\u{25a2}".to_string(),
-                    if self.program.view == ProgramView::Split {
-                        "CODE"
-                    } else {
-                        "SPLIT"
-                    },
-                ));
-                hints.push((k.program_run_from_line.label(), "RUN LINE"));
-                hints.push((k.graph_fit.label(), "FIT"));
-                hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
-                hints.push((k.goto_line.label(), "GOTO"));
-                hints.push((k.view_cycle.label(), "VIEW"));
-                hints.push((k.toggle_bounds.label(), "BOUNDS"));
-                hints.push((k.save.label(), "SAVE"));
-                hints.push((k.undo.label(), "UNDO"));
-                hints.push((k.redo.label(), "REDO"));
+                groups.push(ShortcutGroup {
+                    title: "VIEW",
+                    items: vec![
+                        (
+                            square.to_string(),
+                            if self.program.view == ProgramView::Split {
+                                "CODE"
+                            } else {
+                                "SPLIT"
+                            },
+                        ),
+                        (format!("Ctrl+{square}"), "VIEW"),
+                        (k.graph_fit.label(), "FIT"),
+                        (k.graph_clear.label(), "CLEAR TRAIL"),
+                        (k.toggle_bounds.label(), "BOUNDS"),
+                    ],
+                });
+                groups.push(ShortcutGroup {
+                    title: "PROGRAM",
+                    items: vec![
+                        (k.program_run_from_line.label(), "RUN LINE"),
+                        (k.goto_line.label(), "GOTO"),
+                        (k.save.label(), "SAVE"),
+                        (k.undo.label(), "UNDO"),
+                        (k.redo.label(), "REDO"),
+                    ],
+                });
+            }
+            Page::Machine => {
+                // MAIN shows the same toolpath, so it carries the same view
+                // commands, plus the two program actions that do not need the
+                // editor in front (run from line and go to line).
+                groups.push(ShortcutGroup {
+                    title: "VIEW",
+                    items: vec![
+                        (format!("Ctrl+{square}"), "VIEW"),
+                        (k.graph_fit.label(), "FIT"),
+                        (k.graph_clear.label(), "CLEAR TRAIL"),
+                        (k.toggle_bounds.label(), "BOUNDS"),
+                    ],
+                });
+                groups.push(ShortcutGroup {
+                    title: "PROGRAM",
+                    items: vec![
+                        (k.program_run_from_line.label(), "RUN LINE"),
+                        (k.goto_line.label(), "GOTO"),
+                    ],
+                });
             }
             Page::Files => {
                 hints.push((k.files_copy_to_nc.label(), "COPY NC"));
@@ -2527,7 +2602,6 @@ impl LincApp {
                 hints.push(("Bksp".into(), "BACK"));
                 hints.push(("PgUp/PgDn".into(), "PAGE"));
             }
-            Page::Machine => hints.push((k.toggle_bounds.label(), "BOUNDS")),
             Page::Diagnostics => hints.push(("PgUp/PgDn".into(), "TABS")),
             Page::Mdi => {
                 hints.push((k.mdi_issue.label(), "ISSUE"));
@@ -2535,7 +2609,7 @@ impl LincApp {
             }
             Page::Manual | Page::Homing => {
                 hints.push((k.graph_fit.label(), "FIT"));
-                hints.push((k.view_cycle.label(), "VIEW"));
+                hints.push((format!("Ctrl+{square}"), "VIEW"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
                 hints.push(("Arrows".into(), "SELECT"));
@@ -2555,10 +2629,13 @@ impl LincApp {
             }
             _ => {}
         }
-        // Only page-specific commands are hinted. The physical navigation keys
-        // (F5-F10), ESC and Ctrl+Q are implicit: they are printed on the panel
-        // and in the left navigation, so repeating them here wastes the row.
-        hints
+        if !hints.is_empty() {
+            groups.push(ShortcutGroup {
+                title: "",
+                items: hints,
+            });
+        }
+        groups
     }
 
     /// Controller messages, one line above the hint row.
