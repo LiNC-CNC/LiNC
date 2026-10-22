@@ -278,9 +278,10 @@ def set_mode(linuxcnc, stat, command, mode, what, timeout):
 def repeat_until(command, stat, predicate, act, what, timeout):
     """Send `act` until `predicate(stat)` holds, then return.
 
-    A command can arrive while the task is still settling and be dropped — the
-    same reason the panel's boot-time E-stop pulse does nothing — so the request
-    is re-sent every couple of seconds instead of being trusted once.
+    For commands that are safe to repeat: a request can arrive while the task is
+    still settling and be dropped — the same reason the panel's boot-time E-stop
+    pulse does nothing. Do not use it for homing: a second HOME restarts the
+    sequence and the joints flip between homed and not, over and over.
     """
     deadline = time.monotonic() + timeout
     sent = 0.0
@@ -304,39 +305,50 @@ def bring_up(args):
     if args.on:
         power_on(linuxcnc, stat, command, args.timeout)
     if args.home:
-        log("homing every axis")
-        set_mode(
-            linuxcnc, stat, command, linuxcnc.MODE_MANUAL, "MANUAL mode", args.timeout
-        )
-        try:
-            repeat_until(
-                command,
-                stat,
-                all_homed,
-                lambda: command.home(-1),
-                "every axis to finish homing",
-                args.timeout,
-            )
-        except SystemExit:
-            print(f"sim-ready: joints not homed: {unhomed(stat)}", file=sys.stderr)
-            raise
-        log("axes homed")
+        stat.poll()
+        if all_homed(stat):
+            log("axes already homed")
+        else:
+            home_axes(linuxcnc, stat, command, args)
     if args.load:
-        path = os.path.abspath(args.load)
-        if not os.path.exists(path):
-            sys.exit(f"sim-ready: no such program: {path}")
-        name = os.path.basename(path)
-        log(f"opening {name}")
-        set_mode(linuxcnc, stat, command, linuxcnc.MODE_AUTO, "AUTO mode", args.timeout)
-        repeat_until(
-            command,
-            stat,
-            lambda s: os.path.basename(s.file or "") == name,
-            lambda: command.program_open(path),
-            f"{name} to load",
-            args.timeout,
-        )
-        log(f"program loaded: {name}")
+        open_program(linuxcnc, stat, command, args)
+
+
+def home_axes(linuxcnc, stat, command, args):
+    log("homing every axis")
+    set_mode(linuxcnc, stat, command, linuxcnc.MODE_MANUAL, "MANUAL mode", args.timeout)
+    # One HOME, then wait. Re-sending while a joint is moving restarts the
+    # sequence rather than helping it, and the joints then flip between homed and
+    # not for as long as the retries keep coming.
+    command.home(-1)
+    try:
+        wait_for(stat, all_homed, "every axis to finish homing", args.timeout)
+    except SystemExit:
+        print(f"sim-ready: joints not homed: {unhomed(stat)}", file=sys.stderr)
+        raise
+    log("axes homed")
+
+
+def open_program(linuxcnc, stat, command, args):
+    path = os.path.abspath(args.load)
+    if not os.path.exists(path):
+        sys.exit(f"sim-ready: no such program: {path}")
+    name = os.path.basename(path)
+    stat.poll()
+    if os.path.basename(stat.file or "") == name:
+        log(f"{name} already loaded")
+        return
+    log(f"opening {name}")
+    set_mode(linuxcnc, stat, command, linuxcnc.MODE_AUTO, "AUTO mode", args.timeout)
+    repeat_until(
+        command,
+        stat,
+        lambda s: os.path.basename(s.file or "") == name,
+        lambda: command.program_open(path),
+        f"{name} to load",
+        args.timeout,
+    )
+    log(f"program loaded: {name}")
 
 
 def hyprctl(*args):
