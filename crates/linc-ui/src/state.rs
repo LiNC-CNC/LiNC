@@ -520,6 +520,9 @@ pub struct ProgramUi {
     pub follow_current: bool,
     pub focus_editor: bool,
     pub code_scroll_to_line: Option<usize>,
+    /// `snapshot.offsets.revision` the preview was drawn against, so a touch-off
+    /// or DRO entry rebuilds it.
+    pub preview_offsets_seen: u64,
     pub external_change: bool,
 }
 
@@ -546,6 +549,7 @@ impl Default for ProgramUi {
             follow_current: true,
             focus_editor: false,
             code_scroll_to_line: None,
+            preview_offsets_seen: 0,
             external_change: false,
         }
     }

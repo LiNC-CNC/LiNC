@@ -555,6 +555,36 @@ fn word_int(tokens: &[Token], letter: char) -> Option<u32> {
     })
 }
 
+/// The work system a program selects, as an index 1..=9 (`G54`..`G59.3`), or
+/// `None` when it never selects one.
+///
+/// The *first* selection counts: it is the system the program starts cutting in,
+/// and the preview draws the whole program with a single offset. Comments are
+/// lexed as comments, so a `(G54)` note does not count.
+pub fn program_wcs(text: &str) -> Option<u8> {
+    for line in text.lines() {
+        for token in lex_line(line) {
+            if token.kind != TokenKind::GCode {
+                continue;
+            }
+            let Some(value) = parse_number(&token.text[1..]) else {
+                continue;
+            };
+            let index = if (54.0..=59.0).contains(&value) {
+                Some((value - 53.0) as u8)
+            } else if (59.1..=59.3).contains(&value) {
+                Some(((value - 59.0) * 10.0).round() as u8 + 6)
+            } else {
+                None
+            };
+            if index.is_some() {
+                return index;
+            }
+        }
+    }
+    None
+}
+
 fn format_g(value: f64) -> String {
     if (value - value.round()).abs() < 1e-9 {
         format!("G{}", value as i64)
@@ -1047,5 +1077,14 @@ mod tests {
         let preview = parse_preview(text, &["X".into(), "Y".into()], None, [0.0; 3]);
         let arc = preview.segments[1].arc.as_ref().unwrap();
         assert!((arc.radius - 5.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn program_wcs_reads_the_first_selection() {
+        assert_eq!(program_wcs("G21 G90 G54 G17\nG0 X0\n"), Some(1));
+        assert_eq!(program_wcs("(G54 is only a note here)\nG21\nG59.1 G0 X0\n"), Some(7));
+        assert_eq!(program_wcs("G55\nG54\n"), Some(2), "the first selection wins");
+        assert_eq!(program_wcs("G21 G90\nG0 X0\n"), None);
+        assert_eq!(program_wcs(""), None);
     }
 }

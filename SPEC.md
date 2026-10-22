@@ -536,6 +536,10 @@ Program rules:
 ### 6.3 Offsets
 
 - Work offsets G54–G59.
+- The toolpath preview is drawn in machine space in the work system the program
+  selects (`G54`..`G59.3`, first selection in the file), falling back to the
+  active system when the program selects none, so the part sits at the origin it
+  will be cut from.
 - Tool offsets. G92 is deliberately not exposed here: it is a transient offset
   that silently shifts every WCS, and a field for it invited the operator to
   leave the machine in a state neither the DRO nor a program could explain.

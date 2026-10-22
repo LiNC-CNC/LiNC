@@ -413,6 +413,11 @@ impl LincApp {
             ];
         }
         self.update_move_progress();
+        // A touch-off or a DRO entry moves the origin the preview is drawn
+        // against. The backends bump `offsets.revision` on a write.
+        if self.snapshot.offsets.revision != self.program.preview_offsets_seen {
+            self.refresh_preview();
+        }
         // RAPID changes the jog ceiling, so the published speed follows it.
         // Compared against what we last sent, not against the snapshot: the
         // snapshot is rebuilt every poll, and comparing with it published on
@@ -1294,16 +1299,33 @@ impl LincApp {
             return;
         }
         let axes = self.axes();
-        // The plot is drawn in machine space with the active offset applied, so
-        // the part sits where the work zero is on the machine. Touching off then
-        // moves the origin marker, not the part.
-        let offset = self.active_offset().cloned();
+        // The plot is drawn in machine space with the work offset applied, so the
+        // part sits where the work zero is on the machine. Which system: the one
+        // the program selects (a `G54`/`G55` in its preamble is where it will
+        // cut), falling back to the controller's active system for a program that
+        // selects none.
+        let offset = self.preview_offset(&text);
         let preview = parse_preview(&text, &axes, offset.as_ref(), self.tool_tip());
         let valid = preview.error.is_none();
         if valid {
             self.program.last_valid_preview = preview.clone();
         }
         self.program.preview = preview;
+        self.program.preview_offsets_seen = self.snapshot.offsets.revision;
+    }
+
+    /// The work offset the preview is drawn with, in machine coordinates: the
+    /// system the program selects, else the controller's active one.
+    fn preview_offset(&self, text: &str) -> Option<linc_core::model::AxisMap<f64>> {
+        let index = linc_core::gcode::program_wcs(text)
+            .or(self.snapshot.offsets.active_index)?;
+        self.snapshot
+            .offsets
+            .offsets
+            .iter()
+            .find(|row| row.index == index)
+            .map(|row| row.values.clone())
+            .or_else(|| self.active_offset().cloned())
     }
 
     pub fn tick_preview(&mut self) {
@@ -3343,6 +3365,62 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         snapshot.live_trail = std::sync::Arc::new(vec![[0.0; 3]; 5]);
         snapshot.tool_tip = Some([5.0, 2.0, 3.0]);
         assert!(!cleared_trail_pending(&snapshot, tip), "new motion kept");
+    }
+    #[test]
+    fn the_preview_uses_the_offset_the_program_selects() {
+        let (_dir, mut app) = make_app(PanelMode::Edit);
+        for row in app.snapshot.offsets.offsets.iter_mut() {
+            if row.index == 1 {
+                row.values.insert("X", -54.35);
+                row.values.insert("Y", -49.3);
+            }
+            if row.index == 2 {
+                row.values.insert("X", -100.0);
+                row.values.insert("Y", -50.0);
+            }
+        }
+        app.snapshot.offsets.active_index = Some(1);
+
+        // The program selects G54: drawn at the G54 origin, not machine zero.
+        app.program
+            .editor
+            .replace_text("G21 G90 G54\nG0 X0 Y0\n".into());
+        app.refresh_preview();
+        let end = app
+            .program
+            .preview
+            .segments
+            .last()
+            .map(|segment| segment.end)
+            .unwrap_or_default();
+        assert!((end[0] + 54.35).abs() < 1e-6, "G54 X {}", end[0]);
+        assert!((end[1] + 49.3).abs() < 1e-6, "G54 Y {}", end[1]);
+
+        // A program that selects G55 is drawn at G55, though G54 is active.
+        app.program
+            .editor
+            .replace_text("G21 G90 G55\nG0 X0 Y0\n".into());
+        app.refresh_preview();
+        let end = app
+            .program
+            .preview
+            .segments
+            .last()
+            .map(|segment| segment.end)
+            .unwrap_or_default();
+        assert!((end[0] + 100.0).abs() < 1e-6, "G55 X {}", end[0]);
+
+        // With no selection the active system is the fallback.
+        app.program.editor.replace_text("G21 G90\nG0 X0 Y0\n".into());
+        app.refresh_preview();
+        let end = app
+            .program
+            .preview
+            .segments
+            .last()
+            .map(|segment| segment.end)
+            .unwrap_or_default();
+        assert!((end[0] + 54.35).abs() < 1e-6, "active X {}", end[0]);
     }
 }
 
