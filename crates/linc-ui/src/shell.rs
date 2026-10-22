@@ -770,7 +770,7 @@ impl LincApp {
         None
     }
 
-    /// Ask to run from the current line: opens the confirmation, or explains
+    /// Ask to run from the selected line: opens the confirmation, or explains
     /// which condition blocks it. Silent failure would leave the shortcut
     /// looking broken.
     /// Delete a file from a Files pane, then refresh that pane.
@@ -829,17 +829,28 @@ impl LincApp {
             self.toast(reason, theme::WARNING);
             return;
         }
-        let line = self.snapshot.program.current_line.max(1) as u32;
+        let (line, block) = self.run_from_line_choice();
+        self.modal = Some(crate::state::Modal::ConfirmRunFromLine { line, block });
+    }
+
+    /// Run from the line selected in the G-code view, not from the controller's
+    /// current line: after a program ends the controller sits on its last line,
+    /// while the operator has picked the restart point in the editor.
+    fn run_from_line_choice(&self) -> (u32, String) {
+        let line = self
+            .program
+            .selected_line
+            .clamp(1, self.snapshot.program.line_count.max(1));
         let block = self
             .snapshot
             .program
             .content
             .as_deref()
-            .and_then(|text| text.lines().nth(line as usize - 1))
+            .and_then(|text| text.lines().nth(line - 1))
             .unwrap_or_default()
             .trim()
             .to_string();
-        self.modal = Some(crate::state::Modal::ConfirmRunFromLine { line, block });
+        (line as u32, block)
     }
 
     pub fn program_protected(&self) -> bool {
@@ -4172,6 +4183,19 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             assert!(app.manual.fit, "each view refits: {expected:?}");
         }
     }
+    #[test]
+    fn run_from_line_uses_the_selected_line_not_the_controller_line() {
+        let (_dir, mut app) = make_app(PanelMode::Edit);
+        app.snapshot.program.content =
+            Some(std::sync::Arc::new("G0 X0\nG1 X10\nG1 X20\n".to_string()));
+        app.snapshot.program.line_count = 3;
+        app.snapshot.program.current_line = 3;
+        app.program.selected_line = 2;
+        let (line, block) = app.run_from_line_choice();
+        assert_eq!(line, 2);
+        assert_eq!(block, "G1 X10");
+    }
+
 }
 
 
@@ -4243,3 +4267,4 @@ mod move_progress_tests {
         assert_eq!(total, 0.0);
     }
 }
+
