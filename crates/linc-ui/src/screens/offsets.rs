@@ -86,7 +86,8 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     let width = ((ui.available_width() - gap * (axes.len() as f32 - 1.0))
         / axes.len() as f32)
         .max(120.0);
-    const HEIGHT: f32 = 84.0;
+    // The Machine page's readout without the DTG line and move bar.
+    const HEIGHT: f32 = 64.0;
 
     handle_axis_keys(app, ui);
     handle_dro_keys(app, ui);
@@ -106,32 +107,15 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
             let position = app.snapshot.positions.axes.get(axis);
             let work = position.map(|p| p.work).unwrap_or(0.0);
             let machine = position.map(|p| p.machine).unwrap_or(0.0);
-            let painter = ui.painter_at(rect);
-            painter.rect_filled(rect, 6, theme::PANEL);
-            painter.rect_stroke(
-                rect,
-                6,
-                egui::Stroke::new(1.0, if editing { theme::ACCENT } else { theme::BORDER }),
-                egui::StrokeKind::Inside,
-            );
-            painter.text(
-                rect.left_top() + egui::vec2(14.0, 9.0),
-                egui::Align2::LEFT_TOP,
-                axis,
-                egui::FontId::proportional(theme::font_size(13.0)),
-                theme::C3,
-            );
-            painter.text(
-                rect.left_bottom() + egui::vec2(14.0, -11.0),
-                egui::Align2::LEFT_BOTTOM,
-                format!("MACH {machine:.3}"),
-                egui::FontId::monospace(theme::font_size(9.0)),
-                theme::MUTED,
-            );
+            // The Machine page's readout, without its DTG line and move bar.
+            common::paint_dro_frame(ui, rect, editing);
+            common::paint_dro_readout(ui, rect, axis, work, machine, false, !editing);
             if editing {
+                // Below the axis label, on the value line. The edit field covers
+                // the machine coordinate while it is open; it returns on commit.
                 let field = egui::Rect::from_min_max(
-                    egui::pos2(rect.left() + 10.0, rect.top() + 30.0),
-                    egui::pos2(rect.right() - 10.0, rect.top() + 60.0),
+                    egui::pos2(rect.left() + 10.0, rect.top() + 28.0),
+                    egui::pos2(rect.right() - 10.0, rect.top() + 56.0),
                 );
                 let mut child = ui.new_child(
                     egui::UiBuilder::new()
@@ -179,17 +163,8 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                         slot.buffer = buffer;
                     }
                 }
-            } else {
-                painter.text(
-                    rect.left_top() + egui::vec2(14.0, 32.0),
-                    egui::Align2::LEFT_TOP,
-                    theme::format_position(work, 3),
-                    egui::FontId::monospace(theme::font_size(23.0)),
-                    theme::FG,
-                );
-                if response.clicked() && writable && active.is_some() {
-                    start = Some((axis.clone(), work));
-                }
+            } else if response.clicked() && writable && active.is_some() {
+                start = Some((axis.clone(), work));
             }
         }
     });

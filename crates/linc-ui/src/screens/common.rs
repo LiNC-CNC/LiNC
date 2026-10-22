@@ -322,31 +322,34 @@ pub fn axis_cards(app: &LincApp, ui: &mut Ui) {
     }
 }
 
-fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact: bool) {
-    let position = app.snapshot.positions.axes.get(axis);
-    let work = position.map(|p| p.work).unwrap_or(0.0);
-    let machine = position.map(|p| p.machine).unwrap_or(0.0);
-    let dtg = position.map(|p| p.dtg).unwrap_or(0.0);
-    let active = app
-        .snapshot
-        .panel
-        .jog
-        .active_axis
-        .as_deref()
-        .map(|name| name == axis)
-        .unwrap_or(false);
-    // Progress of the move in flight, not the position within the travel range:
-    // the bar starts empty when the axis sets off, fills as the distance to go
-    // shrinks, and sits full once it arrives (see `LincApp::move_progress`).
-    let fraction = app.move_progress.get(axis).copied().unwrap_or(1.0);
+/// The card chrome shared by every axis readout.
+pub fn paint_dro_frame(ui: &Ui, rect: egui::Rect, accent: bool) {
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 6, theme::PANEL);
     painter.rect_stroke(
         rect,
         6,
-        egui::Stroke::new(1.0, if active { theme::ACCENT } else { theme::BORDER }),
+        egui::Stroke::new(1.0, if accent { theme::ACCENT } else { theme::BORDER }),
         egui::StrokeKind::Inside,
     );
+}
+
+/// The top half of an axis readout: the axis name, the work value and the
+/// dimmed machine value beside it.
+///
+/// The Offsets page draws the same card without the bottom band, so the two
+/// readouts cannot drift apart; `show_work` is false while an inline edit field
+/// replaces the value.
+pub fn paint_dro_readout(
+    ui: &Ui,
+    rect: egui::Rect,
+    axis: &str,
+    work: f64,
+    machine: f64,
+    compact: bool,
+    show_work: bool,
+) {
+    let painter = ui.painter_at(rect);
     painter.text(
         rect.left_top() + Vec2::new(14.0, 10.0),
         egui::Align2::LEFT_TOP,
@@ -354,13 +357,15 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
         FontId::proportional(theme::font_size(13.0)),
         theme::C3,
     );
-    painter.text(
-        rect.left_top() + Vec2::new(14.0, 35.0),
-        egui::Align2::LEFT_CENTER,
-        crate::theme::format_position(work, 3),
-        FontId::monospace(if compact { 19.0 } else { 23.0 }),
-        theme::FG,
-    );
+    if show_work {
+        painter.text(
+            rect.left_top() + Vec2::new(14.0, 35.0),
+            egui::Align2::LEFT_CENTER,
+            crate::theme::format_position(work, 3),
+            FontId::monospace(if compact { 19.0 } else { 23.0 }),
+            theme::FG,
+        );
+    }
     // The machine coordinate sits beside the work value: the operator reads the
     // work position first, and the controller's own coordinate is the reference
     // for offsets and limits, so it stays visible but dimmed.
@@ -371,6 +376,11 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
         FontId::monospace(theme::font_size(9.0)),
         theme::MUTED,
     );
+}
+
+/// The bottom band of a jog-screen readout: distance to go and the move bar.
+pub fn paint_dro_progress(ui: &Ui, rect: egui::Rect, dtg: f64, fraction: f64) {
+    let painter = ui.painter_at(rect);
     painter.text(
         rect.left_bottom() + Vec2::new(14.0, -15.0),
         egui::Align2::LEFT_BOTTOM,
@@ -390,6 +400,28 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
         );
         painter.rect_filled(fill, 2, theme::ACCENT);
     }
+}
+
+fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact: bool) {
+    let position = app.snapshot.positions.axes.get(axis);
+    let work = position.map(|p| p.work).unwrap_or(0.0);
+    let machine = position.map(|p| p.machine).unwrap_or(0.0);
+    let dtg = position.map(|p| p.dtg).unwrap_or(0.0);
+    let active = app
+        .snapshot
+        .panel
+        .jog
+        .active_axis
+        .as_deref()
+        .map(|name| name == axis)
+        .unwrap_or(false);
+    // Progress of the move in flight, not the position within the travel range:
+    // the bar starts empty when the axis sets off, fills as the distance to go
+    // shrinks, and sits full once it arrives (see `LincApp::move_progress`).
+    let fraction = app.move_progress.get(axis).copied().unwrap_or(1.0);
+    paint_dro_frame(ui, rect, active);
+    paint_dro_readout(ui, rect, axis, work, machine, compact, true);
+    paint_dro_progress(ui, rect, dtg, fraction);
 }
 
 pub fn health_card(app: &LincApp, ui: &mut Ui, height: f32) {
