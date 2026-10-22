@@ -37,13 +37,6 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             ui.add_space(6.0);
             let available = ui.available_width();
             ui.horizontal_top(|ui| {
-                ui.allocate_ui_with_layout(
-                    egui::Vec2::new(available * 0.58, 230.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        common::positions_table(app, ui);
-                    },
-                );
                 ui.add_space(8.0);
                 ui.allocate_ui_with_layout(
                     egui::Vec2::new((available - available * 0.58 - 8.0).max(300.0), 230.0),
