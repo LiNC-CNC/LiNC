@@ -916,21 +916,17 @@ fn stock_bounds(program: &Bounds3) -> Option<Bounds3> {
 
 /// Translucent solid for the stock envelope: the three visible faces of the
 /// box, so it reads as a block rather than a wireframe.
-/// Dimension lines and labels on the program bounds.
-///
-/// The text is the AXIS Hershey stroke font, placed with its own right/up axes
-/// on the face it measures, so it is projected by the camera like the box: an
-/// orbit turns the letters with the part instead of leaving them flat on top.
+/// Dimension lines and labels on the program bounds, drawn the way AXIS marks
+/// an envelope: a line outside each near edge, witness lines from the corners,
+/// arrowheads at the ends, and the value in the plane of the drawing.
 fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bounds3) {
     let min = bounds.min;
     let max = bounds.max;
     let size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+    let smallest = size[0].min(size[1]).min(size[2]).max(0.5);
     // Annotation size in pixels, converted to model units, so the dimensions
     // stay readable at any zoom the way a drawing's text does.
     let pixels_per_unit = (projection.scale * projection.zoom).max(1e-6) as f64;
-    let smallest = size[0].min(size[1]).min(size[2]).max(0.5);
-    // Never let the annotation grow past a fifth of the box's smallest side, so
-    // a flat axis view cannot turn the numbers into the largest thing on screen.
     let glyph = (18.0 / pixels_per_unit).min(smallest * 0.2);
     let gap = 22.0 / pixels_per_unit;
     // Same family as the box outline, bright enough to read on the dark graph.
@@ -939,106 +935,95 @@ fn draw_bounds_dimensions(painter: &Painter, projection: &Projection, bounds: Bo
     let mid_y = min[1] + size[1] * 0.5;
     let mid_z = min[2] + size[2] * 0.5;
 
-    // X: along the near bottom edge, on the XZ plane.
+    // X: on the ground plane, outside the front edge.
     dimension_line(
         painter,
         projection,
-        [min[0], min[1], min[2] - gap],
-        [max[0], min[1], min[2] - gap],
-        [0.0, 0.0, 1.0],
-        gap * 0.5,
+        [min[0], min[1], min[2]],
+        [max[0], min[1], min[2]],
+        [0.0, -gap, 0.0],
         color,
     );
     dimension_label(
         painter,
         projection,
-        [mid_x, min[1] - gap * 1.8, min[2] - gap],
+        [mid_x, min[1] - gap * 1.9, min[2]],
         [1.0, 0.0, 0.0],
         [0.0, -1.0, 0.0],
         glyph,
-        &format!("{:.1}", size[0]),
+        &format!("{:.2}", size[0]),
         color,
     );
 
-    // Y: along the near left edge, on the YZ plane.
+    // Y: on the ground plane, outside the left edge, reading along Y.
     dimension_line(
         painter,
         projection,
-        [min[0] - gap, min[1], min[2] - gap],
-        [min[0] - gap, max[1], min[2] - gap],
-        [0.0, 0.0, 1.0],
-        gap * 0.5,
+        [min[0], min[1], min[2]],
+        [min[0], max[1], min[2]],
+        [-gap, 0.0, 0.0],
         color,
     );
     dimension_label(
         painter,
         projection,
-        [min[0] - gap * 1.8, mid_y, min[2] - gap],
+        [min[0] - gap * 1.9, mid_y, min[2]],
         [0.0, 1.0, 0.0],
         [-1.0, 0.0, 0.0],
         glyph,
-        &format!("{:.1}", size[1]),
+        &format!("{:.2}", size[1]),
         color,
     );
 
-    // Z: up the near left edge, on the YZ plane as well.
+    // Z: up the near left corner, value turned to read along the line.
     dimension_line(
         painter,
         projection,
-        [min[0] - gap, min[1] - gap, min[2]],
-        [min[0] - gap, min[1] - gap, max[2]],
-        [1.0, 0.0, 0.0],
-        gap * 0.5,
+        [min[0], min[1], min[2]],
+        [min[0], min[1], max[2]],
+        [-gap, -gap, 0.0],
         color,
     );
     dimension_label(
         painter,
         projection,
-        [min[0] - gap * 1.8, min[1] - gap, mid_z],
-        [0.0, 1.0, 0.0],
+        [min[0] - gap * 1.9, min[1] - gap, mid_z],
         [0.0, 0.0, 1.0],
+        [0.0, -1.0, 0.0],
         glyph,
-        &format!("{:.1}", size[2]),
+        &format!("{:.2}", size[2]),
         color,
     );
 }
 
-/// A dimension line with end ticks, all in model space so it shares the box's
-/// perspective.
+/// A dimension line with witness lines and arrowheads, in model space so it
+/// shares the box's perspective.
 fn dimension_line(
     painter: &Painter,
     projection: &Projection,
     from: [f64; 3],
     to: [f64; 3],
-    tick: [f64; 3],
-    tick_len: f64,
+    offset: [f64; 3],
     color: Color32,
 ) {
     let a = projection.project(from);
     let b = projection.project(to);
-    if (b - a).length() < 4.0 {
+    let oa = projection.project([from[0] + offset[0], from[1] + offset[1], from[2] + offset[2]]);
+    let ob = projection.project([to[0] + offset[0], to[1] + offset[1], to[2] + offset[2]]);
+    if (ob - oa).length() < 4.0 {
         return;
     }
-    painter.line_segment([a, b], Stroke::new(0.8, color));
-    for end in [from, to] {
-        let offset = [
-            tick[0] * tick_len,
-            tick[1] * tick_len,
-            tick[2] * tick_len,
-        ];
-        let p = projection.project(end);
-        let q = projection.project([
-            end[0] + offset[0],
-            end[1] + offset[1],
-            end[2] + offset[2],
-        ]);
-        painter.line_segment([p, q], Stroke::new(0.8, color));
-        let q = projection.project([
-            end[0] - offset[0],
-            end[1] - offset[1],
-            end[2] - offset[2],
-        ]);
-        painter.line_segment([p, q], Stroke::new(0.8, color));
+    let stroke = Stroke::new(0.8, color);
+    painter.line_segment([oa, ob], stroke);
+    // Witness lines: from the corner the dimension measures to its line.
+    painter.line_segment([a, oa], Stroke::new(0.6, theme::dim(color, 120)));
+    painter.line_segment([b, ob], Stroke::new(0.6, theme::dim(color, 120)));
+    // Arrowheads at both ends, pointing outwards.
+    let direction = (ob - oa).normalized();
+    let normal = Vec2::new(-direction.y, direction.x) * 3.0;
+    for (tip, sign) in [(oa, -1.0), (ob, 1.0)] {
+        painter.line_segment([tip, tip + direction * 7.0 * sign + normal], stroke);
+        painter.line_segment([tip, tip + direction * 7.0 * sign - normal], stroke);
     }
 }
 
