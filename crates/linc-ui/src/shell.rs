@@ -1803,7 +1803,8 @@ impl LincApp {
             }
             // The tool table pages its own cursor with these keys, so they must
             // reach the page instead of being consumed for tab navigation.
-            let page_keys_belong_to_page = matches!(self.page, Page::Tools | Page::Files);
+            let page_keys_belong_to_page =
+                matches!(self.page, Page::Tools | Page::Files) || self.help.dialog.is_some();
             if !text_focused
                 && !page_keys_belong_to_page
                 && input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp)

@@ -89,10 +89,14 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         });
         if delta != 0 && !anchors.is_empty() {
             let current = app.help.selected_row.min(anchors.len() - 1) as i32;
-            app.help.selected_row =
-                (current + delta).clamp(0, anchors.len() as i32 - 1) as usize;
-            app.help.selected_anchor = Some(anchors[app.help.selected_row].clone());
-            app.help.scroll_to_selection = true;
+            let next = (current + delta).clamp(0, anchors.len() as i32 - 1) as usize;
+            // At either end the key is a no-op: re-requesting the scroll there
+            // made the first/last row flicker on every extra key press.
+            if next != app.help.selected_row {
+                app.help.selected_row = next;
+                app.help.selected_anchor = Some(anchors[next].clone());
+                app.help.scroll_to_selection = true;
+            }
         }
         if read {
             open_anchor = anchors.get(app.help.selected_row).cloned();
@@ -353,6 +357,27 @@ pub fn draw_dialog(app: &mut LincApp, ctx: &egui::Context) {
     let mut back = false;
     let mut related: Option<String> = None;
     let scroll_top = dialog.scroll_to_top;
+    // The dialog owns the keyboard while it is open: arrows and page keys
+    // scroll it, and both Enter and Escape close it.
+    let page = (size.y - 140.0).max(200.0);
+    let mut scroll_delta = 0.0;
+    ctx.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            scroll_delta += 40.0;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            scroll_delta -= 40.0;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+            scroll_delta += page;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+            scroll_delta -= page;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+            close = true;
+        }
+    });
     let modal = egui::Modal::new(egui::Id::unique("linc-help-dialog"))
         .frame(
             egui::Frame::new()
@@ -371,13 +396,33 @@ pub fn draw_dialog(app: &mut LincApp, ctx: &egui::Context) {
                         .color(theme::FG),
                 );
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                    if theme::action_button(ui, "CLOSE", true).clicked() {
+                    let close_button = theme::action_button(ui, "CLOSE", true);
+                    if close_button.clicked() {
                         close = true;
                     }
-                    if dialog.position > 0
-                        && theme::action_button(ui, "BACK", true).clicked()
-                    {
-                        back = true;
+                    let back_button = if dialog.position > 0 {
+                        let button = theme::action_button(ui, "BACK", true);
+                        if button.clicked() {
+                            back = true;
+                        }
+                        Some(button)
+                    } else {
+                        None
+                    };
+                    // Arrows belong to the document scroll, not to focus
+                    // navigation between these two buttons.
+                    for button in [Some(close_button), back_button].into_iter().flatten() {
+                        ui.memory_mut(|memory| {
+                            memory.set_focus_lock_filter(
+                                button.id,
+                                egui::EventFilter {
+                                    tab: true,
+                                    horizontal_arrows: true,
+                                    vertical_arrows: true,
+                                    escape: false,
+                                },
+                            )
+                        });
                     }
                     ui.label(
                         RichText::new(&bundle.version)
@@ -394,6 +439,9 @@ pub fn draw_dialog(app: &mut LincApp, ctx: &egui::Context) {
                 area = area.vertical_scroll_offset(0.0);
             }
             area.show(ui, |ui| {
+                if scroll_delta != 0.0 {
+                    ui.scroll_with_delta(Vec2::new(0.0, -scroll_delta));
+                }
                 related = render_section(app, ui, &bundle, section);
             });
         });
