@@ -43,9 +43,11 @@ pub struct ServerHandle {
 
 impl Drop for ServerHandle {
     fn drop(&mut self) {
+        // The accept loop wakes itself: it never waits on a connection, so a
+        // caller that removed the socket file first (a test cleaning its temp
+        // directory, an operator deleting a stale socket) cannot make this join
+        // wait for a connect that can no longer succeed.
         self.stop.store(true, Ordering::Relaxed);
-        // Wake the blocking accept.
-        let _ = UnixStream::connect(&self.socket);
         if let Some(join) = self.join.take() {
             let _ = join.join();
         }
@@ -70,17 +72,22 @@ pub fn serve(dir: PathBuf, role: &str, source: Arc<dyn Source>) -> std::io::Resu
     } else {
         format!("linc-{role}")
     };
+    // Poll instead of blocking in `accept`. A blocking accept can only be woken
+    // by a connection, so a shutdown after the socket file disappeared - which
+    // is exactly what tidying a temp directory does - used to join forever.
+    listener.set_nonblocking(true)?;
+    let poll = std::time::Duration::from_millis(50);
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = stop.clone();
     let join = std::thread::Builder::new()
         .name(format!("diag-{role}"))
         .spawn(move || {
-            for stream in listener.incoming() {
-                if stop_thread.load(Ordering::Relaxed) {
-                    break;
-                }
-                match stream {
-                    Ok(stream) => {
+            while !stop_thread.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        // The listener is non-blocking; the connection handler
+                        // uses a read timeout and must not inherit that.
+                        let _ = stream.set_nonblocking(false);
                         let source = source.clone();
                         let source_name = source_name.clone();
                         std::thread::Builder::new()
@@ -90,8 +97,12 @@ pub fn serve(dir: PathBuf, role: &str, source: Arc<dyn Source>) -> std::io::Resu
                             })
                             .ok();
                     }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(poll);
+                    }
                     Err(error) => {
                         log::debug!("diagnostic accept failed: {error}");
+                        std::thread::sleep(poll);
                     }
                 }
             }

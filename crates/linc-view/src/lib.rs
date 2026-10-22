@@ -29,6 +29,10 @@ pub mod theme {
     /// Stock envelope: a neutral grey block that stays behind the toolpath.
     /// Live toolhead marker.
     pub const TOOL: Color32 = Color32::from_rgb(0xfb, 0xbf, 0x24);
+    /// The axis triad at the work origin: the same yellow as the DRO cards use
+    /// for their X/Y/Z labels (`theme::C3` in the UI), so the datum and the
+    /// readout read as one system.
+    pub const AXIS: Color32 = Color32::from_rgb(0xfb, 0xbf, 0x24);
     /// The segment of the line highlighted in the G-code pane. Yellow, so it is
     /// distinct from the cut path's blue and the live trail's green.
     pub const CURRENT: Color32 = Color32::from_rgb(0xf7, 0xd7, 0x4a);
@@ -195,15 +199,22 @@ struct Projection {
 /// The screen-plane coordinates of a point in the view's frame.
 ///
 /// The 3D view is an orthographic camera: `yaw` turns it about the vertical
-/// axis, `pitch` raises it above the XY plane. Screen y grows downwards, so the
-/// vertical component is negated — the opposite sign drew +Z downwards.
+/// axis (0 looks from the front, -Y, towards +Y), `pitch` raises it above the
+/// XY plane. Screen y grows downwards, so the vertical component is negated —
+/// the opposite sign drew +Z downwards.
 fn view_xy(local: [f32; 3], mode: ViewMode, yaw: f32, pitch: f32) -> (f32, f32) {
     match mode {
         ViewMode::Iso3d => {
             let (sin_yaw, cos_yaw) = yaw.sin_cos();
             let (sin_pitch, cos_pitch) = pitch.sin_cos();
-            let right = local[0] * cos_yaw - local[1] * sin_yaw;
-            let depth = local[0] * sin_yaw + local[1] * cos_yaw;
+            // The camera stands on the operator's side of the machine: yaw 0
+            // looks from -Y, so +Y runs away from the viewer into the back and
+            // a larger yaw orbits towards +X. The horizontal axis of the screen
+            // is therefore `+X + Y` and the direction towards the camera is
+            // `+X - Y`; getting the second sign wrong (the old `+X + Y`) put
+            // the camera behind the machine, with +Y coming towards the viewer.
+            let right = local[0] * cos_yaw + local[1] * sin_yaw;
+            let depth = local[0] * sin_yaw - local[1] * cos_yaw;
             let up = local[2] * cos_pitch - depth * sin_pitch;
             (right, -up)
         }
@@ -505,7 +516,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         view.variant,
         &view.axis_labels,
         view.origin,
-        theme::MUTED,
+        theme::AXIS,
     );
     if let Some(highlight) = view.highlight_origin {
         draw_axes(
@@ -921,22 +932,31 @@ fn draw_bounds_dimensions(
     let pad = glyph * 0.6;
     let row = glyph * 1.1;
 
-    // X: outside the front edge, on the ground plane. The length sits in the
+    // The drawing is laid out around the box as the operator sees it, and the
+    // camera now stands in front of the machine (+Y runs into the screen). That
+    // swaps which model corner appears where: the upper-right edge is the max-Y
+    // one now, so the X dimension moves there and its values, offsets and glyph
+    // tops are mirrored in Y with it. The Y dimension keeps the min-X edge,
+    // which is still the upper-left one. Done this way every label lands in
+    // exactly the same place on screen as it did when the camera was behind the
+    // machine.
+
+    // X: outside the back edge, on the ground plane. The length sits in the
     // middle; each end carries the work coordinate of that end.
     dimension_line(
         painter,
         projection,
-        [min[0], min[1], min[2]],
-        [max[0], min[1], min[2]],
-        [0.0, -gap, 0.0],
+        [min[0], max[1], min[2]],
+        [max[0], max[1], min[2]],
+        [0.0, gap, 0.0],
         color,
     );
     put_label(
         painter,
         projection,
-        [min[0] + size[0] * 0.5, min[1] - gap - row, min[2]],
+        [min[0] + size[0] * 0.5, max[1] + gap + row, min[2]],
         [1.0, 0.0, 0.0],
-        [0.0, -1.0, 0.0],
+        [0.0, 1.0, 0.0],
         glyph,
         &format!("{:.2}", size[0]),
         color,
@@ -947,10 +967,10 @@ fn draw_bounds_dimensions(
         projection,
         [
             min[0] - pad,
-            min[1] - gap - row - pad - text_width(&start_text, glyph) * 0.5,
+            max[1] + gap + row + pad + text_width(&start_text, glyph) * 0.5,
             min[2],
         ],
-        [0.0, -1.0, 0.0],
+        [0.0, 1.0, 0.0],
         [-1.0, 0.0, 0.0],
         glyph,
         &start_text,
@@ -962,10 +982,10 @@ fn draw_bounds_dimensions(
         projection,
         [
             max[0] + pad,
-            min[1] - gap - row - pad - text_width(&end_text, glyph) * 0.5,
+            max[1] + gap + row + pad + text_width(&end_text, glyph) * 0.5,
             min[2],
         ],
-        [0.0, -1.0, 0.0],
+        [0.0, 1.0, 0.0],
         [-1.0, 0.0, 0.0],
         glyph,
         &end_text,
@@ -976,16 +996,16 @@ fn draw_bounds_dimensions(
     dimension_line(
         painter,
         projection,
-        [min[0], min[1], min[2]],
         [min[0], max[1], min[2]],
+        [min[0], min[1], min[2]],
         [-gap, 0.0, 0.0],
         color,
     );
     put_label(
         painter,
         projection,
-        [min[0] - gap - row, min[1] + size[1] * 0.5, min[2]],
-        [0.0, -1.0, 0.0],
+        [min[0] - gap - row, max[1] - size[1] * 0.5, min[2]],
+        [0.0, 1.0, 0.0],
         [-1.0, 0.0, 0.0],
         glyph,
         &format!("{:.2}", size[1]),
@@ -997,11 +1017,11 @@ fn draw_bounds_dimensions(
         projection,
         [
             min[0] - gap - row - text_width(&start_text, glyph) * 0.5,
-            min[1] - pad,
+            max[1] + pad,
             min[2],
         ],
         [1.0, 0.0, 0.0],
-        [0.0, -1.0, 0.0],
+        [0.0, 1.0, 0.0],
         glyph,
         &start_text,
         color,
@@ -1012,18 +1032,19 @@ fn draw_bounds_dimensions(
         projection,
         [
             min[0] - gap - row - text_width(&end_text, glyph) * 0.5,
-            max[1] + pad,
+            min[1] - pad,
             min[2],
         ],
         [1.0, 0.0, 0.0],
-        [0.0, -1.0, 0.0],
+        [0.0, 1.0, 0.0],
         glyph,
         &end_text,
         color,
     );
 
-    // Z: up the front-left corner (min X, max Y). The back corner already
-    // carries the X and Y dimensions and their witnesses.
+    // Z: up the front-left corner (min X, min Y), which is the corner on the
+    // left of the drawing. The far corner already carries the X and Y
+    // dimensions and their witnesses.
     //
     // The labels stand in the XZ plane: like the X and Y dimensions, a label
     // reads along its own axis and its glyph tops point away from the box, so
@@ -1032,16 +1053,16 @@ fn draw_bounds_dimensions(
     dimension_line(
         painter,
         projection,
-        [min[0], max[1], min[2]],
-        [min[0], max[1], max[2]],
-        [-gap * 1.4, gap * 1.4, 0.0],
+        [min[0], min[1], min[2]],
+        [min[0], min[1], max[2]],
+        [-gap * 1.4, -gap * 1.4, 0.0],
         color,
     );
     let start_text = format!("Z{:.1}", min[2] - offset[2]);
     let end_text = format!("Z{:.1}", max[2] - offset[2]);
     // Y stays on the line so every label is coplanar with it.
     let z_line_x = min[0] - gap * 1.4;
-    let z_label_y = max[1] + gap * 1.4;
+    let z_label_y = min[1] - gap * 1.4;
     put_label(
         painter,
         projection,
@@ -1160,10 +1181,10 @@ fn draw_bounds_filled(painter: &Painter, projection: &Projection, bounds: Bounds
             corner(min[0], min[1], max[2]),
         ],
         vec![
-            corner(min[0], min[1], min[2]),
-            corner(min[0], max[1], min[2]),
-            corner(min[0], max[1], max[2]),
-            corner(min[0], min[1], max[2]),
+            corner(max[0], min[1], min[2]),
+            corner(max[0], max[1], min[2]),
+            corner(max[0], max[1], max[2]),
+            corner(max[0], min[1], max[2]),
         ],
     ] {
         painter.add(egui::Shape::convex_polygon(
@@ -1308,34 +1329,42 @@ fn draw_axes(
     let length = 24.0;
     let mut axes = Vec::new();
     if axis_labels.iter().any(|axis| axis == "X") {
-        axes.push((
-            "X",
-            Vec2::new(length * 0.866, length * 0.5),
-            color,
-        ));
+        axes.push(("X", [1.0, 0.0, 0.0]));
     }
     if axis_labels.iter().any(|axis| axis == "Y") || variant == MachineVariant::Mill {
-        axes.push((
-            "Y",
-            Vec2::new(-length * 0.866, length * 0.5),
-            color,
-        ));
+        axes.push(("Y", [0.0, 1.0, 0.0]));
     }
     if axis_labels.iter().any(|axis| axis == "Z") || variant == MachineVariant::Mill {
-        axes.push((
-            "Z",
-            Vec2::new(0.0, -length),
-            color,
-        ));
+        axes.push(("Z", [0.0, 0.0, 1.0]));
     }
-    painter.circle_filled(origin_pos, 2.0, theme::MUTED);
-    for (label, vector, color) in axes {
+    painter.circle_filled(origin_pos, 2.0, color);
+    // The cross follows the camera through the same projection as the part. It
+    // used to be three fixed screen vectors, so it kept drawing the old orbit:
+    // +Y pointed at the viewer no matter where the camera stood.
+    let font = FontId::monospace(10.0 * FONT_SCALE);
+    for (label, unit) in axes {
+        let (dx, dy) = view_xy(unit, projection.mode, projection.yaw, projection.pitch);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 0.2 {
+            // Along the view, so it has no screen direction: a dot, the way the
+            // corner triad shows it.
+            painter.circle_stroke(origin_pos, 2.5, Stroke::new(1.2, color));
+            painter.text(
+                origin_pos + Vec2::new(4.0, -4.0),
+                Align2::LEFT_BOTTOM,
+                label,
+                font.clone(),
+                color,
+            );
+            continue;
+        }
+        let vector = Vec2::new(dx / len, dy / len) * length;
         painter.line_segment([origin_pos, origin_pos + vector], Stroke::new(1.2, color));
         painter.text(
             origin_pos + vector + Vec2::new(3.0, -3.0),
             Align2::LEFT_BOTTOM,
             label,
-            FontId::monospace(10.0 * FONT_SCALE),
+            font.clone(),
             color,
         );
     }
@@ -1513,6 +1542,24 @@ mod tests {
                 assert!(rect.contains(pos), "{mode:?}: {pos:?} outside {rect:?}");
             }
         }
+    }
+
+    #[test]
+    fn the_iso_view_puts_y_into_the_screen() {
+        // LinuxCNC puts +Y to the back of the machine. From the default orbit
+        // it must therefore run up the screen, away from the operator, and to
+        // the right; +X runs right and towards the viewer, +Z straight up.
+        let (x, y) = view_xy([1.0, 0.0, 0.0], ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        assert!(x > 0.5 && y > 0.0, "+X is right and near: {x},{y}");
+        let (x, y) = view_xy([0.0, 1.0, 0.0], ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        assert!(x > 0.5 && y < 0.0, "+Y goes right and away: {x},{y}");
+        let (x, y) = view_xy([0.0, 0.0, 1.0], ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        assert!(x.abs() < 1e-6 && y < 0.0, "+Z is straight up: {x},{y}");
+        // Looking from the front (+Y away) means the near corner of a box is
+        // the min-Y one: it sits lowest on the screen.
+        let near = view_xy([0.0, -1.0, 0.0], ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        let far = view_xy([0.0, 1.0, 0.0], ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        assert!(near.1 > far.1, "min Y is the near side: {near:?} {far:?}");
     }
 
     #[test]

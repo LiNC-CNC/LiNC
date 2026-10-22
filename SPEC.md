@@ -392,8 +392,10 @@ Default page. The layout is selected by `machine.gui`.
   selected-line highlight. `CLEAR TRAIL` clears only the live trail.
 - 3D navigation follows Blender: middle-drag orbits (yaw about the vertical,
   pitch above the XY plane), Shift+middle-drag pans, the wheel zooms, and a
-  double-click returns to the default isometric view. The top and side views
-  keep their fixed direction; primary drag pans on every view.
+  double-click returns to the default isometric view. The camera stands on the
+  operator's side, yaw 0 looking from -Y, so the rendering matches LinuxCNC:
+  +X to the right and towards the viewer, +Y away into the back, +Z up. The top
+  and side views keep their fixed direction; primary drag pans on every view.
 - `Ctrl+F10` cycles ISO → X (looking along X) → Y (looking along Y) → Z
   (looking down); the lathe toggles between ISO and its XZ view. A fit frames
   the program alone — the tool and the live trail are excluded, since a far
@@ -405,7 +407,8 @@ Default page. The layout is selected by `machine.gui`.
   so it survives a restart. When drawn, the boxes are solid and faint, never
   dashed, because the G0 path is dashed.
 - The program bounds are marked like a technical drawing: a dimension line
-  outside each near face, witness lines from the corners, arrowheads at the ends,
+  outside the upper edges of the drawing (X along max Y, Y along min X, Z up the
+  near-left corner), witness lines from the corners, arrowheads at the ends,
   the X/Y/Z length in the middle and the work coordinate of each end beside its
   arrow. The text is Hershey stroke geometry (the AXIS font) laid into the plane
   it measures — X and Y flat in XY, Z in XZ — so the camera projects it with the
