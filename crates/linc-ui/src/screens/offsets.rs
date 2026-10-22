@@ -321,15 +321,19 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                     let is_selected_row = app.offsets.selected_row == row_index;
                     body.row(ROW_HEIGHT, |mut row| {
                         let (_wcs_rect, _) = row.col(|ui| {
-                            // The band behind a selected row is a faint wash, so
-                            // the label keeps its normal colour.
+                            // No solid selection fill here: the row band and the
+                            // rim bar already mark the selection, and a blue box
+                            // behind the name read as a second, contradictory
+                            // state next to the ACTIVE column.
                             let colour = if is_active { theme::SUCCESS } else { theme::FG };
-                            let response = ui.selectable_label(
-                                selected == index,
-                                RichText::new(format!("G{}", 53 + index))
-                                    .monospace()
-                                    .size(theme::font_size(12.0))
-                                    .color(colour),
+                            let response = ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!("G{}", 53 + index))
+                                        .monospace()
+                                        .size(theme::font_size(11.0))
+                                        .color(colour),
+                                )
+                                .sense(egui::Sense::click()),
                             );
                             if response.clicked() {
                                 selected = index;
