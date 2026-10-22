@@ -1025,10 +1025,10 @@ fn draw_bounds_dimensions(
     // Z: up the front-left corner (min X, max Y). The back corner already
     // carries the X and Y dimensions and their witnesses.
     //
-    // The values read up the line and stand in the XZ plane: like the X and Y
-    // dimensions, a label reads along its own axis and its glyph tops point
-    // away from the box, so the Z text lies flat across X instead of turning
-    // into the YZ plane. `up` is -X, not +X, or the letters come out mirrored.
+    // The labels stand in the XZ plane: like the X and Y dimensions, a label
+    // reads along its own axis and its glyph tops point away from the box, so
+    // the Z text lies flat across X instead of turning into the YZ plane. `up`
+    // is -X, not +X, or the letters come out mirrored.
     dimension_line(
         painter,
         projection,
@@ -1039,32 +1039,34 @@ fn draw_bounds_dimensions(
     );
     let start_text = format!("Z{:.1}", min[2] - offset[2]);
     let end_text = format!("Z{:.1}", max[2] - offset[2]);
-    // The Z text now occupies X (its own height) rather than Y, so place it by
-    // its near edge: a pad to the left of the dimension line, and its centre
-    // half a glyph further out. Y stays at the line so the text is coplanar
-    // with it.
-    let z_label_x = min[0] - gap * 1.4 - pad - glyph * 0.5;
+    // Y stays on the line so every label is coplanar with it.
+    let z_line_x = min[0] - gap * 1.4;
     let z_label_y = max[1] + gap * 1.4;
     put_label(
         painter,
         projection,
-        [z_label_x, z_label_y, min[2] + size[2] * 0.5],
+        [
+            z_line_x - pad - glyph * 0.5,
+            z_label_y,
+            min[2] + size[2] * 0.5,
+        ],
         [0.0, 0.0, 1.0],
         [-1.0, 0.0, 0.0],
         glyph,
         &format!("{:.2}", size[2]),
         color,
     );
+    // The two end values are the length label turned a quarter turn clockwise
+    // about Y: they read along +X with their caps up +Z, so they are written
+    // horizontally, centred on the line and clear of its end by a pad. Below
+    // and above the line is the only room for horizontal text, since sideways
+    // they would run back across it.
     put_label(
         painter,
         projection,
-        [
-            z_label_x,
-            z_label_y,
-            min[2] - pad - text_width(&start_text, glyph) * 0.5,
-        ],
+        [z_line_x, z_label_y, min[2] - pad - glyph * 0.5],
+        [1.0, 0.0, 0.0],
         [0.0, 0.0, 1.0],
-        [-1.0, 0.0, 0.0],
         glyph,
         &start_text,
         color,
@@ -1072,13 +1074,9 @@ fn draw_bounds_dimensions(
     put_label(
         painter,
         projection,
-        [
-            z_label_x,
-            z_label_y,
-            max[2] + pad + text_width(&end_text, glyph) * 0.5,
-        ],
+        [z_line_x, z_label_y, max[2] + pad + glyph * 0.5],
+        [1.0, 0.0, 0.0],
         [0.0, 0.0, 1.0],
-        [-1.0, 0.0, 0.0],
         glyph,
         &end_text,
         color,
