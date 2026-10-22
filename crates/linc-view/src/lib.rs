@@ -1024,6 +1024,11 @@ fn draw_bounds_dimensions(
 
     // Z: up the front-left corner (min X, max Y). The back corner already
     // carries the X and Y dimensions and their witnesses.
+    //
+    // The values read up the line and stand in the XZ plane: like the X and Y
+    // dimensions, a label reads along its own axis and its glyph tops point
+    // away from the box, so the Z text lies flat across X instead of turning
+    // into the YZ plane. `up` is -X, not +X, or the letters come out mirrored.
     dimension_line(
         painter,
         projection,
@@ -1032,42 +1037,48 @@ fn draw_bounds_dimensions(
         [-gap * 1.4, gap * 1.4, 0.0],
         color,
     );
+    let start_text = format!("Z{:.1}", min[2] - offset[2]);
+    let end_text = format!("Z{:.1}", max[2] - offset[2]);
+    // The Z text now occupies X (its own height) rather than Y, so place it by
+    // its near edge: a pad to the left of the dimension line, and its centre
+    // half a glyph further out. Y stays at the line so the text is coplanar
+    // with it.
+    let z_label_x = min[0] - gap * 1.4 - pad - glyph * 0.5;
+    let z_label_y = max[1] + gap * 1.4;
     put_label(
         painter,
         projection,
-        [min[0] - gap * 2.4 - row, max[1] + gap * 1.4, min[2] + size[2] * 0.5],
+        [z_label_x, z_label_y, min[2] + size[2] * 0.5],
         [0.0, 0.0, 1.0],
-        [0.0, -1.0, 0.0],
+        [-1.0, 0.0, 0.0],
         glyph,
         &format!("{:.2}", size[2]),
         color,
     );
-    let start_text = format!("Z{:.1}", min[2] - offset[2]);
     put_label(
         painter,
         projection,
         [
-            min[0] - gap * 2.4 - row,
-            max[1] + gap * 1.4,
+            z_label_x,
+            z_label_y,
             min[2] - pad - text_width(&start_text, glyph) * 0.5,
         ],
         [0.0, 0.0, 1.0],
-        [0.0, -1.0, 0.0],
+        [-1.0, 0.0, 0.0],
         glyph,
         &start_text,
         color,
     );
-    let end_text = format!("Z{:.1}", max[2] - offset[2]);
     put_label(
         painter,
         projection,
         [
-            min[0] - gap * 2.4 - row,
-            max[1] + gap * 1.4,
+            z_label_x,
+            z_label_y,
             max[2] + pad + text_width(&end_text, glyph) * 0.5,
         ],
         [0.0, 0.0, 1.0],
-        [0.0, -1.0, 0.0],
+        [-1.0, 0.0, 0.0],
         glyph,
         &end_text,
         color,

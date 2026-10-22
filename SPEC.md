@@ -408,7 +408,7 @@ Default page. The layout is selected by `machine.gui`.
   outside each near face, witness lines from the corners, arrowheads at the ends,
   the X/Y/Z length in the middle and the work coordinate of each end beside its
   arrow. The text is Hershey stroke geometry (the AXIS font) laid into the plane
-  it measures — X and Y flat in XY, Z in YZ — so the camera projects it with the
+  it measures — X and Y flat in XY, Z in XZ — so the camera projects it with the
   part. There are no PROGRAM or MACHINE captions; the geometry says which is
   which. The stock block is fully transparent by
   default (`toolpath.stock_alpha = 0`) and configurable up to opaque.
