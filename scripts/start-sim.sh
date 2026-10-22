@@ -39,6 +39,9 @@ PID_FILE="$RUNTIME_DIR/sim.pid"
 PANEL_PID_FILE="$RUNTIME_DIR/panel-sim.pid"
 LINC_PID_FILE="$RUNTIME_DIR/linc.pid"
 LOG_FILE="$STATE_DIR/sim.log"
+# LinuxCNC redirects its own stdout and stderr here, so this is where the reason
+# a session failed to start is written.
+PRINT_FILE="$HOME/linuxcnc_print.txt"
 mkdir -p "$RUNTIME_DIR" "$STATE_DIR"
 
 if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
@@ -144,6 +147,7 @@ cd "$ROOT/configs"
 # waits for it.
 sim_ready() {
     local args=(--timeout "$READY_TIMEOUT")
+    (( RELEASE_ESTOP )) && args+=(--estop)
     (( POWER_ON )) && args+=(--on)
     (( HOME_AXES )) && args+=(--home)
     [[ -n "$LOAD_PROGRAM" ]] && args+=(--load "$LOAD_PROGRAM")
@@ -160,8 +164,9 @@ if (( DETACH )); then
     echo "$PID" >"$PID_FILE"
     sleep 2
     if ! kill -0 "$PID" 2>/dev/null; then
-        echo "LinuxCNC failed to start; see $LOG_FILE" >&2
+        echo "LinuxCNC failed to start; see $LOG_FILE and $PRINT_FILE" >&2
         tail -n 20 "$LOG_FILE" >&2 || true
+        tail -n 20 "$PRINT_FILE" >&2 || true
         rm -f "$PID_FILE"
         exit 1
     fi
@@ -182,10 +187,22 @@ if (( DETACH )); then
     fi
 else
     trap '"$SCRIPT_DIR/stop-sim.sh"' EXIT INT TERM
+    echo "starting LinuxCNC: $INI"
+    echo "  log:   $PRINT_FILE"
     if (( RELEASE_ESTOP || FLOAT_WINDOW )); then
         # linuxcnc blocks in the foreground, so the ready steps run beside it
         # and report to this terminal.
         sim_ready &
     fi
+    # LinuxCNC exits quietly by itself: its output goes to $PRINT_FILE. Say so
+    # rather than leaving a failed start looking like nothing happened.
+    set +e
     linuxcnc "$INI" "${ARGS[@]}"
+    status=$?
+    set -e
+    if (( status != 0 )); then
+        echo "LinuxCNC exited with status $status; last lines of $PRINT_FILE:" >&2
+        tail -n 25 "$PRINT_FILE" >&2 || true
+    fi
+    exit "$status"
 fi

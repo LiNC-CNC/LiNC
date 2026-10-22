@@ -13,11 +13,18 @@ float under Hyprland rather than a tile that gets stretched to the screen.
 Run by start-sim.sh; it is not a user-facing command, but every step is a flag
 so start-sim.sh can pass on exactly what was asked for:
 
-  --on            wait for the controller to leave E-stop and power on
+  --estop         make the controller leave E-stop
+  --on            and power it on (implies --estop)
   --home          home every axis (implies --on)
   --load FILE     open a G-code program (implies --on)
   --float         float the HMI window under Hyprland at 1280x720
   --timeout SECS  how long to wait for each step (default 60)
+
+The panel releases the mushroom itself, but its request reaches the controller as
+a short HAL pulse, and at boot that pulse can arrive before the task is ready to
+accept it — the panel then shows the mushroom out while the HMI still shows
+E-STOP. So the reset is also queued on the command channel here, where it waits
+for the task instead of racing it.
 
 Exits non-zero with a plain reason when a step does not happen.
 """
@@ -43,9 +50,14 @@ def parse(argv):
         description="Bring a started LinuxCNC simulation to a ready state."
     )
     parser.add_argument(
+        "--estop",
+        action="store_true",
+        help="make the controller leave E-stop",
+    )
+    parser.add_argument(
         "--on",
         action="store_true",
-        help="wait for the controller to leave E-stop and power on",
+        help="power the controller on (implies --estop)",
     )
     parser.add_argument("--home", action="store_true", help="home every axis")
     parser.add_argument("--load", metavar="FILE", help="open a G-code program")
@@ -68,6 +80,8 @@ def parse(argv):
     args = parser.parse_args(argv)
     if args.home or args.load:
         args.on = True
+    if args.on:
+        args.estop = True
     return args
 
 
@@ -114,19 +128,58 @@ def is_on(linuxcnc, stat):
     return not stat.estop and stat.task_state == linuxcnc.STATE_ON
 
 
+def leave_estop(linuxcnc, stat, command, timeout):
+    """Ask the task to leave E-stop until it does.
+
+    The panel's own release reaches the controller as a 150 ms HAL pulse. At
+    boot that pulse can be sent before the task is accepting commands, so the
+    panel shows the mushroom out and the controller stays in E-stop. A command
+    on the NML channel is queued and re-sent here, which takes the timing out
+    of it.
+    """
+    stat.poll()
+    if not stat.estop:
+        return
+    deadline = time.monotonic() + timeout
+    last_sent = 0.0
+    while True:
+        stat.poll()
+        if not stat.estop:
+            log("E-stop released")
+            return
+        now = time.monotonic()
+        if now - last_sent >= 1.0:
+            command.state(linuxcnc.STATE_ESTOP_RESET)
+            last_sent = now
+        if now >= deadline:
+            sys.exit(
+                "sim-ready: the controller stayed in E-stop; "
+                "is the panel's mushroom released?"
+            )
+        time.sleep(0.1)
+
+
+def power_on(linuxcnc, stat, command, timeout):
+    stat.poll()
+    if is_on(linuxcnc, stat):
+        return
+    command.state(linuxcnc.STATE_ON)
+    command.wait_complete(timeout)
+    wait_for(
+        stat,
+        lambda s: is_on(linuxcnc, s),
+        "the machine to power on (POWER ON in the panel)",
+        timeout,
+    )
+    log("machine on")
+
+
 def bring_up(args):
     linuxcnc, stat, command = task(args.timeout)
+    if args.estop:
+        leave_estop(linuxcnc, stat, command, args.timeout)
     if args.on:
-        # The panel released the mushroom and pressed POWER ON; the controller
-        # only has to get there. Nothing here presses anything: if the machine
-        # does not come up, the panel is still holding a key.
-        wait_for(
-            stat,
-            lambda s: is_on(linuxcnc, s),
-            "the machine to come on (E-stop released and POWER ON in the panel)",
-            args.timeout,
-        )
-        log("machine on")
+        power_on(linuxcnc, stat, command, args.timeout)
     if args.home:
         command.mode(linuxcnc.MODE_MANUAL)
         command.wait_complete(args.timeout)

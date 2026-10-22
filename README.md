@@ -57,7 +57,11 @@ HAL (`hal/rio_sim.hal`) and the LiNC HMI/panel pair. The cabinet still boots the
 way a real one is found — E-stop latched, power off — unless you ask for more:
 `--release-estop`, `--power-on`, `--home`, `--load [FILE]` and `--float` each
 imply the step before, because the E-stop mushroom and POWER ON belong to the
-panel and cannot be pressed behind its back. The HMI enforces a minimum 1280×720 window,
+panel and cannot be pressed behind its back. The panel releases the mushroom
+itself; the controller's reset is queued on LinuxCNC's command channel, since
+the panel's HAL pulse at boot can arrive before the task is ready to take it
+(which left the panel showing the mushroom out and the HMI still showing
+E-STOP). The HMI enforces a minimum 1280×720 window,
 scales proportionally above it, and preserves the SVG font ratios. `linc --check-config --config configs/baiermill.toml` validates
 a profile, its LinuxCNC INI and safety policy without opening the display or
 HAL.

@@ -30,7 +30,8 @@ scripts/build-deb.sh                        # Debian packages, amd64 + arm64
   `LINC_CONFIG=configs/sim.toml`, builds only when a release binary is missing, and needs `DISPLAY`/`WAYLAND_DISPLAY`.
   `--release-estop`, `--power-on`, `--home`, `--load [FILE]`, `--float` bring the session up ready; the E-stop and POWER ON keys
   travel as `LINC_SIM_READY` to the panel (the HAL `loadusr` line cannot take the flag), and `scripts/sim-ready.py` does the rest
-  (wait for the controller, home, open the program, float the window under Hyprland).
+  (queue the E-stop reset on the command channel, power on, home, open the program, float the window under Hyprland). Give the
+  reset the command channel, not only the panel's HAL pulse: a pulse raised at boot can land before the task accepts it.
 - Standalone, no LinuxCNC or HAL. Panel and HMI must share `LINC_SIM_IPC`:
 
 ```bash
