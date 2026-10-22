@@ -126,8 +126,10 @@ pub enum UiAction {
     Page { page: String },
     /// Cycle the toolpath view ISO -> X -> Y -> Z.
     CycleView,
-    /// Show or hide the program bounding box.
+    /// Show or hide the program bounds (technical drawing).
     ShowBounds { visible: bool },
+    /// Advance the `Ctrl+B` cycle: dimensions, + machine, + program box, off.
+    CycleBounds,
     /// Frame the program in the toolpath.
     Fit,
     /// Clear the live trail.

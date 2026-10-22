@@ -52,6 +52,10 @@ pub struct Preferences {
     pub jog_speed_percent: Option<f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_files: Vec<String>,
+    /// `Ctrl+B` cycle position: 0 dimensions only, 1 + machine box, 2 + program
+    /// box, 3 all off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounds_mode: Option<u8>,
     /// Page keys the operator has chosen to show.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub visible_panels: Vec<String>,

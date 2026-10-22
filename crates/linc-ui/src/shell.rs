@@ -174,8 +174,11 @@ impl LincApp {
                 }
                 linc_core::diag::UiAction::CycleView => self.cycle_toolpath_view(),
                 linc_core::diag::UiAction::ShowBounds { visible } => {
-                    self.graph_style.show_program_bounds = visible;
+                    self.graph_style.bounds_mode = if visible { 0 } else { 3 };
+                    self.preferences.bounds_mode = Some(self.graph_style.bounds_mode);
+                    self.preferences_dirty = true;
                 }
+                linc_core::diag::UiAction::CycleBounds => self.cycle_bounds(),
                 linc_core::diag::UiAction::Fit => self.fit_graph(),
                 linc_core::diag::UiAction::ClearTrail => self.clear_trail(),
                 linc_core::diag::UiAction::SelectLine { line } => self.jump_to_line(line),
@@ -288,11 +291,15 @@ impl LincApp {
                 .cloned()
                 .unwrap_or_default(),
         );
-        let graph_style = graph_style(&profile);
         let probe_params = ProbeParameters::from_config(&profile.config.probe);
         // Runtime preferences are separate from the machine profile. They may
         // restore the last page and view, never machine data.
         let preferences = linc_core::preferences::Preferences::load(&profile.preferences_path);
+        let mut graph_style = graph_style(&profile);
+        graph_style.bounds_mode = preferences
+            .bounds_mode
+            .map(|mode| mode % 4)
+            .unwrap_or(graph_style.bounds_mode);
         let remembered_page = preferences
             .last_page
             .as_deref()
@@ -1481,6 +1488,20 @@ impl LincApp {
     /// Cycle the toolpath view through ISO, X, Y and Z, refitting each time so
     /// the new projection frames the program instead of inheriting a zoom that
     /// only suited the old one.
+    /// `Ctrl+B`: dimensions only -> + machine box -> + program box -> off.
+    pub fn cycle_bounds(&mut self) {
+        self.graph_style.bounds_mode = (self.graph_style.bounds_mode + 1) % 4;
+        self.preferences.bounds_mode = Some(self.graph_style.bounds_mode);
+        self.preferences_dirty = true;
+        let label = match self.graph_style.bounds_mode {
+            0 => "bounds: dimensions",
+            1 => "bounds: + machine",
+            2 => "bounds: + program box",
+            _ => "bounds: off",
+        };
+        self.toast(label, theme::MUTED);
+    }
+
     pub fn cycle_toolpath_view(&mut self) {
         let next = linc_view::cycle_view(self.program.graph_view, self.profile.variant);
         self.program.graph_view = next;
@@ -1762,16 +1783,7 @@ impl LincApp {
             self.cycle_toolpath_view();
         }
         if toggle_bounds {
-            // One switch for both envelopes: the program box and the machine
-            // envelope answer the same question ("where is this in the machine").
-            let shown = !(self.graph_style.show_program_bounds
-                || self.graph_style.show_machine_bounds);
-            self.graph_style.show_program_bounds = shown;
-            self.graph_style.show_machine_bounds = shown;
-            self.toast(
-                if shown { "bounds shown" } else { "bounds hidden" },
-                theme::MUTED,
-            );
+            self.cycle_bounds();
         }
         if goto_line && self.page == Page::Program {
             self.modal = Some(crate::state::Modal::GoToLine {

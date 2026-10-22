@@ -267,7 +267,7 @@ pub fn catalog() -> Vec<ToolDef> {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["page", "cycle_view", "show_bounds", "fit", "clear_trail", "select_line"]
+                        "enum": ["page", "cycle_view", "show_bounds", "cycle_bounds", "fit", "clear_trail", "select_line"]
                     },
                     "page": { "type": "string", "description": "For action=page: MACHINE, PROGRAM, FILES, TOOLS, OFFSETS, DIAGNOSTICS, HELP, SETTINGS, MANUAL, HOMING, MDI, PROBE" },
                     "visible": { "type": "boolean", "description": "For action=show_bounds" },
@@ -477,6 +477,7 @@ pub fn call(
                     "action": "show_bounds",
                     "visible": args.get("visible").and_then(Value::as_bool).unwrap_or(false)
                 }),
+                "cycle_bounds" => json!({ "action": "cycle_bounds" }),
                 "fit" => json!({ "action": "fit" }),
                 "clear_trail" => json!({ "action": "clear_trail" }),
                 "select_line" => json!({

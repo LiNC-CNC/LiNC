@@ -974,8 +974,8 @@ impl Default for SettingsUi {
 pub struct GraphStyle {
     pub show_grid: bool,
     pub show_live_trail: bool,
-    pub show_program_bounds: bool,
-    pub show_machine_bounds: bool,
+    /// `Ctrl+B` cycle: 0 dimensions only, 1 + machine box, 2 + program box, 3 off.
+    pub bounds_mode: u8,
     pub show_stock: bool,
     pub stock_alpha: u8,
     pub highlight_selected_line: bool,
@@ -993,8 +993,10 @@ impl GraphStyle {
     ) {
         view.show_grid = self.show_grid;
         view.show_live_trail = self.show_live_trail;
-        view.show_program_bounds = self.show_program_bounds;
-        view.show_machine_bounds = self.show_machine_bounds;
+        let (dims, machine, box_at) = bounds_visibility(self.bounds_mode);
+        view.show_program_bounds = dims;
+        view.show_machine_bounds = machine;
+        view.show_program_box = box_at;
         view.show_stock = self.show_stock;
         view.stock_alpha = self.stock_alpha;
         view.show_selected_line = self.highlight_selected_line;
@@ -1048,8 +1050,10 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
     GraphStyle {
         show_grid: profile.config.toolpath.show_grid,
         show_live_trail: profile.config.toolpath.show_live_trail,
-        show_program_bounds: profile.config.toolpath.show_program_bounds,
-        show_machine_bounds: profile.config.toolpath.show_machine_bounds,
+        bounds_mode: bounds_mode_from_config(
+            profile.config.toolpath.show_program_bounds,
+            profile.config.toolpath.show_machine_bounds,
+        ),
         show_stock: profile.config.toolpath.show_stock,
         stock_alpha: profile.config.toolpath.stock_alpha,
         highlight_selected_line: profile.config.toolpath.highlight_selected_line,
@@ -1059,6 +1063,48 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
         show_legend: true,
         trail_max_points: profile.config.toolpath.trail_max_points,
         perspective: profile.config.toolpath.perspective,
+    }
+}
+
+/// What the `Ctrl+B` cycle shows: `(dimensions, machine box, program box)`.
+pub fn bounds_visibility(mode: u8) -> (bool, bool, bool) {
+    match mode % 4 {
+        0 => (true, false, false),
+        1 => (true, true, false),
+        2 => (true, true, true),
+        _ => (false, false, false),
+    }
+}
+
+/// The cycle position a profile's toolpath flags imply, for a first run.
+pub fn bounds_mode_from_config(show_program: bool, show_machine: bool) -> u8 {
+    if !show_program && !show_machine {
+        3
+    } else if show_machine {
+        2
+    } else {
+        0
+    }
+}
+
+#[cfg(test)]
+mod bounds_tests {
+    use super::{bounds_mode_from_config, bounds_visibility};
+
+    #[test]
+    fn the_cycle_goes_dimensions_machine_box_off() {
+        assert_eq!(bounds_visibility(0), (true, false, false));
+        assert_eq!(bounds_visibility(1), (true, true, false));
+        assert_eq!(bounds_visibility(2), (true, true, true));
+        assert_eq!(bounds_visibility(3), (false, false, false));
+        assert_eq!(bounds_visibility(4), bounds_visibility(0), "wraps");
+    }
+
+    #[test]
+    fn a_profile_flags_imply_a_first_run_mode() {
+        assert_eq!(bounds_mode_from_config(false, false), 3);
+        assert_eq!(bounds_mode_from_config(true, false), 0);
+        assert_eq!(bounds_mode_from_config(true, true), 2);
     }
 }
 
