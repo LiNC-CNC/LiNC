@@ -15,9 +15,6 @@ fn editor_font() -> f32 {
     theme::font_size(13.0)
 }
 
-/// Space between the pane's left edge and the current-line bar.
-const SELECTION_EDGE_PADDING: f32 = 4.0;
-
 fn line_height() -> f32 {
     editor_font() * 1.36
 }
@@ -434,7 +431,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
         ui.horizontal_top(|ui| {
             // Lane for the current-line bar, so it sits left of the numbers
             // instead of on top of them.
-            ui.add_space(SELECTION_EDGE_PADDING + theme::SELECTION_BAR + 4.0);
+            ui.add_space(common::SELECTION_EDGE_PADDING + theme::SELECTION_BAR + 4.0);
             ui.add(
                 egui::Label::new(
                     RichText::new(numbers)
@@ -546,25 +543,10 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                 };
                 let top = first_top + (current as f32 - 1.0) * pitch;
                 let band = egui::Rect::from_min_max(
-                    egui::pos2(clip.left() + SELECTION_EDGE_PADDING, top),
+                    egui::pos2(clip.left() + common::SELECTION_EDGE_PADDING, top),
                     egui::pos2(clip.right(), top + pitch),
-                )
-                .intersect(clip);
-                if band.height() > 0.0 {
-                    ui.painter().rect_filled(
-                        band,
-                        egui::CornerRadius::same((theme::SELECTION_RADIUS / 2.0) as u8),
-                        theme::tint(theme::ACCENT, theme::SELECTION_ALPHA),
-                    );
-                    ui.painter().rect_filled(
-                        egui::Rect::from_min_size(
-                            egui::pos2(band.left(), band.top()),
-                            egui::vec2(theme::SELECTION_BAR, band.height()),
-                        ),
-                        egui::CornerRadius::same(1),
-                        theme::ACCENT,
-                    );
-                }
+                );
+                common::selection_band(ui, band);
             }
             // A little room under the last line, so it does not sit flush
             // against the bottom of the scroll viewport.

@@ -9,6 +9,29 @@ use crate::shell::LincApp;
 use crate::state::Page;
 use crate::theme;
 
+/// Space between a pane's left edge and the selection band's rim bar.
+pub const SELECTION_EDGE_PADDING: f32 = 4.0;
+
+/// Paint the selection band every list shares: a translucent accent field
+/// with a solid bar on its left rim. One implementation, so a selected G-code
+/// line reads the same in the editor and in the MAIN program pane.
+pub fn selection_band(ui: &Ui, rect: egui::Rect) {
+    let rect = rect.intersect(ui.clip_rect());
+    if rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return;
+    }
+    ui.painter().rect_filled(
+        rect,
+        egui::CornerRadius::same((theme::SELECTION_RADIUS / 2.0) as u8),
+        theme::tint(theme::ACCENT, theme::SELECTION_ALPHA),
+    );
+    ui.painter().rect_filled(
+        egui::Rect::from_min_size(rect.min, egui::vec2(theme::SELECTION_BAR, rect.height())),
+        egui::CornerRadius::same(1),
+        theme::ACCENT,
+    );
+}
+
 pub fn token_color(kind: TokenKind) -> Color32 {
     match kind {
         TokenKind::GCode => theme::C1,
@@ -550,6 +573,12 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                             egui::vec2(ui.available_width(), row_height),
                             egui::Sense::hover(),
                         );
+                        if is_current {
+                            // The band goes down before the row's text, so the
+                            // tokens are painted over it rather than tinted by
+                            // it.
+                            selection_band(ui, rect);
+                        }
                         let mut row_ui = ui.new_child(
                             egui::UiBuilder::new()
                                 .id_salt(("program_row", row))
@@ -558,11 +587,12 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                         );
                         row_ui.set_clip_rect(rect.intersect(ui.clip_rect()));
                         row_ui.spacing_mut().item_spacing.x = 4.0;
-                        let (marker, _) =
-                            row_ui.allocate_exact_size(egui::vec2(2.0, 12.0), egui::Sense::hover());
-                        if is_current {
-                            row_ui.painter().rect_filled(marker, 1.0, theme::ACCENT);
-                        }
+                        // Lane for the band's rim bar, so the line numbers start
+                        // at the same x on every row.
+                        let _ = row_ui.allocate_exact_size(
+                            egui::vec2(theme::SELECTION_BAR, row_height),
+                            egui::Sense::hover(),
+                        );
                         let number = line
                             .map(|_| format!("{line_number:>4}"))
                             .unwrap_or_else(|| "    ".to_string());
