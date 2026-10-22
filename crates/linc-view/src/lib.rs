@@ -116,7 +116,11 @@ pub struct TrajectoryView<'a> {
     pub pitch: f32,
     pub show_grid: bool,
     pub show_live_trail: bool,
+    /// Draw the technical drawing on the program bounds: dimension lines and
+    /// their values.
     pub show_program_bounds: bool,
+    /// Draw the program box outline itself.
+    pub show_program_box: bool,
     pub show_machine_bounds: bool,
     /// Draw the stock envelope. SPEC §6.1 lists stock alongside the program
     /// path, live trail and bounds in the mill toolpath.
@@ -161,7 +165,8 @@ impl<'a> TrajectoryView<'a> {
             show_grid: true,
             show_live_trail: true,
             show_program_bounds: true,
-            show_machine_bounds: true,
+            show_program_box: false,
+            show_machine_bounds: false,
             show_stock: true,
             stock_alpha: 0,
             show_selected_line: true,
@@ -600,9 +605,18 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     // Program bounds.
     if view.show_program_bounds {
         if let Some(program) = view.preview.bounds {
-            // Solid and faint: a dashed box reads as a rapid move, and the G0
-            // path is already dashed.
-            draw_bounds(&painter, &projection, program, theme::dim(theme::CYAN, 80), 1.0, false);
+            if view.show_program_box {
+                // Solid and faint: a dashed box reads as a rapid move, and the
+                // G0 path is already dashed.
+                draw_bounds(
+                    &painter,
+                    &projection,
+                    program,
+                    theme::dim(theme::CYAN, 80),
+                    1.0,
+                    false,
+                );
+            }
             draw_bounds_dimensions(&painter, &projection, program, view.work_offset);
         }
     }
@@ -936,8 +950,8 @@ fn draw_bounds_dimensions(
             min[1] - gap - row,
             min[2],
         ],
+        [0.0, 1.0, 0.0],
         [1.0, 0.0, 0.0],
-        [0.0, -1.0, 0.0],
         glyph,
         &start_text,
         color,
@@ -951,8 +965,8 @@ fn draw_bounds_dimensions(
             min[1] - gap - row,
             min[2],
         ],
+        [0.0, 1.0, 0.0],
         [1.0, 0.0, 0.0],
-        [0.0, -1.0, 0.0],
         glyph,
         &end_text,
         color,
@@ -986,8 +1000,8 @@ fn draw_bounds_dimensions(
             min[1] + pad + text_width(&start_text, glyph) * 0.5,
             min[2],
         ],
+        [1.0, 0.0, 0.0],
         [0.0, -1.0, 0.0],
-        [-1.0, 0.0, 0.0],
         glyph,
         &start_text,
         color,
@@ -1001,26 +1015,27 @@ fn draw_bounds_dimensions(
             max[1] - pad - text_width(&end_text, glyph) * 0.5,
             min[2],
         ],
+        [1.0, 0.0, 0.0],
         [0.0, -1.0, 0.0],
-        [-1.0, 0.0, 0.0],
         glyph,
         &end_text,
         color,
     );
 
-    // Z: up the near corner, values turned to read along the line.
+    // Z: up the front-left corner (min X, max Y). The back corner already
+    // carries the X and Y dimensions and their witnesses.
     dimension_line(
         painter,
         projection,
-        [min[0], min[1], min[2]],
-        [min[0], min[1], max[2]],
-        [-gap * 1.4, -gap * 1.4, 0.0],
+        [min[0], max[1], min[2]],
+        [min[0], max[1], max[2]],
+        [-gap * 1.4, gap * 1.4, 0.0],
         color,
     );
     put_label(
         painter,
         projection,
-        [min[0] - gap * 2.4 - row, min[1] - gap * 1.4, min[2] + size[2] * 0.5],
+        [min[0] - gap * 2.4 - row, max[1] + gap * 1.4, min[2] + size[2] * 0.5],
         [0.0, 0.0, 1.0],
         [0.0, -1.0, 0.0],
         glyph,
@@ -1033,7 +1048,7 @@ fn draw_bounds_dimensions(
         projection,
         [
             min[0] - gap * 2.4 - row,
-            min[1] - gap * 1.4,
+            max[1] + gap * 1.4,
             min[2] - pad - text_width(&start_text, glyph) * 0.5,
         ],
         [0.0, 0.0, 1.0],
@@ -1048,7 +1063,7 @@ fn draw_bounds_dimensions(
         projection,
         [
             min[0] - gap * 2.4 - row,
-            min[1] - gap * 1.4,
+            max[1] + gap * 1.4,
             max[2] + pad + text_width(&end_text, glyph) * 0.5,
         ],
         [0.0, 0.0, 1.0],
