@@ -2595,11 +2595,35 @@ impl LincApp {
                 });
             }
             Page::Files => {
+                // Enter is contextual: a folder opens, a USB file copies into
+                // NC_FILES, an NC file loads.
+                let (entries, selected, on_parent) = if self.files.usb_focused {
+                    (
+                        &self.files.usb_entries,
+                        self.files.usb_selected,
+                        self.files.usb_parent_selected,
+                    )
+                } else {
+                    (
+                        &self.files.nc_entries,
+                        self.files.nc_selected,
+                        self.files.nc_parent_selected,
+                    )
+                };
+                let enter = if on_parent
+                    || entries.get(selected).is_some_and(|entry| entry.is_dir)
+                {
+                    "OPEN"
+                } else if self.files.usb_focused {
+                    "COPY"
+                } else {
+                    "LOAD"
+                };
                 groups.push(ShortcutGroup {
                     title: "BROWSE",
                     items: vec![
                         ("\u{2190}/\u{2192}".into(), "PANE"),
-                        ("Enter".into(), "LOAD"),
+                        ("Enter".into(), enter),
                     ],
                 });
                 groups.push(ShortcutGroup {
