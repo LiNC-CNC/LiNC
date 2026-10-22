@@ -271,6 +271,7 @@ pub fn axis_cards(app: &LincApp, ui: &mut Ui) {
 fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact: bool) {
     let position = app.snapshot.positions.axes.get(axis);
     let work = position.map(|p| p.work).unwrap_or(0.0);
+    let machine = position.map(|p| p.machine).unwrap_or(0.0);
     let dtg = position.map(|p| p.dtg).unwrap_or(0.0);
     let active = app
         .snapshot
@@ -305,6 +306,16 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
         crate::theme::format_position(work, 3),
         FontId::monospace(if compact { 19.0 } else { 23.0 }),
         theme::FG,
+    );
+    // The machine coordinate sits beside the work value: the operator reads the
+    // work position first, and the controller's own coordinate is the reference
+    // for offsets and limits, so it stays visible but dimmed.
+    painter.text(
+        rect.right_top() + Vec2::new(-14.0, 35.0),
+        egui::Align2::RIGHT_CENTER,
+        format!("M {}", crate::theme::format_position(machine, 3)),
+        FontId::monospace(theme::font_size(9.0)),
+        theme::MUTED,
     );
     painter.text(
         rect.left_bottom() + Vec2::new(14.0, -15.0),
