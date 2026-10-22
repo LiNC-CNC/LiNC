@@ -908,7 +908,10 @@ impl LincApp {
         if page == Page::Help {
             self.help.ensure_loaded();
         }
-        if page == Page::Program && self.program.view == ProgramView::Code {
+        if page == Page::Program
+            && self.program.view == ProgramView::Code
+            && self.editing_allowed()
+        {
             self.program.focus_editor = true;
         }
     }

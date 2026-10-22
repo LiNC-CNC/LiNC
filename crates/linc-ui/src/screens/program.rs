@@ -205,6 +205,14 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
 /// pane's bottom edge lines up with whatever sits beside it.
 fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
     let editable = app.editing_allowed();
+    // A read-only editor must not keep the text cursor: egui still paints (and
+    // blinks) the cursor whenever the TextEdit has focus, even when it is not
+    // interactive, so starting a run left the caret blinking on its old line
+    // while the current-line band followed the program.
+    let editor_id = egui::Id::unique("linc-program-editor");
+    if !editable && ui.memory(|memory| memory.has_focus(editor_id)) {
+        ui.memory_mut(|memory| memory.surrender_focus(editor_id));
+    }
     // egui has no page-key support in a text edit or a scroll area, and the
     // header row's widgets would take the key first, so the editor moves its
     // selection by a screenful and scrolls to it, before anything else draws.
@@ -515,7 +523,9 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                 .layouter(&mut layouter)
                 .show(ui);
             if app.program.focus_editor {
-                output.response.request_focus();
+                if editable {
+                    output.response.request_focus();
+                }
                 app.program.focus_editor = false;
             }
             if editable && output.response.changed() {
@@ -526,11 +536,18 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     app.mark_editor_changed();
                 }
             }
-            if let Some(range) = output.cursor_range {
-                let cursor =
-                    usize::from(range.primary.index).min(text.chars().count().saturating_sub(1));
-                let line = text.chars().take(cursor).filter(|ch| *ch == '\n').count() + 1;
-                app.program.selected_line = line.max(1).min(line_count.max(1));
+            // Only an editable editor owns the line selection through its text
+            // cursor. A read-only editor keeps the cursor wherever it was when
+            // the run started; feeding that back every frame fought the shell's
+            // follow-the-executing-line update and made the band (and the view)
+            // flicker back to that old line.
+            if editable {
+                if let Some(range) = output.cursor_range {
+                    let cursor = usize::from(range.primary.index)
+                        .min(text.chars().count().saturating_sub(1));
+                    let line = text.chars().take(cursor).filter(|ch| *ch == '\n').count() + 1;
+                    app.program.selected_line = line.max(1).min(line_count.max(1));
+                }
             }
             // The current line, styled like the tool table's selected row: a
             // translucent accent band across the row and a solid bar on the
