@@ -2604,6 +2604,7 @@ impl LincApp {
                 groups.push(ShortcutGroup {
                     title: "FILE",
                     items: vec![
+                        ("C".into(), "COPY"),
                         ("R".into(), "RENAME"),
                         ("N".into(), "NEW"),
                         (k.files_delete.label(), "DELETE"),
@@ -2611,7 +2612,7 @@ impl LincApp {
                 });
                 groups.push(ShortcutGroup {
                     title: "MEDIA",
-                    items: vec![("C".into(), "COPY"), ("E".into(), "EJECT")],
+                    items: vec![("E".into(), "EJECT")],
                 });
             }
             Page::Help => {

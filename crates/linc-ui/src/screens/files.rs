@@ -586,6 +586,9 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
         .size()
         .y;
     let row_height = line_height + 2.0;
+    // The rim bar sits in the same lane for every row; the name starts after
+    // it (plus air), as in the tool table's T column.
+    let name_pad = theme::SELECTION_BAR + 6.0;
     ui.spacing_mut().item_spacing.y = line_height * 0.5;
     ui.spacing_mut().item_spacing.x = 8.0;
     let selected_row = selected;
@@ -663,9 +666,10 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
                         );
                     if renaming_here {
                         if let Some(buffer) = rename_buffer.as_mut() {
+                            ui.add_space(name_pad);
                             let field = ui.add_sized(
                                 [
-                                    (ui.max_rect().width() - 4.0).max(40.0),
+                                    (ui.max_rect().width() - name_pad - 4.0).max(40.0),
                                     (row_height - 2.0).max(12.0),
                                 ],
                                 egui::TextEdit::singleline(buffer)
@@ -720,6 +724,7 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
                     }
                     match (position, entry) {
                         (0, Some(entry)) => {
+                            ui.add_space(name_pad);
                             ui.label(
                                 RichText::new(if entry.is_dir {
                                     format!("{}/", entry.name)
@@ -738,6 +743,7 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
                             );
                         }
                         (0, None) => {
+                            ui.add_space(name_pad);
                             ui.label(
                                 RichText::new("..")
                                     .monospace()
