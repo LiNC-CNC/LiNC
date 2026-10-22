@@ -170,6 +170,99 @@ impl Dropped {
     }
 }
 
+/// One panel state transition, kept in the panel service's own ring.
+///
+/// `from` and `to` are display strings rather than typed values: the ring
+/// carries fields of different shapes (a mode label, a button mask, an
+/// override), and text keeps every record readable without a union type. They
+/// are formatted for a reader, not decoded again.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PanelEventRecord {
+    pub sequence: u64,
+    pub at_ms: i64,
+    pub kind: String,
+    pub from: String,
+    pub to: String,
+}
+
+/// A simulator panel fault an agent can inject.
+///
+/// These are link and input faults the panel service can produce on request.
+/// Controller-side faults (a lost NML session, a missing bridge snapshot) are
+/// not panel faults: the panel service does not own the bridge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PanelFault {
+    /// The link is down: the panel reports offline and the snapshot stops.
+    Disconnect,
+    /// A read timed out; the panel reports a communication error.
+    Timeout,
+    /// The reply arrived corrupted.
+    CrcError,
+    /// The mode field decodes to zero or several inputs.
+    InvalidMode,
+    /// The protect input cannot be trusted, so it fails closed.
+    ProtectUnknown,
+    /// The panel snapshot stops advancing; its age grows past the stale limit.
+    Stale,
+}
+
+impl PanelFault {
+    pub const ALL: [PanelFault; 6] = [
+        PanelFault::Disconnect,
+        PanelFault::Timeout,
+        PanelFault::CrcError,
+        PanelFault::InvalidMode,
+        PanelFault::ProtectUnknown,
+        PanelFault::Stale,
+    ];
+
+    /// Parse the wire name (`disconnect`, `crc_error`, ...).
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|fault| fault.label() == value.trim())
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Disconnect => "disconnect",
+            Self::Timeout => "timeout",
+            Self::CrcError => "crc_error",
+            Self::InvalidMode => "invalid_mode",
+            Self::ProtectUnknown => "protect_unknown",
+            Self::Stale => "stale",
+        }
+    }
+}
+
+/// A change an agent asks a simulated panel to make.
+///
+/// Every field is optional: an absent field is left alone, which is what makes
+/// a patch safe to apply on a panel an operator is also using. Unless stated
+/// otherwise the values are the operator's own controls, so `estop` and
+/// `power` are the same inputs the simulator window's buttons raise.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SimPanelPatch {
+    pub connected: Option<bool>,
+    /// `EDIT`, `AUTO`, `MDI`, `JOG`, `INC`, `MPG`, `HOME`, `PROG.HOME`, or
+    /// `INVALID`/`UNKNOWN` for the fail-closed states.
+    pub mode: Option<String>,
+    pub feed_override: Option<f64>,
+    pub rapid_override: Option<f64>,
+    pub spindle_override: Option<f64>,
+    pub program_protect: Option<bool>,
+    pub estop: Option<bool>,
+    /// Simulation power state: `cnc_panel.power_on`, not the POWER ON key edge.
+    pub power: Option<bool>,
+    /// Button names from the panel table (`cycle_start`, `estop`, ...).
+    pub press: Option<Vec<String>>,
+    /// Button names to release.
+    pub release: Option<Vec<String>>,
+}
+
 /// Process identity attached to every response.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct BuildInfo {

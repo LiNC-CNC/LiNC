@@ -151,7 +151,12 @@ fn call_tool(session: &mut Session, params: &Value) -> Result<Value, JsonRpcErro
     let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
     if crate::tools::is_gated(name) {
         if let Err(error) = session.policy.check_write(name) {
-            return Ok(tool_error(&error));
+            // A refused write is still an attempt, and the operator reviewing
+            // the audit needs to see it. The refusal itself moves nothing.
+            let audit_id = session
+                .audit
+                .record(name, &args, &format!("refused:{}", error.code), 0);
+            return Ok(tool_error(&error, &audit_id));
         }
     }
     let started = Instant::now();
@@ -205,9 +210,13 @@ fn call_tool(session: &mut Session, params: &Value) -> Result<Value, JsonRpcErro
     }
 }
 
-fn tool_error(error: &DiagError) -> Value {
+fn tool_error(error: &DiagError, audit_id: &str) -> Value {
+    let mut payload = serde_json::to_value(error).unwrap_or_else(|_| json!({}));
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("audit_id".into(), json!(audit_id));
+    }
     json!({
-        "content": [{ "type": "text", "text": serde_json::to_string(error).unwrap_or_default() }],
+        "content": [{ "type": "text", "text": payload.to_string() }],
         "isError": true,
     })
 }

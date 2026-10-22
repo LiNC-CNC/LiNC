@@ -1804,6 +1804,8 @@ Exit criteria:
 
 ### Phase 3 — panel diagnostics and simulator control
 
+Status: implemented, with the deviations listed below.
+
 Deliverables:
 
 - `linc-panel` diagnostic socket.
@@ -1818,6 +1820,38 @@ Exit criteria:
 - Agent can press buttons and observe state transitions.
 - No real panel writes.
 - `linc-mcp` never opens `/dev/ttyUSB0`.
+
+Implemented surface:
+
+- `linc-panel` publishes `panel.sock` next to the HMI socket and answers
+  `diag.panel`, `diag.panel_frames`, `diag.panel_events` and `diag.metrics`.
+  The frame ring holds every RS-485 request, reply and LED write with its CRC
+  verdict; the event ring holds one record per changed field (link, fault,
+  mode, E-stop, power, protect, overrides, button mask).
+- The simulator adds `diag.sim_state`, `diag.sim_set`, `diag.sim_buttons`,
+  `diag.sim_fault`, `diag.sim_clear_faults` and `diag.sim_reset` only when the
+  panel service is started with `--allow-sim-control`. A serial panel has no
+  control surface at all, so there is nothing for a tool to write.
+- `linc-mcp --allow-sim-control --sim` exposes `linc_sim_*`; both ends must
+  agree, the tools are annotated as writes, and a refusal is audited as
+  `refused:WRITE_DISABLED`.
+- `linc_get_panel_events` reads the transition ring, `linc_compare_panel_views`
+  diffs the panel's own snapshot against the HMI's copy, and
+  `linc_test_wait_for` polls one allowlisted path (`panel.*`, `sim.*`,
+  `machine.*`, `task.*`, `program.*`, `alarms.length`, `ui.page`).
+
+Deviations from the table in §9.9:
+
+- The simulator records no raw frames: it has no bytes to record.
+  `linc_get_panel_frames` returns the RS-485 traffic and an empty page under
+  simulation. Link faults are injected through the simulator state instead.
+- `nml_lost` and `snapshot_lost` are not panel faults: the panel service does
+  not own the bridge or the HMI's snapshot. `disconnect`, `timeout`,
+  `crc_error`, `invalid_mode`, `protect_unknown` and `stale` are available.
+- `linc_sim_load_program`, `linc_sim_issue_mdi`, `linc_sim_run`/`pause`/
+  `resume`/`stop` and `linc_sim_command` are not exposed: they move the
+  machine, so they belong to the guarded-write work (§13.2), not to panel
+  diagnostics. The simulator's own controls are the only writes.
 
 ### Phase 4 — deep debug and export
 

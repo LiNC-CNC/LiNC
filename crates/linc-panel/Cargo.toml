@@ -16,6 +16,7 @@ eframe.workspace = true
 egui.workspace = true
 env_logger.workspace = true
 log.workspace = true
+serde_json.workspace = true
 serialport.workspace = true
 linc-core = { path = "../linc-core" }
 linc-diag = { path = "../linc-diag" }

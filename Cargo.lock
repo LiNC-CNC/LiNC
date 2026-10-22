@@ -1770,6 +1770,7 @@ dependencies = [
  "linc-diag",
  "linc-hal",
  "log",
+ "serde_json",
  "serialport",
  "signal-hook",
  "thiserror 2.0.21",

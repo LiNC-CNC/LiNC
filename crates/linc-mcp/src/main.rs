@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -14,16 +14,18 @@ struct Args {
     /// Override the `linc` diagnostic socket.
     #[arg(long)]
     socket: Option<PathBuf>,
-    /// Override the `linc-panel` diagnostic socket (reserved; panel tools come later).
+    /// Override the `linc-panel` diagnostic socket.
     #[arg(long)]
     panel_socket: Option<PathBuf>,
     /// Append audit records to this file in addition to stderr.
     #[arg(long)]
     audit: Option<PathBuf>,
-    /// Allow tools that change the simulator. Off by default.
+    /// Allow tools that change a simulator panel. Off by default; the panel
+    /// service must also be started with --allow-sim-control.
     #[arg(long)]
-    allow_writes: bool,
-    /// Required together with --allow-writes.
+    allow_sim_control: bool,
+    /// Required together with --allow-sim-control: state that this session is a
+    /// simulator, so no tool may touch a real panel.
     #[arg(long)]
     sim: bool,
 }
@@ -32,6 +34,9 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,linc_mcp=info"))
         .init();
     let args = Args::parse();
+    if args.allow_sim_control && !args.sim {
+        bail!("--allow-sim-control requires --sim: simulator control is never enabled for a real machine");
+    }
     let socket = args
         .socket
         .clone()
@@ -48,11 +53,10 @@ fn main() -> Result<()> {
         .or_else(|| linc_diag::discovery::discover("panel", None))
         .and_then(|path| linc_diag::Client::connect(&path).ok());
     let policy = linc_mcp::policy::Policy {
-        allow_writes: args.allow_writes,
-        allow_sim_writes: args.allow_writes && args.sim,
+        allow_sim_control: args.allow_sim_control && args.sim,
     };
-    if args.allow_writes {
-        log::warn!("write tools enabled (sim only); every call is audited");
+    if policy.allow_sim_control {
+        log::warn!("simulator control enabled (--allow-sim-control --sim); every call is audited");
     }
     let audit = linc_mcp::audit::Audit::new(args.audit.clone());
     let mut session = linc_mcp::server::Session::new(client, panel, policy, audit);

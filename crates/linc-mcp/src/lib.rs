@@ -5,11 +5,13 @@
 //! every piece of machine state comes from `linc-diag`.
 
 pub mod audit;
+pub mod compare;
 pub mod policy;
 pub mod prompts;
 pub mod resources;
 pub mod server;
 pub mod tools;
+pub mod wait;
 
 pub use server::serve;
 
@@ -18,7 +20,10 @@ pub const SERVER_TITLE: &str = "LiNC diagnostics";
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
 
 pub const INSTRUCTIONS: &str = "\
-Read-only LiNC diagnostics. Real-machine control is disabled by default.\n\
+Read-only LiNC diagnostics. Real-machine control is never available.\n\
+Simulator panel control is off unless linc-mcp was started with\n\
+`--allow-sim-control --sim` and linc-panel with `--allow-sim-control`; even then\n\
+the simulator's own E-stop and power inputs are the only way to change them.\n\
 Check `stale` and `age_ms` before trusting state; a stale snapshot fails closed\n\
 for any write decision. The panel and its hardware E-stop remain authoritative.\n\
 Use linc_why_blocked before suggesting an action, and prefer linc_get_state_summary\n\
@@ -116,7 +121,7 @@ mod tests {
     #[test]
     fn tools_are_read_only_by_default_and_unknown_names_fail_cleanly() {
         let (mut session, handle) = session("readonly");
-        assert!(!session.policy.allow_writes);
+        assert!(!session.policy.allow_sim_control);
         assert!(!tools::is_gated("linc_get_snapshot"));
 
         let replies = round_trip(
@@ -226,5 +231,159 @@ mod tests {
         let text = replies[0]["result"]["content"][0]["text"].as_str().unwrap();
         let error: Value = serde_json::from_str(text).unwrap();
         assert_eq!(error["code"], "LINC_NOT_RUNNING");
+    }
+
+    /// Records what a tool asked the simulator to do, so a test can assert on
+    /// the request as well as the reply.
+    #[derive(Default)]
+    struct StubSim {
+        calls: Mutex<Vec<Value>>,
+    }
+
+    impl linc_diag::SimControl for StubSim {
+        fn state(&self) -> Value {
+            json!({
+                "connected": true, "error": false, "estop": true, "power": false,
+                "mode": "AUTO", "program_protect": false, "faults": [],
+            })
+        }
+
+        fn apply(
+            &self,
+            patch: &linc_core::diag::SimPanelPatch,
+        ) -> Result<Value, linc_core::diag::DiagError> {
+            self.calls.lock().unwrap().push(json!({ "apply": patch }));
+            Ok(self.state())
+        }
+
+        fn buttons(
+            &self,
+            press: &[String],
+            release: &[String],
+            duration_ms: Option<u64>,
+        ) -> Result<Value, linc_core::diag::DiagError> {
+            self.calls.lock().unwrap().push(json!({
+                "press": press, "release": release, "duration_ms": duration_ms,
+            }));
+            Ok(self.state())
+        }
+
+        fn inject_fault(
+            &self,
+            fault: linc_core::diag::PanelFault,
+        ) -> Result<Value, linc_core::diag::DiagError> {
+            self.calls.lock().unwrap().push(json!({ "fault": fault.label() }));
+            Ok(self.state())
+        }
+
+        fn clear_faults(&self) -> Result<Value, linc_core::diag::DiagError> {
+            self.calls.lock().unwrap().push(json!({ "clear_faults": true }));
+            Ok(self.state())
+        }
+
+        fn reset(&self) -> Result<Value, linc_core::diag::DiagError> {
+            self.calls.lock().unwrap().push(json!({ "reset": true }));
+            Ok(self.state())
+        }
+    }
+
+    fn sim_session(
+        name: &str,
+    ) -> (
+        server::Session,
+        linc_diag::ServerHandle,
+        linc_diag::ServerHandle,
+        Arc<StubSim>,
+    ) {
+        let (mut session, hmi_handle) = session(name);
+        let dir = std::env::temp_dir().join(format!("linc-mcp-panel-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let bus = Arc::new(Mutex::new(linc_diag::PanelBus::new()));
+        let stub = Arc::new(StubSim::default());
+        let process = ProcessInfo {
+            pid: std::process::id(),
+            role: "panel".into(),
+            build: BuildInfo {
+                version: "test".into(),
+                backend: "sim".into(),
+                ..BuildInfo::default()
+            },
+        };
+        let source = Arc::new(linc_diag::PanelSource::new(
+            bus,
+            process,
+            Some(stub.clone() as Arc<dyn linc_diag::SimControl>),
+        ));
+        let panel_handle = linc_diag::serve(dir, "panel", source).expect("panel serve");
+        let panel_client = linc_diag::Client::connect(&panel_handle.socket).expect("connect panel");
+        session.panel = Some(panel_client);
+        (session, hmi_handle, panel_handle, stub)
+    }
+
+    #[test]
+    fn simulator_writes_are_refused_until_the_policy_allows_them() {
+        let (mut session, hmi, panel, stub) = sim_session("sim-policy");
+        let replies = round_trip(
+            &mut session,
+            &[json!({
+                "jsonrpc":"2.0","id":1,"method":"tools/call",
+                "params":{"name":"linc_sim_press_button","arguments":{"button":"cycle_start","duration_ms":25}}
+            })],
+        );
+        assert_eq!(replies[0]["result"]["isError"], true);
+        let error = json_from(&replies[0]);
+        assert_eq!(error["code"], "WRITE_DISABLED", "{error}");
+        assert!(error["audit_id"].as_str().is_some(), "refusals are audited too");
+        assert!(stub.calls.lock().unwrap().is_empty(), "nothing reached the simulator");
+
+        session.policy.allow_sim_control = true;
+        let replies = round_trip(
+            &mut session,
+            &[
+                json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"linc_sim_press_button","arguments":{"button":"cycle_start","duration_ms":25}}}),
+                json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"linc_sim_inject_fault","arguments":{"kind":"disconnect"}}}),
+                json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"linc_sim_inject_fault","arguments":{"kind":"nope"}}}),
+            ],
+        );
+        assert_eq!(replies[0]["result"]["isError"], false, "{replies:?}");
+        assert_eq!(json_from(&replies[0])["data"]["applied"], true);
+        assert_eq!(replies[1]["result"]["isError"], false);
+        assert_eq!(json_from(&replies[1])["data"]["injected"], "disconnect");
+        assert_eq!(replies[2]["result"]["isError"], true, "an unknown fault is refused");
+
+        let calls = stub.calls.lock().unwrap().clone();
+        assert_eq!(calls[0]["press"], json!(["cycle_start"]));
+        assert_eq!(calls[0]["duration_ms"], 25);
+        assert_eq!(calls[1]["fault"], "disconnect");
+        drop(panel);
+        drop(hmi);
+    }
+
+    #[test]
+    fn panel_events_compare_and_wait_answer_from_the_panel_socket() {
+        let (mut session, hmi, panel, _stub) = sim_session("sim-read");
+        let replies = round_trip(
+            &mut session,
+            &[
+                json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"linc_get_panel_events","arguments":{"limit":5}}}),
+                json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"linc_compare_panel_views","arguments":{}}}),
+                json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"linc_test_wait_for","arguments":{"path":"panel.connected","op":"eq","value":false,"timeout_ms":0}}}),
+                json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"linc_test_wait_for","arguments":{"path":"machine.secret","value":1}}}),
+            ],
+        );
+        assert_eq!(replies[0]["result"]["isError"], false, "{replies:?}");
+        assert!(json_from(&replies[0])["data"]["events"].is_array());
+
+        assert_eq!(replies[1]["result"]["isError"], false, "{replies:?}");
+        let compared = json_from(&replies[1]);
+        assert!(compared["data"]["same"].is_boolean());
+        assert!(compared["data"]["differences"].is_array());
+
+        assert_eq!(replies[2]["result"]["isError"], false, "{replies:?}");
+        assert_eq!(json_from(&replies[2])["data"]["matched"], true);
+
+        assert_eq!(replies[3]["result"]["isError"], true, "a path outside the list is refused");
+        drop(panel);
+        drop(hmi);
     }
 }

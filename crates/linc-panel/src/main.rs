@@ -37,6 +37,10 @@ struct Args {
     /// Do not create the diagnostic socket for linc-mcp.
     #[arg(long)]
     no_diag: bool,
+    /// Let linc-mcp drive this simulator through the diagnostic socket. The
+    /// panel and its E-stop stay authoritative; a real panel ignores this.
+    #[arg(long)]
+    allow_sim_control: bool,
     /// Do not exchange standalone simulation state files; use only HAL.
     #[arg(long)]
     no_ipc: bool,
@@ -96,6 +100,25 @@ fn main() -> Result<()> {
         cycle
     );
 
+    // The simulator handle exists before the diagnostic socket, because the
+    // socket's control surface is a view of this one state. The window and the
+    // panel loop share it, so a tool's change is an operator's change.
+    let sim_handle = if simulated {
+        Some(linc_panel::sim::SimPanelHandle::new())
+    } else {
+        None
+    };
+    if args.allow_sim_control && !simulated {
+        log::warn!("--allow-sim-control ignored: this panel is not a simulator");
+    }
+    let sim_control: Option<Arc<dyn linc_diag::SimControl>> = match (&sim_handle, args.allow_sim_control, simulated) {
+        (Some(handle), true, true) => {
+            log::warn!("simulator control armed for linc-mcp (--allow-sim-control)");
+            Some(Arc::new(linc_panel::sim::SimControlState::new(handle.clone())))
+        }
+        _ => None,
+    };
+
     // Panel diagnostic socket. The panel owns its own state, so it publishes
     // its own socket instead of routing through the HMI. A failure here never
     // stops the panel loop.
@@ -114,7 +137,11 @@ fn main() -> Result<()> {
                 backend: if simulated { "sim".into() } else { "serial".into() },
             },
         };
-        let source = Arc::new(linc_diag::PanelSource::new(panel_bus.clone(), process));
+        let source = Arc::new(linc_diag::PanelSource::new(
+            panel_bus.clone(),
+            process,
+            sim_control,
+        ));
         match linc_diag::serve(linc_diag::discovery::runtime_dir(), "panel", source) {
             Ok(handle) => {
                 log::info!("panel diagnostic socket at {}", handle.socket.display());
@@ -138,6 +165,7 @@ fn main() -> Result<()> {
             args.once,
             shutdown,
             panel_bus,
+            sim_handle.context("simulator handle")?,
         )
     } else {
         run_physical(profile, cycle, args.no_hal, args.once, shutdown, panel_bus)
@@ -161,6 +189,7 @@ fn run_physical(
         .unwrap_or_else(|| "/dev/ttyUSB0".into());
     let baud = profile.config.panel.link.baud.unwrap_or(115200);
     let mut driver = linc_panel::CncPanelDriver::new(port, baud, cycle);
+    driver.set_frame_tap(panel_bus.clone());
     run_loop(&mut driver, cycle, no_hal, once, shutdown, None, Some(panel_bus))
 }
 
@@ -175,13 +204,13 @@ fn run_simulated(
     once: bool,
     shutdown: Arc<AtomicBool>,
     panel_bus: Arc<Mutex<linc_diag::PanelBus>>,
+    handle: linc_panel::sim::SimPanelHandle,
 ) -> Result<()> {
     let ipc = if no_ipc {
         None
     } else {
         Some(SimPanelIpc::from_env())
     };
-    let handle = linc_panel::sim::SimPanelHandle::new();
     // The simulator starts in the state a real cabinet is found in before the
     // operator powers it up: E-stop latched and power off, panel connected.
     // Release the mushroom and press POWER ON to bring the machine up.

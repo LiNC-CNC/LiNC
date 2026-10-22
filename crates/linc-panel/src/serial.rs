@@ -5,6 +5,7 @@
 //! levels, and never opens a second link.
 
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use linc_core::model::{PanelCapabilities, PanelLinkStats, PanelModeValidity, PanelSnapshot};
@@ -15,6 +16,27 @@ use crate::{
     decode_spindle_override, extract_button_state, led_state_to_bytes, make_snapshot, modbus_crc16,
     PanelDisplay, PanelDriver, PanelError, PanelOutputs,
 };
+
+/// Record one frame on the panel diagnostic ring, if one is attached.
+///
+/// The ring is the only place raw bytes are kept: they are never logged, because
+/// a 20 Hz link would bury the log and the bytes are only useful next to the
+/// decoded state.
+fn record_frame(
+    tap: &Option<Arc<Mutex<linc_diag::PanelBus>>>,
+    direction: &str,
+    bytes: &[u8],
+    decoded: Option<String>,
+    crc_ok: Option<bool>,
+    error: Option<String>,
+) {
+    let Some(bus) = tap else {
+        return;
+    };
+    if let Ok(mut bus) = bus.lock() {
+        bus.push_frame(direction, bytes, decoded, crc_ok, error);
+    }
+}
 
 pub struct CncPanelDriver {
     port: Option<Box<dyn SerialPort>>,
@@ -31,6 +53,7 @@ pub struct CncPanelDriver {
     connected: bool,
     error: bool,
     status_transport_warned: bool,
+    frames: Option<Arc<Mutex<linc_diag::PanelBus>>>,
 }
 
 impl CncPanelDriver {
@@ -66,7 +89,13 @@ impl CncPanelDriver {
             connected: false,
             error: false,
             status_transport_warned: false,
+            frames: None,
         }
+    }
+
+    /// Tap every request, reply and write onto the panel diagnostic ring.
+    pub fn set_frame_tap(&mut self, bus: Arc<Mutex<linc_diag::PanelBus>>) {
+        self.frames = Some(bus);
     }
 
     fn open(&mut self) -> Result<(), PanelError> {
@@ -88,21 +117,43 @@ impl CncPanelDriver {
     }
 
     fn communicate(&mut self) -> Result<[u8; 12], PanelError> {
+        let tap = self.frames.clone();
         let Some(port) = self.port.as_mut() else {
             return Err(PanelError::Transport("not open".into()));
         };
         let started = Instant::now();
-        port.write_all(&[0xEB, 0x01, 0x80, 0x8E])?;
+        let request = [0xEB, 0x01, 0x80, 0x8E];
+        record_frame(&tap, "tx", &request, Some("poll".into()), None, None);
+        port.write_all(&request)?;
         port.flush()?;
         std::thread::sleep(Duration::from_micros(4000));
 
         let mut response = [0u8; 12];
-        port.read_exact(&mut response)?;
+        if let Err(error) = port.read_exact(&mut response) {
+            // No bytes were returned, so the record carries the error and an
+            // empty payload rather than an invented reply.
+            record_frame(&tap, "rx", &[], None, None, Some(error.to_string()));
+            return Err(error.into());
+        }
         self.stats.rx_bytes += response.len() as u64;
         self.stats.last_rx_age_ms = Some(0);
         self.last_rx = Some(Instant::now());
         let calculated = modbus_crc16(&response[..10]);
-        if response[10..12] != calculated && response[10..12] != [calculated[1], calculated[0]] {
+        let crc_ok =
+            response[10..12] == calculated || response[10..12] == [calculated[1], calculated[0]];
+        record_frame(
+            &tap,
+            "rx",
+            &response,
+            None,
+            Some(crc_ok),
+            if crc_ok {
+                None
+            } else {
+                Some("CRC mismatch".into())
+            },
+        );
+        if !crc_ok {
             self.stats.crc_errors += 1;
             return Err(PanelError::Protocol("CRC mismatch".into()));
         }
@@ -118,10 +169,13 @@ impl CncPanelDriver {
         frame.push(crc[1]);
         frame.push(crc[0]);
         std::thread::sleep(Duration::from_micros(5000));
+        record_frame(&tap, "tx", &frame, Some("led frame".into()), Some(true), None);
         port.write_all(&frame)?;
         self.stats.tx_bytes += frame.len() as u64;
         std::thread::sleep(Duration::from_micros(5000));
-        port.write_all(&[0xEB, 0x02, 0x81, 0xCE])?;
+        let commit = [0xEB, 0x02, 0x81, 0xCE];
+        record_frame(&tap, "tx", &commit, Some("led commit".into()), None, None);
+        port.write_all(&commit)?;
         self.stats.tx_bytes += 4;
         port.flush()?;
 
@@ -356,5 +410,21 @@ mod tests {
         );
         assert_eq!(outputs.home, [true, true, false, false]);
         assert!(outputs.proghome.iter().all(|value| !value));
+    }
+
+    #[test]
+    fn the_frame_tap_keeps_the_bytes_and_their_crc_verdict() {
+        let bus = Arc::new(Mutex::new(linc_diag::PanelBus::new()));
+        let tap = Some(bus.clone());
+        record_frame(&tap, "tx", &[0xeb, 0x01, 0x80, 0x8e], Some("poll".into()), None, None);
+        record_frame(&tap, "rx", &[0xeb, 0x01, 0xaa], None, Some(false), Some("CRC mismatch".into()));
+
+        let frames = bus.lock().unwrap().frames(10);        let frames = frames["frames"].as_array().unwrap();
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[1]["direction"], "tx", "newest first");
+        assert_eq!(frames[1]["hex"], "eb01808e");
+        assert_eq!(frames[1]["decoded"], "poll");
+        assert_eq!(frames[0]["crc_ok"], false);
+        assert_eq!(frames[0]["error"], "CRC mismatch");
     }
 }

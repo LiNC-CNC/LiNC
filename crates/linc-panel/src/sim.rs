@@ -6,13 +6,70 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
+use linc_core::diag::{DiagError, PanelFault, SimPanelPatch};
 use linc_core::model::{
     now_ms, PanelCapabilities, PanelLinkStats, PanelMode, PanelModeValidity, PanelSnapshot,
 };
+use serde_json::{json, Value};
 
 use crate::{
     base_capabilities, buttons, make_snapshot, PanelDisplay, PanelDriver, PanelError, PanelOutputs,
 };
+
+/// Link and input faults a simulator can produce on request.
+///
+/// `stale` is not here: it stops the diagnostic bus from advancing, which is the
+/// panel service's publication, not the simulator's state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SimFaults {
+    pub disconnect: bool,
+    pub timeout: bool,
+    pub crc_error: bool,
+    pub invalid_mode: bool,
+    pub protect_unknown: bool,
+}
+
+impl SimFaults {
+    pub fn set(&mut self, fault: PanelFault) {
+        match fault {
+            PanelFault::Disconnect => self.disconnect = true,
+            PanelFault::Timeout => self.timeout = true,
+            PanelFault::CrcError => self.crc_error = true,
+            PanelFault::InvalidMode => self.invalid_mode = true,
+            PanelFault::ProtectUnknown => self.protect_unknown = true,
+            // The bus owns staleness; see `PanelBus::set_stale`.
+            PanelFault::Stale => {}
+        }
+    }
+
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn labels(self) -> Vec<&'static str> {
+        let mut labels = Vec::new();
+        if self.disconnect {
+            labels.push("disconnect");
+        }
+        if self.timeout {
+            labels.push("timeout");
+        }
+        if self.crc_error {
+            labels.push("crc_error");
+        }
+        if self.invalid_mode {
+            labels.push("invalid_mode");
+        }
+        if self.protect_unknown {
+            labels.push("protect_unknown");
+        }
+        labels
+    }
+
+    pub fn any(self) -> bool {
+        !self.labels().is_empty()
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct SimPanelState {
@@ -36,6 +93,10 @@ pub struct SimPanelState {
     pub sseg_status: i32,
     pub velocity: [f64; 3],
     pub last_cycle_ms: f64,
+    pub faults: SimFaults,
+    /// Buttons a remote caller pressed with a deadline, so a held key is
+    /// released even if the caller never does.
+    pub holds: Vec<(u64, Instant)>,
 }
 
 /// How far through its power-up sequence a simulated cabinet starts.
@@ -117,6 +178,8 @@ impl Default for SimPanelState {
             sseg_status: 54,
             velocity: [0.0; 3],
             last_cycle_ms: 0.0,
+            faults: SimFaults::default(),
+            holds: Vec::new(),
         }
     }
 }
@@ -137,9 +200,138 @@ impl SimPanelState {
         let _ = duration;
     }
 
+    /// Press `mask` and release it on its own after `duration`, so a remote
+    /// caller that disconnects cannot leave a key held forever.
+    pub fn press_for(&mut self, mask: u64, duration: Duration) {
+        self.buttons |= mask;
+        if duration.is_zero() {
+            let _ = self.release_expired_at(Instant::now());
+            return;
+        }
+        let until = Instant::now() + duration;
+        match self.holds.iter_mut().find(|(held, _)| *held == mask) {
+            Some((_, at)) => *at = until,
+            None => self.holds.push((mask, until)),
+        }
+    }
+
+    /// Release every held button whose deadline passed. Returns true when the
+    /// button mask changed.
+    pub fn release_expired(&mut self) -> bool {
+        self.release_expired_at(Instant::now())
+    }
+
+    fn release_expired_at(&mut self, now: Instant) -> bool {
+        let mut released = 0u64;
+        self.holds.retain(|(mask, at)| {
+            if *at <= now {
+                released |= *mask;
+                false
+            } else {
+                true
+            }
+        });
+        if released == 0 {
+            return false;
+        }
+        self.buttons &= !released;
+        true
+    }
+
     pub fn led(&self, mask: u64) -> bool {
         self.leds & mask != 0
     }
+
+    /// Apply the simulator part of a remote patch. `Stale` is the bus's, and
+    /// button names are resolved by the caller.
+    pub fn apply_patch(
+        &mut self,
+        patch: &SimPanelPatch,
+        press: u64,
+        release: u64,
+    ) -> Result<(), DiagError> {
+        if let Some(connected) = patch.connected {
+            self.connected = connected;
+        }
+        if let Some(mode) = patch.mode.as_deref() {
+            self.mode = parse_mode(mode)?;
+        }
+        if let Some(value) = patch.feed_override {
+            check_override("feed_override", value)?;
+            self.feed_override = value;
+        }
+        if let Some(value) = patch.rapid_override {
+            check_override("rapid_override", value)?;
+            self.rapid_override = value;
+        }
+        if let Some(value) = patch.spindle_override {
+            check_override("spindle_override", value)?;
+            self.spindle_override = value;
+        }
+        if let Some(protect) = patch.program_protect {
+            self.program_protect = protect;
+        }
+        if let Some(estop) = patch.estop {
+            // Releasing the mushroom raises the same one-shot the window's key
+            // raises, so the controller leaves E-stop without being powered on.
+            if self.estop && !estop {
+                self.estop_reset_pulse = true;
+            }
+            self.estop = estop;
+        }
+        if let Some(power) = patch.power {
+            if self.power != power {
+                if power {
+                    self.power_on_pulse = true;
+                } else {
+                    self.power_off_pulse = true;
+                }
+            }
+            self.power = power;
+        }
+        self.buttons |= press;
+        self.buttons &= !release;
+        Ok(())
+    }
+}
+
+/// Map a mode label (`AUTO`, `PROG.HOME`, ...) to the panel mode.
+pub fn parse_mode(value: &str) -> Result<PanelMode, DiagError> {
+    let value = value.trim();
+    PanelMode::ALL
+        .into_iter()
+        .find(|mode| mode.label().eq_ignore_ascii_case(value))
+        .ok_or_else(|| {
+            DiagError::invalid_argument(format!(
+                "unknown panel mode {value:?}; use a mode label, or diag.sim_fault invalid_mode"
+            ))
+        })
+}
+
+fn check_override(name: &str, value: f64) -> Result<(), DiagError> {
+    if !value.is_finite() || !(0.0..=2.0).contains(&value) {
+        return Err(DiagError::invalid_argument(format!(
+            "{name} must be between 0 and 2"
+        )));
+    }
+    Ok(())
+}
+
+/// Resolve button names against the panel table, so a tool cannot invent a pin.
+pub fn button_mask(name: &str) -> Option<u64> {
+    crate::BUTTON_PINS
+        .iter()
+        .find(|(button, _)| *button == name.trim())
+        .map(|(_, mask)| *mask)
+}
+
+/// The names of the buttons currently pressed, for the diagnostic socket.
+pub fn pressed_button_names(mask: u64) -> Vec<&'static str> {
+    crate::BUTTON_PINS
+        .iter()
+        .filter(|(_, bit)| mask & *bit != 0)
+        .map(|(name, _)| *name)
+        .collect()
 }
 
 #[derive(Clone)]
@@ -171,6 +363,131 @@ impl SimPanelHandle {
 impl Default for SimPanelHandle {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// The simulator's control surface for the panel diagnostic socket.
+///
+/// It mutates the same handle the window and the driver use, so every change
+/// goes through `cnc_panel.*` on the next cycle exactly as an operator's key
+/// would. It exists only when the panel service was started with
+/// `--allow-sim-control`; a real panel has no instance of it.
+pub struct SimControlState {
+    handle: SimPanelHandle,
+}
+
+impl SimControlState {
+    pub fn new(handle: SimPanelHandle) -> Self {
+        Self { handle }
+    }
+
+    fn state_value(&self) -> Value {
+        let state = self.handle.snapshot();
+        json!({
+            "connected": state.connected,
+            "error": state.error,
+            "estop": state.estop,
+            "power": state.power,
+            "mode": state.mode.label(),
+            "feed_override": state.feed_override,
+            "rapid_override": state.rapid_override,
+            "spindle_override": state.spindle_override,
+            "program_protect": state.program_protect,
+            "buttons": state.buttons,
+            "buttons_hex": format!("0x{:016x}", state.buttons),
+            "pressed": pressed_button_names(state.buttons),
+            "leds": state.leds,
+            "sseg_tool": state.sseg_tool,
+            "sseg_next_tool": state.sseg_next_tool,
+            "sseg_status": state.sseg_status,
+            "faults": state.faults.labels(),
+            "held_buttons": state.holds.len(),
+        })
+    }
+}
+
+fn resolve_buttons(names: &[String]) -> Result<u64, DiagError> {
+    names.iter().try_fold(0u64, |mask, name| {
+        button_mask(name)
+            .map(|bit| mask | bit)
+            .ok_or_else(|| {
+                DiagError::invalid_argument(format!(
+                    "unknown panel button {name:?}; buttons are the names in linc_get_panel_state"
+                ))
+            })
+    })
+}
+
+impl linc_diag::SimControl for SimControlState {
+    fn state(&self) -> Value {
+        self.state_value()
+    }
+
+    fn apply(&self, patch: &SimPanelPatch) -> Result<Value, DiagError> {
+        let press = resolve_buttons(patch.press.as_deref().unwrap_or_default())?;
+        let release = resolve_buttons(patch.release.as_deref().unwrap_or_default())?;
+        if press & release != 0 {
+            return Err(DiagError::invalid_argument(
+                "a button cannot be pressed and released in the same patch",
+            ));
+        }
+        let mut error = None;
+        self.handle.set(|state| {
+            if let Err(failure) = state.apply_patch(patch, press, release) {
+                error = Some(failure);
+            }
+        });
+        match error {
+            Some(error) => Err(error),
+            None => Ok(self.state_value()),
+        }
+    }
+
+    fn buttons(
+        &self,
+        press: &[String],
+        release: &[String],
+        duration_ms: Option<u64>,
+    ) -> Result<Value, DiagError> {
+        let press_mask = resolve_buttons(press)?;
+        let release_mask = resolve_buttons(release)?;
+        if press_mask & release_mask != 0 {
+            return Err(DiagError::invalid_argument(
+                "a button cannot be pressed and released at once",
+            ));
+        }
+        self.handle.set(|state| {
+            if release_mask != 0 {
+                state.buttons &= !release_mask;
+                state.holds.retain(|(held, _)| held & release_mask == 0);
+            }
+            if press_mask != 0 {
+                match duration_ms {
+                    Some(duration) => {
+                        state.press_for(press_mask, Duration::from_millis(duration.max(1)))
+                    }
+                    None => state.buttons |= press_mask,
+                }
+            }
+        });
+        Ok(self.state_value())
+    }
+
+    fn inject_fault(&self, fault: PanelFault) -> Result<Value, DiagError> {
+        self.handle.set(|state| state.faults.set(fault));
+        Ok(self.state_value())
+    }
+
+    fn clear_faults(&self) -> Result<Value, DiagError> {
+        self.handle.set(|state| state.faults.clear());
+        Ok(self.state_value())
+    }
+
+    fn reset(&self) -> Result<Value, DiagError> {
+        self.handle.set(|state| {
+            *state = SimPanelState::default();
+        });
+        Ok(self.state_value())
     }
 }
 
@@ -219,8 +536,8 @@ impl SimPanelDriver {
         self.handle.set(|state| state.set_button(mask, pressed));
     }
 
-    fn outputs_from_state(&self, state: &SimPanelState) -> PanelOutputs {
-        let mode = if state.connected {
+    fn outputs_from_state(&self, state: &SimPanelState, connected: bool) -> PanelOutputs {
+        let mode = if connected {
             PanelModeValidity::Valid(state.mode)
         } else {
             PanelModeValidity::Unknown
@@ -298,27 +615,14 @@ impl PanelDriver for SimPanelDriver {
     }
 
     fn poll(&mut self) -> Result<PanelSnapshot, PanelError> {
-        if self.last_poll.elapsed() < self.cycle_time {
-            let state = self.handle.snapshot();
-            return Ok(make_snapshot(
-                state.connected,
-                state.error,
-                &self.outputs,
-                self.caps.clone(),
-                PanelLinkStats {
-                    cycle_time_ms: state.last_cycle_ms,
-                    port: "virtual".into(),
-                    available: false,
-                    ..Default::default()
-                },
-            ));
-        }
-        self.last_poll = Instant::now();
-        // Power pulses are one-shots that drive `cnc_panel.power_on` ->
-        // `halui.estop.reset`. They must expire on the driver cycle: the panel
-        // service runs headless under LinuxCNC, where the simulator window (and
-        // its timer) never runs, so a pulse set there would stay asserted.
-        {
+        let due = self.last_poll.elapsed() >= self.cycle_time;
+        if due {
+            self.last_poll = Instant::now();
+            // Power pulses are one-shots that drive `cnc_panel.power_on` ->
+            // `halui.estop.reset`. They must expire on the driver cycle: the
+            // panel service runs headless under LinuxCNC, where the simulator
+            // window (and its timer) never runs, so a pulse set there would
+            // stay asserted.
             let state = self.handle.snapshot();
             let asserted =
                 state.power_on_pulse || state.power_off_pulse || state.estop_reset_pulse;
@@ -335,13 +639,24 @@ impl PanelDriver for SimPanelDriver {
                 (false, _) => self.pulse_set_at = None,
                 _ => {}
             }
+            // A remote caller can press a key for a bounded time and go away;
+            // the deadline lives in the state so the key is released anyway.
+            self.handle.set(|state| {
+                state.release_expired();
+            });
         }
+
         let state = self.handle.snapshot();
-        let outputs = self.outputs_from_state(&state);
-        self.outputs = outputs.clone();
+        let faults = state.faults;
+        let connected = state.connected && !faults.disconnect && !faults.timeout;
+        let error = state.error || faults.disconnect || faults.timeout || faults.crc_error;
+        let outputs = self.outputs_from_state(&state, connected);
+        if due {
+            self.outputs = outputs.clone();
+        }
         let mut snapshot = make_snapshot(
-            state.connected,
-            state.error,
+            connected,
+            error,
             &outputs,
             self.caps.clone(),
             PanelLinkStats {
@@ -354,6 +669,14 @@ impl PanelDriver for SimPanelDriver {
                 ..Default::default()
             },
         );
+        // Faults that do not stop the link: the panel is connected but its
+        // inputs are the ones the fault describes.
+        if faults.invalid_mode && connected {
+            snapshot.mode = PanelModeValidity::Invalid(Vec::new());
+        }
+        if faults.protect_unknown {
+            snapshot.program_protect_known = false;
+        }
         snapshot.snapshot_age_ms = now_ms();
         Ok(snapshot)
     }
@@ -1738,6 +2061,7 @@ fn draw_key_grid(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use linc_diag::SimControl as _;
 
     #[test]
     fn a_ready_sim_raises_the_power_up_one_shots() {
@@ -1815,6 +2139,125 @@ mod tests {
         let state = handle.snapshot();
         assert_eq!(state.leds, 0b101);
         assert_eq!(state.sseg_status, 55);
+    }
+
+    fn poll_driver(driver: &mut SimPanelDriver) -> PanelSnapshot {
+        // The driver rate-limits to its cycle; one sleep makes the next poll a
+        // real one rather than the cached snapshot.
+        std::thread::sleep(Duration::from_millis(3));
+        driver.poll().unwrap()
+    }
+
+    #[test]
+    fn a_disconnect_fault_takes_the_panel_offline_and_an_invalid_mode_fails_closed() {
+        let handle = SimPanelHandle::new();
+        let mut driver = SimPanelDriver::new(handle.clone(), Duration::from_millis(1));
+
+        handle.set(|state| state.faults.set(PanelFault::Disconnect));
+        let snapshot = poll_driver(&mut driver);
+        assert!(!snapshot.connected);
+        assert!(snapshot.communication_error);
+        assert_eq!(snapshot.mode, PanelModeValidity::Unknown);
+
+        handle.set(|state| state.faults.clear());
+        handle.set(|state| state.faults.set(PanelFault::InvalidMode));
+        let snapshot = poll_driver(&mut driver);
+        assert!(snapshot.connected, "the link still works");
+        assert!(matches!(snapshot.mode, PanelModeValidity::Invalid(_)));
+    }
+
+    #[test]
+    fn an_unknown_protect_input_reports_itself_as_unknown() {
+        let handle = SimPanelHandle::new();
+        let mut driver = SimPanelDriver::new(handle, Duration::from_millis(1));
+        handle_set_fault(&driver, PanelFault::ProtectUnknown);
+        let snapshot = poll_driver(&mut driver);
+        assert!(!snapshot.program_protect_known);
+        assert!(snapshot.protect_effective(), "an untrusted protect fails closed");
+    }
+
+    fn handle_set_fault(driver: &SimPanelDriver, fault: PanelFault) {
+        driver.handle().set(|state| state.faults.set(fault));
+    }
+
+    #[test]
+    fn a_crc_fault_reports_an_error_without_going_offline() {
+        let handle = SimPanelHandle::new();
+        let mut driver = SimPanelDriver::new(handle.clone(), Duration::from_millis(1));
+        handle.set(|state| state.faults.set(PanelFault::CrcError));
+        let snapshot = poll_driver(&mut driver);
+        assert!(snapshot.connected);
+        assert!(snapshot.communication_error);
+    }
+
+    #[test]
+    fn a_bounded_press_releases_itself_on_the_driver_cycle() {
+        let handle = SimPanelHandle::new();
+        handle.set(|state| state.press_for(buttons::CYCLE_START, Duration::from_millis(5)));
+        assert!(handle.snapshot().buttons & buttons::CYCLE_START != 0);
+        let mut driver = SimPanelDriver::new(handle.clone(), Duration::from_millis(1));
+        std::thread::sleep(Duration::from_millis(10));
+        let snapshot = driver.poll().unwrap();
+        assert_eq!(snapshot.buttons & buttons::CYCLE_START, 0);
+        assert!(handle.snapshot().holds.is_empty());
+    }
+
+    #[test]
+    fn a_patch_releases_the_mushroom_with_the_same_one_shot_as_the_window_key() {
+        let handle = SimPanelHandle::new();
+        let control = SimControlState::new(handle.clone());
+        let patch = SimPanelPatch {
+            estop: Some(false),
+            mode: Some("jog".into()),
+            feed_override: Some(0.5),
+            ..Default::default()
+        };
+        let state = linc_diag::SimControl::apply(&control, &patch).expect("patch");
+        assert_eq!(state["estop"], false);
+        assert_eq!(state["mode"], "JOG");
+        assert_eq!(state["feed_override"], 0.5);
+        assert!(handle.snapshot().estop_reset_pulse, "the controller is asked to reset");
+    }
+
+    #[test]
+    fn a_patch_naming_an_unknown_button_is_refused() {
+        let control = SimControlState::new(SimPanelHandle::new());
+        let patch = SimPanelPatch {
+            press: Some(vec!["make_coffee".into()]),
+            ..Default::default()
+        };
+        let error = linc_diag::SimControl::apply(&control, &patch).expect_err("unknown button");
+        assert_eq!(error.code, "INVALID_ARGUMENT");
+        assert!(error.message.contains("make_coffee"));
+
+        let error = SimControlState::new(SimPanelHandle::new())
+            .apply(&SimPanelPatch {
+                mode: Some("TURBO".into()),
+                ..Default::default()
+            })
+            .expect_err("unknown mode");
+        assert!(error.message.contains("TURBO"));
+    }
+
+    #[test]
+    fn reset_returns_the_cabinet_to_estop_latched_and_power_off() {
+        let handle = SimPanelHandle::new();
+        let control = SimControlState::new(handle.clone());
+        control
+            .apply(&SimPanelPatch {
+                power: Some(true),
+                estop: Some(false),
+                program_protect: Some(true),
+                ..Default::default()
+            })
+            .expect("patch");
+        control.inject_fault(PanelFault::Disconnect).expect("fault");
+        control.reset().expect("reset");
+        let state = handle.snapshot();
+        assert!(state.estop);
+        assert!(!state.power);
+        assert!(!state.program_protect);
+        assert!(state.faults.labels().is_empty());
     }
 }
 

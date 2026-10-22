@@ -1,22 +1,23 @@
 //! Write policy and tool annotations.
 //!
-//! Every tool is read-only in this phase; the gate exists so a write cannot be
-//! added by accident without also adding an annotation and an audit entry.
+//! No tool can move a machine or touch a real panel. The only write surface is
+//! a simulator panel, and it stays closed until the operator starts the MCP
+//! server with `--allow-sim-control --sim` *and* the panel service with
+//! `--allow-sim-control`. Writes are refused by name, so adding one without a
+//! policy decision is a compile-time-visible change to [`crate::tools::ToolClass`].
 
 use serde_json::json;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Policy {
-    /// Reads are always allowed. Writes need `--allow-writes` and a simulator.
-    pub allow_writes: bool,
-    pub allow_sim_writes: bool,
+    /// Simulator panel control. Reads are always allowed.
+    pub allow_sim_control: bool,
 }
 
 impl Default for Policy {
     fn default() -> Self {
         Self {
-            allow_writes: false,
-            allow_sim_writes: false,
+            allow_sim_control: false,
         }
     }
 }
@@ -25,10 +26,13 @@ impl Policy {
     /// Refuse a write unless the operator opted in. The returned error is the
     /// one an agent should see, not a panic.
     pub fn check_write(&self, tool: &str) -> Result<(), linc_core::diag::DiagError> {
-        if !self.allow_writes || !self.allow_sim_writes {
+        if !self.allow_sim_control {
             return Err(linc_core::diag::DiagError::new(
                 "WRITE_DISABLED",
-                format!("{tool} is a write; restart linc-mcp with --allow-writes --sim"),
+                format!(
+                    "{tool} changes a simulated panel; restart linc-mcp with --allow-sim-control --sim \
+                     and linc-panel with --allow-sim-control"
+                ),
                 false,
             ));
         }

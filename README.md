@@ -296,6 +296,10 @@ column required by a power turret (see `CONFIGURATION.md`).
   HMI drives the panel status and tool displays.
 - The typed `linc.*` HAL component, the LinuxCNC bridge, the WHB04B-6 pendant
   wiring and the generated G-code help index are present.
+- `linc-mcp` exposes the HMI and panel diagnostic sockets to an agent: state,
+  gates, logs, events, panel frames and transitions, and an opt-in simulator
+  control surface (`--allow-sim-control` on both processes). It never opens the
+  panel serial port, and no tool can reach a real panel.
 
 `cargo test --workspace` covers config merging, INI parsing, command
 validation, editor/preview behavior, graph bounds, panel protocol, HAL output

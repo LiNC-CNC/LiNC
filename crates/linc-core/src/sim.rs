@@ -1293,7 +1293,6 @@ impl MachineBackend for SimBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     fn profile_fixture() -> (tempfile::TempDir, Profile) {
         let dir = tempfile::tempdir().unwrap();

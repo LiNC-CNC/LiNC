@@ -25,7 +25,7 @@ use linc_core::diag::{DiagError, Dropped, Envelope};
 use serde_json::{json, Value};
 
 pub use client::Client;
-pub use panel::{PanelBus, PanelSource};
+pub use panel::{PanelBus, PanelSource, SimControl};
 pub use source::{BusSource, Source};
 
 /// One request line larger than this is rejected instead of buffered.
@@ -311,7 +311,6 @@ mod tests {
     use super::*;
     use linc_core::diag::{BuildInfo, Bus, ProcessInfo};
     use linc_core::model::{MachineSnapshot, MachineVariant};
-    use std::path::Path;
     use serde_json::{json, Value};
     use std::sync::{Arc, Mutex};
 
