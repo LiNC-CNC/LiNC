@@ -49,7 +49,9 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     handle_keys(app, ui, &columns);
     ui.add_space(4.0);
     let available = ui.available_width();
-    let content_height = (ui.available_height() - 8.0).max(240.0);
+    // The page must end above the status line: reserve the bottom padding and
+    // never ask for more height than is there.
+    let content_height = (ui.available_height() - 14.0).max(240.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
             egui::Vec2::new(available * 0.64, content_height),
@@ -494,8 +496,12 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                 visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::ZERO;
             }
             let painter = ui.painter().clone();
+            // Room for the hint row under the table, inside the card: without a
+            // bound the table takes the whole card and pushes it out.
+            let table_height = (ui.available_height() - FOOTER_HEIGHT).max(120.0);
             let mut builder = TableBuilder::new(ui)
                 .id_salt("tool-table-v3")
+                .max_scroll_height(table_height)
                 .striped(true)
                 .resizable(false)
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
@@ -685,6 +691,8 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
 const ROW_HEIGHT: f32 = 26.0;
 /// Rows a PageUp/PageDown moves: the table shows roughly this many at once.
 const TABLE_PAGE: isize = 8;
+/// Space kept under the table for the key hint, inside the card.
+const FOOTER_HEIGHT: f32 = 26.0;
 const FIELD_HEIGHT: f32 = 22.0;
 const HEADER_HEIGHT: f32 = 18.0;
 
