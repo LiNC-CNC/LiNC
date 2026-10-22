@@ -714,6 +714,9 @@ pub struct OffsetsUi {
     pub revision_seen: u64,
     /// Axis whose DRO value is being typed, if any.
     pub dro_edit: Option<DroEdit>,
+    /// When the page last drew: a gap means the operator just arrived, which is
+    /// when the selection should jump to the active system.
+    pub last_frame_ms: i64,
 }
 
 impl Default for OffsetsUi {
@@ -729,6 +732,7 @@ impl Default for OffsetsUi {
             error: None,
             revision_seen: 0,
             dro_edit: None,
+            last_frame_ms: 0,
         }
     }
 }

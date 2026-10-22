@@ -13,6 +13,26 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // No page title: the navigation names the page, and the banner below
     // already says why writes are unavailable.
     common::focus_anchor(ui, "offsets-page-focus");
+    // Arriving on the page selects the system the machine is in, not G54: the
+    // operator is nearly always working in the active offset, and G54 may be one
+    // of six stored rows.
+    let now = linc_core::diag::now_ms();
+    if now - app.offsets.last_frame_ms > 200 {
+        if let Some(active) = app.snapshot.offsets.active_index {
+            if let Some(row) = app
+                .snapshot
+                .offsets
+                .offsets
+                .iter()
+                .position(|offset| offset.index == active)
+            {
+                app.offsets.selected_row = row;
+                app.offsets.selected = active;
+                app.offsets.selected_column = 1;
+            }
+        }
+    }
+    app.offsets.last_frame_ms = now;
     let writable = app.snapshot.writes_allowed();
     if !writable {
         let reason = if app.snapshot.panel.protect_effective() {
