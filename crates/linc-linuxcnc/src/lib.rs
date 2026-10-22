@@ -826,8 +826,8 @@ impl MachineBackend for PythonBridgeBackend {
                 rotation,
             } => {
                 self.validate_write()?;
-                if !(1..=6).contains(&index) {
-                    return Err(MachineError::Invalid("work offset must be G54-G59".into()));
+                if !(1..=9).contains(&index) {
+                    return Err(MachineError::Invalid("work offset must be G54-G59.3".into()));
                 }
                 for (axis, value) in values.iter() {
                     self.profile
@@ -859,8 +859,8 @@ impl MachineBackend for PythonBridgeBackend {
             }
             MachineCommand::ZeroWorkOffset { index, axes } => {
                 self.validate_write()?;
-                if !(1..=6).contains(&index) {
-                    return Err(MachineError::Invalid("work offset must be G54-G59".into()));
+                if !(1..=9).contains(&index) {
+                    return Err(MachineError::Invalid("work offset must be G54-G59.3".into()));
                 }
                 if axes.is_empty() {
                     return Err(MachineError::Invalid("no axes selected".into()));
@@ -882,8 +882,8 @@ impl MachineBackend for PythonBridgeBackend {
             }
             MachineCommand::SetWorkPosition { index, values } => {
                 self.validate_write()?;
-                if !(1..=6).contains(&index) {
-                    return Err(MachineError::Invalid("work offset must be G54-G59".into()));
+                if !(1..=9).contains(&index) {
+                    return Err(MachineError::Invalid("work offset must be G54-G59.3".into()));
                 }
                 if values.iter().next().is_none() {
                     return Err(MachineError::Invalid("no axes given".into()));
@@ -1092,7 +1092,7 @@ fn initial_snapshot(profile: &Profile) -> MachineSnapshot {
     }
     snapshot.positions.units = profile.machine_ini.linear_units.clone();
     snapshot.positions.angular_units = profile.machine_ini.angular_units.clone();
-    for index in 1..=6 {
+    for index in 1..=9 {
         let mut values = AxisMap::new();
         for axis in &profile.machine_ini.axes {
             values.insert(axis.name.clone(), 0.0);
@@ -1701,7 +1701,7 @@ impl Converter {
                 wcs: snapshot
                     .offsets
                     .active_index
-                    .map(|index| format!("G{}", 53 + index))
+                    .map(linc_core::model::wcs_name)
                     .unwrap_or_else(|| "--".into()),
                 mode: "measured".into(),
                 timestamp_ms: now_ms(),

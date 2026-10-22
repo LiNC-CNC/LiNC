@@ -100,8 +100,8 @@ impl SimBackend {
         snapshot.task.interp = InterpState::Idle;
         snapshot.task.mode = task_mode_for(initial_mode);
 
-        // Work offsets G54…G59.
-        for index in 1..=6 {
+        // Work offsets G54…G59.3: nine systems, as LinuxCNC numbers them.
+        for index in 1..=9 {
             let mut values = AxisMap::new();
             for axis in &ini.axes {
                 values.insert(axis.name.clone(), 0.0);
@@ -1040,8 +1040,8 @@ impl MachineBackend for SimBackend {
                     }
                     return Err(MachineError::NotIdle);
                 }
-                if !(1..=6).contains(&index) {
-                    return Err(MachineError::Invalid("work offset must be G54-G59".into()));
+                if !(1..=9).contains(&index) {
+                    return Err(MachineError::Invalid("work offset must be G54-G59.3".into()));
                 }
                 for (axis, value) in values.iter() {
                     self.profile
@@ -1097,8 +1097,8 @@ impl MachineBackend for SimBackend {
                     }
                     return Err(MachineError::NotIdle);
                 }
-                if !(1..=6).contains(&index) {
-                    return Err(MachineError::Invalid("work offset must be G54-G59".into()));
+                if !(1..=9).contains(&index) {
+                    return Err(MachineError::Invalid("work offset must be G54-G59.3".into()));
                 }
                 // `G10 L20` makes the current position read zero, so the new
                 // offset is the machine coordinate for each selected axis.
@@ -1146,8 +1146,8 @@ impl MachineBackend for SimBackend {
                     }
                     return Err(MachineError::NotIdle);
                 }
-                if !(1..=6).contains(&index) {
-                    return Err(MachineError::Invalid("work offset must be G54-G59".into()));
+                if !(1..=9).contains(&index) {
+                    return Err(MachineError::Invalid("work offset must be G54-G59.3".into()));
                 }
                 // `G10 L20` stores the offset that makes the position read the
                 // given coordinates, so the new offset is machine - value.
@@ -1347,6 +1347,47 @@ enabled = true
         assert!(snapshot.program.content.is_some());
         assert!(snapshot.program.line_count > 10);
         assert!(!snapshot.live_trail.is_empty());
+    }
+
+    #[test]
+    fn all_nine_work_systems_exist_and_accept_writes() {
+        use crate::command::MachineCommand;
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        let snapshot = backend.snapshot();
+        let indices: Vec<u8> = snapshot.offsets.offsets.iter().map(|o| o.index).collect();
+        assert_eq!(indices, (1..=9).collect::<Vec<u8>>(), "G54..G59.3");
+
+        let mut values = AxisMap::new();
+        values.insert("X", -10.0);
+        backend
+            .send(MachineCommand::SetWorkOffset {
+                index: 9,
+                values: values.clone(),
+                rotation: Some(0.0),
+            })
+            .expect("G59.3 accepts an offset write");
+        backend
+            .send(MachineCommand::SetWorkPosition {
+                index: 8,
+                values,
+            })
+            .expect("G59.2 accepts a position write");
+        backend
+            .send(MachineCommand::ZeroWorkOffset {
+                index: 7,
+                axes: vec!["X".into()],
+            })
+            .expect("G59.1 accepts a touch-off");
+
+        let snapshot = backend.snapshot();
+        let g59_3 = snapshot
+            .offsets
+            .offsets
+            .iter()
+            .find(|offset| offset.index == 9)
+            .expect("G59.3 row");
+        assert_eq!(g59_3.values.get("X").copied(), Some(-10.0));
     }
 
     #[test]

@@ -733,9 +733,9 @@ MCP. `why_blocked` can still explain why the panel action would be refused.
 | `toggle_limits_override` | HMI | Controller-owned toggle |
 | `load_program` | HMI | Requires not running, safe path |
 | `save_program` | HMI | Requires protect off, machine on, idle, EDIT mode, revision match |
-| `set_work_offset` | HMI | Requires writes allowed and G54–G59 |
+| `set_work_offset` | HMI | Requires writes allowed and G54–G59.3 |
 | `set_g92_offset` | HMI | Requires writes allowed |
-| `zero_work_offset` | HMI | Requires writes allowed and G54–G59 |
+| `zero_work_offset` | HMI | Requires writes allowed and G54–G59.3 |
 | `set_work_position` | HMI | Requires writes allowed and known axes |
 | `set_tool_table_row` | HMI | Requires writes allowed and revision match |
 | `apply_probe_result` | HMI | Requires writes allowed |

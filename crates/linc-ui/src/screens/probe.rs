@@ -319,14 +319,16 @@ fn setup_card(app: &mut LincApp, ui: &mut Ui) {
                 );
             });
         });
-        ui.horizontal(|ui| {
+        // Nine systems no longer fit one line in the probe card: wrap instead of
+        // letting G59.1..G59.3 run off the right edge.
+        ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new("WORK OFFSET")
                     .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
-            for index in 1..=6u8 {
-                let wcs = format!("G{}", 53 + index);
+            for index in 1..=9u8 {
+                let wcs = linc_core::model::wcs_name(index);
                 if common::page_tab(ui, &wcs, app.probe.wcs == wcs).clicked() {
                     app.probe.wcs = wcs;
                     app.probe.apply_target = index;

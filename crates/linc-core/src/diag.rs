@@ -34,21 +34,7 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// `1..=9` to `G54`..`G59.3`, the way the controller numbers them.
-pub fn wcs_name(index: u8) -> String {
-    match index {
-        1 => "G54".into(),
-        2 => "G55".into(),
-        3 => "G56".into(),
-        4 => "G57".into(),
-        5 => "G58".into(),
-        6 => "G59".into(),
-        7 => "G59.1".into(),
-        8 => "G59.2".into(),
-        9 => "G59.3".into(),
-        other => format!("G5{other}"),
-    }
-}
+pub use crate::model::wcs_name;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

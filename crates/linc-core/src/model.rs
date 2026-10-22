@@ -383,6 +383,23 @@ impl Default for WorkOffsetSet {
     }
 }
 
+/// The nine work systems, `1..=9` to `G54..G59.3`, the way the controller
+/// numbers them. Anything outside the range is not a system.
+pub fn wcs_name(index: u8) -> String {
+    match index {
+        1 => "G54".into(),
+        2 => "G55".into(),
+        3 => "G56".into(),
+        4 => "G57".into(),
+        5 => "G58".into(),
+        6 => "G59".into(),
+        7 => "G59.1".into(),
+        8 => "G59.2".into(),
+        9 => "G59.3".into(),
+        other => format!("WCS{other}"),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ToolColumn {
     T,
@@ -1263,6 +1280,9 @@ impl MachineSnapshot {
         match source {
             StatusSource::Wcs => self
                 .active_wcs()
+                // The display has two digits and the contract is 54..=59;
+                // G59.1..G59.3 have no two-digit name, so they show `--`
+                // rather than the wrong system.
                 .filter(|index| (1..=6).contains(index))
                 .map(|index| 53 + index as i32),
             StatusSource::SpindleLoad => self
@@ -1432,5 +1452,16 @@ mod tests {
         assert_eq!(program.executing_line(), 3);
         program.motion_line = 0;
         assert_eq!(program.executing_line(), 11);
+    }
+
+    #[test]
+    fn work_system_names_cover_all_nine() {
+        assert_eq!(wcs_name(1), "G54");
+        assert_eq!(wcs_name(6), "G59");
+        assert_eq!(wcs_name(7), "G59.1");
+        assert_eq!(wcs_name(8), "G59.2");
+        assert_eq!(wcs_name(9), "G59.3");
+        // Not a system: the name says so instead of inventing a G-code.
+        assert_eq!(wcs_name(10), "WCS10");
     }
 }

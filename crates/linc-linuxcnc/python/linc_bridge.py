@@ -480,7 +480,7 @@ class Bridge:
         return True
 
     def read_offsets(self, params):
-        """The six work offsets, live where the controller can tell us.
+        """The nine work offsets (G54-G59.3), live where the controller can tell us.
 
         The parameter file on disk is only written when LinuxCNC exits, so
         reading it alone showed stale numbers after a `G10` write — the DRO moved
@@ -496,7 +496,7 @@ class Bridge:
         active = int(getattr(self.stat, "g5x_index", 1) or 1)
         live = list(getattr(self.stat, "g5x_offset", ()) or ())
         live_rotation = getattr(self.stat, "rotation_xy", None)
-        for index in range(1, 7):
+        for index in range(1, 10):
             base = 5220 + (index - 1) * 20
             values = {}
             for axis_index, axis in enumerate(self.axes):

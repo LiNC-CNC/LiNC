@@ -716,7 +716,7 @@ impl LincApp {
 
     pub fn wcs_label(&self, index: Option<u8>) -> String {
         match index {
-            Some(index) if (1..=9).contains(&index) => format!("G{}", 53 + index),
+            Some(index) if (1..=9).contains(&index) => linc_core::model::wcs_name(index),
             _ => "--".into(),
         }
     }
@@ -1961,7 +1961,7 @@ impl LincApp {
                 self.diagnostics_tab = DiagnosticsTab::ALL[(index + 1) % DiagnosticsTab::ALL.len()];
             }
             Page::Offsets => {
-                self.offsets.selected = if self.offsets.selected >= 6 {
+                self.offsets.selected = if self.offsets.selected >= 9 {
                     1
                 } else {
                     self.offsets.selected + 1

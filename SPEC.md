@@ -567,7 +567,7 @@ Program rules:
 
 ### 6.3 Offsets
 
-- Work offsets G54–G59.
+- Work offsets G54–G59.3: all nine systems the controller numbers (G59.1–G59.3 included), with a rotation column.
 - The toolpath preview is drawn in machine space in the work system the program
   selects (`G54`..`G59.3`, first selection in the file), falling back to the
   active system when the program selects none, so the part sits at the origin it
@@ -726,7 +726,7 @@ category-first workflow: choose a routine group, then pick the operation card.
   fast/slow/traverse feed, max XY/Z distance, XY/Z clearance, extra depth, step
   off width, edge width, diameter hints, probe mode, WCS rotation, calibration
   offset/diameter and square-calibration axis.
-- Work-offset selector G54–G59. `MEASURE ONLY` must be available in addition to
+- Work-offset selector G54–G59.3 (wrapping when the row is full). `MEASURE ONLY` must be available in addition to
   applying the result to the selected offset.
 - `RUN PROBE` builds the selected `o<probe_...> call` and its argument values,
   then issues it immediately using Probe Basic's `issue_mdi` semantics:
@@ -1051,7 +1051,7 @@ pub struct MachineSnapshot {
     pub task: TaskState,                 // Task/Interp state, mode, paused
     pub machine: MachineState,           // on, estop, homed, limits, fault
     pub positions: AxisMap<PositionSet>, // work, machine, DTG per INI axis
-    pub offsets: WorkOffsetSet,          // G54-G59, G92, rotation, axis count
+    pub offsets: WorkOffsetSet,          // G54-G59.3, G92, rotation, axis count
     pub tool_table: ToolTableState,      // standard LinuxCNC table + columns
     pub spindles: Vec<SpindleState>,     // main + sub/live tool
     pub feed: FeedState,
@@ -1218,7 +1218,8 @@ For this design repository:
 - Program protect ON locks program editing, saves, offset/tool writes, file
   imports and probe applies; unsaved changes are preserved, not discarded.
 - The panel's status seven-segment display shows the active `G54`–`G59` offset
-  as `54`–`59`, and `--` when unknown; it never fabricates a value.
+  as `54`–`59`, and `--` when unknown; it never fabricates a value. The
+  extended systems have no two-digit name, so `G59.1`–`G59.3` also shows `--`.
 - LiNC exposes the declared `linc.*` HAL outputs and writes them; it never
   writes arbitrary machine or panel pins.
 - Mode/override inputs are steady one-hot/steady and decoded without pulse

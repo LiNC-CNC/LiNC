@@ -1,4 +1,4 @@
-//! Work offsets G54-G59 and tool offsets.
+//! Work offsets G54-G59.3 and tool offsets.
 
 use egui::{RichText, Ui};
 use linc_core::command::MachineCommand;
@@ -14,7 +14,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     common::focus_anchor(ui, "offsets-page-focus");
     // Arriving on the page selects the system the machine is in, not G54: the
     // operator is nearly always working in the active offset, and G54 may be one
-    // of six stored rows.
+    // of nine stored rows.
     let now = linc_core::diag::now_ms();
     if now - app.offsets.last_frame_ms > 200 {
         if let Some(active) = app.snapshot.offsets.active_index {
@@ -306,7 +306,7 @@ fn selected_highlight(app: &LincApp) -> Option<([f64; 3], String)> {
             .or_else(|| row.values.get(axis).copied())
             .unwrap_or(0.0);
     }
-    Some((point, format!("G{}", 53 + index)))
+    Some((point, linc_core::model::wcs_name(index)))
 }
 
 /// Enter commits the typed position, Escape drops it. Both are consumed before
@@ -353,7 +353,7 @@ pub(crate) fn commit_dro_edit(app: &mut LincApp) -> bool {
     true
 }
 
-/// G54-G59 as an editable table, built and driven like the tool table: one band
+/// G54-G59.3 as an editable table, built and driven like the tool table: one band
 /// and a rim bar mark the selected row, an outline marks the cell, the arrow keys
 /// move between cells, Enter edits and Escape cancels.
 fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
@@ -410,7 +410,11 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
             .columns(egui_extras::Column::exact(VALUE), axes.len())
             .column(egui_extras::Column::exact(VALUE))
             .column(egui_extras::Column::remainder())
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            // All nine systems are part of the table: an inner scroll area cut
+            // G59.1..G59.3 out of sight. The page's own scroll area handles a
+            // window too short for the rows.
+            .vscroll(false);
         let mut bands: Vec<(egui::Rect, bool)> = Vec::new();
         table
             .header(18.0, |mut header| {
@@ -464,7 +468,7 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                             let colour = if is_active { theme::SUCCESS } else { theme::FG };
                             let response = ui.add(
                                 egui::Label::new(
-                                    RichText::new(format!("G{}", 53 + index))
+                                    RichText::new(linc_core::model::wcs_name(index))
                                         .monospace()
                                         .size(theme::font_size(12.0))
                                         .color(colour),
@@ -727,7 +731,7 @@ fn apply_work_offset(app: &mut LincApp, index: u8) {
     for axis in &axes {
         let text = draft.values.get(axis).cloned().unwrap_or_default();
         let Some(value) = crate::state::eval_expression(&text) else {
-            app.offsets.error = Some(format!("G{} {axis}: invalid entry {text:?}", 53 + index));
+            app.offsets.error = Some(format!("{} {axis}: invalid entry {text:?}", linc_core::model::wcs_name(index)));
             return;
         };
         if let Err(error) = app.profile.machine_ini.validate_axis_value(axis, value) {
@@ -761,7 +765,7 @@ fn apply_work_offset(app: &mut LincApp, index: u8) {
         rotation,
     });
     app.toast(
-        format!("G{} offset written", 53 + index),
+        format!("{} offset written", linc_core::model::wcs_name(index)),
         theme::ACCENT,
     );
 }
