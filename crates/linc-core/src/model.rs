@@ -1151,6 +1151,9 @@ pub struct MachineSnapshot {
     pub live_trail: Arc<Vec<[f64; 3]>>,
     /// Actual tool tip in machine coordinates, if known.
     pub tool_tip: Option<[f64; 3]>,
+    /// The LinuxCNC bridge's own health; `None` for the simulator backend.
+    #[serde(default)]
+    pub bridge: Option<crate::diag::BridgeInfo>,
 }
 
 impl MachineSnapshot {
@@ -1178,6 +1181,7 @@ impl MachineSnapshot {
             alarms: VecDeque::new(),
             live_trail: Arc::new(Vec::new()),
             tool_tip: None,
+            bridge: None,
         }
     }
 

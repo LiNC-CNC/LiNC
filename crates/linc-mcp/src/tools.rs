@@ -415,6 +415,87 @@ pub fn catalog() -> Vec<ToolDef> {
             class: ToolClass::Export,
         },
         ToolDef {
+            name: "linc_get_motion_history",
+            title: "Motion history",
+            description: "10 Hz samples of positions, following error, servo load, spindle, feed and program lines.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "seconds": { "type": "number", "minimum": 0, "maximum": 120, "description": "Only samples this recent" },
+                    "max_samples": { "type": "integer", "minimum": 1, "maximum": 1200, "default": 600 }
+                },
+                "additionalProperties": false
+            }),
+            class: ToolClass::Read,
+        },
+        ToolDef {
+            name: "linc_get_screen_model",
+            title: "Screen model",
+            description: "Page, viewport, shell regions and toasts; enough to reproduce a layout bug.",
+            schema: no_args(),
+            class: ToolClass::Read,
+        },
+        ToolDef {
+            name: "linc_get_nml",
+            title: "NML bridge",
+            description: "Bridge process identity, request/reply counters, latency, stderr tail and connection state.",
+            schema: no_args(),
+            class: ToolClass::Read,
+        },
+        ToolDef {
+            name: "linc_get_hal",
+            title: "linc.* HAL component",
+            description: "The HMI's own HAL outputs and heartbeat, plus whether real HAL introspection is available.",
+            schema: no_args(),
+            class: ToolClass::Read,
+        },
+        ToolDef {
+            name: "linc_get_hal_pins",
+            title: "HAL pins (if available)",
+            description: "Returns available=false with a reason when real HAL introspection is not linked.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "filter": { "type": "string" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 5000, "default": 1000 }
+                },
+                "additionalProperties": false
+            }),
+            class: ToolClass::Read,
+        },
+        ToolDef {
+            name: "linc_get_hal_signals",
+            title: "HAL signals (if available)",
+            description: "Returns available=false with a reason when real HAL introspection is not linked.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "filter": { "type": "string" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 5000, "default": 1000 }
+                },
+                "additionalProperties": false
+            }),
+            class: ToolClass::Read,
+        },
+        ToolDef {
+            name: "linc_get_io",
+            title: "Machine I/O",
+            description: "Coolant, lube, door, limits, following error and servo load.",
+            schema: no_args(),
+            class: ToolClass::Read,
+        },
+        ToolDef {
+            name: "linc_get_crash_records",
+            title: "Crash records",
+            description: "Panic records written by linc, linc-panel and linc-mcp, newest first.",
+            schema: json!({
+                "type": "object",
+                "properties": { "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 } },
+                "additionalProperties": false
+            }),
+            class: ToolClass::Read,
+        },
+        ToolDef {
             name: "linc_get_metrics",
             title: "Diagnostic metrics",
             description: "Sequence, ring sizes, drop counters and capture time.",
@@ -699,6 +780,35 @@ pub fn call(
             });
             Ok(rewrap(&envelope, data))
         }
+        "linc_get_motion_history" => client.call(
+            "diag.motion_history",
+            json!({
+                "seconds": args.get("seconds").cloned().unwrap_or(Value::Null),
+                "max_samples": args.get("max_samples").and_then(Value::as_u64).unwrap_or(600),
+            }),
+        ),
+        "linc_get_screen_model" => client.call("diag.screen_model", Value::Null),
+        "linc_get_nml" => client.call("diag.nml", Value::Null),
+        "linc_get_hal" => client.call("diag.hal", Value::Null),
+        "linc_get_hal_pins" => client.call(
+            "diag.hal_pins",
+            json!({
+                "filter": args.get("filter").cloned().unwrap_or(Value::Null),
+                "limit": args.get("limit").and_then(Value::as_u64).unwrap_or(1000),
+            }),
+        ),
+        "linc_get_hal_signals" => client.call(
+            "diag.hal_signals",
+            json!({
+                "filter": args.get("filter").cloned().unwrap_or(Value::Null),
+                "limit": args.get("limit").and_then(Value::as_u64).unwrap_or(1000),
+            }),
+        ),
+        "linc_get_io" => client.call("diag.io", Value::Null),
+        "linc_get_crash_records" => client.call(
+            "diag.crash_records",
+            json!({ "limit": args.get("limit").and_then(Value::as_u64).unwrap_or(50) }),
+        ),
         "linc_get_metrics" => client.call("diag.metrics", Value::Null),
         other => Err(DiagError::not_found(format!("unknown tool {other:?}"))),
     }

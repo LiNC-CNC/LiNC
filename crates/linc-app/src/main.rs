@@ -164,7 +164,16 @@ fn main() -> Result<()> {    init_logging();
             "config_path": config_path.display().to_string(),
             "ini": profile.config.machine.linuxcnc_ini,
             "summary": profile.summary(),
+            "hal": {
+                "component": profile.config.hal.linc_component,
+                "panel_component": profile.config.hal.panel_component,
+                "allowed_outputs": profile.config.hal.allowed_outputs,
+                "write_policy": profile.config.hal.write_policy,
+            },
         });
+        // A crash record is the only diagnostic that survives the process: the
+        // hook writes it before the panic propagates.
+        linc_diag::crash::install_hook("hmi", process.clone());
         let source = std::sync::Arc::new(
             linc_diag::BusSource::new(diag_bus.clone(), process).with_config(config),
         );

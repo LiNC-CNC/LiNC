@@ -18,6 +18,7 @@ use linc_core::command::{
     HalValue, LincOutput, MachineCommand, MachineError, MdiOrigin, ProbeTarget,
 };
 use linc_core::config::Profile;
+use linc_core::diag::BridgeInfo;
 use linc_core::gcode::parse_preview;
 use linc_core::model::*;
 use linc_core::tooltable::ToolTable;
@@ -354,6 +355,8 @@ struct Shared {
     /// Last MDI block issued for a probe routine, so the result converter can
     /// interpret `#1001`-`#1009` with the routine that actually ran.
     last_probe_block: Mutex<Option<String>>,
+    /// Request/reply counters, stderr tail and liveness for `linc_get_nml`.
+    bridge: Mutex<BridgeInfo>,
 }
 
 /// LinuxCNC backend backed by the supervised Python helper.
@@ -385,6 +388,11 @@ impl PythonBridgeBackend {
             alive: Mutex::new(true),
             last_update: Mutex::new(Instant::now()),
             last_probe_block: Mutex::new(None),
+            bridge: Mutex::new(BridgeInfo {
+                kind: "python".into(),
+                alive: true,
+                ..BridgeInfo::default()
+            }),
         });
         let mut child = Command::new("python3")
             .arg("-u")
@@ -396,6 +404,9 @@ impl PythonBridgeBackend {
             .env("PYTHONUNBUFFERED", "1")
             .spawn()
             .map_err(|error| BridgeError::Spawn(error.to_string()))?;
+        if let Ok(mut bridge) = shared.bridge.lock() {
+            bridge.pid = child.id();
+        }
         let stdin = child.stdin.take();
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -408,6 +419,10 @@ impl PythonBridgeBackend {
                     read_loop(stdout, shared_reader.clone(), profile_reader);
                 }
                 *shared_reader.alive.lock().unwrap() = false;
+                if let Ok(mut bridge) = shared_reader.bridge.lock() {
+                    bridge.alive = false;
+                    bridge.fatal = Some("bridge process exited".into());
+                }
                 let mut snapshot = shared_reader.snapshot.lock().unwrap();
                 snapshot.panel.connected = false;
                 snapshot.panel.communication_error = true;
@@ -422,10 +437,17 @@ impl PythonBridgeBackend {
             })
             .map_err(|error| BridgeError::Spawn(error.to_string()))?;
         if let Some(stderr) = stderr {
+            let shared_stderr = shared.clone();
             thread::Builder::new()
                 .name("linc-linuxcnc-stderr".into())
                 .spawn(move || {
                     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                        if let Ok(mut bridge) = shared_stderr.bridge.lock() {
+                            bridge.stderr_tail.push(line.clone());
+                            if bridge.stderr_tail.len() > 20 {
+                                bridge.stderr_tail.remove(0);
+                            }
+                        }
                         // The helper's stderr carries both routine reports and
                         // failures. Logging everything at warn made a normal
                         // startup ("the file has X, the controller Y") look like
@@ -482,6 +504,16 @@ impl PythonBridgeBackend {
         self.next_id += 1;
         let mut payload = payload;
         payload["id"] = serde_json::json!(id);
+        let command = payload
+            .get("cmd")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let started = Instant::now();
+        self.update_bridge(|bridge| {
+            bridge.requests += 1;
+            bridge.last_request = Some(command);
+        });
         let Some(stdin) = self.stdin.as_mut() else {
             return Err(MachineError::NotConnected);
         };
@@ -496,10 +528,27 @@ impl PythonBridgeBackend {
         let mut results = self.shared.results.lock().unwrap();
         loop {
             if let Some(result) = results.remove(&id) {
+                let latency_ms = started.elapsed().as_millis() as u64;
+                self.update_bridge(|bridge| match &result {
+                    Ok(()) => {
+                        bridge.replies += 1;
+                        bridge.last_latency_ms = latency_ms;
+                        bridge.max_latency_ms = bridge.max_latency_ms.max(latency_ms);
+                        bridge.last_reply = Some("ok".into());
+                    }
+                    Err(message) => {
+                        bridge.errors += 1;
+                        bridge.last_reply = Some(message.clone());
+                    }
+                });
                 return result.map_err(MachineError::Backend);
             }
             let now = Instant::now();
             if now >= deadline {
+                self.update_bridge(|bridge| {
+                    bridge.errors += 1;
+                    bridge.last_reply = Some("bridge command timed out".into());
+                });
                 return Err(MachineError::Backend("bridge command timed out".into()));
             }
             let (guard, _) = self
@@ -511,8 +560,18 @@ impl PythonBridgeBackend {
         }
     }
 
+    fn update_bridge(&self, update: impl FnOnce(&mut BridgeInfo)) {
+        if let Ok(mut bridge) = self.shared.bridge.lock() {
+            update(&mut bridge);
+        }
+    }
+
     fn current(&self) -> MachineSnapshot {
         let mut snapshot = self.shared.snapshot.lock().unwrap().clone();
+        if let Ok(mut bridge) = self.shared.bridge.lock() {
+            bridge.alive = self.shared.alive.lock().map(|alive| *alive).unwrap_or(false);
+            snapshot.bridge = Some(bridge.clone());
+        }
         let stale = self
             .shared
             .last_update

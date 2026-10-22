@@ -58,6 +58,18 @@ fn main() -> Result<()> {
     if policy.allow_sim_control {
         log::warn!("simulator control enabled (--allow-sim-control --sim); every call is audited");
     }
+    linc_diag::crash::install_hook(
+        "mcp",
+        linc_core::diag::ProcessInfo {
+            pid: std::process::id(),
+            role: "mcp".into(),
+            build: linc_core::diag::BuildInfo {
+                version: env!("CARGO_PKG_VERSION").into(),
+                backend: "mcp".into(),
+                ..linc_core::diag::BuildInfo::default()
+            },
+        },
+    );
     let audit = linc_mcp::audit::Audit::new(args.audit.clone());
     let mut session = linc_mcp::server::Session::new(client, panel, policy, audit);
     let stdin = std::io::stdin();

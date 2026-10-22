@@ -12,7 +12,7 @@ commands (MDI, probe, tool change, program/offset writes). Three binaries:
 
 ```bash
 cargo build --release                       # all three binaries
-cargo test --workspace                      # 186 tests today
+cargo test --workspace                      # 191 tests today
 ./target/release/linc --config configs/sim.toml --check-config
 ./target/release/linc --config configs/baiermill.toml --check-config
 scripts/build-deb.sh                        # Debian packages, amd64 + arm64
@@ -45,7 +45,8 @@ LINC_SIM_IPC=/tmp/linc/panel-sim ./target/release/linc --config configs/sim.toml
 - Diagnostics: `linc` and `linc-panel` each publish a socket under `${XDG_RUNTIME_DIR:-/tmp}/linc/diag-<uid>/`; `./target/release/linc-mcp` attaches to both.
   Simulator writes need `linc-panel --allow-sim-control` **and** `linc-mcp --allow-sim-control --sim`; either one alone leaves
   the tools closed (`WRITE_DISABLED` / `SIM_CONTROL_DISABLED`). A refused write is still audited. `linc_test_wait_for` polls
-  allowlisted paths only; there is no JSONPath and no regex.
+  allowlisted paths only; there is no JSONPath and no regex. Crash records land in `$XDG_STATE_HOME/linc/crash-<role>-<pid>.json`
+  (each binary installs a panic hook); `linc_get_crash_records` reads them without the HMI.
 
 ## Crate map
 
@@ -55,7 +56,7 @@ LINC_SIM_IPC=/tmp/linc/panel-sim ./target/release/linc --config configs/sim.toml
 - `linc-linuxcnc` — `MachineBackend` over a supervised `python3` helper (`python/linc_bridge.py`, embedded with `include_str!`). `linc-core`.
 - `linc-panel` — `PanelDriver`, RS-485 protocol, sim panel, `cnc_panel.*` pins. `linc-core` + `linc-hal`.
 - `linc-ui` — shell, keymap, theme, pages, files/USB. `linc-core` + `linc-view`; never HAL, LinuxCNC, serial or Python.
-- `linc-diag` — Unix-socket diagnostic protocol: discovery, envelope, `BusSource` over `linc_core::diag`, `PanelSource` over the panel's own snapshot/frames/events. Depends only on `linc-core`.
+- `linc-diag` — Unix-socket diagnostic protocol: discovery, envelope, `BusSource` over `linc_core::diag`, `PanelSource` over the panel's own snapshot/frames/events, crash records, bundle export. Depends only on `linc-core`.
 - `linc-mcp` — MCP adapter over `linc-diag`: tools, resources, prompts, audit. Read-only except the opt-in simulator panel surface. Depends only on `linc-core` and `linc-diag`.
 - `linc-app` — `main`, CLI, backend selection, window. The only crate that wires `linc-ui`, `linc-hal` and `linc-linuxcnc` together, and the one that starts the diagnostic socket.
 

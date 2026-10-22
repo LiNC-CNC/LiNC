@@ -1474,8 +1474,10 @@ source's threshold, and a write decision fails closed on a stale envelope.
 
 Methods implemented: `diag.hello`, `diag.ping`, `diag.snapshot`, `diag.summary`,
 `diag.snapshot_at`, `diag.snapshot_diff`, `diag.timeline`, `diag.ui`,
-`diag.why_blocked`, `diag.offsets`, `diag.tools`, `diag.program`, `diag.logs`,
-`diag.events`, `diag.config`, `diag.metrics`, `diag.export_bundle`,
+`diag.screen_model`, `diag.why_blocked`, `diag.offsets`, `diag.tools`,
+`diag.program`, `diag.logs`, `diag.events`, `diag.config`, `diag.metrics`,
+`diag.motion_history`, `diag.nml`, `diag.hal`, `diag.hal_pins`,
+`diag.hal_signals`, `diag.io`, `diag.crash_records`, `diag.export_bundle`,
 `diag.screenshot`, `diag.ui_action`, `diag.subscribe`, `diag.unsubscribe`,
 `diag.cancel`.
 Unknown methods return `NOT_FOUND` and keep the connection open.
@@ -1483,17 +1485,22 @@ Unknown methods return `NOT_FOUND` and keep the connection open.
 The bus retains 60 snapshots at 1 Hz (a minute of history) for
 `diag.snapshot_at` and `diag.snapshot_diff`; the diff reports changed leaf paths
 and ignores fields that move on every sample (`meta.age_ms`, `live_trail`,
-`program.content`, ...), so a diff is a diagnosis rather than noise. A subscribed
-connection receives `diag.notify` at most every 250 ms when the sequence moves.
+`program.content`, ...), so a diff is a diagnosis rather than noise. It also
+retains 1200 motion samples at 10 Hz (two minutes) for `diag.motion_history`;
+the response is evenly downsampled to `max_samples` and eviction increments
+`dropped.motion`. A subscribed connection receives `diag.notify` at most every
+250 ms when the sequence moves.
 
 `diag.screenshot` asks the UI thread for a capture and waits up to 3 s. The
 capture goes through egui's screenshot callback, which runs after the frame is
 painted — reading the window's frame buffer during layout returns the cleared
 buffer. The PNG is written to the export directory and returned as base64.
 
-`diag.export_bundle` writes nine JSON files (hello, summary, snapshot, gates,
-offsets, tools, config, logs, events) to a fixed directory:
-`$LINC_EXPORT_DIR`, else `$XDG_STATE_HOME/linc/exports`, else `~/.local/state/linc/exports`.
+`diag.export_bundle` writes thirteen JSON files (hello, summary, snapshot,
+gates, offsets, tools, config, logs, events, panel, ui, motion, crashes) to a
+fixed directory: `$LINC_EXPORT_DIR`, else `$XDG_STATE_HOME/linc/exports`, else
+`~/.local/state/linc/exports`. Every string value is rewritten so the
+operator's home path becomes `~`; nothing else is redacted.
 
 The bus publishes on every backend sample and refreshes at 5 Hz, so `age_ms`
 stays small while the window is idle: `egui` repaints on demand, and a publisher
@@ -1517,23 +1524,45 @@ are prefixed `linc_` and read-only except where noted: `linc_ping`,
 `linc_diff_snapshots`, `linc_get_timeline`, `linc_why_blocked`,
 `linc_get_ui_state`, `linc_get_program`, `linc_get_offsets`, `linc_get_tools`,
 `linc_get_config`, `linc_get_logs`, `linc_get_events`, `linc_get_metrics`,
-`linc_get_panel_state`, `linc_get_panel_frames`, `linc_screenshot` (returns MCP
-image content), `linc_export_bundle` (writes only under the export directory) and
-`linc_ui_action`. The UI action tool queues an HMI intent — go to a page, cycle
-the view, show or hide the bounds, fit, clear the trail, select a line — and the
-UI applies it before the frame draws, so an agent can drive verification without
-synthetic X input. It changes the HMI's view, never the machine; tools that could
-move the machine are gated behind `--allow-writes --sim`, and none exist yet.
+`linc_get_motion_history`, `linc_get_screen_model`, `linc_get_nml`,
+`linc_get_hal`, `linc_get_hal_pins`, `linc_get_hal_signals`, `linc_get_io`,
+`linc_get_crash_records`, `linc_get_panel_state`, `linc_get_panel_frames`,
+`linc_get_panel_events`, `linc_compare_panel_views`, `linc_test_wait_for`,
+`linc_screenshot` (returns MCP image content), `linc_export_bundle` (writes only
+under the export directory) and `linc_ui_action`. The UI action tool queues an
+HMI intent — go to a page, cycle the view, show or hide the bounds, fit, clear
+the trail, select a line — and the UI applies it before the frame draws, so an
+agent can drive verification without synthetic X input. It changes the HMI's
+view, never the machine. `linc_test_wait_for` polls one allowlisted path
+(`panel.*`, `sim.*`, `machine.*`, `task.*`, `program.*`, `alarms.length`,
+`ui.page`) with `eq`/`ne`/`lt`/`lte`/`gt`/`gte`/`contains`; there is no JSONPath,
+regex or evaluation.
 Resources mirror the same state by URI; prompts start the two diagnostic
 sequences in `docs/MCP-SERVER-HANDOFF.md`.
 
-Every call is audited (stderr plus `--audit <file>`), and writes are refused with
-`WRITE_DISABLED` unless the server was started with `--allow-writes --sim`.
+Every call is audited (stderr plus `--audit <file>`), including a refused write.
+The only write surface is a simulated panel, and it is closed unless the panel
+service was started with `--allow-sim-control` *and* the server with
+`--allow-sim-control --sim`; either alone answers `WRITE_DISABLED` or
+`SIM_CONTROL_DISABLED`. There is no tool that moves a machine or touches a real
+panel.
 
-The panel service publishes its own socket (`panel-role` discovery) with
-`diag.panel`, `diag.panel_frames` and `diag.metrics`: link state, mode,
-overrides, buttons, protect and a raw-frame ring. `linc-mcp` connects to it when
-it is running and reports `PANEL_NOT_RUNNING` when it is not.
+The panel service publishes its own socket (role `panel`) with `diag.panel`,
+`diag.panel_frames`, `diag.panel_events` and `diag.metrics`: link state, mode,
+overrides, buttons, protect, a 2048-frame raw ring with CRC verdicts and a ring
+of state transitions. `linc-mcp` connects to it when it is running and reports
+`PANEL_NOT_RUNNING` when it is not. A simulated panel with control armed also
+answers `diag.sim_state`, `diag.sim_set`, `diag.sim_buttons`, `diag.sim_fault`,
+`diag.sim_clear_faults` and `diag.sim_reset`. Faults are `disconnect`,
+`timeout`, `crc_error`, `invalid_mode`, `protect_unknown` and `stale`; the first
+four are link faults, the next two input faults, and `stale` freezes publication
+so the envelope age grows.
 
-Not in this phase: simulator fault injection, the NML/bridge and HAL sections.
-They extend this envelope rather than replace it.
+Crash records are written by a panic hook in `linc`, `linc-panel` and
+`linc-mcp` to `$XDG_STATE_HOME/linc/crash-<role>-<pid>.json` and read back by
+`linc_get_crash_records` and the bundle. `linc_get_nml` reports the Python
+bridge's pid, liveness, request/reply/error counters, latency, stderr tail and a
+fatal reason; the simulator answers `available: false`. `linc_get_hal` reports
+the `linc.*` outputs and heartbeat; `linc_get_hal_pins` and
+`linc_get_hal_signals` answer `available: false` with the reason that the build
+does not link the full HAL C API, and never fabricate pins.

@@ -1855,6 +1855,8 @@ Deviations from the table in §9.9:
 
 ### Phase 4 — deep debug and export
 
+Status: implemented, with the deviations listed below.
+
 Deliverables:
 
 - UI state publisher and screenshot.
@@ -1872,6 +1874,52 @@ Exit criteria:
 - Bundle reproduces a fault offline.
 - HAL pin values match `halcmd` in a live session.
 - Bundle redaction tested.
+
+Implemented surface:
+
+- `UiSnapshot` now carries `viewport` (points, pixels per point, fullscreen),
+  `frame_time_ms` and `regions` (the shell's top bar, nav, content and bottom
+  bar, in points). `linc_get_screen_model` returns them; the screenshot path
+  already existed and is part of the same tool group.
+- Motion history: the bus samples `MotionSample` at 10 Hz into a 1200-sample
+  ring (120 s) and `linc_get_motion_history` returns a page, evenly downsampled
+  to `max_samples`, with positions per axis (work/machine/dtg/velocity),
+  commanded/actual/following error/servo load, spindle speed and load,
+  overrides, task mode, interpreter, program and motion line, E-stop, power and
+  panel mode. Eviction increments `dropped.motion`.
+- Crash records: `linc`, `linc-panel` and `linc-mcp` install a panic hook that
+  writes `$XDG_STATE_HOME/linc/crash-<role>-<pid>.json` (message, location,
+  capped backtrace, build, pid). `linc_get_crash_records` reads the directory
+  directly, so a dead HMI still yields its record; the bundle includes them.
+- Bundle: 13 files now (`panel.json`, `ui.json`, `motion.json`,
+  `crashes.json` added). Every string value is rewritten so the operator's home
+  path becomes `~`; a unit test covers the redaction.
+- NML: `PythonBridgeBackend` publishes `BridgeInfo` in the snapshot (kind, pid,
+  alive, request/reply/error counters, last and maximum latency, last
+  request/reply, 20-line stderr tail, fatal reason). `linc_get_nml` returns it
+  plus command/status connection state, ages and echo serial. The simulator
+  answers `available: false` with a reason. `restarts` is always `0`: the bridge
+  is not restarted in place, a dead child reports `alive: false` and `fatal`.
+- HAL: `linc_get_hal` reports the `linc.*` outputs, the heartbeat and the
+  configured component; `linc_get_hal_pins` and `linc_get_hal_signals` answer
+  `available: false` with the reason that `linc-hal` resolves only five symbols
+  and does not link the full HAL C API. They never fabricate pins.
+  `linc_get_io` reads coolant, lube, door, limits, homing and following error
+  from the snapshot.
+- Metrics now include the retained history and motion counts.
+
+Deviations:
+
+- `linc_ui_navigate`, `linc_ui_send_key`, `linc_ui_set_focus`,
+  `linc_test_assert` and `linc_test_capture` from §9.10 are not exposed.
+  Synthetic keyboard or focus input must not exist in a real-machine HMI, and
+  the rest is covered by `linc_ui_action`, `linc_test_wait_for`,
+  `linc_get_screen_model` and `linc_screenshot`.
+- Real HAL pin/signal enumeration is not available (see above); the exit
+  criterion "HAL pin values match halcmd" is met only for the `linc.*` outputs,
+  which are the pins this process owns.
+- `linc_get_nml` cannot show a live bridge in a build without LinuxCNC; it is
+  exercised by the simulator answer and by unit tests.
 
 ### Phase 5 — optional guarded real writes
 

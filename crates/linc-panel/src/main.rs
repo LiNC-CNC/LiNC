@@ -137,6 +137,7 @@ fn main() -> Result<()> {
                 backend: if simulated { "sim".into() } else { "serial".into() },
             },
         };
+        linc_diag::crash::install_hook("panel", process.clone());
         let source = Arc::new(linc_diag::PanelSource::new(
             panel_bus.clone(),
             process,

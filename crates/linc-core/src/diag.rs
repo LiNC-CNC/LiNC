@@ -112,6 +112,46 @@ pub struct UiSnapshot {
     /// Render rate the UI measured, for diagnosing a sluggish panel.
     pub fps: f32,
     pub toasts: Vec<String>,
+    /// Window size in points and scale, so a layout bug can be reproduced.
+    #[serde(default)]
+    pub viewport: ViewportInfo,
+    /// Named screen regions from the shell, in points, top-left origin.
+    #[serde(default)]
+    pub regions: Vec<ScreenRegion>,
+    /// The frame time the UI measured when it published this snapshot.
+    #[serde(default)]
+    pub frame_time_ms: f32,
+}
+
+/// Window size and scale of the HMI, measured from the frame.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ViewportInfo {
+    pub width: f32,
+    pub height: f32,
+    pub pixels_per_point: f32,
+    pub fullscreen: bool,
+}
+
+/// One named rectangle the shell laid out, for the screen model tool.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ScreenRegion {
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl ScreenRegion {
+    pub fn new(name: &str, x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self {
+            name: name.into(),
+            x,
+            y,
+            width,
+            height,
+        }
+    }
 }
 
 /// An HMI intent an agent may trigger through the diagnostic socket.
@@ -162,11 +202,17 @@ pub struct Dropped {
     pub logs: u64,
     pub snapshots: u64,
     pub panel_frames: u64,
+    #[serde(default)]
+    pub motion: u64,
 }
 
 impl Dropped {
     pub fn any(&self) -> bool {
-        self.events > 0 || self.logs > 0 || self.snapshots > 0 || self.panel_frames > 0
+        self.events > 0
+            || self.logs > 0
+            || self.snapshots > 0
+            || self.panel_frames > 0
+            || self.motion > 0
     }
 }
 
@@ -261,6 +307,135 @@ pub struct SimPanelPatch {
     pub press: Option<Vec<String>>,
     /// Button names to release.
     pub release: Option<Vec<String>>,
+}
+
+/// The HMI's view of the LinuxCNC bridge process behind the backend.
+///
+/// Filled by `linc-linuxcnc`; a simulator backend has none. `restarts` is
+/// always zero today because the bridge is not restarted in place: a dead
+/// process sets `alive=false` and `fatal`, and the operator restarts the HMI.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BridgeInfo {
+    pub kind: String,
+    pub pid: u32,
+    pub alive: bool,
+    pub restarts: u64,
+    pub requests: u64,
+    pub replies: u64,
+    pub errors: u64,
+    pub last_latency_ms: u64,
+    pub max_latency_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_request: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_reply: Option<String>,
+    #[serde(default)]
+    pub stderr_tail: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fatal: Option<String>,
+}
+
+/// One axis at a motion sample.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AxisMotion {
+    pub axis: String,
+    pub work: f64,
+    pub machine: f64,
+    pub dtg: f64,
+    pub velocity: f64,
+}
+
+/// A motion sample retained for the motion-history tool.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MotionSample {
+    pub at_ms: i64,
+    pub sequence: u64,
+    pub positions: Vec<AxisMotion>,
+    pub commanded: Vec<f64>,
+    pub actual: Vec<f64>,
+    pub following_error: Vec<f64>,
+    pub servo_load: Vec<f64>,
+    pub spindle_speed: f64,
+    pub spindle_load: f64,
+    pub spindle_override: f64,
+    pub feed: f64,
+    pub feed_override: f64,
+    pub rapid_override: f64,
+    pub task_mode: String,
+    pub interp: String,
+    pub program_line: usize,
+    pub motion_line: usize,
+    pub estop: bool,
+    pub power: String,
+    pub panel_mode: String,
+}
+
+impl MotionSample {
+    pub fn from_snapshot(snapshot: &MachineSnapshot, sequence: u64) -> Self {
+        let axis_entries = |map: &crate::model::AxisMap<f64>| -> Vec<(String, f64)> {
+            map.iter().map(|(axis, value)| (axis.to_string(), *value)).collect()
+        };
+        let commanded = axis_entries(&snapshot.machine.commanded);
+        let positions = snapshot
+            .positions
+            .axes
+            .iter()
+            .map(|(axis, set)| AxisMotion {
+                axis: axis.into(),
+                work: set.work,
+                machine: set.machine,
+                dtg: set.dtg,
+                velocity: set.velocity,
+            })
+            .collect();
+        let spindle = snapshot.spindles.first();
+        Self {
+            at_ms: now_ms(),
+            sequence,
+            positions,
+            commanded: commanded.iter().map(|(_, value)| *value).collect(),
+            actual: axis_entries(&snapshot.machine.actual)
+                .iter()
+                .map(|(_, value)| *value)
+                .collect(),
+            following_error: axis_entries(&snapshot.machine.following_error)
+                .iter()
+                .map(|(_, value)| *value)
+                .collect(),
+            servo_load: axis_entries(&snapshot.machine.servo_load)
+                .iter()
+                .map(|(_, value)| *value)
+                .collect(),
+            spindle_speed: spindle.map(|spindle| spindle.actual_speed).unwrap_or(0.0),
+            spindle_load: spindle.and_then(|spindle| spindle.load).unwrap_or(0.0),
+            spindle_override: snapshot.feed.spindle_override,
+            feed: snapshot.feed.feed,
+            feed_override: snapshot.feed.feed_override,
+            rapid_override: snapshot.feed.rapid_override,
+            task_mode: format!("{:?}", snapshot.task.mode),
+            interp: format!("{:?}", snapshot.task.interp),
+            program_line: snapshot.program.current_line,
+            motion_line: snapshot.program.motion_line,
+            estop: snapshot.machine.estop,
+            power: format!("{:?}", snapshot.task.power),
+            panel_mode: snapshot.panel.mode.label().into(),
+        }
+    }
+}
+
+/// A panic written by `linc-diag`'s crash hook; `linc-mcp` reads the files.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CrashRecord {
+    pub at_ms: i64,
+    pub pid: u32,
+    pub role: String,
+    #[serde(default)]
+    pub build: BuildInfo,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backtrace: Option<String>,
 }
 
 /// Process identity attached to every response.
@@ -380,6 +555,10 @@ pub struct Bus {
     history: VecDeque<HistoryEntry>,
     history_limit: usize,
     last_history_ms: i64,
+    motion: VecDeque<MotionSample>,
+    motion_limit: usize,
+    motion_interval_ms: i64,
+    last_motion_ms: i64,
     screenshot_requested: bool,
     screenshot: Option<Screenshot>,
     ui_actions: VecDeque<UiAction>,
@@ -420,6 +599,10 @@ impl Bus {
             history: VecDeque::new(),
             history_limit: 60,
             last_history_ms: 0,
+            motion: VecDeque::new(),
+            motion_limit: 1_200,
+            motion_interval_ms: 100,
+            last_motion_ms: 0,
             screenshot_requested: false,
             screenshot: None,
             ui_actions: VecDeque::new(),
@@ -454,6 +637,7 @@ impl Bus {
         self.sequence += 1;
         self.captured_at_ms = now_ms();
         self.record_history();
+        self.record_motion();
     }
 
     /// Retain a snapshot at 1 Hz; `history_limit` entries is one minute.
@@ -474,6 +658,55 @@ impl Bus {
 
     pub fn history_len(&self) -> usize {
         self.history.len()
+    }
+
+    /// Retain a motion sample at `motion_interval_ms` (10 Hz by default).
+    fn record_motion(&mut self) {
+        if self.captured_at_ms - self.last_motion_ms < self.motion_interval_ms
+            && !self.motion.is_empty()
+        {
+            return;
+        }
+        self.last_motion_ms = self.captured_at_ms;
+        if self.motion.len() >= self.motion_limit {
+            self.motion.pop_front();
+            self.dropped.motion += 1;
+        }
+        self.motion.push_back(MotionSample::from_snapshot(&self.machine, self.sequence));
+    }
+
+    pub fn motion_len(&self) -> usize {
+        self.motion.len()
+    }
+
+    /// The retained motion samples, optionally limited to the last `seconds`
+    /// and evenly downsampled to `max_samples`.
+    pub fn motion_history(&self, seconds: Option<f64>, max_samples: usize) -> Value {
+        let max = max_samples.clamp(1, 1_200);
+        let cutoff = seconds.map(|seconds| {
+            self.captured_at_ms - (seconds.max(0.0) * 1000.0).round() as i64
+        });
+        let samples: Vec<&MotionSample> = self
+            .motion
+            .iter()
+            .filter(|sample| cutoff.map(|cutoff| sample.at_ms >= cutoff).unwrap_or(true))
+            .collect();
+        let available = samples.len();
+        let step = (available / max).max(1);
+        let picked: Vec<Value> = samples
+            .iter()
+            .step_by(step)
+            .take(max)
+            .map(|sample| serde_json::to_value(sample).unwrap_or(Value::Null))
+            .collect();
+        json!({
+            "samples": picked,
+            "count": picked.len(),
+            "available": available,
+            "retained": self.motion.len(),
+            "sample_interval_ms": self.motion_interval_ms,
+            "downsampled_by": step,
+        })
     }
 
     /// The snapshot at `sequence`, or the newest one at or before it.
@@ -1244,6 +1477,42 @@ mod tests {
         let summary = bus.summary();
         assert_eq!(summary.get("mode").and_then(Value::as_str), Some("Unknown"));
         assert!(summary.get("blockers").and_then(Value::as_array).is_some());
+    }
+
+    #[test]
+    fn motion_samples_are_retained_at_ten_hertz_and_downsampled() {
+        let mut bus = Bus::new(snapshot());
+        bus.publish_machine(snapshot());
+        assert_eq!(bus.motion_len(), 1);
+        // Rewind the sampler instead of sleeping 100 ms per sample.
+        bus.last_motion_ms -= 200;
+        let mut next = snapshot();
+        next.feed.feed = 321.0;
+        next.program.current_line = 7;
+        bus.publish_machine(next);
+        assert_eq!(bus.motion_len(), 2);
+
+        let history = bus.motion_history(None, 10);
+        assert_eq!(history["count"], 2);
+        assert_eq!(history["samples"][1]["feed"], 321.0);
+        assert_eq!(history["samples"][1]["program_line"], 7);
+        assert_eq!(history["sample_interval_ms"], 100);
+
+        let sampled = bus.motion_history(None, 1);
+        assert_eq!(sampled["count"], 1, "max_samples caps the page");
+        assert_eq!(sampled["available"], 2, "the page still reports what was there");
+    }
+
+    #[test]
+    fn the_motion_ring_caps_and_counts_drops() {
+        let mut bus = Bus::new(snapshot());
+        bus.motion_limit = 2;
+        for _ in 0..3 {
+            bus.last_motion_ms -= 200;
+            bus.publish_machine(snapshot());
+        }
+        assert_eq!(bus.motion_len(), 2);
+        assert_eq!(bus.dropped().motion, 1);
     }
 }
 }

@@ -80,6 +80,39 @@ pub fn export_dir() -> std::path::PathBuf {
     state.join("linc").join("exports")
 }
 
+/// Replace home-directory prefixes in every string of a bundle value with `~`.
+///
+/// A bundle goes to a bug report; the operator's home path does not help
+/// reproduce the fault and identifies the account. Nothing else is rewritten.
+fn redact(value: &mut Value) {
+    if let Some(home) = std::env::var_os("HOME").and_then(|home| home.to_str().map(str::to_string)) {
+        redact_strings(value, &home);
+    }
+}
+
+fn redact_strings(value: &mut Value, home: &str) {
+    match value {
+        Value::String(text) => {
+            if !home.is_empty() {
+                if let Some(rest) = text.strip_prefix(home) {
+                    *text = format!("~{rest}");
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                redact_strings(item, home);
+            }
+        }
+        Value::Object(map) => {
+            for item in map.values_mut() {
+                redact_strings(item, home);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn param_u64(params: &Value, key: &str) -> Option<u64> {
     params.get(key).and_then(Value::as_u64)
 }
@@ -162,7 +195,9 @@ impl Source for BusSource {
                 "source": self.process.role,
                 "capabilities": [
                     "snapshot", "summary", "ui", "why_blocked", "offsets", "tools", "program",
-                    "logs", "events", "config", "metrics", "snapshot_at", "snapshot_diff", "timeline", "export_bundle", "ui_action"
+                    "logs", "events", "config", "metrics", "snapshot_at", "snapshot_diff", "timeline",
+                    "export_bundle", "ui_action", "motion_history", "screen_model", "nml", "hal",
+                    "hal_pins", "hal_signals", "io", "crash_records"
                 ],
                 "limits": {
                     "max_frame": crate::MAX_FRAME,
@@ -240,9 +275,12 @@ impl Source for BusSource {
                 })?;
                 let write = |name: &str, value: &Value| -> Result<(), DiagError> {
                     let path = bundle.join(name);
-                    std::fs::write(&path, serde_json::to_vec_pretty(value).unwrap_or_default())
+                    let mut value = value.clone();
+                    redact(&mut value);
+                    std::fs::write(&path, serde_json::to_vec_pretty(&value).unwrap_or_default())
                         .map_err(|error| DiagError::internal(format!("write {}: {error}", path.display())))
                 };
+                let crashes = crate::crash::read_all(50);
                 write("hello.json", &json!({ "process": self.process }))?;
                 write("summary.json", &bus.summary())?;
                 write("snapshot.json", &bus.state(true, 5_000))?;
@@ -252,12 +290,18 @@ impl Source for BusSource {
                 write("config.json", &self.config)?;
                 write("logs.json", &bus.logs(None, None, 1_000))?;
                 write("events.json", &bus.events(None, None, 1_000))?;
-                Ok(json!({ "path": bundle, "files": 9 }))
+                write("panel.json", &serde_json::to_value(&bus.machine().panel).unwrap_or(Value::Null))?;
+                write("ui.json", &serde_json::to_value(bus.ui()).unwrap_or(Value::Null))?;
+                write("motion.json", &bus.motion_history(Some(120.0), 1_200))?;
+                write("crashes.json", &json!({ "records": crashes }))?;
+                Ok(json!({ "path": bundle, "files": 13 }))
             }
             "diag.metrics" => Ok(json!({
                 "sequence": bus.sequence(),
                 "logs": bus.logs(None, None, 1_000_000).get("logs").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
                 "events": bus.events(None, None, 1_000_000).get("events").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+                "history": bus.history_len(),
+                "motion": bus.motion_len(),
                 "dropped": bus.dropped(),
                 "captured_at_ms": bus.captured_at_ms(),
             })),
@@ -269,8 +313,116 @@ impl Source for BusSource {
                 bus.request_ui_action(action);
                 Ok(json!({ "queued": true }))
             }
+            "diag.motion_history" => Ok(bus.motion_history(
+                params.get("seconds").and_then(Value::as_f64),
+                param_u64(params, "max_samples").unwrap_or(600) as usize,
+            )),
+            "diag.screen_model" => {
+                let ui = bus.ui();
+                Ok(json!({
+                    "page": ui.page,
+                    "layout": ui.layout,
+                    "viewport": ui.viewport,
+                    "frame_time_ms": ui.frame_time_ms,
+                    "fps": ui.fps,
+                    "regions": ui.regions,
+                    "toasts": ui.toasts,
+                }))
+            }
+            "diag.nml" => {
+                let machine = bus.machine();
+                let bridge = machine.bridge.clone();
+                Ok(match bridge {
+                    Some(bridge) => json!({
+                        "available": true,
+                        "bridge": bridge,
+                        "command_connected": machine.machine.nml_command_connected,
+                        "status_connected": machine.machine.nml_status_connected,
+                        "command_age_ms": machine.machine.command_age_ms,
+                        "status_age_ms": machine.machine.status_age_ms,
+                        "echo_serial": machine.machine.echo_serial,
+                        "simulated": machine.simulated,
+                    }),
+                    None => json!({
+                        "available": false,
+                        "reason": if machine.simulated {
+                            "the simulator backend has no LinuxCNC bridge"
+                        } else {
+                            "the backend has not reported bridge state"
+                        },
+                        "simulated": machine.simulated,
+                    }),
+                })
+            }
+            "diag.hal" => {
+                let machine = bus.machine();
+                Ok(json!({
+                    "component": self.config.pointer("/hal/component").cloned().unwrap_or(Value::Null),
+                    "available": true,
+                    "outputs": serde_json::to_value(&machine.hal).unwrap_or(Value::Null),
+                    "heartbeat_seq": machine.hal.heartbeat_seq,
+                    "real_hal": {
+                        "pins": false,
+                        "signals": false,
+                        "reason": "linc-hal dlopens only its own output symbols; enumerating pins or signals needs the full HAL C API, which this build does not link",
+                    },
+                }))
+            }
+            "diag.hal_pins" | "diag.hal_signals" => Ok(json!({
+                "available": false,
+                "reason": "real HAL introspection is not linked: linc-hal resolves only hal_init, hal_exit, hal_pin_new, hal_malloc and hal_ready. Use halcmd in the LinuxCNC session; these methods never fabricate pins.",
+            })),
+            "diag.io" => {
+                let machine = &bus.machine().machine;
+                Ok(json!({
+                    "coolant_flood": machine.coolant_flood,
+                    "coolant_mist": machine.coolant_mist,
+                    "lube": machine.lube,
+                    "lube_level_ok": machine.lube_level_ok,
+                    "door_closed": machine.door_closed,
+                    "tool_change_active": machine.tool_change_active,
+                    "limits": machine.limits,
+                    "force_homing": machine.force_homing,
+                    "following_error": machine.following_error,
+                    "servo_load": machine.servo_load,
+                }))
+            }
+            "diag.crash_records" => {
+                let records = crate::crash::read_all(param_u64(params, "limit").unwrap_or(50) as usize);
+                Ok(json!({
+                    "records": records,
+                    "count": records.len(),
+                    "directory": crate::crash::crash_dir(),
+                }))
+            }
             "diag.cancel" => Ok(json!({ "cancelled": params.get("id").cloned().unwrap_or(Value::Null) })),
             other => Err(DiagError::not_found(format!("unknown method {other:?}"))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundle_paths_are_redacted_and_numbers_are_not() {
+        let mut value = json!({
+            "program": { "path": "/home/jack/parts/x.ngc" },
+            "list": ["/home/jack/a", "keep"],
+            "count": 3,
+            "nested": [{ "dir": "/home/jack/nc" }],
+        });
+        redact_strings(&mut value, "/home/jack");
+        assert_eq!(value["program"]["path"], "~/parts/x.ngc");
+        assert_eq!(value["list"][0], "~/a");
+        assert_eq!(value["list"][1], "keep");
+        assert_eq!(value["count"], 3);
+        assert_eq!(value["nested"][0]["dir"], "~/nc");
+
+        // Another user's home stays untouched.
+        let mut other = json!({ "path": "/home/someone/x" });
+        redact_strings(&mut other, "/home/jack");
+        assert_eq!(other["path"], "/home/someone/x");
     }
 }

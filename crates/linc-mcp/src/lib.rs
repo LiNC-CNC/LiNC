@@ -200,6 +200,56 @@ mod tests {
     }
 
     #[test]
+    fn deep_debug_tools_answer_without_inventing_state() {
+        let (mut session, handle) = session("deep");
+        let replies = round_trip(
+            &mut session,
+            &[
+                json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"linc_get_motion_history","arguments":{}}}),
+                json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"linc_get_screen_model","arguments":{}}}),
+                json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"linc_get_nml","arguments":{}}}),
+                json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"linc_get_hal","arguments":{}}}),
+                json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"linc_get_hal_pins","arguments":{}}}),
+                json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"linc_get_io","arguments":{}}}),
+                json!({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"linc_get_crash_records","arguments":{"limit":5}}}),
+                json!({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"linc_get_metrics","arguments":{}}}),
+            ],
+        );
+        for (index, reply) in replies.iter().enumerate() {
+            assert_eq!(reply["result"]["isError"], false, "tool {index}: {reply}");
+        }
+        let motion = json_from(&replies[0]);
+        assert!(motion["data"]["samples"].is_array());
+        assert!(motion["data"]["sample_interval_ms"].is_number());
+
+        let screen = json_from(&replies[1]);
+        assert!(screen["data"]["viewport"].is_object());
+        assert!(screen["data"]["regions"].is_array());
+
+        let nml = json_from(&replies[2]);
+        assert_eq!(nml["data"]["available"], false, "the simulator has no bridge");
+        assert!(nml["data"]["reason"].is_string());
+
+        let hal = json_from(&replies[3]);
+        assert_eq!(hal["data"]["available"], true, "linc.* outputs always exist");
+        assert!(hal["data"]["outputs"].is_object());
+        assert_eq!(hal["data"]["real_hal"]["pins"], false);
+
+        let pins = json_from(&replies[4]);
+        assert_eq!(pins["data"]["available"], false);
+        assert!(pins["data"]["reason"].is_string());
+
+        assert!(json_from(&replies[5])["data"]["limits"].is_array());
+        let crashes = json_from(&replies[6]);
+        assert!(crashes["data"]["records"].is_array());
+        assert!(crashes["data"]["directory"].is_string());
+
+        let metrics = json_from(&replies[7]);
+        assert!(metrics["data"]["motion"].is_number());
+        drop(handle);
+    }
+
+    #[test]
     fn a_ui_action_is_queued_on_the_hmi() {
         let (mut session, handle) = session("ui");
         let replies = round_trip(

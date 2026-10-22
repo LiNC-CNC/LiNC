@@ -10,6 +10,7 @@
 //! [`MAX_FRAME`] bytes and responses are capped by the handlers.
 
 pub mod client;
+pub mod crash;
 pub mod discovery;
 pub mod panel;
 pub mod source;

@@ -132,6 +132,11 @@ pub struct LincApp {
     /// Fixed at 100: the feed override is what scales the jog now, so there is
     /// no second control to keep in step with it.
     pub jog_speed_percent: f64,
+    /// Window size and scale of the last frame, for `linc_get_screen_model`.
+    pub diag_viewport: linc_core::diag::ViewportInfo,
+    /// Named shell rectangles from the last frame.
+    pub diag_regions: Vec<linc_core::diag::ScreenRegion>,
+    pub diag_frame_time_ms: f32,
     preferences_dirty: bool,
     preferences_saved_at: std::time::Instant,
 }
@@ -244,7 +249,21 @@ impl LincApp {
             panel_online: self.snapshot.panel.connected,
             fps: self.fps,
             toasts: self.toasts.iter().map(|toast| toast.text.clone()).collect(),
+            viewport: self.diag_viewport.clone(),
+            regions: self.diag_regions.clone(),
+            frame_time_ms: self.diag_frame_time_ms,
         }
+    }
+
+    /// Record one shell rectangle for the screen model, in points.
+    fn note_region(&mut self, name: &str, rect: egui::Rect) {
+        self.diag_regions.push(linc_core::diag::ScreenRegion::new(
+            name,
+            rect.min.x,
+            rect.min.y,
+            rect.width(),
+            rect.height(),
+        ));
     }
 
     /// Attach the diagnostic bus the app server publishes into.
@@ -393,6 +412,9 @@ impl LincApp {
             jog_increments: crate::state::finite_increments(&profile.machine_ini.increments),
             jog_increment_index: preferences.jog_increment.unwrap_or(0),
             jog_speed_percent: 100.0,
+            diag_viewport: linc_core::diag::ViewportInfo::default(),
+            diag_regions: Vec::new(),
+            diag_frame_time_ms: 0.0,
             preferences,
             preferences_dirty: false,
             preferences_saved_at: std::time::Instant::now(),
@@ -1979,8 +2001,20 @@ impl LincApp {
 
     pub fn draw(&mut self, ui: &mut egui::Ui) {
         self.sync();
+        // A fresh model each frame: a region that disappears must not linger.
+        self.diag_regions.clear();
+        let screen = ui.available_rect_before_wrap();
+        self.diag_viewport = linc_core::diag::ViewportInfo {
+            width: screen.width(),
+            height: screen.height(),
+            pixels_per_point: ui.ctx().pixels_per_point(),
+            fullscreen: ui
+                .ctx()
+                .input(|input| input.viewport().fullscreen.unwrap_or(false)),
+        };
+        self.diag_frame_time_ms = ui.ctx().input(|input| input.unstable_dt * 1000.0);
         ui.painter().rect_filled(ui.max_rect(), 0.0, theme::SURFACE);
-        egui::containers::Panel::top("linc-top")
+        let top_bar = egui::containers::Panel::top("linc-top")
             .exact_size(theme::TOP_BAR_HEIGHT)
             .frame(
                 Frame::new()
@@ -1988,8 +2022,9 @@ impl LincApp {
                     .inner_margin(Margin::symmetric(16, 8)),
             )
             .show(ui, |ui| self.top_bar(ui));
+        self.note_region("top-bar", top_bar.response.rect);
         self.messages_strip(ui);
-        egui::containers::Panel::bottom("linc-bottom")
+        let bottom_bar = egui::containers::Panel::bottom("linc-bottom")
             .exact_size(theme::BOTTOM_BAR_HEIGHT)
             .frame(
                 Frame::new()
@@ -1997,7 +2032,8 @@ impl LincApp {
                     .inner_margin(Margin::symmetric(16, 4)),
             )
             .show(ui, |ui| self.bottom_bar(ui));
-        egui::containers::Panel::left("linc-nav")
+        self.note_region("bottom-bar", bottom_bar.response.rect);
+        let nav = egui::containers::Panel::left("linc-nav")
             .exact_size(theme::NAV_WIDTH)
             .resizable(false)
             .frame(
@@ -2006,7 +2042,8 @@ impl LincApp {
                     .inner_margin(Margin::symmetric(10, 8)),
             )
             .show(ui, |ui| self.nav(ui));
-        egui::containers::CentralPanel::default()
+        self.note_region("nav", nav.response.rect);
+        let central = egui::containers::CentralPanel::default()
             .frame(
                 Frame::new()
                     .fill(theme::SURFACE)
@@ -2046,6 +2083,22 @@ impl LincApp {
                     },
                 );
             });
+        self.note_region("content", central.response.rect);
+        // Panels are laid out against the context's screen rect, which can be
+        // a few points larger than the rect the app's `Ui` was given; report
+        // the extent the shell actually drew, so the model is self-consistent.
+        let right = self
+            .diag_regions
+            .iter()
+            .map(|region| region.x + region.width)
+            .fold(0.0f32, f32::max);
+        let bottom = self
+            .diag_regions
+            .iter()
+            .map(|region| region.y + region.height)
+            .fold(0.0f32, f32::max);
+        self.diag_viewport.width = self.diag_viewport.width.max(right);
+        self.diag_viewport.height = self.diag_viewport.height.max(bottom);
         self.draw_modal(ui.ctx());
         self.draw_tool_change_prompt(ui.ctx());
         self.draw_toasts(ui.ctx());
