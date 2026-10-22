@@ -2600,8 +2600,6 @@ impl LincApp {
                     items: vec![
                         ("\u{2190}/\u{2192}".into(), "PANE"),
                         ("Enter".into(), "LOAD"),
-                        ("Bksp".into(), "UP"),
-                        (k.refresh.label(), "REFRESH"),
                     ],
                 });
                 groups.push(ShortcutGroup {
@@ -2615,7 +2613,10 @@ impl LincApp {
                 });
                 groups.push(ShortcutGroup {
                     title: "MEDIA",
-                    items: vec![("E".into(), "EJECT")],
+                    items: vec![
+                        (k.refresh.label(), "REFRESH"),
+                        ("E".into(), "EJECT"),
+                    ],
                 });
             }
             Page::Help => {

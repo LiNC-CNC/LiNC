@@ -126,7 +126,6 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     let mut new_file = false;
     let mut eject_media = false;
     let mut delete: Option<PathBuf> = None;
-    let mut up = false;
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::C) {
             copy_side = true;
@@ -159,9 +158,6 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
                 }
             }
         }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace) {
-            up = true;
-        }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
             if on_parent {
                 if let Some(parent) = current.as_deref().and_then(Path::parent) {
@@ -188,11 +184,6 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
             }
         }
     });
-    if up && parent_available {
-        if let Some(parent) = current.as_deref().and_then(Path::parent) {
-            open_dir = Some(parent.to_path_buf());
-        }
-    }
     if usb {
         app.files.usb_selected = selected;
         app.files.usb_parent_selected = on_parent;
