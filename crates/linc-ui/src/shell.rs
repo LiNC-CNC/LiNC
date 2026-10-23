@@ -2520,7 +2520,10 @@ impl LincApp {
             else {
                 continue;
             };
-            let selected = *page == self.page;
+            // TOUCH PROBE is a subpage of OFFSETS; keep the parent marked in
+            // the sidebar instead of leaving no entry highlighted.
+            let selected = *page == self.page
+                || (*page == Page::Offsets && self.page == Page::Probe);
             let focused = self.focus_region == FocusRegion::Nav && self.nav_focus == index;
             let (rect, response) =
                 ui.allocate_exact_size(Vec2::new(theme::NAV_WIDTH - 20.0, 38.0), Sense::click());
