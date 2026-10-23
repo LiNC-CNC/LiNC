@@ -1,0 +1,151 @@
+digraph proposed_nml {
+  graph [
+    rankdir=TB,
+    newrank=true,
+    compound=true,
+    splines=spline,
+    nodesep=0.35,
+    ranksep=0.45,
+    pad=0.25,
+    bgcolor="white",
+    fontname="DejaVu Sans",
+    fontsize=11,
+    labelloc=t,
+    label=<<B>NML-based LiNC + LinuxCNC architecture</B><BR/><FONT POINT-SIZE="10">LinuxCNC backend path: UI → supervised Rust helper → linuxcnc-nml / HAL</FONT>>
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontname="DejaVu Sans",
+    fontsize=9.5,
+    margin="0.11,0.06",
+    penwidth=1.2,
+    color="#666666",
+    fillcolor="#FFFFFF"
+  ];
+  edge [
+    fontname="DejaVu Sans",
+    fontsize=8.5,
+    color="#595959",
+    fontcolor="#404040",
+    arrowsize=0.65,
+    penwidth=1.1
+  ];
+
+  subgraph cluster_linc {
+    label=<<B>linc HMI process</B><BR/><FONT POINT-SIZE="8.5">one binary, several threads · no Python runtime · no NML link</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#548235";
+    fontcolor="#375623";
+
+    ui     [label=<<B>UI thread</B><BR/>egui · pages · keyboard>, fillcolor="#E2EFDA", color="#548235"];
+    worker [label=<<B>linc-backend worker</B><BR/>BackendHandle<BR/>validates typed commands>, fillcolor="#E2EFDA", color="#548235"];
+    sup    [label=<<B>HelperBridgeBackend</B><BR/>supervision · request/reply<BR/>JSON codec>, fillcolor="#E2EFDA", color="#548235"];
+    conv   [label=<<B>read_loop + Converter</B><BR/>JSON DTO → MachineSnapshot>, fillcolor="#E2EFDA", color="#548235"];
+    state  [label=<<B>shared state</B><BR/>snapshot · results · bridge info>, shape=cylinder, fillcolor="#E2EFDA", color="#548235"];
+    lhal   [label=<<B>LincHal</B><BR/>writes linc.* outputs>, fillcolor="#E2EFDA", color="#548235"];
+
+    { rank=same; worker; lhal; }
+    { rank=same; sup; conv; state; }
+  }
+
+  subgraph cluster_helper {
+    label=<<B>linc-nml-bridge child process (Rust)</B><BR/><FONT POINT-SIZE="8.5">replaces python3; same JSON protocol and supervision boundary; read-only HAL</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#2E75B6";
+    fontcolor="#1F4E79";
+
+    bridge [label=<<B>bridge loop</B><BR/>20 Hz snapshot<BR/>typed command dispatch<BR/>offset · tool state<BR/>JSON codec>, fillcolor="#DDEBF7", color="#2E75B6"];
+    nmlc   [label=<<B>linuxcnc-nml</B><BR/>NmlClient<BR/>status · command · error<BR/><FONT POINT-SIZE="8">links liblinuxcnc.a + libnml.so</FONT>>, fillcolor="#DDEBF7", color="#2E75B6"];
+    halr   [label=<<B>HalReader</B><BR/>hal_get_pin_value_by_name<BR/><FONT POINT-SIZE="8">via liblinuxcnchal.so</FONT>>, fillcolor="#DDEBF7", color="#2E75B6"];
+    files  [label=<<B>std::fs</B><BR/>parameter file · program text>, fillcolor="#DDEBF7", color="#2E75B6"];
+
+    { rank=same; nmlc; halr; files; }
+  }
+
+  subgraph cluster_panel {
+    label=<<B>linc-panel process</B><BR/><FONT POINT-SIZE="8.5">owns the physical panel</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#7030A0";
+    fontcolor="#4B1F6F";
+
+    panel [label=<<B>PanelDriver + cnc_panel.*</B><BR/>RS-485 or simulated panel<BR/>owns /dev/ttyUSB0>, fillcolor="#E4DFEC", color="#7030A0"];
+    ser   [label=<<B>panel hardware</B><BR/>buttons · LEDs · MPG>, fillcolor="#E4DFEC", color="#7030A0"];
+
+    { rank=same; panel; ser; }
+  }
+
+  subgraph cluster_mem {
+    label=<<B>Kernel shared memory</B><BR/><FONT POINT-SIZE="8.5">System V segments</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#BF9000";
+    fontcolor="#7F6000";
+
+    nml [label=<<B>NML channels</B><BR/>emcCommand · emcStatus · emcError<BR/><FONT POINT-SIZE="8">command queue · status snapshot · error queue</FONT>>, fillcolor="#FFF2CC", color="#BF9000"];
+    hal [label=<<B>HAL shared memory</B><BR/>cnc_panel.* · halui.* · joint.*<BR/>spindle.* · iocontrol.* · linc.*>, fillcolor="#FFF2CC", color="#BF9000"];
+
+    { rank=same; nml; hal; }
+  }
+
+  subgraph cluster_cnc {
+    label=<<B>LinuxCNC session</B><BR/><FONT POINT-SIZE="8.5">separate processes</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#5B7FA6";
+    fontcolor="#33506E";
+
+    task [label=<<B>task</B><BR/>linuxcncsvr · milltask>, fillcolor="#DCE9F7", color="#5B7FA6"];
+    io   [label=<<B>io · halui</B><BR/>tool change · panel I/O>, fillcolor="#DCE9F7", color="#5B7FA6"];
+
+    { rank=same; task; io; }
+  }
+
+  subgraph cluster_diag {
+    label=<<B>diagnostics</B>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#7F7F7F";
+    fontcolor="#404040";
+
+    diag [label=<<B>Unix diag sockets</B><BR/>${XDG_RUNTIME_DIR}/linc/diag-&lt;uid&gt;/>, shape=cylinder, fillcolor="#F2F2F2", color="#7F7F7F"];
+    mcp  [label=<<B>linc-mcp</B><BR/>read-only diagnostics>, fillcolor="#F2F2F2", color="#7F7F7F"];
+
+    { rank=same; diag; mcp; }
+  }
+
+  // HMI control and status path
+  ui -> worker [dir=both, label="typed commands / snapshots"];
+  worker -> sup [dir=both, label="send() / snapshot()"];
+  sup -> bridge [dir=both, label="JSON lines\nstdin / stdout"];
+  sup -> conv [label="reader thread"];
+  conv -> state [label="convert & publish"];
+  state -> worker [dir=both, label="read", style=dashed];
+  worker -> lhal [label="HalWriter"];
+
+  // Native channels
+  bridge -> nmlc [label="snapshot / command"];
+  bridge -> halr [label="read pins", style=dashed];
+  bridge -> files [label="read / write", style=dashed];
+  nmlc -> nml [dir=both, label="stat · command · error"];
+  halr -> hal [label="read HAL", style=dashed];
+  lhal -> hal [label="writes linc.*", color="#548235", fontcolor="#375623"];
+
+  // Panel
+  panel -> hal [dir=both, label="reads / writes cnc_panel.*"];
+  panel -> ser [dir=both, label="serial / window"];
+
+  // LinuxCNC core
+  nml -> task [dir=both, label="command / echo"];
+  hal -> task [dir=both, label="HAL nets"];
+  hal -> io [dir=both];
+
+  // Diagnostics
+  ui -> diag [dir=both, style=dashed, label="publishes", constraint=false];
+  panel -> diag [dir=both, style=dashed, label="publishes", constraint=false];
+  mcp -> diag [dir=both, label="attaches"];
+}

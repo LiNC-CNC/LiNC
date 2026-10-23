@@ -99,6 +99,15 @@ does not shrink the text. Settings shows the configured value and offers a
 temporary runtime override. The HMI enforces a 1280×720 minimum window size.
 The standalone simulation panel uses `[simulation] panel_scale` independently.
 
+## Architecture
+
+The LinuxCNC backend runs behind the typed `MachineBackend` boundary. The
+current HMI uses a supervised Python helper; the proposed NML-based design keeps
+the same process boundary and replaces the helper with a Rust process using
+`linuxcnc-nml` and a native HAL reader. See
+[`docs/architecture.md`](docs/architecture.md) for both diagrams, the data flow,
+and the migration notes.
+
 ## HAL integration
 
 The HAL wiring is included:
