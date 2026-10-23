@@ -632,24 +632,26 @@ fn cell(
             app.offsets.edit_focus = false;
         }
     } else {
-        ui.add_space(CELL_TEXT_PAD);
-        // Same size as the WCS name, and clear of the table edge so a minus
-        // sign cannot be clipped by the cell's padding.
-        let response = ui.add_enabled(
-            writable,
-            egui::Label::new(
-                RichText::new(text.as_str())
-                    .monospace()
-                    .size(theme::font_size(12.0))
-                    .color(theme::FG),
-            )
-            .sense(egui::Sense::click()),
-        );
-        if response.clicked() {
-            app.offsets.selected_row = row_index;
-            app.offsets.selected_column = column;
-            app.offsets.selected = index;
-        }
+        // Values are monospaced with four decimals, so right-aligning the
+        // cell lines every decimal point up regardless of the integer width.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(CELL_TEXT_PAD);
+            let response = ui.add_enabled(
+                writable,
+                egui::Label::new(
+                    RichText::new(text.as_str())
+                        .monospace()
+                        .size(theme::font_size(12.0))
+                        .color(theme::FG),
+                )
+                .sense(egui::Sense::click()),
+            );
+            if response.clicked() {
+                app.offsets.selected_row = row_index;
+                app.offsets.selected_column = column;
+                app.offsets.selected = index;
+            }
+        });
     }
     if selected {
         // Same rect and inset as the tool table: the box keeps its size when the

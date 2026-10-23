@@ -390,14 +390,17 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             |ui| {
                 probe_dro(app, ui);
                 ui.add_space(4.0);
+                let scroll_h = (height - 82.0).max(180.0);
                 egui::ScrollArea::vertical()
                     .id_salt("probe-left")
-                    .max_height((height - 86.0).max(180.0))
+                    .max_height(scroll_h)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
+                        let content_top = ui.cursor().top();
                         parameters_card(app, ui);
                         ui.add_space(6.0);
-                        results_card(app, ui);
+                        let used = ui.cursor().top() - content_top;
+                        results_card(app, ui, (scroll_h - used).max(160.0));
                     });
             },
         );
@@ -864,9 +867,10 @@ fn param_field(ui: &mut Ui, app: &mut LincApp, index: usize, text: &str) {
     }
 }
 
-fn results_card(app: &mut LincApp, ui: &mut Ui) {
+fn results_card(app: &mut LincApp, ui: &mut Ui, min_height: f32) {
     theme::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
+        ui.set_min_height((min_height - 24.0).max(0.0));
         ui.spacing_mut().interact_size.y = 12.0;
         ui.spacing_mut().item_spacing.y = 2.0;
         ui.spacing_mut().button_padding.y = 1.0;
