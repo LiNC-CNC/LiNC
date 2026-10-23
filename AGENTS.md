@@ -158,6 +158,8 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
 
 - **Release vs debug.** `start-sim.sh` and the capture scripts run `target/release/…`; `cargo build` alone updates `target/debug` and leaves the
   running release binary stale. Use `cargo build --release`.
+- **Killed sim leftovers.** `start-sim.sh` stops stale `halui`, `milltask`, `io`, `linuxcnc`, `linc` and `linc-panel` when no `linuxcncsvr`
+  is running; otherwise an old `halui` spams `status buffer is not valid` and an old panel keeps its diagnostic socket. `LINC_KEEP_STALE=1` skips it.
 - **Stale fixture copy.** `/home/jack/CNC/tmp/profiles/base.toml` copies `configs/base.toml` for screenshot profiles. Edit `configs/base.toml`, then
   refresh the copy; editing only the fixture hides the change.
 - **Native NML build.** `linc-linuxcnc` links the sibling `../linuxcnc-nml` crates and the installed LinuxCNC development files (`/usr/include/linuxcnc`, `liblinuxcnc.a`, `libnml.so`). Rebuild after changing the crate; a cross build needs target-side LinuxCNC libraries, not the host's.

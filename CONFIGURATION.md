@@ -227,7 +227,8 @@ and ATC values as the machine; only the HAL stack and paths differ.
   interpreter restores that file at startup, but it only *queues* the G5X
   message and the task delivers queued trajectory messages when motion is idle,
   so a session that starts in E-stop keeps the DRO at zero. Once the machine is
-  powered on, `NmlBackend::sync_work_offsets` re-initializes the interpreter
+  powered on and every axis is homed, `NmlBackend::sync_work_offsets`
+  re-initializes the interpreter
   (`reset_interpreter`), which re-reads the file and delivers the offsets; it
   reads `g5x_offset` back before treating the sync as done, falls back to an MDI
   `G54`..`G59.3`, and retries a few times. Offset writes go through
