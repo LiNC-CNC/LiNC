@@ -44,41 +44,39 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         anchor.request_focus();
     }
     let mut search_active = search_had_focus;
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("SEARCH")
+    // The search bar is the table's title bar: one text line, not the 44 px
+    // touch-target row the theme would otherwise reserve.
+    let one_line = ui.text_style_height(&egui::TextStyle::Body);
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = one_line;
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("SEARCH")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut app.help.query)
+                    .id(search_id)
+                    .hint_text("G2, G3, M6, o sub, arc …  ( / )")
+                    .desired_width(360.0)
+                    .margin(egui::Margin::symmetric(6, 1)),
+            );
+            if app.help.focus_search {
+                response.request_focus();
+                app.help.focus_search = false;
+            }
+            search_active = search_active || response.has_focus();
+            ui.label(
+                RichText::new(format!(
+                    "{} SECTIONS / {} INDEX ROWS / {} FIGURES",
+                    bundle.counts.sections, bundle.counts.rows, bundle.counts.figures
+                ))
+                .monospace()
                 .size(theme::font_size(9.0))
                 .color(theme::MUTED),
-        );
-        // One text line, not the 44 px touch-target height; the theme's
-        // interact_size is the floor the TextEdit style applies.
-        let one_line = ui.text_style_height(&egui::TextStyle::Body);
-        let response = ui
-            .scope(|ui| {
-                ui.spacing_mut().interact_size.y = one_line;
-                ui.add(
-                    egui::TextEdit::singleline(&mut app.help.query)
-                        .id(search_id)
-                        .hint_text("G2, G3, M6, o sub, arc …  ( / )")
-                        .desired_width(360.0)
-                        .margin(egui::Margin::symmetric(6, 1)),
-                )
-            })
-            .inner;
-        if app.help.focus_search {
-            response.request_focus();
-            app.help.focus_search = false;
-        }
-        search_active = search_active || response.has_focus();
-        ui.label(
-            RichText::new(format!(
-                "{} SECTIONS / {} INDEX ROWS / {} FIGURES",
-                bundle.counts.sections, bundle.counts.rows, bundle.counts.figures
-            ))
-            .monospace()
-            .size(theme::font_size(9.0))
-            .color(theme::MUTED),
-        );
+            );
+        });
     });
 
     let mut open_anchor: Option<String> = None;
@@ -193,12 +191,17 @@ impl Columns {
 }
 
 fn header_row(ui: &mut Ui, columns: &Columns) {
-    ui.spacing_mut().item_spacing.x = 0.0;
-    ui.horizontal(|ui| {
-        header_cell(ui, columns.code, "CODE", true);
-        header_cell(ui, columns.params, "PARAMETERS", false);
-        header_cell(ui, columns.desc, "DESCRIPTION", false);
-        header_cell(ui, columns.meaning, "MEANING", false);
+    // The column titles are one 18 px row; without this the theme's 44 px
+    // interact_size makes the header band taller than the table it labels.
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = 18.0;
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.horizontal(|ui| {
+            header_cell(ui, columns.code, "CODE", true);
+            header_cell(ui, columns.params, "PARAMETERS", false);
+            header_cell(ui, columns.desc, "DESCRIPTION", false);
+            header_cell(ui, columns.meaning, "MEANING", false);
+        });
     });
 }
 
