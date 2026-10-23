@@ -14,6 +14,19 @@ The product name is **LiNC**; the executable, Rust workspace crates and HAL
 component use the lowercase identifier `linc`. The specification and accepted
 SVG mockups are in this directory; the Rust implementation is in `crates/`.
 
+## Screenshots
+
+Live captures from the simulator at 1600×1000, with the demo mill part loaded.
+Click any image for the full-size PNG.
+
+| Machine | Program |
+|:---:|:---:|
+| [![Machine dashboard: DRO, toolpath and program preview](docs/screenshots/machine.png)](docs/screenshots/machine.png) | [![Program page: G-code and live toolpath preview](docs/screenshots/program.png)](docs/screenshots/program.png) |
+| **Tools** | **Offsets** |
+| [![Tool table](docs/screenshots/tools.png)](docs/screenshots/tools.png) | [![Work offsets](docs/screenshots/offsets.png)](docs/screenshots/offsets.png) |
+| **Diagnostics** | **G-code Help** |
+| [![Diagnostics overview](docs/screenshots/diagnostics.png)](docs/screenshots/diagnostics.png) | [![G-code help index](docs/screenshots/help.png)](docs/screenshots/help.png) |
+
 ## Accepted references
 
 | Purpose | File |
@@ -33,7 +46,9 @@ SVG mockups are in this directory; the Rust implementation is in `crates/`.
 | Simulator panel (separate window) | `svg/sim-panel.svg` |
 
 Only the accepted versions are included. The earlier vendor-style studies and
-intermediate layout explorations have been removed.
+intermediate layout explorations have been removed. The screenshots above are
+live captures of the current implementation; these SVGs remain the design
+references.
 
 The SVGs are self-contained: they use the literal graphite theme colors and a
 full dark canvas instead of unresolved CSS custom properties, so `eog`,
@@ -254,6 +269,7 @@ LiNC/
 │   ├── sim.toml
 │   ├── lathe-sim.toml
 │   └── baiermill.toml
+├── docs/                 # architecture guide, diagrams and README screenshots
 ├── crates/
 │   ├── linc-app/         # CLI, backend selection, window and event loop
 │   ├── linc-core/        # config, INI, model, commands, HAL, sim, IPC
