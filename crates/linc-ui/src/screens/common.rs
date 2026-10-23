@@ -428,7 +428,7 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
 /// (100-120 %) behind an accent progress fill, with the percentage on the right.
 fn servo_meter(ui: &mut Ui, label: &str, load: f64) {
     const SCALE: f32 = 120.0;
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 16.0), Sense::hover());
     let painter = ui.painter_at(rect);
     let font = FontId::monospace(theme::font_size(10.0));
     painter.text(
@@ -446,8 +446,8 @@ fn servo_meter(ui: &mut Ui, label: &str, load: f64) {
         theme::FG,
     );
     let bar = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 17.0, rect.center().y - 5.0),
-        egui::pos2(rect.right() - 40.0, rect.center().y + 5.0),
+        egui::pos2(rect.left() + 17.0, rect.center().y - 4.0),
+        egui::pos2(rect.right() - 40.0, rect.center().y + 4.0),
     );
     if bar.width() < 12.0 {
         return;
@@ -495,8 +495,8 @@ pub fn servo_load_card(app: &LincApp, ui: &mut Ui, height: f32) {
         ui.set_min_height((height - 21.0).max(0.0));
         ui.set_max_height((height - 21.0).max(0.0));
         ui.set_min_width(ui.available_width());
-        ui.spacing_mut().interact_size.y = 20.0;
-        ui.spacing_mut().item_spacing.y = 1.0;
+        ui.spacing_mut().interact_size.y = 16.0;
+        ui.spacing_mut().item_spacing.y = 0.0;
         theme::section_header(ui, "SERVO LOAD");
         for (label, load) in app.servo_load_rows() {
             servo_meter(ui, &label, load);

@@ -28,7 +28,9 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
         - theme::BOTTOM_BAR_HEIGHT
         - ui.cursor().min.y)
         .max(200.0);
-    let bottom_height = 150.0;
+    // The bottom cards are sized to their contents, not to a fixed strip: the
+    // graph gets every pixel the feed/servo rows do not need.
+    let bottom_height = bottom_cards_height(app);
     let graph_height = (page_height - bottom_height - 6.0).max(200.0);
     let graph_width = (available * 0.70).max(480.0);
     let right_width = (available - graph_width - 8.0).max(280.0);
@@ -78,6 +80,19 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
             },
         );
     });
+}
+
+/// Height that just holds the bottom row: the feed/spindle block needs a fixed
+/// body, and every servo row adds 16 px above the card's title and margins.
+fn bottom_cards_height(app: &LincApp) -> f32 {
+    const FEED: f32 = 100.0;
+    let rows = app.servo_load_rows().len();
+    let servo = if rows == 0 {
+        0.0
+    } else {
+        44.0 + rows as f32 * 16.0
+    };
+    FEED.max(servo)
 }
 
 fn bottom_card(
