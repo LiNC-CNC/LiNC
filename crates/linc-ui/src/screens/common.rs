@@ -1007,43 +1007,46 @@ fn feed_speed_block(
     let painter = ui.painter_at(rect);
     // The lane leaves room beside the letter for the spindle's direction arrow.
     let lane = 42.0;
-    let gap = 4.0;
-    // Shrink the row until all three columns fit the half. The two rows share
-    // the column edges, so `100%` sits directly above `(True)`.
-    let mut font_size = 10.5;
-    let (value_width, _units_width, _extra_width) = loop {
-        let font = FontId::monospace(theme::font_size(font_size));
-        let measure = |text: &str| {
-            ui.fonts_mut(|fonts| {
-                fonts
-                    .layout_no_wrap(text.to_string(), font.clone(), theme::FG)
-                    .size()
-                    .x
-            })
-        };
-        let value_width = rows
+    let gap = 6.0;
+    let detail_size = 9.0;
+    let detail_font = FontId::monospace(theme::font_size(detail_size));
+    let measure = |text: &str, font: &FontId| {
+        ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(text.to_string(), font.clone(), theme::FG)
+                .size()
+                .x
+        })
+    };
+    let units_width = rows
+        .iter()
+        .map(|(_, units, _)| measure(units, &detail_font))
+        .fold(0.0f32, f32::max);
+    let extra_width = rows
+        .iter()
+        .map(|(_, _, extra)| measure(extra, &detail_font))
+        .fold(0.0f32, f32::max);
+    // The feed/RPM values are the primary reading, so they get the larger face,
+    // shrinking only as far as the narrower half requires. The units and the
+    // override/flag stay in the smaller detail face.
+    let mut value_size = 14.0;
+    let value_width = loop {
+        let font = FontId::monospace(theme::font_size(value_size));
+        let width = rows
             .iter()
-            .map(|(value, _, _)| measure(value))
+            .map(|(value, _, _)| measure(value, &font))
             .fold(0.0f32, f32::max);
-        let units_width = rows
-            .iter()
-            .map(|(_, units, _)| measure(units))
-            .fold(0.0f32, f32::max);
-        let extra_width = rows
-            .iter()
-            .map(|(_, _, extra)| measure(extra))
-            .fold(0.0f32, f32::max);
-        let total = lane + value_width + gap + units_width + gap + extra_width;
-        if total <= rect.width() - 8.0 || font_size <= 8.0 {
-            break (value_width, units_width, extra_width);
+        let total = lane + width + gap + units_width + gap + extra_width;
+        if total <= rect.width() - 2.0 || value_size <= 10.0 {
+            break width;
         }
-        font_size -= 0.5;
+        value_size -= 0.5;
     };
     painter.text(
         rect.left_center() + Vec2::new(4.0, 0.0),
         egui::Align2::LEFT_CENTER,
         letter,
-        FontId::proportional(theme::font_size(font_size * 3.0)),
+        FontId::proportional(theme::font_size(32.0)),
         theme::SUCCESS,
     );
     if let Some((direction, on)) = spindle {
@@ -1055,31 +1058,33 @@ fn feed_speed_block(
             on,
         );
     }
-    let font = FontId::monospace(theme::font_size(font_size));
+    let value_font = FontId::monospace(theme::font_size(value_size));
     let value_right = rect.left() + lane + value_width;
     let units_left = value_right + gap;
-    let extra_right = rect.right() - 4.0;
+    // The override/flag column starts right after the units instead of being
+    // pushed to the far edge, which left a wide hole before `100%`.
+    let extra_left = units_left + units_width + gap;
     for (index, (value, units, extra)) in rows.iter().enumerate() {
         let y = rect.center().y + (index as f32 - 0.5) * 24.0;
         painter.text(
             egui::pos2(value_right, y),
             egui::Align2::RIGHT_CENTER,
             value,
-            font.clone(),
+            value_font.clone(),
             theme::FG,
         );
         painter.text(
             egui::pos2(units_left, y),
             egui::Align2::LEFT_CENTER,
             units,
-            font.clone(),
+            detail_font.clone(),
             theme::SUCCESS,
         );
         painter.text(
-            egui::pos2(extra_right, y),
-            egui::Align2::RIGHT_CENTER,
+            egui::pos2(extra_left, y),
+            egui::Align2::LEFT_CENTER,
             extra,
-            font.clone(),
+            detail_font.clone(),
             theme::SUCCESS,
         );
     }
@@ -1122,13 +1127,13 @@ pub fn feed_speed_card(app: &LincApp, ui: &mut Ui, height: f32) {
         let feed_rows = [
             (
                 format!("{programmed:.0}"),
-                format!(" {units}/min"),
-                format!(" {:.0}%", feed.feed_override * 100.0),
+                format!("{units}/min"),
+                format!("{:.0}%", feed.feed_override * 100.0),
             ),
             (
                 format!("{:.0}", feed.feed),
-                format!(" {units}/min"),
-                format!(" ({})", yes_no(feed.feed_override_enabled)),
+                format!("{units}/min"),
+                format!("({})", yes_no(feed.feed_override_enabled)),
             ),
         ];
         feed_speed_block(ui, left, "F", &feed_rows, None);
@@ -1149,13 +1154,13 @@ pub fn feed_speed_card(app: &LincApp, ui: &mut Ui, height: f32) {
         let spindle_rows = [
             (
                 format!("{commanded:.0}"),
-                " RPM".to_string(),
-                format!(" {:.0}%", override_factor * 100.0),
+                "RPM".to_string(),
+                format!("{:.0}%", override_factor * 100.0),
             ),
             (
                 format!("{actual:.0}"),
-                " RPM".to_string(),
-                format!(" ({})", yes_no(on)),
+                "RPM".to_string(),
+                format!("({})", yes_no(on)),
             ),
         ];
         let direction = app
