@@ -44,6 +44,9 @@ libc = "0.2"
 serialport = { version = "4.8", default-features = false }
 signal-hook = "0.3"
 tempfile = "3.14"
+# Native LinuxCNC NML client. The crate is maintained in the sibling
+# `linuxcnc-nml` checkout; it links liblinuxcnc/libnml at build time.
+linuxcnc-nml = { path = "../linuxcnc-nml/linuxcnc-nml" }
 
 [profile.release]
 lto = "thin"

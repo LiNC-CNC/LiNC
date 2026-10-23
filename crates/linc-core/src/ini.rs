@@ -177,6 +177,10 @@ pub struct MachineIni {
     pub max_feed_override: f64,
     pub tool_table: PathBuf,
     pub tool_table_columns: String,
+    /// `[RS274NGC] PARAMETER_FILE`, resolved against the INI directory. The
+    /// interpreter owns this file; the HMI only reads and updates the work
+    /// offset rows so a session cut short does not lose them.
+    pub parameter_file: Option<PathBuf>,
     pub program_prefix: PathBuf,
     pub open_file: Option<PathBuf>,
     pub atc_pockets: Option<u16>,
@@ -287,6 +291,10 @@ impl MachineIni {
             .unwrap_or("TZDR")
             .trim()
             .to_ascii_uppercase();
+        let parameter_file = ini
+            .get("RS274NGC", "PARAMETER_FILE")
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| resolve_ini_path(&config_dir, value));
 
         let program_prefix_value = ini.get("DISPLAY", "PROGRAM_PREFIX").unwrap_or(".");
         let program_prefix = resolve_ini_path(&config_dir, program_prefix_value);
@@ -358,6 +366,7 @@ impl MachineIni {
             max_feed_override: ini.get_f64("DISPLAY", "MAX_FEED_OVERRIDE").unwrap_or(2.0),
             tool_table,
             tool_table_columns,
+            parameter_file,
             program_prefix,
             open_file,
             atc_pockets: ini.get_u32("ATC", "POCKETS").map(|value| value as u16),
@@ -440,6 +449,9 @@ SPINDLES = 1
 JOINTS = 3
 KINEMATICS = trivkins coordinates=XYZ
 
+[RS274NGC]
+PARAMETER_FILE = sim.var
+
 [EMCIO]
 TOOL_TABLE = tool.tbl
 
@@ -472,6 +484,10 @@ HOME_USE_INDEX = YES
         assert_eq!(ini.tool_table_columns, "TZDR");
         assert_eq!(ini.atc_pockets, Some(12));
         assert!(ini.tool_table.ends_with("tool.tbl"));
+        assert_eq!(
+            ini.parameter_file.as_deref(),
+            Some(Path::new("/tmp/machine/sim.var"))
+        );
         // `JOG` is kept as the continuous entry, and each label is the whole
         // token so a selector can show what the INI declares.
         assert_eq!(

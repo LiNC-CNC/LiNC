@@ -5,10 +5,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-anyhow.workspace = true
 log.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 linc-core = { path = "../linc-core" }
+linc-hal = { path = "../linc-hal" }
+# Native NML client. It builds a small C++ shim against the installed
+# LinuxCNC headers and links liblinuxcnc/libnml, so this crate is Linux-only
+# and cannot be built without the LinuxCNC development files.
+linuxcnc-nml.workspace = true

@@ -9,7 +9,7 @@ use linc_core::backend::{BackendHandle, HalWriter, MachineBackend};
 use linc_core::config::Profile;
 use linc_core::model::PanelMode;
 use linc_hal::LincHal;
-use linc_linuxcnc::PythonBridgeBackend;
+use linc_linuxcnc::NmlBackend;
 use linc_ui::{LincApp, UiBackend};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -116,8 +116,8 @@ fn main() -> Result<()> {    init_logging();
     let status_source = profile.status_source;
     let backend: Box<dyn MachineBackend> = if use_linuxcnc {
         Box::new(
-            PythonBridgeBackend::spawn(profile.clone())
-                .context("cannot start the LinuxCNC bridge")?,
+            NmlBackend::connect(profile.clone())
+                .context("cannot open the LinuxCNC NML channels")?,
         )
     } else {
         Box::new(linc_core::sim::SimBackend::new_connected(

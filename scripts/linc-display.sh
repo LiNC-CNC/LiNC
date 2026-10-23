@@ -2,8 +2,8 @@
 # LinuxCNC [DISPLAY] entry point for the LiNC simulation.
 #
 # LinuxCNC invokes displays as: <display> -ini <ini-file> [args]
-# The HMI attaches to the running LinuxCNC session through the linc-linuxcnc
-# bridge. After the linc.* HAL pins exist, this wrapper loads the post-GUI HAL.
+# The HMI attaches to the running LinuxCNC session through the native NML
+# backend. After the linc.* HAL pins exist, this wrapper loads the post-GUI HAL.
 set -e
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$(readlink -f "$0")")" && pwd)

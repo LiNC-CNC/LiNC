@@ -10,6 +10,10 @@
 #   scripts/build-deb.sh --arch arm64        # one arch
 #   scripts/build-deb.sh --stage             # stage only, no dpkg-deb needed
 #   scripts/build-deb.sh --version 0.2.0 --out dist
+#
+# The LinuxCNC backend links liblinuxcnc/libnml, so the build host needs the
+# LinuxCNC development files (or a target sysroot for a cross build) and the
+# sibling ../linuxcnc-nml checkout.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -136,7 +140,7 @@ stage() {
             | sed -n 's/^shlibs:Depends=//p')"
     fi
     if [ -z "${depends:-}" ]; then
-        depends="libc6, libgcc-s1, libgl1, libxkbcommon0, libwayland-client0, libx11-6, libxi6, libxcursor1, libxrandr2, libxcb1"
+        depends="libc6, libgcc-s1, libstdc++6, libgl1, libxkbcommon0, libwayland-client0, libx11-6, libxi6, libxcursor1, libxrandr2, libxcb1"
     fi
     depends="$depends, linuxcnc (>= 2.9) | linuxcnc-uspace"
 
@@ -173,6 +177,12 @@ for arch in "${ARCHES[@]}"; do
         exit 1
     }
     require_target "$arch" "$target"
+    if [ "$arch" != "amd64" ] && [ -z "${LINUXCNC_LIB_DIR:-}" ]; then
+        echo "error: $arch needs an arm64 LinuxCNC sysroot for the native NML client." >&2
+        echo "       Set LINUXCNC_INCLUDE_DIR and LINUXCNC_LIB_DIR to the target" >&2
+        echo "       LinuxCNC headers and libraries, then rerun; do not point them at /usr/lib." >&2
+        exit 1
+    fi
 
     echo "==> building $arch ($target)"
     run_cargo "$arch" build --release --locked --target "$target" "${cargo_jobs[@]}"

@@ -5,7 +5,9 @@
 //! development machine without a running HAL.
 //!
 //! There is deliberately no arbitrary pin-name write API. The only outputs
-//! exposed by [`LincHal`] are the three declared `linc.*` pins.
+//! exposed by [`LincHal`] are the five declared `linc.*` pins. [`HalReader`]
+//! is the separate, read-only side: it can read any pin but has no write
+//! method.
 
 use std::ffi::{c_char, c_void, CString};
 use std::ptr;
@@ -19,6 +21,7 @@ use thiserror::Error;
 const HAL_BIT: i32 = 1;
 const HAL_FLOAT: i32 = 2;
 const HAL_S32: i32 = 3;
+const HAL_U32: i32 = 4;
 const HAL_IN: i32 = 16;
 const HAL_OUT: i32 = 32;
 
@@ -67,6 +70,140 @@ type HalExitFn = unsafe extern "C" fn(i32) -> i32;
 type HalReadyFn = unsafe extern "C" fn(i32) -> i32;
 type HalPinNewFn = unsafe extern "C" fn(*const c_char, i32, i32, *mut *mut c_void, i32) -> i32;
 type HalMallocFn = unsafe extern "C" fn(usize) -> *mut c_void;
+type HalGetPinValueFn =
+    unsafe extern "C" fn(*const c_char, *mut i32, *mut *mut HalData, *mut bool) -> i32;
+
+/// The `hal_data_u` union. It is eight bytes because of the `double` member;
+/// keeping all four members here makes the layout match the C definition.
+#[repr(C)]
+union HalData {
+    b: bool,
+    s: i32,
+    u: u32,
+    f: f64,
+}
+
+/// A read-only value from an arbitrary HAL pin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HalPinValue {
+    Bit(bool),
+    Float(f64),
+    S32(i32),
+    U32(u32),
+}
+
+impl HalPinValue {
+    pub fn as_f64(self) -> Option<f64> {
+        match self {
+            Self::Float(value) => Some(value),
+            Self::S32(value) => Some(value as f64),
+            Self::U32(value) => Some(value as f64),
+            Self::Bit(_) => None,
+        }
+    }
+
+    pub fn as_i64(self) -> Option<i64> {
+        match self {
+            Self::S32(value) => Some(value as i64),
+            Self::U32(value) => Some(value as i64),
+            Self::Bit(value) => Some(value as i64),
+            Self::Float(_) => None,
+        }
+    }
+
+    pub fn as_bool(self) -> Option<bool> {
+        match self {
+            Self::Bit(value) => Some(value),
+            Self::S32(value) => Some(value != 0),
+            Self::U32(value) => Some(value != 0),
+            Self::Float(_) => None,
+        }
+    }
+}
+
+/// Read-only view of arbitrary HAL pins.
+///
+/// This is the counterpart to [`LincHal`]: the HMI may *read* `cnc_panel.*`,
+/// `iocontrol.*`, `halui.*` and spindle feedback, but it still has no generic
+/// write path. The HAL library is `dlopen`ed so a UI-only build starts without
+/// it and reports every pin as unavailable.
+pub struct HalReader {
+    _library: Library,
+    /// A component is required before HAL has a `hal_data` pointer in this
+    /// process; `hal_get_pin_value_by_name` dereferences it. The reader owns no
+    /// pins and exposes no write path.
+    _component: HalComponent,
+    get_pin: HalGetPinValueFn,
+}
+
+unsafe impl Send for HalReader {}
+
+impl HalReader {
+    pub fn new() -> Result<Self, HalError> {
+        let library = open_hal_library()?;
+        let get_pin: HalGetPinValueFn = unsafe {
+            *library
+                .get(b"hal_get_pin_value_by_name\0")
+                .map_err(|error| HalError::Library(error.to_string()))?
+        };
+        let component = HalComponent::new(&format!("linc_reader_{}", std::process::id()))?;
+        component.ready()?;
+        Ok(Self {
+            _library: library,
+            _component: component,
+            get_pin,
+        })
+    }
+
+    /// Read one pin. Returns `None` when the pin does not exist, when HAL has
+    /// not initialised its shared memory, or when the type is unsupported.
+    pub fn read(&self, name: &str) -> Option<HalPinValue> {
+        let name = CString::new(name).ok()?;
+        let mut ty = 0i32;
+        let mut data: *mut HalData = ptr::null_mut();
+        let mut connected = false;
+        let result = unsafe {
+            (self.get_pin)(
+                name.as_ptr(),
+                &mut ty,
+                &mut data,
+                &mut connected as *mut bool,
+            )
+        };
+        if result != 0 || data.is_null() {
+            return None;
+        }
+        // The union's active member is selected by the HAL pin type. The
+        // pointer stays valid only while HAL is running; read it immediately.
+        unsafe {
+            match ty {
+                HAL_BIT => Some(HalPinValue::Bit((*data).b)),
+                HAL_FLOAT => Some(HalPinValue::Float((*data).f)),
+                HAL_S32 => Some(HalPinValue::S32((*data).s)),
+                HAL_U32 => Some(HalPinValue::U32((*data).u)),
+                _ => None,
+            }
+        }
+    }
+
+    pub fn bit(&self, name: &str) -> Option<bool> {
+        self.read(name)?.as_bool()
+    }
+
+    pub fn float(&self, name: &str) -> Option<f64> {
+        self.read(name)?.as_f64()
+    }
+
+    pub fn s32(&self, name: &str) -> Option<i32> {
+        self.read(name)?.as_i64().map(|value| value as i32)
+    }
+}
+
+fn open_hal_library() -> Result<Library, HalError> {
+    unsafe { Library::new("liblinuxcnchal.so.0") }
+        .or_else(|_| unsafe { Library::new("liblinuxcnchal.so") })
+        .map_err(|error| HalError::Library(error.to_string()))
+}
 
 /// A live LinuxCNC HAL component. The component name is the prefix for every
 /// pin; pin arguments are relative names such as `hmi-alive`.
@@ -84,9 +221,7 @@ unsafe impl Send for HalComponent {}
 
 impl HalComponent {
     pub fn new(name: &str) -> Result<Self, HalError> {
-        let library = unsafe { Library::new("liblinuxcnchal.so.0") }
-            .or_else(|_| unsafe { Library::new("liblinuxcnchal.so") })
-            .map_err(|error| HalError::Library(error.to_string()))?;
+        let library = open_hal_library()?;
         let hal_init: HalInitFn = unsafe {
             *library
                 .get(b"hal_init\0")
@@ -351,6 +486,16 @@ mod tests {
                 .unwrap();
             hal.write(LincOutput::JogIncrement, HalValue::Float(1.0))
                 .unwrap();
+        }
+    }
+
+    #[test]
+    fn read_only_hal_reader_is_harmless_without_hal() {
+        // Inside LinuxCNC this initializes a pinless reader component; on a
+        // developer box it returns an error. Neither may panic or segfault.
+        if let Ok(reader) = HalReader::new() {
+            let _ = reader.read("cnc_panel.panel_connected");
+            let _ = reader.bit("cnc_panel.estop");
         }
     }
 

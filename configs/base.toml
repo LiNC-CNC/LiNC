@@ -189,7 +189,8 @@ confirm_quit = true
 
 [backend]
 kind = "linuxcnc"
-transport = "pyo3"
+# Native in-process NML. There is no Python helper and no JSON bridge.
+transport = "nml"
 status_hz = 20
 hal_hz = 10
 connect_timeout_ms = 3000

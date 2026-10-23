@@ -1068,9 +1068,9 @@ fn validate(config: &Config, ini: &MachineIni) -> Result<(), ConfigError> {
     if config.backend.kind != "linuxcnc" {
         return Err(ConfigError::Invalid("backend.kind must be linuxcnc".into()));
     }
-    if config.backend.transport != "pyo3" && config.backend.transport != "python" {
+    if config.backend.transport != "nml" {
         return Err(ConfigError::Invalid(
-            "backend.transport must be pyo3 or python".into(),
+            "backend.transport must be nml".into(),
         ));
     }
     if config.backend.status_hz < 10 || config.backend.status_hz > 20 {
