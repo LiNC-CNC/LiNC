@@ -283,6 +283,7 @@ impl LincApp {
 
     pub fn new(profile: Profile, mut backend: Box<dyn UiBackend>, ctx: &egui::Context) -> Self {
         theme::apply(ctx);
+        theme::install_font_fallback(ctx);
         theme::apply_design_zoom(ctx, profile.ui_scale().unwrap_or(1.0));
         let snapshot = backend.snapshot();
         Self::with_snapshot(profile, backend, snapshot)

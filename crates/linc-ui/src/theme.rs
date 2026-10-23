@@ -96,6 +96,23 @@ pub fn apply_design_zoom(ctx: &egui::Context, multiplier: f32) {
     }
 }
 
+/// Give proportional text the bundled Hack fallback. Ubuntu-Light, the default
+/// proportional face, has no arrow glyphs (U+2190–U+2193); Hack does, so prose
+/// and table cells can use typographic arrows instead of replacement boxes.
+pub fn install_font_fallback(ctx: &egui::Context) {
+    ctx.set_fonts(font_definitions());
+}
+
+fn font_definitions() -> egui::FontDefinitions {
+    let mut fonts = egui::FontDefinitions::default();
+    if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        if !family.iter().any(|name| name == "Hack") {
+            family.insert(1, "Hack".to_owned());
+        }
+    }
+    fonts
+}
+
 pub fn apply(ctx: &egui::Context) {
     // SPEC §5 requires a visible focus ring at all times. egui's default drops
     // focus when the operator clicks empty chrome, which would leave the shell
@@ -445,4 +462,19 @@ pub fn pressure_color(fraction: f64) -> Color32 {
 /// A translucent version of `color`, for selection bands.
 pub fn tint(color: Color32, alpha: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
+}
+
+
+#[cfg(test)]
+mod font_tests {
+    use super::font_definitions;
+
+    #[test]
+    fn proportional_family_falls_back_to_hack() {
+        let fonts = font_definitions();
+        assert!(fonts
+            .families
+            .get(&egui::FontFamily::Proportional)
+            .is_some_and(|family| family.iter().any(|name| name == "Hack")));
+    }
 }
