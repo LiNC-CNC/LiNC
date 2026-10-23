@@ -1082,6 +1082,10 @@ fn draw_bounds_dimensions(
     let offset = work_offset.unwrap_or([0.0; 3]);
     let pad = glyph * 0.6;
     let row = glyph * 1.1;
+    // In a side view the dimension measured along the view axis collapses to a
+    // point. Its labels have nowhere to stand, so they are left out entirely
+    // rather than piled up on the drawing.
+    let hidden = view_axis(projection);
 
     // The drawing is laid out around the box as the operator sees it, and the
     // camera now stands in front of the machine (+Y runs into the screen). That
@@ -1102,46 +1106,51 @@ fn draw_bounds_dimensions(
         [0.0, gap, 0.0],
         color,
     );
-    put_label(
-        painter,
-        projection,
-        [min[0] + size[0] * 0.5, max[1] + gap + row, min[2]],
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        glyph,
-        &format!("{:.2}", size[0]),
-        color,
-    );
-    let start_text = format!("X{:.1}", min[0] - offset[0]);
-    put_label(
-        painter,
-        projection,
-        [
-            min[0] - pad,
-            max[1] + gap + row + pad + text_width(&start_text, glyph) * 0.5,
-            min[2],
-        ],
-        [0.0, 1.0, 0.0],
-        [-1.0, 0.0, 0.0],
-        glyph,
-        &start_text,
-        color,
-    );
-    let end_text = format!("X{:.1}", max[0] - offset[0]);
-    put_label(
-        painter,
-        projection,
-        [
-            max[0] + pad,
-            max[1] + gap + row + pad + text_width(&end_text, glyph) * 0.5,
-            min[2],
-        ],
-        [0.0, 1.0, 0.0],
-        [-1.0, 0.0, 0.0],
-        glyph,
-        &end_text,
-        color,
-    );
+    if hidden != Some('X') {
+        put_label(
+            painter,
+            projection,
+            [min[0] + size[0] * 0.5, max[1] + gap + row, min[2]],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            glyph,
+            &format!("{:.2}", size[0]),
+            color,
+            None,
+        );
+        let start_text = format!("X{:.1}", min[0] - offset[0]);
+        put_label(
+            painter,
+            projection,
+            [
+                min[0] - pad,
+                max[1] + gap + row + pad + text_width(&start_text, glyph) * 0.5,
+                min[2],
+            ],
+            [0.0, 1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            glyph,
+            &start_text,
+            color,
+            Some(([min[0], max[1] + gap, min[2]], [-1.0, 0.0, 0.0])),
+        );
+        let end_text = format!("X{:.1}", max[0] - offset[0]);
+        put_label(
+            painter,
+            projection,
+            [
+                max[0] + pad,
+                max[1] + gap + row + pad + text_width(&end_text, glyph) * 0.5,
+                min[2],
+            ],
+            [0.0, 1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            glyph,
+            &end_text,
+            color,
+            Some(([max[0], max[1] + gap, min[2]], [1.0, 0.0, 0.0])),
+        );
+    }
 
     // Y: outside the left edge, reading along Y.
     dimension_line(
@@ -1152,49 +1161,54 @@ fn draw_bounds_dimensions(
         [-gap, 0.0, 0.0],
         color,
     );
-    put_label(
-        painter,
-        projection,
-        [min[0] - gap - row, max[1] - size[1] * 0.5, min[2]],
-        [0.0, 1.0, 0.0],
-        [-1.0, 0.0, 0.0],
-        glyph,
-        &format!("{:.2}", size[1]),
-        color,
-    );
-    // Each end value stays at its own end: the ends of a dimension are not
-    // interchangeable, so the near coordinate belongs at the near end even
-    // though the mirrored drawing moved which end of the line appears where.
-    let start_text = format!("Y{:.1}", min[1] - offset[1]);
-    put_label(
-        painter,
-        projection,
-        [
-            min[0] - gap - row - text_width(&start_text, glyph) * 0.5,
-            min[1] - pad,
-            min[2],
-        ],
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        glyph,
-        &start_text,
-        color,
-    );
-    let end_text = format!("Y{:.1}", max[1] - offset[1]);
-    put_label(
-        painter,
-        projection,
-        [
-            min[0] - gap - row - text_width(&end_text, glyph) * 0.5,
-            max[1] + pad,
-            min[2],
-        ],
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        glyph,
-        &end_text,
-        color,
-    );
+    if hidden != Some('Y') {
+        put_label(
+            painter,
+            projection,
+            [min[0] - gap - row, max[1] - size[1] * 0.5, min[2]],
+            [0.0, 1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            glyph,
+            &format!("{:.2}", size[1]),
+            color,
+            None,
+        );
+        // Each end value stays at its own end: the ends of a dimension are not
+        // interchangeable, so the near coordinate belongs at the near end even
+        // though the mirrored drawing moved which end of the line appears where.
+        let start_text = format!("Y{:.1}", min[1] - offset[1]);
+        put_label(
+            painter,
+            projection,
+            [
+                min[0] - gap - row - text_width(&start_text, glyph) * 0.5,
+                min[1] - pad,
+                min[2],
+            ],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            glyph,
+            &start_text,
+            color,
+            Some(([min[0] - gap, min[1], min[2]], [0.0, -1.0, 0.0])),
+        );
+        let end_text = format!("Y{:.1}", max[1] - offset[1]);
+        put_label(
+            painter,
+            projection,
+            [
+                min[0] - gap - row - text_width(&end_text, glyph) * 0.5,
+                max[1] + pad,
+                min[2],
+            ],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            glyph,
+            &end_text,
+            color,
+            Some(([min[0] - gap, max[1], min[2]], [0.0, 1.0, 0.0])),
+        );
+    }
 
     // Z: up the front-left corner (min X, min Y), which is the corner on the
     // left of the drawing. The far corner already carries the X and Y
@@ -1217,45 +1231,56 @@ fn draw_bounds_dimensions(
     // Y stays on the line so every label is coplanar with it.
     let z_line_x = min[0] - gap * 1.4;
     let z_label_y = min[1] - gap * 1.4;
-    put_label(
-        painter,
-        projection,
-        [
-            z_line_x - pad - glyph * 0.5,
-            z_label_y,
-            min[2] + size[2] * 0.5,
-        ],
-        [0.0, 0.0, 1.0],
-        [-1.0, 0.0, 0.0],
-        glyph,
-        &format!("{:.2}", size[2]),
-        color,
-    );
-    // The two end values are the length label turned a quarter turn clockwise
-    // about Y: they read along +X with their caps up +Z, so they are written
-    // horizontally, centred on the line and clear of its end by a pad. Below
-    // and above the line is the only room for horizontal text, since sideways
-    // they would run back across it.
-    put_label(
-        painter,
-        projection,
-        [z_line_x, z_label_y, min[2] - pad - glyph * 0.5],
-        [1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0],
-        glyph,
-        &start_text,
-        color,
-    );
-    put_label(
-        painter,
-        projection,
-        [z_line_x, z_label_y, max[2] + pad + glyph * 0.5],
-        [1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0],
-        glyph,
-        &end_text,
-        color,
-    );
+    if hidden != Some('Z') {
+        put_label(
+            painter,
+            projection,
+            [
+                z_line_x - pad - glyph * 0.5,
+                z_label_y,
+                min[2] + size[2] * 0.5,
+            ],
+            [0.0, 0.0, 1.0],
+            [-1.0, 0.0, 0.0],
+            glyph,
+            &format!("{:.2}", size[2]),
+            color,
+            None,
+        );
+        // The two end values are the length label turned a quarter turn clockwise
+        // about Y: they read along +X with their caps up +Z, so they are written
+        // horizontally, centred on the line and clear of its end by a pad. Below
+        // and above the line is the only room for horizontal text, since sideways
+        // they would run back across it.
+        put_label(
+            painter,
+            projection,
+            [z_line_x, z_label_y, min[2] - pad - glyph * 0.5],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            glyph,
+            &start_text,
+            color,
+            Some((
+                [min[0] - gap * 1.4, min[1] - gap * 1.4, min[2]],
+                [0.0, 0.0, -1.0],
+            )),
+        );
+        put_label(
+            painter,
+            projection,
+            [z_line_x, z_label_y, max[2] + pad + glyph * 0.5],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            glyph,
+            &end_text,
+            color,
+            Some((
+                [min[0] - gap * 1.4, min[1] - gap * 1.4, max[2]],
+                [0.0, 0.0, 1.0],
+            )),
+        );
+    }
 }
 
 /// Width of `text` at `glyph` height, in model units.
@@ -1263,7 +1288,78 @@ fn text_width(text: &str, glyph: f64) -> f64 {
     hershey::string_len(text) as f64 * glyph / 440.0
 }
 
-/// Width of `text` at `glyph` height, in model units.
+/// The axis that points straight at or away from the camera, when the view
+/// looks along one machine axis.
+fn view_axis(projection: &Projection) -> Option<char> {
+    for (axis, unit) in [
+        ('X', [1.0f32, 0.0, 0.0]),
+        ('Y', [0.0, 1.0, 0.0]),
+        ('Z', [0.0, 0.0, 1.0]),
+    ] {
+        let (dx, dy) = view_xy(unit, projection.mode, projection.yaw, projection.pitch);
+        if (dx * dx + dy * dy).sqrt() < 0.2 {
+            return Some(axis);
+        }
+    }
+    None
+}
+
+/// Screen direction of a model-space vector, without the projection scale:
+/// zero means the vector points at or away from the viewer.
+fn screen_direction(projection: &Projection, vector: [f64; 3]) -> Vec2 {
+    let (dx, dy) = view_xy(
+        [vector[0] as f32, vector[1] as f32, vector[2] as f32],
+        projection.mode,
+        projection.yaw,
+        projection.pitch,
+    );
+    Vec2::new(dx, dy)
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// Roll a label's glyph-up vector a quarter turn about its baseline so the text
+/// plane faces the camera. Only for a plane that is edge-on: the baseline stays
+/// where it is, which keeps the label reading along the axis it measures.
+///
+/// The second value is set when the readable orientation would put the text
+/// back across the drawing: the baseline then moves one glyph height the other
+/// way, instead of turning the letters upside down.
+fn rolled_up(
+    projection: &Projection,
+    center: [f64; 3],
+    right: [f64; 3],
+    up: [f64; 3],
+) -> ([f64; 3], bool) {
+    let mut normal = cross(right, up);
+    let screen = screen_direction(projection, normal);
+    // Readable orientation: tops up the screen, and tops to the left when the
+    // baseline is vertical.
+    let flip = screen.y > 0.05 || (screen.y.abs() <= 0.05 && screen.x > 0.0);
+    if flip {
+        normal = [-normal[0], -normal[1], -normal[2]];
+    }
+    // The labels sit outside the box. Keep the glyph tops on the outside of the
+    // drawing, so the text does not cover the part or the dimension line.
+    let away = projection.project(center) - projection.rect.center();
+    let shift = screen_direction(projection, normal).dot(away) < -1e-3;
+    (normal, shift)
+}
+
+/// Draw a dimension label.
+///
+/// `flat` is set for the value at the end of a dimension line, as
+/// `(end, outward)`: the point where the line ends and the direction it points
+/// away from the span. When the label's baseline lies along the view, the text
+/// is drawn flat clear of the line: inside the span under a horizontal
+/// dimension, or just past the end of a vertical one. Pass `None` for the
+/// length label in the middle of the line.
 fn put_label(
     painter: &Painter,
     projection: &Projection,
@@ -1273,7 +1369,57 @@ fn put_label(
     glyph: f64,
     text: &str,
     color: Color32,
+    flat: Option<([f64; 3], [f64; 3])>,
 ) {
+    let pixels_per_unit = (projection.scale * projection.zoom) as f64;
+    if screen_direction(projection, right).length() < 0.2 {
+        // The baseline points into the screen, so no rotation about it can make
+        // the text readable: lay it flat and clear of the line.
+        let (end, outward) = flat.unwrap_or((center, up));
+        let glyph_px = (glyph * pixels_per_unit) as f32;
+        let width_px = hershey::string_len(text) * glyph_px / 440.0;
+        let gap = (glyph * 0.6 * pixels_per_unit) as f32;
+        let end_pos = projection.project(end);
+        let direction = screen_direction(projection, outward).normalized();
+        let half_along = 0.5 * (width_px * direction.x.abs() + glyph_px * direction.y.abs());
+        let position = if direction.x.abs() > direction.y.abs() {
+            // A horizontal dimension: step back inside the span along the line
+            // and out across it, under the drawing.
+            let away = end_pos - projection.rect.center();
+            let mut across = away - direction * away.dot(direction);
+            if across.length() < 1e-3 {
+                across = Vec2::new(-direction.y, direction.x);
+            }
+            across = across.normalized();
+            let half_across = 0.5 * (width_px * across.x.abs() + glyph_px * across.y.abs());
+            // The value sits further inside than the pad that spaces the line
+            // from the arrow, so the vertical dimension's end value at the same
+            // corner does not run into it.
+            end_pos - direction * (half_along + gap * 2.5) + across * (half_across + gap)
+        } else {
+            // A vertical dimension: the text goes just past the end, centred on
+            // the line, where there is room above or below the drawing.
+            end_pos + direction * (half_along + gap)
+        };
+        hershey::plot_string_flat(painter, position, glyph_px, text, color);
+        return;
+    }
+    let mut center = center;
+    let up = if screen_direction(projection, up).length() < 0.2 {
+        let (up, shift) = rolled_up(projection, center, right, up);
+        if shift {
+            // Lay the text on the outside by moving the baseline, not by
+            // turning the glyphs upside down.
+            center = [
+                center[0] - up[0] * glyph,
+                center[1] - up[1] * glyph,
+                center[2] - up[2] * glyph,
+            ];
+        }
+        up
+    } else {
+        up
+    };
     let width = text_width(text, glyph);
     let origin = [
         center[0] - right[0] * width * 0.5,
@@ -1633,6 +1779,46 @@ mod tests {
         // An axis the machine does not have is not drawn.
         let two = vec!["X".to_string(), "Z".to_string()];
         assert_eq!(axis_triad(ViewMode::SideXz, DEFAULT_YAW, DEFAULT_PITCH, &two).len(), 2);
+    }
+
+    fn projection(mode: ViewMode) -> Projection {
+        Projection::new(
+            Bounds3 {
+                min: [-100.0, -100.0, -100.0],
+                max: [100.0, 100.0, 100.0],
+            },
+            Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0)),
+            mode,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            1.0,
+            Vec2::ZERO,
+        )
+    }
+
+    #[test]
+    fn a_side_view_has_one_axis_at_the_viewer() {
+        assert_eq!(view_axis(&projection(ViewMode::SideYz)), Some('X'));
+        assert_eq!(view_axis(&projection(ViewMode::SideXz)), Some('Y'));
+        assert_eq!(view_axis(&projection(ViewMode::TopXy)), Some('Z'));
+        assert_eq!(view_axis(&projection(ViewMode::Iso3d)), None);
+    }
+
+    #[test]
+    fn an_edge_on_label_rolls_to_face_the_viewer() {
+        let view = projection(ViewMode::SideYz);
+        // The Y length label reads along Y with its tops pointing into the
+        // screen (-X). Below the drawing it must roll to +Z and move its
+        // baseline down, so upright letters sit under the line.
+        let (up, shift) = rolled_up(&view, [0.0, 0.0, -100.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]);
+        assert_eq!(up, [0.0, 0.0, 1.0]);
+        assert!(shift, "the label is below the drawing: {shift}");
+
+        // The Z length label reads up the left side. It rolls to -Y (left) and
+        // already points away from the drawing, so it needs no extra shift.
+        let (up, shift) = rolled_up(&view, [-100.0, 0.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]);
+        assert_eq!(up, [0.0, -1.0, 0.0]);
+        assert!(!shift, "the label is left of the drawing: {shift}");
     }
 
     #[test]

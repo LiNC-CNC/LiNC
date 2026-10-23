@@ -127,6 +127,43 @@ pub(crate) fn string_len(text: &str) -> f32 {
     text.chars().map(advance).sum()
 }
 
+/// Draw `text` flat on the screen, centred on `center`.
+///
+/// Used for a label whose plane would be edge-on in an orthographic side view:
+/// the label keeps its place on the drawing but turns to face the viewer.
+/// `size` is the glyph height in pixels.
+pub(crate) fn plot_string_flat(
+    painter: &egui::Painter,
+    center: Pos2,
+    size: f32,
+    text: &str,
+    color: Color32,
+) {
+    let scale = size / BOX;
+    let width = string_len(text) * scale;
+    let mut pen = center.x - width * 0.5;
+    let bottom = center.y + size * 0.5;
+    for character in text.chars() {
+        if let Some(strokes) = glyph(character) {
+            for stroke in strokes {
+                let points: Vec<Pos2> = stroke
+                    .iter()
+                    .map(|(x_box, y_box)| {
+                        Pos2::new(
+                            pen + *x_box * scale,
+                            bottom - (BOX - *y_box) * scale,
+                        )
+                    })
+                    .collect();
+                if points.len() >= 2 {
+                    painter.add(egui::Shape::line(points, Stroke::new(1.2, color)));
+                }
+            }
+        }
+        pen += advance(character) * scale;
+    }
+}
+
 /// Draw `text` lying in the plane at `origin` with the given right and up axes.
 ///
 /// `size` is the glyph height in model units. `project` maps a model point to

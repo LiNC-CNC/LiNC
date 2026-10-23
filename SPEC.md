@@ -415,7 +415,11 @@ Default page. The layout is selected by `machine.gui`.
   the X/Y/Z length in the middle and the work coordinate of each end beside its
   arrow. The text is Hershey stroke geometry (the AXIS font) laid into the plane
   it measures — X and Y flat in XY, Z in XZ — so the camera projects it with the
-  part. There are no PROGRAM or MACHINE captions; the geometry says which is
+  part. In a side view one axis points at the viewer, so its labels are left out
+  and the other two keep their baselines but roll a quarter turn to face the
+  camera; an end value whose baseline would lie along the view is drawn flat,
+  inside its span or just past the end, so it stays readable and clear of the
+  line. There are no PROGRAM or MACHINE captions; the geometry says which is
   which. The stock block is fully transparent by
   default (`toolpath.stock_alpha = 0`) and configurable up to opaque.
 - Program card, feed/spindle-load gauges, machine health and alarms.
