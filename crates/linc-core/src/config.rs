@@ -246,6 +246,8 @@ pub struct KeysConfig {
     pub tools: String,
     pub offsets: String,
     pub diagnostics: String,
+    /// Open the offline G-code reference from any page.
+    pub help: String,
     pub back: String,
     pub quit: String,
     pub focus_next: String,
@@ -285,7 +287,8 @@ impl KeysConfig {
             files_delete: "Delete".into(),
             tools: "F7".into(),
             offsets: "F8".into(),
-            diagnostics: "Ctrl+Esc".into(),
+            diagnostics: "Ctrl+D".into(),
+            help: "Ctrl+H".into(),
             back: "Escape".into(),
             quit: "Ctrl+Q".into(),
             focus_next: "Down".into(),

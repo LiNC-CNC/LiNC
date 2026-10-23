@@ -49,7 +49,8 @@ Available navigation keys:
 | `OFFSET` | `F8` | Offsets page |
 | `WIN` | `F10` | Toggle `SPLIT`/`CODE` on the Program page, shown as `▢` in the sidebar shortcuts; `Ctrl+▢` cycles the toolpath view |
 | `ESC` | `Esc` | Back / cancel / close detail |
-| `Ctrl+Esc` | `Ctrl+Esc` | Diagnostics |
+| `Ctrl+D` | `Ctrl+D` | Diagnostics (unless the editable Program editor uses it for duplicate line) |
+| `Ctrl+H` | `Ctrl+H` | G-code Help |
 | `Ctrl+Q` | `Ctrl+Q` | Guarded quit |
 | Arrows | — | Focus/lists/scroll/parameter adjustment |
 | `PageUp` / `PageDown` | — | Page or tab navigation |
@@ -59,8 +60,8 @@ Available navigation keys:
 | `MO(1)` | layer key | Symbols and mouse layer |
 
 The six function keys are the only page keys the keymap can send, so the
-remaining destinations take combinations: `Ctrl+Esc` for Diagnostics and
-`Ctrl+Q` for quit. `[keys]` in the profile binds all of them; the values in the
+remaining destinations take combinations: `Ctrl+D` for Diagnostics and
+`Ctrl+H` for G-code Help, and `Ctrl+Q` for quit. `[keys]` in the profile binds all of them; the values in the
 table are the defaults in `configs/base.toml`.
 
 Hard limitations:
@@ -92,7 +93,7 @@ else, so it cannot shadow another page's command.
 
 | Key | Action |
 |---|---|
-| `F5` `F6` `F7` `F8` `Ctrl+Esc` | Go to Machine / Program / Tools / Offsets / Diagnostics |
+| `F5` `F6` `F7` `F8` `Ctrl+D` `Ctrl+H` | Go to Machine / Program / Tools / Offsets / Diagnostics / G-code Help |
 | `Esc` | Back, cancel, close detail |
 | `Ctrl+Q` | Guarded quit |
 | Arrows, `PageUp`/`PageDown`, `Home`/`End` | Focus, page, first/last item |
@@ -1010,7 +1011,7 @@ Implementation:
 - `TOOL`: Tools.
 - `OFFSET`: Offsets.
 - `WIN`: cycle `SPLIT`/`CODE`, page-local to Program (see 3.1 shortcut scope).
-- `Ctrl+Esc`: Diagnostics.
+- `Ctrl+D`: Diagnostics (the editable Program editor owns `Ctrl+D` for duplicate line); `Ctrl+H`: G-code Help.
 - `HELP` action: G-code Help; no dedicated function key.
 - `LOAD` / `Ctrl+O`: Files, when idle and allowed.
 - `PROBE` action: Touch Probe from Offsets; explicit `RUN PROBE` issues MDI.
@@ -1030,7 +1031,8 @@ Implementation:
 - `MO(1)`: symbols/mouse.
 
 No F1–F8 mapping. The bottom keycap highlight reflects the current page:
-`FILE` active in Program, `Ctrl+Esc` reaching Diagnostics, etc.
+`FILE` active in Program, `Ctrl+D` reaching Diagnostics, `Ctrl+H` G-code Help,
+etc.
 
 ### 8.2 Mode and command gating
 

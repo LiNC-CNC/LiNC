@@ -64,7 +64,8 @@ impl Page {
             Page::Program => Some("FILE"),
             Page::Offsets => Some("OFFSET"),
             Page::Tools => Some("TOOL"),
-            Page::Diagnostics => Some("WIN"),
+            Page::Diagnostics => Some("Ctrl+D"),
+            Page::Help => Some("Ctrl+H"),
             _ => None,
         }
     }
@@ -1435,6 +1436,7 @@ pub struct Keymap {
     pub tools: Binding,
     pub offsets: Binding,
     pub diagnostics: Binding,
+    pub help: Binding,
     pub back: Binding,
     pub quit: Binding,
     pub activate: Binding,
@@ -1495,9 +1497,10 @@ impl Keymap {
             offsets: binding(&keys.offsets, Binding::new(Key::F8, none), &mut rejected),
             diagnostics: binding(
                 &keys.diagnostics,
-                Binding::new(Key::Escape, ctrl),
+                Binding::new(Key::D, ctrl),
                 &mut rejected,
             ),
+            help: binding(&keys.help, Binding::new(Key::H, ctrl), &mut rejected),
             back: binding(&keys.back, Binding::new(Key::Escape, none), &mut rejected),
             quit: binding(&keys.quit, Binding::new(Key::Q, ctrl), &mut rejected),
             activate: binding(&keys.activate, Binding::new(Key::Enter, none), &mut rejected),
@@ -1712,5 +1715,19 @@ mod help_dialog_tests {
         assert!(!help.dialog_back());
         help.close_dialog();
         assert!(help.dialog.is_none());
+    }
+}
+
+#[cfg(test)]
+mod page_key_tests {
+    use super::Keymap;
+
+    #[test]
+    fn diagnostics_and_help_use_ctrl_d_and_ctrl_h() {
+        let keymap = Keymap::from_config(&linc_core::config::KeysConfig::spec_default());
+        assert_eq!(keymap.diagnostics.key, egui::Key::D);
+        assert!(keymap.diagnostics.modifiers.ctrl);
+        assert_eq!(keymap.help.key, egui::Key::H);
+        assert!(keymap.help.modifiers.ctrl);
     }
 }

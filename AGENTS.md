@@ -144,14 +144,13 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
 - Present: `MAIN`, `FILE`, `TOOL`, `OFFSET`, `WIN` (F5, F6, F7, F8, F10), `ESC`, arrows, `PGUP`, `PGDN`, `HOME`, `END`, `ENTER`, `BACKSPACE`,
   letters, digits, punctuation, `CTRL`, and `MO(1)` (symbols, mouse buttons, `Ctrl+Q`). Letters arrive lowercase.
 - Missing: F1–F4, F9, F11, F12, `Tab`, `Shift`, `Delete`. Provide a Ctrl fallback (Files accepts `Ctrl+X` as Delete) or a focusable action.
-- Global keys navigate: F5 Machine, F6 Program (again → Files), F7 Tools, F8 Offsets, `Ctrl+Esc` Diagnostics, `Ctrl+Q` guarded quit, Esc,
-  arrows/Page/Home/End, Enter. `[keys]` drives the shell; `Keymap::from_config` is the only source.
+- Global keys navigate: F5 Machine, F6 Program (again → Files), F7 Tools, F8 Offsets, `Ctrl+D` Diagnostics, `Ctrl+H` G-code Help,
+  `Ctrl+Q` guarded quit, Esc, arrows/Page/Home/End, Enter. `[keys]` drives the shell; `Keymap::from_config` is the only source.
 - Everything else is page-local and consumed only on that page: `Ctrl+S`, `Ctrl+Z/Y`, editor keys, `Ctrl+R` run-from-line, `Ctrl+0` fit, `Ctrl+L`
   clear trail, Files copy/delete, MDI history. A page-local key consumed elsewhere shadows another page's command.
 - The sidebar SHORTCUTS pane lists page-local commands only; navigation keys are never listed. The bottom bar carries live machine state only.
-- `Ctrl+F` is a dead binding: `[keys].find` exists and Settings advertises it, but no find UI is implemented. Do not add one without changing SPEC §6.2.
-- `[ui] pages` selects and orders nav entries but does not unbind keys. If you hide a page, decide what its `[keys]` binding does. The Diagnostics
-  keycap reads `WIN` while its binding is `Ctrl+Esc`; `[keys]` is authoritative.
+- `Ctrl+F` focuses the Help search (`[keys].find`); it is not an editor find. Do not add a find UI without changing SPEC §6.2.
+- `[ui] pages` selects and orders nav entries but does not unbind keys. If you hide a page, decide what its `[keys]` binding does. `[keys]` is authoritative.
 
 ## Traps
 

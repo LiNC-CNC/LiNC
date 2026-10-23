@@ -124,9 +124,10 @@ program_run_from_line = "Ctrl+R"
 files_delete = "Delete"
 tools = "F7"
 offsets = "F8"
-# The CNC keyboard has POS/PROG/SET/MON/DIAG/RESET wired to F5/F6/F7/F8/F10/Esc.
-# There is no F9, so DIAGNOSTICS takes Ctrl+Esc and F10 carries CODE/SPLIT.
-diagnostics = "Ctrl+Esc"
+# There is no F9 on the panel: DIAGNOSTICS takes Ctrl+D and G-CODE HELP Ctrl+H;
+# F10 carries CODE/SPLIT and Esc is back/cancel.
+diagnostics = "Ctrl+D"
+help = "Ctrl+H"
 back = "Escape"
 quit = "Ctrl+Q"
 focus_next = "Down"

@@ -1705,8 +1705,16 @@ impl LincApp {
             if input.consume_key(self.keymap.offsets.modifiers, self.keymap.offsets.key) {
                 nav_page = Some(Page::Offsets);
             }
-            if input.consume_key(self.keymap.diagnostics.modifiers, self.keymap.diagnostics.key) {
+            // Ctrl+D duplicates a line in the editable program; that page-local
+            // command shadows the global Diagnostics key there.
+            let editing_program = self.page == Page::Program && self.editing_allowed();
+            if !editing_program
+                && input.consume_key(self.keymap.diagnostics.modifiers, self.keymap.diagnostics.key)
+            {
                 nav_page = Some(Page::Diagnostics);
+            }
+            if input.consume_key(self.keymap.help.modifiers, self.keymap.help.key) {
+                nav_page = Some(Page::Help);
             }
             if input.consume_key(self.keymap.quit.modifiers, self.keymap.quit.key) {
                 quit = true;
@@ -1724,7 +1732,7 @@ impl LincApp {
             if input.consume_key(self.keymap.find.modifiers, self.keymap.find.key) {
                 find = true;
             }
-            if input.consume_key(egui::Modifiers::CTRL, egui::Key::D) {
+            if editing_program && input.consume_key(egui::Modifiers::CTRL, egui::Key::D) {
                 duplicate_line = true;
             }
             if input.consume_key(egui::Modifiers::CTRL, egui::Key::K) {
@@ -3480,14 +3488,15 @@ pub fn page_from_name(name: &str) -> Option<Page> {
 /// can hide the pages it does not use (a machine with no changer can hide
 /// TOOLS, for example) without removing the screen from the binary.
 /// Ordered to match the keyboard: MAIN (F5), FILE (F6), TOOL (F7), OFFSET
-/// (F8), WIN (F10). A page that has no function key follows the ones that do.
+/// (F8); Diagnostics and Help use Ctrl+D and Ctrl+H. A page that has no
+/// function key follows the ones that do.
 pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
     (Page::Machine, "MACHINE", "MAIN"),
     (Page::Program, "PROGRAM", "FILE"),
     (Page::Tools, "TOOLS", "TOOL"),
     (Page::Offsets, "OFFSETS", "OFFSET"),
-    (Page::Diagnostics, "DIAGNOSTICS", "WIN"),
-    (Page::Help, "G-CODE HELP", "HELP"),
+    (Page::Diagnostics, "DIAGNOSTICS", "Ctrl+D"),
+    (Page::Help, "G-CODE HELP", "Ctrl+H"),
     (Page::Settings, "SETTINGS", ""),
 ];
 
