@@ -44,6 +44,7 @@ not remove physical panel control.
 | `Status` → `MachineSnapshot` | `crates/linc-linuxcnc/src/snapshot.rs` |
 | Panel/spindle/pendant HAL reads | `crates/linc-linuxcnc/src/panel.rs` |
 | Parameter-file row writes | `crates/linc-linuxcnc/src/parameters.rs` |
+| Probe Basic probing G-code | `subroutines/probe_basic/` (vendored verbatim, GPLv3) |
 | HAL read-only FFI | `crates/linc-hal/src/lib.rs` |
 
 ### Build and runtime requirements

@@ -21,3 +21,21 @@ Files: crates/linc-view/src/hershey.rs
 Copyright: 2005, 2006 Chris Radek
 License: GPL-2.0-or-later
  The Hershey stroke font is ported from AXIS (lib/python/hershey.py).
+
+Files: subroutines/probe_basic/*
+Copyright: 2019-2026 Chris Polanski and Probe Basic contributors
+License: GPL-3.0
+ This program is free software: you can redistribute it and/or modify it under
+ the terms of the GNU General Public License as published by the Free Software
+ Foundation, version 3.
+ .
+ This program is distributed in the hope that it will be useful, but WITHOUT ANY
+ WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ PARTICULAR PURPOSE. See the GNU General Public License for more details.
+ .
+ On Debian systems the full text of the GNU General Public License version 3 is
+ in /usr/share/common-licenses/GPL-3.
+Comment: Vendored verbatim from Probe Basic
+ https://github.com/kcjengr/probe_basic at commit
+ 596b16b15ca748975c747256fdafe47ecf0c8adb. Upstream ships GPLv3 license text
+ while its README also says GPLv2; see subroutines/probe_basic/SOURCE.md.

@@ -110,6 +110,7 @@ stage() {
         "$stage_dir/usr/bin" \
         "$stage_dir/usr/share/linc/configs" \
         "$stage_dir/usr/share/linc/hal" \
+        "$stage_dir/usr/share/linc/subroutines" \
         "$stage_dir/usr/share/icons/hicolor/256x256/apps" \
         "$stage_dir/usr/share/applications" \
         "$stage_dir/usr/share/doc/linc"
@@ -123,6 +124,7 @@ stage() {
     install -m644 configs/base.toml configs/sim.toml configs/sim.ini \
         "$stage_dir/usr/share/linc/configs/"
     install -m644 hal/*.hal "$stage_dir/usr/share/linc/hal/"
+    cp -a subroutines/probe_basic "$stage_dir/usr/share/linc/subroutines/"
     install -m644 assets/branding/linc-icon-256.png \
         "$stage_dir/usr/share/icons/hicolor/256x256/apps/linc.png"
     install -m644 packaging/linc.desktop \

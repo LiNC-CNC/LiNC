@@ -1062,4 +1062,75 @@ mod tests {
         assert_eq!(values[0], 99.0);
         assert_eq!(values[16], 0.0);
     }
+
+    fn vendored_subroutines() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../subroutines/probe_basic")
+    }
+
+    #[test]
+    fn every_operation_call_is_vendored() {
+        let dir = vendored_subroutines();
+        assert!(
+            dir.is_dir(),
+            "missing Probe Basic subroutine bundle at {}",
+            dir.display()
+        );
+        for operation in operations() {
+            let path = dir.join(format!("{}.ngc", operation.call));
+            assert!(
+                path.is_file(),
+                "{} calls o<{}>, but {} is missing",
+                operation.id,
+                operation.call,
+                path.display()
+            );
+        }
+        for support in [
+            "touch_probe_param_update",
+            "reset_all_data",
+            "x_data_reset",
+            "y_data_reset",
+            "on_abort",
+        ] {
+            let path = dir.join(format!("{support}.ngc"));
+            assert!(path.is_file(), "missing support routine {}", path.display());
+        }
+    }
+
+    #[test]
+    fn every_vendored_call_is_also_vendored() {
+        let dir = vendored_subroutines();
+        for entry in std::fs::read_dir(&dir).expect("read subroutine bundle") {
+            let path = entry.expect("directory entry").path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("ngc") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("read subroutine");
+            for line in text.lines() {
+                let lower = line.to_ascii_lowercase();
+                let Some(rest) = lower.split("o<").nth(1) else {
+                    continue;
+                };
+                if !rest.contains("> call") {
+                    continue;
+                }
+                let Some(name) = rest.split('>').next() else {
+                    continue;
+                };
+                let name = name.trim();
+                if name.is_empty() || name.chars().all(|ch| ch.is_ascii_digit()) {
+                    continue;
+                }
+                let called = dir.join(format!("{name}.ngc"));
+                assert!(
+                    called.is_file(),
+                    "{} calls o<{}>, but {} is missing",
+                    path.display(),
+                    name,
+                    called.display()
+                );
+            }
+        }
+    }
 }

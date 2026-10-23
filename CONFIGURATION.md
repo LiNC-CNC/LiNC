@@ -90,7 +90,11 @@ DISPLAY = ../scripts/linc-display.sh
 `hal/linc.hal` and `hal/linc-sim.hal`. `linc-display.sh` starts the HMI with
 the profile and loads `hal/linc-sim-postgui.hal` after the `linc.*` pins exist.
 Every path in the INI is relative to `configs/`, so the simulation needs
-nothing outside this checkout.
+nothing outside this checkout. The INI puts `../subroutines/probe_basic` first
+in `SUBROUTINE_PATH`; that directory is the vendored Probe Basic probing
+bundle (see `subroutines/probe_basic/SOURCE.md`). It also sets
+`ON_ABORT_COMMAND = O<on_abort> CALL`, because the probe subroutines disable
+feed override with `M50 P0` and restore it only on a normal return.
 
 ### HAL wiring
 
@@ -170,7 +174,7 @@ Required profile fields:
 | Machine graph bounds | INI travel limits / kinematics |
 | Program graph bounds | Last valid preview parse; never from a syntax-error state |
 | USB mount points | `udisks2` D-Bus, not config |
-| Probe subroutines | INI `SUBROUTINE_PATH`; `[probe] subroutines = "ini"` |
+| Probe subroutines | Bundled at `subroutines/probe_basic` (verbatim Probe Basic G-code); also INI `SUBROUTINE_PATH`; `[probe] subroutines = "ini"` |
 | Probe parameters/results | LinuxCNC parameters `#3014`–`#3036`, results `#1001`–`#1009` |
 | MDI command history | HMI-local ring buffer; not a machine log |
 | Homing sequence | INI `HOME_SEQUENCE`, search/latch/index settings |
@@ -273,6 +277,9 @@ This profile must never be used to command real hardware.
   panel service. The real authority for the link remains `linc-panel` and the
   HAL pin surface.
 - The same `cnc_panel.*` pins feed the HMI and the existing panel logic.
+- Probe subroutines come from that external INI's `SUBROUTINE_PATH`. The
+  vendored bundle in this repo is wired into `configs/sim.ini`; a machine INI
+  must point at its own copy (or at `subroutines/probe_basic` if installed).
 - The physical E-stop and machine-on chain remain hard-wired; the HMI has no
   software E-stop substitute.
 - `panel_link_stats = "optional"` — the Diagnostics page shows counters when

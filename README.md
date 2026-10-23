@@ -205,9 +205,11 @@ file unchanged.
   exposes those controls.
 - **Touch Probe follows Probe Basic's category-first workflow**, reached from
   Offsets: choose a routine group, pick an illustrated operation, adjust
-  WCS/clearance/feed/tip parameters, then `RUN PROBE`. It reuses the G38.2
-  subroutine family, reads results from `#1001`–`#1009`, and issues the selected
-  call immediately via Probe Basic `issue_mdi` after validation.
+  WCS/clearance/feed/tip parameters, then `RUN PROBE`. The Probe Basic probing
+  subroutines are vendored verbatim under `subroutines/probe_basic`; LiNC builds
+  the `#3014`–`#3036` parameter block and issues the selected `o<probe_...>`
+  call via Probe Basic `issue_mdi` after validation. Results come from
+  `#1001`–`#1009`.
 - **MDI is a mode-driven screen**: the panel's MDI position opens it, focuses
   the command line and shows DRO/modal/history. `Enter` issues one block via
   `issue_mdi`; leaving MDI discards unissued input but does not cancel an
@@ -269,6 +271,8 @@ LiNC/
 │   ├── sim.toml
 │   ├── lathe-sim.toml
 │   └── baiermill.toml
+├── subroutines/
+│   └── probe_basic/      # Probe Basic probing G-code, vendored verbatim
 ├── docs/                 # architecture guide, diagrams and README screenshots
 ├── crates/
 │   ├── linc-app/         # CLI, backend selection, window and event loop
@@ -312,6 +316,27 @@ Any browser or SVG viewer can open the files. For command-line rendering:
 ```sh
 rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
 ```
+
+## Probe Basic routines
+
+The touch-probe screen does not reimplement Probe Basic's probing math.
+`subroutines/probe_basic/` vendors the upstream `.ngc` routines verbatim:
+outside/inside corners, boss and pocket, ridge and valley, edge angle,
+calibration, the `#3014`–`#3036` parameter update, the result resets and
+`on_abort`. `configs/sim.ini` puts that directory first in `SUBROUTINE_PATH` and
+sets `ON_ABORT_COMMAND = O<on_abort> CALL`, so an aborted probe restores feed
+override instead of leaving it cancelled.
+
+The directory keeps its own `LICENSE` (GPLv3), `SOURCE.md` with the upstream
+commit and import list, and `SHA256SUMS` for the verbatim files. Upstream also
+states GPLv2 in its README; `SOURCE.md` records that conflict. LiNC itself is
+GPL-2.0-or-later, which is compatible with distributing the combined work under
+GPLv3.
+
+A machine profile that uses its own LinuxCNC INI must add this directory to
+that INI's `SUBROUTINE_PATH` (and, if it wants abort cleanup, set
+`ON_ABORT_COMMAND = O<on_abort> CALL`). `baiermill.toml` currently points at
+`baiermill_pb/probe_basic.ini`, whose own `subroutines/` copy takes precedence.
 
 ## Implementation status
 

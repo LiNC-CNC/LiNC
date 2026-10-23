@@ -804,8 +804,9 @@ previous page.
 ### 6.8 Touch Probe
 
 Mill-variant interface for touch probing, opened from Offsets. It reuses the
-existing Probe Basic G-code subroutines and math and follows Probe Basic's
-category-first workflow: choose a routine group, then pick the operation card.
+existing Probe Basic G-code subroutines and math, vendored verbatim under
+`subroutines/probe_basic`, and follows Probe Basic's category-first workflow:
+choose a routine group, then pick the operation card.
 
 - Category strip, matching Probe Basic: Outside Corners, Inside Corners,
   Boss and Pocket, Ridge and Valley, Edge Angle, Rotary Axis, Surface/Z,
