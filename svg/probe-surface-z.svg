@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640">
+<rect x="0" y="0" width="1000" height="640" rx="0" fill="#141619" stroke="none" stroke-width="1"/>
+<rect x="4" y="4" width="992" height="632" rx="8" fill="none" stroke="#30353a" stroke-width="1"/>
+<line x1="4" y1="54" x2="996" y2="54" stroke="#30353a" stroke-width="1"/>
+<text x="16" y="33" fill="#e8eaed" font-size="16" font-family="sans-serif" font-weight="700" text-anchor="start">VMC-01</text>
+<rect x="92" y="12" width="66" height="26" rx="4" fill="#4da3ff" stroke="none" stroke-width="1"/>
+<text x="104" y="30" fill="#141619" font-size="12" font-family="monospace" font-weight="700" text-anchor="start">MDI</text>
+<text x="176" y="16" fill="#9aa0a6" font-size="8" font-family="sans-serif" text-anchor="start">PROGRAM</text>
+<text x="176" y="34" fill="#e8eaed" font-size="12" font-family="monospace" text-anchor="start">PROBE</text>
+<text x="246" y="16" fill="#9aa0a6" font-size="8" font-family="sans-serif" text-anchor="start">TOOL</text>
+<text x="246" y="34" fill="#e8eaed" font-size="12" font-family="monospace" text-anchor="start">T99</text>
+<text x="300" y="16" fill="#9aa0a6" font-size="8" font-family="sans-serif" text-anchor="start">PROBE</text>
+<text x="300" y="34" fill="#3ddc84" font-size="12" font-family="monospace" font-weight="700" text-anchor="start">OPEN</text>
+<text x="390" y="16" fill="#9aa0a6" font-size="8" font-family="sans-serif" text-anchor="start">WCS</text>
+<text x="390" y="34" fill="#e8eaed" font-size="12" font-family="monospace" text-anchor="start">G54</text>
+<circle cx="460" cy="24" r="4" fill="#3ddc84"/>
+<text x="472" y="29" fill="#3ddc84" font-size="10" font-family="sans-serif" font-weight="700" text-anchor="start">PANEL ONLINE</text>
+<circle cx="600" cy="24" r="4" fill="#3ddc84"/>
+<text x="612" y="29" fill="#e8eaed" font-size="10" font-family="monospace" text-anchor="start">ALARM 0</text>
+<rect x="700" y="12" width="170" height="26" rx="4" fill="#ffb020" stroke="none" stroke-width="0" opacity="0.14"/>
+<text x="710" y="29" fill="#ffb020" font-size="8.5" font-family="monospace" font-weight="700" text-anchor="start">RUN = ISSUE MDI</text>
+<text x="906" y="30" fill="#9aa0a6" font-size="11" font-family="monospace" text-anchor="start">14:32:05</text>
+<rect x="8" y="62" width="142" height="508" rx="6" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<rect x="20" y="88" width="20" height="20" rx="3" fill="none" stroke="#9aa0a6" stroke-width="1.6"/><line x1="24" y1="98" x2="36" y2="98" stroke="#9aa0a6" stroke-width="1.6"/><circle cx="30" cy="94" r="3" fill="none" stroke="#9aa0a6" stroke-width="1.4"/><text x="48" y="96" fill="#9aa0a6" font-size="11.5" font-family="sans-serif" text-anchor="start">MACHINE</text><text x="48" y="112" fill="#9aa0a6" font-size="8.5" font-family="monospace" text-anchor="start">MAIN</text>
+<rect x="20" y="132" width="18" height="20" rx="2" fill="none" stroke="#9aa0a6" stroke-width="1.5"/><line x1="24" y1="138" x2="34" y2="138" stroke="#9aa0a6" stroke-width="1.2"/><line x1="24" y1="143" x2="34" y2="143" stroke="#9aa0a6" stroke-width="1.2"/><line x1="24" y1="148" x2="31" y2="148" stroke="#9aa0a6" stroke-width="1.2"/><text x="48" y="140" fill="#9aa0a6" font-size="11.5" font-family="sans-serif" text-anchor="start">PROGRAM</text><text x="48" y="156" fill="#9aa0a6" font-size="8.5" font-family="monospace" text-anchor="start">FILE</text>
+<path d="M20 190 L28 190 L31 184 L34 196 L38 178 L42 190 L48 190" fill="none" stroke="#9aa0a6" stroke-width="1.6"/><text x="48" y="184" fill="#9aa0a6" font-size="11.5" font-family="sans-serif" text-anchor="start">TOOLS</text><text x="48" y="200" fill="#9aa0a6" font-size="8.5" font-family="monospace" text-anchor="start">TOOL</text>
+<rect x="8" y="210" width="4" height="50" rx="0" fill="#4da3ff" stroke="none" stroke-width="0"/><circle cx="29" cy="230" r="9" fill="none" stroke="#4da3ff" stroke-width="1.5"/><line x1="29" y1="216" x2="29" y2="221" stroke="#4da3ff" stroke-width="1.4"/><line x1="29" y1="239" x2="29" y2="244" stroke="#4da3ff" stroke-width="1.4"/><line x1="15" y1="230" x2="20" y2="230" stroke="#4da3ff" stroke-width="1.4"/><line x1="38" y1="230" x2="43" y2="230" stroke="#4da3ff" stroke-width="1.4"/><text x="48" y="228" fill="#4da3ff" font-size="11.5" font-family="sans-serif" font-weight="700" text-anchor="start">OFFSETS</text><text x="48" y="244" fill="#4da3ff" font-size="8.5" font-family="monospace" text-anchor="start">OFFSET</text><text x="48" y="258" fill="#4da3ff" font-size="8.5" font-family="monospace" font-weight="700" text-anchor="start">PROBE</text>
+<path d="M20 292 L20 286 L25 286 L25 298 L37 298 L37 292 L43 292" fill="none" stroke="#9aa0a6" stroke-width="1.6"/><text x="48" y="284" fill="#9aa0a6" font-size="11.5" font-family="sans-serif" text-anchor="start">DIAGNOSTICS</text><text x="48" y="300" fill="#9aa0a6" font-size="8.5" font-family="monospace" text-anchor="start">WIN</text>
+<circle cx="29" cy="330" r="9" fill="none" stroke="#9aa0a6" stroke-width="1.4"/><text x="29" y="335" fill="#9aa0a6" font-size="11" font-family="monospace" font-weight="700" text-anchor="middle">?</text><text x="48" y="328" fill="#9aa0a6" font-size="11.5" font-family="sans-serif" text-anchor="start">G-CODE HELP</text><text x="52" y="344" fill="#9aa0a6" font-size="8.5" font-family="monospace" text-anchor="start">Ctrl+H</text>
+<line x1="20" y1="366" x2="138" y2="366" stroke="#30353a" stroke-width="1"/>
+<text x="20" y="386" fill="#9aa0a6" font-size="8" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE KEYS</text>
+<text x="20" y="404" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">NUM 1-2</text>
+<text x="88" y="404" fill="#9aa0a6" font-size="8" font-family="sans-serif" text-anchor="start">HIGHLIGHT</text>
+<text x="20" y="418" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">ENTER</text>
+<text x="76" y="418" fill="#9aa0a6" font-size="8" font-family="sans-serif" text-anchor="start">RUN PROBE</text>
+<text x="20" y="432" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">OFFSET</text>
+<text x="68" y="432" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="start">NEXT CATEGORY</text>
+<text x="20" y="446" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">ARROWS</text>
+<text x="68" y="446" fill="#9aa0a6" font-size="8" font-family="sans-serif" text-anchor="start">FOCUS</text>
+<text x="20" y="460" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">ESC</text>
+<text x="54" y="460" fill="#9aa0a6" font-size="8" font-family="sans-serif" text-anchor="start">OFFSETS</text>
+<line x1="20" y1="474" x2="138" y2="474" stroke="#30353a" stroke-width="1"/>
+<text x="20" y="500" fill="#ffb020" font-size="7.0" font-family="sans-serif" font-weight="700" text-anchor="start">RUN PROBE = ONLY MOTION</text>
+<text x="20" y="516" fill="#6b7280" font-size="6.6" font-family="monospace" text-anchor="start">E-STOP STAYS PHYSICAL</text>
+<text x="158" y="78" fill="#e8eaed" font-size="15" font-family="sans-serif" font-weight="700" text-anchor="start">TOUCH PROBE</text>
+<text x="290" y="78" fill="#9aa0a6" font-size="8.2" font-family="sans-serif" text-anchor="start">OFFSETS / PROBE BASIC ROUTINES</text>
+<rect x="820" y="64" width="44" height="18" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="842.0" y="75.4" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">OFFSET</text>
+<text x="870" y="78" fill="#9aa0a6" font-size="6.7" font-family="monospace" text-anchor="start">CYCLES CATEGORIES</text>
+<text x="984" y="78" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="end">6/8</text>
+<line x1="158" y1="90" x2="984" y2="90" stroke="#30353a" stroke-width="1"/>
+<text x="213.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">OUTSIDE CORNERS</text>
+<text x="329.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">INSIDE CORNERS</text>
+<text x="445.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">BOSS + POCKET</text>
+<text x="565.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">RIDGE + VALLEY</text>
+<text x="670.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">EDGE ANGLE</text>
+<text x="761.0" y="120" fill="#4da3ff" font-size="7.5" font-family="sans-serif" font-weight="700" text-anchor="middle">SURFACE / Z</text>
+<line x1="726" y1="130" x2="796" y2="130" stroke="#4da3ff" stroke-width="2"/>
+<text x="854.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">CALIBRATE</text>
+<text x="944.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">HELP</text>
+<rect x="158" y="142" width="360" height="128" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
+<text x="170" y="164" fill="#e8eaed" font-size="9.5" font-family="sans-serif" font-weight="700" text-anchor="start">WORK OFFSETS</text>
+<text x="506" y="164" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="end">RESULT TARGET</text>
+<line x1="170" y1="172" x2="506" y2="172" stroke="#30353a" stroke-width="1"/>
+<rect x="170" y="180" width="62" height="18" rx="2" fill="#4da3ff" stroke="none" stroke-width="1"/>
+<text x="201" y="192.5" fill="#141619" font-size="7" font-family="monospace" font-weight="700" text-anchor="middle">G54</text>
+<rect x="238" y="180" width="62" height="18" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="269" y="192.5" fill="#9aa0a6" font-size="7" font-family="monospace" text-anchor="middle">G55</text>
+<rect x="306" y="180" width="62" height="18" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="337" y="192.5" fill="#9aa0a6" font-size="7" font-family="monospace" text-anchor="middle">G56</text>
+<rect x="374" y="180" width="62" height="18" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="405" y="192.5" fill="#9aa0a6" font-size="7" font-family="monospace" text-anchor="middle">G57</text>
+<rect x="442" y="180" width="62" height="18" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="473" y="192.5" fill="#9aa0a6" font-size="7" font-family="monospace" text-anchor="middle">G58</text>
+<rect x="170" y="202" width="62" height="18" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="201" y="214.5" fill="#9aa0a6" font-size="7" font-family="monospace" text-anchor="middle">G59</text>
+<rect x="238" y="202" width="62" height="18" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="269" y="214.5" fill="#9aa0a6" font-size="7" font-family="monospace" text-anchor="middle">G59.1</text>
+<rect x="306" y="202" width="62" height="18" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="337" y="214.5" fill="#9aa0a6" font-size="7" font-family="monospace" text-anchor="middle">G59.2</text>
+<rect x="374" y="202" width="62" height="18" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="405" y="214.5" fill="#9aa0a6" font-size="7" font-family="monospace" text-anchor="middle">G59.3</text>
+<text x="473" y="214" fill="#6b7280" font-size="5.6" font-family="monospace" text-anchor="middle">9 SYSTEMS</text>
+<rect x="170" y="229" width="14" height="14" rx="2" fill="#141619" stroke="#4b5563" stroke-width="1.2"/>
+<text x="190" y="240" fill="#e8eaed" font-size="7.2" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE POSITION ONLY</text>
+<text x="506" y="240" fill="#9aa0a6" font-size="6.0" font-family="monospace" text-anchor="end">OFF = APPLY TO G54</text>
+<text x="170" y="261" fill="#6b7280" font-size="6.0" font-family="sans-serif" text-anchor="start">OFF: zero the active work offset · ON: record values only</text>
+<rect x="158" y="278" width="360" height="322" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
+<text x="170" y="300" fill="#e8eaed" font-size="9.5" font-family="sans-serif" font-weight="700" text-anchor="start">PROBING PARAMETERS</text>
+<text x="506" y="300" fill="#9aa0a6" font-size="5.9" font-family="sans-serif" text-anchor="end">←→ FIELD · ↑↓ ADJUST</text>
+<line x1="170" y1="308" x2="506" y2="308" stroke="#30353a" stroke-width="1"/>
+<text x="258" y="325" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">PROBE TOOL #</text>
+<rect x="262" y="315" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="301" y="324.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">99</text>
+<text x="422" y="325" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">PROBE SLOW FDRATE</text>
+<rect x="426" y="315" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="466" y="324.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">50</text>
+<text x="258" y="347" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">PROBE TRAVERSE FR</text>
+<rect x="262" y="337" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="301" y="346.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">1000</text>
+<text x="422" y="347" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">PROBE FAST FDRATE</text>
+<rect x="426" y="337" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="466" y="346.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">500</text>
+<text x="258" y="369" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">MAX X/Y DISTANCE</text>
+<rect x="262" y="359" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="301" y="368.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">10.0</text>
+<text x="422" y="369" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">X/Y CLEARANCE</text>
+<rect x="426" y="359" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="466" y="368.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">5.0</text>
+<text x="258" y="391" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">MAX Z DISTANCE</text>
+<rect x="262" y="381" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="301" y="390.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">10.0</text>
+<text x="422" y="391" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">Z CLEARANCE</text>
+<rect x="426" y="381" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="466" y="390.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">5.0</text>
+<text x="258" y="413" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">EXTRA PROBE DEPTH</text>
+<rect x="262" y="403" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="301" y="412.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">0.0</text>
+<text x="422" y="413" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">STEP OFF WIDTH</text>
+<rect x="426" y="403" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="466" y="412.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">1.0</text>
+<text x="258" y="435" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">EDGE WIDTH</text>
+<rect x="262" y="425" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="301" y="434.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">1.0</text>
+<text x="422" y="435" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">TIP Ø</text>
+<rect x="426" y="425" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="466" y="434.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">4.0</text>
+<rect x="170" y="446" width="104" height="22" rx="3" fill="#1a1f25" stroke="#30353a" stroke-width="1"/>
+<text x="222" y="460.5" fill="#e8eaed" font-size="6.0" font-family="sans-serif" font-weight="700" text-anchor="middle">UPDATE PROBE PARAMS</text>
+<rect x="280" y="446" width="70" height="22" rx="3" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="315" y="460.5" fill="#9aa0a6" font-size="6.0" font-family="sans-serif" text-anchor="middle">RESET ALL DATA</text>
+<rect x="356" y="446" width="66" height="22" rx="3" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="389" y="460.5" fill="#9aa0a6" font-size="6.0" font-family="sans-serif" text-anchor="middle">X DATA RESET</text>
+<rect x="428" y="446" width="78" height="22" rx="3" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="467" y="460.5" fill="#9aa0a6" font-size="6.0" font-family="sans-serif" text-anchor="middle">Y DATA RESET</text>
+<line x1="170" y1="474" x2="506" y2="474" stroke="#30353a" stroke-width="1"/>
+<text x="170" y="486" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE RESULTS</text>
+<text x="220" y="504" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">X- PROBED</text>
+<rect x="224" y="495" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="253" y="504.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="332" y="504" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">X+ PROBED</text>
+<rect x="336" y="495" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="365" y="504.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="444" y="504" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">X WIDTH</text>
+<rect x="448" y="495" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="477" y="504.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="220" y="524" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Y- PROBED</text>
+<rect x="224" y="515" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="253" y="524.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="332" y="524" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Y+ PROBED</text>
+<rect x="336" y="515" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="365" y="524.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="444" y="524" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Y WIDTH</text>
+<rect x="448" y="515" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="477" y="524.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="220" y="544" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Z- PROBED</text>
+<rect x="224" y="535" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="253" y="544.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="332" y="544" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">DIAM.</text>
+<rect x="336" y="535" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="365" y="544.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="444" y="544" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">X CENTER</text>
+<rect x="448" y="535" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="477" y="544.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="220" y="564" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">EDGE DELTA</text>
+<rect x="224" y="555" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="253" y="564.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="332" y="564" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">EDGE ANGLE</text>
+<rect x="336" y="555" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="365" y="564.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="444" y="564" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Y CENTER</text>
+<rect x="448" y="555" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="477" y="564.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<rect x="874" y="142" width="110" height="458" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
+<text x="886" y="164" fill="#e8eaed" font-size="9.5" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE</text>
+<text x="972" y="164" fill="#9aa0a6" font-size="6.2" font-family="monospace" text-anchor="end">T99</text>
+<line x1="886" y1="172" x2="972" y2="172" stroke="#30353a" stroke-width="1"/>
+<line x1="929" y1="176" x2="929" y2="188" stroke="#6b7280" stroke-width="2"/>
+<rect x="916" y="188" width="26" height="14" rx="3" fill="#2a3037" stroke="#6b7280" stroke-width="1.2"/>
+<rect x="902" y="202" width="54" height="10" rx="3" fill="#2a3037" stroke="#6b7280" stroke-width="1.2"/>
+<rect x="908" y="212" width="42" height="108" rx="8" fill="#20262c" stroke="#6b7280" stroke-width="1.4"/>
+<line x1="917" y1="218" x2="917" y2="314" stroke="#3f464e" stroke-width="1.2"/>
+<circle cx="929" cy="246" r="9" fill="#3ddc84" opacity="0.16"/>
+<circle cx="929" cy="246" r="4.6" fill="#3ddc84"/>
+<circle cx="929" cy="246" r="1.6" fill="#d1fae5"/>
+<text x="929" y="262" fill="#9aa0a6" font-size="5.2" font-family="monospace" text-anchor="middle">LED</text>
+<path d="M918 320 L940 320 L934 366 L924 366 Z" fill="#2a3037" stroke="#6b7280" stroke-width="1"/>
+<line x1="929" y1="366" x2="929" y2="412" stroke="#6b7280" stroke-width="1.6"/>
+<circle cx="929" cy="420" r="4" fill="#c084fc"/>
+<circle cx="929" cy="420" r="10" fill="none" stroke="#3ddc84" stroke-width="1" stroke-dasharray="2 2" opacity="0.8"/>
+<line x1="929" y1="420" x2="929" y2="437" stroke="#3ddc84" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.6"/>
+<rect x="888" y="438" width="82" height="12" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/>
+<line x1="888" y1="438" x2="970" y2="438" stroke="#9aa0a6" stroke-width="1.2"/>
+<text x="886" y="482" fill="#e8eaed" font-size="6.4" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE INPUT</text>
+<circle cx="888" cy="493" r="2.6" fill="#3ddc84"/>
+<text x="894" y="496" fill="#3ddc84" font-size="6.2" font-family="monospace" font-weight="700" text-anchor="start">OPEN</text>
+<text x="886" y="512" fill="#6b7280" font-size="5.4" font-family="monospace" text-anchor="start">TRIPPED = RED</text>
+<text x="886" y="530" fill="#9aa0a6" font-size="5.6" font-family="monospace" text-anchor="start">TIP Ø4.0 / T99</text>
+<text x="886" y="546" fill="#6b7280" font-size="5.2" font-family="monospace" text-anchor="start">LIVE INPUT LED</text>
+<rect x="526" y="142" width="340" height="458" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
+<text x="538" y="164" fill="#e8eaed" font-size="9.5" font-family="sans-serif" font-weight="700" text-anchor="start">PROBING ROUTINES</text>
+<text x="854" y="164" fill="#9aa0a6" font-size="6.2" font-family="monospace" text-anchor="end">2 ROUTINES</text>
+<text x="538" y="180" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="start">SURFACE / Z / NUM 1-2 HIGHLIGHT</text>
+<line x1="538" y1="188" x2="854" y2="188" stroke="#30353a" stroke-width="1"/>
+<rect x="558" y="214" width="130" height="150" rx="5" fill="#4da3ff" fill-opacity="0.11" stroke="#4da3ff" stroke-width="2"/><rect x="565" y="221" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4da3ff" stroke-width="1"/><text x="574.0" y="230.9" fill="#4da3ff" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">1</text><g transform="translate(590.0,236) scale(2.3)"><rect x="4" y="13" width="26" height="8" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="4" y1="13" x2="30" y2="13" stroke="#9aa0a6" stroke-width="1.4"/><circle cx="17" cy="13" r="7" fill="none" stroke="#3ddc84" stroke-width="1.1" stroke-dasharray="2 2" opacity="0.85"/><line x1="7" y1="13" x2="11" y2="13" stroke="#3ddc84" stroke-width="1.1"/><line x1="23" y1="13" x2="27" y2="13" stroke="#3ddc84" stroke-width="1.1"/><line x1="17" y1="3" x2="17" y2="7" stroke="#3ddc84" stroke-width="1.1"/><line x1="17" y1="19" x2="17" y2="22" stroke="#3ddc84" stroke-width="1.1"/><circle cx="17" cy="13" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="17" cy="13" r="2.3" fill="#c084fc"/></g><text x="623.0" y="352" fill="#e8eaed" font-size="6.4" font-family="sans-serif" font-weight="700" text-anchor="middle">SURFACE Z</text>
+<rect x="702" y="214" width="130" height="150" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="709" y="221" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="718.0" y="230.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">2</text><g transform="translate(734.0,236) scale(2.3)"><path d="M10 2 H24 L21 18 H13 Z" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="6" y1="20" x2="28" y2="20" stroke="#9aa0a6" stroke-width="1.2"/><circle cx="17" cy="12" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="17" cy="12" r="2.3" fill="#c084fc"/></g><text x="767.0" y="352" fill="#9aa0a6" font-size="6.4" font-family="sans-serif" text-anchor="middle">SPINDLE NOSE</text>
+<rect x="538" y="396" width="316" height="130" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
+<text x="550" y="418" fill="#e8eaed" font-size="7.3" font-family="sans-serif" font-weight="700" text-anchor="start">SURFACE Z</text>
+<text x="550" y="432" fill="#9aa0a6" font-size="5.8" font-family="sans-serif" text-anchor="start">Sets the active WCS Z. Leave Probe Position Only off to apply.</text>
+<text x="550" y="452" fill="#e8eaed" font-size="7.3" font-family="sans-serif" font-weight="700" text-anchor="start">SPINDLE NOSE</text>
+<text x="550" y="466" fill="#9aa0a6" font-size="5.8" font-family="sans-serif" text-anchor="start">Records the spindle reference; does not move the WCS.</text>
+<text x="550" y="490" fill="#6b7280" font-size="5.4" font-family="monospace" text-anchor="start">MAX Z / Z CLEARANCE COME FROM THE PARAMETERS PANE.</text>
+<text x="538" y="570" fill="#6b7280" font-size="5.7" font-family="monospace" text-anchor="start">NUM 1-2 SELECT  ·  ENTER RUNS</text>
+<text x="538" y="584" fill="#6b7280" font-size="5.5" font-family="monospace" text-anchor="start">CALIBRATE / HELP USE A DIFFERENT LAYOUT</text>
+<text x="16" y="628" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">PROBE T99 / G54 / POSITION ONLY OFF / APPLY ON</text>
+<text x="420" y="628" fill="#3ddc84" font-size="8" font-family="monospace" text-anchor="start">INPUT OPEN</text>
+<text x="520" y="628" fill="#3ddc84" font-size="8" font-family="monospace" text-anchor="start">PROTECT OFF</text>
+<text x="620" y="628" fill="#3ddc84" font-size="8" font-family="monospace" text-anchor="start">E-STOP OK</text>
+<text x="710" y="628" fill="#3ddc84" font-size="8" font-family="monospace" text-anchor="start">ALARM 0</text>
+<text x="800" y="628" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">CATEGORY 6/8</text>
+<text x="900" y="628" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">14:32:05</text>
+</svg>

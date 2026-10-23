@@ -809,8 +809,8 @@ existing Probe Basic G-code subroutines and math, vendored verbatim under
 choose a routine group, then pick the operation card.
 
 - Category strip, matching Probe Basic: Outside Corners, Inside Corners,
-  Boss and Pocket, Ridge and Valley, Edge Angle, Rotary Axis, Surface/Z,
-  Calibrate and Probe Help.
+  Boss and Pocket, Ridge and Valley, Edge Angle, Surface/Z, Calibrate and
+  Probe Help. Rotary-axis probing is not offered.
 - Each category opens a grid of illustrated operation cards plus a selected
   operation, diagram and G-code call. Work offset, probe mode and parameters
   stay visible across categories.
@@ -1492,7 +1492,14 @@ Only the accepted versions are included.
 | `svg/gcode-help.svg` | G-code Help: offline quick-reference index, code search, detail pane, parameter tables, figures and related codes |
 | `svg/files.svg` | Files: USB and `NC_FILES` panes, mount/eject status, file listing and explicit copy/load actions |
 | `svg/lathe-dashboard.svg` | Lathe dashboard: X/Z/C/Y cards, XZ toolpath, power turret/live-tool card, spindle load and machine health |
-| `svg/probe.svg` | Touch Probe: keyboard-first Probe Basic 3×3 routine matrix (numpad 1–9 highlight, Enter run), passive offset-key tab indicator, Probe Basic parameter/result block, work offsets and live probe LED |
+| `svg/probe.svg` | Touch probe — outside corners: keyboard-first Probe Basic 3×3 matrix (numpad 1–9 highlight, Enter run), passive offset-key category indicator, Probe Basic parameter/result block, work offsets and live probe LED |
+| `svg/probe-inside-corners.svg` | Touch probe — inside corners: four inside corners, straight X/Y edges and Z centre in the same 3×3 matrix |
+| `svg/probe-boss-pocket.svg` | Touch probe — boss and pocket: six round/rect boss and pocket routines plus the diam/X/Y hint row |
+| `svg/probe-ridge-valley.svg` | Touch probe — ridge and valley: six ridge/valley routines plus the X/Y hint row |
+| `svg/probe-edge-angle.svg` | Touch probe — edge angle: four corner and four top-edge angle routines with the WCO-rotation note |
+| `svg/probe-surface-z.svg` | Touch probe — surface/Z: surface and spindle-nose cards with the Z explanation panel |
+| `svg/probe-calibrate.svg` | Touch probe — calibrate: calibration offset, 2×2 round/square boss/pocket routines, diameter/width fields and reset |
+| `svg/probe-help.svg` | Touch probe — help: topic list, step-off-width explanation and dimensioned probe diagram |
 | `svg/mdi.svg` | MDI: single-block command, quick inserts, DRO/modal, command issue via `issue_mdi`, history and last result |
 | `svg/manual.svg` | Manual JOG/INC/MPG: dominant live graph, large work/machine/DTG coordinates and mode context; no on-screen jog controls |
 | `svg/homing.svg` | Homing: per-axis/sequence state, HOME/PROG.HOME physical-key mapping and machine position; no software home controls |

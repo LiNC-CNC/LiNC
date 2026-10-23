@@ -38,7 +38,14 @@ Click any image for the full-size PNG.
 | G-code Help | `svg/gcode-help.svg` |
 | Files / USB transfer | `svg/files.svg` |
 | Lathe dashboard | `svg/lathe-dashboard.svg` |
-| Touch probe interface | `svg/probe.svg` |
+| Touch probe — outside corners | `svg/probe.svg` |
+| Touch probe — inside corners | `svg/probe-inside-corners.svg` |
+| Touch probe — boss and pocket | `svg/probe-boss-pocket.svg` |
+| Touch probe — ridge and valley | `svg/probe-ridge-valley.svg` |
+| Touch probe — edge angle | `svg/probe-edge-angle.svg` |
+| Touch probe — surface / Z | `svg/probe-surface-z.svg` |
+| Touch probe — calibrate | `svg/probe-calibrate.svg` |
+| Touch probe — help | `svg/probe-help.svg` |
 | MDI screen | `svg/mdi.svg` |
 | Manual JOG/INC/MPG | `svg/manual.svg` |
 | Homing screen | `svg/homing.svg` |
@@ -209,7 +216,7 @@ file unchanged.
   subroutines are vendored verbatim under `subroutines/probe_basic`; LiNC builds
   the `#3014`–`#3036` parameter block and issues the selected `o<probe_...>`
   call via Probe Basic `issue_mdi` after validation. Results come from
-  `#1001`–`#1009`.
+  `#1001`–`#1009`. Rotary-axis probing is not offered.
 - **MDI is a mode-driven screen**: the panel's MDI position opens it, focuses
   the command line and shows DRO/modal/history. `Enter` issues one block via
   `issue_mdi`; leaving MDI discards unissued input but does not cancel an
