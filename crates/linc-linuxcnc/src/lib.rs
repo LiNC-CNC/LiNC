@@ -328,6 +328,19 @@ impl NmlBackend {
         if status.io.estop
             || status.task.state != NmlTaskState::On
             || status.task.interp_state != linuxcnc_nml::InterpState::Idle
+            || status.motion.probing
+        {
+            return;
+        }
+        // `G54` is an MDI block, and LinuxCNC refuses MDI until every axis is
+        // homed. A start-up sync that runs before homing would burn every
+        // attempt on rejections and never apply the stored offsets.
+        if status.joints.len() < self.profile.machine_ini.axes.len()
+            || status
+                .joints
+                .iter()
+                .take(self.profile.machine_ini.axes.len())
+                .any(|joint| !joint.homed)
         {
             return;
         }
