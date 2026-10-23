@@ -76,10 +76,10 @@
 <rect x="450" y="370" width="420" height="150" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/>
 <text x="660" y="496" fill="#6b7280" font-size="6.0" font-family="monospace" text-anchor="middle">WORK PIECE</text>
 <line x1="500" y1="326" x2="500" y2="358" stroke="#6b7280" stroke-width="2"/>
-<circle cx="500" cy="366" r="5" fill="#c084fc"/>
+<circle cx="500" cy="366" r="3.2" fill="#c084fc"/>
 <text x="500" y="320" fill="#9aa0a6" font-size="5.6" font-family="monospace" text-anchor="middle">START</text>
 <line x1="660" y1="326" x2="660" y2="358" stroke="#6b7280" stroke-width="2"/>
-<circle cx="660" cy="366" r="5" fill="#c084fc"/>
+<circle cx="660" cy="366" r="3.2" fill="#c084fc"/>
 <text x="660" y="320" fill="#9aa0a6" font-size="5.6" font-family="monospace" text-anchor="middle">TOUCH</text>
 <line x1="500" y1="344" x2="660" y2="344" stroke="#3ddc84" stroke-width="1.2"/>
 <line x1="500" y1="338" x2="500" y2="350" stroke="#3ddc84" stroke-width="1.2"/>
