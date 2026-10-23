@@ -688,12 +688,27 @@ fn results_card(app: &mut LincApp, ui: &mut Ui) {
 }
 
 fn small_button(ui: &mut Ui, text: &str, width: f32) -> egui::Response {
-    ui.add_sized(
-        [width, 18.0],
-        egui::Button::new(RichText::new(text).size(6.8).strong().color(theme::FG))
-            .fill(theme::PANEL_RAISED)
-            .stroke(Stroke::new(1.0, theme::BORDER)),
-    )
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 20.0), Sense::click());
+    let fill = if response.hovered() {
+        theme::PANEL_RAISED
+    } else {
+        theme::SURFACE
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(3), fill);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(3),
+        Stroke::new(1.0, theme::BORDER),
+        StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        FontId::proportional(8.0),
+        theme::FG,
+    );
+    response
 }
 
 fn result_field(ui: &mut Ui, label: &str, value: f64) {
