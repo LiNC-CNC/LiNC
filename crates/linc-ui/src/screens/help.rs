@@ -114,7 +114,20 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     }
 
     let scroll_selection = app.help.scroll_to_selection;
-    theme::card(ui, |ui| {
+    // The table is text rows, not touch targets; the theme's 44 px
+    // interact_size made the column-title row taller than its captions.
+    ui.spacing_mut().interact_size.y = 18.0;
+    egui::Frame::new()
+        .fill(theme::PANEL)
+        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(Margin {
+            left: 12,
+            right: 12,
+            top: 4,
+            bottom: 12,
+        })
+        .show(ui, |ui| {
         ui.set_min_height(ui.available_height());
         ui.spacing_mut().item_spacing.y = 0.0;
         let width = ui.available_width();
@@ -160,7 +173,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                     }
                 }
             });
-    });
+        });
     app.help.scroll_to_selection = false;
     if let Some(anchor) = open_anchor {
         app.help.open_dialog(&anchor);
@@ -686,11 +699,24 @@ fn flow(text: &str) -> String {
 fn show_figure(app: &mut LincApp, ui: &mut Ui, image: &str, caption: &str) {
     let ctx = ui.ctx().clone();
     if let Some(texture) = app.help.texture(&ctx, image) {
-        let max = (ui.available_width() - 20.0).min(720.0);
-        let initial = texture.size_vec2();
-        let scale = (max / initial.x).min(1.0);
-        let size = initial * scale;
-        ui.add(egui::Image::new(egui::load::SizedTexture::new(texture.id(), size)).max_width(max));
+        // The documentation figures are dark-on-transparent; the dialog is
+        // dark too. Put them on a soft light plate so the drawing is legible
+        // without leaving the graphite palette.
+        egui::Frame::new()
+            .fill(Color32::from_rgb(0xe4, 0xe8, 0xed))
+            .stroke(egui::Stroke::new(1.0, theme::BORDER))
+            .corner_radius(6)
+            .inner_margin(10)
+            .show(ui, |ui| {
+                let max = (ui.available_width()).min(720.0);
+                let initial = texture.size_vec2();
+                let scale = (max / initial.x).min(1.0);
+                let size = initial * scale;
+                ui.add(
+                    egui::Image::new(egui::load::SizedTexture::new(texture.id(), size))
+                        .max_width(max),
+                );
+            });
     } else {
         ui.label(
             RichText::new(format!("[figure: {image}]"))
