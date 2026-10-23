@@ -218,6 +218,11 @@ pub struct HelpDialog {
     pub history: Vec<String>,
     pub position: usize,
     pub scroll_to_top: bool,
+    /// Keyboard cursor on the RELATED chips at the bottom; `None` means the
+    /// arrows scroll the document.
+    pub related: Option<usize>,
+    /// Set from the scroll area so Down at the bottom can enter the chips.
+    pub at_bottom: bool,
 }
 
 #[derive(Default)]
@@ -251,6 +256,8 @@ impl HelpUi {
             history: vec![anchor.to_string()],
             position: 0,
             scroll_to_top: true,
+            related: None,
+            at_bottom: false,
         });
     }
 
@@ -269,6 +276,8 @@ impl HelpUi {
         }
         dialog.anchor = anchor.to_string();
         dialog.scroll_to_top = true;
+        dialog.related = None;
+        dialog.at_bottom = false;
         self.selected_anchor = Some(anchor.to_string());
     }
 
@@ -282,6 +291,8 @@ impl HelpUi {
         dialog.position -= 1;
         dialog.anchor = dialog.history[dialog.position].clone();
         dialog.scroll_to_top = true;
+        dialog.related = None;
+        dialog.at_bottom = false;
         self.selected_anchor = Some(dialog.anchor.clone());
         true
     }

@@ -696,9 +696,11 @@ stopping a running program.
   ignores spaces and commas, so `g2g3` finds `G2, G3`.
 - `Enter` or a double-click opens the full section in a near-fullscreen dialog:
   title, description, parameter table, figures, notes and related codes. Up/Down
-  and PageUp/PageDown scroll the document; `Enter`, `Esc` or `CLOSE` closes it;
-  related links navigate inside it and `Backspace` returns through that history.
-  It blocks the page behind it while open.
+  and PageUp/PageDown scroll the document; `Esc` or `CLOSE` closes it. At the
+  bottom, Down enters the RELATED chips: the arrow keys choose one, `Enter`
+  opens it, and `Enter` with no chip chosen closes the dialog. Related links
+  navigate inside it and `Backspace` returns through that history. It blocks the
+  page behind it while open.
 - Current bundle: 125 sections, 89 index rows, 14 figures, generated from the
   pinned LinuxCNC online documentation.
 - Read-only; no machine-control actions. The top-level HELP action opens this

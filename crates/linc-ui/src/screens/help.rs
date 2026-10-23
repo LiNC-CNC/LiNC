@@ -54,7 +54,9 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             egui::TextEdit::singleline(&mut app.help.query)
                 .id(search_id)
                 .hint_text("G2, G3, M6, o sub, arc …  ( / )")
-                .desired_width(360.0),
+                .desired_width(360.0)
+                // One text line, not the touch-target height.
+                .margin(egui::Margin::symmetric(6, 1)),
         );
         if app.help.focus_search {
             response.request_focus();
@@ -222,14 +224,14 @@ fn header_cell(ui: &mut Ui, width: f32, text: &str, centered: bool) {
 
 fn group_row(ui: &mut Ui, group: &linc_core::help::HelpGroup) {
     egui::Frame::new()
-        .fill(theme::PANEL_RAISED)
-        .inner_margin(Margin::symmetric(8, 5))
+        .fill(Color32::BLACK)
+        .inner_margin(Margin::symmetric(8, 2))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
                 ui.label(
                     RichText::new(&group.name)
-                        .size(theme::font_size(11.5))
+                        .size(theme::font_size(10.5))
                         .strong()
                         .color(theme::FG),
                 );
@@ -355,29 +357,70 @@ pub fn draw_dialog(app: &mut LincApp, ctx: &egui::Context) {
     let size = (screen.size() - Vec2::new(48.0, 48.0)).max(Vec2::new(640.0, 360.0));
     let mut close = false;
     let mut back = false;
-    let mut related: Option<String> = None;
+    let mut clicked_related: Option<String> = None;
+    let mut open_related: Option<String> = None;
     let scroll_top = dialog.scroll_to_top;
+    let mut related_selection = dialog.related;
+    let related_count = section.related.len();
     // The dialog owns the keyboard while it is open: arrows and page keys
-    // scroll it, and both Enter and Escape close it.
+    // scroll it; once the bottom is reached, Down enters the RELATED chips,
+    // which are then chosen with the cursor keys. Enter opens the chosen chip,
+    // or closes when no chip is chosen; Escape always closes.
     let page = (size.y - 140.0).max(200.0);
     let mut scroll_delta = 0.0;
+    let mut at_bottom = dialog.at_bottom;
     ctx.input_mut(|input| {
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-            scroll_delta += 40.0;
-        }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
-            scroll_delta -= 40.0;
-        }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
-            scroll_delta += page;
-        }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
-            scroll_delta -= page;
-        }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
-            close = true;
+        let down = input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown);
+        let up = input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp);
+        let left = input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft);
+        let right = input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight);
+        let page_down = input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown);
+        let page_up = input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp);
+        let enter = input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+        if let Some(index) = related_selection {
+            if left || up {
+                // Stepping left/up from the first chip returns to the document.
+                related_selection = index.checked_sub(1);
+            }
+            if right || down {
+                related_selection = Some((index + 1).min(related_count.saturating_sub(1)));
+            }
+            if page_down {
+                related_selection = None;
+                scroll_delta += page;
+            }
+            if page_up {
+                related_selection = None;
+                scroll_delta -= page;
+            }
+            if enter {
+                open_related = section.related.get(index).cloned();
+            }
+        } else {
+            if down {
+                if dialog.at_bottom && related_count > 0 {
+                    related_selection = Some(0);
+                } else {
+                    scroll_delta += 40.0;
+                }
+            }
+            if up {
+                scroll_delta -= 40.0;
+            }
+            if page_down {
+                scroll_delta += page;
+            }
+            if page_up {
+                scroll_delta -= page;
+            }
+            if enter {
+                close = true;
+            }
         }
     });
+    if let Some(dialog) = app.help.dialog.as_mut() {
+        dialog.related = related_selection;
+    }
     let modal = egui::Modal::new(egui::Id::unique("linc-help-dialog"))
         .frame(
             egui::Frame::new()
@@ -438,13 +481,19 @@ pub fn draw_dialog(app: &mut LincApp, ctx: &egui::Context) {
             if scroll_top {
                 area = area.vertical_scroll_offset(0.0);
             }
-            area.show(ui, |ui| {
+            let output = area.show(ui, |ui| {
                 if scroll_delta != 0.0 {
                     ui.scroll_with_delta(Vec2::new(0.0, -scroll_delta));
                 }
-                related = render_section(app, ui, &bundle, section);
+                clicked_related =
+                    render_section(app, ui, &bundle, section, related_selection);
             });
+            at_bottom = output.state.clamped_offset().y + 2.0
+                >= (output.content_size.y - output.inner_rect.height()).max(0.0);
         });
+    if let Some(dialog) = app.help.dialog.as_mut() {
+        dialog.at_bottom = at_bottom;
+    }
     if modal.should_close() {
         close = true;
     }
@@ -455,7 +504,9 @@ pub fn draw_dialog(app: &mut LincApp, ctx: &egui::Context) {
         app.help.close_dialog();
     } else if back {
         app.help.dialog_back();
-    } else if let Some(anchor) = related {
+    } else if let Some(anchor) = open_related {
+        app.help.dialog_link(&anchor);
+    } else if let Some(anchor) = clicked_related {
         app.help.dialog_link(&anchor);
     } else if let Some(dialog) = app.help.dialog.as_mut() {
         if dialog.scroll_to_top {
@@ -470,6 +521,7 @@ fn render_section(
     ui: &mut Ui,
     bundle: &HelpBundle,
     section: &HelpSection,
+    selected_related: Option<usize>,
 ) -> Option<String> {
     let mut related = None;
     ui.set_max_width(ui.available_width());
@@ -594,12 +646,12 @@ fn render_section(
                 .color(theme::MUTED),
         );
         ui.horizontal_wrapped(|ui| {
-            for anchor in &section.related {
+            for (index, anchor) in section.related.iter().enumerate() {
                 let title = bundle
                     .section(anchor)
                     .map(|section| section.title.clone())
                     .unwrap_or_else(|| anchor.clone());
-                if theme::chip(ui, title, false).clicked() {
+                if theme::chip(ui, title, selected_related == Some(index)).clicked() {
                     related = Some(anchor.clone());
                 }
             }
