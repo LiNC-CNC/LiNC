@@ -31,7 +31,7 @@
 <line x1="20" y1="366" x2="138" y2="366" stroke="#30353a" stroke-width="1"/>
 <text x="20" y="386" fill="#9aa0a6" font-size="8" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE KEYS</text>
 <text x="20" y="404" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">NUM 1-9</text>
-<text x="88" y="404" fill="#9aa0a6" font-size="8" font-family="sans-serif" text-anchor="start">SELECT</text>
+<text x="88" y="404" fill="#9aa0a6" font-size="8" font-family="sans-serif" text-anchor="start">HIGHLIGHT</text>
 <text x="20" y="418" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">ENTER</text>
 <text x="76" y="418" fill="#9aa0a6" font-size="8" font-family="sans-serif" text-anchor="start">RUN PROBE</text>
 <text x="20" y="432" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">F8</text>
@@ -41,36 +41,24 @@
 <text x="20" y="460" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">ESC</text>
 <text x="54" y="460" fill="#9aa0a6" font-size="8" font-family="sans-serif" text-anchor="start">OFFSETS</text>
 <line x1="20" y1="474" x2="138" y2="474" stroke="#30353a" stroke-width="1"/>
-<text x="20" y="494" fill="#9aa0a6" font-size="8" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE INPUT</text>
-<circle cx="23" cy="505" r="2.4" fill="#3ddc84"/>
-<text x="31" y="508" fill="#3ddc84" font-size="7.5" font-family="monospace" text-anchor="start">OPEN</text>
-<text x="20" y="522" fill="#6b7280" font-size="6.6" font-family="monospace" text-anchor="start">TRIPPED = RED</text>
-<line x1="20" y1="536" x2="138" y2="536" stroke="#30353a" stroke-width="1"/>
-<text x="20" y="554" fill="#ffb020" font-size="7.0" font-family="sans-serif" font-weight="700" text-anchor="start">RUN PROBE = ONLY MOTION</text>
+<text x="20" y="500" fill="#ffb020" font-size="7.0" font-family="sans-serif" font-weight="700" text-anchor="start">RUN PROBE = ONLY MOTION</text>
+<text x="20" y="516" fill="#6b7280" font-size="6.6" font-family="monospace" text-anchor="start">E-STOP STAYS PHYSICAL</text>
 <text x="158" y="78" fill="#e8eaed" font-size="15" font-family="sans-serif" font-weight="700" text-anchor="start">TOUCH PROBE</text>
 <text x="290" y="78" fill="#9aa0a6" font-size="8.2" font-family="sans-serif" text-anchor="start">OFFSETS / PROBE BASIC ROUTINES</text>
 <rect x="842" y="64" width="22" height="18" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="853.0" y="75.4" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">F8</text>
-<text x="870" y="78" fill="#9aa0a6" font-size="7.0" font-family="monospace" text-anchor="start">OFFSET NEXT TAB</text>
+<text x="870" y="78" fill="#9aa0a6" font-size="7.0" font-family="monospace" text-anchor="start">OFFSET CYCLES TABS</text>
 <text x="984" y="78" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="end">1/9</text>
 <line x1="158" y1="90" x2="984" y2="90" stroke="#30353a" stroke-width="1"/>
-<rect x="158" y="98" width="104" height="32" rx="4" fill="#4da3ff" stroke="none" stroke-width="1"/>
-<text x="210.0" y="119" fill="#141619" font-size="7.2" font-family="sans-serif" font-weight="700" text-anchor="middle">OUTSIDE CORNERS</text>
-<rect x="268" y="98" width="100" height="32" rx="4" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="318.0" y="119" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">INSIDE CORNERS</text>
-<rect x="374" y="98" width="106" height="32" rx="4" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="427.0" y="119" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">BOSS + POCKET</text>
-<rect x="486" y="98" width="108" height="32" rx="4" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="540.0" y="119" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">RIDGE + VALLEY</text>
-<rect x="600" y="98" width="80" height="32" rx="4" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="640.0" y="119" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">EDGE ANGLE</text>
-<rect x="686" y="98" width="62" height="32" rx="4" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="717.0" y="119" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">ROTARY</text>
-<rect x="754" y="98" width="76" height="32" rx="4" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="792.0" y="119" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">SURFACE / Z</text>
-<rect x="836" y="98" width="74" height="32" rx="4" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="873.0" y="119" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">CALIBRATE</text>
-<rect x="916" y="98" width="68" height="32" rx="4" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="950.0" y="119" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">HELP</text>
+<text x="210.0" y="120" fill="#4da3ff" font-size="7.5" font-family="sans-serif" font-weight="700" text-anchor="middle">OUTSIDE CORNERS</text>
+<line x1="166" y1="130" x2="254" y2="130" stroke="#4da3ff" stroke-width="2"/>
+<text x="318.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">INSIDE CORNERS</text>
+<text x="427.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">BOSS + POCKET</text>
+<text x="540.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">RIDGE + VALLEY</text>
+<text x="640.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">EDGE ANGLE</text>
+<text x="717.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">ROTARY</text>
+<text x="792.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">SURFACE / Z</text>
+<text x="873.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">CALIBRATE</text>
+<text x="950.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">HELP</text>
 <rect x="158" y="142" width="360" height="128" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
 <text x="170" y="164" fill="#e8eaed" font-size="9.5" font-family="sans-serif" font-weight="700" text-anchor="start">WORK OFFSETS</text>
 <text x="506" y="164" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="end">RESULT TARGET</text>
@@ -94,11 +82,10 @@
 <rect x="374" y="202" width="62" height="18" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
 <text x="405" y="214.5" fill="#9aa0a6" font-size="7" font-family="monospace" text-anchor="middle">G59.3</text>
 <text x="473" y="214" fill="#6b7280" font-size="5.6" font-family="monospace" text-anchor="middle">9 SYSTEMS</text>
-<rect x="170" y="228" width="160" height="22" rx="3" fill="#4da3ff" stroke="none" stroke-width="1"/>
-<text x="250" y="243" fill="#141619" font-size="7.2" font-family="sans-serif" font-weight="700" text-anchor="middle">APPLY WCS</text>
-<rect x="338" y="228" width="168" height="22" rx="3" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="422" y="243" fill="#9aa0a6" font-size="6.4" font-family="sans-serif" text-anchor="middle">PROBE POSITION ONLY</text>
-<text x="170" y="261" fill="#6b7280" font-size="6.2" font-family="sans-serif" text-anchor="start">Position only records values; it does not zero the offset.</text>
+<rect x="170" y="229" width="14" height="14" rx="2" fill="#141619" stroke="#4b5563" stroke-width="1.2"/>
+<text x="190" y="240" fill="#e8eaed" font-size="7.2" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE POSITION ONLY</text>
+<text x="506" y="240" fill="#9aa0a6" font-size="6.0" font-family="monospace" text-anchor="end">OFF = APPLY TO G54</text>
+<text x="170" y="261" fill="#6b7280" font-size="6.0" font-family="sans-serif" text-anchor="start">OFF: zero the active work offset · ON: record values only</text>
 <rect x="158" y="278" width="360" height="282" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
 <text x="170" y="300" fill="#e8eaed" font-size="9.5" font-family="sans-serif" font-weight="700" text-anchor="start">PROBING PARAMETERS</text>
 <text x="506" y="300" fill="#9aa0a6" font-size="6.1" font-family="sans-serif" text-anchor="end">mm · ↑↓ ADJUST</text>
@@ -188,7 +175,7 @@
 <rect x="526" y="142" width="340" height="418" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
 <text x="538" y="164" fill="#e8eaed" font-size="9.5" font-family="sans-serif" font-weight="700" text-anchor="start">PROBING ROUTINES</text>
 <text x="854" y="164" fill="#9aa0a6" font-size="6.2" font-family="monospace" text-anchor="end">9 ROUTINES</text>
-<text x="538" y="180" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="start">OUTSIDE CORNERS / NUM 1-9 SELECT</text>
+<text x="538" y="180" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="start">OUTSIDE CORNERS / NUM 1-9 HIGHLIGHT</text>
 <line x1="538" y1="188" x2="854" y2="188" stroke="#30353a" stroke-width="1"/>
 <rect x="538" y="196" width="100" height="106" rx="5" fill="#4da3ff" fill-opacity="0.11" stroke="#4da3ff" stroke-width="2"/><rect x="545" y="203" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4da3ff" stroke-width="1"/><text x="554.0" y="212.9" fill="#4da3ff" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">7</text><g transform="translate(562,218) scale(1.85)"><rect x="14" y="2" width="18" height="19" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="2" y1="2" x2="10.5" y2="2" stroke="#3ddc84" stroke-width="1.3"/><polygon points="10.5,2 6.5,-0.2999999999999998 6.5,4.3" fill="#3ddc84"/><line x1="14" y1="12" x2="14" y2="5.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="14,5.5 11.7,9.5 16.3,9.5" fill="#3ddc84"/><circle cx="14" cy="2" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="14" cy="2" r="2.3" fill="#c084fc"/></g><text x="588" y="292" fill="#e8eaed" font-size="6.2" font-family="sans-serif" font-weight="700" text-anchor="middle">FRONT LEFT TOP</text>
 <rect x="646" y="196" width="100" height="106" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="653" y="203" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="662.0" y="212.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">8</text><g transform="translate(670,218) scale(1.85)"><rect x="4" y="11" width="26" height="10" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="4" y1="11" x2="30" y2="11" stroke="#9aa0a6" stroke-width="1.2"/><line x1="17" y1="1.5" x2="17" y2="8.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="17,8.5 14.7,4.5 19.3,4.5" fill="#3ddc84"/><circle cx="17" cy="11" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="17" cy="11" r="2.3" fill="#c084fc"/></g><text x="696" y="292" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">FRONT TOP SIDE</text>
@@ -199,7 +186,8 @@
 <rect x="538" y="424" width="100" height="106" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="545" y="431" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="554.0" y="440.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">1</text><g transform="translate(562,446) scale(1.85)"><rect x="14" y="1" width="18" height="19" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="2" y1="20" x2="10.5" y2="20" stroke="#3ddc84" stroke-width="1.3"/><polygon points="10.5,20 6.5,17.7 6.5,22.3" fill="#3ddc84"/><line x1="14" y1="10" x2="14" y2="16.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="14,16.5 11.7,12.5 16.3,12.5" fill="#3ddc84"/><circle cx="14" cy="20" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="14" cy="20" r="2.3" fill="#c084fc"/></g><text x="588" y="520" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">BACK LEFT TOP</text>
 <rect x="646" y="424" width="100" height="106" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="653" y="431" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="662.0" y="440.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">2</text><g transform="translate(670,446) scale(1.85)"><rect x="4" y="1" width="26" height="10" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="4" y1="11" x2="30" y2="11" stroke="#9aa0a6" stroke-width="1.2"/><line x1="17" y1="20" x2="17" y2="13.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="17,13.5 14.7,17.5 19.3,17.5" fill="#3ddc84"/><circle cx="17" cy="11" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="17" cy="11" r="2.3" fill="#c084fc"/></g><text x="696" y="520" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">BACK TOP SIDE</text>
 <rect x="754" y="424" width="100" height="106" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="761" y="431" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="770.0" y="440.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">3</text><g transform="translate(778,446) scale(1.85)"><rect x="2" y="1" width="18" height="19" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="32" y1="20" x2="23.5" y2="20" stroke="#3ddc84" stroke-width="1.3"/><polygon points="23.5,20 27.5,17.7 27.5,22.3" fill="#3ddc84"/><line x1="20" y1="10" x2="20" y2="16.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="20,16.5 17.7,12.5 22.3,12.5" fill="#3ddc84"/><circle cx="20" cy="20" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="20" cy="20" r="2.3" fill="#c084fc"/></g><text x="804" y="520" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">BACK RIGHT TOP</text>
-<text x="538" y="548" fill="#6b7280" font-size="5.8" font-family="monospace" text-anchor="start">NUM PAD 7 8 9 / 4 5 6 / 1 2 3  ·  ENTER RUNS</text>
+<text x="538" y="542" fill="#6b7280" font-size="5.8" font-family="monospace" text-anchor="start">NUM PAD 7 8 9 / 4 5 6 / 1 2 3  ·  ENTER RUNS</text>
+<text x="538" y="554" fill="#6b7280" font-size="5.5" font-family="monospace" text-anchor="start">CALIBRATE / HELP USE A DIFFERENT LAYOUT</text>
 <rect x="874" y="142" width="110" height="418" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
 <text x="886" y="164" fill="#e8eaed" font-size="9.5" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE</text>
 <text x="972" y="164" fill="#9aa0a6" font-size="6.2" font-family="monospace" text-anchor="end">T99</text>
@@ -229,7 +217,7 @@
 <line x1="4" y1="566" x2="996" y2="566" stroke="#30353a" stroke-width="1"/>
 <text x="158" y="590" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="start">ESC OFFSETS</text>
 <text x="250" y="590" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="start">F8 NEXT TAB</text>
-<text x="350" y="590" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="start">NUM 1-9 SELECT</text>
+<text x="350" y="590" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="start">NUM 1-9 HIGHLIGHT</text>
 <text x="470" y="590" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="start">ENTER RUN</text>
 <text x="560" y="590" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="start">TAB CONTROLS</text>
 <line x1="650" y1="576" x2="650" y2="604" stroke="#30353a" stroke-width="1"/>
@@ -239,8 +227,7 @@
 <rect x="798" y="578" width="34" height="18" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="815.0" y="589.4" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">ENTER</text>
 <rect x="840" y="576" width="144" height="26" rx="4" fill="#4da3ff" stroke="none" stroke-width="1"/>
 <text x="912" y="593" fill="#141619" font-size="8.2" font-family="sans-serif" font-weight="700" text-anchor="middle">RUN PROBE</text>
-<line x1="4" y1="612" x2="996" y2="612" stroke="#30353a" stroke-width="1"/>
-<text x="16" y="628" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">PROBE T99 / G54 / APPLY WCS / POSITION ONLY OFF</text>
+<text x="16" y="628" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">PROBE T99 / G54 / POSITION ONLY OFF / APPLY ON</text>
 <text x="420" y="628" fill="#3ddc84" font-size="8" font-family="monospace" text-anchor="start">INPUT OPEN</text>
 <text x="520" y="628" fill="#3ddc84" font-size="8" font-family="monospace" text-anchor="start">PROTECT OFF</text>
 <text x="620" y="628" fill="#3ddc84" font-size="8" font-family="monospace" text-anchor="start">E-STOP OK</text>
