@@ -43,7 +43,6 @@ Click any image for the full-size PNG.
 | Touch probe — boss and pocket | `svg/probe-boss-pocket.svg` |
 | Touch probe — ridge and valley | `svg/probe-ridge-valley.svg` |
 | Touch probe — edge angle | `svg/probe-edge-angle.svg` |
-| Touch probe — surface / Z | `svg/probe-surface-z.svg` |
 | Touch probe — calibrate | `svg/probe-calibrate.svg` |
 | Touch probe — help | `svg/probe-help.svg` |
 | MDI screen | `svg/mdi.svg` |

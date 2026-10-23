@@ -40,17 +40,16 @@
 <text x="290" y="78" fill="#9aa0a6" font-size="8.2" font-family="sans-serif" text-anchor="start">OFFSETS / PROBE BASIC ROUTINES</text>
 <rect x="820" y="64" width="44" height="18" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="842.0" y="75.4" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">OFFSET</text>
 <text x="870" y="78" fill="#9aa0a6" font-size="6.7" font-family="monospace" text-anchor="start">CYCLES CATEGORIES</text>
-<text x="984" y="78" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="end">8/8</text>
+<text x="984" y="78" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="end">7/7</text>
 <line x1="158" y1="90" x2="984" y2="90" stroke="#30353a" stroke-width="1"/>
 <text x="213.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">OUTSIDE CORNERS</text>
 <text x="329.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">INSIDE CORNERS</text>
 <text x="445.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">BOSS + POCKET</text>
 <text x="565.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">RIDGE + VALLEY</text>
 <text x="670.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">EDGE ANGLE</text>
-<text x="761.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">SURFACE / Z</text>
-<text x="854.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">CALIBRATE</text>
-<text x="944.0" y="120" fill="#4da3ff" font-size="7.5" font-family="sans-serif" font-weight="700" text-anchor="middle">HELP</text>
-<line x1="912" y1="130" x2="976" y2="130" stroke="#4da3ff" stroke-width="2"/>
+<text x="780.0" y="120" fill="#9aa0a6" font-size="7.2" font-family="sans-serif" text-anchor="middle">CALIBRATE</text>
+<text x="890.0" y="120" fill="#4da3ff" font-size="7.5" font-family="sans-serif" font-weight="700" text-anchor="middle">HELP</text>
+<line x1="858" y1="130" x2="922" y2="130" stroke="#4da3ff" stroke-width="2"/>
 <rect x="158" y="142" width="202" height="458" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
 <text x="170" y="164" fill="#e8eaed" font-size="9.5" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE HELP</text>
 <text x="348" y="164" fill="#9aa0a6" font-size="6.2" font-family="monospace" text-anchor="end">1/7</text>
@@ -73,7 +72,7 @@
 <text x="382" y="252" fill="#9aa0a6" font-size="6.8" font-family="sans-serif" text-anchor="start"></text>
 <text x="382" y="268" fill="#e8eaed" font-size="6.8" font-family="sans-serif" text-anchor="start">If the probe is obstructed by the stock during its Z positioning</text>
 <text x="382" y="284" fill="#e8eaed" font-size="6.8" font-family="sans-serif" text-anchor="start">move, an error is raised and the routine aborts.</text>
-<rect x="450" y="370" width="420" height="150" fill="#6b7280" stroke="#4b5563" stroke-width="1.2"/>
+<rect x="450" y="370" width="420" height="150" fill="#4b5563" stroke="#6b7280" stroke-width="1.2"/>
 <text x="660" y="496" fill="#6b7280" font-size="6.0" font-family="monospace" text-anchor="middle">WORK PIECE</text>
 <line x1="500" y1="326" x2="500" y2="358" stroke="#6b7280" stroke-width="2"/>
 <circle cx="500" cy="366" r="3.2" fill="#c084fc"/>
@@ -91,6 +90,6 @@
 <text x="520" y="628" fill="#3ddc84" font-size="8" font-family="monospace" text-anchor="start">PROTECT OFF</text>
 <text x="620" y="628" fill="#3ddc84" font-size="8" font-family="monospace" text-anchor="start">E-STOP OK</text>
 <text x="710" y="628" fill="#3ddc84" font-size="8" font-family="monospace" text-anchor="start">ALARM 0</text>
-<text x="800" y="628" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">CATEGORY 8/8</text>
+<text x="800" y="628" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">CATEGORY 7/7</text>
 <text x="900" y="628" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">14:32:05</text>
 </svg>

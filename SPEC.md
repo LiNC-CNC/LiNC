@@ -809,7 +809,7 @@ existing Probe Basic G-code subroutines and math, vendored verbatim under
 choose a routine group, then pick the operation card.
 
 - Category strip, matching Probe Basic: Outside Corners, Inside Corners,
-  Boss and Pocket, Ridge and Valley, Edge Angle, Surface/Z, Calibrate and
+  Boss and Pocket, Ridge and Valley, Edge Angle, Calibrate and
   Probe Help. Rotary-axis probing is not offered.
 - Each category opens a grid of illustrated operation cards plus a selected
   operation, diagram and G-code call. Work offset, probe mode and parameters
@@ -1497,7 +1497,6 @@ Only the accepted versions are included.
 | `svg/probe-boss-pocket.svg` | Touch probe — boss and pocket: six round/rect boss and pocket routines plus the diam/X/Y hint row |
 | `svg/probe-ridge-valley.svg` | Touch probe — ridge and valley: six ridge/valley routines plus the X/Y hint row |
 | `svg/probe-edge-angle.svg` | Touch probe — edge angle: four corner and four top-edge angle routines with the WCO-rotation note |
-| `svg/probe-surface-z.svg` | Touch probe — surface/Z: surface and spindle-nose cards with the Z explanation panel |
 | `svg/probe-calibrate.svg` | Touch probe — calibrate: calibration offset, 2×2 round/square boss/pocket routines, diameter/width fields and reset |
 | `svg/probe-help.svg` | Touch probe — help: topic list, step-off-width explanation and dimensioned probe diagram |
 | `svg/mdi.svg` | MDI: single-block command, quick inserts, DRO/modal, command issue via `issue_mdi`, history and last result |

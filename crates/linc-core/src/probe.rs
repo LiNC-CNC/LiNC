@@ -20,13 +20,12 @@ pub enum ProbeCategory {
 }
 
 impl ProbeCategory {
-    pub const ALL: [ProbeCategory; 8] = [
+    pub const ALL: [ProbeCategory; 7] = [
         Self::OutsideCorners,
         Self::InsideCorners,
         Self::BossAndPocket,
         Self::RidgeAndValley,
         Self::EdgeAngle,
-        Self::SurfaceZ,
         Self::Calibrate,
         Self::ProbeHelp,
     ];
@@ -1015,7 +1014,7 @@ mod tests {
     #[test]
     fn catalog_covers_all_categories_and_unambiguous_calls() {
         assert!(operations().len() >= 36);
-        assert_eq!(ProbeCategory::ALL.len(), 8);
+        assert_eq!(ProbeCategory::ALL.len(), 7);
         let mut calls = std::collections::HashSet::new();
         for operation in operations() {
             assert!(calls.insert(operation.call), "duplicate {}", operation.call);
