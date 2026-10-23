@@ -1922,11 +1922,12 @@ fn help_view(app: &mut LincApp, ui: &mut Ui) {
                             help_key(ui, "PgUp/PgDn", "Move to the previous/next probe category.");
                             help_key(ui, "OFFSET", "Cycle Offsets → Outside → Inside → Boss + Pocket → Ridge + Valley → Edge Angle → Calibrate → Help → Offsets.");
                             help_key(ui, "Esc", "Return to Offsets. While a parameter is being edited, Esc cancels the edit first.");
-                            help_key(ui, "Arrows", "After clicking a parameter field, move between fields; Enter edits the selected field.");
+                            help_key(ui, "Ctrl+P", "Move the keyboard to the first probing-parameter field.");
+                            help_key(ui, "Arrows", "Move between parameter fields once Ctrl+P or a click has focused them. Enter edits the selected field.");
                             help_key(ui, "X/Y/Z", "Open the X, Y or Z DRO for editing. Enter writes the work position; Esc cancels.");
 
                             help_section(ui, "PROBING PARAMETERS");
-                            help_text(ui, "Click a field, use the arrow keys, then press Enter to edit. Enter commits and Esc cancels. Arithmetic expressions such as 2.5+0.1 are accepted.");
+                            help_text(ui, "Press Ctrl+P to focus the first parameter field, or click a field. The arrow keys move between fields; Enter edits the selected field. Enter commits, and Esc cancels; both return keyboard focus to the screen. Arithmetic expressions such as 2.5+0.1 are accepted.");
                             help_key(ui, "PROBE TOOL #", "Probe tool number. The probe must be in the spindle before a routine can run; the default is T99.");
                             help_key(ui, "PROBE SLOW FDRATE", "Slow feed used for the final contact move.");
                             help_key(ui, "PROBE TRAVERSE FR", "Traverse feed used for positioning moves between probe points.");
@@ -2053,6 +2054,7 @@ fn commit_param_edit(app: &mut LincApp) {
         _ => app.probe.params.diameter_hint = value,
     }
     app.probe.param_editing = false;
+    app.probe.param_focused = false;
     app.probe.param_buffer.clear();
     app.probe.error = None;
 }
@@ -2072,6 +2074,7 @@ fn handle_param_edit_keys(app: &mut LincApp, ui: &mut Ui) {
         commit_param_edit(app);
     } else if cancel {
         app.probe.param_editing = false;
+        app.probe.param_focused = false;
         app.probe.param_buffer.clear();
     }
 }
@@ -2085,7 +2088,11 @@ fn handle_param_nav_keys(app: &mut LincApp, ui: &mut Ui) -> bool {
     }
     let mut delta = 0isize;
     let mut edit = false;
+    let mut leave = false;
     ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+            leave = true;
+        }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
             delta -= 1;
         }
@@ -2102,6 +2109,10 @@ fn handle_param_nav_keys(app: &mut LincApp, ui: &mut Ui) -> bool {
             edit = true;
         }
     });
+    if leave {
+        app.probe.param_focused = false;
+        return true;
+    }
     if delta == 0 && !edit {
         return false;
     }
@@ -2128,6 +2139,17 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
         return;
     }
     if ui.ctx().text_edit_focused() {
+        return;
+    }
+    let focus_first = ui.input_mut(|input| {
+        input.consume_key(egui::Modifiers::CTRL, egui::Key::P)
+    });
+    if focus_first && parameter_editable(app.probe.category) {
+        app.probe.param_selected = 0;
+        app.probe.param_focused = true;
+        app.probe.param_editing = false;
+        app.probe.param_buffer.clear();
+        app.probe.error = None;
         return;
     }
     if handle_probe_dro_axis_keys(app, ui) {
