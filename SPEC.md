@@ -645,8 +645,8 @@ Program rules:
 - Read-only while running; blocked when program protect is active.
 - Offsets edited in the table are validated against LinuxCNC limits and units.
 - `OFFSET` (F8) cycles from Offsets into the probe tabs; there is no separate
-  Touch Probe button. Probing results can update the selected work offset only
-  when Probe Basic probe mode 0 is selected.
+  Touch Probe button. Probing runs in position-only mode; `A` applies the last
+  result to the selected work offset.
 
 ### 6.4 Tools
 
@@ -837,9 +837,9 @@ choose a routine group, then pick the operation card.
   off width, edge width, diameter hints, probe mode, WCS rotation, calibration
   offset/diameter and square-calibration axis. The calibration-only fields
   live in the Calibrate panel.
-- The `PROBE POSITION ONLY` checkbox selects Probe Basic's probe mode: off
-  applies the measured result to the active work offset in the subroutine; on
-  records the result without applying it.
+- Probing always uses Probe Basic's position-only mode. The result is recorded
+  but not written to the WCS by the subroutine; `A` is the explicit shortcut
+  that applies the last result to the active work offset (PROTECT must be off).
 - Parameter entry follows the Offsets table: click a field to select it, the
   arrow keys move between fields, `Enter` opens the inline editor, `Enter`
   again commits the value and `Esc` cancels. Arithmetic expressions are

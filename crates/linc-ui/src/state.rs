@@ -10,7 +10,7 @@ use linc_core::editor::Editor;
 use linc_core::gcode::Preview;
 use linc_core::help::HelpBundle;
 use linc_core::model::MachineSnapshot;
-use linc_core::probe::{ProbeCategory, ProbeMode, ProbeOperation, ProbeParameters};
+use linc_core::probe::{ProbeCategory, ProbeOperation, ProbeParameters};
 use linc_view::{theme as view_theme, TrajectoryView, ViewMode};
 
 use crate::theme;
@@ -951,7 +951,6 @@ pub struct ProbeUi {
     pub operation: String,
     pub params: ProbeParameters,
     pub wcs: String,
-    pub measure_only: bool,
     pub require_apply: bool,
     pub error: Option<String>,
     pub last_run: Option<Instant>,
@@ -974,7 +973,6 @@ impl ProbeUi {
             operation: String::new(),
             params,
             wcs,
-            measure_only: false,
             require_apply: true,
             error: None,
             last_run: None,
@@ -1137,13 +1135,6 @@ pub fn toast(text: impl Into<String>, color: egui::Color32) -> Toast {
     }
 }
 
-pub fn default_probe_mode(measure_only: bool) -> ProbeMode {
-    if measure_only {
-        ProbeMode::MeasureOnly
-    } else {
-        ProbeMode::ApplyWcs
-    }
-}
 
 pub fn page_accent(page: Page) -> egui::Color32 {
     match page {

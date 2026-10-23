@@ -40,11 +40,7 @@ pub fn run(app: &mut LincApp) {
         ));
         return;
     }
-    app.probe.params.probe_mode = if app.probe.measure_only {
-        ProbeMode::MeasureOnly
-    } else {
-        ProbeMode::ApplyWcs
-    };
+    app.probe.params.probe_mode = ProbeMode::MeasureOnly;
     if let Err(error) = app.probe.params.validate(
         app.snapshot.probe.enabled,
         app.snapshot.tool_change.current_tool,

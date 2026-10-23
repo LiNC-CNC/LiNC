@@ -711,23 +711,8 @@ fn parameters_card(app: &mut LincApp, ui: &mut Ui) {
                 );
             });
         });
-        let mut measure = app.probe.measure_only;
-        if ui
-            .checkbox(
-                &mut measure,
-                RichText::new("PROBE POSITION ONLY").size(theme::font_size(8.0)),
-            )
-            .changed()
-        {
-            app.probe.measure_only = measure;
-            app.probe.params.probe_mode = if measure {
-                linc_core::probe::ProbeMode::MeasureOnly
-            } else {
-                linc_core::probe::ProbeMode::ApplyWcs
-            };
-        }
         ui.label(
-            RichText::new("OFF = APPLY TO ACTIVE WCS")
+            RichText::new("PROBE POSITION ONLY · A APPLIES THE LAST RESULT TO THE ACTIVE WCS")
                 .size(theme::font_size(7.5))
                 .color(theme::MUTED),
         );
@@ -1933,6 +1918,7 @@ fn help_view(app: &mut LincApp, ui: &mut Ui) {
                             help_section(ui, "KEYS AND NAVIGATION");
                             help_key(ui, "1–9", "Highlight a routine in the current matrix. Six-card families use 1–6, Calibrate uses 1–4.");
                             help_key(ui, "Enter", "Run the highlighted routine. When a parameter field is selected, Enter opens its inline editor instead.");
+                            help_key(ui, "A", "Apply the last measured result to the active WCS. Protect must be off.");
                             help_key(ui, "PgUp/PgDn", "Move to the previous/next probe category.");
                             help_key(ui, "OFFSET", "Cycle Offsets → Outside → Inside → Boss + Pocket → Ridge + Valley → Edge Angle → Calibrate → Help → Offsets.");
                             help_key(ui, "Esc", "Return to Offsets. While a parameter is being edited, Esc cancels the edit first.");
@@ -1956,7 +1942,7 @@ fn help_view(app: &mut LincApp, ui: &mut Ui) {
 
                             help_section(ui, "RESULTS");
                             help_text(ui, "Results are the Probe Basic #1001–#1012 values: X-/X+/Y-/Y+ and Z- probed positions, X/Y widths, X/Y centres, averaged diameter, edge delta and edge angle. UPDATE PROBE PARAMS sends the current parameters without starting a routine. RESET ALL DATA, X DATA RESET and Y DATA RESET zero the corresponding measured values.");
-                            help_text(ui, "The active WCS is shown in the parameter header. With PROBE POSITION ONLY off, Probe Basic applies the result to that WCS in the subroutine; with it on, the values are recorded without applying them.");
+                            help_text(ui, "The probe runs in position-only mode: measured values are recorded but not written to the WCS. Press A to apply the last result to the active WCS; work-offset writes require PROTECT off.");
 
                             help_section(ui, "CALIBRATION");
                             help_text(ui, "Fit the known ring/pin and select the matching round or square pocket/boss routine. CALIBRATION OFFSET is the stored correction; CALIBRATION DIAMETER and WIDTH X/Y describe the artefact. RESET CAL clears the stored offset.");
@@ -2153,6 +2139,7 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     let cards = cards_for(app.probe.category);
     let mut picked: Option<String> = None;
     let mut run_now = false;
+    let mut apply_now = false;
     ui.input_mut(|input| {
         for (key, name) in [
             (egui::Key::Num1, "1"),
@@ -2174,6 +2161,9 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
             run_now = true;
         }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::A) {
+            apply_now = true;
+        }
     });
     if let Some(operation) = picked {
         app.probe.operation = operation;
@@ -2184,6 +2174,9 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     }
     if run_now && !cards.is_empty() {
         super::probe::run(app);
+    }
+    if apply_now {
+        super::probe::apply(app);
     }
 }
 

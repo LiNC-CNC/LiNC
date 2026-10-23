@@ -2889,6 +2889,7 @@ impl LincApp {
                         items: vec![
                             ("1-9".into(), "HIGHLIGHT"),
                             ("Enter".into(), "RUN PROBE"),
+                            ("A".into(), "APPLY RESULT"),
                             ("PgUp/PgDn".into(), "TABS"),
                             ("X/Y/Z".into(), "EDIT DRO"),
                             ("OFFSET".into(), "NEXT TAB"),
