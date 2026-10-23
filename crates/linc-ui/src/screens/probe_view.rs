@@ -377,11 +377,12 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     }
     let available = ui.available_width();
     let height = ui.available_height().max(380.0);
-    let gap = 8.0;
+    let gap = 4.0;
     let right_w = 150.0;
     let left_w = (available * 0.40).clamp(330.0, 470.0);
     let center_w = (available - left_w - right_w - 2.0 * gap).max(300.0);
     ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
         ui.allocate_ui_with_layout(
             Vec2::new(left_w, height),
             egui::Layout::top_down(Align::Min),
@@ -499,6 +500,7 @@ fn parameters_card(app: &mut LincApp, ui: &mut Ui) {
         widgets.active.corner_radius = CornerRadius::same(2);
         ui.horizontal(|ui| {
             theme::section_header(ui, "PROBING PARAMETERS");
+            ui.add_space(8.0);
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
                     RichText::new(format!("WCS {}", app.probe.wcs))
@@ -506,8 +508,9 @@ fn parameters_card(app: &mut LincApp, ui: &mut Ui) {
                         .size(theme::font_size(8.0))
                         .color(theme::SUCCESS),
                 );
+                ui.add_space(10.0);
                 ui.label(
-                    RichText::new("ARROWS SELECT · ENTER EDIT")
+                    RichText::new("ARROWS · ENTER EDIT")
                         .size(theme::font_size(7.5))
                         .color(theme::MUTED),
                 );
@@ -1456,6 +1459,7 @@ fn probe_symbol(app: &LincApp, ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
         ui.set_min_height((height - 24.0).max(0.0));
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
             theme::section_header(ui, "PROBE");
             ui.label(
                 RichText::new("T99")
@@ -1540,9 +1544,10 @@ fn calibrate_view(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_width();
     let height = ui.available_height().max(380.0);
     let right_w = 150.0;
-    let gap = 8.0;
+    let gap = 4.0;
     let panel_w = (available - right_w - gap).max(400.0);
     ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
         ui.allocate_ui_with_layout(
             Vec2::new(panel_w, height),
             egui::Layout::top_down(Align::Min),
@@ -1697,8 +1702,9 @@ fn help_view(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_width();
     let height = ui.available_height().max(380.0);
     let right_w = 150.0;
-    let gap = 8.0;
+    let gap = 4.0;
     ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
         ui.allocate_ui_with_layout(
             Vec2::new((available - right_w - gap).max(400.0), height),
             egui::Layout::top_down(Align::Min),
