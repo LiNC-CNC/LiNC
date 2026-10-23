@@ -36,6 +36,10 @@ def load_docs():
 
 def clean(text: str) -> str:
     text = text.replace("\xa0", " ")
+    # The default egui proportional font has no arrow glyphs; use ASCII so
+    # the tables and prose do not show replacement boxes.
+    text = text.replace("\u2192", "->").replace("\u2190", "<-")
+    text = text.replace("\u2191", "up ").replace("\u2193", "down ")
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n\s*\n+", "\n\n", text)
     return text.strip()
@@ -195,7 +199,22 @@ def main() -> int:
             anchor for anchor in section["related"] if anchor in anchors
         ]
 
-    payload = {
+    def ascii_arrows(value):
+        """The default proportional egui font has no arrow glyphs."""
+        if isinstance(value, str):
+            return (
+                value.replace("\u2192", "->")
+                .replace("\u2190", "<-")
+                .replace("\u2191", "up ")
+                .replace("\u2193", "down ")
+            )
+        if isinstance(value, list):
+            return [ascii_arrows(item) for item in value]
+        if isinstance(value, dict):
+            return {key: ascii_arrows(item) for key, item in value.items()}
+        return value
+
+    payload = ascii_arrows({
         "source": "https://linuxcnc.org/docs/html/gcode",
         "bundle": "linuxcnc-gcode",
         "version": "pinned Probe Basic gcode_docs.py bundle",
@@ -208,7 +227,7 @@ def main() -> int:
         },
         "groups": groups,
         "sections": out_sections,
-    }
+    })
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
