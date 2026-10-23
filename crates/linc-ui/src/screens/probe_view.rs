@@ -6,6 +6,7 @@ use egui::{
     Ui, Vec2,
 };
 use linc_core::command::{MachineCommand, MdiOrigin};
+use linc_core::model::AxisMap;
 use linc_core::model::MachineVariant;
 use linc_core::probe::ProbeCategory;
 
@@ -387,9 +388,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             Vec2::new(left_w, height),
             egui::Layout::top_down(Align::Min),
             |ui| {
+                probe_dro(app, ui);
+                ui.add_space(4.0);
                 egui::ScrollArea::vertical()
                     .id_salt("probe-left")
-                    .max_height(height)
+                    .max_height((height - 86.0).max(180.0))
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         parameters_card(app, ui);
@@ -476,6 +479,195 @@ fn category_tabs(app: &mut LincApp, ui: &mut Ui) {
         ],
         Stroke::new(1.0, theme::BORDER),
     );
+}
+
+fn probe_dro(app: &mut LincApp, ui: &mut Ui) {
+    let gap = 4.0;
+    let card_w = ((ui.available_width() - gap * 2.0) / 3.0).max(90.0);
+    let mut start: Option<String> = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        for axis in ["X", "Y", "Z"] {
+            let (rect, response) =
+                ui.allocate_exact_size(Vec2::new(card_w, 78.0), Sense::click());
+            let editing = app
+                .probe
+                .dro_edit
+                .as_ref()
+                .map(|edit| edit.axis == axis)
+                .unwrap_or(false);
+            common::paint_dro_frame(ui, rect, editing);
+            let position = app.snapshot.positions.axes.get(axis);
+            let work = position.map(|p| p.work).unwrap_or(0.0);
+            let machine = position.map(|p| p.machine).unwrap_or(0.0);
+            let painter = ui.painter_at(rect);
+            painter.text(
+                rect.left_top() + Vec2::new(10.0, 7.0),
+                Align2::LEFT_TOP,
+                axis,
+                FontId::proportional(theme::font_size(11.0)),
+                theme::C3,
+            );
+            if editing {
+                let field = Rect::from_min_max(
+                    Pos2::new(rect.left() + 10.0, rect.top() + 18.0),
+                    Pos2::new(rect.right() - 10.0, rect.top() + 46.0),
+                );
+                let mut child = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(field)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
+                let mut buffer = app
+                    .probe
+                    .dro_edit
+                    .as_ref()
+                    .map(|edit| edit.buffer.clone())
+                    .unwrap_or_default();
+                let edit = child.add_sized(
+                    [field.width(), field.height()],
+                    egui::TextEdit::singleline(&mut buffer)
+                        .font(egui::FontId::monospace(theme::font_size(15.0)))
+                        .frame(egui::Frame::NONE)
+                        .margin(egui::Margin::symmetric(2, 0))
+                        .id(egui::Id::unique("linc-probe-dro")),
+                );
+                if app
+                    .probe
+                    .dro_edit
+                    .as_ref()
+                    .map(|edit| edit.focus)
+                    .unwrap_or(false)
+                {
+                    edit.request_focus();
+                    if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), edit.id)
+                    {
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(buffer.chars().count()),
+                        )));
+                        state.store(ui.ctx(), edit.id);
+                    }
+                    if let Some(slot) = app.probe.dro_edit.as_mut() {
+                        slot.focus = false;
+                    }
+                }
+                if edit.changed() {
+                    if let Some(slot) = app.probe.dro_edit.as_mut() {
+                        slot.buffer = buffer;
+                    }
+                }
+            } else {
+                painter.text(
+                    Pos2::new(rect.left() + 10.0, rect.top() + 38.0),
+                    Align2::LEFT_CENTER,
+                    theme::format_position(work, 3),
+                    FontId::monospace(theme::font_size(19.0)),
+                    theme::FG,
+                );
+                if response.clicked() {
+                    start = Some(axis.to_string());
+                }
+            }
+            painter.text(
+                Pos2::new(rect.left() + 10.0, rect.bottom() - 10.0),
+                Align2::LEFT_CENTER,
+                format!("M {}", theme::format_position(machine, 3)),
+                FontId::monospace(theme::font_size(8.5)),
+                theme::MUTED,
+            );
+        }
+    });
+    if let Some(axis) = start {
+        start_probe_dro_edit(app, axis);
+    }
+}
+
+fn start_probe_dro_edit(app: &mut LincApp, axis: String) {
+    if app.snapshot.offsets.active_index.is_none() {
+        app.toast("no active work offset", theme::WARNING);
+        return;
+    }
+    let work = app
+        .snapshot
+        .positions
+        .axes
+        .get(&axis)
+        .map(|position| position.work)
+        .unwrap_or(0.0);
+    app.probe.param_focused = false;
+    app.probe.param_editing = false;
+    app.probe.param_buffer.clear();
+    app.probe.dro_edit = Some(crate::state::DroEdit {
+        axis,
+        buffer: theme::format_position(work, 3),
+        focus: true,
+    });
+}
+
+fn commit_probe_dro_edit(app: &mut LincApp) -> bool {
+    let Some(edit) = app.probe.dro_edit.clone() else {
+        return false;
+    };
+    let Some(value) = crate::state::eval_expression(&edit.buffer) else {
+        app.toast("not a number or expression", theme::WARNING);
+        return false;
+    };
+    let Some(index) = app.snapshot.offsets.active_index else {
+        app.toast("no active work offset", theme::WARNING);
+        return false;
+    };
+    let mut values = AxisMap::new();
+    values.insert(edit.axis.clone(), value);
+    app.send(MachineCommand::SetWorkPosition { index, values });
+    app.probe.dro_edit = None;
+    true
+}
+
+fn handle_probe_dro_keys(app: &mut LincApp, ui: &mut Ui) -> bool {
+    if app.probe.dro_edit.is_none() {
+        return false;
+    }
+    let mut commit = false;
+    let mut cancel = false;
+    ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+            commit = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+            cancel = true;
+        }
+    });
+    if commit {
+        commit_probe_dro_edit(app);
+    } else if cancel {
+        app.probe.dro_edit = None;
+    }
+    true
+}
+
+fn handle_probe_dro_axis_keys(app: &mut LincApp, ui: &mut Ui) -> bool {
+    if app.probe.param_editing || app.probe.dro_edit.is_some() {
+        return false;
+    }
+    let mut axis = None;
+    ui.input_mut(|input| {
+        for (name, key) in [
+            ("X", egui::Key::X),
+            ("Y", egui::Key::Y),
+            ("Z", egui::Key::Z),
+        ] {
+            if input.consume_key(egui::Modifiers::NONE, key) {
+                axis = Some(name.to_string());
+            }
+        }
+    });
+    if let Some(axis) = axis {
+        start_probe_dro_edit(app, axis);
+        true
+    } else {
+        false
+    }
 }
 
 fn parameters_card(app: &mut LincApp, ui: &mut Ui) {
@@ -1741,6 +1933,7 @@ fn help_view(app: &mut LincApp, ui: &mut Ui) {
                             help_key(ui, "OFFSET", "Cycle Offsets → Outside → Inside → Boss + Pocket → Ridge + Valley → Edge Angle → Calibrate → Help → Offsets.");
                             help_key(ui, "Esc", "Return to Offsets. While a parameter is being edited, Esc cancels the edit first.");
                             help_key(ui, "Arrows", "After clicking a parameter field, move between fields; Enter edits the selected field.");
+                            help_key(ui, "X/Y/Z", "Open the X, Y or Z DRO for editing. Enter writes the work position; Esc cancels.");
 
                             help_section(ui, "PROBING PARAMETERS");
                             help_text(ui, "Click a field, use the arrow keys, then press Enter to edit. Enter commits and Esc cancels. Arithmetic expressions such as 2.5+0.1 are accepted.");
@@ -1937,11 +2130,17 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     if app.overlay_open() {
         return;
     }
+    if handle_probe_dro_keys(app, ui) {
+        return;
+    }
     if app.probe.param_editing {
         handle_param_edit_keys(app, ui);
         return;
     }
     if ui.ctx().text_edit_focused() {
+        return;
+    }
+    if handle_probe_dro_axis_keys(app, ui) {
         return;
     }
     if handle_param_nav_keys(app, ui) {
@@ -1990,6 +2189,7 @@ pub fn enter_first(app: &mut LincApp) {
     app.probe.param_focused = false;
     app.probe.param_editing = false;
     app.probe.param_buffer.clear();
+    app.probe.dro_edit = None;
     app.probe.error = None;
 }
 
@@ -2008,6 +2208,7 @@ pub fn category_step(app: &mut LincApp, forward: bool) {
     app.probe.param_focused = false;
     app.probe.param_editing = false;
     app.probe.param_buffer.clear();
+    app.probe.dro_edit = None;
     app.probe.error = None;
 }
 

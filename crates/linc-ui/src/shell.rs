@@ -1866,7 +1866,8 @@ impl LincApp {
                 || (self.page == Page::Offsets
                     && (self.offsets.editing || self.offsets.dro_edit.is_some()))
                 || (self.page == Page::Files && self.files.rename.is_some())
-                || (self.page == Page::Probe && self.probe.param_editing)
+                || (self.page == Page::Probe
+                    && (self.probe.param_editing || self.probe.dro_edit.is_some()))
                 || self.help.dialog.is_some();
             if !editing_in_place
                 && input.consume_key(self.keymap.back.modifiers, self.keymap.back.key)
@@ -2889,6 +2890,7 @@ impl LincApp {
                             ("1-9".into(), "HIGHLIGHT"),
                             ("Enter".into(), "RUN PROBE"),
                             ("PgUp/PgDn".into(), "TABS"),
+                            ("X/Y/Z".into(), "EDIT DRO"),
                             ("OFFSET".into(), "NEXT TAB"),
                             (k.back.label(), "OFFSETS"),
                         ],

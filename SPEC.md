@@ -644,8 +644,9 @@ Program rules:
 - Current axis values and distance-to-go.
 - Read-only while running; blocked when program protect is active.
 - Offsets edited in the table are validated against LinuxCNC limits and units.
-- A `PROBE` action opens the Touch Probe page; probing results can update the
-  selected work offset only when Probe Basic probe mode 0 is selected.
+- `OFFSET` (F8) cycles from Offsets into the probe tabs; there is no separate
+  Touch Probe button. Probing results can update the selected work offset only
+  when Probe Basic probe mode 0 is selected.
 
 ### 6.4 Tools
 
@@ -815,9 +816,13 @@ choose a routine group, then pick the operation card.
 - `OFFSET` (F8) cycles Offsets → Outside → Inside → Boss + Pocket → Ridge +
   Valley → Edge Angle → Calibrate → Help → Offsets. `Esc` returns to Offsets
   from any probe tab. `PgUp`/`PgDn` also cycle the probe tabs.
-- Each category opens a grid of illustrated operation cards. Parameters and
-  results stay on the left, the routine matrix is centred and the probe symbol
-  is on the right. Work offsets remain on the Offsets screen rather than being
+- An editable X/Y/Z DRO sits above the parameter card, spanning the same left
+  and right edges. Its work value is edited in place; the machine coordinate is
+  shown underneath. `X`/`Y`/`Z` open the matching DRO, `Enter` writes the work
+  position with `G10 L20`, and `Esc` cancels.
+- Each category opens a grid of illustrated operation cards. The DRO,
+  parameters and results stay on the left, the routine matrix is centred and
+  the probe symbol is on the right. Work offsets remain on the Offsets screen rather than being
   duplicated here; the active WCS is shown in the parameter header. The two
   left-hand cards share one right edge; the probe pane fills the body height
   and bottom-aligns with the routine matrix.
@@ -1069,7 +1074,8 @@ Implementation:
 - `Ctrl+D`: Diagnostics (the editable Program editor owns `Ctrl+D` for duplicate line); `Ctrl+H`: G-code Help.
 - `HELP` action: G-code Help; no dedicated function key.
 - `LOAD` / `Ctrl+O`: Files, when idle and allowed.
-- `PROBE` action: Touch Probe from Offsets; explicit `RUN PROBE` issues MDI.
+- `OFFSET`: cycles Offsets → probe tabs → Offsets. `Enter` runs the selected
+  routine; there is no separate Touch Probe action.
 - MDI mode: `Enter` issues the block; `Esc` clears unissued input; `Up`/`Down`
   select history; `Enter` on a focused history row or `Ctrl+Enter` runs the
   selected history entry through the same validation. No physical CYCLE START

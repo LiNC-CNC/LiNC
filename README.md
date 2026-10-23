@@ -211,11 +211,11 @@ file unchanged.
   exposes those controls.
 - **Touch Probe follows Probe Basic's category-first workflow**, reached from
   Offsets: choose a routine group, pick an illustrated operation, adjust
-  WCS/clearance/feed/tip parameters, then `RUN PROBE`. The Probe Basic probing
+  WCS/clearance/feed/tip parameters, then press `Enter` to run it. The Probe Basic probing
   subroutines are vendored verbatim under `subroutines/probe_basic`; LiNC builds
   the `#3014`–`#3036` parameter block and issues the selected `o<probe_...>`
   call via Probe Basic `issue_mdi` after validation. Results come from
-  `#1001`–`#1009`. Rotary-axis probing is not offered.
+  `#1001`–`#1012`. Rotary-axis probing is not offered.
 - **MDI is a mode-driven screen**: the panel's MDI position opens it, focuses
   the command line and shows DRO/modal/history. `Enter` issues one block via
   `issue_mdi`; leaving MDI discards unissued input but does not cancel an

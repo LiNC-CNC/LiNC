@@ -963,6 +963,8 @@ pub struct ProbeUi {
     pub param_editing: bool,
     pub param_buffer: String,
     pub param_edit_focus: bool,
+    /// Inline editor for the probe page DRO, shared shape with the Offsets DRO.
+    pub dro_edit: Option<DroEdit>,
 }
 
 impl ProbeUi {
@@ -983,6 +985,7 @@ impl ProbeUi {
             param_editing: false,
             param_buffer: String::new(),
             param_edit_focus: false,
+            dro_edit: None,
         }
     }
 
