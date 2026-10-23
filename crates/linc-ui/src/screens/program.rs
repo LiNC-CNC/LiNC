@@ -466,12 +466,16 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             // numbers) appeared one line ahead of the editor. Long lines are
             // clipped; G-code stays one numbered row per line.
             let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
+                // `pixels_per_point` is part of the key: the shell changes the
+                // design zoom with the window, and reusing a galley laid out at
+                // the old scale makes epaint warn during tessellation.
                 let key: GalleyKey = (
                     app.program.editor.revision,
                     syntax_error_line,
                     search.clone(),
                     matches.clone(),
                     buffer.as_str().len(),
+                    ui.ctx().pixels_per_point().to_bits(),
                 );
                 let cache_id = egui::Id::unique("linc-editor-galley");
                 if let Some((cached, galley)) =
@@ -593,7 +597,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
 
 /// Cache key for the editor galley: editor revision, highlight inputs, wrap
 /// width and buffer length.
-type GalleyKey = (u64, Option<usize>, String, Vec<usize>, usize);
+type GalleyKey = (u64, Option<usize>, String, Vec<usize>, usize, u32);
 
 /// The line-number gutter only changes when the line count does.
 fn number_gutter(ui: &egui::Ui, line_count: usize) -> String {
