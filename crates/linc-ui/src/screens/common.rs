@@ -424,113 +424,199 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
     paint_dro_progress(ui, rect, dtg, fraction);
 }
 
-pub fn health_card(app: &LincApp, ui: &mut Ui, height: f32) {
+/// One load bar: the ruler runs green (0-80 %), yellow (80-100 %) and red
+/// (100-120 %) behind an accent progress fill, with the percentage on the right.
+fn servo_meter(ui: &mut Ui, label: &str, load: f64) {
+    const SCALE: f32 = 120.0;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.0), Sense::hover());
+    let painter = ui.painter_at(rect);
+    let font = FontId::monospace(theme::font_size(10.0));
+    painter.text(
+        rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        label,
+        font.clone(),
+        theme::FG,
+    );
+    painter.text(
+        rect.right_center(),
+        egui::Align2::RIGHT_CENTER,
+        format!("{load:.0}%"),
+        font,
+        theme::FG,
+    );
+    let bar = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 17.0, rect.center().y - 5.0),
+        egui::pos2(rect.right() - 40.0, rect.center().y + 5.0),
+    );
+    if bar.width() < 12.0 {
+        return;
+    }
+    let radius = 2;
+    let zone = |from: f32, to: f32, color: Color32, left: bool, right: bool| {
+        let x0 = bar.left() + bar.width() * (from / SCALE);
+        let x1 = bar.left() + bar.width() * (to / SCALE);
+        let rounding = egui::CornerRadius {
+            nw: if left { radius } else { 0 },
+            sw: if left { radius } else { 0 },
+            ne: if right { radius } else { 0 },
+            se: if right { radius } else { 0 },
+        };
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(x0, bar.top()), egui::pos2(x1, bar.bottom())),
+            rounding,
+            theme::tint(color, 100),
+        );
+    };
+    zone(0.0, 80.0, theme::SUCCESS, true, false);
+    zone(80.0, 100.0, theme::WARNING, false, false);
+    zone(100.0, SCALE, theme::ERROR, false, true);
+    let fill = ((load / SCALE as f64).clamp(0.0, 1.0)) as f32;
+    if fill > 0.001 {
+        painter.rect_filled(
+            egui::Rect::from_min_max(
+                bar.left_top(),
+                egui::pos2(bar.left() + bar.width() * fill, bar.bottom()),
+            ),
+            egui::CornerRadius::same(radius),
+            theme::ACCENT,
+        );
+    }
+    painter.rect_stroke(
+        bar,
+        egui::CornerRadius::same(radius),
+        egui::Stroke::new(1.0, theme::BORDER),
+        egui::StrokeKind::Inside,
+    );
+}
+
+pub fn servo_load_card(app: &LincApp, ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
         ui.set_min_height((height - 21.0).max(0.0));
         ui.set_max_height((height - 21.0).max(0.0));
         ui.set_min_width(ui.available_width());
-        ui.spacing_mut().interact_size.y = 22.0;
+        ui.spacing_mut().interact_size.y = 20.0;
+        ui.spacing_mut().item_spacing.y = 1.0;
         theme::section_header(ui, "SERVO LOAD");
-        for axis in app.axes().iter().take(5) {
-            let load = app
-                .snapshot
-                .machine
-                .servo_load
-                .get(axis)
-                .copied()
-                .unwrap_or(0.0);
-            theme::meter(
-                ui,
-                axis,
-                load / 100.0,
-                format!("{load:.0}%"),
-                theme::pressure_color(load / 100.0),
-            );
+        for (label, load) in app.servo_load_rows() {
+            servo_meter(ui, &label, load);
         }
     });
 }
 
-pub fn alarm_card(app: &LincApp, ui: &mut Ui, height: f32) {
-    theme::card(ui, |ui| {
-        ui.set_min_height((height - 21.0).max(0.0));
-        ui.set_max_height((height - 21.0).max(0.0));
-        ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            theme::section_header(ui, "MESSAGES");
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let (messages, alarms) = app.log_counts();
+/// One controller message: clock and severity on the first line, the text
+/// wrapped over the full width below it.
+fn message_row(ui: &mut Ui, alarm: &linc_core::model::Alarm) {
+    let color = match alarm.severity {
+        linc_core::model::AlarmSeverity::Critical | linc_core::model::AlarmSeverity::Error => {
+            theme::ERROR
+        }
+        linc_core::model::AlarmSeverity::Warning => theme::WARNING,
+        linc_core::model::AlarmSeverity::Info => theme::MUTED,
+    };
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format_clock(alarm.timestamp_ms))
+                .monospace()
+                .size(theme::font_size(10.0))
+                .color(theme::MUTED),
+        );
+        ui.label(
+            RichText::new(alarm.severity.label())
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(color),
+        );
+    });
+    ui.add(
+        egui::Label::new(
+            RichText::new(&alarm.message)
+                .size(theme::font_size(11.0))
+                .color(if alarm.severity == linc_core::model::AlarmSeverity::Info {
+                    theme::MUTED
+                } else {
+                    color
+                }),
+        )
+        .wrap(),
+    );
+    ui.add_space(4.0);
+}
+
+/// Full-screen controller log, opened with `[keys].messages` and closed with
+/// Enter, Escape or CLOSE. It owns the keyboard while it is up: the shell
+/// consumes the close keys and the page keys before the page sees them.
+pub fn messages_dialog(app: &mut LincApp, ctx: &egui::Context) {
+    if !app.messages_dialog {
+        return;
+    }
+    let screen = ctx.content_rect();
+    let size = (screen.size() - Vec2::new(48.0, 48.0)).max(Vec2::new(640.0, 360.0));
+    let logs = app.recent_logs(400);
+    let (messages, alarms) = app.log_counts();
+    let scroll = std::mem::take(&mut app.messages_scroll);
+    let mut close = false;
+    let modal = egui::Modal::new(egui::Id::unique("linc-messages-dialog"))
+        .frame(
+            egui::Frame::new()
+                .fill(theme::PANEL)
+                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .corner_radius(8)
+                .inner_margin(16),
+        )
+        .show(ctx, |ui| {
+            ui.set_min_size(size);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("MESSAGES")
+                        .size(theme::font_size(22.0))
+                        .strong()
+                        .color(theme::FG),
+                );
+                ui.add_space(10.0);
                 ui.label(
                     RichText::new(format!("ALARM {alarms} / MSG {messages}"))
                         .monospace()
                         .size(theme::font_size(10.0))
                         .color(theme::MUTED),
                 );
-            });
-        });
-        let logs = app.recent_logs(20);
-        if logs.is_empty() {
-            ui.label(
-                RichText::new("NO ACTIVE ALARMS")
-                    .monospace()
-                    .size(theme::font_size(12.0))
-                    .color(theme::SUCCESS),
-            );
-        } else {
-            let width = ui.available_width();
-            egui::ScrollArea::vertical()
-                .id_salt("alarm-card")
-                .max_height(height - 34.0)
-                // Without this the scroll area sizes to its content, and a long
-                // controller message widened the whole card and pushed the page
-                // sideways.
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.set_max_width(width);
-                    // Rows of one message sit tight: the default spacing plus an
-                    // explicit gap made every entry look double-spaced.
-                    ui.spacing_mut().item_spacing.y = 1.0;
-                    for alarm in &logs {
-                        let color = match alarm.severity {
-                            linc_core::model::AlarmSeverity::Critical
-                            | linc_core::model::AlarmSeverity::Error => theme::ERROR,
-                            linc_core::model::AlarmSeverity::Warning => theme::WARNING,
-                            linc_core::model::AlarmSeverity::Info => theme::MUTED,
-                        };
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(format_clock(alarm.timestamp_ms))
-                                    .monospace()
-                                    .size(theme::font_size(10.0))
-                                    .color(theme::MUTED),
-                            );
-                            ui.label(
-                                RichText::new(alarm.severity.label())
-                                    .monospace()
-                                    .size(theme::font_size(9.0))
-                                    .color(color),
-                            );
-                        });
-                        // The message gets the full card width and wraps, so it
-                        // reads instead of running off the edge.
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(&alarm.message)
-                                    .size(theme::font_size(11.0))
-                                    .color(
-                                        if alarm.severity == linc_core::model::AlarmSeverity::Info {
-                                            theme::MUTED
-                                        } else {
-                                            color
-                                        },
-                                    ),
-                            )
-                            .wrap(),
-                        );
-                        ui.add_space(3.0);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if theme::action_button(ui, "CLOSE", true).clicked() {
+                        close = true;
                     }
                 });
-        }
-    });
+            });
+            theme::separator(ui);
+            let list_height = (size.y - 90.0).max(120.0);
+            egui::ScrollArea::vertical()
+                .id_salt("linc-messages-scroll")
+                .max_height(list_height)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if scroll != 0.0 {
+                        ui.scroll_with_delta(Vec2::new(0.0, -scroll));
+                    }
+                    if logs.is_empty() {
+                        ui.label(
+                            RichText::new("NO MESSAGES")
+                                .monospace()
+                                .size(theme::font_size(12.0))
+                                .color(theme::SUCCESS),
+                        );
+                        return;
+                    }
+                    let width = ui.available_width();
+                    ui.set_max_width(width);
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    for alarm in &logs {
+                        message_row(ui, alarm);
+                        theme::separator(ui);
+                    }
+                });
+        });
+    if close || modal.should_close() {
+        app.messages_dialog = false;
+    }
 }
 
 fn truncate(text: &str, max_chars: usize) -> String {
@@ -727,18 +813,26 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                     let current = app.snapshot.program.executing_line().max(1);
                     let total = app.snapshot.program.line_count.max(1);
                     let is_running = app.snapshot.task.running || app.snapshot.program.paused;
+                    // While the machine runs, the pane follows the line being
+                    // cut; when it is idle it follows the operator's selection,
+                    // so Ctrl+G moves the window instead of being ignored.
+                    let focus = if is_running {
+                        current
+                    } else {
+                        app.program.selected_line.clamp(1, total)
+                    };
                     let half_window = (window_len / 2) as isize;
                     let first = if is_running {
-                        current as isize - half_window
+                        focus as isize - half_window
                     } else {
                         let last_first = (total.saturating_sub(window_len) + 1).max(1) as isize;
-                        (current.saturating_sub(window_len / 2).max(1) as isize).min(last_first)
+                        (focus.saturating_sub(window_len / 2).max(1) as isize).min(last_first)
                     };
                     let mut lines = content.lines().skip((first.max(1) - 1) as usize);
                     for row in 0..window_len {
                         let line_number = first + row as isize;
                         let line = if line_number >= 1 { lines.next() } else { None };
-                        let is_current = line_number == current as isize;
+                        let is_current = line_number == focus as isize;
                         let (rect, _) = ui.allocate_exact_size(
                             egui::vec2(ui.available_width(), row_height),
                             egui::Sense::hover(),
@@ -845,100 +939,170 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
     });
 }
 
-pub fn feed_spindle_card(app: &LincApp, ui: &mut Ui, height: f32) {
+fn yes_no(value: bool) -> &'static str {
+    if value {
+        "True"
+    } else {
+        "False"
+    }
+}
+
+/// Feed and spindle block in the machine-HMI layout: a large `F` or `S` on the
+/// left, two right-aligned value rows beside it. The first row is the
+/// programmed rate and its override, the second the effective value and its
+/// enable/on flag.
+fn feed_speed_block(
+    ui: &Ui,
+    rect: egui::Rect,
+    letter: &str,
+    rows: &[(String, String, String); 2],
+) {
+    let painter = ui.painter_at(rect);
+    let lane = 30.0;
+    let gap = 4.0;
+    // Shrink the row until all three columns fit the half. The two rows share
+    // the column edges, so `100%` sits directly above `(True)`.
+    let mut font_size = 10.5;
+    let (value_width, _units_width, _extra_width) = loop {
+        let font = FontId::monospace(theme::font_size(font_size));
+        let measure = |text: &str| {
+            ui.fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(text.to_string(), font.clone(), theme::FG)
+                    .size()
+                    .x
+            })
+        };
+        let value_width = rows
+            .iter()
+            .map(|(value, _, _)| measure(value))
+            .fold(0.0f32, f32::max);
+        let units_width = rows
+            .iter()
+            .map(|(_, units, _)| measure(units))
+            .fold(0.0f32, f32::max);
+        let extra_width = rows
+            .iter()
+            .map(|(_, _, extra)| measure(extra))
+            .fold(0.0f32, f32::max);
+        let total = lane + value_width + gap + units_width + gap + extra_width;
+        if total <= rect.width() - 8.0 || font_size <= 8.0 {
+            break (value_width, units_width, extra_width);
+        }
+        font_size -= 0.5;
+    };
+    painter.text(
+        rect.left_center() + Vec2::new(4.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        letter,
+        FontId::proportional(theme::font_size(font_size * 3.0)),
+        theme::SUCCESS,
+    );
+    let font = FontId::monospace(theme::font_size(font_size));
+    let value_right = rect.left() + lane + value_width;
+    let units_left = value_right + gap;
+    let extra_right = rect.right() - 4.0;
+    for (index, (value, units, extra)) in rows.iter().enumerate() {
+        let y = rect.center().y + (index as f32 - 0.5) * 24.0;
+        painter.text(
+            egui::pos2(value_right, y),
+            egui::Align2::RIGHT_CENTER,
+            value,
+            font.clone(),
+            theme::FG,
+        );
+        painter.text(
+            egui::pos2(units_left, y),
+            egui::Align2::LEFT_CENTER,
+            units,
+            font.clone(),
+            theme::SUCCESS,
+        );
+        painter.text(
+            egui::pos2(extra_right, y),
+            egui::Align2::RIGHT_CENTER,
+            extra,
+            font.clone(),
+            theme::SUCCESS,
+        );
+    }
+}
+
+pub fn feed_speed_card(app: &LincApp, ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
         ui.set_min_height((height - 24.0).max(0.0));
         ui.set_max_height((height - 24.0).max(0.0));
         ui.set_min_width(ui.available_width());
-        theme::section_header(ui, "FEED / SPINDLE LOAD");
-        ui.horizontal_top(|ui| {
-            let (load, speed, override_factor) = app
-                .snapshot
-                .spindles
-                .first()
-                .map(|spindle| {
-                    (
-                        spindle.load.unwrap_or(0.0) / 100.0,
-                        spindle.actual_speed,
-                        spindle.override_factor * 100.0,
-                    )
-                })
-                .unwrap_or((0.0, 0.0, 0.0));
-            donut_gauge(
-                ui,
-                "FEED OVR",
-                app.snapshot.feed.feed_override,
-                format!("{:.0}%", app.snapshot.feed.feed_override * 100.0),
-                &format!(
-                    "{:.0} {} / MIN",
-                    app.snapshot.feed.feed, app.snapshot.feed.units
-                ),
-                theme::ACCENT,
-            );
-            ui.add_space(16.0);
-            donut_gauge(
-                ui,
-                "SPINDLE LOAD",
-                load,
-                format!("{:.0}%", load * 100.0),
-                &format!("{speed:.0} RPM / {override_factor:.0}%"),
-                theme::pressure_color(load),
-            );
-        });
-    });
-}
+        theme::section_header(ui, "FEED / SPINDLE");
+        let width = ui.available_width();
+        let body_height = (height - 52.0).max(48.0);
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, body_height), Sense::hover());
+        let half = rect.width() * 0.5;
+        let left = egui::Rect::from_min_size(rect.min, Vec2::new(half - 6.0, body_height));
+        let right = egui::Rect::from_min_size(
+            egui::pos2(rect.center().x + 6.0, rect.top()),
+            Vec2::new(half - 6.0, body_height),
+        );
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.center().x, rect.top() + 4.0),
+                egui::pos2(rect.center().x, rect.bottom() - 4.0),
+            ],
+            egui::Stroke::new(1.0, theme::BORDER),
+        );
 
-fn donut_gauge(
-    ui: &mut Ui,
-    label: &str,
-    value: f64,
-    text: String,
-    detail: &str,
-    color: egui::Color32,
-) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(102.0, 104.0), Sense::hover());
-    let painter = ui.painter_at(rect);
-    let diameter = 66.0;
-    let center = egui::pos2(rect.center().x, rect.top() + diameter * 0.5);
-    let radius = diameter * 0.5 - 5.0;
-    painter.circle_stroke(center, radius, egui::Stroke::new(6.0, theme::BORDER));
-    let fraction = value.clamp(0.0, 1.0) as f32;
-    if fraction > 0.001 {
-        let steps = (fraction * 48.0).ceil() as usize;
-        for step in 0..steps {
-            let a0 = -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * step as f32 / 48.0;
-            let a1 =
-                -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * (step + 1) as f32 / 48.0;
-            painter.line_segment(
-                [
-                    center + Vec2::new(a0.cos(), a0.sin()) * radius,
-                    center + Vec2::new(a1.cos(), a1.sin()) * radius,
-                ],
-                egui::Stroke::new(6.0, color),
-            );
-        }
-    }
-    painter.text(
-        center,
-        egui::Align2::CENTER_CENTER,
-        text,
-        FontId::monospace(theme::font_size(11.0)),
-        theme::FG,
-    );
-    painter.text(
-        egui::pos2(rect.center().x, rect.top() + diameter + 4.0),
-        egui::Align2::CENTER_TOP,
-        label,
-        FontId::proportional(theme::font_size(9.0)),
-        theme::MUTED,
-    );
-    painter.text(
-        egui::pos2(rect.center().x, rect.top() + diameter + 18.0),
-        egui::Align2::CENTER_TOP,
-        detail,
-        FontId::monospace(theme::font_size(8.5)),
-        theme::MUTED,
-    );
+        let feed = &app.snapshot.feed;
+        let units = if feed.units.is_empty() {
+            "mm"
+        } else {
+            feed.units.as_str()
+        };
+        let programmed = if feed.feed_override.abs() > 1e-6 {
+            feed.feed / feed.feed_override
+        } else {
+            feed.feed
+        };
+        let feed_rows = [
+            (
+                format!("{programmed:.0}"),
+                format!(" {units}/min"),
+                format!(" {:.0}%", feed.feed_override * 100.0),
+            ),
+            (
+                format!("{:.0}", feed.feed),
+                format!(" {units}/min"),
+                format!(" ({})", yes_no(feed.feed_override_enabled)),
+            ),
+        ];
+        feed_speed_block(ui, left, "F", &feed_rows);
+
+        let (commanded, actual, override_factor, on) = app
+            .snapshot
+            .spindles
+            .first()
+            .map(|spindle| {
+                (
+                    spindle.commanded_speed,
+                    spindle.actual_speed,
+                    spindle.override_factor,
+                    spindle.on,
+                )
+            })
+            .unwrap_or((0.0, 0.0, 1.0, false));
+        let spindle_rows = [
+            (
+                format!("{commanded:.0}"),
+                " RPM".to_string(),
+                format!(" {:.0}%", override_factor * 100.0),
+            ),
+            (
+                format!("{actual:.0}"),
+                " RPM".to_string(),
+                format!(" ({})", yes_no(on)),
+            ),
+        ];
+        feed_speed_block(ui, right, "S", &spindle_rows);
+    });
 }
 
 pub fn turret_card(app: &LincApp, ui: &mut Ui) {

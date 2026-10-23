@@ -19,6 +19,7 @@ max_axes = 5
 
 [ui]
 window_title = "LiNC - BaierMill"
+servo_load = ["X", "Y", "Z", "S"]
 
 [panel]
 kind = "physical"

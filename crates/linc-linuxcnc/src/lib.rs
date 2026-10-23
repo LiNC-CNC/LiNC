@@ -996,6 +996,10 @@ impl MachineBackend for PythonBridgeBackend {
                     Duration::from_secs(5),
                 )
             }
+            MachineCommand::AbortProgram => self.request(
+                serde_json::json!({ "cmd": "abort" }),
+                Duration::from_secs(5),
+            ),
             MachineCommand::ClearTrail => {
                 self.shared
                     .clear_trail

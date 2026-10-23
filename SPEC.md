@@ -94,7 +94,8 @@ else, so it cannot shadow another page's command.
 | Key | Action |
 |---|---|
 | `F5` `F6` `F7` `F8` `Ctrl+D` `Ctrl+H` | Go to Machine / Program / Tools / Offsets / Diagnostics / G-code Help |
-| `Esc` | Back, cancel, close detail |
+| `M` | Open the full-screen messages dialog (`Enter`/`Esc`/`CLOSE` closes it) |
+| `Esc` | Back, cancel, close detail; while a program is active it stops and resets it, the same as the panel's K4 |
 | `Ctrl+Q` | Guarded quit |
 | Arrows, `PageUp`/`PageDown`, `Home`/`End` | Focus, page, first/last item |
 | `Enter` | Select / apply / issue MDI |
@@ -422,7 +423,15 @@ Default page. The layout is selected by `machine.gui`.
   line. There are no PROGRAM or MACHINE captions; the geometry says which is
   which. The stock block is fully transparent by
   default (`toolpath.stock_alpha = 0`) and configurable up to opaque.
-- Program card, feed/spindle-load gauges, machine health and alarms.
+- Program card, a `FEED / SPINDLE` card and a `SERVO LOAD` card beneath the
+  toolpath. The feed/spindle card shows a large `F` and `S`, each with the
+  programmed rate and override above the effective rate and its enable/on flag.
+  The servo card draws one bar per entry in `[ui] servo_load` (machine axes plus
+  `S` for the spindle): a green (0-80 %), yellow (80-100 %) and red (100-120 %)
+  ruler behind an accent progress fill, with the percentage to its right. An
+  empty list hides the servo card. Controller messages are not a pane: `M`
+  opens them full screen, so the log is readable without crowding the MAIN
+  layout.
 - ATC state in Tools/Diagnostics; mill tool table uses orientation and, only
   when ATC is enabled, the standard `P` pocket column.
 
@@ -435,7 +444,7 @@ Default page. The layout is selected by `machine.gui`.
   explicit in the top/bottom status and machine card.
 - Power turret card: station number, clamped/unclamped/indexing state, tool
   description, live-tool RPM/direction and axial/radial orientation.
-- Feed/spindle-load gauges and live-tool load when available.
+- Feed/spindle card, the configured servo-load bars and live-tool load when available.
 - Compact panel state in top/bottom bars only; no machine controls.
 
 ### 6.2 Program
@@ -493,6 +502,14 @@ it, the reason is raised as a notice rather than the key doing nothing.
   restored — and that motion starts from the current position.
 - The bridge requires an idle interpreter because `AUTO_RUN` on a paused program
   would resume it rather than start at the line.
+
+#### GO TO LINE
+
+`Ctrl+G` asks for a line number and moves the program view there; the editor,
+the path highlight and the MAIN program card follow it. While a program is
+running the view follows the executing line, but a line the operator picks with
+`Ctrl+G` or the arrows is kept until the next run starts, instead of being
+dragged back on the next status poll.
 
 #### EDIT state
 

@@ -194,6 +194,9 @@ pub enum MachineCommand {
     RunFromLine {
         line: u32,
     },
+    /// Stop and reset the running program: the same action as the panel's K4
+    /// (`halui.program.stop`). It never starts motion.
+    AbortProgram,
     /// View-only: clear the live tool trail and re-seed at the current tip.
     /// This never changes machine state or the loaded program.
     ClearTrail,
@@ -219,6 +222,7 @@ impl MachineCommand {
             Self::ApplyProbeResult { .. } => "Apply probe result",
             Self::ResetProbeCalibration => "Reset probe calibration",
             Self::SetHalOutput { .. } => "Set HAL output",
+            Self::AbortProgram => "Abort program",
             Self::ClearTrail => "Clear live trail",
         }
     }

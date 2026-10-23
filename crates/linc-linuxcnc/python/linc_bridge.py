@@ -869,6 +869,14 @@ class Bridge:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def abort(self, command):
+        """Stop the running program, like the panel's K4 (halui.program.stop)."""
+        try:
+            self.cmd.abort()
+        except Exception as error:
+            return {"ok": False, "error": str(error)}
+        return {"ok": True}
+
     def load_program(self, command):
         path = command.get("path")
         if not path or not os.path.isfile(path):
@@ -1312,6 +1320,8 @@ class Bridge:
             try:
                 if kind == "issue_mdi":
                     result = self.issue(command)
+                elif kind == "abort":
+                    result = self.abort(command)
                 elif kind == "load_program":
                     result = self.load_program(command)
                 elif kind == "set_work_offset":

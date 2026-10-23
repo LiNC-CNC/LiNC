@@ -381,6 +381,23 @@ The standalone simulator panel has its own zoom control,
 `[simulation] panel_scale`, also in `0.5..3.0`; it is independent of the HMI
 scale.
 
+### Servo load bars
+
+`[ui] servo_load` selects the bars in the MAIN page's `SERVO LOAD` card, in
+order. Each entry is a machine axis from the INI (`X`, `Y`, `Z`, ...) or `S`
+for the first spindle. The list is optional and defaults to the axes the shared
+profile names; an empty list removes the card entirely:
+
+```toml
+[ui]
+servo_load = ["X", "Y", "Z", "S"]
+```
+
+`--check-config` rejects an entry that is not an axis of this machine, `S` when
+the INI has no spindle, and any duplicate. A profile that names an axis the
+machine does not have therefore fails at startup instead of silently dropping a
+bar.
+
 ## 10. Schema reference
 
 | Table | Keys |
@@ -389,7 +406,7 @@ scale.
 | `[machine]` | `name`, `kind`, `gui`, `linuxcnc_ini` |
 | `[mill]` | optional `max_axes` |
 | `[lathe]` | optional `turret_stations`, `power_turret`, `live_tooling`, `live_tool_max_rpm`, `c_axis`, `y_axis`, `sub_spindle` |
-| `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages` |
+| `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages`, `servo_load` |
 | `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width` |
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running`, `show_parent_above_root` |
 | `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter` |
@@ -398,7 +415,7 @@ scale.
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
 | `[mdi]` | `execute_on_enter`, `auto_focus`, `history_limit`, `max_command_length`, `quick_commands` |
 | `[toolpath]` | `show_grid`, `show_live_trail`, `trail_max_points`, `clear_trail_action`, `show_program_bounds`, `show_machine_bounds`, `show_stock`, `stock_alpha`, `bounds_mode` (preference), `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
-| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `help`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds` |
+| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
 | `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_execution`, `quit_requires_idle`, `confirm_quit` |
 | `[backend]` | `kind`, `transport`, `status_hz`, `hal_hz`, `connect_timeout_ms` |

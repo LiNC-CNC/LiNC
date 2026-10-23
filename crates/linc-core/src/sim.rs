@@ -1275,6 +1275,16 @@ impl MachineBackend for SimBackend {
                 self.snapshot.probe.calibration_offset = None;
                 Ok(())
             }
+            MachineCommand::AbortProgram => {
+                // K4 is halui.program.stop: no mode or idle gate, because a
+                // reset has to be able to stop whatever is running.
+                self.snapshot.task.running = false;
+                self.snapshot.task.paused = false;
+                self.snapshot.task.motion_active = false;
+                self.snapshot.task.interp = InterpState::Idle;
+                self.snapshot.program.paused = false;
+                Ok(())
+            }
             MachineCommand::ClearTrail => {
                 self.clear_trail();
                 Ok(())

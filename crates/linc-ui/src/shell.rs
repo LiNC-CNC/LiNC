@@ -81,6 +81,13 @@ pub struct LincApp {
     pub design_scale: f32,
     pub page_focus_requested: bool,
     pub modal: Option<Modal>,
+    /// Full-screen controller log, opened with `[keys].messages`.
+    pub messages_dialog: bool,
+    /// Page-scroll requested by the dialog's keys this frame.
+    pub messages_scroll: f32,
+    /// Rising-edge detector, so follow-current is re-armed when a program
+    /// starts but not again on every poll after the operator selects a line.
+    pub program_was_running: bool,
     pub toasts: Vec<Toast>,
     pub quit_requested: bool,
     pub last_snapshot_ms: u64,
@@ -440,6 +447,9 @@ impl LincApp {
             move_progress: linc_core::model::AxisMap::new(),
             modal_open_last_frame: false,
             tool_prompt_open_last_frame: false,
+            messages_dialog: false,
+            messages_scroll: 0.0,
+            program_was_running: false,
             last_connection: Some(snapshot.panel.connected),
             last_protect: Some(snapshot.panel.protect_effective()),
             panel_offline_toast: false,
@@ -1149,14 +1159,25 @@ impl LincApp {
     /// underneath it: the dialog's button holds focus and takes Enter.
     pub fn overlay_open(&self) -> bool {
         self.modal.is_some()
+            || self.messages_dialog
             || self.help.dialog.is_some()
             || self.snapshot.tool_change.status
                 == linc_core::model::ToolChangeStatus::ManualPrompt
     }
 
     pub fn escape(&mut self) {
+        if self.messages_dialog {
+            self.messages_dialog = false;
+            return;
+        }
         if self.modal.is_some() {
             self.modal = None;
+            return;
+        }
+        // K4's program reset on the keyboard: Esc stops the running program
+        // wherever the operator is, before it means "go back".
+        if self.program_active() {
+            self.abort_program();
             return;
         }
         match self.page {
@@ -1188,6 +1209,16 @@ impl LincApp {
             Page::Diagnostics => self.set_page(Page::Machine),
             _ => self.set_page(Page::Machine),
         }
+    }
+
+    /// Stop and reset the running program, the same effect as the panel's K4.
+    pub fn abort_program(&mut self) {
+        if self.panel_offline() {
+            self.toast("PANEL OFFLINE — CANNOT RESET", theme::ERROR);
+            return;
+        }
+        self.send(linc_core::command::MachineCommand::AbortProgram);
+        self.toast("PROGRAM RESET", theme::WARNING);
     }
 
     pub fn sync(&mut self) {
@@ -1354,9 +1385,13 @@ impl LincApp {
             self.program.selected_line = executed;
             self.program.code_scroll_to_line = Some(self.program.selected_line);
         }
-        if self.snapshot.task.running {
+        // Re-arm the follow only when a run starts. Doing it on every poll
+        // overrode a line the operator had just picked with Ctrl+G or the
+        // arrows, so the selection snapped back to the running line.
+        if self.snapshot.task.running && !self.program_was_running {
             self.program.follow_current = true;
         }
+        self.program_was_running = self.snapshot.task.running;
     }
 
     pub(crate) fn sync_offsets_from_snapshot(&mut self, force: bool) {
@@ -1616,6 +1651,37 @@ impl LincApp {
     }
 
     pub fn handle_keyboard(&mut self, ui: &mut egui::Ui) {
+        // A modal messages dialog owns the keyboard: Enter/Escape close it and
+        // the page keys scroll it. Nothing behind it may react to a key.
+        if self.messages_dialog {
+            let page = ui.ctx().content_rect().height() * 0.7;
+            let mut close = false;
+            let mut scroll = 0.0;
+            ui.input_mut(|input| {
+                if input.consume_key(self.keymap.back.modifiers, self.keymap.back.key)
+                    || input.consume_key(self.keymap.activate.modifiers, self.keymap.activate.key)
+                {
+                    close = true;
+                }
+                if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+                    scroll += page;
+                }
+                if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+                    scroll -= page;
+                }
+                if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                    scroll += 40.0;
+                }
+                if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                    scroll -= 40.0;
+                }
+            });
+            self.messages_scroll = scroll;
+            if close {
+                self.messages_dialog = false;
+            }
+            return;
+        }
         // A text field keeps Home, End and the page keys while it holds the
         // keyboard; they are cursor movement there and focus navigation here.
         // Add every text field that can hold focus to this list.
@@ -1655,6 +1721,8 @@ impl LincApp {
         let mut goto_line = false;
         let mut cycle_toolpath_view = false;
         let mut toggle_bounds = false;
+        let mut open_messages = false;
+        let text_editing = ui.ctx().text_edit_focused();
 
         ui.input_mut(|input| {
             if input.consume_key(self.keymap.machine.modifiers, self.keymap.machine.key) {
@@ -1716,6 +1784,12 @@ impl LincApp {
             }
             if input.consume_key(self.keymap.help.modifiers, self.keymap.help.key) {
                 nav_page = Some(Page::Help);
+            }
+            if !text_editing
+                && !self.overlay_open()
+                && input.consume_key(self.keymap.messages.modifiers, self.keymap.messages.key)
+            {
+                open_messages = true;
             }
             if input.consume_key(self.keymap.quit.modifiers, self.keymap.quit.key) {
                 quit = true;
@@ -1965,6 +2039,9 @@ impl LincApp {
             self.focus_region = FocusRegion::Page;
             self.page_focus_requested = true;
         }
+        if open_messages {
+            self.messages_dialog = true;
+        }
         if escape {
             self.escape();
         }
@@ -2165,6 +2242,7 @@ impl LincApp {
         self.draw_modal(ui.ctx());
         self.draw_tool_change_prompt(ui.ctx());
         crate::screens::help::draw_dialog(self, ui.ctx());
+        crate::screens::common::messages_dialog(self, ui.ctx());
         self.draw_toasts(ui.ctx());
         self.save_preferences(false);
         if self.quit_requested {
@@ -2317,6 +2395,37 @@ impl LincApp {
         logs.extend(self.ui_log.iter().cloned());
         logs.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
         logs
+    }
+
+    /// A program is loaded and not idle at the interpreter: running, paused, or
+    /// waiting for a tool change. This is the state in which Esc resets the
+    /// program and the sidebar offers the shortcut.
+    pub fn program_active(&self) -> bool {
+        self.snapshot.task.running
+            || self.snapshot.program.paused
+            // `Unknown` before the first status poll is not a running program,
+            // so require a loaded program for the interpreter-state test.
+            || (self.snapshot.program.line_count > 0
+                && self.snapshot.task.interp != linc_core::model::InterpState::Idle)
+    }
+
+    /// Rows for the SERVO LOAD pane, in the order `[ui] servo_load` lists them.
+    /// Entries whose axis or spindle is absent are skipped, so a shared profile
+    /// can name an axis the machine does not have.
+    pub fn servo_load_rows(&self) -> Vec<(String, f64)> {
+        let mut rows = Vec::new();
+        for entry in &self.profile.config.ui.servo_load {
+            let label = entry.trim().to_ascii_uppercase();
+            if label == "S" {
+                if let Some(load) = self.snapshot.spindles.first().and_then(|spindle| spindle.load)
+                {
+                    rows.push((label, load));
+                }
+            } else if let Some(load) = self.snapshot.machine.servo_load.get(&label) {
+                rows.push((label, *load));
+            }
+        }
+        rows
     }
 
     /// The newest `limit` entries of [`Self::logs`], for cards that show a few
@@ -2574,6 +2683,12 @@ impl LincApp {
         // the pane so the display commands are the first things in reach.
         let square = "\u{25a2}";
         let mut groups: Vec<ShortcutGroup> = Vec::new();
+        if self.program_active() {
+            groups.push(ShortcutGroup {
+                title: "PROGRAM CONTROL",
+                items: vec![(k.back.label(), "RESET")],
+            });
+        }
         let mut hints: Vec<(String, &'static str)> = Vec::new();
         match self.page {
             Page::Program => {
@@ -2600,6 +2715,7 @@ impl LincApp {
                         ("FILE".into(), "BROWSER"),
                         (k.program_run_from_line.label(), "RUN LINE"),
                         (k.goto_line.label(), "GOTO"),
+                        (k.messages.label(), "MESSAGES"),
                         (k.save.label(), "SAVE"),
                         (k.undo.label(), "UNDO"),
                         (k.redo.label(), "REDO"),
@@ -2625,6 +2741,7 @@ impl LincApp {
                         ("FILE".into(), "BROWSER"),
                         (k.program_run_from_line.label(), "RUN LINE"),
                         (k.goto_line.label(), "GOTO"),
+                        (k.messages.label(), "MESSAGES"),
                     ],
                 });
             }
@@ -2773,7 +2890,7 @@ impl LincApp {
                             linc_core::model::AlarmSeverity::Info => theme::MUTED,
                         };
                         // The strip is one row high: long messages are cut here
-                        // and read in full in the Machine page's pane.
+                        // and read in full in the messages dialog (M).
                         let text: String = alarm.message.chars().take(64).collect();
                         ui.label(RichText::new(text).size(size).color(colour));
                         ui.add_space(12.0);
@@ -4034,6 +4151,104 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             app.program.selected_line,
             app.program.editor.line_count().max(1)
         );
+    }
+
+    #[test]
+    fn a_manual_line_pick_survives_the_running_follow() {
+        let (_dir, mut app) = make_app(PanelMode::Auto);
+        app.snapshot.task.running = true;
+        app.program.follow_current = false;
+        app.program_was_running = false;
+        app.sync_program();
+        assert!(app.program.follow_current, "a run start re-arms follow");
+        // Ctrl+G or the arrows picked a line: the next poll must not drag it
+        // back to the executing one.
+        app.program.follow_current = false;
+        app.sync_program();
+        assert!(!app.program.follow_current, "the operator's pick is kept");
+        // The next run re-arms it again.
+        app.snapshot.task.running = false;
+        app.sync_program();
+        app.snapshot.task.running = true;
+        app.sync_program();
+        assert!(app.program.follow_current);
+    }
+
+    #[test]
+    fn escape_stops_a_running_program() {
+        let (_dir, mut app) = make_app(PanelMode::Auto);
+        app.poll_backend();
+        app.snapshot.task.running = true;
+        app.snapshot.task.interp = linc_core::model::InterpState::Reading;
+        app.escape();
+        app.poll_backend();
+        assert!(!app.snapshot.task.running);
+        assert_eq!(
+            app.snapshot.task.interp,
+            linc_core::model::InterpState::Idle
+        );
+        assert!(
+            app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
+            "the reset is acknowledged: {:?}",
+            app.toasts.iter().map(|toast| &toast.text).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn the_sidebar_offers_reset_while_a_program_is_active() {
+        let (_dir, mut app) = make_app(PanelMode::Auto);
+        app.snapshot.task.running = true;
+        let shows_reset = |app: &LincApp| {
+            app.key_hints().iter().any(|group| {
+                group
+                    .items
+                    .iter()
+                    .any(|(key, label)| key == "Esc" && *label == "RESET")
+            })
+        };
+        assert!(shows_reset(&app));
+        app.snapshot.task.running = false;
+        app.snapshot.task.interp = linc_core::model::InterpState::Idle;
+        app.snapshot.program.paused = false;
+        assert!(!shows_reset(&app));
+    }
+
+    #[test]
+    fn servo_load_rows_follow_the_profile_and_the_machine() {
+        let (_dir, mut app) = make_app(PanelMode::Auto);
+        app.profile.config.ui.servo_load =
+            vec!["X".into(), "S".into(), "A".into()];
+        app.snapshot.machine.servo_load.insert("X", 12.0);
+        app.snapshot.machine.servo_load.insert("A", 4.0);
+        app.snapshot.spindles.clear();
+        assert_eq!(
+            app.servo_load_rows(),
+            vec![("X".to_string(), 12.0), ("A".to_string(), 4.0)],
+            "S is skipped when the machine has no spindle load"
+        );
+        app.snapshot.spindles.push(linc_core::model::SpindleState {
+            index: 0,
+            name: "MAIN SPINDLE".into(),
+            commanded_speed: 4200.0,
+            actual_speed: 4185.0,
+            load: Some(38.0),
+            override_factor: 1.0,
+            direction: 1,
+            on: true,
+            live_tool: false,
+            live_tool_axial: false,
+            live_tool_max_rpm: 0.0,
+        });
+        assert_eq!(
+            app.servo_load_rows(),
+            vec![
+                ("X".to_string(), 12.0),
+                ("S".to_string(), 38.0),
+                ("A".to_string(), 4.0)
+            ]
+        );
+        app.profile.config.ui.servo_load.clear();
+        assert!(app.servo_load_rows().is_empty(), "an empty list hides the pane");
     }
 
     #[test]

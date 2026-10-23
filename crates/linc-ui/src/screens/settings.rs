@@ -151,6 +151,7 @@ fn keyboard(app: &mut LincApp, ui: &mut Ui) {
         ("OFFSET", keys.offsets.as_str(), "Offsets"),
         ("Ctrl+D", keys.diagnostics.as_str(), "Diagnostics"),
         ("Ctrl+H", keys.help.as_str(), "G-code Help"),
+        ("M", keys.messages.as_str(), "Messages dialog"),
         ("ESC", keys.back.as_str(), "Back / cancel / close detail"),
         ("CTRL+Q", keys.quit.as_str(), "Guarded quit"),
         ("CTRL+O", keys.open.as_str(), "Open Files"),

@@ -43,29 +43,24 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
                     |ui| graph_panel(app, ui, graph_height),
                 );
                 ui.add_space(6.0);
-                let card_width = ((graph_width - 16.0) / 3.0 - 11.4).max(180.0);
+                let servo = !app.servo_load_rows().is_empty();
+                let cards = if servo { 2.0 } else { 1.0 };
+                let card_width = ((graph_width - 16.0 - 8.0 * (cards - 1.0)) / cards).max(180.0);
                 ui.horizontal_top(|ui| {
                     bottom_card(app, ui, card_width, bottom_height, "feed", |app, ui, _h| {
-                        common::feed_spindle_card(app, ui, bottom_height);
+                        common::feed_speed_card(app, ui, bottom_height);
                     });
-                    ui.add_space(8.0);
-                    bottom_card(
-                        app,
-                        ui,
-                        card_width,
-                        bottom_height,
-                        "health",
-                        |app, ui, _h| common::health_card(app, ui, bottom_height),
-                    );
-                    ui.add_space(8.0);
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(card_width, bottom_height),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            ui.set_min_width(card_width - 1.0);
-                            common::alarm_card(app, ui, bottom_height);
-                        },
-                    );
+                    if servo {
+                        ui.add_space(8.0);
+                        bottom_card(
+                            app,
+                            ui,
+                            card_width,
+                            bottom_height,
+                            "servo",
+                            |app, ui, _h| common::servo_load_card(app, ui, bottom_height),
+                        );
+                    }
                 });
             },
         );
@@ -266,10 +261,12 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
         );
     });
     ui.add_space(6.0);
-    let card_width = ((available - 16.0) / 3.0).max(220.0);
+    let servo = !app.servo_load_rows().is_empty();
+    let cards = if servo { 3.0 } else { 2.0 };
+    let card_width = ((available - 16.0 - 8.0 * (cards - 1.0)) / cards).max(220.0);
     ui.horizontal_top(|ui| {
         bottom_card(app, ui, card_width, bottom_height, "feed", |app, ui, _h| {
-            common::feed_spindle_card(app, ui, bottom_height);
+            common::feed_speed_card(app, ui, bottom_height);
         });
         ui.add_space(8.0);
         bottom_card(
@@ -285,14 +282,16 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                     .show(ui, |ui| common::turret_card(app, ui));
             },
         );
-        ui.add_space(8.0);
-        bottom_card(
-            app,
-            ui,
-            card_width,
-            bottom_height,
-            "health",
-            |app, ui, _h| common::health_card(app, ui, bottom_height),
-        );
+        if servo {
+            ui.add_space(8.0);
+            bottom_card(
+                app,
+                ui,
+                card_width,
+                bottom_height,
+                "servo",
+                |app, ui, _h| common::servo_load_card(app, ui, bottom_height),
+            );
+        }
     });
 }

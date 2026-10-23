@@ -85,7 +85,7 @@ LINC_SIM_IPC=/tmp/linc/panel-sim ./target/release/linc --config configs/sim.toml
 - `halui.estop.activate` belongs to the machine HAL (`cnc_panel.estop -> rio.sim-estop` in simulation). Do not link it in `hal/linc.hal`.
 - `or2` is loaded once in `hal/linc.hal`; a second `loadrt or2` fails with "already exists". Add instances there.
 - The panel service owns `/dev/ttyUSB0`. The HMI and `linc_bridge.py` must never open it (a test asserts the bridge has no `serialport`/`/dev/tty`).
-- No on-screen mode, cycle, jog, spindle, coolant, override or software E-stop. The explicit exceptions are MDI, `RUN PROBE`, `CHANGE TOOL` and `RUN FROM LINE`.
+- No on-screen mode, cycle, jog, spindle, coolant, override or software E-stop. The explicit exceptions are MDI, `RUN PROBE`, `CHANGE TOOL`, `RUN FROM LINE`, and the keyboard `Esc` program reset while a program is active (the panel's K4).
 - Program protect fails closed on unknown/stale and is rechecked on every write. Never discard a dirty buffer when protect turns on.
 - The tool table file always carries `P`, even for a manual changer: LinuxCNC keeps one tool per
   `P` value, and a table without `P` words loads only its last row. The UI hides the column for
@@ -145,10 +145,10 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
   letters, digits, punctuation, `CTRL`, and `MO(1)` (symbols, mouse buttons, `Ctrl+Q`). Letters arrive lowercase.
 - Missing: F1–F4, F9, F11, F12, `Tab`, `Shift`, `Delete`. Provide a Ctrl fallback (Files accepts `Ctrl+X` as Delete) or a focusable action.
 - Global keys navigate: F5 Machine, F6 Program (again → Files), F7 Tools, F8 Offsets, `Ctrl+D` Diagnostics, `Ctrl+H` G-code Help,
-  `Ctrl+Q` guarded quit, Esc, arrows/Page/Home/End, Enter. `[keys]` drives the shell; `Keymap::from_config` is the only source.
+  `M` Messages, `Ctrl+Q` guarded quit, Esc, arrows/Page/Home/End, Enter. `[keys]` drives the shell; `Keymap::from_config` is the only source.
 - Everything else is page-local and consumed only on that page: `Ctrl+S`, `Ctrl+Z/Y`, editor keys, `Ctrl+R` run-from-line, `Ctrl+0` fit, `Ctrl+L`
   clear trail, Files copy/delete, MDI history. A page-local key consumed elsewhere shadows another page's command.
-- The sidebar SHORTCUTS pane lists page-local commands only; navigation keys are never listed, except the Program page's FILE key, which is shown because it opens the file browser. The bottom bar carries live machine state only.
+- The sidebar SHORTCUTS pane lists page-local commands only; navigation keys are never listed, except the Program page's FILE key, which is shown because it opens the file browser. While a program is active it also shows Esc → RESET: Esc stops and resets the program like the panel's K4. The bottom bar carries live machine state only.
 - `Ctrl+F` focuses the Help search (`[keys].find`); it is not an editor find. Do not add a find UI without changing SPEC §6.2.
 - `[ui] pages` selects and orders nav entries but does not unbind keys. If you hide a page, decide what its `[keys]` binding does. `[keys]` is authoritative.
 

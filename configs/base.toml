@@ -18,6 +18,9 @@ scale = "auto"
 axis_order = ["X", "Y", "Z"]
 # Order matches the keyboard: MAIN, FILE, TOOL, OFFSET, WIN.
 pages = ["machine", "program", "tools", "offsets", "diagnostics", "help"]
+# Load bars on the Machine page: machine axes plus "S" for the spindle. An
+# empty list removes the SERVO LOAD pane.
+servo_load = ["X", "Y", "Z"]
 
 [program]
 default_view = "split"
@@ -128,6 +131,8 @@ offsets = "F8"
 # F10 carries CODE/SPLIT and Esc is back/cancel.
 diagnostics = "Ctrl+D"
 help = "Ctrl+H"
+# Full-screen messages dialog.
+messages = "M"
 back = "Escape"
 quit = "Ctrl+Q"
 focus_next = "Down"

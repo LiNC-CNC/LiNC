@@ -119,6 +119,10 @@ pub struct UiConfig {
     pub scale: String,
     pub axis_order: Vec<String>,
     pub pages: Vec<String>,
+    /// Load bars on the Machine page: any of the machine's axes, plus `"S"`
+    /// for the spindle. An empty list removes the SERVO LOAD pane.
+    #[serde(default)]
+    pub servo_load: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -248,6 +252,8 @@ pub struct KeysConfig {
     pub diagnostics: String,
     /// Open the offline G-code reference from any page.
     pub help: String,
+    /// Open the full-screen messages dialog from any page.
+    pub messages: String,
     pub back: String,
     pub quit: String,
     pub focus_next: String,
@@ -289,6 +295,7 @@ impl KeysConfig {
             offsets: "F8".into(),
             diagnostics: "Ctrl+D".into(),
             help: "Ctrl+H".into(),
+            messages: "M".into(),
             back: "Escape".into(),
             quit: "Ctrl+Q".into(),
             focus_next: "Down".into(),
@@ -826,6 +833,32 @@ fn validate(config: &Config, ini: &MachineIni) -> Result<(), ConfigError> {
             )));
         }
     }
+    // `[ui] servo_load` names the bars on the Machine page. A typo would leave
+    // a silently missing row, so every entry must exist on this machine.
+    let mut servo_labels: Vec<String> = Vec::new();
+    for entry in &config.ui.servo_load {
+        let label = entry.trim().to_ascii_uppercase();
+        let axis = ini
+            .axes
+            .iter()
+            .any(|axis| axis.name.eq_ignore_ascii_case(&label));
+        if label.is_empty() || (label != "S" && !axis) {
+            return Err(ConfigError::Invalid(format!(
+                "ui.servo_load contains '{entry}'; use a machine axis or S for the spindle"
+            )));
+        }
+        if label == "S" && ini.spindles == 0 {
+            return Err(ConfigError::Invalid(
+                "ui.servo_load contains 'S' but the INI configures no spindle".into(),
+            ));
+        }
+        if servo_labels.contains(&label) {
+            return Err(ConfigError::Invalid(format!(
+                "ui.servo_load lists '{label}' more than once"
+            )));
+        }
+        servo_labels.push(label);
+    }
     if config.panel.owner != "linc-panel" {
         return Err(ConfigError::Invalid(
             "panel.owner must be linc-panel; the HMI never owns the link".into(),
@@ -1235,6 +1268,48 @@ pages = ["machine"]
         assert!((ui.zoom_factor().unwrap() - 0.8).abs() < f32::EPSILON);
         ui.scale = "1.25x".into();
         assert!((ui.zoom_factor().unwrap() - 1.25).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn servo_load_names_must_exist_on_the_machine() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let profile = dir.path().join("sim.toml");
+        let load = |servo: &str| {
+            write(
+                &profile,
+                &format!(
+                    r#"schema_version = 1
+profile = "sim"
+extends = "base.toml"
+[machine]
+name = "Test"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[panel]
+kind = "simulated"
+driver = "cnc-panel-sim"
+[panel.link]
+kind = "virtual"
+[simulation]
+enabled = true
+[ui]
+servo_load = {servo}
+"#
+                ),
+            );
+            Profile::load(&profile, None)
+        };
+        let loaded = load(r#"["X", "S"]"#).unwrap();
+        assert_eq!(loaded.config.ui.servo_load, ["X", "S"]);
+        let empty = load("[]").unwrap();
+        assert!(empty.config.ui.servo_load.is_empty());
+        let error = load(r#"["Q"]"#).unwrap_err();
+        assert!(format!("{error}").contains("ui.servo_load"), "{error}");
+        let error = load(r#"["X", "X"]"#).unwrap_err();
+        assert!(format!("{error}").contains("more than once"), "{error}");
     }
 
     #[test]

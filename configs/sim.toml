@@ -20,6 +20,7 @@ max_axes = 5
 [ui]
 window_title = "LiNC - BaierMill Simulation"
 scale = "1.0"
+servo_load = ["X", "Y", "Z", "S"]
 
 [panel]
 kind = "simulated"

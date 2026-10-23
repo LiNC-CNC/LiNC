@@ -1437,6 +1437,8 @@ pub struct Keymap {
     pub offsets: Binding,
     pub diagnostics: Binding,
     pub help: Binding,
+    /// Any page: open the full-screen messages dialog.
+    pub messages: Binding,
     pub back: Binding,
     pub quit: Binding,
     pub activate: Binding,
@@ -1501,6 +1503,7 @@ impl Keymap {
                 &mut rejected,
             ),
             help: binding(&keys.help, Binding::new(Key::H, ctrl), &mut rejected),
+            messages: binding(&keys.messages, Binding::new(Key::M, none), &mut rejected),
             back: binding(&keys.back, Binding::new(Key::Escape, none), &mut rejected),
             quit: binding(&keys.quit, Binding::new(Key::Q, ctrl), &mut rejected),
             activate: binding(&keys.activate, Binding::new(Key::Enter, none), &mut rejected),
