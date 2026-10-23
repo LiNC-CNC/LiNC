@@ -425,9 +425,13 @@ Default page. The layout is selected by `machine.gui`.
   default (`toolpath.stock_alpha = 0`) and configurable up to opaque.
 - Program card, a `FEED / SPINDLE` card and a `SERVO LOAD` card beneath the
   toolpath. The feed/spindle card shows a large `F` and `S`, each with the
-  programmed rate and override above the effective rate and its enable/on flag;
-  a vector rotation arrow beside the `S` shows forward (green), reverse (amber)
-  or stopped (muted dot), so the RPM value itself always stays positive.
+  programmed rate and override above the effective rate and its enable/on flag.
+  The feed value is the programmed F word, converted from the program's G20/G21
+  units to the machine's linear units per minute, so an inch program on a
+  millimetre machine still reads in mm/min; the override is a separate factor,
+  not the rate. A vector rotation arrow beside the `S` shows forward (green),
+  reverse (amber) or stopped (muted dot), so the RPM value itself always stays
+  positive.
   The servo card draws one bar per entry in `[ui] servo_load` (machine axes plus
   `S` for the spindle): a green (0-80 %), yellow (80-100 %) and red (100-120 %)
   ruler behind an accent progress fill, with the percentage to its right. An

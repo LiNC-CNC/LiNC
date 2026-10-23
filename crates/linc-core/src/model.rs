@@ -602,6 +602,9 @@ impl SpindleState {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FeedState {
+    /// Programmed feed rate: the F word, converted from the program's G20/G21
+    /// units to the machine's linear units per minute. `feed_override` is the
+    /// separate override factor; the effective rate is this value scaled by it.
     pub feed: f64,
     pub feed_override: f64,
     pub rapid_override: f64,

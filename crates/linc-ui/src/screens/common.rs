@@ -992,6 +992,33 @@ fn spindle_direction_mark(ui: &Ui, rect: egui::Rect, center: egui::Pos2, directi
     ));
 }
 
+/// The two F rows: the programmed F word and its override, then the effective
+/// rate (the word scaled by the override when it is enabled) and its flag.
+fn feed_rows(feed: &linc_core::model::FeedState) -> [(String, String, String); 2] {
+    let units = if feed.units.is_empty() {
+        "mm"
+    } else {
+        feed.units.as_str()
+    };
+    let effective = if feed.feed_override_enabled {
+        feed.feed * feed.feed_override
+    } else {
+        feed.feed
+    };
+    [
+        (
+            format!("{:.0}", feed.feed),
+            format!("{units}/min"),
+            format!("{:.0}%", feed.feed_override * 100.0),
+        ),
+        (
+            format!("{effective:.0}"),
+            format!("{units}/min"),
+            format!("({})", yes_no(feed.feed_override_enabled)),
+        ),
+    ]
+}
+
 /// Feed and spindle block in the machine-HMI layout: a large `F` or `S` on the
 /// left, two right-aligned value rows beside it. The first row is the
 /// programmed rate and its override, the second the effective value and its
@@ -1113,29 +1140,7 @@ pub fn feed_speed_card(app: &LincApp, ui: &mut Ui, height: f32) {
             egui::Stroke::new(1.0, theme::BORDER),
         );
 
-        let feed = &app.snapshot.feed;
-        let units = if feed.units.is_empty() {
-            "mm"
-        } else {
-            feed.units.as_str()
-        };
-        let programmed = if feed.feed_override.abs() > 1e-6 {
-            feed.feed / feed.feed_override
-        } else {
-            feed.feed
-        };
-        let feed_rows = [
-            (
-                format!("{programmed:.0}"),
-                format!("{units}/min"),
-                format!("{:.0}%", feed.feed_override * 100.0),
-            ),
-            (
-                format!("{:.0}", feed.feed),
-                format!("{units}/min"),
-                format!("({})", yes_no(feed.feed_override_enabled)),
-            ),
-        ];
+        let feed_rows = feed_rows(&app.snapshot.feed);
         feed_speed_block(ui, left, "F", &feed_rows, None);
 
         let (commanded, actual, override_factor, on) = app
@@ -1846,7 +1851,27 @@ pub fn live_coordinates_card(
 
 #[cfg(test)]
 mod tests {
-    use super::{modal_mnemonic, program_window_rows};
+    use super::{feed_rows, modal_mnemonic, program_window_rows};
+    use linc_core::model::FeedState;
+
+    #[test]
+    fn feed_rows_show_the_programmed_and_effective_rate() {
+        let mut feed = FeedState::default();
+        feed.feed = 700.0;
+        feed.feed_override = 0.5;
+        feed.feed_override_enabled = true;
+        feed.units = "mm".into();
+        let rows = feed_rows(&feed);
+        assert_eq!(rows[0].0, "700");
+        assert_eq!(rows[0].1, "mm/min");
+        assert_eq!(rows[0].2, "50%");
+        assert_eq!(rows[1].0, "350");
+        assert_eq!(rows[1].2, "(True)");
+
+        // A disabled override means the programmed rate is what runs.
+        feed.feed_override_enabled = false;
+        assert_eq!(feed_rows(&feed)[1].0, "700");
+    }
 
     #[test]
     fn the_modal_mnemonic_says_what_the_code_means() {

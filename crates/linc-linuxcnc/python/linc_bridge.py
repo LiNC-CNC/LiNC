@@ -23,6 +23,25 @@ import traceback
 import linuxcnc
 import hal
 
+def feed_word(s, linear_units):
+    """The F word in machine linear units per minute.
+
+    LinuxCNC's `settings[1]` is the programmed F word in *program* units: an
+    inch program on a millimetre machine must be converted before the HMI
+    shows it as mm/min. `status.feedrate` is the override factor, not a rate.
+    """
+    settings = list(getattr(s, "settings", ()) or ())
+    word = float(settings[1]) if len(settings) > 1 else 0.0
+    gcodes = [str(code).upper() for code in (getattr(s, "gcodes", ()) or ())]
+    program_inch = "G20" in gcodes and "G21" not in gcodes
+    machine_inch = str(linear_units).strip().lower().startswith("in")
+    if program_inch and not machine_inch:
+        word *= 25.4
+    elif not program_inch and machine_inch:
+        word /= 25.4
+    return word
+
+
 STATUS_HZ = 20.0
 HAL_BITMAP_HZ = 1.0
 HAL_BITMAP_PERIOD = 1.0 / HAL_BITMAP_HZ
@@ -773,7 +792,7 @@ class Bridge:
             },
             "spindles": spindles,
             "feed": {
-                "feed": float(getattr(s, "feedrate", 0.0) or 0.0),
+                "feed": feed_word(s, self.linear_units),
                 "feed_override": panel["feed_override"],
                 "rapid_override": panel["rapid_override"],
                 "spindle_override": panel["spindle_override"],
@@ -1429,6 +1448,25 @@ def _fake_bridge(task_state, values, apply_reset, apply_mdi):
     return bridge
 
 
+def check_feed_word():
+    """The F word is a rate in program units, not the override factor."""
+
+    class Stat:
+        pass
+
+    stat = Stat()
+    stat.settings = [0.0, 700.0, 0.0, 0.0]
+    stat.gcodes = ["G21", "G90"]
+    assert feed_word(stat, "mm") == 700.0, feed_word(stat, "mm")
+    stat.gcodes = ["G20", "G90"]
+    assert abs(feed_word(stat, "mm") - 17780.0) < 1e-6, feed_word(stat, "mm")
+    stat.settings = [0.0, 10.0, 0.0, 0.0]
+    assert abs(feed_word(stat, "mm") - 254.0) < 1e-6, feed_word(stat, "mm")
+    stat.gcodes = ["G21"]
+    assert abs(feed_word(stat, "inch") - 10.0 / 25.4) < 1e-9, feed_word(stat, "inch")
+    print("linc_bridge selftest: feed word units OK")
+
+
 def check_offset_sync():
     """The stored offsets must reach motion once the machine is on, once only."""
     values = {5220: 1.0, 5221: -11.1, 5222: -22.2, 5223: -33.3}
@@ -1575,6 +1613,7 @@ def selftest():
         assert got == expected, f"parse_coordinates({raw!r}) = {got!r}, expected {expected!r}"
     print(f"linc_bridge selftest: {len(cases)} coordinate cases OK")
     check_offset_sync()
+    check_feed_word()
     check_parameter_keys()
     check_work_position()
 
