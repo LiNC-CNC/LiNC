@@ -5,9 +5,9 @@ These diagrams show the **LinuxCNC backend path** only. Simulator mode
 `LINC_SIM_IPC` files; the panel service, HAL outputs, UI, and diagnostics stay
 the same.
 
-**Colours:** green = `linc` HMI, orange = current Python child, blue = proposed
-Rust helper, yellow = kernel shared memory, purple = panel service, grey =
-diagnostics.
+**Colours:** green = `linc` HMI, blue = native helper/service paths, orange =
+Python or a high-risk reimplementation, yellow = kernel shared memory, purple =
+panel service, grey = diagnostics or an auxiliary server.
 
 ## Current: supervised Python helper
 
@@ -80,13 +80,13 @@ or a mutex that is never held across `wait_complete`.
 
 | Option | Data path | Added latency | Isolation | Build | Verdict |
 |---|---|---|---|---|---|
-| Current Python helper | worker → JSON → `python3` → NML | JSON <1 ms; helper loop can block for seconds | Yes | Python runtime | Remove for the dependency, not latency |
-| Rust helper + JSON | worker → JSON → Rust helper → NML | JSON <1 ms; process hop ~tens of µs | Yes | Helper links NML | Good migration step; keep if isolation is required |
-| In-process `NmlBackend` | worker → `NmlClient` / `HalReader` | Direct calls; no IPC | No; `linc-panel` remains separate | HMI links NML | **Best latency and simplest end state for LiNC** |
-| Native machine service | worker → shared-memory snapshot + typed command socket | Near in-process | Yes | Service links NML | Ideal only if an NML crash must not take the HMI down; most work |
-| Pure-Rust NML | worker → Rust NML | Similar to in-process | Depends | No C++/GPL link | Not worth the protocol/version work |
-| `linuxcncrsh` | TCP + text | Milliseconds and polling | Yes | Simple | Too limited for status/commands |
-| PyO3 | worker → embedded Python | GIL + Python | No | Python dev files | Still Python; rejected |
+| [Current Python helper](diagrams/current-architecture.png) | worker → JSON → `python3` → NML | JSON <1 ms; helper loop can block for seconds | Yes | Python runtime | Remove for the dependency, not latency |
+| [Rust helper + JSON](diagrams/proposed-nml-architecture.png) | worker → JSON → Rust helper → NML | JSON <1 ms; process hop ~tens of µs | Yes | Helper links NML | Good migration step; keep if isolation is required |
+| [In-process `NmlBackend`](diagrams/ideal-inprocess-architecture.png) | worker → `NmlClient` / `HalReader` | Direct calls; no IPC | No; `linc-panel` remains separate | HMI links NML | **Best latency and simplest end state for LiNC** |
+| [Native machine service](diagrams/native-service-architecture.png) | worker → shared-memory snapshot + typed command socket | Near in-process | Yes | Service links NML | Ideal only if an NML crash must not take the HMI down; most work |
+| [Pure-Rust NML](diagrams/pure-rust-nml-architecture.png) | worker → Rust NML | Similar to in-process | Depends | No libnml/liblinuxcnc; HAL still native | Not worth the protocol/version work |
+| [`linuxcncrsh`](diagrams/linuxcncrsh-architecture.png) | TCP + text | Milliseconds and polling | Yes | Client simple; HAL still native | Too limited for status/commands |
+| [PyO3](diagrams/pyo3-architecture.png) | worker → embedded Python | GIL + Python | No | Python dev files | Still Python; rejected |
 
 ## Ideal: in-process native backend
 
@@ -106,6 +106,39 @@ If that tradeoff is unacceptable, the ideal becomes a native machine service
 that owns NML and HAL and publishes a snapshot through shared memory, with
 typed commands over a Unix socket. That preserves isolation and near-in-process
 latency, but it is a much larger design than LiNC needs today.
+
+![Native machine service](diagrams/native-service-architecture.png)
+
+## Other options
+
+### Pure-Rust NML
+
+![Pure-Rust NML](diagrams/pure-rust-nml-architecture.png)
+
+The HMI implements the NML CMS/XDR/shared-memory protocol itself and links
+neither `libnml` nor `liblinuxcnc`. HAL reads still go through
+`liblinuxcnchal` (or require a second protocol implementation). The latency is
+similar to the in-process native client, but the NML protocol and its structs
+are version-coupled to LinuxCNC; this is a large maintenance burden for no
+latency gain.
+
+### `linuxcncrsh`
+
+![linuxcncrsh](diagrams/linuxcncrsh-architecture.png)
+
+A `linuxcncrsh` client talks text over TCP to a separate server process. That
+adds a server to configure and a text protocol to parse, and the server does not
+expose the full NML status surface. HAL pins still need a native reader. It is
+useful for diagnostics or simple remote commands, not for the HMI's full
+status and offset/tool path.
+
+### PyO3
+
+![PyO3](diagrams/pyo3-architecture.png)
+
+PyO3 embeds Python in the HMI. It removes the separate helper and JSON, but it
+keeps the Python runtime and the `linuxcnc`/`hal` modules, adds the GIL, and
+gives no process isolation. It does not meet the "remove Python" goal.
 
 ## What changes, what stays
 
@@ -143,4 +176,16 @@ rsvg-convert -w 1600 proposed-nml-architecture.svg -o proposed-nml-architecture.
 
 dot -Tsvg ideal-inprocess-architecture.dot -o ideal-inprocess-architecture.svg
 rsvg-convert -w 1600 ideal-inprocess-architecture.svg -o ideal-inprocess-architecture.png
+
+dot -Tsvg native-service-architecture.dot -o native-service-architecture.svg
+rsvg-convert -w 1600 native-service-architecture.svg -o native-service-architecture.png
+
+dot -Tsvg pure-rust-nml-architecture.dot -o pure-rust-nml-architecture.svg
+rsvg-convert -w 1600 pure-rust-nml-architecture.svg -o pure-rust-nml-architecture.png
+
+dot -Tsvg linuxcncrsh-architecture.dot -o linuxcncrsh-architecture.svg
+rsvg-convert -w 1600 linuxcncrsh-architecture.svg -o linuxcncrsh-architecture.png
+
+dot -Tsvg pyo3-architecture.dot -o pyo3-architecture.svg
+rsvg-convert -w 1600 pyo3-architecture.svg -o pyo3-architecture.png
 ```

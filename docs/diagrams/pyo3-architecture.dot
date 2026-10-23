@@ -1,0 +1,134 @@
+digraph pyo3 {
+  graph [
+    rankdir=TB,
+    newrank=true,
+    compound=true,
+    splines=spline,
+    nodesep=0.35,
+    ranksep=0.45,
+    pad=0.25,
+    bgcolor="white",
+    fontname="DejaVu Sans",
+    fontsize=11,
+    labelloc=t,
+    label=<<B>PyO3: embedded Python backend</B><BR/><FONT POINT-SIZE="10">Python stays in the HMI process; no helper and no JSON, but the GIL and Python runtime remain</FONT>>
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontname="DejaVu Sans",
+    fontsize=9.5,
+    margin="0.11,0.06",
+    penwidth=1.2,
+    color="#666666",
+    fillcolor="#FFFFFF"
+  ];
+  edge [
+    fontname="DejaVu Sans",
+    fontsize=8.5,
+    color="#595959",
+    fontcolor="#404040",
+    arrowsize=0.65,
+    penwidth=1.1
+  ];
+
+  subgraph cluster_linc {
+    label=<<B>linc HMI process</B><BR/><FONT POINT-SIZE="8.5">one process · Python embedded via PyO3 · no process isolation</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#548235";
+    fontcolor="#375623";
+
+    ui     [label=<<B>UI thread</B><BR/>egui · pages · keyboard>, fillcolor="#E2EFDA", color="#548235"];
+    worker [label=<<B>linc-backend worker</B><BR/>PyO3 backend<BR/>validates typed commands<BR/>publishes snapshots>, fillcolor="#E2EFDA", color="#548235"];
+    state  [label=<<B>shared state</B><BR/>latest MachineSnapshot<BR/>command results · events>, shape=cylinder, fillcolor="#E2EFDA", color="#548235"];
+    lhal   [label=<<B>LincHal</B><BR/>writes linc.* outputs>, fillcolor="#E2EFDA", color="#548235"];
+
+    pyo3   [label=<<B>PyO3 bridge</B><BR/>FFI + GIL<BR/><FONT POINT-SIZE="8">libpython in-process</FONT>>, fillcolor="#FCE4D6", color="#C55A11"];
+    pymod  [label=<<B>Python modules</B><BR/>linuxcnc + hal<BR/><FONT POINT-SIZE="8">still the runtime dependency</FONT>>, fillcolor="#FCE4D6", color="#C55A11"];
+    files  [label=<<B>std::fs</B><BR/>parameter file · program text>, fillcolor="#DDEBF7", color="#2E75B6"];
+
+    { rank=same; pyo3; pymod; files; lhal; state; }
+  }
+
+  subgraph cluster_panel {
+    label=<<B>linc-panel process</B><BR/><FONT POINT-SIZE="8.5">owns the physical panel</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#7030A0";
+    fontcolor="#4B1F6F";
+
+    panel [label=<<B>PanelDriver + cnc_panel.*</B><BR/>RS-485 or simulated panel<BR/>owns /dev/ttyUSB0>, fillcolor="#E4DFEC", color="#7030A0"];
+    ser   [label=<<B>panel hardware</B><BR/>buttons · LEDs · MPG>, fillcolor="#E4DFEC", color="#7030A0"];
+
+    { rank=same; panel; ser; }
+  }
+
+  subgraph cluster_mem {
+    label=<<B>Kernel shared memory</B><BR/><FONT POINT-SIZE="8.5">System V segments</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#BF9000";
+    fontcolor="#7F6000";
+
+    nml [label=<<B>NML channels</B><BR/>emcCommand · emcStatus · emcError<BR/><FONT POINT-SIZE="8">command queue · status snapshot · error queue</FONT>>, fillcolor="#FFF2CC", color="#BF9000"];
+    hal [label=<<B>HAL shared memory</B><BR/>cnc_panel.* · halui.* · joint.*<BR/>spindle.* · iocontrol.* · linc.*>, fillcolor="#FFF2CC", color="#BF9000"];
+
+    { rank=same; nml; hal; }
+  }
+
+  subgraph cluster_cnc {
+    label=<<B>LinuxCNC session</B><BR/><FONT POINT-SIZE="8.5">separate processes</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#5B7FA6";
+    fontcolor="#33506E";
+
+    task [label=<<B>task</B><BR/>linuxcncsvr · milltask>, fillcolor="#DCE9F7", color="#5B7FA6"];
+    io   [label=<<B>io · halui</B><BR/>tool change · panel I/O>, fillcolor="#DCE9F7", color="#5B7FA6"];
+
+    { rank=same; task; io; }
+  }
+
+  subgraph cluster_diag {
+    label=<<B>diagnostics</B>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#7F7F7F";
+    fontcolor="#404040";
+
+    diag [label=<<B>Unix diag sockets</B><BR/>${XDG_RUNTIME_DIR}/linc/diag-&lt;uid&gt;/>, shape=cylinder, fillcolor="#F2F2F2", color="#7F7F7F"];
+    mcp  [label=<<B>linc-mcp</B><BR/>read-only diagnostics>, fillcolor="#F2F2F2", color="#7F7F7F"];
+
+    { rank=same; diag; mcp; }
+  }
+
+  // HMI: commands and snapshots
+  ui -> worker [dir=both, label="typed commands\nsnapshot reads"];
+  worker -> state [label="publish"];
+  state -> ui [label="read", style=dashed];
+  worker -> lhal [label="HalWriter"];
+
+  // Direct native access from the backend worker
+  worker -> pyo3 [label="in-process call"];
+  pyo3 -> pymod [label="GIL"];
+  worker -> files [label="read / write", style=dashed];
+  pymod -> nml [dir=both, label="stat · command · error"];
+  pymod -> hal [label="get_value", style=dashed];
+  lhal -> hal [label="writes linc.*", color="#548235", fontcolor="#375623"];
+
+  // Panel
+  panel -> hal [dir=both, label="reads / writes cnc_panel.*"];
+  panel -> ser [dir=both, label="serial / window"];
+
+  // LinuxCNC core
+  nml -> task [dir=both, label="command / echo"];
+  hal -> task [dir=both, label="HAL nets"];
+  hal -> io [dir=both];
+
+  // Diagnostics
+  ui -> diag [dir=both, style=dashed, label="publishes", constraint=false];
+  panel -> diag [dir=both, style=dashed, label="publishes", constraint=false];
+  mcp -> diag [dir=both, label="attaches"];
+}

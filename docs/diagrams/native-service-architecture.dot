@@ -1,0 +1,167 @@
+digraph native_service {
+  graph [
+    rankdir=TB,
+    newrank=true,
+    compound=true,
+    splines=spline,
+    nodesep=0.35,
+    ranksep=0.45,
+    pad=0.25,
+    bgcolor="white",
+    fontname="DejaVu Sans",
+    fontsize=11,
+    labelloc=t,
+    label=<<B>Native machine service: shared snapshot + typed command socket</B><BR/><FONT POINT-SIZE="10">near in-process latency with process isolation; the HMI has no NML or HAL link</FONT>>
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontname="DejaVu Sans",
+    fontsize=9.5,
+    margin="0.11,0.06",
+    penwidth=1.2,
+    color="#666666",
+    fillcolor="#FFFFFF"
+  ];
+  edge [
+    fontname="DejaVu Sans",
+    fontsize=8.5,
+    color="#595959",
+    fontcolor="#404040",
+    arrowsize=0.65,
+    penwidth=1.1
+  ];
+
+  subgraph cluster_hmi {
+    label=<<B>linc HMI process</B><BR/><FONT POINT-SIZE="8.5">no NML link · no HAL link · survives a service restart</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#548235";
+    fontcolor="#375623";
+
+    ui     [label=<<B>UI thread</B><BR/>egui · pages · keyboard>, fillcolor="#E2EFDA", color="#548235"];
+    client [label=<<B>BackendClient</B><BR/>typed commands<BR/>snapshot view>, fillcolor="#E2EFDA", color="#548235"];
+
+    { rank=same; ui; client; }
+  }
+
+  subgraph cluster_shared {
+    label=<<B>same host: shared memory + Unix socket</B><BR/><FONT POINT-SIZE="8.5">no JSON · no per-frame serialization</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#2E75B6";
+    fontcolor="#1F4E79";
+
+    cmdsock [label=<<B>command socket</B><BR/>SOCK_SEQPACKET<BR/>commands · results · events>, fillcolor="#DDEBF7", color="#2E75B6"];
+    snap    [label=<<B>snapshot buffer</B><BR/>seqlock / double buffer<BR/>latest MachineSnapshot>, shape=cylinder, fillcolor="#DDEBF7", color="#2E75B6"];
+
+    { rank=same; cmdsock; snap; }
+  }
+
+  subgraph cluster_service {
+    label=<<B>linc-machined process (Rust)</B><BR/><FONT POINT-SIZE="8.5">single owner of NML + HAL; restartable independently of the HMI</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#2E75B6";
+    fontcolor="#1F4E79";
+
+    handler [label=<<B>command handler</B><BR/>typed commands<BR/>wait_complete>, fillcolor="#DDEBF7", color="#2E75B6"];
+    poller  [label=<<B>status poll + publisher</B><BR/>50–100 Hz<BR/>separate from command waits>, fillcolor="#DDEBF7", color="#2E75B6"];
+
+    nmlc   [label=<<B>linuxcnc-nml</B><BR/>NmlClient<BR/>status + command clients<BR/><FONT POINT-SIZE="8">links liblinuxcnc.a + libnml.so</FONT>>, fillcolor="#DDEBF7", color="#2E75B6"];
+    halr   [label=<<B>HalReader</B><BR/>hal_get_pin_value_by_name<BR/><FONT POINT-SIZE="8">via liblinuxcnchal.so</FONT>>, fillcolor="#DDEBF7", color="#2E75B6"];
+    lhal   [label=<<B>LincHal</B><BR/>writes linc.* outputs>, fillcolor="#DDEBF7", color="#2E75B6"];
+    files  [label=<<B>std::fs</B><BR/>parameter file · program text>, fillcolor="#DDEBF7", color="#2E75B6"];
+
+    { rank=same; handler; poller; }
+    { rank=same; nmlc; halr; lhal; files; }
+  }
+
+  subgraph cluster_panel {
+    label=<<B>linc-panel process</B><BR/><FONT POINT-SIZE="8.5">owns the physical panel</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#7030A0";
+    fontcolor="#4B1F6F";
+
+    panel [label=<<B>PanelDriver + cnc_panel.*</B><BR/>RS-485 or simulated panel<BR/>owns /dev/ttyUSB0>, fillcolor="#E4DFEC", color="#7030A0"];
+    ser   [label=<<B>panel hardware</B><BR/>buttons · LEDs · MPG>, fillcolor="#E4DFEC", color="#7030A0"];
+
+    { rank=same; panel; ser; }
+  }
+
+  subgraph cluster_mem {
+    label=<<B>Kernel shared memory</B><BR/><FONT POINT-SIZE="8.5">System V segments</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#BF9000";
+    fontcolor="#7F6000";
+
+    nml [label=<<B>NML channels</B><BR/>emcCommand · emcStatus · emcError<BR/><FONT POINT-SIZE="8">command queue · status snapshot · error queue</FONT>>, fillcolor="#FFF2CC", color="#BF9000"];
+    hal [label=<<B>HAL shared memory</B><BR/>cnc_panel.* · halui.* · joint.*<BR/>spindle.* · iocontrol.* · linc.*>, fillcolor="#FFF2CC", color="#BF9000"];
+
+    { rank=same; nml; hal; }
+  }
+
+  subgraph cluster_cnc {
+    label=<<B>LinuxCNC session</B><BR/><FONT POINT-SIZE="8.5">separate processes</FONT>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#5B7FA6";
+    fontcolor="#33506E";
+
+    task [label=<<B>task</B><BR/>linuxcncsvr · milltask>, fillcolor="#DCE9F7", color="#5B7FA6"];
+    io   [label=<<B>io · halui</B><BR/>tool change · panel I/O>, fillcolor="#DCE9F7", color="#5B7FA6"];
+
+    { rank=same; task; io; }
+  }
+
+  subgraph cluster_diag {
+    label=<<B>diagnostics</B>>;
+    labeljust=l;
+    style="rounded,dashed";
+    color="#7F7F7F";
+    fontcolor="#404040";
+
+    diag [label=<<B>Unix diag sockets</B><BR/>${XDG_RUNTIME_DIR}/linc/diag-&lt;uid&gt;/>, shape=cylinder, fillcolor="#F2F2F2", color="#7F7F7F"];
+    mcp  [label=<<B>linc-mcp</B><BR/>read-only diagnostics>, fillcolor="#F2F2F2", color="#7F7F7F"];
+
+    { rank=same; diag; mcp; }
+  }
+
+  // HMI <-> shared transport
+  ui -> client [dir=both, label="typed commands\nsnapshots"];
+  client -> cmdsock [label="commands / results"];
+  snap -> client [label="read snapshot", style=dashed];
+
+  // Shared transport <-> service
+  cmdsock -> handler [dir=both, label="typed messages"];
+  poller -> snap [label="publish"];
+
+  // Service internals
+  handler -> nmlc [label="send"];
+  poller -> nmlc [label="poll status / error"];
+  poller -> halr [label="read pins", style=dashed];
+  poller -> files [label="read / write", style=dashed];
+  poller -> lhal [label="write outputs", style=dashed];
+
+  // Native channels
+  nmlc -> nml [dir=both, label="stat · command · error"];
+  halr -> hal [label="read HAL", style=dashed];
+  lhal -> hal [label="writes linc.*", color="#548235", fontcolor="#375623"];
+
+  // Panel
+  panel -> hal [dir=both, label="reads / writes cnc_panel.*"];
+  panel -> ser [dir=both, label="serial / window"];
+
+  // LinuxCNC core
+  nml -> task [dir=both, label="command / echo"];
+  hal -> task [dir=both, label="HAL nets"];
+  hal -> io [dir=both];
+
+  // Diagnostics
+  ui -> diag [dir=both, style=dashed, label="publishes", constraint=false];
+  panel -> diag [dir=both, style=dashed, label="publishes", constraint=false];
+  mcp -> diag [dir=both, label="attaches"];
+}

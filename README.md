@@ -105,8 +105,8 @@ The LinuxCNC backend runs behind the typed `MachineBackend` boundary. The
 current HMI uses a supervised Python helper; the proposed NML-based design keeps
 the same process boundary and replaces the helper with a Rust process using
 `linuxcnc-nml` and a native HAL reader. See
-[`docs/architecture.md`](docs/architecture.md) for both diagrams, the data flow,
-and the migration notes.
+[`docs/architecture.md`](docs/architecture.md) for the current path, the
+migration helper, the in-process ideal, and the other backend options.
 
 ## HAL integration
 
