@@ -112,7 +112,8 @@ current HMI is an in-process `NmlBackend`: `linuxcnc-nml` owns `emcStatus`,
 spindle pins. There is no helper process, JSON protocol or Python runtime on the
 control path. See [`docs/architecture.md`](docs/architecture.md) for the
 implemented path, the removed Python helper, and the alternatives that were
-rejected.
+rejected. For a visual walkthrough, open the self-contained
+[HTML architecture guide](docs/architecture.html).
 
 The native NML client links `liblinuxcnc`/`libnml`, so a build needs the
 LinuxCNC development files and the sibling `../linuxcnc-nml` checkout. The

@@ -1,5 +1,9 @@
 # LiNC + LinuxCNC architecture
 
+For a visual tour of the current system, open the self-contained
+[HTML architecture guide](architecture.html). It has the runtime map, command and
+snapshot paths, HAL surface, failure domains and build requirements in one page.
+
 These diagrams show the **LinuxCNC backend path** only. Simulator mode
 (`--sim`) replaces the NML/HAL column with `SimBackend` and the `LINC_SIM_IPC`
 files; the panel service, HAL outputs, UI, and diagnostics stay the same.
