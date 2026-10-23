@@ -23,6 +23,21 @@ import traceback
 import linuxcnc
 import hal
 
+def spindle_feedback_rps(primary, commanded):
+    """Feedback in rotations per second, with the documented loopback.
+
+    `spindle.N.speed-in` is the encoder feedback, but it reads 0 when the HAL
+    does not connect it. In that case use `spindle.N.speed-out-rps`, which is
+    the commanded speed and already includes the override. Returning None when
+    neither pin exists lets the caller fall back to the programmed S word.
+    """
+    if primary is not None and abs(float(primary)) > 1e-9:
+        return float(primary)
+    if commanded is not None:
+        return float(commanded)
+    return None
+
+
 def spindle_actual_rpm(spindle, feedback_rps):
     """True spindle RPM from the configured feedback pin.
 
@@ -718,17 +733,25 @@ class Bridge:
             load_pin = pin("rio.spindle-modbus.spindle_load-abs")
             if index > 0:
                 load_pin = pin(f"rio.spindle{index}-modbus.spindle_load-abs", None)
-            feedback = (
+            primary = (
                 pin(self.spindle_speed_pin)
                 if index == 0 and self.spindle_speed_pin
                 else None
             )
+            commanded_rps = pin(f"spindle.{index}.speed-out-rps")
+            feedback = spindle_feedback_rps(primary, commanded_rps)
+            override = panel["spindle_override"]
+            rate = {
+                "speed": float(spindle.get("speed", 0.0)),
+                "override": override,
+                "enabled": bool(spindle.get("enabled", 0)),
+            }
             spindles.append(
                 {
                     "index": index,
                     "speed": float(spindle.get("speed", 0.0)),
-                    "actual": spindle_actual_rpm(spindle, feedback),
-                    "override": float(spindle.get("override", 1.0)),
+                    "actual": spindle_actual_rpm(rate, feedback),
+                    "override": override,
                     "direction": int(spindle.get("direction", 0)),
                     "on": bool(spindle.get("enabled", 0)),
                     "load": float(load_pin) if load_pin is not None else None,
@@ -1475,6 +1498,12 @@ def _fake_bridge(task_state, values, apply_reset, apply_mdi):
 
 def check_spindle_actual():
     spindle = {"speed": 4200.0, "override": 0.5, "enabled": 1}
+    # Encoder feedback wins; a zero speed-in is treated as unconnected and the
+    # commanded speed-out-rps takes over.
+    assert spindle_feedback_rps(70.0, 60.0) == 70.0
+    assert spindle_feedback_rps(0.0, 60.0) == 60.0
+    assert spindle_feedback_rps(None, 60.0) == 60.0
+    assert spindle_feedback_rps(None, None) is None
     # Feedback is rotations per second, so 70 rps is 4200 rpm.
     assert abs(spindle_actual_rpm(spindle, 70.0) - 4200.0) < 1e-6
     assert abs(spindle_actual_rpm(spindle, -70.0) - 4200.0) < 1e-6

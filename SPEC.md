@@ -431,8 +431,10 @@ Default page. The layout is selected by `machine.gui`.
   millimetre machine still reads in mm/min; the override is a separate factor,
   not the rate. The second S row is the true feedback from
   `[hal.pins] spindle_speed` (RPS converted to RPM), so turning the spindle
-  override changes the displayed true RPM; without feedback it falls back to
-  the programmed speed scaled by the override. A vector rotation arrow beside
+  override changes the displayed true RPM; when that pin is absent or reads 0
+  the bridge uses `spindle.N.speed-out-rps`, then the programmed speed scaled
+  by the override. The override percentage is the panel value. A vector
+  rotation arrow beside
   the `S` shows forward (green),
   reverse (amber) or stopped (muted dot), so the RPM value itself always stays
   positive.

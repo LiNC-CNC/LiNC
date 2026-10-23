@@ -386,9 +386,10 @@ scale.
 `[hal.pins] spindle_speed` names the HAL pin carrying actual spindle-speed
 feedback in rotations per second (`spindle.0.speed-in` by default). The bridge
 converts it to RPM for the second `S` row and the top bar, so the displayed true
-RPM follows the spindle override. If the pin is absent, the display falls back
-to the programmed speed scaled by the override. Point it at the encoder or
-`spindle.N.speed-out-rps` loopback your HAL provides.
+RPM follows the spindle override. If the pin is absent or reads 0 (no encoder
+wired), the bridge uses `spindle.N.speed-out-rps`, the loopback LinuxCNC
+recommends, and then the programmed speed scaled by the override. The override
+percentage beside the `S` comes from the panel's spindle-override pin.
 
 ### Servo load bars
 
