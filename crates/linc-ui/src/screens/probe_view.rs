@@ -702,11 +702,8 @@ fn parameters_card(app: &mut LincApp, ui: &mut Ui) {
                 );
             });
         });
-        ui.label(
-            RichText::new("PROBE POSITION ONLY · A APPLIES THE LAST RESULT TO THE ACTIVE WCS")
-                .size(theme::font_size(7.5))
-                .color(theme::MUTED),
-        );
+        // Keep the vertical gap where the old mode remark lived.
+        ui.add_space(16.0);
         for row in 0..6 {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
