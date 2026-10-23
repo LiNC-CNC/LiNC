@@ -2,7 +2,9 @@
 # Start the LiNC simulation with a real LinuxCNC process.
 #
 #   ./scripts/start-sim.sh                 foreground (Ctrl+C stops LinuxCNC)
-#   ./scripts/start-sim.sh --detach        background, PID in $XDG_RUNTIME_DIR/linc/sim.pid
+#   ./scripts/start-sim.sh --detach        background, PID in $XDG_RUNTIME_DIR/linc/sim.pid;
+#                                          the session log is also followed on the
+#                                          terminal so LinuxCNC's output stays visible
 #
 # Optional start-up, in this order (each step implies the one before it):
 #   --release-estop   start the simulated cabinet with the E-stop released
@@ -39,8 +41,10 @@ PID_FILE="$RUNTIME_DIR/sim.pid"
 PANEL_PID_FILE="$RUNTIME_DIR/panel-sim.pid"
 LINC_PID_FILE="$RUNTIME_DIR/linc.pid"
 LOG_FILE="$STATE_DIR/sim.log"
-# LinuxCNC redirects its own stdout and stderr here, so this is where the reason
-# a session failed to start is written.
+# `linuxcnc -r` stops the launcher from moving its own stdout/stderr into these
+# files, so the session output goes to the terminal (foreground) or to
+# $LOG_FILE (detached). Keep the print file only as a fallback for a launcher
+# that redirected before we could.
 PRINT_FILE="$HOME/linuxcnc_print.txt"
 mkdir -p "$RUNTIME_DIR" "$STATE_DIR"
 
@@ -159,7 +163,8 @@ sim_ready() {
 }
 
 if (( DETACH )); then
-    nohup linuxcnc "$INI" "${ARGS[@]}" >"$LOG_FILE" 2>&1 &
+    # -r: keep LinuxCNC's own output in $LOG_FILE instead of linuxcnc_print.txt.
+    nohup linuxcnc -r "$INI" "${ARGS[@]}" >"$LOG_FILE" 2>&1 &
     PID=$!
     echo "$PID" >"$PID_FILE"
     sleep 2
@@ -177,6 +182,12 @@ if (( DETACH )); then
     echo "  display: $LINC_PID_FILE"
     echo "  log:     $LOG_FILE"
     echo "  stop:    $SCRIPT_DIR/stop-sim.sh"
+    if [[ -t 1 ]]; then
+        # Keep the operator's terminal useful after the script exits. The tail
+        # ends with LinuxCNC; closing the terminal only stops following.
+        tail -n +1 -f --pid="$PID" "$LOG_FILE" &
+        echo "  output:  following $LOG_FILE (Ctrl+C stops following; the sim keeps running)"
+    fi
     if (( RELEASE_ESTOP || FLOAT_WINDOW )); then
         # The session is in the background, so its log is the only place these
         # steps will be read.
@@ -188,21 +199,20 @@ if (( DETACH )); then
 else
     trap '"$SCRIPT_DIR/stop-sim.sh"' EXIT INT TERM
     echo "starting LinuxCNC: $INI"
-    echo "  log:   $PRINT_FILE"
+    echo "  output: this terminal (linuxcnc -r)"
     if (( RELEASE_ESTOP || FLOAT_WINDOW )); then
         # linuxcnc blocks in the foreground, so the ready steps run beside it
         # and report to this terminal.
         sim_ready &
     fi
-    # LinuxCNC exits quietly by itself: its output goes to $PRINT_FILE. Say so
-    # rather than leaving a failed start looking like nothing happened.
+    # `-r` leaves LinuxCNC's output on this terminal, so a failed start says
+    # why instead of only pointing at a print file.
     set +e
-    linuxcnc "$INI" "${ARGS[@]}"
+    linuxcnc -r "$INI" "${ARGS[@]}"
     status=$?
     set -e
     if (( status != 0 )); then
-        echo "LinuxCNC exited with status $status; last lines of $PRINT_FILE:" >&2
-        tail -n 25 "$PRINT_FILE" >&2 || true
+        echo "LinuxCNC exited with status $status" >&2
     fi
     exit "$status"
 fi
