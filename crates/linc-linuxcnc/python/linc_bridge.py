@@ -23,6 +23,49 @@ import traceback
 import linuxcnc
 import hal
 
+def read_spindles(s, panel, spindle_speed_pin, read_pin=None):
+    """Spindle rows for the snapshot.
+
+    Kept separate from `Bridge.snapshot` so the panel override is an explicit
+    argument: using the later local `panel` from inside the function's spindle
+    loop raised UnboundLocalError before the first snapshot.
+    """
+    if read_pin is None:
+        read_pin = pin
+    spindles = []
+    for index, spindle in enumerate(getattr(s, "spindle", ()) or ()):
+        if index >= 4:
+            break
+        load_pin = read_pin("rio.spindle-modbus.spindle_load-abs")
+        if index > 0:
+            load_pin = read_pin(f"rio.spindle{index}-modbus.spindle_load-abs", None)
+        primary = (
+            read_pin(spindle_speed_pin)
+            if index == 0 and spindle_speed_pin
+            else None
+        )
+        commanded_rps = read_pin(f"spindle.{index}.speed-out-rps")
+        feedback = spindle_feedback_rps(primary, commanded_rps)
+        override = panel["spindle_override"]
+        rate = {
+            "speed": float(spindle.get("speed", 0.0)),
+            "override": override,
+            "enabled": bool(spindle.get("enabled", 0)),
+        }
+        spindles.append(
+            {
+                "index": index,
+                "speed": float(spindle.get("speed", 0.0)),
+                "actual": spindle_actual_rpm(rate, feedback),
+                "override": override,
+                "direction": int(spindle.get("direction", 0)),
+                "on": bool(spindle.get("enabled", 0)),
+                "load": float(load_pin) if load_pin is not None else None,
+            }
+        )
+    return spindles
+
+
 def spindle_feedback_rps(primary, commanded):
     """Feedback in rotations per second, with the documented loopback.
 
@@ -726,37 +769,11 @@ class Bridge:
             self.last_program_path = program_path
             self.last_program_text = program_text
             self.last_program_mtime = mtime
-        spindles = []
-        for index, spindle in enumerate(getattr(s, "spindle", ()) or ()):
-            if index >= 4:
-                break
-            load_pin = pin("rio.spindle-modbus.spindle_load-abs")
-            if index > 0:
-                load_pin = pin(f"rio.spindle{index}-modbus.spindle_load-abs", None)
-            primary = (
-                pin(self.spindle_speed_pin)
-                if index == 0 and self.spindle_speed_pin
-                else None
-            )
-            commanded_rps = pin(f"spindle.{index}.speed-out-rps")
-            feedback = spindle_feedback_rps(primary, commanded_rps)
-            override = panel["spindle_override"]
-            rate = {
-                "speed": float(spindle.get("speed", 0.0)),
-                "override": override,
-                "enabled": bool(spindle.get("enabled", 0)),
-            }
-            spindles.append(
-                {
-                    "index": index,
-                    "speed": float(spindle.get("speed", 0.0)),
-                    "actual": spindle_actual_rpm(rate, feedback),
-                    "override": override,
-                    "direction": int(spindle.get("direction", 0)),
-                    "on": bool(spindle.get("enabled", 0)),
-                    "load": float(load_pin) if load_pin is not None else None,
-                }
-            )
+        # The spindle's override and the panel pins are needed below, so read
+        # the panel before the spindle rows rather than after them.
+        sparse = time.time() - self.bitmap_last >= HAL_BITMAP_PERIOD
+        panel = self.read_panel(sparse)
+        spindles = read_spindles(s, panel, self.spindle_speed_pin)
         gcodes = list(getattr(s, "gcodes", ()) or ())
         mcodes = list(getattr(s, "mcodes", ()) or ())
         task_mode = int(getattr(s, "task_mode", 0) or 0)
@@ -773,8 +790,6 @@ class Bridge:
             power = "estop_reset"
         else:
             power = "off"
-        sparse = time.time() - self.bitmap_last >= HAL_BITMAP_PERIOD
-        panel = self.read_panel(sparse)
         self.poll_proghome(panel)
         homing = {}
         following_error = {}
@@ -1513,6 +1528,25 @@ def check_spindle_actual():
     print("linc_bridge selftest: spindle feedback rpm OK")
 
 
+def check_spindle_rows():
+    """The snapshot's spindle rows must see the panel override."""
+
+    class Stat:
+        pass
+
+    stat = Stat()
+    stat.spindle = [{"speed": 4200.0, "override": 0.5, "direction": 1, "enabled": 1}]
+
+    def fake_pin(name, default=None):
+        return {"spindle.0.speed-out-rps": 60.0}.get(name, default)
+
+    rows = read_spindles(stat, {"spindle_override": 0.5}, "spindle.0.speed-in", fake_pin)
+    assert rows[0]["actual"] == 3600.0, rows
+    assert rows[0]["override"] == 0.5, rows
+    assert rows[0]["direction"] == 1 and rows[0]["on"] is True, rows
+    print("linc_bridge selftest: spindle rows use the panel override OK")
+
+
 def check_feed_word():
     """The F word is a rate in program units, not the override factor."""
 
@@ -1680,6 +1714,7 @@ def selftest():
     check_offset_sync()
     check_feed_word()
     check_spindle_actual()
+    check_spindle_rows()
     check_parameter_keys()
     check_work_position()
 
