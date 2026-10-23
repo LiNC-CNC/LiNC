@@ -835,6 +835,10 @@ choose a routine group, then pick the operation card.
 - The `PROBE POSITION ONLY` checkbox selects Probe Basic's probe mode: off
   applies the measured result to the active work offset in the subroutine; on
   records the result without applying it.
+- Parameter entry follows the Offsets table: click a field to select it, the
+  arrow keys move between fields, `Enter` opens the inline editor, `Enter`
+  again commits the value and `Esc` cancels. Arithmetic expressions are
+  accepted, as in the offset cells.
 - `Enter` builds the selected `o<probe_...> call` and its argument values,
   then issues it immediately using Probe Basic's `issue_mdi` semantics:
   temporary MDI mode, command sent, previous task mode restored when the

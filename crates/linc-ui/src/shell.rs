@@ -1866,6 +1866,7 @@ impl LincApp {
                 || (self.page == Page::Offsets
                     && (self.offsets.editing || self.offsets.dro_edit.is_some()))
                 || (self.page == Page::Files && self.files.rename.is_some())
+                || (self.page == Page::Probe && self.probe.param_editing)
                 || self.help.dialog.is_some();
             if !editing_in_place
                 && input.consume_key(self.keymap.back.modifiers, self.keymap.back.key)
@@ -3693,7 +3694,7 @@ pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
     (Page::Machine, "MACHINE", "MAIN"),
     (Page::Program, "PROGRAM", "FILE"),
     (Page::Tools, "TOOLS", "TOOL"),
-    (Page::Offsets, "OFFSETS / PROBE", "OFFSET"),
+    (Page::Offsets, "OFFSETS", "PROBE"),
     (Page::Diagnostics, "DIAGNOSTICS", "Ctrl+D"),
     (Page::Help, "G-CODE HELP", "Ctrl+H"),
     (Page::Settings, "SETTINGS", ""),

@@ -480,13 +480,23 @@ fn category_tabs(app: &mut LincApp, ui: &mut Ui) {
 fn parameters_card(app: &mut LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.spacing_mut().interact_size.y = 12.0;
+        ui.spacing_mut().interact_size.y = 16.0;
         ui.spacing_mut().item_spacing.y = 1.0;
-        ui.spacing_mut().button_padding.y = 1.0;
+        ui.spacing_mut().button_padding = Vec2::new(4.0, 1.0);
         ui.style_mut().text_styles.insert(
             egui::TextStyle::Body,
             FontId::monospace(theme::font_size(9.0)),
         );
+        let widgets = &mut ui.visuals_mut().widgets;
+        widgets.inactive.bg_fill = theme::PANEL_RAISED;
+        widgets.inactive.bg_stroke = Stroke::new(1.0, theme::BORDER);
+        widgets.inactive.corner_radius = CornerRadius::same(2);
+        widgets.hovered.bg_fill = theme::PANEL_RAISED;
+        widgets.hovered.bg_stroke = Stroke::new(1.0, theme::ACCENT);
+        widgets.hovered.corner_radius = CornerRadius::same(2);
+        widgets.active.bg_fill = theme::PANEL_RAISED;
+        widgets.active.bg_stroke = Stroke::new(1.0, theme::ACCENT);
+        widgets.active.corner_radius = CornerRadius::same(2);
         ui.horizontal(|ui| {
             theme::section_header(ui, "PROBING PARAMETERS");
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
@@ -497,7 +507,7 @@ fn parameters_card(app: &mut LincApp, ui: &mut Ui) {
                         .color(theme::SUCCESS),
                 );
                 ui.label(
-                    RichText::new("←→ FIELD · ↑↓ ADJUST")
+                    RichText::new("ARROWS SELECT · ENTER EDIT")
                         .size(theme::font_size(7.5))
                         .color(theme::MUTED),
                 );
@@ -523,53 +533,17 @@ fn parameters_card(app: &mut LincApp, ui: &mut Ui) {
                 .size(theme::font_size(7.5))
                 .color(theme::MUTED),
         );
-        egui::Grid::new("probe-params-grid")
-            .num_columns(4)
-            .spacing([6.0, 1.0])
-            .show(ui, |ui| {
-                param_pair(
-                    ui,
-                    "PROBE TOOL",
-                    &mut ParamValue::U16(&mut app.probe.params.probe_tool_number),
-                    "SLOW FEED",
-                    &mut ParamValue::F64(&mut app.probe.params.slow_feed),
-                );
-                param_pair(
-                    ui,
-                    "FAST FEED",
-                    &mut ParamValue::F64(&mut app.probe.params.fast_feed),
-                    "TRAVERSE",
-                    &mut ParamValue::F64(&mut app.probe.params.traverse_feed),
-                );
-                param_pair(
-                    ui,
-                    "MAX XY",
-                    &mut ParamValue::F64(&mut app.probe.params.max_xy_distance),
-                    "XY CLEAR",
-                    &mut ParamValue::F64(&mut app.probe.params.xy_clearance),
-                );
-                param_pair(
-                    ui,
-                    "MAX Z",
-                    &mut ParamValue::F64(&mut app.probe.params.max_z_distance),
-                    "Z CLEAR",
-                    &mut ParamValue::F64(&mut app.probe.params.z_clearance),
-                );
-                param_pair(
-                    ui,
-                    "EXTRA DEPTH",
-                    &mut ParamValue::F64(&mut app.probe.params.extra_depth),
-                    "STEP OFF",
-                    &mut ParamValue::F64(&mut app.probe.params.step_off_width),
-                );
-                param_pair(
-                    ui,
-                    "EDGE WIDTH",
-                    &mut ParamValue::F64(&mut app.probe.params.edge_width),
-                    "TIP",
-                    &mut ParamValue::F64(&mut app.probe.params.diameter_hint),
-                );
+        for row in 0..6 {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                for col in 0..2 {
+                    let index = row * 2 + col;
+                    param_label(ui, PARAM_LABELS[index]);
+                    let text = param_text(&app.probe.params, index);
+                    param_field(ui, app, index, &text);
+                }
             });
+        }
         if let Some(error) = &app.probe.error {
             ui.label(
                 RichText::new(error)
@@ -580,45 +554,117 @@ fn parameters_card(app: &mut LincApp, ui: &mut Ui) {
     });
 }
 
-enum ParamValue<'a> {
-    F64(&'a mut f64),
-    U16(&'a mut u16),
-}
+const PARAM_LABELS: [&str; 12] = [
+    "PROBE TOOL #",
+    "PROBE SLOW FDRATE",
+    "PROBE TRAVERSE FR",
+    "PROBE FAST FDRATE",
+    "MAX X/Y DISTANCE",
+    "X/Y CLEARANCE",
+    "MAX Z DISTANCE",
+    "Z CLEARANCE",
+    "EXTRA PROBE DEPTH",
+    "STEP OFF WIDTH",
+    "EDGE WIDTH",
+    "TIP",
+];
 
-fn param_pair(ui: &mut Ui, l1: &str, v1: &mut ParamValue, l2: &str, v2: &mut ParamValue) {
-    param_label(ui, l1);
-    param_field(ui, v1);
-    param_label(ui, l2);
-    param_field(ui, v2);
-    ui.end_row();
+fn param_text(params: &linc_core::probe::ProbeParameters, index: usize) -> String {
+    let value = match index {
+        0 => return params.probe_tool_number.to_string(),
+        1 => params.slow_feed,
+        2 => params.traverse_feed,
+        3 => params.fast_feed,
+        4 => params.max_xy_distance,
+        5 => params.xy_clearance,
+        6 => params.max_z_distance,
+        7 => params.z_clearance,
+        8 => params.extra_depth,
+        9 => params.step_off_width,
+        10 => params.edge_width,
+        _ => params.diameter_hint,
+    };
+    if value.fract().abs() < 1e-9 {
+        format!("{value:.1}")
+    } else {
+        let mut text = format!("{value:.3}");
+        while text.ends_with('0') {
+            text.pop();
+        }
+        if text.ends_with('.') {
+            text.push('0');
+        }
+        text
+    }
 }
 
 fn param_label(ui: &mut Ui, text: &str) {
-    ui.label(
-        RichText::new(text)
-            .size(theme::font_size(7.5))
-            .color(theme::MUTED),
+    ui.add_sized(
+        [104.0, 16.0],
+        egui::Label::new(
+            RichText::new(text)
+                .size(theme::font_size(7.2))
+                .color(theme::MUTED),
+        ),
     );
 }
 
-fn param_field(ui: &mut Ui, value: &mut ParamValue) {
-    let width = 56.0;
-    let height = 14.0;
-    match value {
-        ParamValue::F64(v) => {
-            ui.add_sized(
-                [width, height],
-                egui::DragValue::new(*v).speed(0.5).max_decimals(3),
-            );
-        }
-        ParamValue::U16(v) => {
-            let mut f = **v as f64;
-            if ui
-                .add_sized([width, height], egui::DragValue::new(&mut f).speed(1.0))
-                .changed()
-            {
-                **v = f.round().clamp(0.0, u16::MAX as f64) as u16;
+fn param_field(ui: &mut Ui, app: &mut LincApp, index: usize, text: &str) {
+    let selected = app.probe.param_focused && app.probe.param_selected == index;
+    let editing = selected && app.probe.param_editing;
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(64.0, 16.0), Sense::click());
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(2), theme::PANEL_RAISED);
+    let border = if editing {
+        Stroke::new(1.5, theme::ERROR)
+    } else if selected {
+        Stroke::new(1.5, theme::ACCENT)
+    } else {
+        Stroke::new(1.0, theme::BORDER)
+    };
+    ui.painter()
+        .rect_stroke(rect, CornerRadius::same(2), border, StrokeKind::Inside);
+    if editing {
+        let inner = rect.shrink2(Vec2::new(3.0, 1.0));
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(inner)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        let mut buffer = std::mem::take(&mut app.probe.param_buffer);
+        let response = child.add_sized(
+            [inner.width(), inner.height()],
+            egui::TextEdit::singleline(&mut buffer)
+                .frame(egui::Frame::NONE)
+                .margin(egui::Margin::symmetric(2, 0))
+                .font(egui::FontId::monospace(theme::font_size(9.0)))
+                .id(egui::Id::unique("linc-probe-param")),
+        );
+        if app.probe.param_edit_focus {
+            response.request_focus();
+            if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), response.id) {
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(buffer.chars().count()),
+                )));
+                state.store(ui.ctx(), response.id);
             }
+            app.probe.param_edit_focus = false;
+        }
+        app.probe.param_buffer = buffer;
+    } else {
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            text,
+            FontId::monospace(theme::font_size(9.0)),
+            theme::FG,
+        );
+        if response.clicked() {
+            app.probe.param_selected = index;
+            app.probe.param_focused = true;
+            app.probe.param_editing = false;
+            app.probe.param_buffer.clear();
         }
     }
 }
@@ -715,12 +761,15 @@ fn small_button(ui: &mut Ui, text: &str, width: f32) -> egui::Response {
 }
 
 fn result_field(ui: &mut Ui, label: &str, value: f64) {
-    ui.label(
-        RichText::new(label)
-            .size(theme::font_size(7.5))
-            .color(theme::MUTED),
+    ui.add_sized(
+        [58.0, 16.0],
+        egui::Label::new(
+            RichText::new(label)
+                .size(theme::font_size(7.5))
+                .color(theme::MUTED),
+        ),
     );
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(66.0, 14.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(64.0, 16.0), Sense::hover());
     ui.painter()
         .rect_filled(rect, CornerRadius::same(2), theme::PANEL_RAISED);
     ui.painter().rect_stroke(
@@ -791,6 +840,9 @@ fn matrix_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
                             texture.as_ref(),
                         ) {
                             app.probe.operation = card.operation.to_string();
+                            app.probe.param_focused = false;
+                            app.probe.param_editing = false;
+                            app.probe.param_buffer.clear();
                             app.probe.error = None;
                         }
                     } else {
@@ -1563,6 +1615,9 @@ fn calibration_panel(app: &mut LincApp, ui: &mut Ui) {
                                     texture.as_ref(),
                                 ) {
                                     app.probe.operation = card.operation.to_string();
+                                    app.probe.param_focused = false;
+                                    app.probe.param_editing = false;
+                                    app.probe.param_buffer.clear();
                                     app.probe.error = None;
                                 }
                             }
@@ -1680,8 +1735,116 @@ fn help_view(app: &mut LincApp, ui: &mut Ui) {
     });
 }
 
+fn parameter_editable(category: ProbeCategory) -> bool {
+    !matches!(category, ProbeCategory::Calibrate | ProbeCategory::ProbeHelp)
+}
+
+fn start_param_edit(app: &mut LincApp) {
+    app.probe.param_buffer = param_text(&app.probe.params, app.probe.param_selected);
+    app.probe.param_focused = true;
+    app.probe.param_editing = true;
+    app.probe.param_edit_focus = true;
+    app.probe.error = None;
+}
+
+fn commit_param_edit(app: &mut LincApp) {
+    let Some(value) = crate::state::eval_expression(&app.probe.param_buffer) else {
+        app.probe.error = Some(format!(
+            "{}: invalid entry {:?}",
+            PARAM_LABELS[app.probe.param_selected], app.probe.param_buffer
+        ));
+        return;
+    };
+    match app.probe.param_selected {
+        0 => app.probe.params.probe_tool_number = value.round().clamp(0.0, u16::MAX as f64) as u16,
+        1 => app.probe.params.slow_feed = value,
+        2 => app.probe.params.traverse_feed = value,
+        3 => app.probe.params.fast_feed = value,
+        4 => app.probe.params.max_xy_distance = value,
+        5 => app.probe.params.xy_clearance = value,
+        6 => app.probe.params.max_z_distance = value,
+        7 => app.probe.params.z_clearance = value,
+        8 => app.probe.params.extra_depth = value,
+        9 => app.probe.params.step_off_width = value,
+        10 => app.probe.params.edge_width = value,
+        _ => app.probe.params.diameter_hint = value,
+    }
+    app.probe.param_editing = false;
+    app.probe.param_buffer.clear();
+    app.probe.error = None;
+}
+
+fn handle_param_edit_keys(app: &mut LincApp, ui: &mut Ui) {
+    let mut commit = false;
+    let mut cancel = false;
+    ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+            commit = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+            cancel = true;
+        }
+    });
+    if commit {
+        commit_param_edit(app);
+    } else if cancel {
+        app.probe.param_editing = false;
+        app.probe.param_buffer.clear();
+    }
+}
+
+fn handle_param_nav_keys(app: &mut LincApp, ui: &mut Ui) -> bool {
+    if !app.probe.param_focused
+        || !parameter_editable(app.probe.category)
+        || app.probe.param_editing
+    {
+        return false;
+    }
+    let mut delta = 0isize;
+    let mut edit = false;
+    ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
+            delta -= 1;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
+            delta += 1;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            delta -= 2;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            delta += 2;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+            edit = true;
+        }
+    });
+    if delta == 0 && !edit {
+        return false;
+    }
+    if delta != 0 {
+        app.probe.param_selected =
+            (app.probe.param_selected as isize + delta).clamp(0, PARAM_LABELS.len() as isize - 1)
+                as usize;
+    }
+    if edit {
+        start_param_edit(app);
+    }
+    true
+}
+
 pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
-    if app.overlay_open() || ui.ctx().text_edit_focused() {
+    if app.overlay_open() {
+        return;
+    }
+    if app.probe.param_editing {
+        handle_param_edit_keys(app, ui);
+        return;
+    }
+    if ui.ctx().text_edit_focused() {
+        return;
+    }
+    if handle_param_nav_keys(app, ui) {
         return;
     }
     let cards = cards_for(app.probe.category);
@@ -1711,6 +1874,9 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     });
     if let Some(operation) = picked {
         app.probe.operation = operation;
+        app.probe.param_focused = false;
+        app.probe.param_editing = false;
+        app.probe.param_buffer.clear();
         app.probe.error = None;
     }
     if run_now && !cards.is_empty() {
@@ -1721,6 +1887,9 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
 pub fn enter_first(app: &mut LincApp) {
     app.probe.category = ProbeCategory::OutsideCorners;
     app.probe.operation.clear();
+    app.probe.param_focused = false;
+    app.probe.param_editing = false;
+    app.probe.param_buffer.clear();
     app.probe.error = None;
 }
 
@@ -1736,6 +1905,9 @@ pub fn category_step(app: &mut LincApp, forward: bool) {
     };
     app.probe.category = ProbeCategory::ALL[next];
     app.probe.operation.clear();
+    app.probe.param_focused = false;
+    app.probe.param_editing = false;
+    app.probe.param_buffer.clear();
     app.probe.error = None;
 }
 
@@ -1763,6 +1935,23 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn parameter_order_matches_the_probe_basic_reference() {
+        let params = linc_core::probe::ProbeParameters::default();
+        assert_eq!(PARAM_LABELS[0], "PROBE TOOL #");
+        assert_eq!(PARAM_LABELS[1], "PROBE SLOW FDRATE");
+        assert_eq!(PARAM_LABELS[2], "PROBE TRAVERSE FR");
+        assert_eq!(PARAM_LABELS[3], "PROBE FAST FDRATE");
+        assert_eq!(PARAM_LABELS[4], "MAX X/Y DISTANCE");
+        assert_eq!(PARAM_LABELS[5], "X/Y CLEARANCE");
+        assert_eq!(PARAM_LABELS[6], "MAX Z DISTANCE");
+        assert_eq!(PARAM_LABELS[7], "Z CLEARANCE");
+        assert_eq!(PARAM_LABELS[8], "EXTRA PROBE DEPTH");
+        assert_eq!(PARAM_LABELS[9], "STEP OFF WIDTH");
+        assert_eq!(param_text(&params, 2), "1000.0");
+        assert_eq!(param_text(&params, 3), "500.0");
     }
 
     #[test]

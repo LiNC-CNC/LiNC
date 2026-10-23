@@ -957,6 +957,12 @@ pub struct ProbeUi {
     pub last_run: Option<Instant>,
     pub apply_target: u8,
     pub textures: HashMap<String, egui::TextureHandle>,
+    /// Inline editor for the parameter table, following the Offsets table.
+    pub param_selected: usize,
+    pub param_focused: bool,
+    pub param_editing: bool,
+    pub param_buffer: String,
+    pub param_edit_focus: bool,
 }
 
 impl ProbeUi {
@@ -972,6 +978,11 @@ impl ProbeUi {
             last_run: None,
             apply_target: 1,
             textures: HashMap::new(),
+            param_selected: 0,
+            param_focused: false,
+            param_editing: false,
+            param_buffer: String::new(),
+            param_edit_focus: false,
         }
     }
 
