@@ -444,7 +444,7 @@ fn category_tabs(app: &mut LincApp, ui: &mut Ui) {
                     .color(theme::MUTED),
             );
             ui.label(
-                RichText::new("OFFSETS / PROBE")
+                RichText::new("OFFSET NEXT")
                     .size(theme::font_size(8.0))
                     .color(theme::MUTED),
             );
@@ -1668,7 +1668,7 @@ fn help_view(app: &mut LincApp, ui: &mut Ui) {
                         "1–9 highlight a routine in the current matrix.",
                         "ENTER runs the highlighted routine.",
                         "PgUp/PgDn cycle the category strip.",
-                        "OFFSET returns to Offsets; ESC also returns to Offsets.",
+                        "OFFSET advances through the tabs; ESC returns to Offsets.",
                         "The probe is T99; the active WCS is shown in Probing Parameters.",
                     ] {
                         ui.label(RichText::new(line).size(theme::font_size(9.0)).color(theme::MUTED));
@@ -1728,6 +1728,14 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     if run_now && !cards.is_empty() {
         super::probe::run(app);
     }
+}
+
+pub fn enter_first(app: &mut LincApp) {
+    app.probe.category = ProbeCategory::OutsideCorners;
+    if let Some(card) = cards_for(app.probe.category).first() {
+        app.probe.operation = card.operation.to_string();
+    }
+    app.probe.error = None;
 }
 
 pub fn category_step(app: &mut LincApp, forward: bool) {

@@ -812,8 +812,9 @@ choose a routine group, then pick the operation card.
   Boss and Pocket, Ridge and Valley, Edge Angle, Calibrate and
   Probe Help. Rotary-axis probing is not offered. The tabs are passive
   indicators: they are not buttons and take no keyboard focus.
-- `OFFSET` (F8) toggles between the Offsets screen and the probe tabs; `Esc`
-  returns to Offsets. `PgUp`/`PgDn` cycle the probe tabs.
+- `OFFSET` (F8) cycles Offsets → Outside → Inside → Boss + Pocket → Ridge +
+  Valley → Edge Angle → Calibrate → Help → Offsets. `Esc` returns to Offsets
+  from any probe tab. `PgUp`/`PgDn` also cycle the probe tabs.
 - Each category opens a grid of illustrated operation cards. Parameters and
   results stay on the left, the routine matrix is centred and the probe symbol
   is on the right. Work offsets remain on the Offsets screen rather than being

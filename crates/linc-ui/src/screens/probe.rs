@@ -11,6 +11,10 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     super::probe_view::show(app, ui);
 }
 
+pub fn enter_first(app: &mut LincApp) {
+    super::probe_view::enter_first(app);
+}
+
 pub fn category_step(app: &mut LincApp, forward: bool) {
     super::probe_view::category_step(app, forward);
 }

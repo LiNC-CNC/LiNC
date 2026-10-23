@@ -1714,6 +1714,8 @@ impl LincApp {
         let mut page_up = false;
         let mut page_down = false;
         let mut probe_enter = false;
+        let mut probe_next = false;
+        let mut probe_exit = false;
         let mut home = false;
         let mut end = false;
         let mut focus_left = false;
@@ -1784,7 +1786,13 @@ impl LincApp {
             }
             if input.consume_key(self.keymap.offsets.modifiers, self.keymap.offsets.key) {
                 if self.page == Page::Probe {
-                    nav_page = Some(Page::Offsets);
+                    if linc_core::probe::ProbeCategory::ALL.last().copied()
+                        == Some(self.probe.category)
+                    {
+                        probe_exit = true;
+                    } else {
+                        probe_next = true;
+                    }
                 } else if self.page == Page::Offsets
                     && self.snapshot.probe.enabled
                     && self.profile.variant == linc_core::model::MachineVariant::Mill
@@ -2040,6 +2048,9 @@ impl LincApp {
             let view = self.program.view;
             self.remember_program_view(view);
         }
+        if probe_exit {
+            nav_page = Some(Page::Offsets);
+        }
         if let Some(page) = nav_page {
             self.request_page(page);
         }
@@ -2047,7 +2058,11 @@ impl LincApp {
             self.help.focus_search = true;
         }
         if probe_enter {
+            screens::probe::enter_first(self);
             self.set_page(Page::Probe);
+        }
+        if probe_next {
+            screens::probe::category_step(self, true);
         }
         if page_up {
             self.page_up();
@@ -2859,7 +2874,7 @@ impl LincApp {
             Page::Offsets => {
                 hints.push(("Arrows".into(), "SELECT"));
                 hints.push(("X/Y/Z".into(), "EDIT DRO"));
-                hints.push(("OFFSET".into(), "TOUCH PROBE"));
+                hints.push(("OFFSET".into(), "PROBE"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
             }
             Page::Probe => {
@@ -2873,7 +2888,7 @@ impl LincApp {
                             ("1-9".into(), "HIGHLIGHT"),
                             ("Enter".into(), "RUN PROBE"),
                             ("PgUp/PgDn".into(), "TABS"),
-                            ("OFFSET".into(), "OFFSETS"),
+                            ("OFFSET".into(), "NEXT TAB"),
                             (k.back.label(), "OFFSETS"),
                         ],
                     });
