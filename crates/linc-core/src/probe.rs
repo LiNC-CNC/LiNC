@@ -1070,6 +1070,22 @@ mod tests {
         assert_eq!(values[16], 0.0);
     }
 
+    #[test]
+    fn probe_mdi_blocks_pass_the_issue_preview() {
+        let params = ProbeParameters::default();
+        let axes = vec!["X".to_string(), "Y".to_string(), "Z".to_string()];
+        for operation in operations() {
+            let text = params.mdi_text(operation);
+            let preview = crate::gcode::parse_preview(&text, &axes, None, [0.0; 3]);
+            assert!(
+                preview.error.is_none(),
+                "{}: {:?}",
+                operation.id,
+                preview.error
+            );
+        }
+    }
+
     fn vendored_subroutines() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../subroutines/probe_basic")
     }
@@ -1140,3 +1156,4 @@ mod tests {
         }
     }
 }
+

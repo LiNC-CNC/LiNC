@@ -804,9 +804,15 @@ pub fn parse_preview(
         }
         let line_start_segment = preview.segments.len();
 
-        // O-words are structured blocks. The preview does not execute them.
-        if tokens.iter().any(|token| token.kind == TokenKind::OWord) {
-            // Still scan words for modal state, but do not emit a move.
+        // O-words are structured blocks. The preview neither executes nor
+        // syntax-checks them: a call such as `o<probe_z_minus_wco> call`
+        // contains words like `call` that are not G-code words, and rejecting
+        // them blocked every probe routine before it reached the interpreter.
+        if tokens.iter().any(|token| token.kind == TokenKind::OWord)
+            || raw_line.trim_start().starts_with("o<")
+            || raw_line.trim_start().starts_with("O<")
+        {
+            continue;
         }
 
         // Validate obvious malformed axis words and words without values.
