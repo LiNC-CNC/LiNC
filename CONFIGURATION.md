@@ -16,7 +16,7 @@ safety validation without connecting to LinuxCNC or HAL.
 4. **Panel I/O is split from the UI.** The LiNC-owned `linc-panel` service owns
    the serial port and `cnc_panel.*` pins. The egui HMI never opens the serial
    device. LiNC may write only its declared `linc.*` HAL outputs
-   (`hmi-alive`, `tool-change-confirm`, `status-display`).
+   (`hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`).
 5. **Safety policy is not a preference.** A profile cannot enable software
    E-stop, cycle control, jog, spindle, coolant or overrides; MDI issue is an
    explicit operator action, not a cycle-start substitute; pendant is jog-only.
@@ -227,12 +227,12 @@ and ATC values as the machine; only the HAL stack and paths differ.
   interpreter restores that file at startup, but it only *queues* the G5X
   message and the task delivers queued trajectory messages when motion is idle,
   so a session that starts in E-stop keeps the DRO at zero. Once the machine is
-  powered on, `linc_bridge.py` re-initializes the interpreter
+  powered on, `NmlBackend::sync_work_offsets` re-initializes the interpreter
   (`reset_interpreter`), which re-reads the file and delivers the offsets; it
-  reads `stat.g5x_offset` back before treating the sync as done, falls back to
-  an MDI `G54`..`G59.3`, and retries for about a minute. Offset writes go
-  through `G10 L2`/`G10 L20`, so the interpreter owns the values and writes them
-  back on exit.
+  reads `g5x_offset` back before treating the sync as done, falls back to an MDI
+  `G54`..`G59.3`, and retries a few times. Offset writes go through
+  `G10 L2`/`G10 L20`, so the interpreter owns the values; the native backend
+  mirrors the changed rows to the parameter file immediately.
 - `rio` is `hal/rio_sim.py`; no FPGA card or serial device.
 - The HAL pin surface is the same `cnc_panel.*` and `rio.*` surface as the
   real machine, so the HMI uses the same code path.
@@ -331,8 +331,8 @@ probe applies are disabled. An unknown or stale switch state is treated as ON.
 The backend rechecks the input for every write; unsaved editor content is
 preserved read-only, never discarded.
 
-LiNC writes only `linc.hmi-alive`, `linc.tool-change-confirm` and
-`linc.status-display`. No generic HAL write path exists. The loader hard-codes
+LiNC writes only `linc.hmi-alive`, `linc.tool-change-confirm`,
+`linc.status-display`, `linc.jog-increment` and `linc.jog-speed`. No generic HAL write path exists. The loader hard-codes
 USB mount flags to include `nosuid,nodev,noexec`; a profile may add flags but
 never remove them.
 
@@ -384,10 +384,10 @@ scale.
 ### Spindle feedback
 
 `[hal.pins] spindle_speed` names the HAL pin carrying actual spindle-speed
-feedback in rotations per second (`spindle.0.speed-in` by default). The bridge
+feedback in rotations per second (`spindle.0.speed-in` by default). The backend
 converts it to RPM for the second `S` row and the top bar, so the displayed true
 RPM follows the spindle override. If the pin is absent or reads 0 (no encoder
-wired), the bridge uses `spindle.N.speed-out-rps`, the loopback LinuxCNC
+wired), the backend uses `spindle.N.speed-out-rps`, the loopback LinuxCNC
 recommends, and then the programmed speed scaled by the override. The override
 percentage beside the `S` comes from the panel's spindle-override pin.
 
@@ -504,7 +504,7 @@ For this design repository:
   tool table file; an ATC/turret profile requires `P` in
   `TOOL_TABLE_COLUMNS`;
 - `[hal] write_policy = "declared-outputs-only"` and `allowed_outputs` is
-  exactly `hmi-alive`, `tool-change-confirm`, `status-display`;
+  exactly `hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`;
 - `[pendant] jog_only = true` and non-jog functions are ignored;
 - `base.toml` cannot be loaded as a runnable profile.
 
@@ -530,6 +530,6 @@ or a commissioned LinuxCNC session:
    ignored mode/cycle/spindle/coolant/override/program/macro controls.
 7. Profile paths that use `../../baiermill_pb` require the sibling checkout
    layout; use absolute paths in an installed profile.
-8. Decide whether the LinuxCNC bridge should remain the supervised official
-   module helper or be replaced by an embedded PyO3/NML implementation. The
-   `MachineBackend` boundary is unchanged either way.
+8. Native NML is now the LinuxCNC backend (`NmlBackend`); the supervised Python
+   helper has been removed. Keep `linuxcnc-nml` and the installed LinuxCNC
+   development files in the build and packaging checks.

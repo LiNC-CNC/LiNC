@@ -58,8 +58,8 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
 
 - `linc-core` — profile/INI loader, model, commands, backend trait, G-code lexer/preview, editor, probe, tool table, preferences, sim backend. Leaf: third-party deps only.
 - `linc-view` — toolpath projection/painting, sparklines. `egui` + `linc-core`.
-- `linc-hal` — `dlopen`ed HAL FFI and typed `linc.*` component. `linc-core`.
-- `linc-linuxcnc` — `MachineBackend` over a supervised `python3` helper (`python/linc_bridge.py`, embedded with `include_str!`). `linc-core`.
+- `linc-hal` — `dlopen`ed HAL FFI, typed `linc.*` component and read-only `HalReader`. `linc-core`.
+- `linc-linuxcnc` — `MachineBackend` over an in-process `NmlClient` (`linuxcnc-nml`) plus `HalReader`; no helper process, JSON or Python. `linc-core` + `linc-hal`. Requires the sibling `../linuxcnc-nml` checkout (path `../../../linuxcnc-nml` from the crate) and the LinuxCNC development files.
 - `linc-panel` — `PanelDriver`, RS-485 protocol, sim panel, `cnc_panel.*` pins. `linc-core` + `linc-hal`.
 - `linc-ui` — shell, keymap, theme, pages, files/USB. `linc-core` + `linc-view`; never HAL, LinuxCNC, serial or Python.
 - `linc-diag` — Unix-socket diagnostic protocol: discovery, envelope, `BusSource` over `linc_core::diag`, `PanelSource` over the panel's own snapshot/frames/events, crash records, bundle export. Depends only on `linc-core`.
@@ -86,7 +86,7 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
   `or2.estop_reset`; never attach a second `net`.
 - `halui.estop.activate` belongs to the machine HAL (`cnc_panel.estop -> rio.sim-estop` in simulation). Do not link it in `hal/linc.hal`.
 - `or2` is loaded once in `hal/linc.hal`; a second `loadrt or2` fails with "already exists". Add instances there.
-- The panel service owns `/dev/ttyUSB0`. The HMI and `linc_bridge.py` must never open it (a test asserts the bridge has no `serialport`/`/dev/tty`).
+- The panel service owns `/dev/ttyUSB0`. The HMI, `NmlBackend` and `HalReader` must never open it; only `linc-panel` owns serial code. `linc-linuxcnc` has no `serialport` dependency.
 - No on-screen mode, cycle, jog, spindle, coolant, override or software E-stop. The explicit exceptions are MDI, `RUN PROBE`, `CHANGE TOOL`, `RUN FROM LINE`, and the keyboard `Esc` program reset while a program is active (the panel's K4).
 - Program protect fails closed on unknown/stale and is rechecked on every write. Never discard a dirty buffer when protect turns on.
 - The tool table file always carries `P`, even for a manual changer: LinuxCNC keeps one tool per
@@ -160,7 +160,7 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
   running release binary stale. Use `cargo build --release`.
 - **Stale fixture copy.** `/home/jack/CNC/tmp/profiles/base.toml` copies `configs/base.toml` for screenshot profiles. Edit `configs/base.toml`, then
   refresh the copy; editing only the fixture hides the change.
-- **Embedded bridge.** `python/linc_bridge.py` is compiled in via `include_str!`; rebuild after editing it.
+- **Native NML build.** `linc-linuxcnc` links the sibling `../linuxcnc-nml` crates and the installed LinuxCNC development files (`/usr/include/linuxcnc`, `liblinuxcnc.a`, `libnml.so`). Rebuild after changing the crate; a cross build needs target-side LinuxCNC libraries, not the host's.
 - **Standalone IPC.** With `--sim --no-hal`, panel and HMI only see each other through `LINC_SIM_IPC` JSON files; different paths give a
   `PANEL OFFLINE` banner, not an error dialog.
 - **Wayland in headless runs.** Setting `DISPLAY` is not enough to put a window on Xvfb: winit prefers Wayland while `WAYLAND_DISPLAY` is set

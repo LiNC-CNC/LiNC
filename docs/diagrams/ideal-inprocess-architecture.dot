@@ -11,7 +11,7 @@ digraph ideal_inprocess {
     fontname="DejaVu Sans",
     fontsize=11,
     labelloc=t,
-    label=<<B>Ideal: in-process native NML backend</B><BR/><FONT POINT-SIZE="10">no Python, no helper, no JSON; direct typed calls from the backend worker</FONT>>
+    label=<<B>Current: in-process native NML backend</B><BR/><FONT POINT-SIZE="10">no Python, no helper, no JSON; direct typed calls from the backend worker</FONT>>
   ];
 
   node [

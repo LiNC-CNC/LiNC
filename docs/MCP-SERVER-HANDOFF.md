@@ -636,8 +636,8 @@ Gate logic is currently spread across:
 - `MachineSnapshot::program_editing_allowed`
 - `MachineSnapshot::mdi_allowed`
 - `MachineSnapshot::issue_allowed`
-- `PythonBridgeBackend::validate_issue`
-- `PythonBridgeBackend::validate_write`
+- `NmlBackend::validate_issue`
+- `NmlBackend::validate_write`
 - `SimBackend::require_issue`
 - individual command arms
 
@@ -1754,7 +1754,7 @@ Deliverables:
 
 - `linc-core::gates` with `Action`, `GateContext`, `Check`, `GateReport`,
   `evaluate`.
-- Refactor `PythonBridgeBackend` and `SimBackend` to call shared gates.
+- Refactor `NmlBackend` and `SimBackend` to call shared gates.
 - `linc-core::diag` DTOs and ring buffer types.
 - `UiSnapshot` and page-local snapshot types.
 - Golden JSON tests for DTOs.
@@ -1894,12 +1894,13 @@ Implemented surface:
 - Bundle: 13 files now (`panel.json`, `ui.json`, `motion.json`,
   `crashes.json` added). Every string value is rewritten so the operator's home
   path becomes `~`; a unit test covers the redaction.
-- NML: `PythonBridgeBackend` publishes `BridgeInfo` in the snapshot (kind, pid,
+- NML: `NmlBackend` publishes `BridgeInfo` in the snapshot (kind `nml`, pid,
   alive, request/reply/error counters, last and maximum latency, last
-  request/reply, 20-line stderr tail, fatal reason). `linc_get_nml` returns it
-  plus command/status connection state, ages and echo serial. The simulator
-  answers `available: false` with a reason. `restarts` is always `0`: the bridge
-  is not restarted in place, a dead child reports `alive: false` and `fatal`.
+  request/reply, fatal reason). `linc_get_nml` returns it plus command/status
+  connection state, ages and echo serial. The simulator answers
+  `available: false` with a reason. `restarts` is always `0`: the in-process
+  client is not restarted in place. There is no stderr tail because there is no
+  helper process.
 - HAL: `linc_get_hal` reports the `linc.*` outputs, the heartbeat and the
   configured component; `linc_get_hal_pins` and `linc_get_hal_signals` answer
   `available: false` with the reason that `linc-hal` resolves only five symbols
@@ -2118,8 +2119,9 @@ the socket or the UI publisher.
     before running it; do not run it while another session is active.
 16. **HAL pin browser in the UI is synthetic.** Add real introspection; do not
     mislabel snapshot values as live HAL pins.
-17. **The Python bridge is embedded with `include_str!`.** Rebuild after editing
-    `python/linc_bridge.py`.
+17. **The native NML client is linked at build time.** Rebuild after changing
+    `crates/linc-linuxcnc` or the sibling `linuxcnc-nml` crate; a cross build
+    needs target-side LinuxCNC libraries.
 18. **`MachineIni` and `Config` are not fully `Serialize`.** Add derives or DTOs;
     do not expose `Debug` output.
 19. **`linc-ui` must not depend on `linc-diag` or `linc-mcp`.**

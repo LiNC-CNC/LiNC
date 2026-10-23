@@ -150,9 +150,9 @@ Panel ownership rules:
 - The HMI **must not** open `/dev/ttyUSB0`; the panel service owns the serial
   port. The HMI **must not** duplicate panel controls as on-screen buttons.
 - LiNC **may write declared HAL outputs** through its `linc` HAL component.
-  The initial allowlist is `linc.hmi-alive`, `linc.tool-change-confirm` and
-  `linc.status-display`. It never writes arbitrary `cnc_panel.*` or
-  machine-motion pins.
+  The allowlist is `linc.hmi-alive`, `linc.tool-change-confirm`,
+  `linc.status-display`, `linc.jog-increment` and `linc.jog-speed`. It never
+  writes arbitrary `cnc_panel.*` or machine-motion pins.
 - The panel driver is modular: a `PanelDriver` trait plus a capabilities
   descriptor (buttons, LEDs, displays, mode encoding, override encoding,
   pendant support) lets future panel types and transports replace the panel
@@ -237,7 +237,7 @@ Allowed on screen:
 
 ```text
 CNC control panel --RS-485--> linc-panel (LiNC panel service) --> HAL --> halui/LinuxCNC
-QMK keyboard --USB--> linc (Rust egui) --NML or PyO3--> LinuxCNC
+QMK keyboard --USB--> linc (Rust egui) --NML--> LinuxCNC
 WHB pendant --USB--> LinuxCNC jog input only (non-jog ignored)
 LinuxCNC status --------------------------------> linc
 linc.* HAL outputs <-----------------------------> linc
@@ -252,7 +252,8 @@ cnc_panel.* HAL pins <--------------------------> linc-panel
   panel control.
 - `linc`: Rust `egui` application and machine backend. Owns no motion hardware.
   Loads the `linc` HAL component and writes only its declared outputs:
-  `linc.hmi-alive`, `linc.tool-change-confirm`, `linc.status-display`.
+  `linc.hmi-alive`, `linc.tool-change-confirm`, `linc.status-display`,
+  `linc.jog-increment` and `linc.jog-speed`.
 - `linuxcnc`: task/motion/IO. Authoritative machine state.
 - HAL glue: standard `halui`, the `linc` component, and `linc-panel`.
 
@@ -262,7 +263,7 @@ cnc_panel.* HAL pins <--------------------------> linc-panel
 LiNC/
   crates/
     linc-core/        # state, commands, backend trait, validation
-    linc-linuxcnc/    # PyO3 official module; optional C++ NML bridge
+    linc-linuxcnc/    # native NML client + HAL reader; no Python
     linc-hal/         # typed HAL FFI + linc.* output allowlist
     linc-panel/       # PanelDriver trait; generic panel and simulator drivers
     linc-ui/          # egui shell, theme, screens, widgets
@@ -298,10 +299,10 @@ The UI never talks to NML or HAL directly. A worker thread owns the backend,
 publishes snapshots over a channel, and writes typed HAL outputs through
 `linc-hal`. There is no generic arbitrary-pin write API.
 
-Preferred first bridge: **PyO3 + official `linuxcnc` module**, matching the
-Probe Basic execution semantics. The C++ NML bridge is a later replacement if
-Python must be removed. `linuxcnc-grpc` is only for a remote panel, not the
-local HMI.
+The LinuxCNC backend is **in-process native NML**: `linuxcnc-nml` owns the
+`emcCommand`/`emcStatus`/`emcError` channels and `HalReader` reads panel pins.
+There is no Python helper and no JSON transport. `linuxcnc-grpc` is only for a
+remote panel, not the local HMI.
 
 ### 4.4 Simulation panel
 
@@ -434,7 +435,7 @@ Default page. The layout is selected by `machine.gui`.
   not the rate. The second S row is the true feedback from
   `[hal.pins] spindle_speed` (RPS converted to RPM), so turning the spindle
   override changes the displayed true RPM; when that pin is absent or reads 0
-  the bridge uses `spindle.N.speed-out-rps`, then the programmed speed scaled
+  the backend uses `spindle.N.speed-out-rps`, then the programmed speed scaled
   by the override. The override percentage is the panel value. A vector
   rotation arrow beside
   the `S` shows forward (green),
@@ -514,8 +515,8 @@ it, the reason is raised as a notice rather than the key doing nothing.
 - A confirmation names the line and its block, and states that the lines before
   it are skipped — work and tool offsets, feed, spindle and coolant are not
   restored — and that motion starts from the current position.
-- The bridge requires an idle interpreter because `AUTO_RUN` on a paused program
-  would resume it rather than start at the line.
+- The backend requires an idle interpreter because `AUTO_RUN` on a paused
+  program would resume it rather than start at the line.
 
 #### GO TO LINE
 
@@ -1228,10 +1229,10 @@ Panel snapshot should include at least:
 
 `linc-panel` maintains the serial counters and raw button/LED bitmaps, and the
 simulation surfaces them. On the **physical** path they do not reach the HMI
-yet: the panel service runs with `--no-ipc` under LinuxCNC and the LinuxCNC
-bridge still reports `link.available = false`, so Diagnostics shows the
-counters as unavailable rather than zero. Wiring them over IPC or dedicated HAL
-pins is still open.
+yet: the panel service runs with `--no-ipc` under LinuxCNC and the native
+backend reports the HAL link as unavailable for these counters, so Diagnostics
+shows them as unavailable rather than zero. Wiring them over IPC or dedicated
+HAL pins is still open.
 
 ## 10. Performance
 
@@ -1251,7 +1252,7 @@ pins is still open.
 - The hardware E-stop chain is the only safety-rated stop.
 - A software E-stop button is forbidden.
 - LiNC may write only the declared `linc.*` HAL outputs
-  (`hmi-alive`, `tool-change-confirm`, `status-display`). It never writes
+  (`hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`). It never writes
   arbitrary HAL pins or machine motion/spindle/coolant/cycle pins.
 - Validate machine ON, homed, idle, program protect and no active program
   before MDI, probe, tool-change and program/offset/tool writes.
@@ -1373,7 +1374,8 @@ For the future implementation:
    roughly 14 ms per transaction; choose 0.02–0.05 s or reduce delays.
 4. Add Diagnostics counters and raw bitmaps to `linc-panel`.
 5. Verify the MPG encoder path; it is not carried by the RS-485 driver.
-6. Choose the LinuxCNC bridge: PyO3 first, C++ NML later.
+6. Native NML is the LinuxCNC backend; keep the `linuxcnc-nml` sibling crate and
+   the LinuxCNC development files in the build and packaging checks.
 7. Confirm spindle-load source (`rio.spindle-modbus.spindle_load-abs` or VFD
    equivalent); never derive it from override.
 8. Map panel `EDIT`/`HOME`/`PROGHOME` modes to UI state; they are not all
@@ -1457,7 +1459,7 @@ For the future implementation:
     the panel driver and map `g5x_index` to `54`–`59`, with `--` on
     unknown/stale or extended offsets.
 34. Implement the `linc` HAL component and typed output allowlist:
-    `hmi-alive`, `tool-change-confirm`, `status-display`. Verify ownership,
+    `hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`. Verify ownership,
     startup/shutdown, heartbeat expiry and that no arbitrary pin writes exist.
 35. Rename or alias the existing branded panel HAL component/pins to
     `cnc_panel` and update the machine HAL, or provide compatibility nets.
@@ -1654,8 +1656,8 @@ so the envelope age grows.
 Crash records are written by a panic hook in `linc`, `linc-panel` and
 `linc-mcp` to `$XDG_STATE_HOME/linc/crash-<role>-<pid>.json` and read back by
 `linc_get_crash_records` and the bundle. `linc_get_nml` reports the Python
-bridge's pid, liveness, request/reply/error counters, latency, stderr tail and a
-fatal reason; the simulator answers `available: false`. `linc_get_hal` reports
+backend's pid, liveness, request/reply/error counters, latency, stderr tail and
+a fatal reason; the simulator answers `available: false`. `linc_get_hal` reports
 the `linc.*` outputs and heartbeat; `linc_get_hal_pins` and
 `linc_get_hal_signals` answer `available: false` with the reason that the build
 does not link the full HAL C API, and never fabricate pins.

@@ -11,7 +11,7 @@ digraph current_tb {
     fontname="DejaVu Sans",
     fontsize=11,
     labelloc=t,
-    label=<<B>Current LiNC + LinuxCNC architecture</B><BR/><FONT POINT-SIZE="10">LinuxCNC backend path: UI → supervised Python helper → NML/HAL</FONT>>
+    label=<<B>Previous: supervised Python helper</B><BR/><FONT POINT-SIZE="10">LinuxCNC backend path: UI → supervised Python helper → NML/HAL</FONT>>
   ];
 
   node [

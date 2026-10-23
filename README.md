@@ -52,6 +52,11 @@ cargo build --release
 ./scripts/start-sim.sh --detach --release-estop --power-on --home --load --float
 ```
 
+The native LinuxCNC backend links `liblinuxcnc`/`libnml` and the sibling
+`../linuxcnc-nml` crate, so `cargo build` needs the LinuxCNC development files
+and a C++ compiler. The simulator uses `SimBackend` at runtime but the binary
+still links NML.
+
 `start-sim.sh` launches a real LinuxCNC process with the in-repo simulation
 HAL (`hal/rio_sim.hal`) and the LiNC HMI/panel pair. The cabinet still boots the
 way a real one is found — E-stop latched, power off — unless you ask for more:
@@ -102,11 +107,17 @@ The standalone simulation panel uses `[simulation] panel_scale` independently.
 ## Architecture
 
 The LinuxCNC backend runs behind the typed `MachineBackend` boundary. The
-current HMI uses a supervised Python helper; the proposed NML-based design keeps
-the same process boundary and replaces the helper with a Rust process using
-`linuxcnc-nml` and a native HAL reader. See
-[`docs/architecture.md`](docs/architecture.md) for the current path, the
-migration helper, the in-process ideal, and the other backend options.
+current HMI is an in-process `NmlBackend`: `linuxcnc-nml` owns `emcStatus`,
+`emcCommand` and `emcError`, and the read-only `HalReader` reads panel and
+spindle pins. There is no helper process, JSON protocol or Python runtime on the
+control path. See [`docs/architecture.md`](docs/architecture.md) for the
+implemented path, the removed Python helper, and the alternatives that were
+rejected.
+
+The native NML client links `liblinuxcnc`/`libnml`, so a build needs the
+LinuxCNC development files and the sibling `../linuxcnc-nml` checkout. The
+panel service remains a separate process and the only owner of
+`/dev/ttyUSB0`.
 
 ## HAL integration
 
@@ -246,7 +257,7 @@ LiNC/
 │   ├── linc-app/         # CLI, backend selection, window and event loop
 │   ├── linc-core/        # config, INI, model, commands, HAL, sim, IPC
 │   ├── linc-hal/         # typed linc.* HAL output component
-│   ├── linc-linuxcnc/    # LinuxCNC bridge
+│   ├── linc-linuxcnc/    # native LinuxCNC NML backend
 │   ├── linc-panel/       # RS-485 panel service and simulator panel
 │   ├── linc-ui/          # egui shell, pages, keyboard model
 │   └── linc-view/        # toolpath and lathe graph rendering
@@ -303,7 +314,7 @@ column required by a power turret (see `CONFIGURATION.md`).
   panel. Simulation HMI and panel exchange state over two atomic JSON files so
   panel modes, power, E-stop, overrides and protect drive the HMI, while the
   HMI drives the panel status and tool displays.
-- The typed `linc.*` HAL component, the LinuxCNC bridge, the WHB04B-6 pendant
+- The typed `linc.*` HAL component, the native LinuxCNC backend, the WHB04B-6 pendant
   wiring and the generated G-code help index are present.
 - `linc-mcp` exposes the HMI and panel diagnostic sockets to an agent: state,
   gates, logs, events, panel frames and transitions, motion history, crash
