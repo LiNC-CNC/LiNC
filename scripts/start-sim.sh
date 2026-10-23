@@ -122,6 +122,24 @@ if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
 fi
 rm -f "$PANEL_PID_FILE" "$LINC_PID_FILE"
 
+# A session that is killed rather than closed can leave LiNC, halui, milltask and
+# io behind even after linuxcncsvr exits. The survivors keep stale diagnostic
+# sockets and spam "status buffer is not valid" against the next session, so
+# clear them when no LinuxCNC server is running. This script is for the
+# simulation; a real machine must not have a leftover panel without LinuxCNC.
+if [[ "${LINC_KEEP_STALE:-0}" != 1 ]] && ! pgrep -x linuxcncsvr >/dev/null 2>&1; then
+    for name in halui milltask io linuxcnc linc linc-panel; do
+        if pgrep -x "$name" >/dev/null 2>&1; then
+            echo "stopping stale $name process from a killed session"
+            pkill -TERM -x "$name" >/dev/null 2>&1 || true
+        fi
+    done
+    sleep 1
+    for name in halui milltask io linuxcnc linc linc-panel; do
+        pkill -KILL -x "$name" >/dev/null 2>&1 || true
+    done
+fi
+
 # A session that is killed rather than closed leaves the System V semaphores and
 # shared memory LinuxCNC created for its NML channels behind. The next session
 # then reports "SHMEM: Can't take semaphore" and can no longer reach the task, so
