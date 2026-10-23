@@ -189,7 +189,7 @@
 <circle cx="929" cy="420" r="3.2" fill="#c084fc"/>
 <circle cx="929" cy="420" r="8" fill="none" stroke="#3ddc84" stroke-width="1" stroke-dasharray="2 2" opacity="0.8"/>
 <line x1="929" y1="420" x2="929" y2="437" stroke="#3ddc84" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.6"/>
-<rect x="888" y="438" width="82" height="12" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/>
+<rect x="888" y="438" width="82" height="12" rx="1" fill="#6b7280" stroke="#4b5563" stroke-width="1.2"/>
 <line x1="888" y1="438" x2="970" y2="438" stroke="#9aa0a6" stroke-width="1.2"/>
 <text x="886" y="482" fill="#e8eaed" font-size="6.4" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE INPUT</text>
 <circle cx="888" cy="493" r="2.6" fill="#3ddc84"/>

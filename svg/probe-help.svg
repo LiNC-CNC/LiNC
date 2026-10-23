@@ -73,7 +73,7 @@
 <text x="382" y="252" fill="#9aa0a6" font-size="6.8" font-family="sans-serif" text-anchor="start"></text>
 <text x="382" y="268" fill="#e8eaed" font-size="6.8" font-family="sans-serif" text-anchor="start">If the probe is obstructed by the stock during its Z positioning</text>
 <text x="382" y="284" fill="#e8eaed" font-size="6.8" font-family="sans-serif" text-anchor="start">move, an error is raised and the routine aborts.</text>
-<rect x="450" y="370" width="420" height="150" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/>
+<rect x="450" y="370" width="420" height="150" fill="#6b7280" stroke="#4b5563" stroke-width="1.2"/>
 <text x="660" y="496" fill="#6b7280" font-size="6.0" font-family="monospace" text-anchor="middle">WORK PIECE</text>
 <line x1="500" y1="326" x2="500" y2="358" stroke="#6b7280" stroke-width="2"/>
 <circle cx="500" cy="366" r="3.2" fill="#c084fc"/>

@@ -75,7 +75,7 @@
 <line x1="244" y1="390" x2="244" y2="444" stroke="#6b7280" stroke-width="1.6"/>
 <circle cx="244" cy="452" r="3.2" fill="#c084fc"/>
 <circle cx="244" cy="452" r="8" fill="none" stroke="#3ddc84" stroke-width="1" stroke-dasharray="2 2" opacity="0.8"/>
-<rect x="190" y="470" width="108" height="12" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/>
+<rect x="190" y="470" width="108" height="12" rx="1" fill="#6b7280" stroke="#4b5563" stroke-width="1.2"/>
 <line x1="190" y1="470" x2="298" y2="470" stroke="#9aa0a6" stroke-width="1.2"/>
 <text x="170" y="506" fill="#e8eaed" font-size="6.4" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE INPUT</text>
 <circle cx="172" cy="517" r="2.6" fill="#3ddc84"/>
