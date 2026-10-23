@@ -852,13 +852,14 @@ impl MachineBackend for SimBackend {
                         .find(|op| block.contains(op.call));
                     let family = operation.map(|op| op.result_family()).unwrap_or_default();
                     let diameter = self.profile.config.probe.probe_diameter;
-                    let mut values = [0.0; 9];
+                    let mut values = [0.0; 12];
                     match family {
                         crate::probe::ResultFamily::BossPocket => {
                             values[0] = diameter;
                             values[1] = tip[0];
                             values[2] = diameter;
                             values[3] = tip[1];
+                            values[9] = diameter;
                         }
                         crate::probe::ResultFamily::Edge => {
                             let call = operation.map(|op| op.call).unwrap_or_default();
@@ -1068,7 +1069,9 @@ impl MachineBackend for SimBackend {
                     return Err(MachineError::NotIdle);
                 }
                 if !(1..=9).contains(&index) {
-                    return Err(MachineError::Invalid("work offset must be G54-G59.3".into()));
+                    return Err(MachineError::Invalid(
+                        "work offset must be G54-G59.3".into(),
+                    ));
                 }
                 for (axis, value) in values.iter() {
                     self.profile
@@ -1125,7 +1128,9 @@ impl MachineBackend for SimBackend {
                     return Err(MachineError::NotIdle);
                 }
                 if !(1..=9).contains(&index) {
-                    return Err(MachineError::Invalid("work offset must be G54-G59.3".into()));
+                    return Err(MachineError::Invalid(
+                        "work offset must be G54-G59.3".into(),
+                    ));
                 }
                 // `G10 L20` makes the current position read zero, so the new
                 // offset is the machine coordinate for each selected axis.
@@ -1174,7 +1179,9 @@ impl MachineBackend for SimBackend {
                     return Err(MachineError::NotIdle);
                 }
                 if !(1..=9).contains(&index) {
-                    return Err(MachineError::Invalid("work offset must be G54-G59.3".into()));
+                    return Err(MachineError::Invalid(
+                        "work offset must be G54-G59.3".into(),
+                    ));
                 }
                 // `G10 L20` stores the offset that makes the position read the
                 // given coordinates, so the new offset is machine - value.
@@ -1405,10 +1412,7 @@ enabled = true
             })
             .expect("G59.3 accepts an offset write");
         backend
-            .send(MachineCommand::SetWorkPosition {
-                index: 8,
-                values,
-            })
+            .send(MachineCommand::SetWorkPosition { index: 8, values })
             .expect("G59.2 accepts a position write");
         backend
             .send(MachineCommand::ZeroWorkOffset {

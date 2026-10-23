@@ -763,7 +763,7 @@ pub struct ProbeResult {
     pub mode: String,
     pub timestamp_ms: u64,
     pub values: Vec<f64>,
-    /// Which `#1001`–`#1009` layout the routine wrote, so the UI labels the
+    /// Which `#1001`–`#1012` result layout the routine wrote, so the UI labels the
     /// slots by meaning instead of assuming X/Y/Z positions.
     #[serde(default)]
     pub family: crate::probe::ResultFamily,
@@ -1277,10 +1277,7 @@ impl MachineSnapshot {
     /// Two-digit panel status. Unknown never guesses: a stale snapshot or an
     /// offline panel reports `--` rather than the last known value.
     pub fn status_display_value(&self, source: StatusSource) -> Option<i32> {
-        if self.meta.stale
-            || !self.panel.connected
-            || self.panel.communication_error
-        {
+        if self.meta.stale || !self.panel.connected || self.panel.communication_error {
             return None;
         }
         match source {

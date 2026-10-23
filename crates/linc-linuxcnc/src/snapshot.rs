@@ -497,8 +497,8 @@ impl SnapshotBuilder {
         // parameter file is the only readable copy, and LinuxCNC writes it on
         // interpreter exit; a probe that runs to M2 is therefore visible on
         // the next poll only when the controller has written the file.
-        let mut values = [0.0; 9];
-        for (index, key) in (1001..=1009).enumerate() {
+        let mut values = [0.0; 12];
+        for (index, key) in (1001..=1012).enumerate() {
             values[index] = parameters.get(key);
         }
         let signature = format!("{values:?}");
@@ -555,6 +555,13 @@ impl SnapshotBuilder {
             while snapshot.probe.history.len() > 32 {
                 snapshot.probe.history.pop_back();
             }
+            self.last_probe_signature = Some(signature);
+        } else if self.last_probe_signature.as_deref() != Some(signature.as_str())
+            && snapshot.probe.last_result.is_some()
+        {
+            // A reset subroutine zeroes #1001..#1012. Clear the old result so
+            // the UI shows the reset values instead of stale measurements.
+            snapshot.probe.last_result = None;
             self.last_probe_signature = Some(signature);
         }
     }

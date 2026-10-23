@@ -93,7 +93,8 @@ impl ProbeOperation {
     }
 }
 
-macro_rules! op {    ($id:literal, $name:literal, $call:literal, $cat:ident, $diagram:ident, $desc:literal, $applies:literal, $cal:literal) => {
+macro_rules! op {
+    ($id:literal, $name:literal, $call:literal, $cat:ident, $diagram:ident, $desc:literal, $applies:literal, $cal:literal) => {
         ProbeOperation {
             id: $id,
             name: $name,
@@ -727,21 +728,26 @@ impl ProbeParameters {
     /// Build the two MDI blocks used by `RUN PROBE`: update the Probe Basic
     /// parameter block, then invoke the selected routine. `IssueMdi` splits
     /// newline-separated blocks and issues them sequentially.
-    pub fn blocks(&self, operation: &ProbeOperation) -> Vec<String> {
+    pub fn parameter_update_block(&self) -> String {
         let values = self
             .values()
             .iter()
             .map(|value| format_number(*value))
             .collect::<Vec<_>>();
-        let update = format!(
+        format!(
             "o<touch_probe_param_update> call {}",
             values
                 .iter()
                 .map(|value| format!("[{value}]"))
                 .collect::<String>()
-        );
-        let call = format!("o<{}> call", operation.call);
-        vec![update, call]
+        )
+    }
+
+    pub fn blocks(&self, operation: &ProbeOperation) -> Vec<String> {
+        vec![
+            self.parameter_update_block(),
+            format!("o<{}> call", operation.call),
+        ]
     }
 
     pub fn mdi_text(&self, operation: &ProbeOperation) -> String {
@@ -957,7 +963,8 @@ mod tests {
     #[test]
     fn result_slots_are_not_axis_positions() {
         // #1001 is an X width and #1002 an X centre, not X and Y positions.
-        let results = ParameterResults::from_values(&[50.0, 12.5, 30.0, -4.25, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let results =
+            ParameterResults::from_values(&[50.0, 12.5, 30.0, -4.25, 0.0, 0.0, 0.0, 0.0, 0.0]);
         let measured = results.measurements(ResultFamily::BossPocket);
         assert_eq!(measured.len(), 4);
         assert_eq!(measured[0].parameter, 1001);
@@ -994,7 +1001,8 @@ mod tests {
     fn z_surface_result_is_never_read_as_x() {
         // A Z-surface routine writes only #1009. Reading #1001 as X (the old
         // behaviour) displayed a stale width as the probed X coordinate.
-        let results = ParameterResults::from_values(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -7.25]);
+        let results =
+            ParameterResults::from_values(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -7.25]);
         let measured = results.measurements(ResultFamily::SurfaceZ);
         assert_eq!(measured.len(), 1);
         assert_eq!(measured[0].parameter, 1009);
@@ -1063,8 +1071,7 @@ mod tests {
     }
 
     fn vendored_subroutines() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../subroutines/probe_basic")
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../subroutines/probe_basic")
     }
 
     #[test]

@@ -956,14 +956,12 @@ pub struct ProbeUi {
     pub error: Option<String>,
     pub last_run: Option<Instant>,
     pub apply_target: u8,
+    pub textures: HashMap<String, egui::TextureHandle>,
 }
 
 impl ProbeUi {
     pub fn new(params: ProbeParameters, wcs: String) -> Self {
-        let operation = linc_core::probe::operations_in(ProbeCategory::OutsideCorners)
-            .first()
-            .map(|operation| operation.id.to_string())
-            .unwrap_or_default();
+        let operation = "back_left_top_corner".to_string();
         Self {
             category: ProbeCategory::OutsideCorners,
             operation,
@@ -974,6 +972,7 @@ impl ProbeUi {
             error: None,
             last_run: None,
             apply_target: 1,
+            textures: HashMap::new(),
         }
     }
 
@@ -984,6 +983,23 @@ impl ProbeUi {
     pub fn mdi(&self) -> Option<String> {
         self.operation()
             .map(|operation| self.params.mdi_text(operation))
+    }
+
+    pub fn texture(&mut self, ctx: &egui::Context, operation: &str) -> Option<egui::TextureHandle> {
+        if let Some(texture) = self.textures.get(operation) {
+            return Some(texture.clone());
+        }
+        let bytes = crate::assets::probe_icon_bytes(&format!("{operation}.png"))?;
+        let image = image::load_from_memory(bytes).ok()?.to_rgba8();
+        let size = [image.width() as usize, image.height() as usize];
+        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+        let texture = ctx.load_texture(
+            format!("probe-icon-{operation}"),
+            color_image,
+            egui::TextureOptions::LINEAR,
+        );
+        self.textures.insert(operation.to_string(), texture.clone());
+        Some(texture)
     }
 }
 
@@ -1225,7 +1241,6 @@ impl Binding {
     pub const fn new(key: egui::Key, modifiers: egui::Modifiers) -> Self {
         Self { key, modifiers }
     }
-
 
     /// Short display form, e.g. `F5`, `Ctrl+Q`, `Esc`, `/`. Used by the
     /// bottom bar's keyboard-command hints.
@@ -1475,14 +1490,26 @@ impl Keymap {
         let keymap = Self {
             machine: binding(&keys.machine, Binding::new(Key::F5, none), &mut rejected),
             program: binding(&keys.program, Binding::new(Key::F6, none), &mut rejected),
-            view_cycle: binding(&keys.view_cycle, Binding::new(Key::F10, ctrl), &mut rejected),
-            toggle_bounds: binding(&keys.toggle_bounds, Binding::new(Key::B, ctrl), &mut rejected),
+            view_cycle: binding(
+                &keys.view_cycle,
+                Binding::new(Key::F10, ctrl),
+                &mut rejected,
+            ),
+            toggle_bounds: binding(
+                &keys.toggle_bounds,
+                Binding::new(Key::B, ctrl),
+                &mut rejected,
+            ),
             program_cycle_view: binding(
                 &keys.program_cycle_view,
                 Binding::new(Key::F10, none),
                 &mut rejected,
             ),
-            graph_fit: binding(&keys.graph_fit, Binding::new(Key::Num0, ctrl), &mut rejected),
+            graph_fit: binding(
+                &keys.graph_fit,
+                Binding::new(Key::Num0, ctrl),
+                &mut rejected,
+            ),
             graph_clear: binding(&keys.graph_clear, Binding::new(Key::L, ctrl), &mut rejected),
             goto_line: binding(&keys.goto_line, Binding::new(Key::G, ctrl), &mut rejected),
             program_run_from_line: binding(
@@ -1497,23 +1524,27 @@ impl Keymap {
             ),
             tools: binding(&keys.tools, Binding::new(Key::F7, none), &mut rejected),
             offsets: binding(&keys.offsets, Binding::new(Key::F8, none), &mut rejected),
-            diagnostics: binding(
-                &keys.diagnostics,
-                Binding::new(Key::D, ctrl),
-                &mut rejected,
-            ),
+            diagnostics: binding(&keys.diagnostics, Binding::new(Key::D, ctrl), &mut rejected),
             help: binding(&keys.help, Binding::new(Key::H, ctrl), &mut rejected),
             messages: binding(&keys.messages, Binding::new(Key::M, none), &mut rejected),
             back: binding(&keys.back, Binding::new(Key::Escape, none), &mut rejected),
             quit: binding(&keys.quit, Binding::new(Key::Q, ctrl), &mut rejected),
-            activate: binding(&keys.activate, Binding::new(Key::Enter, none), &mut rejected),
+            activate: binding(
+                &keys.activate,
+                Binding::new(Key::Enter, none),
+                &mut rejected,
+            ),
             open: binding(&keys.open, Binding::new(Key::O, ctrl), &mut rejected),
             save: binding(&keys.save, Binding::new(Key::S, ctrl), &mut rejected),
             undo: binding(&keys.undo, Binding::new(Key::Z, ctrl), &mut rejected),
             redo: binding(&keys.redo, Binding::new(Key::Y, ctrl), &mut rejected),
             find: binding(&keys.find, Binding::new(Key::F, ctrl), &mut rejected),
             refresh: binding(&keys.refresh, Binding::new(Key::R, ctrl), &mut rejected),
-            mdi_issue: binding(&keys.mdi_issue, Binding::new(Key::Enter, none), &mut rejected),
+            mdi_issue: binding(
+                &keys.mdi_issue,
+                Binding::new(Key::Enter, none),
+                &mut rejected,
+            ),
             mdi_history_up: binding(
                 &keys.mdi_history_up,
                 Binding::new(Key::ArrowUp, none),
@@ -1524,7 +1555,11 @@ impl Keymap {
                 Binding::new(Key::ArrowDown, none),
                 &mut rejected,
             ),
-            help_search: binding(&keys.help_search, Binding::new(Key::Slash, none), &mut rejected),
+            help_search: binding(
+                &keys.help_search,
+                Binding::new(Key::Slash, none),
+                &mut rejected,
+            ),
             rejected,
         };
         keymap

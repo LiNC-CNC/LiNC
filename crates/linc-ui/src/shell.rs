@@ -281,10 +281,7 @@ impl LincApp {
     }
 
     /// Attach the diagnostic bus the app server publishes into.
-    pub fn set_diag_bus(
-        &mut self,
-        bus: std::sync::Arc<std::sync::Mutex<linc_core::diag::Bus>>,
-    ) {
+    pub fn set_diag_bus(&mut self, bus: std::sync::Arc<std::sync::Mutex<linc_core::diag::Bus>>) {
         self.diag_bus = Some(bus);
     }
 
@@ -494,9 +491,7 @@ impl LincApp {
         {
             let configured = app.profile.config.probe.tool_number;
             let expected = linc_core::probe::EXPECTED_PROBE_TOOL;
-            log::warn!(
-                "probe tool number is {configured}, expected {expected} (#3014)"
-            );
+            log::warn!("probe tool number is {configured}, expected {expected} (#3014)");
             app.toast(
                 format!("Probe tool is T{configured}, expected T{expected}"),
                 theme::WARNING,
@@ -756,7 +751,9 @@ impl LincApp {
         if self.snapshot.program.line_count == 0 {
             return Some("no program is loaded");
         }
-        if self.snapshot.task.running || self.snapshot.task.interp != linc_core::model::InterpState::Idle {
+        if self.snapshot.task.running
+            || self.snapshot.task.interp != linc_core::model::InterpState::Idle
+        {
             return Some("abort the running program first");
         }
         if self.snapshot.machine.estop {
@@ -771,11 +768,15 @@ impl LincApp {
         if self.panel_offline() || self.snapshot.meta.stale {
             return Some("panel state is not current");
         }
-        if self
-            .axes()
-            .iter()
-            .any(|axis| !self.snapshot.machine.homed.get(axis).copied().unwrap_or(false))
-        {
+        if self.axes().iter().any(|axis| {
+            !self
+                .snapshot
+                .machine
+                .homed
+                .get(axis)
+                .copied()
+                .unwrap_or(false)
+        }) {
             return Some("home every axis first");
         }
         None
@@ -813,7 +814,8 @@ impl LincApp {
         if count == 0 {
             return;
         }
-        let selected = (self.program.selected_line as isize + step).clamp(1, count as isize) as usize;
+        let selected =
+            (self.program.selected_line as isize + step).clamp(1, count as isize) as usize;
         self.program.selected_line = selected;
         self.program.code_scroll_to_line = Some(selected);
         // Choosing a line is the operator taking over; the tool must not drag
@@ -919,9 +921,7 @@ impl LincApp {
         if page == Page::Help {
             self.help.ensure_loaded();
         }
-        if page == Page::Program
-            && self.program.view == ProgramView::Code
-            && self.editing_allowed()
+        if page == Page::Program && self.program.view == ProgramView::Code && self.editing_allowed()
         {
             self.program.focus_editor = true;
         }
@@ -1161,8 +1161,7 @@ impl LincApp {
         self.modal.is_some()
             || self.messages_dialog
             || self.help.dialog.is_some()
-            || self.snapshot.tool_change.status
-                == linc_core::model::ToolChangeStatus::ManualPrompt
+            || self.snapshot.tool_change.status == linc_core::model::ToolChangeStatus::ManualPrompt
     }
 
     pub fn escape(&mut self) {
@@ -1442,15 +1441,18 @@ impl LincApp {
     fn sync_probe(&mut self) {
         if self.snapshot.probe.enabled {
             self.probe.wcs = self.snapshot.probe.selected_wcs.clone();
-            if let Some(result) = self.snapshot.probe.last_result.as_ref() {
+            if let Some(index) =
+                (1..=9).find(|index| linc_core::model::wcs_name(*index) == self.probe.wcs)
+            {
+                self.probe.apply_target = index;
+            }
+            if let Some(_result) = self.snapshot.probe.last_result.as_ref() {
                 if self.probe.last_run.is_none() {
                     self.probe.last_run = Some(Instant::now());
                 }
-                let _ = result;
             }
         }
     }
-
     pub fn active_offset_values(&self) -> Option<&linc_core::model::AxisMap<f64>> {
         active_offset(&self.snapshot)
     }
@@ -1461,7 +1463,8 @@ impl LincApp {
     }
 
     pub fn jog_increment_index(&self) -> usize {
-        self.jog_increment_index.min(self.increments().len().saturating_sub(1))
+        self.jog_increment_index
+            .min(self.increments().len().saturating_sub(1))
     }
 
     /// Selected increment in machine units; 0.0 means continuous jog.
@@ -1470,7 +1473,9 @@ impl LincApp {
     }
 
     pub fn jog_increment_label(&self) -> Option<String> {
-        crate::state::jog_increment(self.increments(), self.jog_increment_index()).0.into()
+        crate::state::jog_increment(self.increments(), self.jog_increment_index())
+            .0
+            .into()
     }
 
     /// Publish the selection to `linc.jog-increment` when it changes.
@@ -1559,8 +1564,7 @@ impl LincApp {
     /// The work offset the preview is drawn with, in machine coordinates: the
     /// system the program selects, else the controller's active one.
     fn preview_offset(&self, text: &str) -> Option<linc_core::model::AxisMap<f64>> {
-        let index = linc_core::gcode::program_wcs(text)
-            .or(self.snapshot.offsets.active_index)?;
+        let index = linc_core::gcode::program_wcs(text).or(self.snapshot.offsets.active_index)?;
         self.snapshot
             .offsets
             .offsets
@@ -1647,7 +1651,11 @@ impl LincApp {
 
     pub fn focus_nav(&mut self) {
         self.focus_region = FocusRegion::Nav;
-        self.nav_focus = self.nav.iter().position(|page| *page == self.page).unwrap_or(0);
+        self.nav_focus = self
+            .nav
+            .iter()
+            .position(|page| *page == self.page)
+            .unwrap_or(0);
     }
 
     pub fn handle_keyboard(&mut self, ui: &mut egui::Ui) {
@@ -1705,6 +1713,7 @@ impl LincApp {
         let mut help_search = false;
         let mut page_up = false;
         let mut page_down = false;
+        let mut probe_enter = false;
         let mut home = false;
         let mut end = false;
         let mut focus_left = false;
@@ -1757,8 +1766,10 @@ impl LincApp {
                 if input.consume_key(self.keymap.graph_fit.modifiers, self.keymap.graph_fit.key) {
                     graph_fit = true;
                 }
-                if input.consume_key(self.keymap.graph_clear.modifiers, self.keymap.graph_clear.key)
-                {
+                if input.consume_key(
+                    self.keymap.graph_clear.modifiers,
+                    self.keymap.graph_clear.key,
+                ) {
                     graph_clear = true;
                 }
                 if input.consume_key(
@@ -1772,13 +1783,25 @@ impl LincApp {
                 nav_page = Some(Page::Tools);
             }
             if input.consume_key(self.keymap.offsets.modifiers, self.keymap.offsets.key) {
-                nav_page = Some(Page::Offsets);
+                if self.page == Page::Probe {
+                    nav_page = Some(Page::Offsets);
+                } else if self.page == Page::Offsets
+                    && self.snapshot.probe.enabled
+                    && self.profile.variant == linc_core::model::MachineVariant::Mill
+                {
+                    probe_enter = true;
+                } else {
+                    nav_page = Some(Page::Offsets);
+                }
             }
             // Ctrl+D duplicates a line in the editable program; that page-local
             // command shadows the global Diagnostics key there.
             let editing_program = self.page == Page::Program && self.editing_allowed();
             if !editing_program
-                && input.consume_key(self.keymap.diagnostics.modifiers, self.keymap.diagnostics.key)
+                && input.consume_key(
+                    self.keymap.diagnostics.modifiers,
+                    self.keymap.diagnostics.key,
+                )
             {
                 nav_page = Some(Page::Diagnostics);
             }
@@ -1915,7 +1938,10 @@ impl LincApp {
             if input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowRight) {
                 focus_right = true;
             }
-            if input.consume_key(self.keymap.help_search.modifiers, self.keymap.help_search.key) {
+            if input.consume_key(
+                self.keymap.help_search.modifiers,
+                self.keymap.help_search.key,
+            ) {
                 help_search = true;
             }
             // The page test comes first: `consume_key` swallows the key whether
@@ -2020,6 +2046,9 @@ impl LincApp {
         if (help_search || find) && self.page == Page::Help && !self.overlay_open() {
             self.help.focus_search = true;
         }
+        if probe_enter {
+            self.set_page(Page::Probe);
+        }
         if page_up {
             self.page_up();
         }
@@ -2063,7 +2092,11 @@ impl LincApp {
                 }
             });
             if activate {
-                let page = self.nav.get(self.nav_focus).copied().unwrap_or(Page::Machine);
+                let page = self
+                    .nav
+                    .get(self.nav_focus)
+                    .copied()
+                    .unwrap_or(Page::Machine);
                 self.request_page(page);
             }
         }
@@ -2417,7 +2450,11 @@ impl LincApp {
         for entry in &self.profile.config.ui.servo_load {
             let label = entry.trim().to_ascii_uppercase();
             if label == "S" {
-                if let Some(load) = self.snapshot.spindles.first().and_then(|spindle| spindle.load)
+                if let Some(load) = self
+                    .snapshot
+                    .spindles
+                    .first()
+                    .and_then(|spindle| spindle.load)
                 {
                     rows.push((label, load));
                 }
@@ -2522,8 +2559,8 @@ impl LincApp {
             };
             // TOUCH PROBE is a subpage of OFFSETS; keep the parent marked in
             // the sidebar instead of leaving no entry highlighted.
-            let selected = *page == self.page
-                || (*page == Page::Offsets && self.page == Page::Probe);
+            let selected =
+                *page == self.page || (*page == Page::Offsets && self.page == Page::Probe);
             let focused = self.focus_region == FocusRegion::Nav && self.nav_focus == index;
             let (rect, response) =
                 ui.allocate_exact_size(Vec2::new(theme::NAV_WIDTH - 20.0, 38.0), Sense::click());
@@ -2600,80 +2637,83 @@ impl LincApp {
         let shortcuts_height = (ui.available_height() - 32.0).max(80.0);
         let shortcuts = self.key_hints();
         if !shortcuts.is_empty() {
-        Frame::new()
-            .fill(theme::PANEL)
-            .stroke(Stroke::new(1.0, theme::BORDER))
-            .corner_radius(4)
-            .inner_margin(Margin::same(6))
-            .show(ui, |ui| {
-                // The list can be longer than the sidebar: scroll it, and keep
-                // the safety note under it on screen.
-                ui.spacing_mut().item_spacing.y = 0.0;
-                ui.label(
-                    RichText::new("SHORTCUTS")
-                        .size(theme::font_size(9.0))
-                        .strong()
-                        .color(theme::MUTED),
-                );
-                egui::ScrollArea::vertical()
-                    .id_salt("sidebar-shortcuts")
-                    .max_height((shortcuts_height - 20.0).max(60.0))
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                // Half a text line between entries: the rows are dense enough
-                // to read as a list, with air that does not waste the pane.
-                let hint_line = ui
-                    .painter()
-                    .layout_no_wrap(
-                        "Ag".to_string(),
-                        egui::FontId::monospace(theme::font_size(9.0)),
-                        theme::MUTED,
-                    )
-                    .size()
-                    .y;
-                for group in shortcuts.iter() {
-                    if !group.title.is_empty() {
-                        // Also before the first title: the pane header is not a
-                        // group, and the first one was sitting right under it.
-                        ui.add_space(hint_line * 0.5);
-                        ui.label(
-                            RichText::new(group.title)
-                                .size(theme::font_size(8.0))
-                                .strong()
-                                .color(theme::MUTED),
-                        );
-                        ui.add_space(hint_line * 0.35);
-                    }
-                    for (index, (key, action)) in group.items.iter().enumerate() {
-                        // One line per command, exactly; `ui.horizontal`
-                        // inherited the 44 px touch target and left large air
-                        // between two 9 pt rows.
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(ui.available_width(), hint_line),
-                            Layout::left_to_right(Align::Center),
-                            |ui| {
-                                ui.label(
-                                    RichText::new(key.clone())
-                                        .monospace()
-                                        .size(theme::font_size(9.0))
-                                        .color(theme::C3),
-                                );
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            Frame::new()
+                .fill(theme::PANEL)
+                .stroke(Stroke::new(1.0, theme::BORDER))
+                .corner_radius(4)
+                .inner_margin(Margin::same(6))
+                .show(ui, |ui| {
+                    // The list can be longer than the sidebar: scroll it, and keep
+                    // the safety note under it on screen.
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui.label(
+                        RichText::new("SHORTCUTS")
+                            .size(theme::font_size(9.0))
+                            .strong()
+                            .color(theme::MUTED),
+                    );
+                    egui::ScrollArea::vertical()
+                        .id_salt("sidebar-shortcuts")
+                        .max_height((shortcuts_height - 20.0).max(60.0))
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            // Half a text line between entries: the rows are dense enough
+                            // to read as a list, with air that does not waste the pane.
+                            let hint_line = ui
+                                .painter()
+                                .layout_no_wrap(
+                                    "Ag".to_string(),
+                                    egui::FontId::monospace(theme::font_size(9.0)),
+                                    theme::MUTED,
+                                )
+                                .size()
+                                .y;
+                            for group in shortcuts.iter() {
+                                if !group.title.is_empty() {
+                                    // Also before the first title: the pane header is not a
+                                    // group, and the first one was sitting right under it.
+                                    ui.add_space(hint_line * 0.5);
                                     ui.label(
-                                        RichText::new(*action)
-                                            .size(theme::font_size(9.0))
+                                        RichText::new(group.title)
+                                            .size(theme::font_size(8.0))
+                                            .strong()
                                             .color(theme::MUTED),
                                     );
-                                });
-                            },
-                        );
-                        if index + 1 < group.items.len() {
-                            ui.add_space(hint_line * 0.5);
-                        }
-                    }
-                }
-                    });
-            });
+                                    ui.add_space(hint_line * 0.35);
+                                }
+                                for (index, (key, action)) in group.items.iter().enumerate() {
+                                    // One line per command, exactly; `ui.horizontal`
+                                    // inherited the 44 px touch target and left large air
+                                    // between two 9 pt rows.
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(ui.available_width(), hint_line),
+                                        Layout::left_to_right(Align::Center),
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new(key.clone())
+                                                    .monospace()
+                                                    .size(theme::font_size(9.0))
+                                                    .color(theme::C3),
+                                            );
+                                            ui.with_layout(
+                                                Layout::right_to_left(Align::Center),
+                                                |ui| {
+                                                    ui.label(
+                                                        RichText::new(*action)
+                                                            .size(theme::font_size(9.0))
+                                                            .color(theme::MUTED),
+                                                    );
+                                                },
+                                            );
+                                        },
+                                    );
+                                    if index + 1 < group.items.len() {
+                                        ui.add_space(hint_line * 0.5);
+                                    }
+                                }
+                            }
+                        });
+                });
         }
     }
 
@@ -2764,8 +2804,7 @@ impl LincApp {
                         self.files.nc_parent_selected,
                     )
                 };
-                let enter = if on_parent
-                    || entries.get(selected).is_some_and(|entry| entry.is_dir)
+                let enter = if on_parent || entries.get(selected).is_some_and(|entry| entry.is_dir)
                 {
                     "OPEN"
                 } else if self.files.usb_focused {
@@ -2791,10 +2830,7 @@ impl LincApp {
                 });
                 groups.push(ShortcutGroup {
                     title: "MEDIA",
-                    items: vec![
-                        (k.refresh.label(), "REFRESH"),
-                        ("E".into(), "EJECT"),
-                    ],
+                    items: vec![(k.refresh.label(), "REFRESH"), ("E".into(), "EJECT")],
                 });
             }
             Page::Help => {
@@ -2823,9 +2859,27 @@ impl LincApp {
             Page::Offsets => {
                 hints.push(("Arrows".into(), "SELECT"));
                 hints.push(("X/Y/Z".into(), "EDIT DRO"));
+                hints.push(("OFFSET".into(), "TOUCH PROBE"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
             }
-            Page::Probe => hints.push(("Arrows".into(), "SELECT")),
+            Page::Probe => {
+                if self.probe.category == linc_core::probe::ProbeCategory::ProbeHelp {
+                    hints.push(("OFFSET".into(), "OFFSETS"));
+                    hints.push((k.back.label(), "OFFSETS"));
+                } else {
+                    groups.push(ShortcutGroup {
+                        title: "PROBE KEYS",
+                        items: vec![
+                            ("1-9".into(), "HIGHLIGHT"),
+                            ("Enter".into(), "RUN PROBE"),
+                            ("PgUp/PgDn".into(), "TABS"),
+                            ("OFFSET".into(), "OFFSETS"),
+                            (k.back.label(), "OFFSETS"),
+                        ],
+                    });
+                    hints.push(("Arrows".into(), "FOCUS"));
+                }
+            }
             Page::Tools => {
                 hints.push(("Arrows".into(), "SELECT"));
                 hints.push(("Enter".into(), "EDIT"));
@@ -2882,7 +2936,11 @@ impl LincApp {
                         })
                         .size(size)
                         .strong()
-                        .color(if errors > 0 { theme::ERROR } else { theme::MUTED }),
+                        .color(if errors > 0 {
+                            theme::ERROR
+                        } else {
+                            theme::MUTED
+                        }),
                     );
                     ui.add_space(8.0);
                     for alarm in self.snapshot.alarms.iter().take(3) {
@@ -3582,7 +3640,10 @@ pub fn fps_step(previous: f32, dt: f32) -> f32 {
 /// Parse a page name as the diagnostic tools spell it. Accepts the navigation
 /// label and the enum-ish spelling, so `G-CODE HELP` and `HELP` both work.
 pub fn page_from_name(name: &str) -> Option<Page> {
-    let wanted = name.trim().to_ascii_uppercase().replace(['-', '_', ' '], " ");
+    let wanted = name
+        .trim()
+        .to_ascii_uppercase()
+        .replace(['-', '_', ' '], " ");
     for page in [
         Page::Machine,
         Page::Program,
@@ -3617,7 +3678,7 @@ pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
     (Page::Machine, "MACHINE", "MAIN"),
     (Page::Program, "PROGRAM", "FILE"),
     (Page::Tools, "TOOLS", "TOOL"),
-    (Page::Offsets, "OFFSETS", "OFFSET"),
+    (Page::Offsets, "OFFSETS / PROBE", "OFFSET"),
     (Page::Diagnostics, "DIAGNOSTICS", "Ctrl+D"),
     (Page::Help, "G-CODE HELP", "Ctrl+H"),
     (Page::Settings, "SETTINGS", ""),
@@ -3631,10 +3692,7 @@ fn nav_pages(configured: &[String]) -> Vec<Page> {
     if configured.is_empty() {
         return NAV_ITEMS.iter().map(|(page, _, _)| *page).collect();
     }
-    configured
-        .iter()
-        .map(|key| page_from_config(key))
-        .collect()
+    configured.iter().map(|key| page_from_config(key)).collect()
 }
 
 /// Stable preferences key for a page. Mode-driven pages are never persisted.
@@ -3990,7 +4048,8 @@ enabled = true
 panel_window = false
 [preferences]
 file = "{root}/prefs/{{profile}}.preferences.toml"
-"#.replace("{root}", &root.to_string_lossy()),
+"#
+            .replace("{root}", &root.to_string_lossy()),
         )
         .unwrap();
         let profile = Profile::load(&root.join("sim.toml"), None).unwrap();
@@ -4193,7 +4252,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert!(
             app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
             "the reset is acknowledged: {:?}",
-            app.toasts.iter().map(|toast| &toast.text).collect::<Vec<_>>()
+            app.toasts
+                .iter()
+                .map(|toast| &toast.text)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -4219,8 +4281,7 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     #[test]
     fn servo_load_rows_follow_the_profile_and_the_machine() {
         let (_dir, mut app) = make_app(PanelMode::Auto);
-        app.profile.config.ui.servo_load =
-            vec!["X".into(), "S".into(), "A".into()];
+        app.profile.config.ui.servo_load = vec!["X".into(), "S".into(), "A".into()];
         app.snapshot.machine.servo_load.insert("X", 12.0);
         app.snapshot.machine.servo_load.insert("A", 4.0);
         app.snapshot.spindles.clear();
@@ -4251,7 +4312,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             ]
         );
         app.profile.config.ui.servo_load.clear();
-        assert!(app.servo_load_rows().is_empty(), "an empty list hides the pane");
+        assert!(
+            app.servo_load_rows().is_empty(),
+            "an empty list hides the pane"
+        );
     }
 
     #[test]
@@ -4298,7 +4362,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             .get("X")
             .map(|position| position.work)
             .unwrap_or(f64::NAN);
-        assert!((work - 12.5).abs() < 1e-6, "DRO X shows {work}, expected 12.5");
+        assert!(
+            (work - 12.5).abs() < 1e-6,
+            "DRO X shows {work}, expected 12.5"
+        );
     }
 
     #[test]
@@ -4388,7 +4455,9 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert!((end[0] + 100.0).abs() < 1e-6, "G55 X {}", end[0]);
 
         // With no selection the active system is the fallback.
-        app.program.editor.replace_text("G21 G90\nG0 X0 Y0\n".into());
+        app.program
+            .editor
+            .replace_text("G21 G90\nG0 X0 Y0\n".into());
         app.refresh_preview();
         let end = app
             .program
@@ -4432,9 +4501,7 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert_eq!(line, 2);
         assert_eq!(block, "G1 X10");
     }
-
 }
-
 
 /// Encode an egui capture as a PNG.
 fn png_from_color_image(image: &egui::ColorImage) -> Option<linc_core::diag::Screenshot> {
@@ -4504,4 +4571,3 @@ mod move_progress_tests {
         assert_eq!(total, 0.0);
     }
 }
-

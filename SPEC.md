@@ -645,7 +645,7 @@ Program rules:
 - Read-only while running; blocked when program protect is active.
 - Offsets edited in the table are validated against LinuxCNC limits and units.
 - A `PROBE` action opens the Touch Probe page; probing results can update the
-  selected work offset only after an explicit `APPLY RESULT`.
+  selected work offset only when Probe Basic probe mode 0 is selected.
 
 ### 6.4 Tools
 
@@ -810,33 +810,41 @@ choose a routine group, then pick the operation card.
 
 - Category strip, matching Probe Basic: Outside Corners, Inside Corners,
   Boss and Pocket, Ridge and Valley, Edge Angle, Calibrate and
-  Probe Help. Rotary-axis probing is not offered.
-- Each category opens a grid of illustrated operation cards plus a selected
-  operation, diagram and G-code call. Work offset, probe mode and parameters
-  stay visible across categories.
+  Probe Help. Rotary-axis probing is not offered. The tabs are passive
+  indicators: they are not buttons and take no keyboard focus.
+- `OFFSET` (F8) toggles between the Offsets screen and the probe tabs; `Esc`
+  returns to Offsets. `PgUp`/`PgDn` cycle the probe tabs.
+- Each category opens a grid of illustrated operation cards. Parameters and
+  results stay on the left, the routine matrix is centred and the probe symbol
+  is on the right. Work offsets remain on the Offsets screen rather than being
+  duplicated here; the active WCS is shown in the parameter header.
 - Edge operations (X±, Y±, Z surface) remain available within the relevant
-  category; calibration includes round/square boss/pocket and reset.
+  category; the Z surface routine is the centre card (`5`). Calibration
+  includes round/square boss/pocket and reset.
 - Parameters mirror `touch_probe_param_update.ngc`: probe tool number,
   fast/slow/traverse feed, max XY/Z distance, XY/Z clearance, extra depth, step
   off width, edge width, diameter hints, probe mode, WCS rotation, calibration
-  offset/diameter and square-calibration axis.
-- Work-offset selector G54–G59.3 (wrapping when the row is full). `MEASURE ONLY` must be available in addition to
-  applying the result to the selected offset.
-- `RUN PROBE` builds the selected `o<probe_...> call` and its argument values,
+  offset/diameter and square-calibration axis. The calibration-only fields
+  live in the Calibrate panel.
+- The `PROBE POSITION ONLY` checkbox selects Probe Basic's probe mode: off
+  applies the measured result to the active work offset in the subroutine; on
+  records the result without applying it.
+- `Enter` builds the selected `o<probe_...> call` and its argument values,
   then issues it immediately using Probe Basic's `issue_mdi` semantics:
   temporary MDI mode, command sent, previous task mode restored when the
-  interpreter returns idle. The click is the explicit operator action; there is
-  no second stage and no physical-CYCLE-START step.
+  interpreter returns idle. This is the explicit operator action; there is no
+  separate RUN button and no physical-CYCLE-START step.
 - Probe motion requires machine ON, homed axes, probe tool T99 in the spindle,
   idle interpreter, no active program and valid parameters. A syntax/validation
   error issues nothing and marks the failing condition.
-- Read results from the subroutine outputs (`#1001`–`#1009`) and show measured
-  value, error, selected WCS, and history.
-- `APPLY RESULT` writes the selected work offset only when idle and program
-  protect is off. Calibration routines update the probe calibration offset;
-  `RESET CAL` clears it through `probe_cal_reset.ngc`.
+- Read results from the subroutine outputs (`#1001`–`#1012`): X-/X+/Y-/Y+ and
+  Z- probed positions, widths and centres, averaged diameter, edge delta and
+  edge angle. `UPDATE PROBE PARAMS`, `RESET ALL DATA`, `X DATA RESET` and
+  `Y DATA RESET` issue the matching Probe Basic subroutines.
+- Calibration routines update the probe calibration offset; `RESET CAL` clears
+  it through `probe_cal_reset.ngc`.
 - The page has no general cycle-start, jog, override or E-stop controls. The
-  specific `RUN PROBE` action is the only motion initiator, and the hardware
+  specific `Enter` action is the only motion initiator, and the hardware
   E-stop remains independent.
 
 ### 6.9 MDI
