@@ -769,7 +769,7 @@ fn matrix_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
         ui.add_space(6.0);
         let gap = 6.0;
         let card_w = ((ui.available_width() - gap * 2.0) / 3.0).max(88.0);
-        let rows = (cards.len() + 2) / 3;
+        let rows = cards.len().div_ceil(3);
         let card_h = if rows > 2 { 98.0 } else { 112.0 };
         for row in 0..rows {
             ui.horizontal(|ui| {
@@ -882,7 +882,7 @@ fn probe_card(
         ),
         StrokeKind::Inside,
     );
-    let tile_side = (width - 18.0).min(62.0).max(30.0);
+    let tile_side = (width - 18.0).clamp(30.0, 62.0);
     let tile = Rect::from_center_size(
         Pos2::new(rect.center().x, rect.top() + 10.0 + tile_side / 2.0),
         Vec2::splat(tile_side),
