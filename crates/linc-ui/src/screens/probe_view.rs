@@ -1710,25 +1710,65 @@ fn help_view(app: &mut LincApp, ui: &mut Ui) {
             egui::Layout::top_down(Align::Min),
             |ui| {
                 theme::card(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.set_min_height((height - 24.0).max(0.0));
                     theme::section_header(ui, "PROBE HELP");
-                    ui.add_space(4.0);
-                    ui.label(RichText::new("PROBE BASIC ROUTINES").size(theme::font_size(9.0)).strong().color(theme::FG));
-                    for line in [
-                        "1–9 highlight a routine in the current matrix.",
-                        "ENTER runs the highlighted routine.",
-                        "PgUp/PgDn cycle the category strip.",
-                        "OFFSET advances through the tabs; ESC returns to Offsets.",
-                        "The probe is T99; the active WCS is shown in Probing Parameters.",
-                    ] {
-                        ui.label(RichText::new(line).size(theme::font_size(9.0)).color(theme::MUTED));
-                    }
-                    ui.add_space(8.0);
-                    ui.label(RichText::new("STEP OFF WIDTH").size(theme::font_size(9.0)).strong().color(theme::FG));
                     ui.label(
-                        RichText::new("The probe moves off the measured face by this amount before the next move. Extra probe depth and clearance are applied around the routine.")
+                        RichText::new("Probe Basic routines for edges, corners, bosses, pockets, ridges, edge angle and probe calibration.")
                             .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
+                    ui.add_space(6.0);
+                    theme::separator(ui);
+                    egui::ScrollArea::vertical()
+                        .id_salt("probe-help-scroll")
+                        .max_height((height - 76.0).max(220.0))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            help_section(ui, "ROUTINE FAMILIES");
+                            help_text(ui, "The matrix is keyboard-first. Press a number to highlight one routine; the selection is outlined in blue. There is no default routine, so Enter does nothing until a number is pressed.");
+                            help_item(ui, "Outside corners", "1–3 probe the front corners and 7–9 the back corners. 4/6 probe the left/right side and 5 probes the Z surface. Results give the probed X/Y faces plus the measured width and centre.");
+                            help_item(ui, "Inside corners", "1–3 probe inside front corners and 7–9 inside back corners. The Y± and X± cards probe a single inner wall; 5 probes the Z surface.");
+                            help_item(ui, "Boss + pocket", "Round and rectangular bosses, pockets and pocket centres. The HINT row shows the diameter and X/Y centre used by the selected routine, so set those values in Probing Parameters before running.");
+                            help_item(ui, "Ridge + valley", "Probes both sides of a ridge or valley. The centre-start routines find the midpoint; the HINT row shows the X/Y hint for the selected routine.");
+                            help_item(ui, "Edge angle", "The corner and top-edge cards probe two points across the edge. The result includes EDGE DELTA and EDGE ANGLE; the routine can update the active WCS rotation.");
+                            help_item(ui, "Calibrate", "Uses a known ring or pin. The 2×2 matrix covers round/square pocket/boss; the measured error updates the probe calibration offset.");
+
+                            help_section(ui, "KEYS AND NAVIGATION");
+                            help_key(ui, "1–9", "Highlight a routine in the current matrix. Six-card families use 1–6, Calibrate uses 1–4.");
+                            help_key(ui, "Enter", "Run the highlighted routine. When a parameter field is selected, Enter opens its inline editor instead.");
+                            help_key(ui, "PgUp/PgDn", "Move to the previous/next probe category.");
+                            help_key(ui, "OFFSET", "Cycle Offsets → Outside → Inside → Boss + Pocket → Ridge + Valley → Edge Angle → Calibrate → Help → Offsets.");
+                            help_key(ui, "Esc", "Return to Offsets. While a parameter is being edited, Esc cancels the edit first.");
+                            help_key(ui, "Arrows", "After clicking a parameter field, move between fields; Enter edits the selected field.");
+
+                            help_section(ui, "PROBING PARAMETERS");
+                            help_text(ui, "Click a field, use the arrow keys, then press Enter to edit. Enter commits and Esc cancels. Arithmetic expressions such as 2.5+0.1 are accepted.");
+                            help_key(ui, "PROBE TOOL #", "Probe tool number. The probe must be in the spindle before a routine can run; the default is T99.");
+                            help_key(ui, "PROBE SLOW FDRATE", "Slow feed used for the final contact move.");
+                            help_key(ui, "PROBE TRAVERSE FR", "Traverse feed used for positioning moves between probe points.");
+                            help_key(ui, "PROBE FAST FDRATE", "Fast feed used for the initial approach before the slow contact move.");
+                            help_key(ui, "MAX X/Y DISTANCE", "Maximum search distance in X and Y before the routine aborts.");
+                            help_key(ui, "X/Y CLEARANCE", "Retract distance above the work before moving in X/Y.");
+                            help_key(ui, "MAX Z DISTANCE", "Maximum Z search distance before the routine aborts.");
+                            help_key(ui, "Z CLEARANCE", "Z retract height used between contacts.");
+                            help_key(ui, "EXTRA PROBE DEPTH", "Additional overtravel after contact; use enough to guarantee the probe trips.");
+                            help_key(ui, "STEP OFF WIDTH", "Distance the probe moves away from the measured face before the next move. It must be larger than the gap between the probe and the edge. If the probe is obstructed during the Z positioning move, the routine aborts with an error.");
+                            help_key(ui, "EDGE WIDTH", "Distance between the two probed points used for an edge-angle measurement.");
+                            help_key(ui, "TIP", "Probe tip diameter hint; the routine uses it when calculating widths and centres.");
+
+                            help_section(ui, "RESULTS");
+                            help_text(ui, "Results are the Probe Basic #1001–#1012 values: X-/X+/Y-/Y+ and Z- probed positions, X/Y widths, X/Y centres, averaged diameter, edge delta and edge angle. UPDATE PROBE PARAMS sends the current parameters without starting a routine. RESET ALL DATA, X DATA RESET and Y DATA RESET zero the corresponding measured values.");
+                            help_text(ui, "The active WCS is shown in the parameter header. With PROBE POSITION ONLY off, Probe Basic applies the result to that WCS in the subroutine; with it on, the values are recorded without applying them.");
+
+                            help_section(ui, "CALIBRATION");
+                            help_text(ui, "Fit the known ring/pin and select the matching round or square pocket/boss routine. CALIBRATION OFFSET is the stored correction; CALIBRATION DIAMETER and WIDTH X/Y describe the artefact. RESET CAL clears the stored offset.");
+                            help_text(ui, "Run the calibration routine until the measured error is stable. Calibration changes the probe offset, so verify a known feature before returning to production work.");
+
+                            help_section(ui, "REQUIREMENTS AND ERRORS");
+                            help_text(ui, "A routine requires machine ON, homed axes, the probe tool in the spindle, an idle interpreter, no active program, and valid parameters. Work-offset writes also require PROTECT off. A validation error issues no motion and is shown in the parameter card.");
+                            help_text(ui, "Touch probing is unavailable for lathe profiles. If the panel is offline, the page is read-only. If the probe tool does not match, load the probe tool before running; if no routine is selected, press its number first.");
+                        });
                 });
             },
         );
@@ -1737,6 +1777,60 @@ fn help_view(app: &mut LincApp, ui: &mut Ui) {
             Vec2::new(right_w, height),
             egui::Layout::top_down(Align::Min),
             |ui| probe_symbol(app, ui, height),
+        );
+    });
+}
+
+fn help_section(ui: &mut Ui, title: &str) {
+    ui.add_space(8.0);
+    ui.label(
+        RichText::new(title)
+            .size(theme::font_size(9.0))
+            .strong()
+            .color(theme::ACCENT),
+    );
+    ui.add_space(2.0);
+}
+
+fn help_text(ui: &mut Ui, text: &str) {
+    ui.label(
+        RichText::new(text)
+            .size(theme::font_size(8.5))
+            .color(theme::MUTED),
+    );
+    ui.add_space(3.0);
+}
+
+fn help_item(ui: &mut Ui, title: &str, text: &str) {
+    ui.label(
+        RichText::new(title)
+            .size(theme::font_size(8.5))
+            .strong()
+            .color(theme::FG),
+    );
+    ui.label(
+        RichText::new(text)
+            .size(theme::font_size(8.5))
+            .color(theme::MUTED),
+    );
+    ui.add_space(3.0);
+}
+
+fn help_key(ui: &mut Ui, key: &str, text: &str) {
+    ui.horizontal(|ui| {
+        ui.add_sized(
+            [92.0, 16.0],
+            egui::Label::new(
+                RichText::new(key)
+                    .monospace()
+                    .size(theme::font_size(8.0))
+                    .color(theme::FG),
+            ),
+        );
+        ui.label(
+            RichText::new(text)
+                .size(theme::font_size(8.5))
+                .color(theme::MUTED),
         );
     });
 }

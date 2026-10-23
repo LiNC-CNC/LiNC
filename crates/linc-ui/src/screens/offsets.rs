@@ -2,11 +2,10 @@
 
 use egui::{RichText, Ui};
 use linc_core::command::MachineCommand;
-use linc_core::model::{AxisMap, MachineVariant};
+use linc_core::model::AxisMap;
 
 use crate::screens::common;
 use crate::shell::LincApp;
-use crate::state::Page;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
@@ -386,14 +385,6 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
         ui.horizontal(|ui| {
             theme::section_header(ui, "WORK OFFSETS");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Probe Basic's touch-probe page is a subpage of offsets: the
-                // work-offset table is where the operator starts, and the
-                // probe routines write back into the same G5x rows.
-                if app.snapshot.probe.enabled && app.profile.variant == MachineVariant::Mill {
-                    if theme::action_button(ui, "TOUCH PROBE", true).clicked() {
-                        app.request_page(Page::Probe);
-                    }
-                }
                 ui.label(
                     RichText::new("ARROWS MOVE · ENTER EDIT · + - * / ACCEPTED")
                         .monospace()
