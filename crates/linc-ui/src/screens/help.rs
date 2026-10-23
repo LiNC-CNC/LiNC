@@ -48,7 +48,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // touch-target row the theme would otherwise reserve.
     let one_line = ui.text_style_height(&egui::TextStyle::Body);
     ui.scope(|ui| {
-        ui.spacing_mut().interact_size.y = one_line;
+        ui.spacing_mut().interact_size.y = one_line + 2.0;
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new("SEARCH")
@@ -60,7 +60,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                     .id(search_id)
                     .hint_text("G2, G3, M6, o sub, arc …  ( / )")
                     .desired_width(360.0)
-                    .margin(egui::Margin::symmetric(6, 1)),
+                    .margin(egui::Margin::symmetric(6, 2)),
             );
             if app.help.focus_search {
                 response.request_focus();
@@ -116,6 +116,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     let scroll_selection = app.help.scroll_to_selection;
     theme::card(ui, |ui| {
         ui.set_min_height(ui.available_height());
+        ui.spacing_mut().item_spacing.y = 0.0;
         let width = ui.available_width();
         let columns = Columns::new(width);
         header_row(ui, &columns);
@@ -234,14 +235,14 @@ fn header_cell(ui: &mut Ui, width: f32, text: &str, centered: bool) {
 
 fn group_row(ui: &mut Ui, group: &linc_core::help::HelpGroup) {
     egui::Frame::new()
-        .fill(Color32::BLACK)
-        .inner_margin(Margin::symmetric(8, 2))
+        .fill(theme::SURFACE)
+        .inner_margin(Margin::symmetric(8, 1))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
                 ui.label(
                     RichText::new(&group.name)
-                        .size(theme::font_size(10.5))
+                        .size(theme::font_size(10.0))
                         .strong()
                         .color(theme::FG),
                 );
