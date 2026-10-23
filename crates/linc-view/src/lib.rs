@@ -1407,15 +1407,15 @@ fn put_label(
     let mut center = center;
     let up = if screen_direction(projection, up).length() < 0.2 {
         let (up, shift) = rolled_up(projection, center, right, up);
-        if shift {
-            // Lay the text on the outside by moving the baseline, not by
-            // turning the glyphs upside down.
-            center = [
-                center[0] - up[0] * glyph,
-                center[1] - up[1] * glyph,
-                center[2] - up[2] * glyph,
-            ];
-        }
+        // Lay the text on the outside by moving the baseline, not by turning
+        // the glyphs upside down, and leave a pad between it and the line.
+        let pad = glyph * 0.6;
+        let offset = if shift { -glyph - pad } else { pad };
+        center = [
+            center[0] + up[0] * offset,
+            center[1] + up[1] * offset,
+            center[2] + up[2] * offset,
+        ];
         up
     } else {
         up
