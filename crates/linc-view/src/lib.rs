@@ -974,7 +974,8 @@ pub fn axis_triad(
 ///
 /// The arrow direction comes from the same projection as the part, so it turns
 /// with the orbit. An axis that points at the viewer has no screen direction and
-/// is drawn as a circle instead.
+/// is drawn as a circle instead; its name goes under the whole triad, where it
+/// does not sit in the middle of the other two arms.
 fn draw_axis_triad(
     painter: &Painter,
     rect: Rect,
@@ -986,6 +987,10 @@ fn draw_axis_triad(
     let center = rect.right_top() + Vec2::new(-46.0, 42.0);
     let length = 18.0;
     let font = FontId::monospace(9.0 * FONT_SCALE);
+    // Half the height of the 9 px face, so labels count towards the arm's reach.
+    let half_text = 5.0;
+    let mut bottom = center.y + 4.0;
+    let mut at_viewer = Vec::new();
     for (label, direction) in axis_triad(mode, yaw, pitch, labels) {
         match direction {
             Some(direction) => {
@@ -1002,27 +1007,33 @@ fn draw_axis_triad(
                     [tip, tip - back - side],
                     Stroke::new(1.4, theme::MUTED),
                 );
+                let label_pos = tip + direction * 7.0;
                 painter.text(
-                    tip + direction * 7.0,
+                    label_pos,
                     Align2::CENTER_CENTER,
                     label,
                     font.clone(),
                     theme::MUTED,
                 );
+                bottom = bottom.max(label_pos.y + half_text);
             }
             None => {
-                // Pointing at the viewer: a circle with a dot.
+                // Pointing at the viewer: a circle with a dot. The label is
+                // placed after the arms are known, below all of them.
                 painter.circle_stroke(center, 4.0, Stroke::new(1.2, theme::MUTED));
                 painter.circle_filled(center, 1.2, theme::MUTED);
-                painter.text(
-                    center + Vec2::new(9.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    label,
-                    font.clone(),
-                    theme::MUTED,
-                );
+                at_viewer.push(label);
             }
         }
+    }
+    for (index, label) in at_viewer.into_iter().enumerate() {
+        painter.text(
+            Pos2::new(center.x, bottom + 6.0 + index as f32 * 10.0),
+            Align2::CENTER_TOP,
+            label,
+            font.clone(),
+            theme::MUTED,
+        );
     }
 }
 
