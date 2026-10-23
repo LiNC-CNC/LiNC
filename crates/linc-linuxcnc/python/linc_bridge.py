@@ -23,6 +23,22 @@ import traceback
 import linuxcnc
 import hal
 
+def spindle_actual_rpm(spindle, feedback_rps):
+    """True spindle RPM from the configured feedback pin.
+
+    `spindle.0.speed-in` is the *actual* speed feedback in rotations per
+    second (LinuxCNC core-components.adoc), while `spindle.speed` from status
+    is the programmed S word. Fall back to the programmed speed scaled by the
+    override when no feedback pin is connected, so the display still responds
+    to the override on a machine without an encoder.
+    """
+    if feedback_rps is not None:
+        return abs(float(feedback_rps)) * 60.0
+    if not spindle.get("enabled"):
+        return 0.0
+    return abs(float(spindle.get("speed", 0.0))) * float(spindle.get("override", 1.0))
+
+
 def feed_word(s, linear_units):
     """The F word in machine linear units per minute.
 
@@ -168,6 +184,9 @@ class Bridge:
             self.config.get("TRAJ", "COORDINATES", fallback="XYZ")
         )
         self.linear_units = self.config.get("TRAJ", "LINEAR_UNITS", fallback="mm")
+        self.spindle_speed_pin = os.environ.get(
+            "LINC_SPINDLE_SPEED_PIN", "spindle.0.speed-in"
+        )
         self.angular_units = self.config.get("TRAJ", "ANGULAR_UNITS", fallback="degree")
         self.tool_table = self.config.get("EMCIO", "TOOL_TABLE", fallback="")
         self.param_file = self.config.get("RS274NGC", "PARAMETER_FILE", fallback="")
@@ -699,10 +718,16 @@ class Bridge:
             load_pin = pin("rio.spindle-modbus.spindle_load-abs")
             if index > 0:
                 load_pin = pin(f"rio.spindle{index}-modbus.spindle_load-abs", None)
+            feedback = (
+                pin(self.spindle_speed_pin)
+                if index == 0 and self.spindle_speed_pin
+                else None
+            )
             spindles.append(
                 {
                     "index": index,
                     "speed": float(spindle.get("speed", 0.0)),
+                    "actual": spindle_actual_rpm(spindle, feedback),
                     "override": float(spindle.get("override", 1.0)),
                     "direction": int(spindle.get("direction", 0)),
                     "on": bool(spindle.get("enabled", 0)),
@@ -1448,6 +1473,17 @@ def _fake_bridge(task_state, values, apply_reset, apply_mdi):
     return bridge
 
 
+def check_spindle_actual():
+    spindle = {"speed": 4200.0, "override": 0.5, "enabled": 1}
+    # Feedback is rotations per second, so 70 rps is 4200 rpm.
+    assert abs(spindle_actual_rpm(spindle, 70.0) - 4200.0) < 1e-6
+    assert abs(spindle_actual_rpm(spindle, -70.0) - 4200.0) < 1e-6
+    # Without feedback the programmed speed is scaled by the override.
+    assert abs(spindle_actual_rpm(spindle, None) - 2100.0) < 1e-6
+    assert spindle_actual_rpm({"speed": 4200.0, "override": 0.5, "enabled": 0}, None) == 0.0
+    print("linc_bridge selftest: spindle feedback rpm OK")
+
+
 def check_feed_word():
     """The F word is a rate in program units, not the override factor."""
 
@@ -1614,6 +1650,7 @@ def selftest():
     print(f"linc_bridge selftest: {len(cases)} coordinate cases OK")
     check_offset_sync()
     check_feed_word()
+    check_spindle_actual()
     check_parameter_keys()
     check_work_position()
 

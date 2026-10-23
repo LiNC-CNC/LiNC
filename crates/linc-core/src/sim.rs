@@ -587,8 +587,11 @@ impl SimBackend {
         self.snapshot.feed.feed_override = panel.feed_override;
         self.snapshot.feed.rapid_override = panel.rapid_override;
         self.snapshot.feed.spindle_override = panel.spindle_override;
-        if let Some(spindle) = self.snapshot.spindles.first_mut() {
+        for spindle in &mut self.snapshot.spindles {
             spindle.override_factor = panel.spindle_override;
+            // The simulator has no encoder; the feedback follows the commanded
+            // speed through the override, as a connected loopback would.
+            spindle.actual_speed = spindle.commanded_speed * panel.spindle_override;
         }
         self.snapshot.panel = panel;
     }

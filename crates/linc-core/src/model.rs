@@ -579,7 +579,10 @@ impl Default for ToolTableState {
 pub struct SpindleState {
     pub index: usize,
     pub name: String,
+    /// Programmed S word, in RPM.
     pub commanded_speed: f64,
+    /// True feedback in RPM, from the configured `[hal.pins] spindle_speed`
+    /// (LinuxCNC `spindle.N.speed-in` is rotations per second).
     pub actual_speed: f64,
     pub load: Option<f64>,
     pub override_factor: f64,

@@ -429,7 +429,11 @@ Default page. The layout is selected by `machine.gui`.
   The feed value is the programmed F word, converted from the program's G20/G21
   units to the machine's linear units per minute, so an inch program on a
   millimetre machine still reads in mm/min; the override is a separate factor,
-  not the rate. A vector rotation arrow beside the `S` shows forward (green),
+  not the rate. The second S row is the true feedback from
+  `[hal.pins] spindle_speed` (RPS converted to RPM), so turning the spindle
+  override changes the displayed true RPM; without feedback it falls back to
+  the programmed speed scaled by the override. A vector rotation arrow beside
+  the `S` shows forward (green),
   reverse (amber) or stopped (muted dot), so the RPM value itself always stays
   positive.
   The servo card draws one bar per entry in `[ui] servo_load` (machine axes plus

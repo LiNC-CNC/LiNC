@@ -381,6 +381,15 @@ The standalone simulator panel has its own zoom control,
 `[simulation] panel_scale`, also in `0.5..3.0`; it is independent of the HMI
 scale.
 
+### Spindle feedback
+
+`[hal.pins] spindle_speed` names the HAL pin carrying actual spindle-speed
+feedback in rotations per second (`spindle.0.speed-in` by default). The bridge
+converts it to RPM for the second `S` row and the top bar, so the displayed true
+RPM follows the spindle override. If the pin is absent, the display falls back
+to the programmed speed scaled by the override. Point it at the encoder or
+`spindle.N.speed-out-rps` loopback your HAL provides.
+
 ### Servo load bars
 
 `[ui] servo_load` selects the bars in the MAIN page's `SERVO LOAD` card, in

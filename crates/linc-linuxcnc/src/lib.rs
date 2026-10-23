@@ -200,6 +200,9 @@ struct BridgeSpindle {
     index: usize,
     #[serde(default)]
     speed: f64,
+    /// Actual feedback in RPM (the bridge converts the HAL RPS pin).
+    #[serde(default)]
+    actual: f64,
     #[serde(default)]
     override_factor: f64,
     #[serde(default)]
@@ -402,6 +405,10 @@ impl PythonBridgeBackend {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("PYTHONUNBUFFERED", "1")
+            .env(
+                "LINC_SPINDLE_SPEED_PIN",
+                &profile.config.hal.pins.spindle_speed,
+            )
             .spawn()
             .map_err(|error| BridgeError::Spawn(error.to_string()))?;
         if let Ok(mut bridge) = shared.bridge.lock() {
@@ -1466,7 +1473,7 @@ impl Converter {
                     format!("SPINDLE {}", spindle.index)
                 },
                 commanded_speed: spindle.speed,
-                actual_speed: spindle.speed,
+                actual_speed: spindle.actual,
                 load: spindle.load,
                 override_factor: spindle.override_factor,
                 direction: spindle.direction,
