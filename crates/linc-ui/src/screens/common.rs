@@ -492,8 +492,10 @@ fn servo_meter(ui: &mut Ui, label: &str, load: f64) {
 
 pub fn servo_load_card(app: &LincApp, ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
-        ui.set_min_height((height - 21.0).max(0.0));
-        ui.set_max_height((height - 21.0).max(0.0));
+        // The same content offset as the feed card, so both card frames end on
+        // the same bottom line.
+        ui.set_min_height((height - 24.0).max(0.0));
+        ui.set_max_height((height - 24.0).max(0.0));
         ui.set_min_width(ui.available_width());
         ui.spacing_mut().interact_size.y = 16.0;
         ui.spacing_mut().item_spacing.y = 0.0;
