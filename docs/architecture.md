@@ -53,18 +53,72 @@ running, and a LinuxCNC restart is reported as a lost status link instead of
 taking the UI down. In-process NML is possible later, but it loses that
 isolation.
 
+## Does the JSON hop matter?
+
+Not much. A representative 2.9 KB snapshot (without program text) takes about
+37 µs to serialize with `json.dumps` and 37 µs to parse with `json.loads` on
+this machine. A JSON line round-trip through a child process is about 22 µs
+median (43 µs at p99) in a local echo test. The status loop is capped at
+`status_hz = 20` (50 ms), and the simulator's task cycle averages about 10 ms,
+so the JSON/process hop is well under 1 ms and under 2% of the status period.
+A large program is sent only when the file changes, so it is a one-off copy,
+not steady-state cost.
+
+The bridge is also not in the jog, cycle, spindle, or feed path. Those are
+panel → HAL → `halui`/motion. The bridge handles MDI, offsets, tool changes,
+program load, and probing, which are supervisory operations.
+
+The latency that does matter is the helper's single-threaded loop. A mode
+switch waits for `wait_complete` (2 s in `issue`, 5 s request timeout), and the
+Python loop emits no snapshots while it waits. A Rust helper should handle
+commands on a separate thread from the status poll; an in-process backend
+should split status polling from command waits for the same reason. The NML
+client is not thread-safe, so that means separate status and command clients,
+or a mutex that is never held across `wait_complete`.
+
+## Options
+
+| Option | Data path | Added latency | Isolation | Build | Verdict |
+|---|---|---|---|---|---|
+| Current Python helper | worker → JSON → `python3` → NML | JSON <1 ms; helper loop can block for seconds | Yes | Python runtime | Remove for the dependency, not latency |
+| Rust helper + JSON | worker → JSON → Rust helper → NML | JSON <1 ms; process hop ~tens of µs | Yes | Helper links NML | Good migration step; keep if isolation is required |
+| In-process `NmlBackend` | worker → `NmlClient` / `HalReader` | Direct calls; no IPC | No; `linc-panel` remains separate | HMI links NML | **Best latency and simplest end state for LiNC** |
+| Native machine service | worker → shared-memory snapshot + typed command socket | Near in-process | Yes | Service links NML | Ideal only if an NML crash must not take the HMI down; most work |
+| Pure-Rust NML | worker → Rust NML | Similar to in-process | Depends | No C++/GPL link | Not worth the protocol/version work |
+| `linuxcncrsh` | TCP + text | Milliseconds and polling | Yes | Simple | Too limited for status/commands |
+| PyO3 | worker → embedded Python | GIL + Python | No | Python dev files | Still Python; rejected |
+
+## Ideal: in-process native backend
+
+![Ideal in-process LiNC + LinuxCNC architecture](diagrams/ideal-inprocess-architecture.png)
+
+For LiNC, the ideal is an in-process `NmlBackend` on the existing
+`linc-backend` worker: direct `NmlClient`, `HalReader`, and `std::fs` access,
+with no helper, no JSON, and no Python. The UI, validation, panel service, HAL
+outputs, and diagnostics stay as they are.
+
+The panel service remains the important isolation boundary: it owns
+`/dev/ttyUSB0` and `cnc_panel.*`, so an HMI crash still leaves the physical
+panel able to control the machine. The tradeoff is that an NML/C++ shim crash
+would take the HMI down with it.
+
+If that tradeoff is unacceptable, the ideal becomes a native machine service
+that owns NML and HAL and publishes a snapshot through shared memory, with
+typed commands over a Unix socket. That preserves isolation and near-in-process
+latency, but it is a much larger design than LiNC needs today.
+
 ## What changes, what stays
 
-| Concern | Current | NML-based |
-|---|---|---|
-| NML client | Python `linuxcnc` module | `linuxcnc-nml` / `NmlClient` |
-| HAL reads | Python `hal.get_value()` | `HalReader` in the helper |
-| Helper process | `python3` + `linc_bridge.py` | `linc-nml-bridge` (Rust) |
-| Helper protocol | JSON lines over stdin/stdout | unchanged |
-| HMI supervisor | `PythonBridgeBackend` | `HelperBridgeBackend` (same role) |
-| Converter / UI / panel / diag | unchanged | unchanged |
-| Crash isolation | helper crash keeps UI alive | unchanged |
-| Build dependency | Python runtime + `linuxcnc`/`hal` modules | LinuxCNC headers and libraries |
+| Concern | Current Python helper | NML helper (migration) | In-process (ideal) |
+|---|---|---|---|
+| NML client | Python `linuxcnc` module | `NmlClient` in helper | `NmlClient` in HMI |
+| HAL reads | Python `hal.get_value()` | `HalReader` in helper | `HalReader` in HMI |
+| Helper process | `python3` + `linc_bridge.py` | `linc-nml-bridge` (Rust) | none |
+| Transport | JSON lines | same JSON lines | direct calls |
+| HMI supervisor | `PythonBridgeBackend` | `HelperBridgeBackend` | `NmlBackend` |
+| Converter / UI / panel / diag | unchanged | unchanged | converter can be simplified |
+| Crash isolation | helper crash keeps UI alive | same | HMI crash loses display; panel remains |
+| Build dependency | Python runtime + `linuxcnc`/`hal` | helper links LinuxCNC NML | HMI links LinuxCNC NML |
 
 ## Migration note
 
@@ -86,4 +140,7 @@ rsvg-convert -w 1600 current-architecture.svg -o current-architecture.png
 
 dot -Tsvg proposed-nml-architecture.dot -o proposed-nml-architecture.svg
 rsvg-convert -w 1600 proposed-nml-architecture.svg -o proposed-nml-architecture.png
+
+dot -Tsvg ideal-inprocess-architecture.dot -o ideal-inprocess-architecture.svg
+rsvg-convert -w 1600 ideal-inprocess-architecture.svg -o ideal-inprocess-architecture.png
 ```
