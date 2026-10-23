@@ -962,6 +962,9 @@ pub struct PanelSnapshot {
     /// False when the protect input could not be trusted; callers must fail closed.
     pub program_protect_known: bool,
     pub estop: bool,
+    /// Simulation panel probe-contact state; real panels leave this false.
+    #[serde(default)]
+    pub probe: bool,
     /// The panel's RAPID key, held for faster continuous jog.
     #[serde(default)]
     pub rapid: bool,

@@ -343,6 +343,7 @@ fn run_loop(
             spindle_override: snapshot.spindle_override,
             program_protect: snapshot.program_protect,
             estop: snapshot.estop,
+            probe: snapshot.probe,
             home: snapshot.home,
             proghome: snapshot.proghome,
             step: snapshot.step,

@@ -272,6 +272,8 @@ pub struct PanelOutputs {
     pub spindle_override: f64,
     pub program_protect: bool,
     pub estop: bool,
+    /// Simulation-only probe contact, wired to `rio.sim-probe`.
+    pub probe: bool,
     pub home: [bool; 4],
     pub proghome: [bool; 4],
     pub step: bool,
@@ -469,6 +471,7 @@ pub fn make_snapshot(
         program_protect: outputs.program_protect,
         program_protect_known: connected,
         estop: outputs.estop,
+        probe: outputs.probe,
         current_tool: outputs.display.sseg_tool.max(0) as u16,
         next_tool: outputs.display.sseg_next_tool.max(0) as u16,
         buttons: outputs.buttons,

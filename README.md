@@ -208,7 +208,9 @@ file unchanged.
   Program graph, Offsets, Tools and Diagnostics; Files and Help are shared.
 - **The simulator panel is a separate companion window**, not part of the HMI.
   It reproduces the panel controls and HAL pin surface; the real HMI never
-  exposes those controls.
+  exposes those controls. Its latching `PROBE` key closes the simulated probe
+  contact (`rio.sim-probe`), so a Probe Basic routine can be tripped and then
+  released from the panel.
 - **Touch Probe follows Probe Basic's category-first workflow**, reached from
   Offsets: choose a routine group, pick an illustrated operation, adjust
   WCS/clearance/feed/tip parameters, then press `Enter` to run it. The Probe Basic probing

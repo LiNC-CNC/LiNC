@@ -31,6 +31,7 @@ pub struct CncPanelHal {
     heartbeat: HalPin,
     power_on: HalPin,
     power_off: HalPin,
+    probe: HalPin,
     /// One-shot E-stop release request, wired to `halui.estop.reset`.
     estop_reset: HalPin,
     home_state_x: HalPin,
@@ -90,6 +91,7 @@ impl CncPanelHal {
         let heartbeat = component.s32_out("heartbeat")?;
         let power_on = component.bit_out("power_on")?;
         let power_off = component.bit_out("power_off")?;
+        let probe = component.bit_out("probe")?;
         let estop_reset = component.bit_out("estop_reset")?;
         let home_state_x = component.s32_in("home_state_x")?;
         let home_state_y = component.s32_in("home_state_y")?;
@@ -106,6 +108,7 @@ impl CncPanelHal {
             *heartbeat.s32() = 0;
             *power_on.bit() = 0;
             *power_off.bit() = 0;
+            *probe.bit() = 0;
             *estop_reset.bit() = 0;
             *home_state_x.s32() = 0;
             *home_state_y.s32() = 0;
@@ -135,6 +138,7 @@ impl CncPanelHal {
             heartbeat,
             power_on,
             power_off,
+            probe,
             estop_reset,
             home_state_x,
             home_state_y,
@@ -177,6 +181,7 @@ impl CncPanelHal {
             *self.communication_error.bit() = 0;
             *self.power_on.bit() = outputs.power_on_pulse as u8;
             *self.power_off.bit() = outputs.power_off_pulse as u8;
+            *self.probe.bit() = outputs.probe as u8;
             *self.estop_reset.bit() = outputs.estop_reset_pulse as u8;
             *self.heartbeat.s32() = (*self.heartbeat.s32()).wrapping_add(1);
         }

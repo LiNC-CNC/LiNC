@@ -86,6 +86,9 @@ pub struct SimPanelState {
     pub rapid_override: f64,
     pub spindle_override: f64,
     pub program_protect: bool,
+    /// Simulated probe contact. Latching, so the operator can hold it through
+    /// a probe move and release it afterwards.
+    pub probe: bool,
     pub buttons: u64,
     pub leds: u64,
     pub sseg_tool: i32,
@@ -171,6 +174,7 @@ impl Default for SimPanelState {
             rapid_override: 1.0,
             spindle_override: 1.0,
             program_protect: false,
+            probe: false,
             buttons: 0,
             leds: 0,
             sseg_tool: 12,
@@ -577,6 +581,7 @@ impl SimPanelDriver {
             spindle_override: state.spindle_override,
             program_protect: state.program_protect,
             estop: state.estop,
+            probe: state.probe,
             home: [
                 home_active && rapid,
                 home_active && x && !self.last_display.homing,
@@ -1042,6 +1047,61 @@ fn panel_key(
     // whether the pointer is still down. A click-only edge left the button bit
     // latched, and halui kept jogging after the operator let go.
     (resp.clicked(), resp.is_pointer_button_down_on())
+}
+
+fn toggle_key(
+    ui: &egui::Ui,
+    l: &PanelLayout,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    label_text: &str,
+    sub: &str,
+    fill: Color32,
+    id: &'static str,
+    on: bool,
+) -> bool {
+    let rect = l.r(x, y, w, h);
+    let resp = rounded_button(
+        ui,
+        l,
+        rect,
+        ui.scope_id().with(("toggle-key", id)),
+        fill,
+        KEY_BORDER,
+    );
+    let led = rect.left_top() + Vec2::new(12.0 * l.k, 12.0 * l.k);
+    ui.painter()
+        .circle_filled(led, 3.5 * l.k, if on { GREEN } else { Color32::from_rgb(0x38, 0x3e, 0x41) });
+    if on {
+        ui.painter().circle_stroke(
+            led,
+            5.2 * l.k,
+            Stroke::new(1.0 * l.k, GREEN.gamma_multiply(0.55)),
+        );
+    }
+    label(
+        ui.painter(),
+        l,
+        x + w * 0.5,
+        y + h * 0.38,
+        14.0,
+        label_text,
+        TEXT,
+        Align2::CENTER_CENTER,
+    );
+    label(
+        ui.painter(),
+        l,
+        x + w * 0.5,
+        y + h * 0.68,
+        8.5,
+        sub,
+        if on { GREEN } else { MUTED },
+        Align2::CENTER_CENTER,
+    );
+    resp.clicked()
 }
 
 fn power_key(
@@ -1884,15 +1944,25 @@ fn paint_panel(
         handle.set(|s| s.set_button(buttons::CYCLE_STOP, true));
         *pressed |= buttons::CYCLE_STOP;
     }
-    lamp(
-        painter,
+
+    // Simulation-only probe contact, in the bottom-right corner and styled
+    // like the other square panel keys. Latching on purpose: the operator can
+    // hold it through a probe move and release it when the routine finishes.
+    if toggle_key(
+        ui,
         l,
-        360.0,
-        815.0,
-        9.0,
-        state.leds & crate::leds::CYCLE_ON != 0,
-        GREEN,
-    );
+        1507.0,
+        850.0,
+        145.0,
+        60.0,
+        "PROBE",
+        "CONTACT",
+        KEY_BG,
+        "probe-contact",
+        state.probe,
+    ) {
+        handle.set(|state| state.probe = !state.probe);
+    }
 
     let middle = [
         ("MPG SIM", buttons::MPG_SIM, Some(crate::leds::MPG_SIM)),
@@ -2117,6 +2187,18 @@ mod tests {
         assert_eq!(status_display_text(-1), "--");
         assert_eq!(status_display_text(54), "54");
         assert_eq!(status_display_text(60), "--");
+    }
+
+    #[test]
+    fn probe_contact_is_published_in_the_panel_snapshot() {
+        let handle = SimPanelHandle::new();
+        let mut driver = SimPanelDriver::new(handle.clone(), Duration::from_millis(1));
+        handle.set(|state| state.probe = true);
+        let snapshot = poll_driver(&mut driver);
+        assert!(snapshot.probe);
+        handle.set(|state| state.probe = false);
+        let snapshot = poll_driver(&mut driver);
+        assert!(!snapshot.probe);
     }
 
     #[test]
