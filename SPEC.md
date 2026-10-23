@@ -424,7 +424,9 @@ Default page. The layout is selected by `machine.gui`.
   which. The stock block is fully transparent by
   default (`toolpath.stock_alpha = 0`) and configurable up to opaque.
 - Program card, a `FEED / SPINDLE` card and a `SERVO LOAD` card beneath the
-  toolpath. The feed/spindle card shows a large `F` and `S`, each with the
+  toolpath. The two bottom cards fill the toolpath's width, so the servo card's
+  right edge lines up with the graph's right edge. The feed/spindle card shows a
+  large `F` and `S`, each with the
   programmed rate and override above the effective rate and its enable/on flag.
   The feed value is the programmed F word, converted from the program's G20/G21
   units to the machine's linear units per minute, so an inch program on a

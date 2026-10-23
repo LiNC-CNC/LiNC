@@ -47,8 +47,12 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
                 ui.add_space(6.0);
                 let servo = !app.servo_load_rows().is_empty();
                 let cards = if servo { 2.0 } else { 1.0 };
-                let card_width = ((graph_width - 16.0 - 8.0 * (cards - 1.0)) / cards).max(180.0);
+                let card_width = bottom_row_card_width(graph_width, cards, 180.0);
                 ui.horizontal_top(|ui| {
+                    // The explicit gap below is the whole gap: the default
+                    // item spacing would add 8 more per card and push the
+                    // servo card past the graph's right edge.
+                    ui.spacing_mut().item_spacing.x = 0.0;
                     bottom_card(app, ui, card_width, bottom_height, "feed", |app, ui, _h| {
                         common::feed_speed_card(app, ui, bottom_height);
                     });
@@ -95,6 +99,12 @@ fn bottom_cards_height(app: &LincApp) -> f32 {
     FEED.max(servo)
 }
 
+/// Width of one bottom card so that `cards` cards and the 8 px gaps between
+/// them fill `column` exactly. `min` is the smallest usable card.
+fn bottom_row_card_width(column: f32, cards: f32, min: f32) -> f32 {
+    ((column - 8.0 * (cards - 1.0)) / cards).max(min)
+}
+
 fn bottom_card(
     app: &mut LincApp,
     ui: &mut Ui,
@@ -107,8 +117,8 @@ fn bottom_card(
         Vec2::new(width, height),
         egui::Layout::top_down(egui::Align::Min),
         |ui| {
-            ui.set_min_width(width - 1.0);
-            ui.set_max_width(width - 1.0);
+            ui.set_min_width(width);
+            ui.set_max_width(width);
             let _ = id;
             add(app, ui, height);
         },
@@ -278,8 +288,9 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
     ui.add_space(6.0);
     let servo = !app.servo_load_rows().is_empty();
     let cards = if servo { 3.0 } else { 2.0 };
-    let card_width = ((available - 16.0 - 8.0 * (cards - 1.0)) / cards).max(220.0);
+    let card_width = bottom_row_card_width(available, cards, 220.0);
     ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
         bottom_card(app, ui, card_width, bottom_height, "feed", |app, ui, _h| {
             common::feed_speed_card(app, ui, bottom_height);
         });
@@ -309,4 +320,25 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
             );
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bottom_row_card_width;
+
+    #[test]
+    fn the_bottom_row_ends_at_the_column_edge() {
+        for (column, cards, min, expected) in [
+            (750.0, 2.0, 180.0, 750.0),
+            (1098.0, 3.0, 220.0, 1098.0),
+            (480.0, 1.0, 180.0, 480.0),
+        ] {
+            let width = bottom_row_card_width(column, cards, min);
+            let total = width * cards + 8.0 * (cards - 1.0);
+            assert!(
+                (total - expected).abs() < 1e-3,
+                "{cards} cards of {width} span {total}, expected {expected}"
+            );
+        }
+    }
 }
