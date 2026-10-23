@@ -332,6 +332,14 @@ impl NmlBackend {
         {
             return;
         }
+        // Never re-initialize the interpreter while a program is open:
+        // `reset_interpreter` closes the file, and `sim-ready` can load the
+        // program between homing and this poll. The program open path restores
+        // the parameter file and applies its G5X offsets itself.
+        if !status.task.file.trim().is_empty() {
+            self.offsets_synced = true;
+            return;
+        }
         // `G54` is an MDI block, and LinuxCNC refuses MDI until every axis is
         // homed. A start-up sync that runs before homing would burn every
         // attempt on rejections and never apply the stored offsets.
