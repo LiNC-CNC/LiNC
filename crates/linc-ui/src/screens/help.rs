@@ -50,14 +50,21 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                 .size(theme::font_size(9.0))
                 .color(theme::MUTED),
         );
-        let response = ui.add(
-            egui::TextEdit::singleline(&mut app.help.query)
-                .id(search_id)
-                .hint_text("G2, G3, M6, o sub, arc …  ( / )")
-                .desired_width(360.0)
-                // One text line, not the touch-target height.
-                .margin(egui::Margin::symmetric(6, 1)),
-        );
+        // One text line, not the 44 px touch-target height; the theme's
+        // interact_size is the floor the TextEdit style applies.
+        let one_line = ui.text_style_height(&egui::TextStyle::Body);
+        let response = ui
+            .scope(|ui| {
+                ui.spacing_mut().interact_size.y = one_line;
+                ui.add(
+                    egui::TextEdit::singleline(&mut app.help.query)
+                        .id(search_id)
+                        .hint_text("G2, G3, M6, o sub, arc …  ( / )")
+                        .desired_width(360.0)
+                        .margin(egui::Margin::symmetric(6, 1)),
+                )
+            })
+            .inner;
         if app.help.focus_search {
             response.request_focus();
             app.help.focus_search = false;
