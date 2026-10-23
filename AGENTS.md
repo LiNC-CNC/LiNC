@@ -148,7 +148,7 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
   `Ctrl+Q` guarded quit, Esc, arrows/Page/Home/End, Enter. `[keys]` drives the shell; `Keymap::from_config` is the only source.
 - Everything else is page-local and consumed only on that page: `Ctrl+S`, `Ctrl+Z/Y`, editor keys, `Ctrl+R` run-from-line, `Ctrl+0` fit, `Ctrl+L`
   clear trail, Files copy/delete, MDI history. A page-local key consumed elsewhere shadows another page's command.
-- The sidebar SHORTCUTS pane lists page-local commands only; navigation keys are never listed. The bottom bar carries live machine state only.
+- The sidebar SHORTCUTS pane lists page-local commands only; navigation keys are never listed, except the Program page's FILE key, which is shown because it opens the file browser. The bottom bar carries live machine state only.
 - `Ctrl+F` focuses the Help search (`[keys].find`); it is not an editor find. Do not add a find UI without changing SPEC §6.2.
 - `[ui] pages` selects and orders nav entries but does not unbind keys. If you hide a page, decide what its `[keys]` binding does. `[keys]` is authoritative.
 

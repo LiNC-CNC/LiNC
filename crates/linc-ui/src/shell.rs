@@ -2597,6 +2597,7 @@ impl LincApp {
                 groups.push(ShortcutGroup {
                     title: "PROGRAM",
                     items: vec![
+                        ("FILE".into(), "BROWSER"),
                         (k.program_run_from_line.label(), "RUN LINE"),
                         (k.goto_line.label(), "GOTO"),
                         (k.save.label(), "SAVE"),
@@ -2621,6 +2622,7 @@ impl LincApp {
                 groups.push(ShortcutGroup {
                     title: "PROGRAM",
                     items: vec![
+                        ("FILE".into(), "BROWSER"),
                         (k.program_run_from_line.label(), "RUN LINE"),
                         (k.goto_line.label(), "GOTO"),
                     ],

@@ -106,7 +106,7 @@ else, so it cannot shadow another page's command.
 | Page | Keys |
 |---|---|
 | Machine (MAIN) | `Ctrl+F10`/`Ctrl+▢` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail, `Ctrl+R` run from line, `Ctrl+G` go to a line number |
-| Program | `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
+| Program | `FILE` open the file browser, `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
 | Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Ctrl+X` delete |
 | MDI | `Enter` issue, `Up`/`Down` history, `Esc` clear the unissued block |
 | Help | `/` or `Ctrl+F` focus search, `Up`/`Down` select, `Enter` open the reference, `Backspace` back in the reference dialog |
