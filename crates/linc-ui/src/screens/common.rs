@@ -949,18 +949,64 @@ fn yes_no(value: bool) -> &'static str {
     }
 }
 
+/// Small rotation arrow beside the spindle `S`: clockwise for forward,
+/// counter-clockwise for reverse, and a dot when stopped. It is drawn as
+/// vectors so it never depends on font glyph coverage.
+fn spindle_direction_mark(ui: &Ui, rect: egui::Rect, center: egui::Pos2, direction: i8, on: bool) {
+    let painter = ui.painter_at(rect);
+    if !on || direction == 0 {
+        painter.circle_filled(center, 2.0, theme::MUTED);
+        return;
+    }
+    let color = if direction > 0 {
+        theme::SUCCESS
+    } else {
+        theme::WARNING
+    };
+    let radius = 6.5;
+    let start = 300.0_f32.to_radians();
+    let sweep = 300.0_f32.to_radians();
+    let steps = 20;
+    let mut points = Vec::with_capacity(steps + 1);
+    for step in 0..=steps {
+        let angle = start + sweep * step as f32 / steps as f32;
+        points.push(center + Vec2::new(angle.cos(), angle.sin()) * radius);
+    }
+    let stroke = egui::Stroke::new(1.5, color);
+    painter.add(egui::Shape::line(points, stroke));
+    // The head sits at the clockwise end for forward, and at the other end
+    // pointing the other way for reverse, so the same arc reads either way.
+    let (head_angle, sign) = if direction > 0 {
+        (start + sweep, 1.0)
+    } else {
+        (start, -1.0)
+    };
+    let tip = center + Vec2::new(head_angle.cos(), head_angle.sin()) * radius;
+    let tangent = Vec2::new(-head_angle.sin(), head_angle.cos()) * sign;
+    let back = tip - tangent * 4.2;
+    let side = Vec2::new(-tangent.y, tangent.x) * 2.4;
+    painter.add(egui::Shape::convex_polygon(
+        vec![tip, back + side, back - side],
+        color,
+        egui::Stroke::NONE,
+    ));
+}
+
 /// Feed and spindle block in the machine-HMI layout: a large `F` or `S` on the
 /// left, two right-aligned value rows beside it. The first row is the
 /// programmed rate and its override, the second the effective value and its
-/// enable/on flag.
+/// enable/on flag. The spindle block carries its rotation direction beside the
+/// letter.
 fn feed_speed_block(
     ui: &Ui,
     rect: egui::Rect,
     letter: &str,
     rows: &[(String, String, String); 2],
+    spindle: Option<(i8, bool)>,
 ) {
     let painter = ui.painter_at(rect);
-    let lane = 30.0;
+    // The lane leaves room beside the letter for the spindle's direction arrow.
+    let lane = 42.0;
     let gap = 4.0;
     // Shrink the row until all three columns fit the half. The two rows share
     // the column edges, so `100%` sits directly above `(True)`.
@@ -1000,6 +1046,15 @@ fn feed_speed_block(
         FontId::proportional(theme::font_size(font_size * 3.0)),
         theme::SUCCESS,
     );
+    if let Some((direction, on)) = spindle {
+        spindle_direction_mark(
+            ui,
+            rect,
+            egui::pos2(rect.left() + 30.0, rect.center().y - 12.0),
+            direction,
+            on,
+        );
+    }
     let font = FontId::monospace(theme::font_size(font_size));
     let value_right = rect.left() + lane + value_width;
     let units_left = value_right + gap;
@@ -1076,7 +1131,7 @@ pub fn feed_speed_card(app: &LincApp, ui: &mut Ui, height: f32) {
                 format!(" ({})", yes_no(feed.feed_override_enabled)),
             ),
         ];
-        feed_speed_block(ui, left, "F", &feed_rows);
+        feed_speed_block(ui, left, "F", &feed_rows, None);
 
         let (commanded, actual, override_factor, on) = app
             .snapshot
@@ -1103,7 +1158,13 @@ pub fn feed_speed_card(app: &LincApp, ui: &mut Ui, height: f32) {
                 format!(" ({})", yes_no(on)),
             ),
         ];
-        feed_speed_block(ui, right, "S", &spindle_rows);
+        let direction = app
+            .snapshot
+            .spindles
+            .first()
+            .map(|spindle| (spindle.direction, spindle.on))
+            .unwrap_or((0, false));
+        feed_speed_block(ui, right, "S", &spindle_rows, Some(direction));
     });
 }
 
