@@ -389,6 +389,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                 egui::ScrollArea::vertical()
                     .id_salt("probe-left")
                     .max_height(height)
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
                         parameters_card(app, ui);
                         ui.add_space(6.0);
@@ -478,6 +479,7 @@ fn category_tabs(app: &mut LincApp, ui: &mut Ui) {
 
 fn parameters_card(app: &mut LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
+        ui.set_min_width(ui.available_width());
         ui.spacing_mut().interact_size.y = 12.0;
         ui.spacing_mut().item_spacing.y = 1.0;
         ui.spacing_mut().button_padding.y = 1.0;
@@ -623,6 +625,7 @@ fn param_field(ui: &mut Ui, value: &mut ParamValue) {
 
 fn results_card(app: &mut LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
+        ui.set_min_width(ui.available_width());
         ui.spacing_mut().interact_size.y = 12.0;
         ui.spacing_mut().item_spacing.y = 2.0;
         ui.spacing_mut().button_padding.y = 1.0;
@@ -750,6 +753,7 @@ fn issue_probe_mdi(app: &mut LincApp, block: String, toast: &str) {
 fn matrix_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
     let cards = cards_for(app.probe.category);
     theme::card(ui, |ui| {
+        ui.set_min_height((height - 24.0).max(0.0));
         ui.horizontal(|ui| {
             theme::section_header(ui, "PROBING ROUTINES");
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
@@ -1397,8 +1401,8 @@ fn draw_icon(ui: &Ui, r: Rect, icon: Icon, _selected: bool) {
 }
 
 fn probe_symbol(app: &LincApp, ui: &mut Ui, height: f32) {
-    let _ = height;
     theme::card(ui, |ui| {
+        ui.set_min_height((height - 24.0).max(0.0));
         ui.horizontal(|ui| {
             theme::section_header(ui, "PROBE");
             ui.label(
@@ -1408,8 +1412,13 @@ fn probe_symbol(app: &LincApp, ui: &mut Ui, height: f32) {
                     .color(theme::MUTED),
             );
         });
+        let draw_h = 210.0;
+        let spare = (ui.available_height() - draw_h).max(0.0);
+        if spare > 0.0 {
+            ui.add_space(spare / 2.0);
+        }
         let (rect, _) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), 210.0), Sense::hover());
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), draw_h), Sense::hover());
         let p = ui.painter_at(rect);
         let c = Pos2::new(rect.center().x, rect.top() + 70.0);
         p.line_segment(
@@ -1465,27 +1474,6 @@ fn probe_symbol(app: &LincApp, ui: &mut Ui, height: f32) {
         let led_at = Pos2::new(c.x, c.y - 2.0);
         p.circle_filled(led_at, 5.0, led.linear_multiply(0.18));
         p.circle_filled(led_at, 3.0, led);
-        p.text(
-            Pos2::new(led_at.x + 7.0, led_at.y + 2.5),
-            Align2::LEFT_CENTER,
-            "LED",
-            FontId::monospace(theme::font_size(7.0)),
-            theme::MUTED,
-        );
-        let status = if app.snapshot.probe.running {
-            "RUNNING"
-        } else if app.snapshot.probe.error.is_some() {
-            "ERROR"
-        } else {
-            "READY"
-        };
-        p.text(
-            Pos2::new(rect.left() + 10.0, rect.bottom() - 44.0),
-            Align2::LEFT_CENTER,
-            status,
-            FontId::monospace(theme::font_size(7.0)),
-            led,
-        );
         p.text(
             Pos2::new(rect.left() + 10.0, rect.bottom() - 10.0),
             Align2::LEFT_CENTER,
@@ -1732,9 +1720,7 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
 
 pub fn enter_first(app: &mut LincApp) {
     app.probe.category = ProbeCategory::OutsideCorners;
-    if let Some(card) = cards_for(app.probe.category).first() {
-        app.probe.operation = card.operation.to_string();
-    }
+    app.probe.operation.clear();
     app.probe.error = None;
 }
 
@@ -1749,9 +1735,8 @@ pub fn category_step(app: &mut LincApp, forward: bool) {
         (index + ProbeCategory::ALL.len() - 1) % ProbeCategory::ALL.len()
     };
     app.probe.category = ProbeCategory::ALL[next];
-    if let Some(card) = cards_for(app.probe.category).first() {
-        app.probe.operation = card.operation.to_string();
-    }
+    app.probe.operation.clear();
+    app.probe.error = None;
 }
 
 #[cfg(test)]

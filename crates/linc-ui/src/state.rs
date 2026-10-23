@@ -961,10 +961,9 @@ pub struct ProbeUi {
 
 impl ProbeUi {
     pub fn new(params: ProbeParameters, wcs: String) -> Self {
-        let operation = "back_left_top_corner".to_string();
         Self {
             category: ProbeCategory::OutsideCorners,
-            operation,
+            operation: String::new(),
             params,
             wcs,
             measure_only: false,

@@ -818,7 +818,12 @@ choose a routine group, then pick the operation card.
 - Each category opens a grid of illustrated operation cards. Parameters and
   results stay on the left, the routine matrix is centred and the probe symbol
   is on the right. Work offsets remain on the Offsets screen rather than being
-  duplicated here; the active WCS is shown in the parameter header.
+  duplicated here; the active WCS is shown in the parameter header. The two
+  left-hand cards share one right edge; the probe pane fills the body height
+  and bottom-aligns with the routine matrix.
+- No routine is selected on entry or when a tab changes. Pressing a number is
+  the only way to highlight a routine; `Enter` before that reports that a
+  routine must be selected.
 - Edge operations (X±, Y±, Z surface) remain available within the relevant
   category; the Z surface routine is the centre card (`5`). Calibration
   includes round/square boss/pocket and reset.
