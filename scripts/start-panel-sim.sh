@@ -72,6 +72,7 @@ if (( DETACH )); then
     fi
     echo "panel sim started (PID $PID)"
     echo "  profile: $PROFILE"
+    echo "  ipc:     $IPC_BASE"
     echo "  log:     $LOG_FILE"
     echo "  stop:    $SCRIPT_DIR/stop-sim.sh"
 else

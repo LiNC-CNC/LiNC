@@ -33,11 +33,13 @@ scripts/build-deb.sh                        # Debian packages, amd64 + arm64
   travel as `LINC_SIM_READY` to the panel (the HAL `loadusr` line cannot take the flag), and `scripts/sim-ready.py` does the rest
   (queue the E-stop reset on the command channel, power on, home, open the program, float the window under Hyprland). Give the
   reset the command channel, not only the panel's HAL pulse: a pulse raised at boot can land before the task accepts it.
-- Standalone, no LinuxCNC or HAL. Panel and HMI must share `LINC_SIM_IPC`:
+- Standalone, no LinuxCNC or HAL. Panel and HMI must share `LINC_SIM_IPC`; the
+  panel script uses `$XDG_RUNTIME_DIR/linc/panel-sim` by default, so give the
+  HMI the same value (do not hardcode `/tmp` on a desktop session):
 
 ```bash
 ./scripts/start-panel-sim.sh
-LINC_SIM_IPC=/tmp/linc/panel-sim ./target/release/linc --config configs/sim.toml --sim --no-hal
+LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --config configs/sim.toml --sim --no-hal
 ```
 
 - Raw panel: `./target/release/linc-panel --config configs/sim.toml --sim --no-hal --window` (`--sim` forces sim, `--no-hal` skips `cnc_panel.*`).
