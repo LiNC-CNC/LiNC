@@ -86,8 +86,7 @@ pub struct SimPanelState {
     pub rapid_override: f64,
     pub spindle_override: f64,
     pub program_protect: bool,
-    /// Simulated probe contact. Latching, so the operator can hold it through
-    /// a probe move and release it afterwards.
+    /// Simulated probe contact. Asserted only while the panel PROBE key is held.
     pub probe: bool,
     pub buttons: u64,
     pub leds: u64,
@@ -1049,7 +1048,7 @@ fn panel_key(
     (resp.clicked(), resp.is_pointer_button_down_on())
 }
 
-fn toggle_key(
+fn momentary_key(
     ui: &egui::Ui,
     l: &PanelLayout,
     x: f32,
@@ -1061,7 +1060,7 @@ fn toggle_key(
     fill: Color32,
     id: &'static str,
     on: bool,
-) -> bool {
+) -> (bool, bool) {
     let rect = l.r(x, y, w, h);
     let resp = rounded_button(
         ui,
@@ -1101,7 +1100,7 @@ fn toggle_key(
         if on { GREEN } else { MUTED },
         Align2::CENTER_CENTER,
     );
-    resp.clicked()
+    (resp.clicked(), resp.is_pointer_button_down_on())
 }
 
 fn power_key(
@@ -1946,9 +1945,10 @@ fn paint_panel(
     }
 
     // Simulation-only probe contact, in the bottom-right corner and styled
-    // like the other square panel keys. Latching on purpose: the operator can
-    // hold it through a probe move and release it when the routine finishes.
-    if toggle_key(
+    // like the other square panel keys. Momentary: the contact is closed while
+    // the operator holds the key, matching how the probe input is asserted on
+    // contact and released on retract.
+    let (_, probe_held) = momentary_key(
         ui,
         l,
         1507.0,
@@ -1960,9 +1960,8 @@ fn paint_panel(
         KEY_BG,
         "probe-contact",
         state.probe,
-    ) {
-        handle.set(|state| state.probe = !state.probe);
-    }
+    );
+    handle.set(|state| state.probe = probe_held);
 
     let middle = [
         ("MPG SIM", buttons::MPG_SIM, Some(crate::leds::MPG_SIM)),
