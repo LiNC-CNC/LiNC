@@ -1492,7 +1492,7 @@ Only the accepted versions are included.
 | `svg/gcode-help.svg` | G-code Help: offline quick-reference index, code search, detail pane, parameter tables, figures and related codes |
 | `svg/files.svg` | Files: USB and `NC_FILES` panes, mount/eject status, file listing and explicit copy/load actions |
 | `svg/lathe-dashboard.svg` | Lathe dashboard: X/Z/C/Y cards, XZ toolpath, power turret/live-tool card, spindle load and machine health |
-| `svg/probe.svg` | Touch Probe: Probe Basic-style category strip and illustrated operation cards, WCS/parameters, explicit `RUN PROBE` issue, result/apply and calibration |
+| `svg/probe.svg` | Touch Probe: keyboard-first Probe Basic 3×3 routine matrix (numpad 1–9 highlight, Enter run), passive offset-key tab indicator, Probe Basic parameter/result block, work offsets and live probe LED |
 | `svg/mdi.svg` | MDI: single-block command, quick inserts, DRO/modal, command issue via `issue_mdi`, history and last result |
 | `svg/manual.svg` | Manual JOG/INC/MPG: dominant live graph, large work/machine/DTG coordinates and mode context; no on-screen jog controls |
 | `svg/homing.svg` | Homing: per-axis/sequence state, HOME/PROG.HOME physical-key mapping and machine position; no software home controls |

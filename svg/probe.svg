@@ -86,7 +86,7 @@
 <text x="190" y="240" fill="#e8eaed" font-size="7.2" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE POSITION ONLY</text>
 <text x="506" y="240" fill="#9aa0a6" font-size="6.0" font-family="monospace" text-anchor="end">OFF = APPLY TO G54</text>
 <text x="170" y="261" fill="#6b7280" font-size="6.0" font-family="sans-serif" text-anchor="start">OFF: zero the active work offset · ON: record values only</text>
-<rect x="158" y="278" width="360" height="282" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
+<rect x="158" y="278" width="360" height="322" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
 <text x="170" y="300" fill="#e8eaed" font-size="9.5" font-family="sans-serif" font-weight="700" text-anchor="start">PROBING PARAMETERS</text>
 <text x="506" y="300" fill="#9aa0a6" font-size="6.1" font-family="sans-serif" text-anchor="end">mm · ↑↓ ADJUST</text>
 <line x1="170" y1="308" x2="506" y2="308" stroke="#30353a" stroke-width="1"/>
@@ -96,137 +96,124 @@
 <text x="422" y="325" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">PROBE SLOW FDRATE</text>
 <rect x="426" y="315" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
 <text x="466" y="324.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">50</text>
-<text x="258" y="345" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">PROBE TRAVERSE FR</text>
-<rect x="262" y="335" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="301" y="344.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">1000</text>
-<text x="422" y="345" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">PROBE FAST FDRATE</text>
-<rect x="426" y="335" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="466" y="344.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">500</text>
-<text x="258" y="365" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">MAX X/Y DISTANCE</text>
-<rect x="262" y="355" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="301" y="364.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">10.0</text>
-<text x="422" y="365" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">X/Y CLEARANCE</text>
-<rect x="426" y="355" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="466" y="364.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">5.0</text>
-<text x="258" y="385" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">MAX Z DISTANCE</text>
-<rect x="262" y="375" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="301" y="384.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">10.0</text>
-<text x="422" y="385" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">Z CLEARANCE</text>
-<rect x="426" y="375" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="466" y="384.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">5.0</text>
-<text x="258" y="405" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">EXTRA PROBE DEPTH</text>
-<rect x="262" y="395" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="301" y="404.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">0.0</text>
-<text x="422" y="405" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">STEP OFF WIDTH</text>
-<rect x="426" y="395" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="466" y="404.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">1.0</text>
-<text x="258" y="425" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">EDGE WIDTH</text>
-<rect x="262" y="415" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="301" y="424.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">1.0</text>
-<text x="422" y="425" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">TIP Ø</text>
-<rect x="426" y="415" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="466" y="424.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">4.0</text>
-<rect x="170" y="432" width="104" height="22" rx="3" fill="#1a1f25" stroke="#30353a" stroke-width="1"/>
-<text x="222" y="446.5" fill="#e8eaed" font-size="6.0" font-family="sans-serif" font-weight="700" text-anchor="middle">UPDATE PROBE PARAMS</text>
-<rect x="280" y="432" width="70" height="22" rx="3" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="315" y="446.5" fill="#9aa0a6" font-size="6.0" font-family="sans-serif" text-anchor="middle">RESET ALL DATA</text>
-<rect x="356" y="432" width="66" height="22" rx="3" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="389" y="446.5" fill="#9aa0a6" font-size="6.0" font-family="sans-serif" text-anchor="middle">X DATA RESET</text>
-<rect x="428" y="432" width="78" height="22" rx="3" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="467" y="446.5" fill="#9aa0a6" font-size="6.0" font-family="sans-serif" text-anchor="middle">Y DATA RESET</text>
-<line x1="170" y1="460" x2="506" y2="460" stroke="#30353a" stroke-width="1"/>
-<text x="170" y="472" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE RESULTS</text>
-<text x="220" y="488" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">X- PROBED</text>
-<rect x="224" y="479" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="253" y="488.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
-<text x="332" y="488" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">X+ PROBED</text>
-<rect x="336" y="479" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="365" y="488.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
-<text x="444" y="488" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">X WIDTH</text>
-<rect x="448" y="479" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="477" y="488.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
-<text x="220" y="506" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Y- PROBED</text>
-<rect x="224" y="497" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="253" y="506.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
-<text x="332" y="506" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Y+ PROBED</text>
-<rect x="336" y="497" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="365" y="506.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
-<text x="444" y="506" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Y WIDTH</text>
-<rect x="448" y="497" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="477" y="506.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
-<text x="220" y="524" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Z- PROBED</text>
+<text x="258" y="347" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">PROBE TRAVERSE FR</text>
+<rect x="262" y="337" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="301" y="346.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">1000</text>
+<text x="422" y="347" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">PROBE FAST FDRATE</text>
+<rect x="426" y="337" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="466" y="346.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">500</text>
+<text x="258" y="369" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">MAX X/Y DISTANCE</text>
+<rect x="262" y="359" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="301" y="368.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">10.0</text>
+<text x="422" y="369" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">X/Y CLEARANCE</text>
+<rect x="426" y="359" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="466" y="368.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">5.0</text>
+<text x="258" y="391" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">MAX Z DISTANCE</text>
+<rect x="262" y="381" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="301" y="390.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">10.0</text>
+<text x="422" y="391" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">Z CLEARANCE</text>
+<rect x="426" y="381" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="466" y="390.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">5.0</text>
+<text x="258" y="413" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">EXTRA PROBE DEPTH</text>
+<rect x="262" y="403" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="301" y="412.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">0.0</text>
+<text x="422" y="413" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">STEP OFF WIDTH</text>
+<rect x="426" y="403" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="466" y="412.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">1.0</text>
+<text x="258" y="435" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">EDGE WIDTH</text>
+<rect x="262" y="425" width="78" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="301" y="434.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">1.0</text>
+<text x="422" y="435" fill="#9aa0a6" font-size="6.7" font-family="sans-serif" text-anchor="end">TIP Ø</text>
+<rect x="426" y="425" width="80" height="13" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="466" y="434.6" fill="#e8eaed" font-size="7.5" font-family="monospace" text-anchor="middle">4.0</text>
+<rect x="170" y="446" width="104" height="22" rx="3" fill="#1a1f25" stroke="#30353a" stroke-width="1"/>
+<text x="222" y="460.5" fill="#e8eaed" font-size="6.0" font-family="sans-serif" font-weight="700" text-anchor="middle">UPDATE PROBE PARAMS</text>
+<rect x="280" y="446" width="70" height="22" rx="3" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="315" y="460.5" fill="#9aa0a6" font-size="6.0" font-family="sans-serif" text-anchor="middle">RESET ALL DATA</text>
+<rect x="356" y="446" width="66" height="22" rx="3" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="389" y="460.5" fill="#9aa0a6" font-size="6.0" font-family="sans-serif" text-anchor="middle">X DATA RESET</text>
+<rect x="428" y="446" width="78" height="22" rx="3" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="467" y="460.5" fill="#9aa0a6" font-size="6.0" font-family="sans-serif" text-anchor="middle">Y DATA RESET</text>
+<line x1="170" y1="474" x2="506" y2="474" stroke="#30353a" stroke-width="1"/>
+<text x="170" y="486" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE RESULTS</text>
+<text x="220" y="504" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">X- PROBED</text>
+<rect x="224" y="495" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="253" y="504.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="332" y="504" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">X+ PROBED</text>
+<rect x="336" y="495" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="365" y="504.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="444" y="504" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">X WIDTH</text>
+<rect x="448" y="495" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="477" y="504.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="220" y="524" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Y- PROBED</text>
 <rect x="224" y="515" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
 <text x="253" y="524.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
-<text x="332" y="524" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">DIAM.</text>
+<text x="332" y="524" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Y+ PROBED</text>
 <rect x="336" y="515" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
 <text x="365" y="524.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
-<text x="444" y="524" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">X CENTER</text>
+<text x="444" y="524" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Y WIDTH</text>
 <rect x="448" y="515" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
 <text x="477" y="524.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
-<text x="220" y="542" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">EDGE DELTA</text>
-<rect x="224" y="533" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="253" y="542.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
-<text x="332" y="542" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">EDGE ANGLE</text>
-<rect x="336" y="533" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="365" y="542.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
-<text x="444" y="542" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Y CENTER</text>
-<rect x="448" y="533" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
-<text x="477" y="542.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
-<rect x="526" y="142" width="340" height="418" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
+<text x="220" y="544" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Z- PROBED</text>
+<rect x="224" y="535" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="253" y="544.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="332" y="544" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">DIAM.</text>
+<rect x="336" y="535" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="365" y="544.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="444" y="544" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">X CENTER</text>
+<rect x="448" y="535" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="477" y="544.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="220" y="564" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">EDGE DELTA</text>
+<rect x="224" y="555" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="253" y="564.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="332" y="564" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">EDGE ANGLE</text>
+<rect x="336" y="555" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="365" y="564.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<text x="444" y="564" fill="#9aa0a6" font-size="6.3" font-family="sans-serif" text-anchor="end">Y CENTER</text>
+<rect x="448" y="555" width="58" height="12" rx="2" fill="#141619" stroke="#30353a" stroke-width="1"/>
+<text x="477" y="564.2" fill="#e8eaed" font-size="7.0" font-family="monospace" text-anchor="middle">0.0000</text>
+<rect x="526" y="142" width="340" height="458" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
 <text x="538" y="164" fill="#e8eaed" font-size="9.5" font-family="sans-serif" font-weight="700" text-anchor="start">PROBING ROUTINES</text>
 <text x="854" y="164" fill="#9aa0a6" font-size="6.2" font-family="monospace" text-anchor="end">9 ROUTINES</text>
 <text x="538" y="180" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="start">OUTSIDE CORNERS / NUM 1-9 HIGHLIGHT</text>
 <line x1="538" y1="188" x2="854" y2="188" stroke="#30353a" stroke-width="1"/>
-<rect x="538" y="196" width="100" height="106" rx="5" fill="#4da3ff" fill-opacity="0.11" stroke="#4da3ff" stroke-width="2"/><rect x="545" y="203" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4da3ff" stroke-width="1"/><text x="554.0" y="212.9" fill="#4da3ff" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">7</text><g transform="translate(562,218) scale(1.85)"><rect x="14" y="2" width="18" height="19" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="2" y1="2" x2="10.5" y2="2" stroke="#3ddc84" stroke-width="1.3"/><polygon points="10.5,2 6.5,-0.2999999999999998 6.5,4.3" fill="#3ddc84"/><line x1="14" y1="12" x2="14" y2="5.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="14,5.5 11.7,9.5 16.3,9.5" fill="#3ddc84"/><circle cx="14" cy="2" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="14" cy="2" r="2.3" fill="#c084fc"/></g><text x="588" y="292" fill="#e8eaed" font-size="6.2" font-family="sans-serif" font-weight="700" text-anchor="middle">FRONT LEFT TOP</text>
-<rect x="646" y="196" width="100" height="106" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="653" y="203" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="662.0" y="212.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">8</text><g transform="translate(670,218) scale(1.85)"><rect x="4" y="11" width="26" height="10" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="4" y1="11" x2="30" y2="11" stroke="#9aa0a6" stroke-width="1.2"/><line x1="17" y1="1.5" x2="17" y2="8.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="17,8.5 14.7,4.5 19.3,4.5" fill="#3ddc84"/><circle cx="17" cy="11" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="17" cy="11" r="2.3" fill="#c084fc"/></g><text x="696" y="292" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">FRONT TOP SIDE</text>
-<rect x="754" y="196" width="100" height="106" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="761" y="203" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="770.0" y="212.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">9</text><g transform="translate(778,218) scale(1.85)"><rect x="2" y="2" width="18" height="19" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="32" y1="2" x2="23.5" y2="2" stroke="#3ddc84" stroke-width="1.3"/><polygon points="23.5,2 27.5,-0.2999999999999998 27.5,4.3" fill="#3ddc84"/><line x1="20" y1="12" x2="20" y2="5.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="20,5.5 17.7,9.5 22.3,9.5" fill="#3ddc84"/><circle cx="20" cy="2" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="20" cy="2" r="2.3" fill="#c084fc"/></g><text x="804" y="292" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">FRONT RIGHT TOP</text>
-<rect x="538" y="310" width="100" height="106" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="545" y="317" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="554.0" y="326.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">4</text><g transform="translate(562,332) scale(1.85)"><rect x="14" y="4" width="17" height="15" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="14" y1="4" x2="14" y2="19" stroke="#9aa0a6" stroke-width="1.2"/><line x1="2" y1="11" x2="10.5" y2="11" stroke="#3ddc84" stroke-width="1.3"/><polygon points="10.5,11 6.5,8.7 6.5,13.3" fill="#3ddc84"/><circle cx="14" cy="11" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="14" cy="11" r="2.3" fill="#c084fc"/></g><text x="588" y="406" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">LEFT TOP SIDE</text>
-<rect x="646" y="310" width="100" height="106" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="653" y="317" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="662.0" y="326.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">5</text><g transform="translate(670,332) scale(1.85)"><rect x="4" y="13" width="26" height="8" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="4" y1="13" x2="30" y2="13" stroke="#9aa0a6" stroke-width="1.4"/><circle cx="17" cy="13" r="7" fill="none" stroke="#3ddc84" stroke-width="1.1" stroke-dasharray="2 2" opacity="0.85"/><line x1="7" y1="13" x2="11" y2="13" stroke="#3ddc84" stroke-width="1.1"/><line x1="23" y1="13" x2="27" y2="13" stroke="#3ddc84" stroke-width="1.1"/><line x1="17" y1="3" x2="17" y2="7" stroke="#3ddc84" stroke-width="1.1"/><line x1="17" y1="19" x2="17" y2="22" stroke="#3ddc84" stroke-width="1.1"/><circle cx="17" cy="13" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="17" cy="13" r="2.3" fill="#c084fc"/></g><text x="696" y="406" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">SURFACE Z</text>
-<rect x="754" y="310" width="100" height="106" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="761" y="317" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="770.0" y="326.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">6</text><g transform="translate(778,332) scale(1.85)"><rect x="3" y="4" width="17" height="15" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="20" y1="4" x2="20" y2="19" stroke="#9aa0a6" stroke-width="1.2"/><line x1="32" y1="11" x2="23.5" y2="11" stroke="#3ddc84" stroke-width="1.3"/><polygon points="23.5,11 27.5,8.7 27.5,13.3" fill="#3ddc84"/><circle cx="20" cy="11" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="20" cy="11" r="2.3" fill="#c084fc"/></g><text x="804" y="406" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">RIGHT TOP SIDE</text>
-<rect x="538" y="424" width="100" height="106" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="545" y="431" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="554.0" y="440.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">1</text><g transform="translate(562,446) scale(1.85)"><rect x="14" y="1" width="18" height="19" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="2" y1="20" x2="10.5" y2="20" stroke="#3ddc84" stroke-width="1.3"/><polygon points="10.5,20 6.5,17.7 6.5,22.3" fill="#3ddc84"/><line x1="14" y1="10" x2="14" y2="16.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="14,16.5 11.7,12.5 16.3,12.5" fill="#3ddc84"/><circle cx="14" cy="20" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="14" cy="20" r="2.3" fill="#c084fc"/></g><text x="588" y="520" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">BACK LEFT TOP</text>
-<rect x="646" y="424" width="100" height="106" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="653" y="431" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="662.0" y="440.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">2</text><g transform="translate(670,446) scale(1.85)"><rect x="4" y="1" width="26" height="10" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="4" y1="11" x2="30" y2="11" stroke="#9aa0a6" stroke-width="1.2"/><line x1="17" y1="20" x2="17" y2="13.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="17,13.5 14.7,17.5 19.3,17.5" fill="#3ddc84"/><circle cx="17" cy="11" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="17" cy="11" r="2.3" fill="#c084fc"/></g><text x="696" y="520" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">BACK TOP SIDE</text>
-<rect x="754" y="424" width="100" height="106" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="761" y="431" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="770.0" y="440.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">3</text><g transform="translate(778,446) scale(1.85)"><rect x="2" y="1" width="18" height="19" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="32" y1="20" x2="23.5" y2="20" stroke="#3ddc84" stroke-width="1.3"/><polygon points="23.5,20 27.5,17.7 27.5,22.3" fill="#3ddc84"/><line x1="20" y1="10" x2="20" y2="16.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="20,16.5 17.7,12.5 22.3,12.5" fill="#3ddc84"/><circle cx="20" cy="20" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="20" cy="20" r="2.3" fill="#c084fc"/></g><text x="804" y="520" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">BACK RIGHT TOP</text>
-<text x="538" y="542" fill="#6b7280" font-size="5.8" font-family="monospace" text-anchor="start">NUM PAD 7 8 9 / 4 5 6 / 1 2 3  ·  ENTER RUNS</text>
-<text x="538" y="554" fill="#6b7280" font-size="5.5" font-family="monospace" text-anchor="start">CALIBRATE / HELP USE A DIFFERENT LAYOUT</text>
-<rect x="874" y="142" width="110" height="418" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
+<rect x="538" y="196" width="100" height="112" rx="5" fill="#4da3ff" fill-opacity="0.11" stroke="#4da3ff" stroke-width="2"/><rect x="545" y="203" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4da3ff" stroke-width="1"/><text x="554.0" y="212.9" fill="#4da3ff" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">7</text><g transform="translate(561,218) scale(1.95)"><rect x="14" y="2" width="18" height="19" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="2" y1="2" x2="10.5" y2="2" stroke="#3ddc84" stroke-width="1.3"/><polygon points="10.5,2 6.5,-0.2999999999999998 6.5,4.3" fill="#3ddc84"/><line x1="14" y1="12" x2="14" y2="5.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="14,5.5 11.7,9.5 16.3,9.5" fill="#3ddc84"/><circle cx="14" cy="2" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="14" cy="2" r="2.3" fill="#c084fc"/></g><text x="588" y="292" fill="#e8eaed" font-size="6.2" font-family="sans-serif" font-weight="700" text-anchor="middle">FRONT LEFT TOP</text>
+<rect x="646" y="196" width="100" height="112" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="653" y="203" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="662.0" y="212.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">8</text><g transform="translate(669,218) scale(1.95)"><rect x="4" y="11" width="26" height="10" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="4" y1="11" x2="30" y2="11" stroke="#9aa0a6" stroke-width="1.2"/><line x1="17" y1="1.5" x2="17" y2="8.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="17,8.5 14.7,4.5 19.3,4.5" fill="#3ddc84"/><circle cx="17" cy="11" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="17" cy="11" r="2.3" fill="#c084fc"/></g><text x="696" y="292" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">FRONT TOP SIDE</text>
+<rect x="754" y="196" width="100" height="112" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="761" y="203" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="770.0" y="212.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">9</text><g transform="translate(777,218) scale(1.95)"><rect x="2" y="2" width="18" height="19" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="32" y1="2" x2="23.5" y2="2" stroke="#3ddc84" stroke-width="1.3"/><polygon points="23.5,2 27.5,-0.2999999999999998 27.5,4.3" fill="#3ddc84"/><line x1="20" y1="12" x2="20" y2="5.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="20,5.5 17.7,9.5 22.3,9.5" fill="#3ddc84"/><circle cx="20" cy="2" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="20" cy="2" r="2.3" fill="#c084fc"/></g><text x="804" y="292" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">FRONT RIGHT TOP</text>
+<rect x="538" y="318" width="100" height="112" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="545" y="325" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="554.0" y="334.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">4</text><g transform="translate(561,340) scale(1.95)"><rect x="14" y="4" width="17" height="15" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="14" y1="4" x2="14" y2="19" stroke="#9aa0a6" stroke-width="1.2"/><line x1="2" y1="11" x2="10.5" y2="11" stroke="#3ddc84" stroke-width="1.3"/><polygon points="10.5,11 6.5,8.7 6.5,13.3" fill="#3ddc84"/><circle cx="14" cy="11" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="14" cy="11" r="2.3" fill="#c084fc"/></g><text x="588" y="414" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">LEFT TOP SIDE</text>
+<rect x="646" y="318" width="100" height="112" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="653" y="325" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="662.0" y="334.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">5</text><g transform="translate(669,340) scale(1.95)"><rect x="4" y="13" width="26" height="8" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="4" y1="13" x2="30" y2="13" stroke="#9aa0a6" stroke-width="1.4"/><circle cx="17" cy="13" r="7" fill="none" stroke="#3ddc84" stroke-width="1.1" stroke-dasharray="2 2" opacity="0.85"/><line x1="7" y1="13" x2="11" y2="13" stroke="#3ddc84" stroke-width="1.1"/><line x1="23" y1="13" x2="27" y2="13" stroke="#3ddc84" stroke-width="1.1"/><line x1="17" y1="3" x2="17" y2="7" stroke="#3ddc84" stroke-width="1.1"/><line x1="17" y1="19" x2="17" y2="22" stroke="#3ddc84" stroke-width="1.1"/><circle cx="17" cy="13" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="17" cy="13" r="2.3" fill="#c084fc"/></g><text x="696" y="414" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">SURFACE Z</text>
+<rect x="754" y="318" width="100" height="112" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="761" y="325" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="770.0" y="334.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">6</text><g transform="translate(777,340) scale(1.95)"><rect x="3" y="4" width="17" height="15" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="20" y1="4" x2="20" y2="19" stroke="#9aa0a6" stroke-width="1.2"/><line x1="32" y1="11" x2="23.5" y2="11" stroke="#3ddc84" stroke-width="1.3"/><polygon points="23.5,11 27.5,8.7 27.5,13.3" fill="#3ddc84"/><circle cx="20" cy="11" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="20" cy="11" r="2.3" fill="#c084fc"/></g><text x="804" y="414" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">RIGHT TOP SIDE</text>
+<rect x="538" y="440" width="100" height="112" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="545" y="447" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="554.0" y="456.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">1</text><g transform="translate(561,462) scale(1.95)"><rect x="14" y="1" width="18" height="19" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="2" y1="20" x2="10.5" y2="20" stroke="#3ddc84" stroke-width="1.3"/><polygon points="10.5,20 6.5,17.7 6.5,22.3" fill="#3ddc84"/><line x1="14" y1="10" x2="14" y2="16.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="14,16.5 11.7,12.5 16.3,12.5" fill="#3ddc84"/><circle cx="14" cy="20" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="14" cy="20" r="2.3" fill="#c084fc"/></g><text x="588" y="536" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">BACK LEFT TOP</text>
+<rect x="646" y="440" width="100" height="112" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="653" y="447" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="662.0" y="456.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">2</text><g transform="translate(669,462) scale(1.95)"><rect x="4" y="1" width="26" height="10" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="4" y1="11" x2="30" y2="11" stroke="#9aa0a6" stroke-width="1.2"/><line x1="17" y1="20" x2="17" y2="13.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="17,13.5 14.7,17.5 19.3,17.5" fill="#3ddc84"/><circle cx="17" cy="11" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="17" cy="11" r="2.3" fill="#c084fc"/></g><text x="696" y="536" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">BACK TOP SIDE</text>
+<rect x="754" y="440" width="100" height="112" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/><rect x="761" y="447" width="18" height="15" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="770.0" y="456.9" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">3</text><g transform="translate(777,462) scale(1.95)"><rect x="2" y="1" width="18" height="19" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/><line x1="32" y1="20" x2="23.5" y2="20" stroke="#3ddc84" stroke-width="1.3"/><polygon points="23.5,20 27.5,17.7 27.5,22.3" fill="#3ddc84"/><line x1="20" y1="10" x2="20" y2="16.5" stroke="#3ddc84" stroke-width="1.3"/><polygon points="20,16.5 17.7,12.5 22.3,12.5" fill="#3ddc84"/><circle cx="20" cy="20" r="5" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.4"/><circle cx="20" cy="20" r="2.3" fill="#c084fc"/></g><text x="804" y="536" fill="#9aa0a6" font-size="6.2" font-family="sans-serif" text-anchor="middle">BACK RIGHT TOP</text>
+<text x="538" y="570" fill="#6b7280" font-size="5.8" font-family="monospace" text-anchor="start">NUM PAD 7 8 9 / 4 5 6 / 1 2 3  ·  ENTER RUNS</text>
+<text x="538" y="584" fill="#6b7280" font-size="5.5" font-family="monospace" text-anchor="start">CALIBRATE / HELP USE A DIFFERENT LAYOUT</text>
+<rect x="874" y="142" width="110" height="458" rx="5" fill="#101317" stroke="#30353a" stroke-width="1"/>
 <text x="886" y="164" fill="#e8eaed" font-size="9.5" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE</text>
 <text x="972" y="164" fill="#9aa0a6" font-size="6.2" font-family="monospace" text-anchor="end">T99</text>
 <line x1="886" y1="172" x2="972" y2="172" stroke="#30353a" stroke-width="1"/>
 <line x1="929" y1="176" x2="929" y2="188" stroke="#6b7280" stroke-width="2"/>
 <rect x="916" y="188" width="26" height="14" rx="3" fill="#2a3037" stroke="#6b7280" stroke-width="1.2"/>
 <rect x="902" y="202" width="54" height="10" rx="3" fill="#2a3037" stroke="#6b7280" stroke-width="1.2"/>
-<rect x="908" y="212" width="42" height="82" rx="8" fill="#20262c" stroke="#6b7280" stroke-width="1.4"/>
-<line x1="917" y1="218" x2="917" y2="288" stroke="#3f464e" stroke-width="1.2"/>
-<circle cx="929" cy="234" r="9" fill="#3ddc84" opacity="0.16"/>
-<circle cx="929" cy="234" r="4.6" fill="#3ddc84"/>
-<circle cx="929" cy="234" r="1.6" fill="#d1fae5"/>
-<text x="929" y="250" fill="#9aa0a6" font-size="5.2" font-family="monospace" text-anchor="middle">LED</text>
-<path d="M918 294 L940 294 L934 330 L924 330 Z" fill="#2a3037" stroke="#6b7280" stroke-width="1"/>
-<line x1="929" y1="330" x2="929" y2="360" stroke="#6b7280" stroke-width="1.6"/>
-<circle cx="929" cy="367" r="4" fill="#c084fc"/>
-<circle cx="929" cy="367" r="10" fill="none" stroke="#3ddc84" stroke-width="1" stroke-dasharray="2 2" opacity="0.8"/>
-<line x1="929" y1="367" x2="929" y2="384" stroke="#3ddc84" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.6"/>
-<rect x="888" y="386" width="82" height="12" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/>
-<line x1="888" y1="386" x2="970" y2="386" stroke="#9aa0a6" stroke-width="1.2"/>
-<text x="886" y="416" fill="#e8eaed" font-size="6.4" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE INPUT</text>
-<circle cx="888" cy="427" r="2.6" fill="#3ddc84"/>
-<text x="894" y="430" fill="#3ddc84" font-size="6.2" font-family="monospace" font-weight="700" text-anchor="start">OPEN</text>
-<text x="886" y="444" fill="#6b7280" font-size="5.4" font-family="monospace" text-anchor="start">TRIPPED = RED</text>
-<text x="886" y="462" fill="#9aa0a6" font-size="5.6" font-family="monospace" text-anchor="start">TIP Ø4.0 / T99</text>
-<text x="886" y="476" fill="#6b7280" font-size="5.2" font-family="monospace" text-anchor="start">LIVE INPUT LED</text>
-<line x1="4" y1="566" x2="996" y2="566" stroke="#30353a" stroke-width="1"/>
-<text x="158" y="590" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="start">ESC OFFSETS</text>
-<text x="250" y="590" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="start">F8 NEXT TAB</text>
-<text x="350" y="590" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="start">NUM 1-9 HIGHLIGHT</text>
-<text x="470" y="590" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="start">ENTER RUN</text>
-<text x="560" y="590" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="start">TAB CONTROLS</text>
-<line x1="650" y1="576" x2="650" y2="604" stroke="#30353a" stroke-width="1"/>
-<text x="662" y="590" fill="#9aa0a6" font-size="7.2" font-family="monospace" text-anchor="start">PROBE INPUT</text>
-<circle cx="760" cy="587" r="2.4" fill="#3ddc84"/>
-<text x="768" y="590" fill="#3ddc84" font-size="7.2" font-family="monospace" font-weight="700" text-anchor="start">OPEN</text>
-<rect x="798" y="578" width="34" height="18" rx="3" fill="#1a1f25" stroke="#4b5563" stroke-width="1"/><text x="815.0" y="589.4" fill="#9aa0a6" font-size="6.3" font-family="monospace" font-weight="700" text-anchor="middle">ENTER</text>
-<rect x="840" y="576" width="144" height="26" rx="4" fill="#4da3ff" stroke="none" stroke-width="1"/>
-<text x="912" y="593" fill="#141619" font-size="8.2" font-family="sans-serif" font-weight="700" text-anchor="middle">RUN PROBE</text>
+<rect x="908" y="212" width="42" height="108" rx="8" fill="#20262c" stroke="#6b7280" stroke-width="1.4"/>
+<line x1="917" y1="218" x2="917" y2="314" stroke="#3f464e" stroke-width="1.2"/>
+<circle cx="929" cy="246" r="9" fill="#3ddc84" opacity="0.16"/>
+<circle cx="929" cy="246" r="4.6" fill="#3ddc84"/>
+<circle cx="929" cy="246" r="1.6" fill="#d1fae5"/>
+<text x="929" y="262" fill="#9aa0a6" font-size="5.2" font-family="monospace" text-anchor="middle">LED</text>
+<path d="M918 320 L940 320 L934 366 L924 366 Z" fill="#2a3037" stroke="#6b7280" stroke-width="1"/>
+<line x1="929" y1="366" x2="929" y2="412" stroke="#6b7280" stroke-width="1.6"/>
+<circle cx="929" cy="420" r="4" fill="#c084fc"/>
+<circle cx="929" cy="420" r="10" fill="none" stroke="#3ddc84" stroke-width="1" stroke-dasharray="2 2" opacity="0.8"/>
+<line x1="929" y1="420" x2="929" y2="437" stroke="#3ddc84" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.6"/>
+<rect x="888" y="438" width="82" height="12" rx="1" fill="#20262c" stroke="#6b7280" stroke-width="1.2"/>
+<line x1="888" y1="438" x2="970" y2="438" stroke="#9aa0a6" stroke-width="1.2"/>
+<text x="886" y="482" fill="#e8eaed" font-size="6.4" font-family="sans-serif" font-weight="700" text-anchor="start">PROBE INPUT</text>
+<circle cx="888" cy="493" r="2.6" fill="#3ddc84"/>
+<text x="894" y="496" fill="#3ddc84" font-size="6.2" font-family="monospace" font-weight="700" text-anchor="start">OPEN</text>
+<text x="886" y="512" fill="#6b7280" font-size="5.4" font-family="monospace" text-anchor="start">TRIPPED = RED</text>
+<text x="886" y="530" fill="#9aa0a6" font-size="5.6" font-family="monospace" text-anchor="start">TIP Ø4.0 / T99</text>
+<text x="886" y="546" fill="#6b7280" font-size="5.2" font-family="monospace" text-anchor="start">LIVE INPUT LED</text>
 <text x="16" y="628" fill="#9aa0a6" font-size="8" font-family="monospace" text-anchor="start">PROBE T99 / G54 / POSITION ONLY OFF / APPLY ON</text>
 <text x="420" y="628" fill="#3ddc84" font-size="8" font-family="monospace" text-anchor="start">INPUT OPEN</text>
 <text x="520" y="628" fill="#3ddc84" font-size="8" font-family="monospace" text-anchor="start">PROTECT OFF</text>
