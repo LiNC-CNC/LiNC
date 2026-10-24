@@ -2086,7 +2086,8 @@ the socket or the UI publisher.
 - [ ] `cargo test --workspace`
 - [ ] `cargo clippy --workspace --all-targets`
 - [ ] `linc --check-config --config configs/sim.toml`
-- [ ] `linc --check-config --config configs/baiermill.toml` (when siblings exist)
+- [ ] `linc --check-config --config configs/baiermill-pb.toml` (when siblings exist);
+      `configs/baiermill.toml` is expected to fail until the machine tree carries the probe bundle
 - [ ] README, CONFIGURATION, SPEC and AGENTS updated.
 
 ---

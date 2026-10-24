@@ -37,10 +37,10 @@ pub mod theme {
     /// distinct from the cut path's blue and the live trail's green.
     pub const CURRENT: Color32 = Color32::from_rgb(0xf7, 0xd7, 0x4a);
     pub fn dim(color: Color32, alpha: u8) -> Color32 {
-    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
-}
+        Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
+    }
 
-pub const STOCK_FILL: Color32 = Color32::from_rgba_premultiplied(0x4a, 0x50, 0x57, 0x14);
+    pub const STOCK_FILL: Color32 = Color32::from_rgba_premultiplied(0x4a, 0x50, 0x57, 0x14);
     pub const STOCK_EDGE: Color32 = Color32::from_rgb(0x5a, 0x62, 0x6b);
 }
 
@@ -262,9 +262,21 @@ impl Projection {
         let mut max = [f32::NEG_INFINITY, f32::NEG_INFINITY];
         for corner in 0..8 {
             let point = [
-                if corner & 1 == 0 { expanded.min[0] } else { expanded.max[0] },
-                if corner & 2 == 0 { expanded.min[1] } else { expanded.max[1] },
-                if corner & 4 == 0 { expanded.min[2] } else { expanded.max[2] },
+                if corner & 1 == 0 {
+                    expanded.min[0]
+                } else {
+                    expanded.max[0]
+                },
+                if corner & 2 == 0 {
+                    expanded.min[1]
+                } else {
+                    expanded.max[1]
+                },
+                if corner & 4 == 0 {
+                    expanded.min[2]
+                } else {
+                    expanded.max[2]
+                },
             ];
             let local = [
                 (point[0] - center[0]) as f32,
@@ -277,8 +289,7 @@ impl Projection {
         }
         let world_w = (max[0] - min[0]).max(1.0);
         let world_h = (max[1] - min[1]).max(1.0);
-        let scale =
-            ((rect.width() / world_w).min(rect.height() / world_h) * 0.82).max(0.01);
+        let scale = ((rect.width() / world_w).min(rect.height() / world_h) * 0.82).max(0.01);
         Self {
             min: expanded.min,
             max: expanded.max,
@@ -460,7 +471,11 @@ fn draw_origin_arrow(painter: &egui::Painter, from: Pos2, to: Pos2, colour: Colo
     // A filled head reads as a direction at this size; two barbs alone
     // disappeared into the dashes.
     painter.add(egui::Shape::convex_polygon(
-        vec![tip, back + side * (barb * 0.45), back - side * (barb * 0.45)],
+        vec![
+            tip,
+            back + side * (barb * 0.45),
+            back - side * (barb * 0.45),
+        ],
         colour,
         Stroke::NONE,
     ));
@@ -729,12 +744,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
                 // joint looked like it labelled the following move.
                 let tag = if let Some(arc) = &segment.arc {
                     let points = arc_points(segment, arc);
-                    projection.project(
-                        points
-                            .get(points.len() / 2)
-                            .copied()
-                            .unwrap_or(segment.end),
-                    )
+                    projection.project(points.get(points.len() / 2).copied().unwrap_or(segment.end))
                 } else {
                     projection.project([
                         (segment.start[0] + segment.end[0]) / 2.0,
@@ -999,14 +1009,8 @@ fn draw_axis_triad(
                 // Arrowhead: two short legs back from the tip.
                 let side = Vec2::new(-direction.y, direction.x) * 3.0;
                 let back = direction * 5.0;
-                painter.line_segment(
-                    [tip, tip - back + side],
-                    Stroke::new(1.4, theme::MUTED),
-                );
-                painter.line_segment(
-                    [tip, tip - back - side],
-                    Stroke::new(1.4, theme::MUTED),
-                );
+                painter.line_segment([tip, tip - back + side], Stroke::new(1.4, theme::MUTED));
+                painter.line_segment([tip, tip - back - side], Stroke::new(1.4, theme::MUTED));
                 let label_pos = tip + direction * 7.0;
                 painter.text(
                     label_pos,
@@ -1054,7 +1058,11 @@ fn stock_bounds(program: &Bounds3) -> Option<Bounds3> {
     let floor = min[2].min(max[2]) - margin;
     Some(Bounds3 {
         min: [min[0] - margin, min[1] - margin, floor],
-        max: [max[0] + margin, max[1] + margin, max[2].max(min[2]) + margin],
+        max: [
+            max[0] + margin,
+            max[1] + margin,
+            max[2].max(min[2]) + margin,
+        ],
     })
 }
 
@@ -1441,7 +1449,11 @@ fn dimension_line(
 ) {
     let a = projection.project(from);
     let b = projection.project(to);
-    let oa = projection.project([from[0] + offset[0], from[1] + offset[1], from[2] + offset[2]]);
+    let oa = projection.project([
+        from[0] + offset[0],
+        from[1] + offset[1],
+        from[2] + offset[2],
+    ]);
     let ob = projection.project([to[0] + offset[0], to[1] + offset[1], to[2] + offset[2]]);
     if (ob - oa).length() < 4.0 {
         return;
@@ -1487,11 +1499,7 @@ fn draw_bounds_filled(painter: &Painter, projection: &Projection, bounds: Bounds
             corner(max[0], min[1], max[2]),
         ],
     ] {
-        painter.add(egui::Shape::convex_polygon(
-            face,
-            fill,
-            Stroke::NONE,
-        ));
+        painter.add(egui::Shape::convex_polygon(face, fill, Stroke::NONE));
     }
 }
 
@@ -1571,9 +1579,15 @@ fn draw_grid(painter: &Painter, projection: &Projection, bounds: Bounds3) {
                 ViewMode::SideYz => {
                     // Horizontal axis Y, vertical Z, drawn at the near X face.
                     if mode_axis == 0 {
-                        ([bounds.min[0], value, bounds.min[2]], [bounds.min[0], value, bounds.max[2]])
+                        (
+                            [bounds.min[0], value, bounds.min[2]],
+                            [bounds.min[0], value, bounds.max[2]],
+                        )
                     } else {
-                        ([bounds.min[0], bounds.min[1], value], [bounds.max[0], bounds.min[1], value])
+                        (
+                            [bounds.min[0], bounds.min[1], value],
+                            [bounds.max[0], bounds.min[1], value],
+                        )
                     }
                 }
                 ViewMode::SideXz => {
@@ -1725,7 +1739,15 @@ mod tests {
             max: [100.0, 100.0, 100.0],
         };
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
-        let projection = Projection::new(bounds, rect, ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH, 1.0, Vec2::ZERO);
+        let projection = Projection::new(
+            bounds,
+            rect,
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            1.0,
+            Vec2::ZERO,
+        );
         for point in [
             [0.0, 0.0, 0.0],
             [100.0, 100.0, 100.0],
@@ -1747,8 +1769,14 @@ mod tests {
             max: [-70.0, -70.0, 50.0],
         };
         let rect = Rect::from_min_max(Pos2::new(205.0, 288.0), Pos2::new(924.0, 499.0));
-        let (zoom, pan) =
-            fit_zoom_pan(machine, program, rect, ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        let (zoom, pan) = fit_zoom_pan(
+            machine,
+            program,
+            rect,
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+        );
         println!("zoom={zoom} pan={pan:?}");
         assert!(zoom > 1.0 && zoom < 10.0, "{zoom}");
         assert!(pan.y.abs() < rect.height(), "{pan:?}");
@@ -1778,7 +1806,10 @@ mod tests {
 
         // An axis the machine does not have is not drawn.
         let two = vec!["X".to_string(), "Z".to_string()];
-        assert_eq!(axis_triad(ViewMode::SideXz, DEFAULT_YAW, DEFAULT_PITCH, &two).len(), 2);
+        assert_eq!(
+            axis_triad(ViewMode::SideXz, DEFAULT_YAW, DEFAULT_PITCH, &two).len(),
+            2
+        );
     }
 
     fn projection(mode: ViewMode) -> Projection {
@@ -1831,17 +1862,33 @@ mod tests {
         assert_eq!(cycle_view(ViewMode::LatheXz, Mill), ViewMode::Iso3d);
 
         // The lathe has one flat view.
-        assert_eq!(cycle_view(ViewMode::Iso3d, MachineVariant::Lathe), ViewMode::LatheXz);
-        assert_eq!(cycle_view(ViewMode::LatheXz, MachineVariant::Lathe), ViewMode::Iso3d);
+        assert_eq!(
+            cycle_view(ViewMode::Iso3d, MachineVariant::Lathe),
+            ViewMode::LatheXz
+        );
+        assert_eq!(
+            cycle_view(ViewMode::LatheXz, MachineVariant::Lathe),
+            ViewMode::Iso3d
+        );
     }
 
     #[test]
     fn the_axis_views_look_along_one_axis_each() {
         // Looking along X: Y is horizontal, Z is vertical.
-        let (x, y) = view_xy([1.0, 2.0, 3.0], ViewMode::SideYz, DEFAULT_YAW, DEFAULT_PITCH);
+        let (x, y) = view_xy(
+            [1.0, 2.0, 3.0],
+            ViewMode::SideYz,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+        );
         assert!((x - 2.0).abs() < 1e-6 && (y + 3.0).abs() < 1e-6, "{x},{y}");
         // Looking along Y: X is horizontal, Z is vertical.
-        let (x, y) = view_xy([1.0, 2.0, 3.0], ViewMode::SideXz, DEFAULT_YAW, DEFAULT_PITCH);
+        let (x, y) = view_xy(
+            [1.0, 2.0, 3.0],
+            ViewMode::SideXz,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+        );
         assert!((x - 1.0).abs() < 1e-6 && (y + 3.0).abs() < 1e-6, "{x},{y}");
         // Looking down Z: X is horizontal, Y is vertical (downwards).
         let (x, y) = view_xy([1.0, 2.0, 3.0], ViewMode::TopXy, DEFAULT_YAW, DEFAULT_PITCH);
@@ -1873,9 +1920,21 @@ mod tests {
                 Projection::new(machine, rect, mode, DEFAULT_YAW, DEFAULT_PITCH, zoom, pan);
             for corner in 0..8 {
                 let point = [
-                    if corner & 1 == 0 { program.min[0] } else { program.max[0] },
-                    if corner & 2 == 0 { program.min[1] } else { program.max[1] },
-                    if corner & 4 == 0 { program.min[2] } else { program.max[2] },
+                    if corner & 1 == 0 {
+                        program.min[0]
+                    } else {
+                        program.max[0]
+                    },
+                    if corner & 2 == 0 {
+                        program.min[1]
+                    } else {
+                        program.max[1]
+                    },
+                    if corner & 4 == 0 {
+                        program.min[2]
+                    } else {
+                        program.max[2]
+                    },
                 ];
                 let pos = projection.project(point);
                 assert!(rect.contains(pos), "{mode:?}: {pos:?} outside {rect:?}");
@@ -1896,7 +1955,12 @@ mod tests {
         assert!(x.abs() < 1e-6 && y < 0.0, "+Z is straight up: {x},{y}");
         // Looking from the front (+Y away) means the near corner of a box is
         // the min-Y one: it sits lowest on the screen.
-        let near = view_xy([0.0, -1.0, 0.0], ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        let near = view_xy(
+            [0.0, -1.0, 0.0],
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+        );
         let far = view_xy([0.0, 1.0, 0.0], ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
         assert!(near.1 > far.1, "min Y is the near side: {near:?} {far:?}");
     }
@@ -1934,7 +1998,14 @@ mod tests {
             max: [0.0, 0.0, 0.0],
         };
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 400.0));
-        let (zoom, pan) = fit_zoom_pan(envelope, envelope, rect, ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        let (zoom, pan) = fit_zoom_pan(
+            envelope,
+            envelope,
+            rect,
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+        );
         assert!((zoom - 1.0).abs() < 1e-4, "zoom {zoom}");
         assert!(pan.length() < 1e-3, "pan {pan:?}");
     }
@@ -1963,7 +2034,10 @@ mod tests {
         let all = fit_target(&view, reference);
         assert_eq!(all.max[0], 200.0, "the tool is inside the fit");
         assert_eq!(all.min[1], -200.0, "the work zero is inside the fit");
-        assert_eq!(all.max[2], 100.0, "the highlighted system is inside the fit");
+        assert_eq!(
+            all.max[2], 100.0,
+            "the highlighted system is inside the fit"
+        );
         assert_eq!(all.min[0], -30.0, "the program is still inside the fit");
     }
 
@@ -2002,17 +2076,38 @@ mod tests {
             max: [-240.0, -140.0, -20.0],
         };
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 400.0));
-        let (zoom, pan) =
-            fit_zoom_pan(envelope, program, rect, ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        let (zoom, pan) = fit_zoom_pan(
+            envelope,
+            program,
+            rect,
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+        );
         assert!(zoom > 1.5, "zoom {zoom}");
-        let fitted = Projection::new(envelope, rect, ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH, zoom, pan);
+        let fitted = Projection::new(
+            envelope,
+            rect,
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            zoom,
+            pan,
+        );
         let centre = fitted.project(program.center());
         assert!((centre.x - rect.center().x).abs() < 0.5, "{centre:?}");
         assert!((centre.y - rect.center().y).abs() < 0.5, "{centre:?}");
         // The reference is still the envelope, so the same point projects to the
         // same place whatever is loaded: that is what keeps the markers still.
-        let unchanged =
-            Projection::new(envelope, rect, ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH, zoom, pan);
+        let unchanged = Projection::new(
+            envelope,
+            rect,
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            zoom,
+            pan,
+        );
         assert_eq!(
             fitted.project([-54.35, -49.3, -27.15]),
             unchanged.project([-54.35, -49.3, -27.15])

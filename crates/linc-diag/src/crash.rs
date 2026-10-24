@@ -97,9 +97,14 @@ fn message_of(info: &std::panic::PanicHookInfo<'_>) -> String {
 pub fn install_hook(role: &'static str, process: ProcessInfo) {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let location = info
-            .location()
-            .map(|location| format!("{}:{}:{}", location.file(), location.line(), location.column()));
+        let location = info.location().map(|location| {
+            format!(
+                "{}:{}:{}",
+                location.file(),
+                location.line(),
+                location.column()
+            )
+        });
         let backtrace = std::backtrace::Backtrace::force_capture().to_string();
         let backtrace = if backtrace.len() > BACKTRACE_LIMIT {
             backtrace[..BACKTRACE_LIMIT].to_string()
@@ -160,7 +165,11 @@ mod tests {
         assert_eq!(records[0].message, "boom");
         assert_eq!(records[0].location.as_deref(), Some("src/main.rs:1:1"));
 
-        assert_eq!(read_all_in(&dir, 1).len(), 1, "the limit applies after sorting");
+        assert_eq!(
+            read_all_in(&dir, 1).len(),
+            1,
+            "the limit applies after sorting"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

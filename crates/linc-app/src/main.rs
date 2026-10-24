@@ -82,7 +82,8 @@ fn window_icon() -> Option<egui::IconData> {
     })
 }
 
-fn main() -> Result<()> {    init_logging();
+fn main() -> Result<()> {
+    init_logging();
     let args = parse_args();
     let config_path = args
         .config
@@ -157,7 +158,11 @@ fn main() -> Result<()> {    init_logging();
                 git_commit: option_env!("LINC_GIT_COMMIT").unwrap_or("").into(),
                 git_dirty: option_env!("LINC_GIT_DIRTY").is_some(),
                 profile: profile.config.machine.name.clone(),
-                backend: if use_linuxcnc { "linuxcnc".into() } else { "sim".into() },
+                backend: if use_linuxcnc {
+                    "linuxcnc".into()
+                } else {
+                    "sim".into()
+                },
             },
         };
         let config = serde_json::json!({

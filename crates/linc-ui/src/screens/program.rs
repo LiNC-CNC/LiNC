@@ -34,9 +34,6 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     }
 }
 
-
-
-
 fn split(app: &mut LincApp, ui: &mut Ui) {
     let available = ui.available_size();
     let top = ui.cursor().top();
@@ -88,10 +85,8 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
     // is a thumbnail strip beside it.
     let editor_width = (available.x * 0.76).max(520.0);
     ui.horizontal_top(|ui| {
-        let editor_rect = egui::Rect::from_min_size(
-            ui.cursor().min,
-            Vec2::new(editor_width, height),
-        );
+        let editor_rect =
+            egui::Rect::from_min_size(ui.cursor().min, Vec2::new(editor_width, height));
         editor_pane(app, ui, editor_rect);
         ui.add_space(8.0);
         let width = (available.x - editor_width - 8.0).max(220.0);
@@ -150,11 +145,9 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
             ViewKind::MiniXy => {
                 common::card_title(ui, "PATH");
             }
-            ViewKind::Full => common::toolpath_header(
-                ui,
-                app.program.graph_view.label(),
-                app.program.graph_zoom,
-            ),
+            ViewKind::Full => {
+                common::toolpath_header(ui, app.program.graph_view.label(), app.program.graph_zoom)
+            }
         }
         // Measured from the cursor: `min_rect` already holds the minimum size
         // the shell set, so it would report the whole card as the header and
@@ -198,8 +191,6 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
         app.program.graph_auto_fit = auto_fit;
     });
 }
-
-
 
 /// `card_height` is the total height of the card, margins included, so the
 /// pane's bottom edge lines up with whatever sits beside it.
@@ -278,9 +269,9 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
             };
             state
                 .cursor
-                .set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(
-                    index,
-                ))));
+                .set_char_range(Some(egui::text::CCursorRange::one(
+                    egui::text::CCursor::new(index),
+                )));
             state.store(ui.ctx(), id);
             let mut target_line = 0usize;
             for (position, character) in text.chars().enumerate() {
@@ -369,8 +360,7 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
         // than the card had and pushed the card past the column beside it.
         const FOOTER_HEIGHT: f32 = 32.0;
         let header_height = ui.cursor().top() - content_top;
-        let editor_height =
-            (rect.height() - 8.0 - header_height - FOOTER_HEIGHT - 4.0).max(80.0);
+        let editor_height = (rect.height() - 8.0 - header_height - FOOTER_HEIGHT - 4.0).max(80.0);
         let (rect, _) = ui.allocate_exact_size(
             Vec2::new(ui.available_width(), editor_height),
             egui::Sense::hover(),
@@ -478,19 +468,15 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     ui.ctx().pixels_per_point().to_bits(),
                 );
                 let cache_id = egui::Id::unique("linc-editor-galley");
-                if let Some((cached, galley)) =
-                    ui.ctx().data(|data| data.get_temp::<(GalleyKey, Arc<Galley>)>(cache_id))
+                if let Some((cached, galley)) = ui
+                    .ctx()
+                    .data(|data| data.get_temp::<(GalleyKey, Arc<Galley>)>(cache_id))
                 {
                     if cached == key {
                         return galley;
                     }
                 }
-                let mut job = highlight_job(
-                    buffer.as_str(),
-                    syntax_error_line,
-                    &search,
-                    &matches,
-                );
+                let mut job = highlight_job(buffer.as_str(), syntax_error_line, &search, &matches);
                 job.wrap.max_width = f32::INFINITY;
                 let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
                 ui.ctx()
@@ -508,11 +494,13 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     .take(line.saturating_sub(1))
                     .map(|row| row.chars().count() + 1)
                     .sum();
-                let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id)
-                    .unwrap_or_default();
-                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                    egui::text::CCursor::new(char_index),
-                )));
+                let mut state =
+                    egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::one(
+                        egui::text::CCursor::new(char_index),
+                    )));
                 state.store(ui.ctx(), id);
             }
             let output = egui::TextEdit::multiline(&mut text)
@@ -592,7 +580,6 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             ui.scroll_to_rect(rect, Some(egui::Align::Center));
         }
     });
-
 }
 
 /// Cache key for the editor galley: editor revision, highlight inputs, wrap
@@ -602,8 +589,9 @@ type GalleyKey = (u64, Option<usize>, String, Vec<usize>, usize, u32);
 /// The line-number gutter only changes when the line count does.
 fn number_gutter(ui: &egui::Ui, line_count: usize) -> String {
     let cache_id = egui::Id::unique("linc-editor-gutter");
-    if let Some((cached, text)) =
-        ui.ctx().data(|data| data.get_temp::<(usize, String)>(cache_id))
+    if let Some((cached, text)) = ui
+        .ctx()
+        .data(|data| data.get_temp::<(usize, String)>(cache_id))
     {
         if cached == line_count {
             return text;

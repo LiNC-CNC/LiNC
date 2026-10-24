@@ -188,7 +188,11 @@ where
                 value,
             });
         }
-        std::thread::sleep(interval.min(timeout.saturating_sub(started.elapsed())).max(Duration::from_millis(1)));
+        std::thread::sleep(
+            interval
+                .min(timeout.saturating_sub(started.elapsed()))
+                .max(Duration::from_millis(1)),
+        );
     }
 }
 
@@ -208,8 +212,9 @@ mod tests {
         assert_eq!(error.code, "INVALID_ARGUMENT");
         assert!(error.message.contains("allowed paths"));
 
-        let error = Condition::parse(&json!({ "path": "machine.estop", "op": "regex", "value": 1 }))
-            .expect_err("unknown operator");
+        let error =
+            Condition::parse(&json!({ "path": "machine.estop", "op": "regex", "value": 1 }))
+                .expect_err("unknown operator");
         assert_eq!(error.code, "INVALID_ARGUMENT");
 
         let parsed = Condition::parse(&json!({ "path": "machine.estop", "value": true }))
@@ -219,12 +224,24 @@ mod tests {
 
     #[test]
     fn comparisons_cover_labels_numbers_and_collections() {
-        assert!(condition("panel.mode", "eq", json!("auto")).matches(&json!("AUTO")).unwrap());
-        assert!(condition("task.power", "eq", json!("ON")).matches(&json!("On")).unwrap());
-        assert!(condition("program.current_line", "gte", json!(10)).matches(&json!(12)).unwrap());
-        assert!(!condition("program.current_line", "lt", json!(10)).matches(&json!(12)).unwrap());
-        assert!(condition("task.mode", "contains", json!("ut")).matches(&json!("Auto")).unwrap());
-        assert!(condition("alarms.length", "eq", json!(2)).matches(&json!(2)).unwrap());
+        assert!(condition("panel.mode", "eq", json!("auto"))
+            .matches(&json!("AUTO"))
+            .unwrap());
+        assert!(condition("task.power", "eq", json!("ON"))
+            .matches(&json!("On"))
+            .unwrap());
+        assert!(condition("program.current_line", "gte", json!(10))
+            .matches(&json!(12))
+            .unwrap());
+        assert!(!condition("program.current_line", "lt", json!(10))
+            .matches(&json!(12))
+            .unwrap());
+        assert!(condition("task.mode", "contains", json!("ut"))
+            .matches(&json!("Auto"))
+            .unwrap());
+        assert!(condition("alarms.length", "eq", json!(2))
+            .matches(&json!(2))
+            .unwrap());
         assert!(condition("panel.mode", "eq", json!("AUTO"))
             .matches(&json!("JOG"))
             .map(|matched| !matched)

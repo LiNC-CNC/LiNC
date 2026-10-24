@@ -55,7 +55,12 @@ mod tests {
         let source = Arc::new(linc_diag::BusSource::new(bus, process));
         let handle = linc_diag::serve(dir, "hmi", source).expect("serve");
         let client = linc_diag::Client::connect(&handle.socket).expect("connect");
-        let session = server::Session::new(client, None, policy::Policy::default(), audit::Audit::new(None));
+        let session = server::Session::new(
+            client,
+            None,
+            policy::Policy::default(),
+            audit::Audit::new(None),
+        );
         (session, handle)
     }
 
@@ -95,7 +100,10 @@ mod tests {
         let content = replies[2]["result"]["content"][0]["text"].as_str().unwrap();
         let envelope: Value = serde_json::from_str(content).unwrap();
         assert_eq!(envelope["schema_version"], 1);
-        assert_eq!(envelope["data"]["machine"], "", "summary of an empty machine");
+        assert_eq!(
+            envelope["data"]["machine"], "",
+            "summary of an empty machine"
+        );
         assert!(envelope["data"]["blockers"].as_array().is_some());
 
         assert!(replies[3]["result"]["resources"].as_array().unwrap().len() >= 5);
@@ -135,7 +143,10 @@ mod tests {
         let text = replies[0]["result"]["content"][0]["text"].as_str().unwrap();
         let error: Value = serde_json::from_str(text).unwrap();
         assert_eq!(error["code"], "NOT_FOUND");
-        assert!(error["audit_id"].as_str().is_some(), "every call is audited: {error}");
+        assert!(
+            error["audit_id"].as_str().is_some(),
+            "every call is audited: {error}"
+        );
         drop(handle);
     }
 
@@ -166,8 +177,12 @@ mod tests {
         let source = Arc::new(linc_diag::BusSource::new(bus, process));
         let handle = linc_diag::serve(dir, "hmi", source).expect("serve");
         let client = linc_diag::Client::connect(&handle.socket).expect("connect");
-        let mut session =
-            server::Session::new(client, None, policy::Policy::default(), audit::Audit::new(None));
+        let mut session = server::Session::new(
+            client,
+            None,
+            policy::Policy::default(),
+            audit::Audit::new(None),
+        );
 
         let replies = round_trip(
             &mut session,
@@ -183,7 +198,9 @@ mod tests {
         let diff = json_from(&replies[0]);
         let changes = diff["data"]["changes"].as_array().unwrap();
         assert!(
-            changes.iter().any(|change| change["path"] == "machine_name"),
+            changes
+                .iter()
+                .any(|change| change["path"] == "machine_name"),
             "{changes:?}"
         );
         assert!(json_from(&replies[1])["data"]["timeline"].is_array());
@@ -227,11 +244,17 @@ mod tests {
         assert!(screen["data"]["regions"].is_array());
 
         let nml = json_from(&replies[2]);
-        assert_eq!(nml["data"]["available"], false, "the simulator has no bridge");
+        assert_eq!(
+            nml["data"]["available"], false,
+            "the simulator has no bridge"
+        );
         assert!(nml["data"]["reason"].is_string());
 
         let hal = json_from(&replies[3]);
-        assert_eq!(hal["data"]["available"], true, "linc.* outputs always exist");
+        assert_eq!(
+            hal["data"]["available"], true,
+            "linc.* outputs always exist"
+        );
         assert!(hal["data"]["outputs"].is_object());
         assert_eq!(hal["data"]["real_hal"]["pins"], false);
 
@@ -265,7 +288,10 @@ mod tests {
             serde_json::from_str(replies[0]["result"]["content"][0]["text"].as_str().unwrap())
                 .unwrap();
         assert_eq!(envelope["data"]["queued"], true);
-        assert_eq!(replies[2]["result"]["isError"], true, "unknown actions fail cleanly");
+        assert_eq!(
+            replies[2]["result"]["isError"], true,
+            "unknown actions fail cleanly"
+        );
         drop(handle);
     }
 
@@ -275,7 +301,9 @@ mod tests {
         drop(handle);
         let replies = round_trip(
             &mut session,
-            &[json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"linc_ping","arguments":{}}})],
+            &[
+                json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"linc_ping","arguments":{}}}),
+            ],
         );
         assert_eq!(replies[0]["result"]["isError"], true);
         let text = replies[0]["result"]["content"][0]["text"].as_str().unwrap();
@@ -322,12 +350,18 @@ mod tests {
             &self,
             fault: linc_core::diag::PanelFault,
         ) -> Result<Value, linc_core::diag::DiagError> {
-            self.calls.lock().unwrap().push(json!({ "fault": fault.label() }));
+            self.calls
+                .lock()
+                .unwrap()
+                .push(json!({ "fault": fault.label() }));
             Ok(self.state())
         }
 
         fn clear_faults(&self) -> Result<Value, linc_core::diag::DiagError> {
-            self.calls.lock().unwrap().push(json!({ "clear_faults": true }));
+            self.calls
+                .lock()
+                .unwrap()
+                .push(json!({ "clear_faults": true }));
             Ok(self.state())
         }
 
@@ -346,7 +380,8 @@ mod tests {
         Arc<StubSim>,
     ) {
         let (mut session, hmi_handle) = session(name);
-        let dir = std::env::temp_dir().join(format!("linc-mcp-panel-{}-{name}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("linc-mcp-panel-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let bus = Arc::new(Mutex::new(linc_diag::PanelBus::new()));
         let stub = Arc::new(StubSim::default());
@@ -383,8 +418,14 @@ mod tests {
         assert_eq!(replies[0]["result"]["isError"], true);
         let error = json_from(&replies[0]);
         assert_eq!(error["code"], "WRITE_DISABLED", "{error}");
-        assert!(error["audit_id"].as_str().is_some(), "refusals are audited too");
-        assert!(stub.calls.lock().unwrap().is_empty(), "nothing reached the simulator");
+        assert!(
+            error["audit_id"].as_str().is_some(),
+            "refusals are audited too"
+        );
+        assert!(
+            stub.calls.lock().unwrap().is_empty(),
+            "nothing reached the simulator"
+        );
 
         session.policy.allow_sim_control = true;
         let replies = round_trip(
@@ -399,7 +440,10 @@ mod tests {
         assert_eq!(json_from(&replies[0])["data"]["applied"], true);
         assert_eq!(replies[1]["result"]["isError"], false);
         assert_eq!(json_from(&replies[1])["data"]["injected"], "disconnect");
-        assert_eq!(replies[2]["result"]["isError"], true, "an unknown fault is refused");
+        assert_eq!(
+            replies[2]["result"]["isError"], true,
+            "an unknown fault is refused"
+        );
 
         let calls = stub.calls.lock().unwrap().clone();
         assert_eq!(calls[0]["press"], json!(["cycle_start"]));
@@ -432,7 +476,10 @@ mod tests {
         assert_eq!(replies[2]["result"]["isError"], false, "{replies:?}");
         assert_eq!(json_from(&replies[2])["data"]["matched"], true);
 
-        assert_eq!(replies[3]["result"]["isError"], true, "a path outside the list is refused");
+        assert_eq!(
+            replies[3]["result"]["isError"], true,
+            "a path outside the list is refused"
+        );
         drop(panel);
         drop(hmi);
     }

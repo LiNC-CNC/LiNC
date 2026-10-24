@@ -24,13 +24,14 @@ pub fn list() -> Value {
 }
 
 pub fn get(params: &Value) -> Result<Value, crate::server::JsonRpcError> {
-    let name = params
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or_else(|| crate::server::JsonRpcError {
-            code: -32602,
-            message: "prompts/get needs a name".into(),
-        })?;
+    let name =
+        params
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| crate::server::JsonRpcError {
+                code: -32602,
+                message: "prompts/get needs a name".into(),
+            })?;
     let symptom = params
         .get("arguments")
         .and_then(|args| args.get("symptom"))

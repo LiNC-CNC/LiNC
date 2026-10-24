@@ -37,7 +37,11 @@ impl Session {
 }
 
 /// Serve until `reader` is exhausted. A protocol error is answered, never fatal.
-pub fn serve<R: BufRead, W: Write>(reader: R, mut writer: W, session: &mut Session) -> std::io::Result<()> {
+pub fn serve<R: BufRead, W: Write>(
+    reader: R,
+    mut writer: W,
+    session: &mut Session,
+) -> std::io::Result<()> {
     for line in reader.lines() {
         let line = match line {
             Ok(line) => line,
@@ -148,7 +152,10 @@ fn call_tool(session: &mut Session, params: &Value) -> Result<Value, JsonRpcErro
             code: -32602,
             message: "tools/call needs a tool name".into(),
         })?;
-    let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+    let args = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
     if crate::tools::is_gated(name) {
         if let Err(error) = session.policy.check_write(name) {
             // A refused write is still an attempt, and the operator reviewing
@@ -165,9 +172,11 @@ fn call_tool(session: &mut Session, params: &Value) -> Result<Value, JsonRpcErro
     let duration_ms = started.elapsed().as_millis();
     let audit_id = match &result {
         Ok(_) => session.audit.record(name, &args, "ok", duration_ms),
-        Err(error) => session
-            .audit
-            .record(name, &args, &format!("error:{}", error.code), duration_ms),
+        Err(error) => {
+            session
+                .audit
+                .record(name, &args, &format!("error:{}", error.code), duration_ms)
+        }
     };
     match result {
         Ok(envelope) => {

@@ -661,7 +661,10 @@ pub fn call(
             client.call("diag.snapshot_at", json!({ "sequence": sequence }))
         }
         "linc_diff_snapshots" => {
-            let from = args.get("from_sequence").and_then(Value::as_u64).unwrap_or(0);
+            let from = args
+                .get("from_sequence")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
             let params = json!({
                 "from_sequence": from,
                 "to_sequence": args.get("to_sequence").cloned().unwrap_or(Value::Null),
@@ -681,7 +684,9 @@ pub fn call(
         "linc_ui_action" => {
             let action = args.get("action").and_then(Value::as_str).unwrap_or("");
             let params = match action {
-                "page" => json!({ "action": "page", "page": args.get("page").cloned().unwrap_or(Value::Null) }),
+                "page" => {
+                    json!({ "action": "page", "page": args.get("page").cloned().unwrap_or(Value::Null) })
+                }
                 "cycle_view" => json!({ "action": "cycle_view" }),
                 "show_bounds" => json!({
                     "action": "show_bounds",
@@ -694,7 +699,11 @@ pub fn call(
                     "action": "select_line",
                     "line": args.get("line").and_then(Value::as_u64).unwrap_or(1)
                 }),
-                other => return Err(DiagError::invalid_argument(format!("unknown ui action {other:?}"))),
+                other => {
+                    return Err(DiagError::invalid_argument(format!(
+                        "unknown ui action {other:?}"
+                    )))
+                }
             };
             client.call("diag.ui_action", params)
         }
@@ -719,7 +728,11 @@ pub fn call(
         }
         "linc_sim_get_state" => panel_client(panel)?.call("diag.sim_state", Value::Null),
         "linc_sim_set_panel" => {
-            if args.as_object().map(|object| object.is_empty()).unwrap_or(true) {
+            if args
+                .as_object()
+                .map(|object| object.is_empty())
+                .unwrap_or(true)
+            {
                 return Err(DiagError::invalid_argument(
                     "linc_sim_set_panel needs at least one field",
                 ));
@@ -739,9 +752,10 @@ pub fn call(
             panel_client(panel)?.call("diag.sim_buttons", json!({ "release": [button] }))
         }
         "linc_sim_inject_fault" => {
-            let kind = args.get("kind").and_then(Value::as_str).ok_or_else(|| {
-                DiagError::invalid_argument("linc_sim_inject_fault needs a kind")
-            })?;
+            let kind = args
+                .get("kind")
+                .and_then(Value::as_str)
+                .ok_or_else(|| DiagError::invalid_argument("linc_sim_inject_fault needs a kind"))?;
             panel_client(panel)?.call("diag.sim_fault", json!({ "kind": kind }))
         }
         "linc_sim_clear_faults" => panel_client(panel)?.call("diag.sim_clear_faults", Value::Null),
@@ -844,7 +858,10 @@ fn read_condition_value(
     }
     if let Some(key) = path.strip_prefix("sim.") {
         let envelope = panel_client(panel)?.call("diag.sim_state", Value::Null)?;
-        return Ok(envelope["data"]["state"].get(key).cloned().unwrap_or(Value::Null));
+        return Ok(envelope["data"]["state"]
+            .get(key)
+            .cloned()
+            .unwrap_or(Value::Null));
     }
     let envelope = client.call("diag.snapshot", json!({ "include_trail": false }))?;
     let machine = &envelope["data"]["machine"];

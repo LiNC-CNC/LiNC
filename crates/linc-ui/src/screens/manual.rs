@@ -73,8 +73,6 @@ fn coordinates_readout(app: &LincApp) -> Vec<LiveAxisRow> {
         .collect()
 }
 
-
-
 /// `X`, `Y`, `Z` zero that axis and `A` zeroes all of them.
 ///
 /// The Manual (JOG / INC / MPG) and Homing (HOME / PROG.HOME) pages share one
@@ -117,7 +115,11 @@ pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
     let mut zero: Option<Vec<String>> = None;
     let mut toggle_limits = false;
     ui.input_mut(|input| {
-        for (key, axis) in [(egui::Key::X, "X"), (egui::Key::Y, "Y"), (egui::Key::Z, "Z")] {
+        for (key, axis) in [
+            (egui::Key::X, "X"),
+            (egui::Key::Y, "Y"),
+            (egui::Key::Z, "Z"),
+        ] {
             if input.consume_key(egui::Modifiers::NONE, key) {
                 if axes.iter().any(|name| name == axis) {
                     zero = Some(vec![axis.to_string()]);
@@ -207,7 +209,11 @@ fn mode_context_card(app: &mut LincApp, ui: &mut Ui) {
                 // so the HMI offers exactly the values LinuxCNC was configured
                 // with instead of a hardcoded list. The first entry is the
                 // continuous "JOG" step.
-                theme::kv_row(ui, "STEP", app.jog_increment_label().unwrap_or_else(|| "JOG".into()));
+                theme::kv_row(
+                    ui,
+                    "STEP",
+                    app.jog_increment_label().unwrap_or_else(|| "JOG".into()),
+                );
                 let increments: Vec<(String, f64)> = app.increments().to_vec();
                 let selected = app.jog_increment_index();
                 let mut chosen = None;

@@ -67,6 +67,10 @@ pub struct Preferences {
     /// can override the label here; it is presentation, never machine data.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tool_kinds: BTreeMap<String, String>,
+    /// Typed probing feeds, clearances, hints and UI mode. Probe enablement,
+    /// tool identity and measured calibration remain profile/controller-owned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe: Option<crate::probe::ProbeParameters>,
 }
 
 impl Preferences {
@@ -77,7 +81,10 @@ impl Preferences {
         match toml::from_str::<Self>(&text) {
             Ok(preferences) => preferences,
             Err(error) => {
-                log::warn!("ignoring unreadable preferences {}: {error}", path.display());
+                log::warn!(
+                    "ignoring unreadable preferences {}: {error}",
+                    path.display()
+                );
                 Self::default()
             }
         }
@@ -98,8 +105,7 @@ impl Preferences {
         let mut temp = tempfile::NamedTempFile::new_in(parent)?;
         temp.write_all(body.as_bytes())?;
         temp.flush()?;
-        temp.persist(path)
-            .map_err(|error| error.error)?;
+        temp.persist(path).map_err(|error| error.error)?;
         Ok(())
     }
 
@@ -133,7 +139,11 @@ mod tests {
 
         // A preferences file must not be able to smuggle machine identity,
         // HAL pins or safety flags.
-        fs::write(&path, "last_page = \"tools\"\nlinuxcnc_ini = \"/etc/passwd\"\n").unwrap();
+        fs::write(
+            &path,
+            "last_page = \"tools\"\nlinuxcnc_ini = \"/etc/passwd\"\n",
+        )
+        .unwrap();
         let loaded = Preferences::load(&path);
         assert_eq!(loaded, Preferences::default());
     }
@@ -146,7 +156,38 @@ mod tests {
         preferences.tool_kinds.insert("12".into(), "DRILL".into());
         preferences.save(&path).expect("save");
         let loaded = Preferences::load(&path);
-        assert_eq!(loaded.tool_kinds.get("12").map(String::as_str), Some("DRILL"));
+        assert_eq!(
+            loaded.tool_kinds.get("12").map(String::as_str),
+            Some("DRILL")
+        );
+    }
+
+    #[test]
+    fn probe_parameters_round_trip_without_machine_owned_state() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("probe.preferences.toml");
+        let mut probe = crate::probe::ProbeParameters::default();
+        probe.probe_tool_number = 42;
+        probe.fast_feed = 375.0;
+        probe.slow_feed = 0.0;
+        probe.diameter_hint = 62.5;
+        probe.calibration_offset = 0.125;
+        probe.wcs_rotation = true;
+        let preferences = Preferences {
+            probe: Some(probe),
+            ..Default::default()
+        };
+        preferences.save(&path).expect("save");
+        let text = fs::read_to_string(&path).expect("read");
+        assert!(!text.contains("probe_tool_number"));
+        assert!(!text.contains("calibration_offset"));
+        let loaded = Preferences::load(&path).probe.expect("probe preferences");
+        assert_eq!(loaded.probe_tool_number, crate::probe::EXPECTED_PROBE_TOOL);
+        assert_eq!(loaded.calibration_offset, 0.0);
+        assert_eq!(loaded.fast_feed, 375.0);
+        assert_eq!(loaded.slow_feed, 0.0);
+        assert_eq!(loaded.diameter_hint, 62.5);
+        assert!(loaded.wcs_rotation);
     }
 
     #[test]

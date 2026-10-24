@@ -169,7 +169,14 @@ impl CncPanelDriver {
         frame.push(crc[1]);
         frame.push(crc[0]);
         std::thread::sleep(Duration::from_micros(5000));
-        record_frame(&tap, "tx", &frame, Some("led frame".into()), Some(true), None);
+        record_frame(
+            &tap,
+            "tx",
+            &frame,
+            Some("led frame".into()),
+            Some(true),
+            None,
+        );
         port.write_all(&frame)?;
         self.stats.tx_bytes += frame.len() as u64;
         std::thread::sleep(Duration::from_micros(5000));
@@ -416,10 +423,25 @@ mod tests {
     fn the_frame_tap_keeps_the_bytes_and_their_crc_verdict() {
         let bus = Arc::new(Mutex::new(linc_diag::PanelBus::new()));
         let tap = Some(bus.clone());
-        record_frame(&tap, "tx", &[0xeb, 0x01, 0x80, 0x8e], Some("poll".into()), None, None);
-        record_frame(&tap, "rx", &[0xeb, 0x01, 0xaa], None, Some(false), Some("CRC mismatch".into()));
+        record_frame(
+            &tap,
+            "tx",
+            &[0xeb, 0x01, 0x80, 0x8e],
+            Some("poll".into()),
+            None,
+            None,
+        );
+        record_frame(
+            &tap,
+            "rx",
+            &[0xeb, 0x01, 0xaa],
+            None,
+            Some(false),
+            Some("CRC mismatch".into()),
+        );
 
-        let frames = bus.lock().unwrap().frames(10);        let frames = frames["frames"].as_array().unwrap();
+        let frames = bus.lock().unwrap().frames(10);
+        let frames = frames["frames"].as_array().unwrap();
         assert_eq!(frames.len(), 2);
         assert_eq!(frames[1]["direction"], "tx", "newest first");
         assert_eq!(frames[1]["hex"], "eb01808e");

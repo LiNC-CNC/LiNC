@@ -118,7 +118,11 @@ pub fn serve(dir: PathBuf, role: &str, source: Arc<dyn Source>) -> std::io::Resu
     })
 }
 
-fn handle_connection(mut stream: UnixStream, source: &dyn Source, source_name: &str) -> std::io::Result<()> {
+fn handle_connection(
+    mut stream: UnixStream,
+    source: &dyn Source,
+    source_name: &str,
+) -> std::io::Result<()> {
     let mut reader = std::io::BufReader::new(stream.try_clone()?);
     let mut subscribed = false;
     let mut last_sequence = 0u64;
@@ -164,11 +168,17 @@ fn handle_connection(mut stream: UnixStream, source: &dyn Source, source_name: &
                 continue;
             }
             Err(error) => {
-                let _ = write_response(&mut stream, &error_response(Value::Null, &DiagError::new(
-                    "INVALID_ARGUMENT",
-                    format!("unreadable request: {error}"),
-                    false,
-                )));
+                let _ = write_response(
+                    &mut stream,
+                    &error_response(
+                        Value::Null,
+                        &DiagError::new(
+                            "INVALID_ARGUMENT",
+                            format!("unreadable request: {error}"),
+                            false,
+                        ),
+                    ),
+                );
                 break;
             }
         }
@@ -316,10 +326,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "linc-diag-{}-{name}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("linc-diag-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }
@@ -380,7 +387,10 @@ mod tests {
             .call("diag.why_blocked", Value::Null)
             .expect("why_blocked");
         let blockers = blocked["data"]["blockers"].as_array().unwrap();
-        assert!(blockers.iter().any(|b| b["code"] == "NO_PROGRAM"), "{blocked}");
+        assert!(
+            blockers.iter().any(|b| b["code"] == "NO_PROGRAM"),
+            "{blocked}"
+        );
 
         // Unknown methods are protocol errors; the server stays up.
         let error = client

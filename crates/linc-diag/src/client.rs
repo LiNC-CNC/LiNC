@@ -86,7 +86,11 @@ impl Client {
             } else {
                 "LINC_NOT_RUNNING"
             };
-            DiagError::new(code, format!("read from diagnostic socket failed: {error}"), true)
+            DiagError::new(
+                code,
+                format!("read from diagnostic socket failed: {error}"),
+                true,
+            )
         })?;
         if read == 0 {
             return Err(DiagError::new(
@@ -102,9 +106,16 @@ impl Client {
             .map_err(|error| DiagError::internal(format!("bad response: {error}")))?;
         if let Some(error) = response.get("error") {
             let detail = error.get("data").cloned().unwrap_or_else(|| error.clone());
-            return Err(serde_json::from_value::<DiagError>(detail).unwrap_or_else(|_| {
-                DiagError::internal(error.get("message").and_then(Value::as_str).unwrap_or("error"))
-            }));
+            return Err(
+                serde_json::from_value::<DiagError>(detail).unwrap_or_else(|_| {
+                    DiagError::internal(
+                        error
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .unwrap_or("error"),
+                    )
+                }),
+            );
         }
         response
             .get("result")

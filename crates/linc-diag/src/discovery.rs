@@ -136,7 +136,10 @@ pub fn read_instance(dir: &Path, role: &str) -> std::io::Result<Instance> {
     if instance.role != role {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("instance.json is for role {:?}, not {:?}", instance.role, role),
+            format!(
+                "instance.json is for role {:?}, not {:?}",
+                instance.role, role
+            ),
         ));
     }
     if !pid_alive(instance.pid) {
@@ -165,7 +168,5 @@ pub fn discover(role: &str, override_path: Option<&Path>) -> Option<PathBuf> {
         }
     }
     let conventional = socket_path(&dir, role);
-    conventional
-        .exists()
-        .then_some(conventional)
+    conventional.exists().then_some(conventional)
 }

@@ -6,11 +6,10 @@ use linc_core::model::MachineVariant;
 
 use crate::shell::LincApp;
 use crate::state::ToolDraft;
-use egui_extras::{Column as ExtraColumn, TableBuilder};
 use crate::theme;
+use egui_extras::{Column as ExtraColumn, TableBuilder};
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
-
     // No page title: the navigation names the page.
     // CURRENT; T1   PREPARED; T2 — the tool numbers carry the amber the axis
     // labels use, so they read as data rather than prose.
@@ -59,16 +58,17 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // the table gets them. While a cell is being edited its field holds focus
     // instead.
     let focus_id = egui::Id::unique("tools-table-focus");
-    let (focus_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-    let focus = ui.interact(focus_rect, focus_id, egui::Sense::focusable_noninteractive());
+    let (focus_rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+    let focus = ui.interact(
+        focus_rect,
+        focus_id,
+        egui::Sense::focusable_noninteractive(),
+    );
     // Never while a dialog or the tool-change prompt is up: this widget claims
     // focus every frame, and it was stealing it back from the dialog's buttons.
     let overlay_open = app.overlay_open();
-    if !app.tools.editing
-        && app.tools.kind_popup.is_none()
-        && !overlay_open
-        && !focus.has_focus()
-    {
+    if !app.tools.editing && app.tools.kind_popup.is_none() && !overlay_open && !focus.has_focus() {
         focus.request_focus();
     }
     ui.memory_mut(|memory| {
@@ -404,10 +404,7 @@ fn load_selected_tool(app: &mut LincApp) {
         return;
     }
     app.tools.error = None;
-    app.toast(
-        format!("T{tool} M6 + G43 H{tool} queued"),
-        theme::ACCENT,
-    );
+    app.toast(format!("T{tool} M6 + G43 H{tool} queued"), theme::ACCENT);
     app.send(MachineCommand::LoadTool { tool });
 }
 
@@ -556,7 +553,8 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                         let last_rect = std::cell::Cell::new(None::<egui::Rect>);
                         let selected_rect = std::cell::Cell::new(None::<egui::Rect>);
                         for (position, column) in columns.iter().enumerate() {
-                            let selected_cell = index == selected_row && position == selected_column;
+                            let selected_cell =
+                                index == selected_row && position == selected_column;
                             let response = row.col(|ui| {
                                 // One inner box, both paddings reserved: the
                                 // selector then never touches a glyph on either
@@ -664,15 +662,17 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                         RichText::new(text)
                                             .monospace()
                                             .size(theme::font_size(11.0))
-                                            .color(if column.cell == Cell::Tool
-                                                && entry.tool == current_tool
-                                            {
-                                                theme::SUCCESS
-                                            } else if column.cell == Cell::Kind {
-                                                theme::MUTED
-                                            } else {
-                                                theme::FG
-                                            }),
+                                            .color(
+                                                if column.cell == Cell::Tool
+                                                    && entry.tool == current_tool
+                                                {
+                                                    theme::SUCCESS
+                                                } else if column.cell == Cell::Kind {
+                                                    theme::MUTED
+                                                } else {
+                                                    theme::FG
+                                                },
+                                            ),
                                     )
                                     .truncate();
                                     // Numbers align on the right so the decimal
@@ -704,12 +704,9 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     egui::StrokeKind::Inside,
                                 );
                             }
-
                         }
                         if index == selected_row {
-                            if let (Some(first), Some(last)) =
-                                (first_rect.get(), last_rect.get())
-                            {
+                            if let (Some(first), Some(last)) = (first_rect.get(), last_rect.get()) {
                                 // One band across the row, so the gaps between
                                 // columns are filled and the highlight is
                                 // continuous instead of a row of boxes.
@@ -754,9 +751,11 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("ARROWS MOVE · ENTER EDITS · ESC CANCELS · T LOADS + G43 · + - * / ACCEPTED")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
+                RichText::new(
+                    "ARROWS MOVE · ENTER EDITS · ESC CANCELS · T LOADS + G43 · + - * / ACCEPTED",
+                )
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
             );
         });
     });
@@ -796,7 +795,10 @@ fn draw_kind_popup(app: &mut LincApp, ui: &mut Ui, opened_now: bool) {
             .position(|kind| *kind == current.as_str())
             .unwrap_or(0);
     }
-    let mut index = app.tools.kind_popup_index.min(choices.len().saturating_sub(1));
+    let mut index = app
+        .tools
+        .kind_popup_index
+        .min(choices.len().saturating_sub(1));
     let mut chosen: Option<&'static str> = None;
     let mut close = false;
     ui.input_mut(|input| {
@@ -922,9 +924,11 @@ fn save_tool_row(app: &mut LincApp, tool: u16) {
     let result = (|| -> Result<(), String> {
         // The tool number is editable, so a row can be renumbered; it must parse
         // and must not collide with another row.
-        let renumbered = draft.tool.trim().parse::<u16>().map_err(|_| {
-            format!("T{tool}: invalid tool number {:?}", draft.tool)
-        })?;
+        let renumbered = draft
+            .tool
+            .trim()
+            .parse::<u16>()
+            .map_err(|_| format!("T{tool}: invalid tool number {:?}", draft.tool))?;
         if renumbered != tool
             && app
                 .snapshot
@@ -996,10 +1000,7 @@ fn save_tool_row(app: &mut LincApp, tool: u16) {
     // Drop the draft so the cell shows the written value, not the expression
     // that produced it (`10+2` must read `12.0000` after Enter).
     app.tools.drafts.remove(&written);
-    app.toast(
-        format!("T{written} tool table write queued"),
-        theme::ACCENT,
-    );
+    app.toast(format!("T{written} tool table write queued"), theme::ACCENT);
 }
 
 fn selected_tool(app: &LincApp) -> u16 {

@@ -121,7 +121,11 @@ fn overview(app: &mut LincApp, ui: &mut Ui) {
                 health_card(
                     ui,
                     "MOTION",
-                    if following > 50.0 { "ELEVATED" } else { "NOMINAL" },
+                    if following > 50.0 {
+                        "ELEVATED"
+                    } else {
+                        "NOMINAL"
+                    },
                     following > 50.0,
                     &format!("FOLLOW {following:.1} µm / SERVO {servo:.0}%"),
                 );
@@ -1001,7 +1005,8 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
     });
     ui.add_space(4.0);
     theme::card(ui, |ui| {
-        let logs: Vec<Alarm> = app.logs()
+        let logs: Vec<Alarm> = app
+            .logs()
             .into_iter()
             .filter(|alarm| {
                 app.diagnostics_severity

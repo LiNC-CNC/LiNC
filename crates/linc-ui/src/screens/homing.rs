@@ -118,9 +118,7 @@ fn homing_context_card(app: &LincApp, ui: &mut Ui, rows: &[linc_core::homing::Ho
             .iter()
             .filter(|row| row.status == AxisHomeStatus::Homed)
             .count();
-        let homing = rows
-            .iter()
-            .any(|row| row.status == AxisHomeStatus::Homing);
+        let homing = rows.iter().any(|row| row.status == AxisHomeStatus::Homing);
         theme::kv_row(
             ui,
             "PANEL MODE",
@@ -178,4 +176,3 @@ fn homing_context_card(app: &LincApp, ui: &mut Ui, rows: &[linc_core::homing::Ho
         );
     });
 }
-

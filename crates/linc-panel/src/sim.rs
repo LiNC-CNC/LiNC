@@ -411,13 +411,11 @@ impl SimControlState {
 
 fn resolve_buttons(names: &[String]) -> Result<u64, DiagError> {
     names.iter().try_fold(0u64, |mask, name| {
-        button_mask(name)
-            .map(|bit| mask | bit)
-            .ok_or_else(|| {
-                DiagError::invalid_argument(format!(
-                    "unknown panel button {name:?}; buttons are the names in linc_get_panel_state"
-                ))
-            })
+        button_mask(name).map(|bit| mask | bit).ok_or_else(|| {
+            DiagError::invalid_argument(format!(
+                "unknown panel button {name:?}; buttons are the names in linc_get_panel_state"
+            ))
+        })
     })
 }
 
@@ -628,8 +626,7 @@ impl PanelDriver for SimPanelDriver {
             // window (and its timer) never runs, so a pulse set there would
             // stay asserted.
             let state = self.handle.snapshot();
-            let asserted =
-                state.power_on_pulse || state.power_off_pulse || state.estop_reset_pulse;
+            let asserted = state.power_on_pulse || state.power_off_pulse || state.estop_reset_pulse;
             match (asserted, self.pulse_set_at) {
                 (true, None) => self.pulse_set_at = Some(Instant::now()),
                 (true, Some(at)) if at.elapsed() >= POWER_PULSE => {
@@ -1071,8 +1068,15 @@ fn momentary_key(
         KEY_BORDER,
     );
     let led = rect.left_top() + Vec2::new(12.0 * l.k, 12.0 * l.k);
-    ui.painter()
-        .circle_filled(led, 3.5 * l.k, if on { GREEN } else { Color32::from_rgb(0x38, 0x3e, 0x41) });
+    ui.painter().circle_filled(
+        led,
+        3.5 * l.k,
+        if on {
+            GREEN
+        } else {
+            Color32::from_rgb(0x38, 0x3e, 0x41)
+        },
+    );
     if on {
         ui.painter().circle_stroke(
             led,
@@ -2254,7 +2258,10 @@ mod tests {
         handle_set_fault(&driver, PanelFault::ProtectUnknown);
         let snapshot = poll_driver(&mut driver);
         assert!(!snapshot.program_protect_known);
-        assert!(snapshot.protect_effective(), "an untrusted protect fails closed");
+        assert!(
+            snapshot.protect_effective(),
+            "an untrusted protect fails closed"
+        );
     }
 
     fn handle_set_fault(driver: &SimPanelDriver, fault: PanelFault) {
@@ -2297,7 +2304,10 @@ mod tests {
         assert_eq!(state["estop"], false);
         assert_eq!(state["mode"], "JOG");
         assert_eq!(state["feed_override"], 0.5);
-        assert!(handle.snapshot().estop_reset_pulse, "the controller is asked to reset");
+        assert!(
+            handle.snapshot().estop_reset_pulse,
+            "the controller is asked to reset"
+        );
     }
 
     #[test]

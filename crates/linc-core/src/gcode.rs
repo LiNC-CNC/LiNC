@@ -517,9 +517,7 @@ impl Preview {
             let to = to.saturating_sub(1).min(self.segments.len());
             self.line_bounds.insert(line, (from, to));
         }
-        self.bounds = Bounds3::from_points(
-            self.segments.iter().map(|segment| segment.end),
-        );
+        self.bounds = Bounds3::from_points(self.segments.iter().map(|segment| segment.end));
         true
     }
 
@@ -1018,9 +1016,7 @@ pub fn parse_preview(
                     position[2] = r;
                 }
                 // 2. Rapid to the hole at the current Z.
-                if (hole[0] - position[0]).abs() > 1e-9
-                    || (hole[1] - position[1]).abs() > 1e-9
-                {
+                if (hole[0] - position[0]).abs() > 1e-9 || (hole[1] - position[1]).abs() > 1e-9 {
                     push_cycle_segment(
                         &mut preview,
                         position,
@@ -1347,8 +1343,15 @@ mod tests {
     #[test]
     fn program_wcs_reads_the_first_selection() {
         assert_eq!(program_wcs("G21 G90 G54 G17\nG0 X0\n"), Some(1));
-        assert_eq!(program_wcs("(G54 is only a note here)\nG21\nG59.1 G0 X0\n"), Some(7));
-        assert_eq!(program_wcs("G55\nG54\n"), Some(2), "the first selection wins");
+        assert_eq!(
+            program_wcs("(G54 is only a note here)\nG21\nG59.1 G0 X0\n"),
+            Some(7)
+        );
+        assert_eq!(
+            program_wcs("G55\nG54\n"),
+            Some(2),
+            "the first selection wins"
+        );
         assert_eq!(program_wcs("G21 G90\nG0 X0\n"), None);
         assert_eq!(program_wcs(""), None);
     }
@@ -1368,10 +1371,22 @@ mod tests {
             .map(|segment| (segment.start, segment.end, segment.kind))
             .collect();
         assert_eq!(line4.len(), 4, "{line4:?}");
-        assert_eq!(line4[0], ([0.0, 0.0, 5.0], [10.0, 0.0, 5.0], SegmentKind::Rapid));
-        assert_eq!(line4[1], ([10.0, 0.0, 5.0], [10.0, 0.0, 2.0], SegmentKind::Rapid));
-        assert_eq!(line4[2], ([10.0, 0.0, 2.0], [10.0, 0.0, -5.0], SegmentKind::Feed));
-        assert_eq!(line4[3], ([10.0, 0.0, -5.0], [10.0, 0.0, 5.0], SegmentKind::Rapid));
+        assert_eq!(
+            line4[0],
+            ([0.0, 0.0, 5.0], [10.0, 0.0, 5.0], SegmentKind::Rapid)
+        );
+        assert_eq!(
+            line4[1],
+            ([10.0, 0.0, 5.0], [10.0, 0.0, 2.0], SegmentKind::Rapid)
+        );
+        assert_eq!(
+            line4[2],
+            ([10.0, 0.0, 2.0], [10.0, 0.0, -5.0], SegmentKind::Feed)
+        );
+        assert_eq!(
+            line4[3],
+            ([10.0, 0.0, -5.0], [10.0, 0.0, 5.0], SegmentKind::Rapid)
+        );
 
         let line5: Vec<_> = preview
             .segments
@@ -1380,10 +1395,22 @@ mod tests {
             .map(|segment| (segment.start, segment.end, segment.kind))
             .collect();
         assert_eq!(line5.len(), 4, "{line5:?}");
-        assert_eq!(line5[0], ([10.0, 0.0, 5.0], [20.0, 0.0, 5.0], SegmentKind::Rapid));
-        assert_eq!(line5[1], ([20.0, 0.0, 5.0], [20.0, 0.0, 2.0], SegmentKind::Rapid));
-        assert_eq!(line5[2], ([20.0, 0.0, 2.0], [20.0, 0.0, -5.0], SegmentKind::Feed));
-        assert_eq!(line5[3], ([20.0, 0.0, -5.0], [20.0, 0.0, 5.0], SegmentKind::Rapid));
+        assert_eq!(
+            line5[0],
+            ([10.0, 0.0, 5.0], [20.0, 0.0, 5.0], SegmentKind::Rapid)
+        );
+        assert_eq!(
+            line5[1],
+            ([20.0, 0.0, 5.0], [20.0, 0.0, 2.0], SegmentKind::Rapid)
+        );
+        assert_eq!(
+            line5[2],
+            ([20.0, 0.0, 2.0], [20.0, 0.0, -5.0], SegmentKind::Feed)
+        );
+        assert_eq!(
+            line5[3],
+            ([20.0, 0.0, -5.0], [20.0, 0.0, 5.0], SegmentKind::Rapid)
+        );
     }
 
     #[test]
@@ -1421,12 +1448,22 @@ mod tests {
             .map(|segment| (segment.start, segment.end, segment.kind))
             .collect();
         assert_eq!(line3.len(), 4, "{line3:?}");
-        assert_eq!(line3[0], ([0.0, 0.0, 1.0], [0.0, 0.0, 3.0], SegmentKind::Rapid));
+        assert_eq!(
+            line3[0],
+            ([0.0, 0.0, 1.0], [0.0, 0.0, 3.0], SegmentKind::Rapid)
+        );
         assert_eq!(line3[0].1, [0.0, 0.0, 3.0], "below R: move Z before X/Y");
         assert_eq!(line3[1].0, [0.0, 0.0, 3.0]);
         assert_eq!(line3[1].1, [10.0, 0.0, 3.0]);
-        assert_eq!(line3[2], ([10.0, 0.0, 3.0], [10.0, 0.0, -2.0], SegmentKind::Feed));
-        assert_eq!(line3[3].1, [10.0, 0.0, 3.0], "initial Z below R clears to R");
+        assert_eq!(
+            line3[2],
+            ([10.0, 0.0, 3.0], [10.0, 0.0, -2.0], SegmentKind::Feed)
+        );
+        assert_eq!(
+            line3[3].1,
+            [10.0, 0.0, 3.0],
+            "initial Z below R clears to R"
+        );
     }
 
     #[test]
@@ -1468,6 +1505,4 @@ mod tests {
         assert!(!preview.trim_approach([99.0, 0.0, 0.0]));
         assert_eq!(preview.segments.len(), 1);
     }
-
 }
-

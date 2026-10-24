@@ -273,9 +273,7 @@ fn run_worker(
             if speed != last_jog_speed {
                 last_jog_speed = speed;
                 if let Some(writer) = hal.as_mut() {
-                    if let Err(error) =
-                        writer.write(LincOutput::JogSpeed, HalValue::Float(speed))
-                    {
+                    if let Err(error) = writer.write(LincOutput::JogSpeed, HalValue::Float(speed)) {
                         log::warn!("HAL jog-speed write failed: {error}");
                     }
                 }

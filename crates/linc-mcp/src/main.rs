@@ -31,8 +31,10 @@ struct Args {
 }
 
 fn main() -> Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,linc_mcp=info"))
-        .init();
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("warn,linc_mcp=info"),
+    )
+    .init();
     let args = Args::parse();
     if args.allow_sim_control && !args.sim {
         bail!("--allow-sim-control requires --sim: simulator control is never enabled for a real machine");

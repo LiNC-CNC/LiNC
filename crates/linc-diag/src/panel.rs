@@ -139,7 +139,12 @@ impl PanelBus {
         }
         self.sequence += 1;
         self.captured_at_ms = now_ms();
-        let events = transitions(&self.snapshot, &snapshot, self.sequence, self.captured_at_ms);
+        let events = transitions(
+            &self.snapshot,
+            &snapshot,
+            self.sequence,
+            self.captured_at_ms,
+        );
         self.snapshot = snapshot;
         for event in events {
             self.push_event(event);
@@ -168,7 +173,11 @@ impl PanelBus {
             self.frames.pop_front();
             self.dropped.panel_frames += 1;
         }
-        let hex: String = bytes.iter().take(64).map(|byte| format!("{byte:02x}")).collect();
+        let hex: String = bytes
+            .iter()
+            .take(64)
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
         self.frames.push_back(FrameRecord {
             sequence: self.sequence,
             at_ms: now_ms(),
@@ -197,12 +206,7 @@ impl PanelBus {
         json!({ "frames": frames, "next_cursor": Value::Null })
     }
 
-    pub fn events(
-        &self,
-        since_sequence: Option<u64>,
-        kind: Option<&str>,
-        limit: usize,
-    ) -> Value {
+    pub fn events(&self, since_sequence: Option<u64>, kind: Option<&str>, limit: usize) -> Value {
         let limit = limit.clamp(1, EVENT_CAPACITY);
         let events: Vec<Value> = self
             .events
@@ -357,7 +361,11 @@ pub struct PanelSource {
 impl PanelSource {
     /// `sim` is `Some` only for a simulator started with `--allow-sim-control`;
     /// a real panel always passes `None` and never answers `diag.sim_*`.
-    pub fn new(bus: Arc<Mutex<PanelBus>>, process: ProcessInfo, sim: Option<Arc<dyn SimControl>>) -> Self {
+    pub fn new(
+        bus: Arc<Mutex<PanelBus>>,
+        process: ProcessInfo,
+        sim: Option<Arc<dyn SimControl>>,
+    ) -> Self {
         Self { bus, process, sim }
     }
 
@@ -387,9 +395,10 @@ impl PanelSource {
                 Ok(json!({ "armed": true, "state": state, "panel": self.snapshot_value() }))
             }
             "diag.sim_set" => {
-                let patch: SimPanelPatch = serde_json::from_value(params.clone()).map_err(|error| {
-                    DiagError::invalid_argument(format!("bad sim panel patch: {error}"))
-                })?;
+                let patch: SimPanelPatch =
+                    serde_json::from_value(params.clone()).map_err(|error| {
+                        DiagError::invalid_argument(format!("bad sim panel patch: {error}"))
+                    })?;
                 let state = control.apply(&patch)?;
                 Ok(json!({ "applied": true, "state": state, "panel": self.snapshot_value() }))
             }
@@ -429,7 +438,9 @@ impl PanelSource {
                 } else {
                     control.inject_fault(fault)?
                 };
-                Ok(json!({ "injected": fault.label(), "state": state, "panel": self.snapshot_value() }))
+                Ok(
+                    json!({ "injected": fault.label(), "state": state, "panel": self.snapshot_value() }),
+                )
             }
             "diag.sim_clear_faults" => {
                 self.bus
@@ -463,7 +474,9 @@ fn string_list(params: &Value, key: &str) -> Result<Vec<String>, DiagError> {
                     .ok_or_else(|| DiagError::invalid_argument(format!("{key} must be strings")))
             })
             .collect(),
-        Some(_) => Err(DiagError::invalid_argument(format!("{key} must be an array"))),
+        Some(_) => Err(DiagError::invalid_argument(format!(
+            "{key} must be an array"
+        ))),
     }
 }
 
@@ -520,7 +533,9 @@ impl Source for PanelSource {
                 "stale": bus.stale(),
                 "sim_control": self.sim.is_some(),
             })),
-            "diag.panel_frames" => Ok(bus.frames(param_u64(params, "limit").unwrap_or(100) as usize)),
+            "diag.panel_frames" => {
+                Ok(bus.frames(param_u64(params, "limit").unwrap_or(100) as usize))
+            }
             "diag.panel_events" => Ok(bus.events(
                 param_u64(params, "since_sequence"),
                 param_str(params, "kind"),
@@ -554,7 +569,11 @@ mod tests {
         let mut bus = PanelBus::new();
         let start = bus.sequence();
         bus.publish(PanelSnapshot::default());
-        assert_eq!(bus.sequence(), start, "an identical snapshot is not new state");
+        assert_eq!(
+            bus.sequence(),
+            start,
+            "an identical snapshot is not new state"
+        );
 
         let next = connected_snapshot();
         bus.publish(next.clone());
@@ -577,7 +596,10 @@ mod tests {
 
         let events = bus.events(Some(before), None, 10);
         let events = events["events"].as_array().unwrap();
-        let kinds: Vec<&str> = events.iter().filter_map(|event| event["kind"].as_str()).collect();
+        let kinds: Vec<&str> = events
+            .iter()
+            .filter_map(|event| event["kind"].as_str())
+            .collect();
         assert_eq!(kinds, vec!["mode", "estop", "feed_override"], "{events:?}");
         assert_eq!(events[0]["to"], "JOG");
         assert_eq!(events[2]["to"], "0.50");
@@ -600,7 +622,10 @@ mod tests {
         let mut recovered = connected_snapshot();
         recovered.mode = PanelModeValidity::Valid(linc_core::model::PanelMode::Auto);
         bus.publish(recovered);
-        assert!(bus.sequence() > sequence, "clearing the fault resumes publication");
+        assert!(
+            bus.sequence() > sequence,
+            "clearing the fault resumes publication"
+        );
     }
 
     #[test]

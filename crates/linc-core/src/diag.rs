@@ -359,7 +359,9 @@ pub struct MotionSample {
 impl MotionSample {
     pub fn from_snapshot(snapshot: &MachineSnapshot, sequence: u64) -> Self {
         let axis_entries = |map: &crate::model::AxisMap<f64>| -> Vec<(String, f64)> {
-            map.iter().map(|(axis, value)| (axis.to_string(), *value)).collect()
+            map.iter()
+                .map(|(axis, value)| (axis.to_string(), *value))
+                .collect()
         };
         let commanded = axis_entries(&snapshot.machine.commanded);
         let positions = snapshot
@@ -658,7 +660,8 @@ impl Bus {
             self.motion.pop_front();
             self.dropped.motion += 1;
         }
-        self.motion.push_back(MotionSample::from_snapshot(&self.machine, self.sequence));
+        self.motion
+            .push_back(MotionSample::from_snapshot(&self.machine, self.sequence));
     }
 
     pub fn motion_len(&self) -> usize {
@@ -669,9 +672,8 @@ impl Bus {
     /// and evenly downsampled to `max_samples`.
     pub fn motion_history(&self, seconds: Option<f64>, max_samples: usize) -> Value {
         let max = max_samples.clamp(1, 1_200);
-        let cutoff = seconds.map(|seconds| {
-            self.captured_at_ms - (seconds.max(0.0) * 1000.0).round() as i64
-        });
+        let cutoff =
+            seconds.map(|seconds| self.captured_at_ms - (seconds.max(0.0) * 1000.0).round() as i64);
         let samples: Vec<&MotionSample> = self
             .motion
             .iter()
@@ -753,7 +755,11 @@ impl Bus {
                     .map(|since| log.sequence > since)
                     .unwrap_or(true)
         }) {
-            entries.push((log.at_ms, "log", serde_json::to_value(log).unwrap_or(Value::Null)));
+            entries.push((
+                log.at_ms,
+                "log",
+                serde_json::to_value(log).unwrap_or(Value::Null),
+            ));
         }
         for event in self.events.iter().filter(|event| {
             low.map(|low| event.at_ms >= low).unwrap_or(true)
@@ -762,7 +768,11 @@ impl Bus {
                     .map(|since| event.sequence > since)
                     .unwrap_or(true)
         }) {
-            entries.push((event.at_ms, "event", serde_json::to_value(event).unwrap_or(Value::Null)));
+            entries.push((
+                event.at_ms,
+                "event",
+                serde_json::to_value(event).unwrap_or(Value::Null),
+            ));
         }
         entries.sort_by_key(|(at, _, _)| *at);
         let entries: Vec<Value> = entries
@@ -822,7 +832,10 @@ impl Bus {
                 transitions.push((
                     "power",
                     Severity::Info,
-                    format!("machine power {:?} -> {:?}", previous.task.power, next.task.power),
+                    format!(
+                        "machine power {:?} -> {:?}",
+                        previous.task.power, next.task.power
+                    ),
                 ));
             }
             if previous.machine.estop != next.machine.estop {
@@ -856,7 +869,10 @@ impl Bus {
                 transitions.push((
                     "interp",
                     Severity::Info,
-                    format!("interpreter {:?} -> {:?}", previous.task.interp, next.task.interp),
+                    format!(
+                        "interpreter {:?} -> {:?}",
+                        previous.task.interp, next.task.interp
+                    ),
                 ));
             }
             if previous.program.display_name != next.program.display_name {
@@ -1064,12 +1080,7 @@ impl Bus {
         json!({ "logs": records, "next_cursor": Value::Null })
     }
 
-    pub fn events(
-        &self,
-        since_sequence: Option<u64>,
-        kind: Option<&str>,
-        limit: usize,
-    ) -> Value {
+    pub fn events(&self, since_sequence: Option<u64>, kind: Option<&str>, limit: usize) -> Value {
         let limit = limit.clamp(1, 1_000);
         let records: Vec<Value> = self
             .events
@@ -1241,7 +1252,11 @@ pub mod gates {
                 format!(
                     "the interpreter is {:?}{}",
                     machine.task.interp,
-                    if machine.task.running { " and a program is running" } else { "" }
+                    if machine.task.running {
+                        " and a program is running"
+                    } else {
+                        ""
+                    }
                 ),
                 Severity::Warning,
                 "program",
@@ -1335,170 +1350,197 @@ pub mod gates {
         )
     }
 
-#[cfg(test)]
-mod tests {
-    use super::super::*;
-    use crate::model::{MachineSnapshot, MachineVariant, PanelSnapshot};
+    #[cfg(test)]
+    mod tests {
+        use super::super::*;
+        use crate::model::{MachineSnapshot, MachineVariant, PanelSnapshot};
 
-    fn snapshot() -> MachineSnapshot {
-        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
-        snapshot.panel = PanelSnapshot {
-            connected: true,
-            program_protect_known: true,
-            ..PanelSnapshot::default()
-        };
-        snapshot
-    }
-
-    #[test]
-    fn envelope_reports_age_and_staleness_from_the_capture_time() {
-        let process = ProcessInfo::default();
-        let captured = now_ms() - 5_000;
-        let envelope = Envelope::new("linc", process, 7, captured, 2_000, Dropped::default(), json!({}));
-        assert_eq!(envelope.schema_version, SCHEMA_VERSION);
-        assert!(envelope.age_ms >= 5_000, "{}", envelope.age_ms);
-        assert!(envelope.stale);
-
-        let fresh = Envelope::new(
-            "linc",
-            ProcessInfo::default(),
-            8,
-            now_ms(),
-            2_000,
-            Dropped::default(),
-            json!({}),
-        );
-        assert!(!fresh.stale);
-    }
-
-    #[test]
-    fn gates_name_the_panel_machine_and_program_preconditions() {
-        let mut snapshot = snapshot();
-        snapshot.panel.connected = false;
-        let blockers = gates::blockers(&snapshot, &UiSnapshot::default());
-        assert!(blockers.iter().any(|b| b.code == "PANEL_OFFLINE"));
-        // The report is exhaustive: the program precondition is still listed, so
-        // an agent sees the whole picture instead of one reason at a time.
-        assert!(blockers.iter().any(|b| b.code == "NO_PROGRAM"));
-
-        let mut snapshot = self::snapshot();
-        snapshot.machine.estop = true;
-        let blockers = gates::blockers(&snapshot, &UiSnapshot::default());
-        assert!(blockers.iter().any(|b| b.code == "ESTOP_LATCHED"));
-        assert!(blockers.iter().any(|b| b.code == "MACHINE_OFF"), "{blockers:?}");
-        assert!(blockers.iter().any(|b| b.code == "NO_PROGRAM"));
-
-        // An unhomed axis is a warning, not an error: jogging in manual still works.
-        let mut snapshot_with_axis = self::snapshot();
-        snapshot_with_axis
-            .positions
-            .axes
-            .insert("X".to_string(), crate::model::PositionSet::default());
-        snapshot_with_axis.machine.homed.insert("X".to_string(), false);
-        let blockers = gates::blockers(&snapshot_with_axis, &UiSnapshot::default());
-        let blocker = blockers.iter().find(|b| b.code == "AXES_UNHOMED").cloned();
-        assert_eq!(blocker.map(|b| b.severity), Some(Severity::Warning));
-
-        // A tool table that did not load is an error from the config layer.
-        let mut snapshot = self::snapshot();
-        snapshot.tool_table.error = Some("missing column P".into());
-        assert!(gates::blockers(&snapshot, &UiSnapshot::default())
-            .iter()
-            .any(|b| b.code == "TOOL_TABLE_ERROR"));
-    }
-
-    #[test]
-    fn publishing_advances_the_sequence_only_when_state_changes() {
-        let mut bus = Bus::new(snapshot());
-        let start = bus.sequence();
-        bus.publish_machine(snapshot());
-        assert!(bus.sequence() > start, "a new snapshot is a new sequence");
-
-        let ui = UiSnapshot {
-            page: "MACHINE".into(),
-            ..UiSnapshot::default()
-        };
-        bus.publish_ui(ui.clone());
-        let after_ui = bus.sequence();
-        bus.publish_ui(ui);
-        assert_eq!(bus.sequence(), after_ui, "a repeated UI snapshot is a no-op");
-    }
-
-    #[test]
-    fn ui_actions_are_queued_capped_and_drained() {
-        let mut bus = Bus::new(snapshot());
-        bus.request_ui_action(UiAction::Fit);
-        bus.request_ui_action(UiAction::Page {
-            page: "PROGRAM".into(),
-        });
-        let actions = bus.take_ui_actions();
-        assert_eq!(actions.len(), 2);
-        assert!(bus.take_ui_actions().is_empty(), "draining empties the queue");
-
-        for _ in 0..40 {
-            bus.request_ui_action(UiAction::CycleView);
+        fn snapshot() -> MachineSnapshot {
+            let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+            snapshot.panel = PanelSnapshot {
+                connected: true,
+                program_protect_known: true,
+                ..PanelSnapshot::default()
+            };
+            snapshot
         }
-        assert_eq!(bus.take_ui_actions().len(), 32, "the queue is capped");
-    }
 
-    #[test]
-    fn transitions_are_recorded_as_events() {
-        let mut bus = Bus::new(snapshot());
-        let mut next = snapshot();
-        next.task.power = crate::model::MachinePower::On;
-        bus.publish_machine(next);
-        let events = bus.events(None, Some("power"), 10);
-        let records = events.get("events").and_then(Value::as_array).unwrap();
-        assert_eq!(records.len(), 1, "{events}");
-        bus.push_event("estop", Severity::Error, "e-stop true".to_string());
-        let events = bus.events(None, Some("estop"), 10);
-        let records = events.get("events").and_then(Value::as_array).unwrap();
-        assert_eq!(records[0].get("severity").and_then(Value::as_str), Some("error"));
-    }
+        #[test]
+        fn envelope_reports_age_and_staleness_from_the_capture_time() {
+            let process = ProcessInfo::default();
+            let captured = now_ms() - 5_000;
+            let envelope = Envelope::new(
+                "linc",
+                process,
+                7,
+                captured,
+                2_000,
+                Dropped::default(),
+                json!({}),
+            );
+            assert_eq!(envelope.schema_version, SCHEMA_VERSION);
+            assert!(envelope.age_ms >= 5_000, "{}", envelope.age_ms);
+            assert!(envelope.stale);
 
-    #[test]
-    fn the_summary_carries_the_operator_fields() {
-        let mut bus = Bus::new(snapshot());
-        bus.publish_machine(snapshot());
-        let summary = bus.summary();
-        assert_eq!(summary.get("mode").and_then(Value::as_str), Some("Unknown"));
-        assert!(summary.get("blockers").and_then(Value::as_array).is_some());
-    }
+            let fresh = Envelope::new(
+                "linc",
+                ProcessInfo::default(),
+                8,
+                now_ms(),
+                2_000,
+                Dropped::default(),
+                json!({}),
+            );
+            assert!(!fresh.stale);
+        }
 
-    #[test]
-    fn motion_samples_are_retained_at_ten_hertz_and_downsampled() {
-        let mut bus = Bus::new(snapshot());
-        bus.publish_machine(snapshot());
-        assert_eq!(bus.motion_len(), 1);
-        // Rewind the sampler instead of sleeping 100 ms per sample.
-        bus.last_motion_ms -= 200;
-        let mut next = snapshot();
-        next.feed.feed = 321.0;
-        next.program.current_line = 7;
-        bus.publish_machine(next);
-        assert_eq!(bus.motion_len(), 2);
+        #[test]
+        fn gates_name_the_panel_machine_and_program_preconditions() {
+            let mut snapshot = snapshot();
+            snapshot.panel.connected = false;
+            let blockers = gates::blockers(&snapshot, &UiSnapshot::default());
+            assert!(blockers.iter().any(|b| b.code == "PANEL_OFFLINE"));
+            // The report is exhaustive: the program precondition is still listed, so
+            // an agent sees the whole picture instead of one reason at a time.
+            assert!(blockers.iter().any(|b| b.code == "NO_PROGRAM"));
 
-        let history = bus.motion_history(None, 10);
-        assert_eq!(history["count"], 2);
-        assert_eq!(history["samples"][1]["feed"], 321.0);
-        assert_eq!(history["samples"][1]["program_line"], 7);
-        assert_eq!(history["sample_interval_ms"], 100);
+            let mut snapshot = self::snapshot();
+            snapshot.machine.estop = true;
+            let blockers = gates::blockers(&snapshot, &UiSnapshot::default());
+            assert!(blockers.iter().any(|b| b.code == "ESTOP_LATCHED"));
+            assert!(
+                blockers.iter().any(|b| b.code == "MACHINE_OFF"),
+                "{blockers:?}"
+            );
+            assert!(blockers.iter().any(|b| b.code == "NO_PROGRAM"));
 
-        let sampled = bus.motion_history(None, 1);
-        assert_eq!(sampled["count"], 1, "max_samples caps the page");
-        assert_eq!(sampled["available"], 2, "the page still reports what was there");
-    }
+            // An unhomed axis is a warning, not an error: jogging in manual still works.
+            let mut snapshot_with_axis = self::snapshot();
+            snapshot_with_axis
+                .positions
+                .axes
+                .insert("X".to_string(), crate::model::PositionSet::default());
+            snapshot_with_axis
+                .machine
+                .homed
+                .insert("X".to_string(), false);
+            let blockers = gates::blockers(&snapshot_with_axis, &UiSnapshot::default());
+            let blocker = blockers.iter().find(|b| b.code == "AXES_UNHOMED").cloned();
+            assert_eq!(blocker.map(|b| b.severity), Some(Severity::Warning));
 
-    #[test]
-    fn the_motion_ring_caps_and_counts_drops() {
-        let mut bus = Bus::new(snapshot());
-        bus.motion_limit = 2;
-        for _ in 0..3 {
-            bus.last_motion_ms -= 200;
+            // A tool table that did not load is an error from the config layer.
+            let mut snapshot = self::snapshot();
+            snapshot.tool_table.error = Some("missing column P".into());
+            assert!(gates::blockers(&snapshot, &UiSnapshot::default())
+                .iter()
+                .any(|b| b.code == "TOOL_TABLE_ERROR"));
+        }
+
+        #[test]
+        fn publishing_advances_the_sequence_only_when_state_changes() {
+            let mut bus = Bus::new(snapshot());
+            let start = bus.sequence();
             bus.publish_machine(snapshot());
+            assert!(bus.sequence() > start, "a new snapshot is a new sequence");
+
+            let ui = UiSnapshot {
+                page: "MACHINE".into(),
+                ..UiSnapshot::default()
+            };
+            bus.publish_ui(ui.clone());
+            let after_ui = bus.sequence();
+            bus.publish_ui(ui);
+            assert_eq!(
+                bus.sequence(),
+                after_ui,
+                "a repeated UI snapshot is a no-op"
+            );
         }
-        assert_eq!(bus.motion_len(), 2);
-        assert_eq!(bus.dropped().motion, 1);
+
+        #[test]
+        fn ui_actions_are_queued_capped_and_drained() {
+            let mut bus = Bus::new(snapshot());
+            bus.request_ui_action(UiAction::Fit);
+            bus.request_ui_action(UiAction::Page {
+                page: "PROGRAM".into(),
+            });
+            let actions = bus.take_ui_actions();
+            assert_eq!(actions.len(), 2);
+            assert!(
+                bus.take_ui_actions().is_empty(),
+                "draining empties the queue"
+            );
+
+            for _ in 0..40 {
+                bus.request_ui_action(UiAction::CycleView);
+            }
+            assert_eq!(bus.take_ui_actions().len(), 32, "the queue is capped");
+        }
+
+        #[test]
+        fn transitions_are_recorded_as_events() {
+            let mut bus = Bus::new(snapshot());
+            let mut next = snapshot();
+            next.task.power = crate::model::MachinePower::On;
+            bus.publish_machine(next);
+            let events = bus.events(None, Some("power"), 10);
+            let records = events.get("events").and_then(Value::as_array).unwrap();
+            assert_eq!(records.len(), 1, "{events}");
+            bus.push_event("estop", Severity::Error, "e-stop true".to_string());
+            let events = bus.events(None, Some("estop"), 10);
+            let records = events.get("events").and_then(Value::as_array).unwrap();
+            assert_eq!(
+                records[0].get("severity").and_then(Value::as_str),
+                Some("error")
+            );
+        }
+
+        #[test]
+        fn the_summary_carries_the_operator_fields() {
+            let mut bus = Bus::new(snapshot());
+            bus.publish_machine(snapshot());
+            let summary = bus.summary();
+            assert_eq!(summary.get("mode").and_then(Value::as_str), Some("Unknown"));
+            assert!(summary.get("blockers").and_then(Value::as_array).is_some());
+        }
+
+        #[test]
+        fn motion_samples_are_retained_at_ten_hertz_and_downsampled() {
+            let mut bus = Bus::new(snapshot());
+            bus.publish_machine(snapshot());
+            assert_eq!(bus.motion_len(), 1);
+            // Rewind the sampler instead of sleeping 100 ms per sample.
+            bus.last_motion_ms -= 200;
+            let mut next = snapshot();
+            next.feed.feed = 321.0;
+            next.program.current_line = 7;
+            bus.publish_machine(next);
+            assert_eq!(bus.motion_len(), 2);
+
+            let history = bus.motion_history(None, 10);
+            assert_eq!(history["count"], 2);
+            assert_eq!(history["samples"][1]["feed"], 321.0);
+            assert_eq!(history["samples"][1]["program_line"], 7);
+            assert_eq!(history["sample_interval_ms"], 100);
+
+            let sampled = bus.motion_history(None, 1);
+            assert_eq!(sampled["count"], 1, "max_samples caps the page");
+            assert_eq!(
+                sampled["available"], 2,
+                "the page still reports what was there"
+            );
+        }
+
+        #[test]
+        fn the_motion_ring_caps_and_counts_drops() {
+            let mut bus = Bus::new(snapshot());
+            bus.motion_limit = 2;
+            for _ in 0..3 {
+                bus.last_motion_ms -= 200;
+                bus.publish_machine(snapshot());
+            }
+            assert_eq!(bus.motion_len(), 2);
+            assert_eq!(bus.dropped().motion, 1);
+        }
     }
-}
 }

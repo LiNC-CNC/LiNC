@@ -111,13 +111,16 @@ fn main() -> Result<()> {
     if args.allow_sim_control && !simulated {
         log::warn!("--allow-sim-control ignored: this panel is not a simulator");
     }
-    let sim_control: Option<Arc<dyn linc_diag::SimControl>> = match (&sim_handle, args.allow_sim_control, simulated) {
-        (Some(handle), true, true) => {
-            log::warn!("simulator control armed for linc-mcp (--allow-sim-control)");
-            Some(Arc::new(linc_panel::sim::SimControlState::new(handle.clone())))
-        }
-        _ => None,
-    };
+    let sim_control: Option<Arc<dyn linc_diag::SimControl>> =
+        match (&sim_handle, args.allow_sim_control, simulated) {
+            (Some(handle), true, true) => {
+                log::warn!("simulator control armed for linc-mcp (--allow-sim-control)");
+                Some(Arc::new(linc_panel::sim::SimControlState::new(
+                    handle.clone(),
+                )))
+            }
+            _ => None,
+        };
 
     // Panel diagnostic socket. The panel owns its own state, so it publishes
     // its own socket instead of routing through the HMI. A failure here never
@@ -134,7 +137,11 @@ fn main() -> Result<()> {
                 git_commit: option_env!("LINC_GIT_COMMIT").unwrap_or("").into(),
                 git_dirty: option_env!("LINC_GIT_DIRTY").is_some(),
                 profile: profile.config.machine.name.clone(),
-                backend: if simulated { "sim".into() } else { "serial".into() },
+                backend: if simulated {
+                    "sim".into()
+                } else {
+                    "serial".into()
+                },
             },
         };
         linc_diag::crash::install_hook("panel", process.clone());
@@ -191,7 +198,15 @@ fn run_physical(
     let baud = profile.config.panel.link.baud.unwrap_or(115200);
     let mut driver = linc_panel::CncPanelDriver::new(port, baud, cycle);
     driver.set_frame_tap(panel_bus.clone());
-    run_loop(&mut driver, cycle, no_hal, once, shutdown, None, Some(panel_bus))
+    run_loop(
+        &mut driver,
+        cycle,
+        no_hal,
+        once,
+        shutdown,
+        None,
+        Some(panel_bus),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -270,7 +285,15 @@ fn run_simulated(
         window_result.map_err(|error| anyhow::anyhow!("simulator window: {error}"))?;
         Ok(())
     } else {
-        run_loop(&mut driver, cycle, no_hal, once, shutdown, ipc, Some(panel_bus))
+        run_loop(
+            &mut driver,
+            cycle,
+            no_hal,
+            once,
+            shutdown,
+            ipc,
+            Some(panel_bus),
+        )
     }
 }
 

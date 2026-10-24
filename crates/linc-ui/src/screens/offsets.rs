@@ -87,9 +87,8 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     }
     let active = app.snapshot.offsets.active_index;
     let gap = 8.0;
-    let width = ((ui.available_width() - gap * (axes.len() as f32 - 1.0))
-        / axes.len() as f32)
-        .max(120.0);
+    let width =
+        ((ui.available_width() - gap * (axes.len() as f32 - 1.0)) / axes.len() as f32).max(120.0);
     // The Machine page's readout without the DTG line and move bar.
     const HEIGHT: f32 = 64.0;
 
@@ -152,10 +151,12 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                     // not appending to it.
                     let id = egui::Id::unique("linc-offsets-dro");
                     if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
-                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-                            egui::text::CCursor::new(0),
-                            egui::text::CCursor::new(buffer.chars().count()),
-                        )));
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(0),
+                                egui::text::CCursor::new(buffer.chars().count()),
+                            )));
                         state.store(ui.ctx(), id);
                     }
                     if let Some(slot) = app.offsets.dro_edit.as_mut() {
@@ -363,7 +364,11 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     ui.spacing_mut().item_spacing.y = 0.0;
     let (focus_rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 0.0), egui::Sense::hover());
-    let focus = ui.interact(focus_rect, focus_id, egui::Sense::focusable_noninteractive());
+    let focus = ui.interact(
+        focus_rect,
+        focus_id,
+        egui::Sense::focusable_noninteractive(),
+    );
     ui.spacing_mut().item_spacing.y = spacing_y;
     if !app.offsets.editing && app.offsets.dro_edit.is_none() && !focus.has_focus() {
         focus.request_focus();
@@ -515,7 +520,11 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                                 RichText::new(if is_active { "ACTIVE" } else { "STORED" })
                                     .monospace()
                                     .size(theme::font_size(9.0))
-                                    .color(if is_active { theme::SUCCESS } else { theme::MUTED }),
+                                    .color(if is_active {
+                                        theme::SUCCESS
+                                    } else {
+                                        theme::MUTED
+                                    }),
                             );
                         });
                         bands.push((_wcs_rect.union(state_rect), is_selected_row));
@@ -600,10 +609,7 @@ fn cell(
         // Place the field in an exact interior rect. `add_sized` let the field's
         // minimum height grow the row, and the red border grew with it.
         let inner_rect = egui::Rect::from_min_max(
-            egui::pos2(
-                cell_rect.left() + CELL_TEXT_PAD,
-                cell_rect.top() + 1.0,
-            ),
+            egui::pos2(cell_rect.left() + CELL_TEXT_PAD, cell_rect.top() + 1.0),
             egui::pos2(
                 (cell_rect.right() - CELL_TEXT_PAD).max(cell_rect.left() + 24.0),
                 cell_rect.bottom() - 1.0,
@@ -623,10 +629,12 @@ fn cell(
         if app.offsets.edit_focus {
             let id = egui::Id::unique("linc-offset-cell");
             if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
-                state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-                    egui::text::CCursor::new(0),
-                    egui::text::CCursor::new(app.offsets.edit_buffer.chars().count()),
-                )));
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::two(
+                        egui::text::CCursor::new(0),
+                        egui::text::CCursor::new(app.offsets.edit_buffer.chars().count()),
+                    )));
                 state.store(ui.ctx(), id);
             }
             app.offsets.edit_focus = false;
@@ -659,14 +667,7 @@ fn cell(
         ui.painter().rect_stroke(
             cell_rect.shrink2(egui::vec2(1.0, 1.0)),
             egui::CornerRadius::same(theme::SELECTION_RADIUS as u8),
-            egui::Stroke::new(
-                1.5,
-                if editing {
-                    theme::ERROR
-                } else {
-                    theme::ACCENT
-                },
-            ),
+            egui::Stroke::new(1.5, if editing { theme::ERROR } else { theme::ACCENT }),
             egui::StrokeKind::Inside,
         );
     }
@@ -780,7 +781,10 @@ fn apply_work_offset(app: &mut LincApp, index: u8) {
     for axis in &axes {
         let text = draft.values.get(axis).cloned().unwrap_or_default();
         let Some(value) = crate::state::eval_expression(&text) else {
-            app.offsets.error = Some(format!("{} {axis}: invalid entry {text:?}", linc_core::model::wcs_name(index)));
+            app.offsets.error = Some(format!(
+                "{} {axis}: invalid entry {text:?}",
+                linc_core::model::wcs_name(index)
+            ));
             return;
         };
         if let Err(error) = app.profile.machine_ini.validate_axis_value(axis, value) {

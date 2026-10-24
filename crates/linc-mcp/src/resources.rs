@@ -5,12 +5,36 @@ use serde_json::{json, Value};
 use crate::server::JsonRpcError;
 
 const RESOURCES: &[(&str, &str, &str)] = &[
-    ("linc://state/summary", "LiNC state summary", "Operator-level state and blockers."),
-    ("linc://ui", "LiNC UI state", "Page, mode, views and selection."),
-    ("linc://snapshot", "LiNC machine snapshot", "Full snapshot without the live trail."),
-    ("linc://offsets", "LiNC work offsets", "All systems and the active one."),
-    ("linc://tools", "LiNC tool table", "Rows, columns and tool change state."),
-    ("linc://program", "LiNC program", "Loaded program metadata and text head."),
+    (
+        "linc://state/summary",
+        "LiNC state summary",
+        "Operator-level state and blockers.",
+    ),
+    (
+        "linc://ui",
+        "LiNC UI state",
+        "Page, mode, views and selection.",
+    ),
+    (
+        "linc://snapshot",
+        "LiNC machine snapshot",
+        "Full snapshot without the live trail.",
+    ),
+    (
+        "linc://offsets",
+        "LiNC work offsets",
+        "All systems and the active one.",
+    ),
+    (
+        "linc://tools",
+        "LiNC tool table",
+        "Rows, columns and tool change state.",
+    ),
+    (
+        "linc://program",
+        "LiNC program",
+        "Loaded program metadata and text head.",
+    ),
     ("linc://logs", "LiNC logs", "Recent log records."),
 ];
 

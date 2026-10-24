@@ -464,7 +464,6 @@ pub fn tint(color: Color32, alpha: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
 }
 
-
 #[cfg(test)]
 mod font_tests {
     use super::font_definitions;

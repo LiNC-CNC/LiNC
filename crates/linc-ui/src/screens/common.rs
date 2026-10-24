@@ -82,7 +82,6 @@ fn token_line_ui(ui: &mut Ui, text: &str, size: f32) {
     });
 }
 
-
 /// Space under a cell that has a mnemonic: half a mnemonic line, a little more
 /// than the spacing between the lines inside a cell. Enough to separate wrapped
 /// rows without leaving a hole.
@@ -95,13 +94,7 @@ const ROW_GAP: f32 = 5.0;
 /// naming what the code means (`G21` → `MM`). The dashboard leaves it off: that
 /// strip sits under sixteen lines of G-code and its two-line cells are what the
 /// card is sized for.
-pub fn modal_grid(
-    app: &LincApp,
-    ui: &mut Ui,
-    columns: usize,
-    mnemonics: bool,
-    id_salt: &str,
-) {
+pub fn modal_grid(app: &LincApp, ui: &mut Ui, columns: usize, mnemonics: bool, id_salt: &str) {
     let codes = app
         .snapshot
         .program
@@ -291,7 +284,6 @@ pub fn modal_height(codes: usize, columns: usize) -> f32 {
     26.0 + rows as f32 * 41.0
 }
 
-
 pub fn modal_text(key: &str, value: &str) -> String {
     if value.is_empty() {
         key.to_string()
@@ -299,7 +291,6 @@ pub fn modal_text(key: &str, value: &str) -> String {
         format!("{key} {value}")
     }
 }
-
 
 pub fn axis_cards(app: &LincApp, ui: &mut Ui) {
     let axes = app.axes();
@@ -1278,17 +1269,13 @@ pub fn trajectory(
         app.profile.variant,
     );
     view.origin = origin;
-    view.work_offset = app
-        .program
-        .preview_offset
-        .as_ref()
-        .map(|map| {
-            [
-                map.get("X").copied().unwrap_or(0.0),
-                map.get("Y").copied().unwrap_or(0.0),
-                map.get("Z").copied().unwrap_or(0.0),
-            ]
-        });
+    view.work_offset = app.program.preview_offset.as_ref().map(|map| {
+        [
+            map.get("X").copied().unwrap_or(0.0),
+            map.get("Y").copied().unwrap_or(0.0),
+            map.get("Z").copied().unwrap_or(0.0),
+        ]
+    });
     if let Some((point, label)) = highlight {
         view.highlight_origin = Some(point);
         view.highlight_label = Some(label);
@@ -1354,7 +1341,11 @@ pub fn focus_anchor(ui: &mut Ui, salt: &str) {
 /// widget (the Help table uses Up/Down for its own selection).
 pub fn focus_anchor_locked(ui: &mut Ui, salt: &str, lock_arrows: bool) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
-    let response = ui.interact(rect, ui.scope_id().with(salt), Sense::focusable_noninteractive());
+    let response = ui.interact(
+        rect,
+        ui.scope_id().with(salt),
+        Sense::focusable_noninteractive(),
+    );
     let requested = ui.ctx().data_mut(|data| {
         data.remove_temp::<bool>(egui::Id::unique("linc-page-focus"))
             .unwrap_or(false)
@@ -1380,7 +1371,6 @@ pub fn focus_anchor_locked(ui: &mut Ui, salt: &str, lock_arrows: bool) -> egui::
     // a stray empty control. Real widgets still draw their own rings.
     response
 }
-
 
 pub fn mode_label(app: &LincApp) -> String {
     app.snapshot
@@ -1646,7 +1636,11 @@ pub fn limits_override_row(app: &mut crate::shell::LincApp, ui: &mut Ui) {
                 .size(theme::font_size(10.0))
                 .color(theme::MUTED),
         );
-        let label = if overridden { "OVERRIDE ON" } else { "OVERRIDE" };
+        let label = if overridden {
+            "OVERRIDE ON"
+        } else {
+            "OVERRIDE"
+        };
         let clicked = if overridden && blink_on {
             theme::danger_button(ui, label, true).clicked()
         } else if overridden {
@@ -1744,12 +1738,7 @@ pub fn zero_axes(app: &mut crate::shell::LincApp, axes: Vec<String>) {
     app.send(linc_core::command::MachineCommand::ZeroWorkOffset { index, axes });
 }
 
-pub fn live_coordinates_card(
-    ui: &mut Ui,
-    header: &str,
-    units_label: &str,
-    rows: &[LiveAxisRow],
-) {
+pub fn live_coordinates_card(ui: &mut Ui, header: &str, units_label: &str, rows: &[LiveAxisRow]) {
     theme::card(ui, |ui| {
         ui.horizontal(|ui| {
             theme::section_header(ui, header);
@@ -1771,7 +1760,11 @@ pub fn live_coordinates_card(
                 })
                 .stroke(egui::Stroke::new(
                     1.0,
-                    if row.active { theme::ACCENT } else { theme::BORDER },
+                    if row.active {
+                        theme::ACCENT
+                    } else {
+                        theme::BORDER
+                    },
                 ))
                 .corner_radius(3)
                 .inner_margin(egui::Margin::symmetric(8, 4));
@@ -1901,11 +1894,11 @@ mod tests {
         // has to stay around seven characters or it widens its column past the
         // card.
         let codes = [
-            "G0", "G1", "G2", "G3", "G4", "G5", "G5.1", "G5.2", "G38.2", "G7", "G8", "G10",
-            "G15", "G16", "G17", "G18", "G19", "G20", "G21", "G28", "G30", "G33", "G40", "G41",
-            "G42", "G43", "G43.1", "G49", "G53", "G54", "G54.1", "G59.3", "G61", "G64", "G73",
-            "G74", "G76", "G80", "G81", "G82", "G83", "G84", "G85", "G87", "G90", "G91", "G92",
-            "G93", "G94", "G95", "G96", "G97", "G98", "G99",
+            "G0", "G1", "G2", "G3", "G4", "G5", "G5.1", "G5.2", "G38.2", "G7", "G8", "G10", "G15",
+            "G16", "G17", "G18", "G19", "G20", "G21", "G28", "G30", "G33", "G40", "G41", "G42",
+            "G43", "G43.1", "G49", "G53", "G54", "G54.1", "G59.3", "G61", "G64", "G73", "G74",
+            "G76", "G80", "G81", "G82", "G83", "G84", "G85", "G87", "G90", "G91", "G92", "G93",
+            "G94", "G95", "G96", "G97", "G98", "G99",
         ];
         for key in codes {
             let mnemonic = modal_mnemonic(key);

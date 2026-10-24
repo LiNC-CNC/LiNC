@@ -56,12 +56,24 @@ fn base64(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
         out.push(TABLE[(n >> 18) as usize & 63] as char);
         out.push(TABLE[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -75,7 +87,9 @@ pub fn export_dir() -> std::path::PathBuf {
     }
     let state = std::env::var_os("XDG_STATE_HOME")
         .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/state")))
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/state"))
+        })
         .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
     state.join("linc").join("exports")
 }
@@ -85,7 +99,8 @@ pub fn export_dir() -> std::path::PathBuf {
 /// A bundle goes to a bug report; the operator's home path does not help
 /// reproduce the fault and identifies the account. Nothing else is rewritten.
 fn redact(value: &mut Value) {
-    if let Some(home) = std::env::var_os("HOME").and_then(|home| home.to_str().map(str::to_string)) {
+    if let Some(home) = std::env::var_os("HOME").and_then(|home| home.to_str().map(str::to_string))
+    {
         redact_strings(value, &home);
     }
 }
@@ -165,7 +180,6 @@ impl BusSource {
             true,
         ))
     }
-
 }
 
 impl Source for BusSource {
@@ -266,8 +280,9 @@ impl Source for BusSource {
             )),
             "diag.export_bundle" => {
                 let dir = export_dir();
-                std::fs::create_dir_all(&dir)
-                    .map_err(|error| DiagError::internal(format!("cannot create {}: {error}", dir.display())))?;
+                std::fs::create_dir_all(&dir).map_err(|error| {
+                    DiagError::internal(format!("cannot create {}: {error}", dir.display()))
+                })?;
                 let stamp = linc_core::diag::now_ms();
                 let bundle = dir.join(format!("linc-bundle-{stamp}"));
                 std::fs::create_dir_all(&bundle).map_err(|error| {
@@ -278,7 +293,9 @@ impl Source for BusSource {
                     let mut value = value.clone();
                     redact(&mut value);
                     std::fs::write(&path, serde_json::to_vec_pretty(&value).unwrap_or_default())
-                        .map_err(|error| DiagError::internal(format!("write {}: {error}", path.display())))
+                        .map_err(|error| {
+                            DiagError::internal(format!("write {}: {error}", path.display()))
+                        })
                 };
                 let crashes = crate::crash::read_all(50);
                 write("hello.json", &json!({ "process": self.process }))?;
@@ -290,8 +307,14 @@ impl Source for BusSource {
                 write("config.json", &self.config)?;
                 write("logs.json", &bus.logs(None, None, 1_000))?;
                 write("events.json", &bus.events(None, None, 1_000))?;
-                write("panel.json", &serde_json::to_value(&bus.machine().panel).unwrap_or(Value::Null))?;
-                write("ui.json", &serde_json::to_value(bus.ui()).unwrap_or(Value::Null))?;
+                write(
+                    "panel.json",
+                    &serde_json::to_value(&bus.machine().panel).unwrap_or(Value::Null),
+                )?;
+                write(
+                    "ui.json",
+                    &serde_json::to_value(bus.ui()).unwrap_or(Value::Null),
+                )?;
                 write("motion.json", &bus.motion_history(Some(120.0), 1_200))?;
                 write("crashes.json", &json!({ "records": crashes }))?;
                 Ok(json!({ "path": bundle, "files": 13 }))
@@ -388,14 +411,17 @@ impl Source for BusSource {
                 }))
             }
             "diag.crash_records" => {
-                let records = crate::crash::read_all(param_u64(params, "limit").unwrap_or(50) as usize);
+                let records =
+                    crate::crash::read_all(param_u64(params, "limit").unwrap_or(50) as usize);
                 Ok(json!({
                     "records": records,
                     "count": records.len(),
                     "directory": crate::crash::crash_dir(),
                 }))
             }
-            "diag.cancel" => Ok(json!({ "cancelled": params.get("id").cloned().unwrap_or(Value::Null) })),
+            "diag.cancel" => {
+                Ok(json!({ "cancelled": params.get("id").cloned().unwrap_or(Value::Null) }))
+            }
             other => Err(DiagError::not_found(format!("unknown method {other:?}"))),
         }
     }

@@ -55,10 +55,7 @@ fn normalized(field: &str, snapshot: &Value) -> Value {
             "0x{:016x}",
             snapshot["buttons"].as_u64().unwrap_or_default()
         )),
-        other => snapshot
-            .get(other)
-            .cloned()
-            .unwrap_or(Value::Null),
+        other => snapshot.get(other).cloned().unwrap_or(Value::Null),
     }
 }
 

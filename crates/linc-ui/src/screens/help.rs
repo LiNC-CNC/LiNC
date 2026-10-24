@@ -40,7 +40,9 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     let search_had_focus = ui.memory(|memory| memory.has_focus(search_id));
     // Enter in the search bar belongs to the search: it hands the keyboard
     // back to the table and must not open the selected row in the same frame.
-    if search_had_focus && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
+    if search_had_focus
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+    {
         anchor.request_focus();
     }
     let mut search_active = search_had_focus;
@@ -128,51 +130,51 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             bottom: 12,
         })
         .show(ui, |ui| {
-        ui.set_min_height(ui.available_height());
-        ui.spacing_mut().item_spacing.y = 0.0;
-        let width = ui.available_width();
-        let columns = Columns::new(width);
-        header_row(ui, &columns);
-        ui.add_space(2.0);
-        theme::separator(ui);
-        if filtered.is_empty() {
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new("NO CODES MATCH THIS SEARCH")
-                    .size(theme::font_size(12.0))
-                    .color(theme::MUTED),
-            );
-            return;
-        }
-        egui::ScrollArea::vertical()
-            .id_salt("help-table")
-            .max_height(ui.available_height() - 10.0)
-            .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 3.0;
-                let mut index = 0usize;
-                let mut zebra = false;
-                for group in &filtered {
-                    group_row(ui, group);
-                    for row in &group.rows {
-                        let selected = index == app.help.selected_row;
-                        let response = table_row(ui, &columns, row, selected, zebra, index);
-                        if selected && scroll_selection {
-                            ui.scroll_to_rect(response.rect, Some(Align::Center));
+            ui.set_min_height(ui.available_height());
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let width = ui.available_width();
+            let columns = Columns::new(width);
+            header_row(ui, &columns);
+            ui.add_space(2.0);
+            theme::separator(ui);
+            if filtered.is_empty() {
+                ui.add_space(12.0);
+                ui.label(
+                    RichText::new("NO CODES MATCH THIS SEARCH")
+                        .size(theme::font_size(12.0))
+                        .color(theme::MUTED),
+                );
+                return;
+            }
+            egui::ScrollArea::vertical()
+                .id_salt("help-table")
+                .max_height(ui.available_height() - 10.0)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 3.0;
+                    let mut index = 0usize;
+                    let mut zebra = false;
+                    for group in &filtered {
+                        group_row(ui, group);
+                        for row in &group.rows {
+                            let selected = index == app.help.selected_row;
+                            let response = table_row(ui, &columns, row, selected, zebra, index);
+                            if selected && scroll_selection {
+                                ui.scroll_to_rect(response.rect, Some(Align::Center));
+                            }
+                            if response.clicked() {
+                                app.help.selected_row = index;
+                                app.help.selected_anchor = Some(row.anchor.clone());
+                                ui.memory_mut(|memory| memory.request_focus(anchor.id));
+                            }
+                            if response.double_clicked() {
+                                ui.memory_mut(|memory| memory.request_focus(anchor.id));
+                                open_anchor = Some(row.anchor.clone());
+                            }
+                            index += 1;
+                            zebra = !zebra;
                         }
-                        if response.clicked() {
-                            app.help.selected_row = index;
-                            app.help.selected_anchor = Some(row.anchor.clone());
-                            ui.memory_mut(|memory| memory.request_focus(anchor.id));
-                        }
-                        if response.double_clicked() {
-                            ui.memory_mut(|memory| memory.request_focus(anchor.id));
-                            open_anchor = Some(row.anchor.clone());
-                        }
-                        index += 1;
-                        zebra = !zebra;
                     }
-                }
-            });
+                });
         });
     app.help.scroll_to_selection = false;
     if let Some(anchor) = open_anchor {
@@ -509,8 +511,7 @@ pub fn draw_dialog(app: &mut LincApp, ctx: &egui::Context) {
                 if scroll_delta != 0.0 {
                     ui.scroll_with_delta(Vec2::new(0.0, -scroll_delta));
                 }
-                clicked_related =
-                    render_section(app, ui, &bundle, section, related_selection);
+                clicked_related = render_section(app, ui, &bundle, section, related_selection);
             });
             at_bottom = output.state.clamped_offset().y + 2.0
                 >= (output.content_size.y - output.inner_rect.height()).max(0.0);
@@ -595,12 +596,7 @@ fn render_section(
                     });
             }
             HelpBlock::Table { rows } => {
-                let columns = rows
-                    .iter()
-                    .map(Vec::len)
-                    .max()
-                    .unwrap_or(1)
-                    .max(1);
+                let columns = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
                 let cell_width = (ui.available_width() / columns as f32 - 8.0).max(80.0);
                 egui::Grid::new(format!(
                     "help-table-{}-{block_index}-{}",
