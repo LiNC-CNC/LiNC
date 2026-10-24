@@ -14,6 +14,8 @@ net jog-speed linc.jog-speed => halui.axis.jog-speed halui.joint.jog-speed
 # Jog step for INC mode, selected in the HMI from [DISPLAY] INCREMENTS.
 net jog-increment linc.jog-increment => halui.axis.x.increment halui.axis.y.increment halui.axis.z.increment
 
-# Simulated probe contact: the PROBE key on the panel drives rio.sim-probe,
-# which rio_sim.py mirrors onto motion.probe-input.
+# Simulated probe contact: the PROBE key on the panel drives rio.sim-probe
+# (rio_sim.py turns it into sig_rio_probe_bit). motion.probe-input is driven by
+# hal/linc-sim3d.hal, which ORs that bit with the 3D simulator's probe-out; no
+# probe input is linked here.
 net sim-probe cnc_panel.probe => rio.sim-probe

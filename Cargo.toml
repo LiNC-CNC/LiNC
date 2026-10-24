@@ -9,6 +9,7 @@ members = [
     "crates/linc-diag",
     "crates/linc-mcp",
     "crates/linc-app",
+    "crates/linc-sim3d",
 ]
 resolver = "2"
 

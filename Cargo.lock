@@ -1291,6 +1291,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.30.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
+
+[[package]]
 name = "glifo"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1773,6 +1779,26 @@ dependencies = [
  "serialport",
  "signal-hook",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "linc-sim3d"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "eframe",
+ "egui",
+ "env_logger",
+ "glam",
+ "linc-core",
+ "linc-hal",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml",
 ]
 
 [[package]]

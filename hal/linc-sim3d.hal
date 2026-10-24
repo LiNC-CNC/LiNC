@@ -1,0 +1,56 @@
+# LiNC 3D simulator (linc-sim3d) HAL wiring.
+#
+# Simulation only. The simulator models the machine, the touch probe and the
+# cutters so probing can be tested against a modelled workpiece; it reports
+# contact and collision and never commands motion. Do not load this file on a
+# real machine.
+#
+# Loaded after:
+#   hal/rio_sim.hal  defines sig_rio_probe_bit and drives the joint feedback
+#   hal/linc.hal     creates cnc_panel.*, loads or2 once and creates
+#                    or2.probe_sim3d
+#
+# The script resolves the repository root from its own path and runs
+# target/release/linc-sim3d (or target/debug) with --hal --config
+# configs/sim3d.toml. -W blocks until the component is ready, so the nets below
+# always find their pins.
+loadusr -Wn linc-sim3d ../scripts/sim3d-hal.sh
+
+# ---------------------------------------------------------------------------
+# Machine position
+# ---------------------------------------------------------------------------
+# joint.N.pos-fb is the joint position in machine units (mm), which is what the
+# model wants. joint.N.motor-pos-fb is in motor counts (SCALE here is about
+# 2000 counts/mm), and older LinuxCNC builds named the joint feedback
+# joint.N.joint-pos-fb; this install exports joint.N.pos-fb.
+net sim3d-pos-x joint.0.pos-fb => linc-sim3d.pos-x
+net sim3d-pos-y joint.1.pos-fb => linc-sim3d.pos-y
+net sim3d-pos-z joint.2.pos-fb => linc-sim3d.pos-z
+
+# Active tool from iocontrol. The signal `tool-number` already exists (linc.hal
+# drives the panel's tool display from it) and a HAL pin takes exactly one
+# signal, so the simulator's input pin joins that signal instead of starting a
+# second one.
+net tool-number => linc-sim3d.tool-number
+
+# The live tool offset is deliberately not netted - not because HAL has no
+# source (motion.tooloffset.x/y/z exist) but because the model already applies
+# the tool table's Z in machine coordinates: adding motion's live G43 offset
+# would count the tool length twice. The pin keeps its documented default (0);
+# whoever really wants a live offset can set it.
+setp linc-sim3d.tool-offset 0
+
+# ---------------------------------------------------------------------------
+# Probe contact
+# ---------------------------------------------------------------------------
+# The panel's PROBE key (cnc_panel.probe -> rio.sim-probe, wired post-GUI) and
+# the modelled tip contact both have to reach motion.probe-input, which is a
+# single pin, so they are ORed. The panel path itself is untouched
+# (hal/linc-sim-postgui.hal).
+addf or2.probe_sim3d servo-thread
+net sig_rio_probe_bit => or2.probe_sim3d.in0
+net sim3d-probe-out linc-sim3d.probe-out => or2.probe_sim3d.in1
+net probe-input or2.probe_sim3d.out => motion.probe-input
+
+# linc-sim3d.collision and the three linc-sim3d.tip-* pins are diagnostics:
+# read them in halshow or from the panel. They drive nothing.

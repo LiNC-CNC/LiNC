@@ -1,0 +1,10 @@
+# LiNC simulation-only probe input for the rig without the 3D simulator.
+#
+# Loaded after linc-sim.hal by configs/sim-no3d.ini, which is configs/sim.ini
+# without ../hal/linc-sim3d.hal. With no 3D simulator there is no modelled tip
+# contact, so the panel's PROBE key is the only probe source: rio_sim.py turns
+# it into sig_rio_probe_bit, and this file is what reaches the controller.
+# Do not load this file together with hal/linc-sim3d.hal - motion.probe-input
+# takes exactly one signal.
+
+net probe-input sig_rio_probe_bit => motion.probe-input

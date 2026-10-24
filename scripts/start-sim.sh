@@ -13,6 +13,11 @@
 #   --load [FILE]     load a program; FILE defaults to the demo mill program
 #   --float           float the HMI window under Hyprland at 1280x720
 #
+# --no-sim3d starts the same rig without the 3D simulator: it loads
+# configs/sim-no3d.ini (configs/sim.ini minus the linc-sim3d HAL file), and the
+# simulator binary is neither required nor built. An explicit LINC_SIM_INI is a
+# deliberate choice, so it still wins over the flag's default.
+#
 # The E-stop and POWER ON keys are panel inputs, so they are asked of the panel
 # (`LINC_SIM_READY`) rather than pressed behind its back; start-sim.sh then runs
 # scripts/sim-ready.py for the steps that need the controller.
@@ -25,6 +30,7 @@
 #   LINC_SIM_CONFIG   profile (default: configs/sim.toml)
 #   LINC_SIM_INI      LinuxCNC INI (default: configs/sim.ini)
 #   LINC_BIN          linc binary (default: target/release/linc)
+#   LINC_SIM3D_BIN    3D simulator HAL binary (default: target/release/linc-sim3d)
 #   LINC_LOG_LEVEL    RUST_LOG for linc/linc-panel (default: the binaries' own
 #                     filter — LiNC crates at info, everything else at warn)
 set -euo pipefail
@@ -35,6 +41,7 @@ PROFILE="${LINC_SIM_CONFIG:-$ROOT/configs/sim.toml}"
 INI="${LINC_SIM_INI:-$ROOT/configs/sim.ini}"
 BIN="${LINC_BIN:-$ROOT/target/release/linc}"
 PANEL_BIN="${LINC_PANEL_BIN:-$ROOT/target/release/linc-panel}"
+SIM3D_BIN="${LINC_SIM3D_BIN:-$ROOT/target/release/linc-sim3d}"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/linc"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/linc"
 PID_FILE="$RUNTIME_DIR/sim.pid"
@@ -58,10 +65,6 @@ for file in "$PROFILE" "$INI"; do
         exit 1
     fi
 done
-if [[ ! -x "$BIN" || ! -x "$PANEL_BIN" ]]; then
-    echo "building LiNC release binaries..." >&2
-    (cd "$ROOT" && cargo build --release -p linc-app -p linc-panel)
-fi
 
 DETACH=0
 RELEASE_ESTOP=0
@@ -69,6 +72,7 @@ POWER_ON=0
 HOME_AXES=0
 LOAD_PROGRAM=""
 FLOAT_WINDOW=0
+NO_SIM3D=0
 READY_TIMEOUT="${LINC_READY_TIMEOUT:-60}"
 ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -87,11 +91,37 @@ while [[ $# -gt 0 ]]; do
             ;;
         --load=*) LOAD_PROGRAM="${1#--load=}" ;;
         --float) FLOAT_WINDOW=1 ;;
+        --no-sim3d) NO_SIM3D=1 ;;
         --timeout) READY_TIMEOUT="${2:?--timeout needs seconds}"; shift ;;
         *) ARGS+=("$1") ;;
     esac
     shift
 done
+
+# --no-sim3d runs the same rig without the 3D simulator. An explicit
+# LINC_SIM_INI is a deliberate choice, so it wins over the flag's default.
+if (( NO_SIM3D )) && [[ -z "${LINC_SIM_INI:-}" ]]; then
+    INI="$ROOT/configs/sim-no3d.ini"
+    if [[ ! -f "$INI" ]]; then
+        echo "file not found: $INI" >&2
+        exit 1
+    fi
+fi
+
+# The build guard sits below the option parsing because it depends on it: the
+# normal rig also needs the simulator binary, --no-sim3d neither needs nor
+# builds it.
+NEED_SIM3D=1
+(( NO_SIM3D )) && NEED_SIM3D=0
+if [[ ! -x "$BIN" || ! -x "$PANEL_BIN" || ( $NEED_SIM3D -eq 1 && ! -x "$SIM3D_BIN" ) ]]; then
+    echo "building LiNC release binaries..." >&2
+    if (( NEED_SIM3D )); then
+        (cd "$ROOT" && cargo build --release -p linc-app -p linc-panel -p linc-sim3d)
+    else
+        (cd "$ROOT" && cargo build --release -p linc-app -p linc-panel)
+    fi
+fi
+
 # The power-up sequence only makes sense whole: POWER ON releases the mushroom
 # (as the panel's own key does), and homing or loading needs the machine on.
 (( HOME_AXES )) && POWER_ON=1

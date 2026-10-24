@@ -1,0 +1,6 @@
+;T P Z D R  Remark
+T1 P0 Z-56.068000 D+6 ; 6mm 3 Flute 30 deg Helix
+T2 P0 Z+0 D+17.300000 ; 6mm 3 Flute ballnose
+T4 P0 Z+0 D+13.450000 ; 14mm 3 flute endmill
+T11 P0 Z-59.021000 D+63 ; 63mm facemill
+T99 P0 Z+0 D+3 ; Probe Tool 3MM ball Probe Tip

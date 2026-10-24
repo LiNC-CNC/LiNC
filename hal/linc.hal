@@ -19,8 +19,9 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 loadrt and2 names=and2.cycle_gate,and2.cycle_resume,and2.cycle_run,and2.jxn_inc,and2.jxp_inc,and2.jyn_inc,and2.jyp_inc,and2.jzn_inc,and2.jzp_inc,and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint
 # `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
 # with "or2: already exists". Instances only used by the simulation
-# (or2.estop_reset) are created here and wired in linc-sim.hal.
-loadrt or2 names=or2.estop_reset,or2.jog_a,or2.jog_b,or2.manual_req,or2.pause
+# (or2.estop_reset, or2.probe_sim3d) are created here and wired in the
+# simulation-only HAL files (linc-sim.hal, linc-sim3d.hal).
+loadrt or2 names=or2.estop_reset,or2.jog_a,or2.jog_b,or2.manual_req,or2.pause,or2.probe_sim3d
 loadrt not names=not.bdt,not.coolant,not.is_joint,not.lube,not.mode_inc,not.opt,not.paused,not.spindle_on
 loadrt toggle names=toggle.coolant,toggle.lube,toggle.opt,toggle.bdt,toggle.sbk,toggle.worklamp
 loadrt scale names=scale.feed,scale.rapid,scale.spindle
@@ -350,7 +351,13 @@ net tool-number iocontrol.0.tool-number => cnc_panel.sseg_spdtool
 # ---------------------------------------------------------------------------
 # Probe input and manual tool-change/panel I/O
 # ---------------------------------------------------------------------------
-net sig_rio_probe_bit => motion.probe-input
+# motion.probe-input has exactly one reader, and it is the simulated probe OR:
+#   sim:  sig_rio_probe_bit + linc-sim3d.probe-out -> or2.probe_sim3d.out
+#         -> motion.probe-input, wired in hal/linc-sim3d.hal.
+#   real: the machine HAL wires the probe input; do not add a second reader
+#         here (a HAL pin takes exactly one signal).
+# sig_rio_probe_bit itself is defined by the machine HAL (rio_sim.hal in the
+# simulation), not by this file.
 net tool-change-piston cnc_panel.chuck => rio.tool-change.bit
 
 # Adjust or remove the rio.* nets to match the actual machine I/O.
