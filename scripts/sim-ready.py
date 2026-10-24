@@ -83,6 +83,13 @@ def parse(argv):
         help="case-insensitive class or title text of the HMI window (default: linc)",
     )
     parser.add_argument(
+        "--window-ignore",
+        action="append",
+        metavar="TEXT",
+        help="class text that must never be taken for the HMI window; repeatable "
+        "(default: linc-sim3d, the 3D simulator's own window)",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=60.0,
@@ -357,13 +364,35 @@ def hyprctl(*args):
     )
 
 
-def find_window(match, timeout):
-    """The HMI client's address, waiting for the window to map.
+DEFAULT_WINDOW_IGNORE = ("linc-sim3d",)
+
+
+def select_window(clients, match, ignore):
+    """The address of the client that is the HMI window, or None.
 
     The class is the client's app id; for an egui window that is the profile's
     window title, which is why the default match is `linc`. Titles are not
     searched: a terminal sitting in the checkout has LiNC in its title too.
+
+    `ignore` tokens are matched the same way and win over `match`: the 3D
+    simulator's window class also contains `linc`, so without this a running
+    simulator is floated instead of the HMI whenever the compositor lists it
+    first.
     """
+    match = match.lower()
+    ignored = [token.lower() for token in ignore if token]
+    for client in clients:
+        klass = str(client.get("class", "")).lower()
+        if not klass or match not in klass:
+            continue
+        if any(token in klass for token in ignored):
+            continue
+        return client.get("address")
+    return None
+
+
+def find_window(match, ignore, timeout):
+    """The HMI client's address, waiting for the window to map."""
     deadline = time.monotonic() + timeout
     while True:
         result = hyprctl("-j", "clients")
@@ -372,9 +401,9 @@ def find_window(match, timeout):
                 clients = json.loads(result.stdout)
             except json.JSONDecodeError:
                 clients = []
-            for client in clients:
-                if match in str(client.get("class", "")).lower():
-                    return client.get("address")
+            address = select_window(clients, match, ignore)
+            if address:
+                return address
         if time.monotonic() >= deadline:
             return None
         time.sleep(0.25)
@@ -400,7 +429,8 @@ def float_window(args):
     if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
         log("not under Hyprland; leaving the window placement alone")
         return
-    address = find_window(args.window_match.lower(), args.timeout)
+    ignore = args.window_ignore or list(DEFAULT_WINDOW_IGNORE)
+    address = find_window(args.window_match.lower(), ignore, args.timeout)
     if not address:
         sys.exit(
             f"sim-ready: no window with class matching {args.window_match!r} "
