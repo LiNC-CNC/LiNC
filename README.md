@@ -249,7 +249,9 @@ performance and limitations - is in [docs/sim3d.md](docs/sim3d.md).
 - **The toolpath graph has two distinct layers.** The loaded program path is
   drawn in program colours; the live toolpath is a separate green trail.
   `CLEAR TRAIL` clears only the live trail and re-seeds it at the current
-  position.
+  position. Any part of the loaded path outside the machine's INI travel
+  envelope is solid red, split at the crossing, so red means outside the
+  machine boundary; the inside keeps the cut, rapid or selected-line colour.
 - **The panel status 7-segment shows the active work offset** (`54`–`59`),
   because two digits fit exactly and the coordinate frame matters during
   setup. It shows `--` when unknown; spindle load or units are optional

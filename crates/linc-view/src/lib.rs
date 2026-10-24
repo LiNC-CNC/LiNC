@@ -6,6 +6,7 @@
 const FONT_SCALE: f32 = 1.25;
 
 pub(crate) mod hershey;
+pub mod travel;
 
 use egui::{
     Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Response, Sense, Stroke,
@@ -358,6 +359,63 @@ fn draw_dashed(painter: &Painter, start: Pos2, end: Pos2, stroke: Stroke, dash: 
     }
 }
 
+/// Draw one straight move, red where it lies outside the machine travel box.
+///
+/// The classifier works in machine coordinates, so the split point is exact in
+/// the model: the inside uses the caller's stroke (cut, rapid or selected) and
+/// only the part past a limit turns `theme::ERROR`.
+fn draw_travel_line(
+    painter: &Painter,
+    projection: &Projection,
+    start: [f64; 3],
+    end: [f64; 3],
+    limits: Option<Bounds3>,
+    stroke: Stroke,
+    dotted: bool,
+) {
+    let Some(limits) = limits else {
+        Projection::draw_line(
+            painter,
+            projection.project(start),
+            projection.project(end),
+            stroke,
+            dotted,
+        );
+        return;
+    };
+    let outside = Stroke::new(stroke.width, theme::ERROR);
+    let draw = |a: [f64; 3], b: [f64; 3], stroke: Stroke, dotted: bool| {
+        Projection::draw_line(
+            painter,
+            projection.project(a),
+            projection.project(b),
+            stroke,
+            dotted,
+        );
+    };
+    match travel::classify_segment(start, end, &limits) {
+        travel::TravelClass::Inside => draw(start, end, stroke, dotted),
+        // A red rapid is solid, not dotted: the dash pattern is what makes a
+        // rapid recede, and an out-of-travel move must be the thing that stands
+        // out. The outside colour carries the meaning; the width still follows
+        // the caller, so a selected line stays as thick as its highlight.
+        travel::TravelClass::Outside => draw(start, end, outside, false),
+        travel::TravelClass::Straddling { enter, exit } => {
+            let entry = travel::point_at(start, end, enter);
+            let leave = travel::point_at(start, end, exit);
+            if enter > 0.0 {
+                draw(start, entry, outside, false);
+            }
+            if exit > enter {
+                draw(entry, leave, stroke, dotted);
+            }
+            if exit < 1.0 {
+                draw(leave, end, outside, false);
+            }
+        }
+    }
+}
+
 fn arc_points(segment: &PathSegment, arc: &ArcSpec) -> Vec<[f64; 3]> {
     let mut points = Vec::new();
     let (u, v) = match arc.plane {
@@ -707,6 +765,10 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         // One tag per line: a canned cycle can contribute several segments to
         // the same line, and a tag on each of them repeated `LN n`.
         let mut tagged_lines: Vec<usize> = Vec::new();
+        // The machine envelope is the INI travel box (the same one the machine
+        // bounds draw). It is available whether or not the box is visible: the
+        // red out-of-travel marking is state, not an optional overlay.
+        let travel_limits = view.machine_bounds;
         for segment in &view.preview.segments {
             let is_selected = view.show_selected_line && view.selected_line == Some(segment.line);
             let stroke = if is_selected {
@@ -716,25 +778,32 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             } else {
                 Stroke::new(1.8, theme::ACCENT)
             };
+            let dotted = segment.kind == SegmentKind::Rapid;
             if let Some(arc) = &segment.arc {
+                // Arcs are already drawn as short chords; classifying each chord
+                // puts the red at the drawn crossing. The arc samples are much
+                // finer than a pixel at display scale.
                 let points = arc_points(segment, arc);
-                let dotted = segment.kind == SegmentKind::Rapid;
                 for pair in points.windows(2) {
-                    Projection::draw_line(
+                    draw_travel_line(
                         &painter,
-                        projection.project(pair[0]),
-                        projection.project(pair[1]),
+                        &projection,
+                        pair[0],
+                        pair[1],
+                        travel_limits,
                         stroke,
                         dotted,
                     );
                 }
             } else {
-                Projection::draw_line(
+                draw_travel_line(
                     &painter,
-                    projection.project(segment.start),
-                    projection.project(segment.end),
+                    &projection,
+                    segment.start,
+                    segment.end,
+                    travel_limits,
                     stroke,
-                    segment.kind == SegmentKind::Rapid,
+                    dotted,
                 );
             }
             if is_selected && !tagged_lines.contains(&segment.line) {

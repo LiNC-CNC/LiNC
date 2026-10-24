@@ -4171,12 +4171,6 @@ mod tests {
         tool_change.current_tool = 3;
         assert_eq!(tool_change_field(&tool_change).unwrap().0, "TC T3 PENDING");
     }
-
-    #[test]
-    fn machine_bounds_use_ini_limits() {
-        // Checked through a loaded profile in the integration tests.
-        assert!(NAV_ITEMS.iter().any(|(page, _, _)| *page == Page::Help));
-    }
 }
 
 #[cfg(test)]
@@ -4237,6 +4231,23 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         let backend = Box::new(LocalBackend::new(profile.clone(), mode));
         let app = LincApp::new(profile, backend, &ctx);
         (dir, app)
+    }
+
+    #[test]
+    fn machine_bounds_follow_the_ini_and_classify_the_toolpath() {
+        let (_dir, profile) = fixture();
+        let bounds = machine_bounds(&profile).expect("the INI has X/Y/Z limits");
+        assert_eq!(bounds.min, [-372.0, -346.0, -253.0]);
+        assert_eq!(bounds.max, [5.0, 4.0, 19.0]);
+        // The same box the toolpath painter receives. A move from X 0 to X 10
+        // crosses MAX_LIMIT 5 halfway along, so the red starts halfway.
+        assert_eq!(
+            linc_view::travel::classify_segment([0.0, 0.0, 0.0], [10.0, 0.0, 0.0], &bounds),
+            linc_view::travel::TravelClass::Straddling {
+                enter: 0.0,
+                exit: 0.5,
+            }
+        );
     }
 
     #[test]

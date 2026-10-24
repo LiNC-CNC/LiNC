@@ -579,6 +579,15 @@ Program rules:
   dashed cyan box around the last valid program extents; machine bounds are a
   dashed muted envelope from the INI travel limits and kinematics. Both use the
   same view transform as the toolpath.
+- Any part of the loaded program path outside the machine travel envelope is
+  drawn in the `--error` red (`theme::ERROR`, `#ff5c5c`). Red therefore means
+  outside the machine boundary. A move that crosses a limit is split at the
+  exact crossing: the inside keeps its cut, rapid or selected-line stroke, and
+  only the out-of-travel part turns solid red, so a selected line is still
+  highlighted where it is reachable. A move whose endpoints are both outside
+  but which passes through the envelope keeps the normal colour between its
+  two crossings. The classification uses the same per-axis
+  `MIN_LIMIT`/`MAX_LIMIT` box as the machine bounds.
 - The selected/current G-code line is highlighted in the graph: its segment or
   arc uses a brighter stroke and a line-number tag, distinct from the execution
   marker. The tag sits at the middle of the move (the end of one block is the
