@@ -250,6 +250,7 @@ impl SimBackend {
             selected_wcs: profile.config.probe.wcs.clone(),
             calibration_offset: Some(0.0),
             calibration_diameter: Some(profile.config.probe.calibration_diameter),
+            input_tripped: Some(false),
             ..Default::default()
         };
 
@@ -484,6 +485,58 @@ impl SimBackend {
         }
         self.snapshot.tool_tip = points.last().copied();
         self.snapshot.live_trail = Arc::new(points);
+    }
+
+    /// Write a probe result into a work offset row.
+    ///
+    /// `axes` narrows the write to the axes a DIRECT branch actually touches
+    /// (`crate::probe::direct_written_axes`); `None` writes every apply term,
+    /// which is what an explicit Apply the operator asked for does.
+    fn write_probe_raw(
+        &mut self,
+        result: &ProbeResult,
+        index: u8,
+        axes: Option<&[&'static str]>,
+    ) -> Result<(), MachineError> {
+        let operation = crate::probe::operation(&result.operation)
+            .ok_or_else(|| MachineError::Invalid("unknown probe operation".into()))?;
+        let results = crate::probe::ParameterResults::from_values(&result.values);
+        let raw = results
+            .raw_offsets(operation, &result.source_offsets, &result.auxiliary)
+            .map_err(MachineError::Invalid)?;
+        let raw = match axes {
+            Some(axes) => {
+                let mut kept = AxisMap::new();
+                for (axis, value) in raw.iter() {
+                    if axes.contains(&axis) {
+                        kept.insert(axis, *value);
+                    }
+                }
+                kept
+            }
+            None => raw,
+        };
+        for (axis, value) in raw.iter() {
+            self.profile
+                .machine_ini
+                .validate_axis_value(axis, *value)
+                .map_err(MachineError::Invalid)?;
+        }
+        let offset = self
+            .snapshot
+            .offsets
+            .offsets
+            .iter_mut()
+            .find(|offset| offset.index == index)
+            .ok_or_else(|| MachineError::Invalid("unknown work offset".into()))?;
+        for (axis, value) in raw.iter() {
+            offset.values.insert(axis.to_string(), *value);
+        }
+        if let Some(rotation) = result.rotation {
+            offset.rotation = Some(rotation);
+        }
+        self.snapshot.offsets.revision += 1;
+        Ok(())
     }
 
     fn add_alarm(
@@ -805,6 +858,20 @@ fn word_number(text: &str, letter: char) -> Option<f64> {
     rest[..end].parse::<f64>().ok()
 }
 
+/// Select the routine that the MDI block really calls. The catalogue holds both
+/// `probe_round_pocket` and `probe_round_pocket_center_start`, so substring
+/// containment resolves a centre-start call to the shorter routine; only an
+/// exact `o<ID> call` token may select an operation. The native transaction
+/// parser (`linc-linuxcnc`'s `snapshot::probe_operation`) keeps its own copy of
+/// this match because it cannot depend on the simulator.
+fn probe_operation_for(block: &str) -> Option<&'static crate::probe::ProbeOperation> {
+    crate::probe::operation_for_mdi(block)
+}
+
+/// True when one block line is the subroutine call `o<call> call`, optionally
+/// followed by bracket arguments such as `[#3017]`. Whitespace around the
+/// `o`, the name and the keyword is tolerated; a line that merely mentions the
+/// name is not a call.
 fn canonical_under(root: &Path, candidate: &Path) -> Result<PathBuf, MachineError> {
     let root = root.canonicalize().map_err(|_| MachineError::UnsafePath)?;
     let candidate = candidate
@@ -840,67 +907,165 @@ impl MachineBackend for SimBackend {
                 if matches!(origin, MdiOrigin::Probe) && !self.snapshot.probe.enabled {
                     return Err(MachineError::Invalid("touch probing is disabled".into()));
                 }
+                let operation = (origin == MdiOrigin::Probe)
+                    .then(|| probe_operation_for(&block))
+                    .flatten();
+                let parameters = (origin == MdiOrigin::Probe)
+                    .then(|| crate::probe::ProbeParameters::from_mdi(&block))
+                    .flatten();
+                let direct = parameters
+                    .as_ref()
+                    .is_some_and(|params| params.probe_mode == crate::probe::ProbeMode::ApplyWcs);
+                // Fail closed on every action that writes controller state,
+                // before anything executes. This is the same classifier the
+                // native backend and the UI use, so the three cannot drift:
+                // measurement-only POSITION runs stay allowed, while DIRECT,
+                // Edge Angle, calibration runs (including spindle_nose),
+                // the calibration reset, the U parameter update and every
+                // result reset require PROTECT off.
+                if origin == MdiOrigin::Probe
+                    && crate::probe::probe_write_action(&block).is_some()
+                    && !self.snapshot.writes_allowed()
+                {
+                    return Err(MachineError::ProgramProtected);
+                }
+                let tip = self.current_tool_tip();
+                let active_index = self.snapshot.offsets.active_index;
+                let source_offsets = active_index
+                    .and_then(|index| {
+                        self.snapshot
+                            .offsets
+                            .offsets
+                            .iter()
+                            .find(|offset| offset.index == index)
+                            .map(|offset| offset.values.clone())
+                    })
+                    .unwrap_or_default();
+                // The reference angle routines clear rotation before their
+                // measure-only branch, including when no later Apply occurs.
+                if operation.is_some_and(|op| op.category == crate::probe::ProbeCategory::EdgeAngle)
+                {
+                    if let Some(offset) = active_index.and_then(|index| {
+                        self.snapshot
+                            .offsets
+                            .offsets
+                            .iter_mut()
+                            .find(|offset| offset.index == index)
+                    }) {
+                        offset.rotation = Some(0.0);
+                        self.snapshot.offsets.revision += 1;
+                    }
+                }
                 for line in block.lines().filter(|line| !line.trim().is_empty()) {
                     self.apply_mdi_line(line)?;
                 }
-                // Probe simulation: complete with a plausible measured result
-                // written into the slots the selected routine actually uses.
-                if origin == MdiOrigin::Probe {
-                    let tip = self.current_tool_tip();
-                    let operation = crate::probe::operations()
-                        .iter()
-                        .find(|op| block.contains(op.call));
-                    let family = operation.map(|op| op.result_family()).unwrap_or_default();
-                    let diameter = self.profile.config.probe.probe_diameter;
+                if let Some(operation) = operation {
+                    if operation.id == "cal_reset" {
+                        self.snapshot.probe.calibration_offset = Some(0.0);
+                        self.snapshot.probe.last_result = None;
+                        return Ok(());
+                    }
+                    let defaults = parameters.clone().unwrap_or_default();
+                    let round = operation.call.contains("round");
+                    let expected_x = match operation.category {
+                        crate::probe::ProbeCategory::Calibrate if round => {
+                            defaults.calibration_diameter
+                        }
+                        crate::probe::ProbeCategory::Calibrate => defaults.x_cal_width,
+                        crate::probe::ProbeCategory::BossAndPocket if round => {
+                            defaults.diameter_hint
+                        }
+                        crate::probe::ProbeCategory::BossAndPocket => defaults.x_hint_boss_pocket,
+                        crate::probe::ProbeCategory::RidgeAndValley => defaults.x_hint_ridge_valley,
+                        _ => 20.0,
+                    };
+                    let expected_y = match operation.category {
+                        crate::probe::ProbeCategory::Calibrate if round => {
+                            defaults.calibration_diameter
+                        }
+                        crate::probe::ProbeCategory::Calibrate => defaults.y_cal_width,
+                        crate::probe::ProbeCategory::BossAndPocket if round => {
+                            defaults.diameter_hint
+                        }
+                        crate::probe::ProbeCategory::BossAndPocket => defaults.y_hint_boss_pocket,
+                        crate::probe::ProbeCategory::RidgeAndValley => defaults.y_hint_ridge_valley,
+                        _ => 20.0,
+                    };
+                    let expected_x = expected_x.max(1.0);
+                    let expected_y = expected_y.max(1.0);
+                    let calibration = operation.calibration;
+                    let width_x = expected_x + if calibration { 0.02 } else { 0.0 };
+                    let width_y = expected_y - if calibration { 0.01 } else { 0.0 };
+                    let updated = operation.result_parameters();
+                    let has_width_x = updated.contains(&1001);
+                    let has_width_y = updated.contains(&1003);
                     let mut values = [0.0; 12];
-                    match family {
-                        crate::probe::ResultFamily::BossPocket => {
-                            values[0] = diameter;
-                            values[1] = tip[0];
-                            values[2] = diameter;
-                            values[3] = tip[1];
-                            values[9] = diameter;
-                        }
-                        crate::probe::ResultFamily::Edge => {
-                            let call = operation.map(|op| op.call).unwrap_or_default();
-                            if call.contains("x_plus") {
-                                values[5] = tip[0];
-                            } else if call.contains("x_minus") {
-                                values[4] = tip[0];
-                            } else if call.contains("y_plus") {
-                                values[7] = tip[1];
-                            } else if call.contains("y_minus") {
-                                values[6] = tip[1];
-                            }
-                        }
-                        crate::probe::ResultFamily::SurfaceZ => values[8] = tip[2],
+                    for parameter in &updated {
+                        let value = match parameter {
+                            1001 => width_x,
+                            1002 => tip[0],
+                            1003 => width_y,
+                            1004 => tip[1],
+                            1005 => tip[0] - if has_width_x { width_x / 2.0 } else { 0.0 },
+                            1006 => tip[0] + if has_width_x { width_x / 2.0 } else { 0.0 },
+                            1007 => tip[1] - if has_width_y { width_y / 2.0 } else { 0.0 },
+                            1008 => tip[1] + if has_width_y { width_y / 2.0 } else { 0.0 },
+                            1009 => tip[2],
+                            1010 => (width_x + width_y) / 2.0,
+                            1011 | 1012 => 0.0,
+                            _ => continue,
+                        };
+                        values[(parameter - 1001) as usize] = value;
                     }
                     let results = crate::probe::ParameterResults::from_values(&values);
-                    let mut measured = AxisMap::new();
-                    if let Some(operation) = operation {
-                        for (axis, value) in results.wcs_offsets(operation) {
-                            measured.insert(axis, value);
-                        }
+                    let mut auxiliary = std::collections::BTreeMap::new();
+                    auxiliary.insert("start_x".into(), tip[0]);
+                    auxiliary.insert("start_y".into(), tip[1]);
+                    auxiliary.insert("corner_x".into(), tip[0]);
+                    auxiliary.insert("corner_y".into(), tip[1]);
+                    let rotation = (defaults.wcs_rotation
+                        && operation.category == crate::probe::ProbeCategory::EdgeAngle)
+                        .then_some(values[11]);
+                    let wcs = active_index.map(wcs_name).unwrap_or_else(|| "NONE".into());
+                    let mut result = ProbeResult::from_operation(
+                        operation,
+                        &results,
+                        source_offsets,
+                        wcs,
+                        if direct { "DIRECT WCO" } else { "POSITION" }.into(),
+                        updated,
+                        auxiliary,
+                        rotation,
+                        false,
+                    );
+                    if let Some(offset) = results.calibration_error(operation, &defaults) {
+                        result.error = Some(offset);
+                        self.snapshot.probe.calibration_offset = Some(offset);
                     }
-                    let error = operation.and_then(|op| results.error(op, Some(diameter)));
-                    let result = ProbeResult {
-                        routine: operation
-                            .map(|op| op.name.to_string())
-                            .unwrap_or_else(|| "simulated probe".into()),
-                        measured,
-                        error,
-                        wcs: self.snapshot.probe.selected_wcs.clone(),
-                        mode: "SIM".into(),
-                        timestamp_ms: now_ms(),
-                        values: values.to_vec(),
-                        family,
-                    };
+                    // A DIRECT run writes only the axes its branch's `G10 L2`
+                    // names. Publishing a wider row here would rehearse offsets
+                    // the machine never touches (`surface_z` writes Z only, the
+                    // corner routines leave Z alone, `spindle_nose` writes
+                    // nothing at all).
+                    let written = crate::probe::direct_written_axes(operation);
+                    let touches_row = operation
+                        .apply_terms()
+                        .iter()
+                        .any(|term| written.contains(&term.axis));
+                    if direct && touches_row {
+                        if let Some(index) = active_index {
+                            self.write_probe_raw(&result, index, Some(written))?;
+                        }
+                        result.applied = true;
+                    }
                     self.snapshot.probe.last_result = Some(result.clone());
                     self.snapshot.probe.history.push_front(result.clone());
                     while self.snapshot.probe.history.len() > 20 {
                         self.snapshot.probe.history.pop_back();
                     }
                     self.last_probe = Some(result);
+                } else if origin == MdiOrigin::Probe && block.contains("reset") {
+                    self.snapshot.probe.last_result = None;
                 }
                 Ok(())
             }
@@ -1256,33 +1421,44 @@ impl MachineBackend for SimBackend {
             }
             MachineCommand::ApplyProbeResult { result, target } => {
                 if !self.snapshot.writes_allowed() {
-                    return Err(MachineError::ProgramProtected);
-                }
-                match target {
-                    ProbeTarget::WorkOffset(index) => {
-                        if let Some(offset) = self
-                            .snapshot
-                            .offsets
-                            .offsets
-                            .iter_mut()
-                            .find(|o| o.index == index)
-                        {
-                            offset.values = result.measured.clone();
-                            self.snapshot.offsets.revision += 1;
-                        }
+                    if self.snapshot.panel.protect_effective() {
+                        return Err(MachineError::ProgramProtected);
                     }
-                    ProbeTarget::Calibration => {
-                        let value = result.measured.values().first().copied().unwrap_or(0.0);
-                        self.snapshot.probe.calibration_offset = Some(value);
-                    }
+                    return Err(MachineError::NotIdle);
                 }
-                Ok(())
+                let ProbeTarget::WorkOffset(index) = target else {
+                    return Err(MachineError::Invalid(
+                        "calibration is stored by the calibration routine, not Apply".into(),
+                    ));
+                };
+                result
+                    .apply_error(self.snapshot.offsets.active_index)
+                    .map_err(MachineError::Invalid)?;
+                let current = self
+                    .snapshot
+                    .probe
+                    .last_result
+                    .as_ref()
+                    .ok_or_else(|| MachineError::Invalid("no current probe result".into()))?;
+                if current != &result {
+                    return Err(MachineError::Invalid(
+                        "stale probe result; run the probe again".into(),
+                    ));
+                }
+                if self.snapshot.offsets.active_index != Some(index) {
+                    return Err(MachineError::Invalid(
+                        "Apply target must be the active work offset".into(),
+                    ));
+                }
+                // An explicit Apply writes the complete result, exactly as
+                // before: only the DIRECT path is limited to its branch.
+                self.write_probe_raw(&result, index, None)
             }
             MachineCommand::ResetProbeCalibration => {
                 if !self.snapshot.writes_allowed() {
                     return Err(MachineError::ProgramProtected);
                 }
-                self.snapshot.probe.calibration_offset = None;
+                self.snapshot.probe.calibration_offset = Some(0.0);
                 Ok(())
             }
             MachineCommand::AbortProgram => {
@@ -1569,5 +1745,624 @@ enabled = true
             .unwrap();
         let text = std::fs::read_to_string(root.join("PART.NC")).unwrap();
         assert_eq!(text, "G0 X1\nG1 X2\n");
+    }
+
+    fn run_probe(
+        backend: &mut SimBackend,
+        id: &str,
+        parameters: &crate::probe::ProbeParameters,
+    ) -> ProbeResult {
+        let operation = crate::probe::operation(id).unwrap();
+        backend
+            .send(MachineCommand::IssueMdi {
+                block: parameters.mdi_text(operation),
+                origin: MdiOrigin::Probe,
+            })
+            .expect("run probe");
+        backend
+            .snapshot()
+            .probe
+            .last_result
+            .clone()
+            .expect("result")
+    }
+
+    /// A simulator whose tool tip sits at a known point, so the generated
+    /// result slots are checkable, plus the fixture directory owning the profile.
+    fn positioned_backend() -> (tempfile::TempDir, SimBackend) {
+        let (dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        for (axis, value) in [("X", 12.5), ("Y", -4.25), ("Z", 1.5)] {
+            if let Some(position) = backend.snapshot.positions.axes.get_mut(axis) {
+                position.work = value;
+            }
+        }
+        (dir, backend)
+    }
+
+    fn slot(result: &ProbeResult, parameter: u16) -> f64 {
+        result
+            .value(parameter)
+            .unwrap_or_else(|| panic!("#{parameter} is not an updated slot"))
+    }
+
+    /// A probe routine is only selected by the exact `o<ID> call` token the
+    /// parameter block generator emits, never by a contained name.
+    fn assert_selected(result: &ProbeResult, id: &str) {
+        let operation = crate::probe::operation(id).expect("catalogue operation");
+        assert_eq!(result.operation, id);
+        assert_eq!(result.routine, operation.name);
+        assert_eq!(
+            crate::probe::operation(&result.operation).map(|found| found.call),
+            Some(operation.call),
+            "the result must resolve back to the operation it was generated from"
+        );
+        assert_eq!(result.updated, operation.result_parameters());
+    }
+
+    #[test]
+    fn probe_apply_converts_coordinates_merges_axes_and_is_idempotent() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        let source =
+            AxisMap::from_entries([("X".into(), 1.0), ("Y".into(), 2.0), ("Z".into(), 3.0)]);
+        backend
+            .send(MachineCommand::SetWorkOffset {
+                index: 1,
+                values: source,
+                rotation: Some(0.0),
+            })
+            .unwrap();
+        let result = run_probe(
+            &mut backend,
+            "edge_x_minus",
+            &crate::probe::ProbeParameters::default(),
+        );
+        let expected_x = 1.0 + result.measured.get("X").copied().unwrap();
+        for _ in 0..2 {
+            backend
+                .send(MachineCommand::ApplyProbeResult {
+                    result: result.clone(),
+                    target: ProbeTarget::WorkOffset(1),
+                })
+                .expect("Apply");
+            let offset = &backend.snapshot().offsets.offsets[0];
+            assert!((offset.values.get("X").copied().unwrap() - expected_x).abs() < 1e-9);
+            assert_eq!(offset.values.get("Y"), Some(&2.0));
+            assert_eq!(offset.values.get("Z"), Some(&3.0));
+        }
+
+        backend.snapshot.offsets.active_index = Some(2);
+        let error = backend
+            .send(MachineCommand::ApplyProbeResult {
+                result,
+                target: ProbeTarget::WorkOffset(2),
+            })
+            .unwrap_err();
+        assert!(matches!(error, MachineError::Invalid(message) if message.contains("G54")));
+    }
+
+    #[test]
+    fn calibration_computes_selected_offset_and_has_no_generic_apply() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        let mut parameters = crate::probe::ProbeParameters::default();
+        parameters.calibration_diameter = 40.0;
+        let result = run_probe(&mut backend, "cal_round_boss", &parameters);
+        assert!((result.error.unwrap() - 0.0075).abs() < 1e-12);
+        assert!((backend.snapshot().probe.calibration_offset.unwrap() - 0.0075).abs() < 1e-12);
+        assert!(backend
+            .send(MachineCommand::ApplyProbeResult {
+                result: result.clone(),
+                target: ProbeTarget::WorkOffset(1),
+            })
+            .is_err());
+        assert!((backend.snapshot().probe.calibration_offset.unwrap() - 0.0075).abs() < 1e-12);
+
+        parameters.square_cal_axis = 1;
+        let result = run_probe(&mut backend, "cal_round_boss", &parameters);
+        assert!((result.error.unwrap() - 0.01).abs() < 1e-12);
+        parameters.square_cal_axis = 2;
+        let result = run_probe(&mut backend, "cal_round_boss", &parameters);
+        assert!((result.error.unwrap() - 0.005).abs() < 1e-12);
+    }
+
+    #[test]
+    fn direct_mode_applies_once_and_angle_run_clears_old_rotation() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        backend.snapshot.offsets.offsets[0].values =
+            AxisMap::from_entries([("X".into(), 1.0), ("Y".into(), 2.0), ("Z".into(), 3.0)]);
+        backend.snapshot.offsets.offsets[0].rotation = Some(15.0);
+        let mut parameters = crate::probe::ProbeParameters::default();
+        let angle = run_probe(&mut backend, "top_front_edge_angle", &parameters);
+        assert_eq!(backend.snapshot().offsets.offsets[0].rotation, Some(0.0));
+        assert_eq!(angle.rotation, None);
+
+        parameters.probe_mode = crate::probe::ProbeMode::ApplyWcs;
+        let result = run_probe(&mut backend, "edge_x_plus", &parameters);
+        assert!(result.applied);
+        let expected = 1.0 + result.measured.get("X").copied().unwrap();
+        assert_eq!(
+            backend.snapshot().offsets.offsets[0].values.get("X"),
+            Some(&expected)
+        );
+        assert!(backend
+            .send(MachineCommand::ApplyProbeResult {
+                result,
+                target: ProbeTarget::WorkOffset(1),
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn direct_corner_write_includes_the_helper_z() {
+        let (_dir, mut backend) = positioned_backend();
+        backend.snapshot.offsets.offsets[0].values =
+            AxisMap::from_entries([("X".into(), -10.0), ("Y".into(), 2.0), ("Z".into(), 7.5)]);
+        let mut parameters = crate::probe::ProbeParameters::default();
+        parameters.probe_mode = crate::probe::ProbeMode::ApplyWcs;
+
+        // The corner routine records X and Y inline and the helper
+        // (probe_z_minus_sub, called with #3030) records Z, so a DIRECT run
+        // touches all three axes (crate::probe::direct_written_axes).
+        let result = run_probe(&mut backend, "front_left_top_corner", &parameters);
+        assert!(result.applied);
+        assert_eq!(
+            crate::probe::direct_written_axes(
+                crate::probe::operation("front_left_top_corner").unwrap()
+            ),
+            &["X", "Y", "Z"]
+        );
+        let source_x = -10.0;
+        let source_y = 2.0;
+        let source_z = 7.5;
+        let row = &backend.snapshot().offsets.offsets[0];
+        assert_eq!(
+            row.values.get("X"),
+            Some(&(source_x + result.measured.get("X").copied().unwrap()))
+        );
+        assert_eq!(
+            row.values.get("Y"),
+            Some(&(source_y + result.measured.get("Y").copied().unwrap()))
+        );
+        assert_eq!(
+            row.values.get("Z"),
+            Some(&(source_z + result.measured.get("Z").copied().unwrap()))
+        );
+    }
+
+    #[test]
+    fn direct_angle_write_includes_the_helper_z() {
+        let (_dir, mut backend) = positioned_backend();
+        backend.snapshot.offsets.offsets[0].values =
+            AxisMap::from_entries([("X".into(), -10.0), ("Y".into(), 2.0), ("Z".into(), 7.5)]);
+        let mut parameters = crate::probe::ProbeParameters::default();
+        parameters.probe_mode = crate::probe::ProbeMode::ApplyWcs;
+
+        // The Edge Angle routine records X and Y inline and the helper records
+        // Z, so a DIRECT run touches all three axes.
+        let result = run_probe(&mut backend, "top_front_edge_angle", &parameters);
+        assert!(result.applied);
+        assert_eq!(
+            crate::probe::direct_written_axes(
+                crate::probe::operation("top_front_edge_angle").unwrap()
+            ),
+            &["X", "Y", "Z"]
+        );
+        let row = &backend.snapshot().offsets.offsets[0];
+        for (axis, source) in [("X", -10.0), ("Y", 2.0), ("Z", 7.5)] {
+            assert_eq!(
+                row.values.get(axis),
+                Some(&(source + result.measured.get(axis).copied().unwrap())),
+                "{axis}"
+            );
+        }
+    }
+
+    #[test]
+    fn position_run_with_a_helper_leaves_the_row_untouched() {
+        let (_dir, mut backend) = positioned_backend();
+        let source =
+            AxisMap::from_entries([("X".into(), -10.0), ("Y".into(), 2.0), ("Z".into(), 7.5)]);
+        backend.snapshot.offsets.offsets[0].values = source.clone();
+        backend.snapshot.offsets.offsets[0].rotation = Some(5.0);
+        let parameters = crate::probe::ProbeParameters::default();
+
+        // A POSITION run measures; the helper's DIRECT Z branch must not fire.
+        let result = run_probe(&mut backend, "front_left_top_corner", &parameters);
+        assert!(!result.applied);
+        assert_eq!(result.mode, "POSITION");
+        let row = &backend.snapshot().offsets.offsets[0];
+        assert_eq!(row.values, source);
+        assert_eq!(row.rotation, Some(5.0));
+    }
+
+    #[test]
+    fn direct_surface_z_write_touches_only_z() {
+        let (_dir, mut backend) = positioned_backend();
+        backend.snapshot.offsets.offsets[0].values =
+            AxisMap::from_entries([("X".into(), -9.0), ("Y".into(), -8.0), ("Z".into(), 3.0)]);
+        let mut parameters = crate::probe::ProbeParameters::default();
+        parameters.probe_mode = crate::probe::ProbeMode::ApplyWcs;
+
+        let result = run_probe(&mut backend, "surface_z", &parameters);
+        assert!(result.applied);
+        let row = &backend.snapshot().offsets.offsets[0];
+        assert_eq!(
+            row.values.get("Z"),
+            Some(&(3.0 + result.measured.get("Z").copied().unwrap()))
+        );
+        assert_eq!(row.values.get("X"), Some(&-9.0));
+        assert_eq!(row.values.get("Y"), Some(&-8.0));
+    }
+
+    #[test]
+    fn direct_spindle_nose_is_not_applied_and_changes_nothing() {
+        let (_dir, mut backend) = positioned_backend();
+        let source =
+            AxisMap::from_entries([("X".into(), 1.0), ("Y".into(), 2.0), ("Z".into(), 3.0)]);
+        backend.snapshot.offsets.offsets[0].values = source.clone();
+        backend.snapshot.offsets.offsets[0].rotation = Some(12.0);
+        let mut parameters = crate::probe::ProbeParameters::default();
+        parameters.probe_mode = crate::probe::ProbeMode::ApplyWcs;
+
+        // probe_spindle_nose.ngc has no G10 at all, so a DIRECT run there is a
+        // measurement, not an applied offset.
+        let result = run_probe(&mut backend, "spindle_nose", &parameters);
+        assert!(!result.applied);
+        let row = &backend.snapshot().offsets.offsets[0];
+        assert_eq!(row.values, source);
+        assert_eq!(row.rotation, Some(12.0));
+    }
+
+    fn probe_block(id: &str, mode: crate::probe::ProbeMode) -> String {
+        let mut parameters = crate::probe::ProbeParameters::default();
+        parameters.probe_mode = mode;
+        parameters.mdi_text(crate::probe::operation(id).expect("operation"))
+    }
+
+    /// Every action the shared classifier calls a write, plus the labels the
+    /// gating test checks them against.
+    fn probe_write_blocks() -> Vec<(&'static str, String)> {
+        use crate::probe::ProbeMode;
+        vec![
+            ("direct", probe_block("edge_x_plus", ProbeMode::ApplyWcs)),
+            (
+                "direct-angle",
+                probe_block("top_front_edge_angle", ProbeMode::ApplyWcs),
+            ),
+            (
+                "edge-angle",
+                probe_block("top_front_edge_angle", ProbeMode::MeasureOnly),
+            ),
+            (
+                "calibration",
+                probe_block("cal_round_boss", ProbeMode::MeasureOnly),
+            ),
+            (
+                "spindle-nose",
+                probe_block("spindle_nose", ProbeMode::MeasureOnly),
+            ),
+            ("calibration-reset", "o<probe_cal_reset> call".into()),
+            (
+                "parameter-update",
+                crate::probe::ProbeParameters::default().parameter_update_block(),
+            ),
+            ("reset-all", "o<reset_all_data> call".into()),
+            ("reset-x", "o<x_data_reset> call".into()),
+            ("reset-y", "o<y_data_reset> call".into()),
+            ("unknown-mode", "o<probe_x_plus_wco> call".into()),
+        ]
+    }
+
+    #[test]
+    fn protect_refuses_every_probe_write_action_in_the_simulator() {
+        // PROTECT on, and PROTECT unknown (a stale/absent pin) both fail closed.
+        for (protect_on, known) in [(true, true), (false, false)] {
+            let (_dir, profile) = profile_fixture();
+            let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+            let row =
+                AxisMap::from_entries([("X".into(), 1.0), ("Y".into(), 2.0), ("Z".into(), 3.0)]);
+            backend.snapshot.offsets.offsets[0].values = row.clone();
+            backend.snapshot.offsets.offsets[0].rotation = Some(5.0);
+            backend.snapshot.probe.calibration_offset = Some(0.25);
+            backend.set_program_protect(protect_on, known);
+            for (name, block) in probe_write_blocks() {
+                assert!(
+                    crate::probe::probe_write_action(&block).is_some(),
+                    "{name} is not classified as a write"
+                );
+                let error = backend
+                    .send(MachineCommand::IssueMdi {
+                        block,
+                        origin: MdiOrigin::Probe,
+                    })
+                    .expect_err("PROTECT let a probe write execute");
+                assert_eq!(error, MachineError::ProgramProtected, "{name}");
+                // Nothing executed: no row, rotation, calibration or result
+                // change, and no fresh result.
+                assert_eq!(backend.snapshot().offsets.offsets[0].values, row, "{name}");
+                assert_eq!(
+                    backend.snapshot().offsets.offsets[0].rotation,
+                    Some(5.0),
+                    "{name}"
+                );
+                assert_eq!(
+                    backend.snapshot().probe.calibration_offset,
+                    Some(0.25),
+                    "{name}"
+                );
+                assert!(backend.snapshot().probe.last_result.is_none(), "{name}");
+                assert!(backend.snapshot().probe.history.is_empty(), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn protect_off_runs_every_probe_write_action() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        backend.set_program_protect(false, true);
+        // DIRECT writes the row and records a fresh result.
+        let mut direct = crate::probe::ProbeParameters::default();
+        direct.probe_mode = crate::probe::ProbeMode::ApplyWcs;
+        let result = run_probe(&mut backend, "edge_x_plus", &direct);
+        assert!(result.applied);
+        assert_eq!(backend.snapshot().probe.history.len(), 1);
+        // Calibration commits again.
+        let parameters = crate::probe::ProbeParameters::default();
+        let calibration = run_probe(&mut backend, "cal_round_boss", &parameters);
+        assert_eq!(calibration.operation, "cal_round_boss");
+        assert!(backend.snapshot().probe.calibration_offset.is_some());
+        // The reset, U update, data resets and spindle nose reach the controller.
+        for (name, block) in [
+            ("parameter-update", parameters.parameter_update_block()),
+            (
+                "spindle-nose",
+                probe_block("spindle_nose", crate::probe::ProbeMode::MeasureOnly),
+            ),
+            ("reset-all", "o<reset_all_data> call".to_string()),
+            ("reset-x", "o<x_data_reset> call".to_string()),
+            ("reset-y", "o<y_data_reset> call".to_string()),
+            ("calibration-reset", "o<probe_cal_reset> call".to_string()),
+        ] {
+            backend
+                .send(MachineCommand::IssueMdi {
+                    block,
+                    origin: MdiOrigin::Probe,
+                })
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+        }
+        assert_eq!(backend.snapshot().probe.calibration_offset, Some(0.0));
+    }
+
+    #[test]
+    fn spindle_nose_write_requires_protect_off() {
+        use crate::probe::{probe_write_action, ProbeMode, ProbeWriteAction};
+        let block = probe_block("spindle_nose", ProbeMode::MeasureOnly);
+        // It is calibration-flagged even though its category is SurfaceZ.
+        assert_eq!(
+            probe_write_action(&block),
+            Some(ProbeWriteAction::CalibrationRun)
+        );
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        backend.set_program_protect(true, true);
+        let error = backend
+            .send(MachineCommand::IssueMdi {
+                block: block.clone(),
+                origin: MdiOrigin::Probe,
+            })
+            .expect_err("spindle nose ran under PROTECT");
+        assert_eq!(error, MachineError::ProgramProtected);
+        assert!(backend.snapshot().probe.last_result.is_none());
+        backend.set_program_protect(false, true);
+        backend
+            .send(MachineCommand::IssueMdi {
+                block,
+                origin: MdiOrigin::Probe,
+            })
+            .expect("spindle nose with PROTECT off");
+        assert_eq!(backend.snapshot().probe.history.len(), 1);
+    }
+
+    #[test]
+    fn position_measure_only_runs_stay_allowed_with_protect_on() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        backend.set_program_protect(true, true);
+        let parameters = crate::probe::ProbeParameters::default();
+        for id in ["edge_x_plus", "round_boss"] {
+            // The incidental parameter preamble is not a write; run_probe
+            // panics if the send is refused.
+            let result = run_probe(&mut backend, id, &parameters);
+            assert_eq!(result.mode, "POSITION", "{id}");
+            assert!(!result.applied, "{id}");
+        }
+        assert_eq!(backend.snapshot().probe.history.len(), 2);
+    }
+
+    #[test]
+    fn protect_blocks_angle_rotation_reset_even_in_position_mode() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        backend.snapshot.offsets.offsets[0].rotation = Some(15.0);
+        backend.set_program_protect(true, true);
+        let parameters = crate::probe::ProbeParameters::default();
+        let operation = crate::probe::operation("top_front_edge_angle").unwrap();
+        let error = backend
+            .send(MachineCommand::IssueMdi {
+                block: parameters.mdi_text(operation),
+                origin: MdiOrigin::Probe,
+            })
+            .unwrap_err();
+        assert_eq!(error, MachineError::ProgramProtected);
+        assert_eq!(backend.snapshot().offsets.offsets[0].rotation, Some(15.0));
+        assert!(backend.snapshot().probe.last_result.is_none());
+
+        backend.set_program_protect(false, true);
+        run_probe(&mut backend, "top_front_edge_angle", &parameters);
+        assert_eq!(backend.snapshot().offsets.offsets[0].rotation, Some(0.0));
+    }
+
+    #[test]
+    fn round_pocket_centre_start_selects_its_own_operation() {
+        let (_dir, mut backend) = positioned_backend();
+        let mut parameters = crate::probe::ProbeParameters::default();
+        parameters.diameter_hint = 30.0;
+        let operation = crate::probe::operation("round_pocket_center").expect("operation");
+        assert_eq!(
+            parameters.mdi_text(operation).lines().last(),
+            Some("o<probe_round_pocket_center_start> call")
+        );
+
+        let result = run_probe(&mut backend, "round_pocket_center", &parameters);
+        assert_selected(&result, "round_pocket_center");
+        // The shorter catalogue name must not win: it writes #1009 and applies Z.
+        assert_ne!(result.operation, "round_pocket");
+        assert_eq!(
+            result.updated,
+            vec![1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1010]
+        );
+        assert_eq!(slot(&result, 1001), 30.0);
+        assert_eq!(slot(&result, 1002), 12.5);
+        assert_eq!(slot(&result, 1003), 30.0);
+        assert_eq!(slot(&result, 1004), -4.25);
+        assert_eq!(slot(&result, 1005), -2.5);
+        assert_eq!(slot(&result, 1006), 27.5);
+        assert_eq!(slot(&result, 1007), -19.25);
+        assert_eq!(slot(&result, 1008), 10.75);
+        assert_eq!(slot(&result, 1010), 30.0);
+        assert!(!result.has_parameter(1009));
+        assert_eq!(result.measured.get("X").copied(), Some(12.5));
+        assert_eq!(result.measured.get("Y").copied(), Some(-4.25));
+        assert_eq!(result.measured.get("Z").copied(), None);
+    }
+
+    #[test]
+    fn rect_pocket_centre_start_selects_its_own_operation() {
+        let (_dir, mut backend) = positioned_backend();
+        let mut parameters = crate::probe::ProbeParameters::default();
+        parameters.x_hint_boss_pocket = 40.0;
+        parameters.y_hint_boss_pocket = 20.0;
+        let operation = crate::probe::operation("rect_pocket_center").expect("operation");
+        assert_eq!(
+            parameters.mdi_text(operation).lines().last(),
+            Some("o<probe_rect_pocket_center_start> call")
+        );
+
+        let result = run_probe(&mut backend, "rect_pocket_center", &parameters);
+        assert_selected(&result, "rect_pocket_center");
+        assert_ne!(result.operation, "rect_pocket");
+        assert_eq!(
+            result.updated,
+            vec![1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008]
+        );
+        assert_eq!(slot(&result, 1001), 40.0);
+        assert_eq!(slot(&result, 1002), 12.5);
+        assert_eq!(slot(&result, 1003), 20.0);
+        assert_eq!(slot(&result, 1004), -4.25);
+        assert_eq!(slot(&result, 1005), -7.5);
+        assert_eq!(slot(&result, 1006), 32.5);
+        assert_eq!(slot(&result, 1007), -14.25);
+        assert_eq!(slot(&result, 1008), 5.75);
+        assert!(!result.has_parameter(1009));
+        assert_eq!(result.measured.get("X").copied(), Some(12.5));
+        assert_eq!(result.measured.get("Y").copied(), Some(-4.25));
+        assert_eq!(result.measured.get("Z").copied(), None);
+    }
+
+    #[test]
+    fn valley_x_centre_start_selects_its_own_operation() {
+        let (_dir, mut backend) = positioned_backend();
+        let mut parameters = crate::probe::ProbeParameters::default();
+        parameters.x_hint_ridge_valley = 8.0;
+        let operation = crate::probe::operation("valley_x_center").expect("operation");
+        assert_eq!(
+            parameters.mdi_text(operation).lines().last(),
+            Some("o<probe_valley_x_center_start> call")
+        );
+
+        let result = run_probe(&mut backend, "valley_x_center", &parameters);
+        assert_selected(&result, "valley_x_center");
+        assert_ne!(result.operation, "valley_x");
+        assert_eq!(result.updated, vec![1001, 1002, 1005, 1006]);
+        assert_eq!(slot(&result, 1001), 8.0);
+        assert_eq!(slot(&result, 1002), 12.5);
+        assert_eq!(slot(&result, 1005), 8.5);
+        assert_eq!(slot(&result, 1006), 16.5);
+        assert!(!result.has_parameter(1009));
+        assert_eq!(result.measured.get("X").copied(), Some(12.5));
+        assert_eq!(result.measured.get("Y").copied(), None);
+    }
+
+    #[test]
+    fn valley_y_centre_start_selects_its_own_operation() {
+        let (_dir, mut backend) = positioned_backend();
+        let mut parameters = crate::probe::ProbeParameters::default();
+        parameters.y_hint_ridge_valley = 8.0;
+        let operation = crate::probe::operation("valley_y_center").expect("operation");
+        assert_eq!(
+            parameters.mdi_text(operation).lines().last(),
+            Some("o<probe_valley_y_center_start> call")
+        );
+
+        let result = run_probe(&mut backend, "valley_y_center", &parameters);
+        assert_selected(&result, "valley_y_center");
+        assert_ne!(result.operation, "valley_y");
+        assert_eq!(result.updated, vec![1003, 1004, 1007, 1008]);
+        assert_eq!(slot(&result, 1003), 8.0);
+        assert_eq!(slot(&result, 1004), -4.25);
+        assert_eq!(slot(&result, 1007), -8.25);
+        assert_eq!(slot(&result, 1008), -0.25);
+        assert!(!result.has_parameter(1009));
+        assert_eq!(result.measured.get("X").copied(), None);
+        assert_eq!(result.measured.get("Y").copied(), Some(-4.25));
+    }
+
+    #[test]
+    fn operation_calls_match_exactly_after_whitespace_and_arguments() {
+        let id = |block: &str| probe_operation_for(block).map(|operation| operation.id);
+        assert_eq!(
+            id("o<probe_valley_x_center_start> call"),
+            Some("valley_x_center")
+        );
+        assert_eq!(
+            id("  O<PROBE_VALLEY_Y_CENTER_START>\tCall"),
+            Some("valley_y_center")
+        );
+        assert_eq!(
+            id("o<probe_rect_pocket> call [1][#3017]"),
+            Some("rect_pocket")
+        );
+        assert_eq!(
+            id("o <probe_round_pocket_center_start> call"),
+            Some("round_pocket_center")
+        );
+        // A missing keyword, a bare mention and a prefix-only name are not calls.
+        assert_eq!(id("o<probe_round_pocket_center_start>"), None);
+        assert_eq!(id("M118 (probe_round_pocket_center_start)"), None);
+        assert_eq!(id("o<probe_round_pocket_center> call"), None);
+    }
+
+    #[test]
+    fn a_name_mention_is_not_a_call_and_the_plain_routine_still_matches() {
+        let (_dir, mut backend) = positioned_backend();
+        backend
+            .send(MachineCommand::IssueMdi {
+                block: "M118 (probe_round_pocket_center_start)".into(),
+                origin: MdiOrigin::Probe,
+            })
+            .expect("comment-only block");
+        assert!(backend.snapshot().probe.last_result.is_none());
+
+        let mut parameters = crate::probe::ProbeParameters::default();
+        parameters.diameter_hint = 30.0;
+        let result = run_probe(&mut backend, "round_pocket", &parameters);
+        assert_selected(&result, "round_pocket");
+        assert_ne!(result.operation, "round_pocket_center");
+        assert!(result.has_parameter(1009));
+        assert_eq!(result.measured.get("Z").copied(), Some(1.5));
     }
 }

@@ -1,0 +1,17 @@
+# LiNC's copy of baiermill_pb/hallib/szgh_panel.hal, used by
+# configs/baiermill-pb.ini. The machine tree is never edited.
+#
+# The machine's file starts the compiled helper:
+#   loadusr ./szgh-panel-hal -c 0.01
+# That binary is not in the machine tree. Its python driver is
+# (baiermill_pb/szgh_panel_hal.py: executable, "#!/usr/bin/env python3",
+# LinuxCNC's hal module + pyserial, no display), and the machine's own HAL file
+# keeps that form as its first-line comment:
+#   # loadusr ./szgh_panel_hal.py -c 0.01
+# This file loads the python driver instead. The component name it creates is
+# "szgh_panel" - the same pins the machine's post-GUI HAL nets - and "-c 0.01"
+# is the machine's 10 ms panel cycle, so behaviour matches the intended entry.
+#
+# LinuxCNC changes to the INI's directory (configs/) before loading HAL, so this
+# relative path resolves to ../baiermill_pb/szgh_panel_hal.py.
+loadusr ../../baiermill_pb/szgh_panel_hal.py -c 0.01

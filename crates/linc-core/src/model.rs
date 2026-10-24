@@ -767,6 +767,107 @@ pub struct ProbeResult {
     /// slots by meaning instead of assuming X/Y/Z positions.
     #[serde(default)]
     pub family: crate::probe::ResultFamily,
+    /// Stable catalogue id; never infer Apply behavior from the display name.
+    #[serde(default)]
+    pub operation: String,
+    /// Result parameters actually updated during this run.
+    #[serde(default)]
+    pub updated: Vec<u16>,
+    /// Raw source WCS offsets captured before the run.
+    #[serde(default)]
+    pub source_offsets: AxisMap<f64>,
+    /// Captured start/corner values needed by angle Apply (simulation and
+    /// diagnostics; LinuxCNC evaluates the matching controller-side context).
+    #[serde(default)]
+    pub auxiliary: std::collections::BTreeMap<String, f64>,
+    /// Rotation to apply, present only when it was requested at run time.
+    #[serde(default)]
+    pub rotation: Option<f64>,
+    /// The values are already live: a DIRECT write or a verified explicit Apply.
+    #[serde(default)]
+    pub applied: bool,
+}
+
+impl ProbeResult {
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_operation(
+        operation: &crate::probe::ProbeOperation,
+        results: &crate::probe::ParameterResults,
+        source_offsets: AxisMap<f64>,
+        wcs: String,
+        mode: String,
+        updated: Vec<u16>,
+        auxiliary: std::collections::BTreeMap<String, f64>,
+        rotation: Option<f64>,
+        applied: bool,
+    ) -> Self {
+        Self {
+            routine: operation.name.into(),
+            measured: AxisMap::from_entries(results.work_positions(operation, &auxiliary)),
+            error: None,
+            wcs,
+            mode,
+            timestamp_ms: now_ms(),
+            values: results.values.to_vec(),
+            family: operation.result_family(),
+            operation: operation.id.into(),
+            updated,
+            source_offsets,
+            auxiliary,
+            rotation,
+            applied,
+        }
+    }
+
+    pub fn has_parameter(&self, parameter: u16) -> bool {
+        self.updated.contains(&parameter)
+    }
+
+    pub fn value(&self, parameter: u16) -> Option<f64> {
+        if !self.has_parameter(parameter) || !(1001..=1012).contains(&parameter) {
+            return None;
+        }
+        self.values.get((parameter - 1001) as usize).copied()
+    }
+
+    pub fn apply_error(&self, active_index: Option<u8>) -> Result<(), String> {
+        if self.applied {
+            return Err("this result was already applied".into());
+        }
+        let operation = crate::probe::operation(&self.operation)
+            .ok_or_else(|| "probe result has no valid originating operation".to_string())?;
+        let terms = operation.apply_terms();
+        if terms.is_empty() {
+            return Err(format!(
+                "{} has no work-offset Apply action",
+                operation.name
+            ));
+        }
+        let index = active_index.ok_or_else(|| "no active work offset".to_string())?;
+        let active = wcs_name(index);
+        if self.wcs != active {
+            return Err(format!(
+                "result belongs to {}; re-probe in {active} before Apply",
+                self.wcs
+            ));
+        }
+        for term in terms {
+            let required: &[u16] = match term.source {
+                crate::probe::ApplySource::Slot(parameter) => &[parameter],
+                crate::probe::ApplySource::SlotMinusDelta(parameter)
+                | crate::probe::ApplySource::SlotPlusDelta(parameter) => &[parameter, 1011],
+                _ => &[],
+            };
+            for parameter in required {
+                if !self.has_parameter(*parameter) {
+                    return Err(format!(
+                        "result is missing required parameter #{parameter}; re-run the probe"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -776,6 +877,9 @@ pub struct ProbeState {
     pub selected_wcs: String,
     pub calibration_offset: Option<f64>,
     pub calibration_diameter: Option<f64>,
+    /// Live G38 probe input, when reported by the controller.
+    #[serde(default)]
+    pub input_tripped: Option<bool>,
     pub last_result: Option<ProbeResult>,
     pub history: VecDeque<ProbeResult>,
     pub running: bool,
@@ -791,6 +895,7 @@ impl Default for ProbeState {
             selected_wcs: "G54".into(),
             calibration_offset: None,
             calibration_diameter: None,
+            input_tripped: None,
             last_result: None,
             history: VecDeque::new(),
             running: false,

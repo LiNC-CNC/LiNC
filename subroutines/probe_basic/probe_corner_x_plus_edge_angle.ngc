@@ -137,6 +137,10 @@ o<probe_corner_x_plus_edge_angle> sub
 
   #<c1y> = [#<z1y> + [#<c1xr> - #<z1x>] * SIN[#<edge_angle>] + [#<c1yr> - #<z1y>] * COS[#<edge_angle>]]
 
+  (LiNC explicit Apply context; no effect on Probe Basic operation)
+  #<_linc_corner_x> = #<c1x>
+  #<_linc_corner_y> = #<c1y>
+
   (Probe Completion Move to Z Clearance Plane, and XY Zero)
   G91
   F[#<probe_traverse_fr>]

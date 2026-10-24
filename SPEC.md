@@ -108,7 +108,7 @@ else, so it cannot shadow another page's command.
 |---|---|
 | Machine (MAIN) | `Ctrl+F10`/`Ctrl+▢` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail, `Ctrl+R` run from line, `Ctrl+G` go to a line number |
 | Program | `FILE` open the file browser, `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
-| Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Ctrl+X` delete |
+| Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Backspace` delete |
 | MDI | `Enter` issue, `Up`/`Down` history, `Esc` clear the unissued block |
 | Help | `/` or `Ctrl+F` focus search, `Up`/`Down` select, `Enter` open the reference, `Backspace` back in the reference dialog |
 | Offsets, Tools, Probe | Arrows select a row |
@@ -762,12 +762,13 @@ previous page.
   turns accent and the other pane's row band dims; `Up`/`Down` move the
   selection and `PageUp`/`PageDown` move a page, with the list scrolling the
   cursor into view; `Enter` opens a program from `NC_FILES` or copies a file from USB
-  into `NC_FILES`; `Backspace` goes up a folder; `C` copies the selected entry to
+  into `NC_FILES`; `C` copies the selected entry to
   the other pane; `R` renames it in place (the NAME cell becomes a field with the
   name without its extension selected; Enter commits, Escape restores);
-  `Ctrl+R` refreshes; `E` ejects; `Delete` (or `Ctrl+X`, since the CNC keyboard
-  has no Delete key) deletes the selected file after a confirmation naming its
-  full path.
+  `Ctrl+R` refreshes; `E` ejects; `Delete` (or `Backspace`, since the CNC
+  keyboard has no Delete key) deletes the selected file after a confirmation
+  naming its full path. `Ctrl+C`/`Ctrl+X`/`Ctrl+V` stay with text editing and
+  are not Files actions; the `..` row opens the parent folder.
 - The lists are rows like the tool table: NAME/SIZE/MODIFIED header, a striped
   row per entry, the selected row's band and rim bar, and no column selection.
 - Inside a directory the list starts with a `..` row. It is selectable with the

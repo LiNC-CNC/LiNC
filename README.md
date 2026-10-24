@@ -89,9 +89,9 @@ short settle, since the panel's HAL pulse at boot can arrive before the task is
 ready to take it (which left the panel showing the mushroom out and the HMI
 still showing E-STOP). If a step does not happen, `sim-ready` prints the HAL
 pins that are holding it. The HMI enforces a minimum 1280×720 window,
-scales proportionally above it, and preserves the SVG font ratios. `linc --check-config --config configs/baiermill.toml` validates
-a profile, its LinuxCNC INI and safety policy without opening the display or
-HAL.
+scales proportionally above it, and preserves the SVG font ratios. `linc --check-config --config configs/baiermill-pb.toml`
+validates a profile, its LinuxCNC INI, the probe bundle it resolves and the
+safety policy without opening the display or HAL.
 
 ## Configuration
 
@@ -101,7 +101,8 @@ The HMI is configured per machine, with explicit profile selection:
 |---|---|
 | Shared defaults | `configs/base.toml` |
 | BaierMill mill simulation | `configs/sim.toml` |
-| BaierMill physical mill | `configs/baiermill.toml` |
+| BaierMill physical mill | `configs/baiermill-pb.toml` (LiNC's reviewed machine configuration) |
+| BaierMill physical mill, machine's own INI | `configs/baiermill.toml` (fails `--check-config`: no probe bundle) |
 | Lathe simulation | `configs/lathe-sim.toml` |
 
 The machine profile points at the LinuxCNC INI, which remains authoritative for
@@ -112,7 +113,7 @@ LiNC writes only its declared `linc.*` HAL outputs.
 
 ```sh
 ./scripts/start-sim.sh                       # real LinuxCNC + sim HAL
-linc --config configs/baiermill.toml         # physical machine / its display entry
+linc --config configs/baiermill-pb.toml      # physical machine / its display entry
 ```
 
 See [`CONFIGURATION.md`](CONFIGURATION.md) for the merge rules, schema, safety
@@ -163,13 +164,32 @@ POSTGUI_HALFILE = /home/jack/CNC/LiNC/hal/linc-postgui.hal
 `LINC_CONFIG` must name the same profile used by the `linc` display:
 
 ```sh
-export LINC_CONFIG=/home/jack/CNC/LiNC/configs/baiermill.toml
+export LINC_CONFIG=/home/jack/CNC/LiNC/configs/baiermill-pb.toml
 linc --config "$LINC_CONFIG"
 ```
 
 The core HAL expects the generic `cnc_panel` component and pins. The live
 machine HAL must rename or alias the legacy panel component before using this
 file unchanged.
+
+## 3D machine simulator (`linc-sim3d`)
+
+`crates/linc-sim3d` is a small 3D simulator that stands in for the BaierMill so
+touch probing can be tested without a machine. It models the body, the probe and
+the cutters, loads STEP workpieces, and publishes probe contact on the
+`linc-sim3d` HAL component; `hal/linc-sim3d.hal` ORs it with the panel's PROBE
+key into `motion.probe-input`. Cutting material is **not** simulated.
+
+```sh
+./target/debug/linc-sim3d --config configs/sim3d.toml   # the 3D window, jogged from the panel
+./target/debug/linc-sim3d --hal                         # HAL component + the window
+./target/debug/linc-sim3d --selftest                    # probe sweep, PASS/FAIL lines
+```
+
+`--hal` is the mode `scripts/start-sim.sh` starts, so the rig shows the 3D window by default: one process owns the HAL component and the view, and closing the window (Esc) keeps sampling, so a probe move in progress is never interrupted. A headless rig sets `LINC_SIM3D_WINDOW=0` or passes `--no-window`; `--window` forces the window even when no display is detected.
+
+Full documentation - pins, probe wiring, coordinates, STEP workpieces,
+performance and limitations - is in [docs/sim3d.md](docs/sim3d.md).
 
 ## Design decisions locked in
 
@@ -278,7 +298,9 @@ LiNC/
 │   ├── base.toml
 │   ├── sim.toml
 │   ├── lathe-sim.toml
-│   └── baiermill.toml
+│   ├── baiermill.toml
+│   ├── baiermill-pb.toml  # reviewed machine profile
+│   └── baiermill-pb.ini   # LiNC's copy of the machine INI
 ├── subroutines/
 │   └── probe_basic/      # Probe Basic probing G-code, vendored verbatim
 ├── docs/                 # architecture guide, diagrams and README screenshots
@@ -341,10 +363,33 @@ states GPLv2 in its README; `SOURCE.md` records that conflict. LiNC itself is
 GPL-2.0-or-later, which is compatible with distributing the combined work under
 GPLv3.
 
-A machine profile that uses its own LinuxCNC INI must add this directory to
-that INI's `SUBROUTINE_PATH` (and, if it wants abort cleanup, set
-`ON_ABORT_COMMAND = O<on_abort> CALL`). `baiermill.toml` currently points at
-`baiermill_pb/probe_basic.ini`, whose own `subroutines/` copy takes precedence.
+A machine profile whose own LinuxCNC INI does not put this directory first in
+`SUBROUTINE_PATH` cannot run a Probe Run: every generated Run starts with
+`o<touch_probe_param_update> call` and `o<linc_probe_context> call`, and the
+machine's copy has neither the context helper nor LiNC's angle anchors and
+traverse-feed corrections.
+
+`configs/baiermill-pb.ini` is LiNC's reviewed BaierMill configuration: a copy
+of the machine's `probe_basic.ini` with identical axes, limits, homing, PID,
+ATC, tool table, parameter file and HAL composition (except two LiNC-owned
+files: the panel helper `hal/baiermill-pb-szgh-panel.hal` and the post-GUI
+`hal/baiermill-pb-postgui.hal`, which keeps every machine net and drops only
+the nets that fed the Probe Basic window), but LiNC's display,
+`SUBROUTINE_PATH = ../subroutines/probe_basic:../../baiermill_pb/subroutines:...`
+and paths relative to `configs/`. `baiermill_pb` itself stays untouched;
+`configs/baiermill-pb.toml` selects the copy. Deploy the whole bundle (not one
+file), then confirm it with
+`linc --config configs/baiermill-pb.toml --check-config`, which fails when a
+routine a Probe Run needs is missing or a resolved routine is not LiNC's
+reviewed copy. That check reads no HAL file contents and starts no LinuxCNC,
+so it is not a start-readiness check. The profile is still not start-ready:
+`hal/linc.hal` (LiNC's `cnc_panel.*` wiring), a profile-aware post-GUI
+choice in `scripts/linc-display.sh` and a real HAL start are all missing —
+CONFIGURATION.md §7 lists them. `configs/baiermill.toml` keeps pointing at the machine's own
+INI and now fails that check, which is the deployment defect surfaced before a
+Run instead of during one. Adding `ON_ABORT_COMMAND = O<on_abort> CALL` (as
+`configs/sim.ini` does) is still the machine owner's decision: without it an
+aborted probe leaves feed override cancelled.
 
 ## Implementation status
 

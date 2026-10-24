@@ -15,7 +15,7 @@ cargo build --release                       # all three binaries
 cargo test --workspace                      # 198 tests today
 python3 scripts/mcp-smoke.py                # phase 3+4 acceptance, real binaries
 ./target/release/linc --config configs/sim.toml --check-config
-./target/release/linc --config configs/baiermill.toml --check-config
+./target/release/linc --config configs/baiermill-pb.toml --check-config
 scripts/build-deb.sh                        # Debian packages, amd64 + arm64
 ```
 
@@ -27,6 +27,7 @@ scripts/build-deb.sh                        # Debian packages, amd64 + arm64
 
 - `--check-config` merges the profile, reads the INI, resolves paths and checks safety without a window or HAL; it fails if the INI or a `../../` sibling checkout is missing.
 - `lathe-sim.toml` is expected to fail `--check-config` until its tool table has `P`; that is the turret guard.
+- `baiermill.toml` is expected to fail `--check-config` until the BaierMill machine tree carries the reviewed probe bundle; that is the deployment guard. Validate the machine with `baiermill-pb.toml`, whose `configs/baiermill-pb.ini` lists `../subroutines/probe_basic` first.
 - `./scripts/start-sim.sh` (`--detach`; stop with `./scripts/stop-sim.sh`) runs `linuxcnc configs/sim.ini` from `configs/`, exports
   `LINC_CONFIG=configs/sim.toml`, builds only when a release binary is missing, and needs `DISPLAY`/`WAYLAND_DISPLAY`.
   `--release-estop`, `--power-on`, `--home`, `--load [FILE]`, `--float` bring the session up ready; the E-stop and POWER ON keys
@@ -145,7 +146,9 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
 
 - Present: `MAIN`, `FILE`, `TOOL`, `OFFSET`, `WIN` (F5, F6, F7, F8, F10), `ESC`, arrows, `PGUP`, `PGDN`, `HOME`, `END`, `ENTER`, `BACKSPACE`,
   letters, digits, punctuation, `CTRL`, and `MO(1)` (symbols, mouse buttons, `Ctrl+Q`). Letters arrive lowercase.
-- Missing: F1–F4, F9, F11, F12, `Tab`, `Shift`, `Delete`. Provide a Ctrl fallback (Files accepts `Ctrl+X` as Delete) or a focusable action.
+- Missing: F1–F4, F9, F11, F12, `Tab`, `Shift`, `Delete`. Files deletes with `Backspace` (or `Delete` where
+  present). `Ctrl+C`/`Ctrl+X`/`Ctrl+V` belong to text editing; only the Probe page takes `Ctrl+X` (X data reset), and only
+  while no text editor has focus.
 - Global keys navigate: F5 Machine, F6 Program (again → Files), F7 Tools, F8 Offsets, `Ctrl+D` Diagnostics, `Ctrl+H` G-code Help,
   `M` Messages, `Ctrl+Q` guarded quit, Esc, arrows/Page/Home/End, Enter. `[keys]` drives the shell; `Keymap::from_config` is the only source.
 - Everything else is page-local and consumed only on that page: `Ctrl+S`, `Ctrl+Z/Y`, editor keys, `Ctrl+R` run-from-line, `Ctrl+0` fit, `Ctrl+L`
@@ -170,7 +173,7 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
   Remove `WAYLAND_DISPLAY` from the child environment when a capture or smoke test must use Xvfb's 1280×720 screen.
 - **Profile selection.** `--config` or `LINC_CONFIG` is mandatory; there is no default. Under LinuxCNC they must match the `[DISPLAY]` line, and
   `-ini` overrides `machine.linuxcnc_ini`.
-- **Sibling checkouts.** `sim.toml` is self-contained (`configs/` + `hal/`), but `baiermill.toml` and `lathe-sim.toml` point outside the repo
-  (`../../baiermill_pb`, `../../probe_basic_dev`); `--check-config` fails without them.
+- **Sibling checkouts.** `sim.toml` is self-contained (`configs/` + `hal/`), but `baiermill-pb.toml` (via `configs/baiermill-pb.ini`), `baiermill.toml`
+  and `lathe-sim.toml` point outside the repo (`../../baiermill_pb`, `../../probe_basic_dev`); `--check-config` fails without them.
 - **egui 0.37.** The workspace pins `egui`/`eframe`/`egui_extras` 0.37. Copy API style from `theme.rs`/`shell.rs`; older egui examples may not
   compile, and a second egui version breaks type compatibility.

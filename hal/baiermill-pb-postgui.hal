@@ -1,0 +1,462 @@
+# LiNC's post-GUI HAL for the BaierMill machine configuration.
+#
+# Started from baiermill_pb/hallib/probe_basic_postgui.hal, which configs/
+# baiermill-pb.ini used to load directly. The machine tree is never edited. Only
+# the nets that existed to feed the Probe Basic window are gone (its mode pins,
+# jog and spindle button pins, override and load displays, timers, probe lamp,
+# program lamps, proghome buttons, quit-on-pin and its manual tool-change
+# component); every machine net is copied verbatim, in the original order:
+#
+#   - SZGH panel: spindle and direction LEDs, chuck/tool LEDs, 7-segment tool
+#     display, single block, cycle start/stop/pause through and2/or2/not/toggle,
+#     K4 LED, worklamp, lube, coolant, block delete, optional stop, ready/run/
+#     cycle LEDs, jog LEDs, homed and velocity LEDs, jog-enable gating, home
+#     buttons, spindle-orient LED.
+#   - Machine/task: E-stop handling, spindle at speed (near + mult2, including
+#     the spindle-override term), spindle inhibit on the clamp sensor, ATC
+#     piston, spindle enable/forward/reverse gating while tool 99 (probe) is
+#     loaded, and the rio worklamp/oil-lube/spindle bits.
+#   - Pendant: whb.halui.program.* run/resume/pause/stop and the whb jog-enable
+#     inputs.
+#
+# Component loading is unchanged from the machine file: time, not, toggle, and2,
+# or2, mult2, near, conv_s32_float and comp with the same instance names. rio.hal
+# loads only KINEMATICS, EMCMOT, rio and pid, pendant.hal only xhc-whb04b-6, and
+# the panel helper only the szgh_panel component, so nothing is loaded twice.
+# Caveat: this file owns the toggle.* and not.paused instance names, which
+# hal/linc.hal also loads, so that file cannot be added to this profile without
+# renaming one side.
+#
+# No linc.* or cnc_panel.* pin is wired here. LinuxCNC loads POSTGUI_HALFILE as
+# soon as it spawns the display, before the HMI has created linc.*, and this
+# profile does not start linc-panel (hal/linc.hal does that). LiNC's own wiring
+# belongs in hal/linc-postgui.hal, loaded after linc.* exists.
+#
+# Status: this file has not been through a LinuxCNC HAL start, and no machine
+# hardware was touched. CONFIGURATION.md section 7 lists what is unverified.
+loadrt time
+loadrt not names=not.program-idle,\
+not.cycle-stop-inv,\
+not.estop-raw,\
+not.paused,\
+not.coolant-on,\
+not.bdt-on,\
+not.opt-on,\
+not.spindle-on,\
+not.tool-99,\
+not.homing,\
+not.worklamp,\
+not.ls-b
+
+loadrt toggle names=toggle.coolant,\
+toggle.bdt,\
+toggle.opt,\
+toggle.sbk,\
+toggle.worklamp,\
+toggle.lube
+
+loadrt and2 names=and2.coolant-off,\
+and2.ready-led,\
+and2.cycle-start-resume,\
+and2.cycle-start-run,\
+and2.run-enabled,\
+and2.tool-change-piston,\
+and2.jog-enable-x,\
+and2.jog-enable-y,\
+and2.jog-enable-z,\
+and2.spindle-enable-gate,\
+and2.spindle-forward-on,\
+and2.spindle-forward-gate,\
+and2.spindle-rev-gate,\
+and2.home-all,\
+and2.home-x,\
+and2.home-y,\
+and2.home-z,\
+and2.worklamp,\
+and2.spindle-orient-gate
+
+loadrt or2 names=or2.pause-trigger,\
+or2.ready-or,\
+or2.k4-led,\
+or2.homing-x-y,\
+or2.tool-change-piston,\
+or2.homing-any,\
+or2.pendant-run,\
+or2.pendant-resume,\
+or2.pendant-pause,\
+or2.pendant-stop
+
+loadrt mult2 names=mult2.jog-speed,mult2.spindle-speed
+
+loadrt near names=near.spindle-speed
+
+addf time.0 servo-thread
+addf not.program-idle servo-thread
+addf not.cycle-stop-inv servo-thread
+addf not.estop-raw servo-thread
+addf not.paused servo-thread
+addf not.coolant-on servo-thread
+addf not.bdt-on servo-thread
+addf not.opt-on servo-thread
+addf not.spindle-on servo-thread
+addf not.tool-99 servo-thread
+addf not.worklamp servo-thread
+addf toggle.coolant servo-thread
+addf toggle.bdt servo-thread
+addf toggle.opt servo-thread
+addf toggle.sbk servo-thread
+addf toggle.worklamp servo-thread
+addf toggle.lube servo-thread
+addf and2.coolant-off servo-thread
+addf and2.ready-led servo-thread
+addf and2.cycle-start-resume servo-thread
+addf and2.cycle-start-run servo-thread
+addf and2.run-enabled servo-thread
+addf and2.tool-change-piston servo-thread
+addf and2.jog-enable-x servo-thread
+addf and2.jog-enable-y servo-thread
+addf and2.jog-enable-z servo-thread
+addf and2.spindle-enable-gate servo-thread
+addf and2.spindle-forward-on servo-thread
+addf and2.spindle-forward-gate servo-thread
+addf and2.spindle-rev-gate servo-thread
+addf or2.pause-trigger servo-thread
+addf or2.ready-or servo-thread
+addf or2.k4-led servo-thread
+addf or2.homing-x-y servo-thread
+addf or2.homing-any servo-thread
+addf or2.tool-change-piston servo-thread
+addf or2.pendant-run servo-thread
+addf or2.pendant-resume servo-thread
+addf or2.pendant-pause servo-thread
+addf or2.pendant-stop servo-thread
+addf not.homing servo-thread
+addf and2.home-all servo-thread
+addf and2.home-x servo-thread
+addf and2.home-y servo-thread
+addf and2.home-z servo-thread
+addf and2.worklamp servo-thread
+addf not.ls-b servo-thread
+addf and2.spindle-orient-gate servo-thread
+addf mult2.jog-speed servo-thread
+addf mult2.spindle-speed servo-thread
+addf near.spindle-speed servo-thread
+
+net pdnt.program.is-idle => not.program-idle.in
+net pdnt.program.is-paused => time.0.pause
+net cycle-timer time.0.start <= not.program-idle.out
+# Cycle-time counters fed only the Probe Basic window's timers. LiNC shows
+# cycle time itself, so time.0.seconds/minutes/hours are unread; the
+# time.0.start/pause nets above stay because they are machine-neutral.
+
+# spindle at speed
+net spindle-cmd spindle.0.speed-cmd-rps => mult2.spindle-speed.in0
+net spindle-speed-cmd-with-override mult2.spindle-speed.out => near.spindle-speed.in1
+net sig_rio_spindle-encoder_rps => near.spindle-speed.in2
+net spindle-at-speed near.spindle-speed.out => spindle.0.at-speed
+setp near.spindle-speed.scale 1.05
+
+#  ---manual tool change signals---
+# The manual tool-change dialog component Probe Basic loaded is gone.
+# tool-change and tool-prep-number are already driven by rio.hal from
+# iocontrol.0.tool-*; LiNC shows its own CHANGE TOOL prompt and drives
+# tool-changed from linc.tool-change-confirm in hal/linc-postgui.hal, which
+# is loaded after the HMI's linc.* component exists (CONFIGURATION.md 7).
+net tool-change      => and2.tool-change-piston.in0
+net tool-change      => szgh_panel.led_chuck
+net tool-change-button <= szgh_panel.chuck
+net tool-change-button => and2.tool-change-piston.in1
+net tool-change-piston <= and2.tool-change-piston.out
+net tool-change-piston => or2.tool-change-piston.in0
+# --- SZGH Panel Tool Number Display ---
+# Connect current tool number to panel 7-segment display
+net tool-number <= iocontrol.0.tool-number
+net tool-number => szgh_panel.sseg_spdtool
+net tool-prep-number => szgh_panel.sseg_magtool
+
+# ---automatic tool change support---
+# clamp sensor
+net sig_rio_ls-a_bit => motion.digital-in-05
+# unclamp sensor
+net sig_rio_ls-b_bit => motion.digital-in-02
+
+net auto-tool-change-out <= motion.digital-out-02 => or2.tool-change-piston.in1
+net tool-change-piston-out <= or2.tool-change-piston.out => rio.tool-change.bit
+net spindle-locked <= spindle.0.locked => and2.spindle-orient-gate.in0
+net sig_rio_ls-b_bit => not.ls-b.in
+net spindle-clamped <= not.ls-b.out => and2.spindle-orient-gate.in1
+net spindle-orient-active <= and2.spindle-orient-gate.out => rio.spindle-position-home.bit => szgh_panel.led_spd_ori
+net ori-button <= szgh_panel.spd_ori => halui.mdi-command-05
+net spindle-orient <= spindle.0.orient => spindle.0.is-oriented
+net sig_rio_ls-b_bit => spindle.0.inhibit
+
+# *** Probe graphic simulation trigger push probe tip ***
+net sig_rio_probe_bit => motion.probe-input
+# The probe lamp was a Probe Basic indicator; the machine signal above
+# (motion.probe-input) is unchanged.
+
+# Spindle encoder RPM fed only Probe Basic's spindle and sidebar readouts;
+# LiNC reads spindle RPM from NML status.
+
+# *** SZGH Panel ***
+# Panel override pots fed Probe Basic display pins only. LiNC reads the
+# overrides from NML status and drives halui through scale.feed/conv.feed
+# in hal/linc.hal (that file is not part of this profile yet).
+# mult2.jog-speed is left with no consumer; the spindle override is still
+# needed for spindle-at-speed below.
+
+# The rapid override fed only Probe Basic's override display; LiNC reads it
+# from NML status.
+net spindle-ovr szgh_panel.spindle_override
+net spindle-ovr => mult2.spindle-speed.in1
+net spindle-status-rev halui.spindle.0.runs-backward => szgh_panel.led_spd_ccw
+net spindle-status-forward halui.spindle.0.runs-forward => szgh_panel.led_spd_cw
+net spindle-status-on halui.spindle.0.is-on => not.spindle-on.in
+net spindle-status-off not.spindle-on.out => szgh_panel.led_spd_sp
+# Spindle load fed only Probe Basic's load indicators; LiNC reads spindle
+# load from NML status.
+
+# Jog direction signals still drive the panel LEDs. The removed sinks were
+# Probe Basic jogs; under LiNC jog comes from cnc_panel.jog_* through
+# hal/linc.hal (halui axis/joint jog pins), not from szgh_panel.jog_*.
+net jog-x-pos szgh_panel.jog_xp
+net jog-x-pos => szgh_panel.led_jog_xp
+net jog-x-neg szgh_panel.jog_xn
+net jog-x-neg => szgh_panel.led_jog_xn
+net jog-y-pos szgh_panel.jog_yp
+net jog-y-pos => szgh_panel.led_jog_yp
+net jog-y-neg szgh_panel.jog_yn
+net jog-y-neg => szgh_panel.led_jog_yn
+net jog-z-pos szgh_panel.jog_zp
+net jog-z-pos => szgh_panel.led_jog_zp
+net jog-z-neg szgh_panel.jog_zn
+net jog-z-neg => szgh_panel.led_jog_zn
+net rapid szgh_panel.rapid => szgh_panel.led_rapid
+# The rapid indicator was a Probe Basic lamp; the panel LED above stays.
+
+# Connect axis homed status to panel LEDs
+net x-homed joint.0.homed => szgh_panel.led_x
+net y-homed joint.1.homed => szgh_panel.led_y
+net z-homed joint.2.homed => szgh_panel.led_z
+
+# Connect joint velocity commands to panel velocity displays
+net j0vel-cmd => szgh_panel.vel_x
+net j1vel-cmd => szgh_panel.vel_y
+net j2vel-cmd => szgh_panel.vel_z
+
+# --- SZGH Panel Program Control Buttons ---
+# Cycle start (normally open) - routes to run or resume based on pause state
+# Run only when: button AND NOT paused AND idle (not running)
+# Resume only when: button AND paused
+net cycle-start-raw szgh_panel.cycle_start
+net cycle-start-raw => and2.cycle-start-run.in0
+net pdnt.program.is-paused => not.paused.in
+net not-paused not.paused.out => and2.run-enabled.in0
+net pdnt.program.is-idle => and2.run-enabled.in1
+net run-enabled and2.run-enabled.out => and2.cycle-start-run.in1
+net cycle-start-run and2.cycle-start-run.out => or2.pendant-run.in0
+net pdnt.program.run whb.halui.program.run => or2.pendant-run.in1
+net pendant-run-cmd or2.pendant-run.out => halui.program.run
+net cycle-start-raw => and2.cycle-start-resume.in0
+net pdnt.program.is-paused => and2.cycle-start-resume.in1
+net cycle-start-resume and2.cycle-start-resume.out => or2.pendant-resume.in0
+net pdnt.program.resume whb.halui.program.resume => or2.pendant-resume.in1
+net pendant-resume-cmd or2.pendant-resume.out => halui.program.resume
+
+# Cycle stop - inverted (normally closed), use NOT gate
+net cycle-stop-raw szgh_panel.cycle_stop => not.cycle-stop-inv.in
+
+# Single block - triggers both pause and step
+net single-block-button szgh_panel.sbk => toggle.sbk.in
+net single-block-mode <= toggle.sbk.out
+net single-block-mode => szgh_panel.led_sbk
+net single-block-step szgh_panel.step => halui.program.step
+
+net single-block-mode => or2.pause-trigger.in0
+net cycle-stop-pause not.cycle-stop-inv.out => or2.pause-trigger.in1
+net pause-trigger or2.pause-trigger.out => or2.pendant-pause.in0
+net pdnt.program.pause whb.halui.program.pause => or2.pendant-pause.in1
+net pendant-pause-cmd or2.pendant-pause.out => halui.program.pause
+
+# K4 button triggers program stop (not pause)
+net k4-btn szgh_panel.k4 => or2.pendant-stop.in0
+net pdnt.program.stop whb.halui.program.stop => or2.pendant-stop.in1
+net pendant-stop-cmd or2.pendant-stop.out => halui.program.stop
+
+# K4 LED - on when program is running OR paused
+net pdnt.program.is-running => or2.k4-led.in0
+net pdnt.program.is-paused => or2.k4-led.in1
+net k4-led or2.k4-led.out => szgh_panel.led_k4
+
+# E-stop
+net sig_rio_estop-in_bit => not.estop-raw.in
+net estop-reset not.estop-raw.out => halui.estop.reset
+# The machine-on switch also drove Probe Basic's quit-on-falling-edge.
+# LiNC never quits on a HAL pin (Ctrl+Q is guarded), so it has no sink
+# here; rio.hal still routes that switch to halui.machine.on.
+
+# Machine lock
+#net machine-lock szgh_panel.mlk => halui.machine.lock
+
+# --- SZGH Panel Worklamp Toggle ---
+# Inverted toggle so lamp is ON by default; gated by machine-on
+net worklamp-btn szgh_panel.worklamp => toggle.worklamp.in
+net worklamp-toggle toggle.worklamp.out => not.worklamp.in
+net worklamp-default not.worklamp.out => and2.worklamp.in0
+net sig_halui_machine_is-on => and2.worklamp.in1
+net worklamp-on and2.worklamp.out => rio.worklamp.bit
+net worklamp-on => szgh_panel.led_worklamp
+
+# --- SZGH Panel Lube Toggle ---
+net lube-btn szgh_panel.lube => toggle.lube.in
+net lube-toggle toggle.lube.out => rio.oil-lube.bit
+net lube-toggle => szgh_panel.led_lub
+
+# --- SZGH Panel Coolant Toggle ---
+# Coolant button toggles flood on/off using toggle component
+net coolant-btn szgh_panel.coolant => toggle.coolant.in
+net coolant-toggle toggle.coolant.out => halui.flood.on
+net coolant-toggle => not.coolant-on.in
+net coolant-off-in not.coolant-on.out => and2.coolant-off.in0
+net coolant-off and2.coolant-off.out => halui.flood.off
+
+# --- SZGH Panel BDT (Block Delete) Toggle ---
+# BDT button toggles block delete on/off
+net bdt-btn szgh_panel.bdt => toggle.bdt.in
+net bdt-toggle toggle.bdt.out => halui.program.block-delete.on
+net bdt-toggle => not.bdt-on.in
+net bdt-off not.bdt-on.out => halui.program.block-delete.off
+
+# --- SZGH Panel OPT (Optional Stop) Toggle ---
+# OPT button toggles optional stop on/off
+net opt-btn szgh_panel.opt => toggle.opt.in
+net opt-toggle toggle.opt.out => halui.program.optional-stop.on
+net opt-toggle => not.opt-on.in
+net opt-off not.opt-on.out => halui.program.optional-stop.off
+
+# --- SZGH Panel Status LEDs ---
+# Machine ready LED - on when machine is on AND (program is idle OR paused)
+net sig_halui_machine_is-on => and2.ready-led.in0
+net sig_halui_machine_is-on => and2.coolant-off.in1
+net pdnt.program.is-idle => or2.ready-or.in0
+net pdnt.program.is-paused => or2.ready-or.in1
+net ready-or or2.ready-or.out => and2.ready-led.in1
+net ready-led and2.ready-led.out => szgh_panel.led_ready
+
+# Program running LED
+net pdnt.program.is-running => szgh_panel.led_run
+net pdnt.program.is-running => szgh_panel.led_cycle_on
+# The program-running indicator was a Probe Basic lamp; the panel LEDs
+# above carry the same status.
+
+# Cycle off LED lights up when the program is paused
+net pdnt.program.is-paused => szgh_panel.led_cycle_off
+
+# Coolant LED
+net flood-status halui.flood.is-on => szgh_panel.led_coolant
+
+# BDT LED - lights up when block delete is on
+net bdt-status halui.program.block-delete.is-on => szgh_panel.led_bdt
+
+# OPT LED - lights up when optional stop is on
+net opt-status halui.program.optional-stop.is-on => szgh_panel.led_opt
+
+# --- SZGH Panel Mode Selection ---
+# Mode switch: only mode-mpg is still needed (it gates jog-enable below).
+# The other mode pins fed Probe Basic's mode selector; under LiNC the
+# equivalent is halui.mode.* wired in hal/linc.hal from cnc_panel.mode_*,
+# which is not part of this profile yet, so those switches have no sink.
+net mode-mpg szgh_panel.mode_mpg
+
+# --- Jog Enable Control ---
+# Jog enable for each axis is only active when MPG mode is selected
+# This prevents accidental jogging in other modes
+net mode-mpg => and2.jog-enable-x.in0
+net mode-mpg => and2.jog-enable-y.in0
+net mode-mpg => and2.jog-enable-z.in0
+
+net pdnt.axis.x.jog-enable whb.axis.x.jog-enable => and2.jog-enable-x.in1
+net pdnt.axis.y.jog-enable whb.axis.y.jog-enable => and2.jog-enable-y.in1
+net pdnt.axis.z.jog-enable whb.axis.z.jog-enable => and2.jog-enable-z.in1
+
+net jog-enable-x and2.jog-enable-x.out => axis.x.jog-enable
+net jog-enable-y and2.jog-enable-y.out => axis.y.jog-enable
+net jog-enable-z and2.jog-enable-z.out => axis.z.jog-enable
+
+# --- SZGH Panel Spindle Control ---
+# Panel spindle buttons were routed to Probe Basic's spindle buttons.
+# LiNC's equivalent is hal/linc.hal: net spindle-cw cnc_panel.spd_cw =>
+# halui.spindle.0.forward (and reverse/stop). Wiring halui.spindle.0.* here
+# would give those pins a second signal once hal/linc.hal is loaded.
+
+# --- SZGH Panel Home Buttons ---
+# Detect if any axis is currently homing
+net x-homing joint.0.homing => or2.homing-x-y.in0
+net y-homing joint.1.homing => or2.homing-x-y.in1
+net xy-homing or2.homing-x-y.out => or2.homing-any.in0
+net z-homing joint.2.homing => or2.homing-any.in1
+net any-homing or2.homing-any.out => not.homing.in
+net not-homing not.homing.out
+
+# Home all axes button (only works when no axis is homing)
+net home-all-btn szgh_panel.home-all => and2.home-all.in0
+net not-homing => and2.home-all.in1
+net home-all-gated and2.home-all.out => halui.home-all
+
+# Individual axis home buttons (only work when no axis is homing)
+net home-x-btn szgh_panel.home-x => and2.home-x.in0
+net not-homing => and2.home-x.in1
+net home-x-gated and2.home-x.out => halui.joint.0.home
+
+net home-y-btn szgh_panel.home-y => and2.home-y.in0
+net not-homing => and2.home-y.in1
+net home-y-gated and2.home-y.out => halui.joint.1.home
+
+net home-z-btn szgh_panel.home-z => and2.home-z.in0
+net not-homing => and2.home-z.in1
+net home-z-gated and2.home-z.out => halui.joint.2.home
+
+# --- SZGH Panel Proghome Buttons (MDI G0 commands) ---
+# Proghome buttons issued MDI through the Probe Basic window. LiNC's panel
+# proghome keys are wired in hal/linc.hal; nothing here needs them.
+
+#################################################################################
+# Spindle disable when tool 99 (probe) is loaded
+#################################################################################
+# Load additional components needed (and2 instances loaded at top of file)
+loadrt conv_s32_float names=toolconv
+loadrt comp names=comp.tool-check
+
+addf toolconv servo-thread
+addf comp.tool-check servo-thread
+
+# Convert tool number from s32 to float (tool-number signal already defined above)
+net tool-number => toolconv.in
+net current-tool-float <= toolconv.out
+net current-tool-float => comp.tool-check.in0
+setp comp.tool-check.in1 99
+
+# Invert: high when tool is NOT 99
+net tool-is-99 <= comp.tool-check.equal
+net tool-is-99 => not.tool-99.in
+net tool-not-99 <= not.tool-99.out
+
+# Gate spindle enable signal
+net sig_spindle_0_on => and2.spindle-enable-gate.in0
+net tool-not-99 => and2.spindle-enable-gate.in1
+net gated-spindle-enable <= and2.spindle-enable-gate.out
+net gated-spindle-enable => rio.spindle.enable
+
+# Gate spindle forward signal
+net sig_spindle_0_forward => and2.spindle-forward-on.in0
+net sig_spindle_0_on => and2.spindle-forward-on.in1
+net sig_spindle_forward_on <= and2.spindle-forward-on.out => and2.spindle-forward-gate.in0
+net tool-not-99 => and2.spindle-forward-gate.in1
+net gated-spindle-forward <= and2.spindle-forward-gate.out
+net gated-spindle-forward => rio.spindle-forward.bit
+
+# Gate spindle reverse signal
+net sig_spindle_0_reverse => and2.spindle-rev-gate.in0
+net tool-not-99 => and2.spindle-rev-gate.in1
+net gated-spindle-rev <= and2.spindle-rev-gate.out
+net gated-spindle-rev => rio.spindle-reverse.bit

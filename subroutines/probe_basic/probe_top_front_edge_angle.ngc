@@ -35,6 +35,7 @@ o<probe_top_front_edge_angle> sub
   (set rotation offset to zero for new probe cycle)
   G10 L2 P[#5220] R0
 
+  #<workspace_x> = #[5201 + [20 * #5220]]
   #<workspace_y> = #[5202 + [20 * #5220]]
 
     (Probe Tool Safety Check)
@@ -49,6 +50,7 @@ o<probe_top_front_edge_angle> sub
   #<z_probe_stack> = [#<z_clearance> + #<probe_diameter> + #<extra_probe_depth>]
 
   #<x_start_position> = #5420
+  #<_linc_start_x> = #<x_start_position>
 
   (Call sub "probe_z_minus_sub" to Probe top of Workpiece)
   o<probe_z_minus_sub> call [#3014][#3015][#3016][#3017][#3020][#3021][#3030]
@@ -108,13 +110,13 @@ o<probe_top_front_edge_angle> sub
   (probe mode rules for WCO, Rotation and probe position measuring only)
   o130 if [#<probe_mode> EQ 0 AND #<wco_rotation> EQ 0]
       (Record Zero in selected axes and WCO)
-      G10 L2 P#5220 X[#<x_start_position>] Y[#<y_plus_zero_edge_start> + #<workspace_y>]
+      G10 L2 P#5220 X[#<x_start_position> + #<workspace_x>] Y[#<y_plus_zero_edge_start> + #<workspace_y>]
   o130 endif
 
   (probe mode rules for WCO, Rotation and probe position measuring only)
   o140 if [#<probe_mode> EQ 0 AND #<wco_rotation> EQ 1]
       (Record Zero in selected axes and WCO)
-      G10 L2 P#5220 X[#<x_start_position>] Y[#<y_plus_zero_edge_start> + #<workspace_y>] R[#<edge_angle>]
+      G10 L2 P#5220 X[#<x_start_position> + #<workspace_x>] Y[#<y_plus_zero_edge_start> + #<workspace_y>] R[#<edge_angle>]
   o140 endif
 
   (Reinstate Feedrate Override)

@@ -1,0 +1,50 @@
+# BaierMill physical-machine profile on LiNC's own machine configuration.
+#
+# Same machine as configs/baiermill.toml, but the LinuxCNC INI is LiNC's copy
+# in this directory (baiermill-pb.ini) instead of the machine's own
+# ../../baiermill_pb/probe_basic.ini. The copy is identical in axes, limits,
+# homing, PID, ATC, tool table, parameter file and HAL wiring, and differs only
+# in [DISPLAY], [RS274NGC] SUBROUTINE_PATH (LiNC's reviewed probe bundle first)
+# and the paths that were relative to the machine directory. The machine tree
+# stays untouched.
+#
+# The CNC control panel driver is part of LiNC and runs in the linc-panel
+# service; the HMI never opens /dev/ttyUSB0. LiNC writes only its declared
+# linc.* HAL outputs.
+
+schema_version = 1
+profile = "baiermill-pb"
+extends = "base.toml"
+
+[machine]
+name = "BaierMill"
+kind = "real"
+gui = "mill"
+linuxcnc_ini = "baiermill-pb.ini"
+
+[mill]
+max_axes = 5
+
+[ui]
+window_title = "LiNC - BaierMill"
+servo_load = ["X", "Y", "Z", "S"]
+
+[panel]
+kind = "physical"
+label = "CNC control panel"
+owner = "linc-panel"
+driver = "cnc-panel"
+mode_encoding = "one_hot_steady"
+override_encoding = "analog_steady"
+
+[panel.link]
+kind = "rs485"
+# linc-panel launch metadata. The panel service owns the serial port; the HMI
+# never opens it.
+port = "/dev/ttyUSB0"
+baud = 115200
+data_bits = 8
+parity = "none"
+stop_bits = 1
+# linc-panel service cycle; the driver sleeps ~14 ms per transaction.
+cycle_time_ms = 10

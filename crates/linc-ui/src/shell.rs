@@ -35,6 +35,12 @@ pub enum FocusRegion {
 /// Lines a PageUp/PageDown moves the selection in a read-only G-code view.
 const LINE_PAGE: isize = 10;
 
+/// The clipboard shortcut `egui-winit` converts into `Event::Cut`. It is the
+/// platform convention rather than a profile binding, and it is what the two
+/// page-local consumers bind: the Probe page's X data reset and the Files
+/// page's delete (`[keys].cut` defaults to the same chord).
+const CUT_SHORTCUT: Binding = Binding::new(egui::Key::X, egui::Modifiers::CTRL);
+
 /// One titled group of page-local keyboard commands shown in the sidebar.
 /// An empty title means the group has no header (most pages).
 struct ShortcutGroup {
@@ -88,6 +94,9 @@ pub struct LincApp {
     /// Rising-edge detector, so follow-current is re-armed when a program
     /// starts but not again on every poll after the operator selects a line.
     pub program_was_running: bool,
+    /// Geometry the Probe page painted, read by the 1280x720 layout tests.
+    #[cfg(test)]
+    pub probe_layout: screens::probe_view::ProbeLayout,
     pub toasts: Vec<Toast>,
     pub quit_requested: bool,
     pub last_snapshot_ms: u64,
@@ -324,10 +333,22 @@ impl LincApp {
                 .cloned()
                 .unwrap_or_default(),
         );
-        let probe_params = ProbeParameters::from_config(&profile.config.probe);
         // Runtime preferences are separate from the machine profile. They may
-        // restore the last page and view, never machine data.
+        // restore probe feeds/hints and UI state, never machine-owned identity
+        // or measured calibration.
         let preferences = linc_core::preferences::Preferences::load(&profile.preferences_path);
+        let mut probe_params = preferences
+            .probe
+            .clone()
+            .unwrap_or_else(|| ProbeParameters::from_config(&profile.config.probe));
+        probe_params.probe_tool_number = profile.config.probe.tool_number;
+        probe_params.calibration_offset = snapshot.probe.calibration_offset.unwrap_or(0.0);
+        let active_probe_wcs = snapshot
+            .offsets
+            .active_index
+            .filter(|index| (1..=9).contains(index))
+            .map(linc_core::model::wcs_name)
+            .unwrap_or_else(|| "--".into());
         let mut graph_style = graph_style(&profile);
         graph_style.bounds_mode = preferences
             .bounds_mode
@@ -388,7 +409,7 @@ impl LincApp {
             },
             offsets: OffsetsUi::default(),
             tools: ToolsUi::default(),
-            probe: ProbeUi::new(probe_params, profile.config.probe.wcs.clone()),
+            probe: ProbeUi::new(probe_params, active_probe_wcs),
             mdi: MdiUi::new(profile.config.mdi.quick_commands.clone()),
             help: HelpUi::default(),
             files: FilesUi::new(
@@ -447,6 +468,8 @@ impl LincApp {
             messages_dialog: false,
             messages_scroll: 0.0,
             program_was_running: false,
+            #[cfg(test)]
+            probe_layout: screens::probe_view::ProbeLayout::default(),
             last_connection: Some(snapshot.panel.connected),
             last_protect: Some(snapshot.panel.protect_effective()),
             panel_offline_toast: false,
@@ -901,6 +924,10 @@ impl LincApp {
         }
         if page == Page::Probe {
             self.homing_return_page = Page::Offsets;
+            // Every entry path starts with nothing selected: Esc from Files
+            // returns to the tab, not to a routine Enter would run. The tab
+            // itself is preserved; only F8 selects the first one.
+            screens::probe::clear_selection(self);
         }
         if !page.is_mode_driven() {
             self.last_non_mode_page = page;
@@ -1031,6 +1058,16 @@ impl LincApp {
     /// Ask for the preferences file to be written on the next save window.
     pub fn touch_preferences(&mut self) {
         self.preferences_dirty = true;
+    }
+
+    /// Persist operator-owned probe settings after a committed UI edit. Serde
+    /// skips the profile-owned tool number and controller-owned calibration.
+    pub fn remember_probe_params(&mut self) {
+        let params = self.probe.params.clone();
+        if self.preferences.probe.as_ref() != Some(&params) {
+            self.preferences.probe = Some(params);
+            self.preferences_dirty = true;
+        }
     }
 
     pub fn save_preferences(&mut self, force: bool) {
@@ -1255,10 +1292,21 @@ impl LincApp {
         self.toasts.retain(|toast| toast.until > Instant::now());
     }
 
+    /// Enter a page that is coming back after its mode went away. The
+    /// destination policy is unchanged (`last_non_mode_page` still decides),
+    /// but a restored Probe page is an entry like any other: nothing may come
+    /// back selected for Enter to run.
+    fn restore_page(&mut self, page: Page) {
+        if page == Page::Probe {
+            screens::probe::clear_selection(self);
+        }
+        self.page = page;
+    }
+
     fn on_mode_change(&mut self, mode: PanelModeValidity) {
         let Some(new_mode) = mode.mode() else {
             if self.page.is_mode_driven() {
-                self.page = self.last_non_mode_page;
+                self.restore_page(self.last_non_mode_page);
             }
             return;
         };
@@ -1267,14 +1315,14 @@ impl LincApp {
             && !new_mode.is_manual()
             && self.page == Page::Manual
         {
-            self.page = self.last_non_mode_page;
+            self.restore_page(self.last_non_mode_page);
         }
         if prior_mode == Some(PanelMode::Mdi)
             && new_mode != PanelMode::Mdi
             && self.page == Page::Mdi
         {
             self.mdi.input.clear();
-            self.page = self.last_non_mode_page;
+            self.restore_page(self.last_non_mode_page);
         }
         if matches!(
             prior_mode,
@@ -1282,7 +1330,7 @@ impl LincApp {
         ) && !matches!(new_mode, PanelMode::Home | PanelMode::ProgHome)
             && self.page == Page::Homing
         {
-            self.page = self.last_non_mode_page;
+            self.restore_page(self.last_non_mode_page);
         }
         match new_mode {
             PanelMode::Mdi => {
@@ -1438,17 +1486,36 @@ impl LincApp {
         }
     }
 
+    /// Copy the controller's measured #3032 value into the next parameter block.
+    /// The field is read-only in the UI, so an open editor for another parameter
+    /// keeps its own buffer and cannot be clobbered by this synchronization.
+    pub(crate) fn sync_probe_calibration(&mut self) {
+        let Some(offset) = self.snapshot.probe.calibration_offset else {
+            return;
+        };
+        if self.probe.calibration_offset_seen == Some(offset) {
+            return;
+        }
+        self.probe.params.calibration_offset = offset;
+        self.probe.calibration_offset_seen = Some(offset);
+    }
+
     fn sync_probe(&mut self) {
+        // The backend's legacy selected_wcs is not an Apply target. Both the
+        // display and Apply follow the controller's actual active work offset.
+        self.probe.wcs = self
+            .snapshot
+            .offsets
+            .active_index
+            .filter(|index| (1..=9).contains(index))
+            .map(linc_core::model::wcs_name)
+            .unwrap_or_else(|| "--".into());
+        self.sync_probe_calibration();
         if self.snapshot.probe.enabled {
-            self.probe.wcs = self.snapshot.probe.selected_wcs.clone();
-            if let Some(index) =
-                (1..=9).find(|index| linc_core::model::wcs_name(*index) == self.probe.wcs)
-            {
-                self.probe.apply_target = index;
-            }
-            if let Some(_result) = self.snapshot.probe.last_result.as_ref() {
+            if let Some(result) = self.snapshot.probe.last_result.as_ref() {
                 if self.probe.last_run.is_none() {
                     self.probe.last_run = Some(Instant::now());
+                    self.probe.last_run_operation = Some(result.operation.clone());
                 }
             }
         }
@@ -1658,7 +1725,45 @@ impl LincApp {
             .unwrap_or(0);
     }
 
+    /// `egui-winit` turns the platform clipboard shortcut (Ctrl+X) into
+    /// `Event::Cut`, not a key event, so the Probe page's X data reset never
+    /// sees it. Hand the shortcut back to the Probe page as the key event it
+    /// expects; leave the clipboard event alone while a text field can use it,
+    /// and never synthesize the chord for any other page. Refresh (Ctrl+R) and
+    /// redo (Ctrl+Y) never need this because they are not clipboard shortcuts.
+    fn hand_cut_to_page(&mut self, ui: &egui::Ui) {
+        // Only the Probe page binds Ctrl+X. Every other page keeps the
+        // clipboard event, so Ctrl+X stays a text-editing chord there and the
+        // Files page's delete is Backspace.
+        if self.page != Page::Probe {
+            return;
+        }
+        if ui.ctx().text_edit_focused() || self.overlay_open() {
+            return;
+        }
+        ui.input_mut(|input| {
+            if !input
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::Cut))
+            {
+                return;
+            }
+            input
+                .events
+                .retain(|event| !matches!(event, egui::Event::Cut));
+            input.events.push(egui::Event::Key {
+                key: CUT_SHORTCUT.key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: CUT_SHORTCUT.modifiers,
+            });
+        });
+    }
+
     pub fn handle_keyboard(&mut self, ui: &mut egui::Ui) {
+        self.hand_cut_to_page(ui);
         // A modal messages dialog owns the keyboard: Enter/Escape close it and
         // the page keys scroll it. Nothing behind it may react to a key.
         if self.messages_dialog {
@@ -1699,6 +1804,8 @@ impl LincApp {
                 || memory.has_focus(egui::Id::unique("linc-offset-cell"))
                 || memory.has_focus(egui::Id::unique("linc-offsets-dro"))
                 || memory.has_focus(egui::Id::unique("linc-file-rename"))
+                || memory.has_focus(egui::Id::unique("linc-probe-param"))
+                || memory.has_focus(egui::Id::unique("linc-probe-dro"))
         });
         let mut nav_page = None;
         let mut escape = false;
@@ -1850,13 +1957,19 @@ impl LincApp {
             if input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowDown) {
                 move_line_down = true;
             }
-            if input.consume_key(self.keymap.refresh.modifiers, self.keymap.refresh.key) {
+            // Probe owns Ctrl+R (reset data) and Ctrl+Y (reset Y data) while
+            // that page is open; elsewhere these retain their global meanings.
+            if self.page != Page::Probe
+                && input.consume_key(self.keymap.refresh.modifiers, self.keymap.refresh.key)
+            {
                 refresh = true;
             }
             if input.consume_key(self.keymap.undo.modifiers, self.keymap.undo.key) {
                 undo = true;
             }
-            if input.consume_key(self.keymap.redo.modifiers, self.keymap.redo.key) {
+            if self.page != Page::Probe
+                && input.consume_key(self.keymap.redo.modifiers, self.keymap.redo.key)
+            {
                 redo = true;
             }
             // An edit or a page popup owns Escape: it cancels the edit (or
@@ -1921,8 +2034,10 @@ impl LincApp {
             }
             // The tool table pages its own cursor with these keys, so they must
             // reach the page instead of being consumed for tab navigation.
-            let page_keys_belong_to_page =
-                matches!(self.page, Page::Tools | Page::Files) || self.help.dialog.is_some();
+            let page_keys_belong_to_page = matches!(self.page, Page::Tools | Page::Files)
+                || self.help.dialog.is_some()
+                || (self.page == Page::Probe
+                    && (self.probe.param_editing || self.probe.dro_edit.is_some()));
             if !text_focused
                 && !page_keys_belong_to_page
                 && input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp)
@@ -2844,7 +2959,7 @@ impl LincApp {
                         ("C".into(), "COPY"),
                         ("R".into(), "RENAME"),
                         ("N".into(), "NEW"),
-                        (k.files_delete.label(), "DELETE"),
+                        (format!("Bksp/{}", k.files_delete.label()), "DELETE"),
                     ],
                 });
                 groups.push(ShortcutGroup {
@@ -2882,24 +2997,62 @@ impl LincApp {
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
             }
             Page::Probe => {
-                if self.probe.category == linc_core::probe::ProbeCategory::ProbeHelp {
-                    hints.push(("OFFSET".into(), "OFFSETS"));
-                    hints.push((k.back.label(), "OFFSETS"));
-                } else {
-                    groups.push(ShortcutGroup {
-                        title: "PROBE KEYS",
+                use linc_core::probe::ProbeCategory;
+
+                match self.probe.category {
+                    ProbeCategory::ProbeHelp => groups.push(ShortcutGroup {
+                        title: "PROBE HELP",
                         items: vec![
-                            ("1-9".into(), "HIGHLIGHT"),
-                            ("Enter".into(), "RUN PROBE"),
-                            ("A".into(), "APPLY RESULT"),
-                            ("Ctrl+P".into(), "PARAMETERS"),
+                            ("Up/Down".into(), "TOPIC"),
+                            ("Left/Right".into(), "PAGE"),
                             ("PgUp/PgDn".into(), "TABS"),
-                            ("X/Y/Z".into(), "EDIT DRO"),
                             ("OFFSET".into(), "NEXT TAB"),
                             (k.back.label(), "OFFSETS"),
                         ],
-                    });
-                    hints.push(("Arrows".into(), "FOCUS"));
+                    }),
+                    ProbeCategory::Calibrate => groups.push(ShortcutGroup {
+                        title: "CALIBRATION KEYS",
+                        items: vec![
+                            ("1-4".into(), "HIGHLIGHT"),
+                            ("Enter".into(), "RUN CALIBRATION"),
+                            ("V".into(), "AVG XY / X / Y"),
+                            ("Ctrl+P".into(), "DIMENSIONS"),
+                            ("Ctrl+R".into(), "RESET CALIBRATION"),
+                            ("PgUp/PgDn".into(), "TABS"),
+                            ("OFFSET".into(), "NEXT TAB"),
+                            (k.back.label(), "OFFSETS"),
+                        ],
+                    }),
+                    category => {
+                        let mut items = vec![
+                            ("1-9".into(), "HIGHLIGHT"),
+                            ("Enter".into(), "RUN PROBE"),
+                            ("W".into(), "POSITION / DIRECT"),
+                            ("A".into(), "APPLY RESULT"),
+                            ("Ctrl+P".into(), "PARAMETERS"),
+                        ];
+                        if category == ProbeCategory::EdgeAngle {
+                            items.push(("R".into(), "APPLY ROTATION"));
+                        }
+                        items.extend([
+                            ("X/Y/Z".into(), "EDIT VISIBLE DRO"),
+                            ("PgUp/PgDn".into(), "TABS"),
+                            ("OFFSET".into(), "NEXT TAB"),
+                            (k.back.label(), "OFFSETS"),
+                        ]);
+                        groups.push(ShortcutGroup {
+                            title: "PROBE KEYS",
+                            items,
+                        });
+                        groups.push(ShortcutGroup {
+                            title: "RESULT KEYS",
+                            items: vec![
+                                ("U".into(), "UPDATE PARAMS"),
+                                ("Ctrl+R".into(), "RESET ALL DATA"),
+                                ("Ctrl+X / Ctrl+Y".into(), "RESET X / Y DATA"),
+                            ],
+                        });
+                    }
                 }
             }
             Page::Tools => {
@@ -4087,6 +4240,65 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     }
 
     #[test]
+    fn probe_preferences_restore_only_operator_owned_values() {
+        let (_dir, mut app) = make_app(PanelMode::Auto);
+        app.probe.params.slow_feed = 0.0;
+        app.probe.params.fast_feed = 234.5;
+        app.probe.params.probe_mode = linc_core::probe::ProbeMode::ApplyWcs;
+        app.probe.params.wcs_rotation = true;
+        app.probe.params.x_hint_boss_pocket = 31.25;
+        app.remember_probe_params();
+        app.save_preferences(true);
+
+        let saved = linc_core::preferences::Preferences::load(&app.profile.preferences_path);
+        let saved_probe = saved.probe.as_ref().unwrap();
+        assert_eq!(saved_probe.fast_feed, 234.5);
+        assert_eq!(saved_probe.slow_feed, 0.0);
+        // Serde defaults prove these machine/controller facts were not written.
+        assert_eq!(saved_probe.probe_tool_number, 99);
+        assert_eq!(saved_probe.calibration_offset, 0.0);
+
+        app.profile.config.probe.tool_number = 42;
+        app.snapshot.probe.calibration_offset = Some(0.375);
+        app.probe.params.fast_feed = 999.0;
+        let profile = app.profile.clone();
+        let snapshot = app.snapshot.clone();
+        let backend = Box::new(LocalBackend::new(profile.clone(), PanelMode::Auto));
+        let app = LincApp::with_snapshot(profile, backend, snapshot);
+        assert_eq!(app.probe.params.fast_feed, 234.5);
+        assert_eq!(app.probe.params.slow_feed, 0.0);
+        assert_eq!(app.probe.params.probe_tool_number, 42);
+        assert_eq!(app.probe.params.calibration_offset, 0.375);
+        assert_eq!(
+            app.probe.params.probe_mode,
+            linc_core::probe::ProbeMode::ApplyWcs
+        );
+        assert!(app.probe.params.wcs_rotation);
+        assert_eq!(app.probe.params.x_hint_boss_pocket, 31.25);
+    }
+
+    #[test]
+    fn probe_sync_uses_active_wcs_and_new_calibration_without_touching_edit_buffer() {
+        let (_dir, mut app) = make_app(PanelMode::Auto);
+        app.snapshot.offsets.active_index = Some(2);
+        app.snapshot.probe.selected_wcs = "G54".into();
+        app.snapshot.probe.calibration_offset = Some(0.125);
+        app.probe.param_selected = 1;
+        app.probe.param_editing = true;
+        app.probe.param_buffer = "77.5".into();
+        app.sync_probe();
+        assert_eq!(app.probe.wcs, "G55");
+        assert_eq!(app.probe.params.calibration_offset, 0.125);
+        assert!(app.probe.param_editing);
+        assert_eq!(app.probe.param_buffer, "77.5");
+
+        app.snapshot.probe.calibration_offset = Some(0.25);
+        app.sync_probe();
+        assert_eq!(app.probe.params.calibration_offset, 0.25);
+        assert_eq!(app.probe.param_buffer, "77.5");
+    }
+
+    #[test]
     fn a_touch_off_reaches_the_offset_table() {
         // The keys issue `G10 L20`; the table rebuilds from the snapshot's
         // revision. A constant revision left the table showing the old value
@@ -4522,6 +4734,1072 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         let (line, block) = app.run_from_line_choice();
         assert_eq!(line, 2);
         assert_eq!(block, "G1 X10");
+    }
+
+    use linc_core::probe::ProbeCategory;
+
+    /// The one wording both calibration routines share under PROTECT.
+    const CALIBRATION_PROTECT: &str = "PROTECT ON — calibration Run writes controller #3032 and the spindle reference parameters #3007/#3010";
+
+    fn probe_raw_input(events: Vec<egui::Event>) -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 720.0),
+            )),
+            events,
+            ..Default::default()
+        }
+    }
+
+    /// \`true\` when \`inner\` lies inside \`outer\` up to a rounding pixel.
+    fn inside(outer: egui::Rect, inner: egui::Rect) -> bool {
+        inner.min.x >= outer.min.x - 0.5
+            && inner.min.y >= outer.min.y - 0.5
+            && inner.max.x <= outer.max.x + 0.5
+            && inner.max.y <= outer.max.y + 0.5
+    }
+
+    /// One probe page host: a 1280x720 headless window, a simulator machine in
+    /// a known state, and a backend that records what the UI actually sent.
+    struct ProbeHarness {
+        _dir: tempfile::TempDir,
+        ctx: egui::Context,
+        app: LincApp,
+        sent: std::rc::Rc<std::cell::RefCell<Vec<MachineCommand>>>,
+    }
+
+    impl ProbeHarness {
+        fn new(mode: PanelMode, protect: bool, connected: bool) -> Self {
+            Self::ready(mode, protect, connected, MachinePower::On)
+        }
+
+        fn ready(mode: PanelMode, protect: bool, connected: bool, power: MachinePower) -> Self {
+            let (dir, profile) = fixture();
+            let ctx = egui::Context::default();
+            let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let mut sim = linc_core::sim::SimBackend::new(profile.clone(), mode);
+            sim.set_power(power);
+            sim.set_program_protect(protect, true);
+            sim.set_panel_connected(connected);
+            let backend = Box::new(RecordingBackend {
+                inner: sim,
+                sent: sent.clone(),
+            });
+            // Build the app inside a real 1280x720 pass: \`LincApp::new\` applies
+            // the design zoom, and outside a pass egui reports no viewport.
+            let mut app_slot = None;
+            let mut profile_slot = Some(profile);
+            let mut backend_slot = Some(backend);
+            let mut output = ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+                let profile = profile_slot.take().expect("one pass");
+                let backend = backend_slot.take().expect("one pass");
+                app_slot = Some(LincApp::new(profile, backend, ui.ctx()));
+            });
+            output.textures_delta.clear();
+            let mut app = app_slot.unwrap();
+            // The probe tool is in the spindle, so a blocked Run reports the
+            // write policy rather than a tool mismatch.
+            app.probe.params.probe_tool_number = app.snapshot.tool_change.current_tool;
+            Self {
+                _dir: dir,
+                ctx,
+                app,
+                sent,
+            }
+        }
+
+        /// Paint one frame at the 1280x720 baseline, with optional keys.
+        fn frame(&mut self, keys: &[egui::Key]) -> Vec<egui::OutputCommand> {
+            let keys: Vec<_> = keys
+                .iter()
+                .map(|key| (*key, egui::Modifiers::NONE))
+                .collect();
+            self.frame_with(&keys)
+        }
+
+        fn frame_with(
+            &mut self,
+            keys: &[(egui::Key, egui::Modifiers)],
+        ) -> Vec<egui::OutputCommand> {
+            let events = keys
+                .iter()
+                .map(|(key, modifiers)| egui::Event::Key {
+                    key: *key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: *modifiers,
+                })
+                .collect();
+            self.frame_events(events)
+        }
+
+        /// Paint one frame with raw events and return what egui asked the
+        /// platform to do (clipboard writes prove a TextEdit consumed the cut).
+        fn frame_events(&mut self, events: Vec<egui::Event>) -> Vec<egui::OutputCommand> {
+            let app = &mut self.app;
+            let mut output = self.ctx.run_ui(probe_raw_input(events), |ui| {
+                // The same prologue as \`eframe::App::ui\`, minus the frame.
+                theme::apply_design_zoom(ui.ctx(), app.design_scale);
+                app.handle_keyboard(ui);
+                app.draw(ui);
+            });
+            // A headless frame has no painter to upload the textures to.
+            let mut textures = output.textures_delta;
+            textures.clear();
+            std::mem::take(&mut output.platform_output.commands)
+        }
+
+        /// Open the page on \`category\` with a routine selected, bypassing the
+        /// entry reset so a test can act on a selection.
+        fn enter_probe(&mut self, category: ProbeCategory, operation: &str) {
+            self.app.set_page(Page::Probe);
+            self.app.probe.category = category;
+            self.app.probe.operation = operation.to_string();
+            self.app.probe.error = None;
+        }
+
+        /// Click at an absolute page position (press and release in one frame).
+        fn click_at(&mut self, position: egui::Pos2) -> Vec<egui::OutputCommand> {
+            self.frame_events(vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ])
+        }
+
+        /// Put one file in NC_FILES, show the Files page and select it.
+        fn files_page_with_one_file(&mut self, name: &str) -> std::path::PathBuf {
+            // Keep the removable-media poll out of the test; the NC pane is enough.
+            self.app.files.usb_root = Some(self.app.files.nc_root.clone());
+            let path = self.app.files.nc_root.join(name);
+            std::fs::write(&path, "G0 X0\n").unwrap();
+            self.app.set_page(Page::Files);
+            self.app.files.nc_current = self.app.files.nc_root.clone();
+            self.app.files.nc_entries = crate::state::read_dir_entries(&self.app.files.nc_root);
+            self.app.files.nc_selected = self
+                .app
+                .files
+                .nc_entries
+                .iter()
+                .position(|entry| entry.path == path)
+                .expect("test file is listed");
+            self.app.files.nc_parent_selected = false;
+            path
+        }
+
+        fn mdi_sent(&self) -> Vec<String> {
+            self.sent
+                .borrow()
+                .iter()
+                .filter_map(|command| match command {
+                    MachineCommand::IssueMdi { block, .. } => Some(block.clone()),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        /// Every command that writes probe or controller state.
+        fn probe_writes(&self) -> Vec<String> {
+            self.sent
+                .borrow()
+                .iter()
+                .filter(|command| {
+                    matches!(
+                        command,
+                        MachineCommand::IssueMdi { .. }
+                            | MachineCommand::ResetProbeCalibration
+                            | MachineCommand::ApplyProbeResult { .. }
+                    )
+                })
+                .map(|command| format!("{command:?}"))
+                .collect()
+        }
+
+        fn sent_debug(&self) -> Vec<String> {
+            self.sent
+                .borrow()
+                .iter()
+                .map(|c| format!("{c:?}"))
+                .collect()
+        }
+    }
+
+    struct RecordingBackend {
+        inner: linc_core::sim::SimBackend,
+        sent: std::rc::Rc<std::cell::RefCell<Vec<MachineCommand>>>,
+    }
+
+    impl UiBackend for RecordingBackend {
+        fn snapshot(&mut self) -> MachineSnapshot {
+            linc_core::backend::MachineBackend::snapshot(&mut self.inner)
+        }
+
+        fn send(
+            &mut self,
+            command: MachineCommand,
+        ) -> Result<(), linc_core::command::MachineError> {
+            self.sent.borrow_mut().push(command.clone());
+            linc_core::backend::MachineBackend::send(&mut self.inner, command)
+        }
+
+        fn drain_events(&mut self) -> Vec<BackendEvent> {
+            Vec::new()
+        }
+    }
+
+    // PR-03: PROTECT gates what an action writes, not which mode it runs in.
+
+    #[test]
+    fn protect_refuses_a_calibration_run_before_issuing_anything() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, true, true);
+        harness.enter_probe(ProbeCategory::Calibrate, "cal_round_boss");
+        harness.frame(&[]);
+        // The refusal is painted before Enter: a calibration Run rewrites #3032.
+        let reason = harness
+            .app
+            .probe_layout
+            .run_reason_text
+            .clone()
+            .unwrap_or_default();
+        assert_eq!(reason, format!("RUN UNAVAILABLE: {CALIBRATION_PROTECT}"));
+
+        screens::probe::run(&mut harness.app);
+        assert_eq!(
+            harness.app.probe.error.as_deref(),
+            Some(CALIBRATION_PROTECT)
+        );
+        assert!(
+            harness.probe_writes().is_empty(),
+            "{:?}",
+            harness.sent_debug()
+        );
+        assert!(harness.app.probe.last_run_operation.is_none());
+
+        // With PROTECT off the same Run issues exactly one block.
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::Calibrate, "cal_round_boss");
+        harness.frame(&[]);
+        screens::probe::run(&mut harness.app);
+        assert_eq!(harness.app.probe.error, None);
+        let sent = harness.mdi_sent();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert!(
+            sent[0].contains("o<probe_cal_round_boss> call"),
+            "{}",
+            sent[0]
+        );
+    }
+
+    #[test]
+    fn protection_covers_the_spindle_nose_calibration_routine() {
+        // spindle_nose is category SurfaceZ but the catalogue marks it
+        // calibration: it writes #3010 and #3007, so PROTECT must treat it as a
+        // calibration Run even in POSITION mode.
+        let mut harness = ProbeHarness::new(PanelMode::Auto, true, true);
+        harness.enter_probe(ProbeCategory::OutsideCorners, "spindle_nose");
+        harness.app.probe.params.probe_mode = linc_core::probe::ProbeMode::MeasureOnly;
+        harness.frame(&[]);
+        let reason = harness
+            .app
+            .probe_layout
+            .run_reason_text
+            .clone()
+            .unwrap_or_default();
+        assert_eq!(reason, format!("RUN UNAVAILABLE: {CALIBRATION_PROTECT}"));
+
+        screens::probe::run(&mut harness.app);
+        assert_eq!(
+            harness.app.probe.error.as_deref(),
+            Some(CALIBRATION_PROTECT)
+        );
+        assert!(
+            harness.probe_writes().is_empty(),
+            "{:?}",
+            harness.sent_debug()
+        );
+        assert!(harness.app.probe.last_run_operation.is_none());
+
+        // PROTECT off: the same selection runs, still as a POSITION run.
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::OutsideCorners, "spindle_nose");
+        harness.frame(&[]);
+        screens::probe::run(&mut harness.app);
+        assert_eq!(harness.app.probe.error, None);
+        let sent = harness.mdi_sent();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert!(
+            sent[0].contains("o<probe_spindle_nose> call"),
+            "{}",
+            sent[0]
+        );
+    }
+
+    #[test]
+    fn an_unclassifiable_routine_block_is_refused_even_with_protect_off() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::OutsideCorners, "back_left_top_corner");
+        // A routine call with no typed parameter block: the mode it inherits
+        // from the interpreter cannot be trusted, so it fails closed rather than
+        // passing as a measurement.
+        crate::screens::probe_view::issue_probe_mdi(
+            &mut harness.app,
+            "o<probe_z_minus_wco> call".into(),
+            "test",
+        );
+        let error = harness.app.probe.error.clone().unwrap_or_default();
+        assert!(error.contains("cannot be classified"), "{error}");
+        assert!(
+            harness.probe_writes().is_empty(),
+            "{:?}",
+            harness.sent_debug()
+        );
+    }
+
+    #[test]
+    fn protect_refuses_the_parameter_update_and_every_data_reset() {
+        for (key, modifiers, label) in [
+            (egui::Key::U, egui::Modifiers::NONE, "U UPDATE PARAMS"),
+            (egui::Key::R, egui::Modifiers::CTRL, "Ctrl+R RESET ALL"),
+            (egui::Key::X, egui::Modifiers::CTRL, "Ctrl+X RESET X"),
+            (egui::Key::Y, egui::Modifiers::CTRL, "Ctrl+Y RESET Y"),
+        ] {
+            let mut harness = ProbeHarness::new(PanelMode::Auto, true, true);
+            harness.enter_probe(ProbeCategory::OutsideCorners, "back_left_top_corner");
+            harness.frame_with(&[(key, modifiers)]);
+            let error = harness.app.probe.error.clone().unwrap_or_default();
+            assert!(error.contains("PROTECT ON"), "{label}: {error}");
+            assert!(
+                harness.probe_writes().is_empty(),
+                "{label} issued {:?}",
+                harness.sent_debug()
+            );
+
+            // PROTECT off: the same key issues one MDI block and no more.
+            let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+            harness.enter_probe(ProbeCategory::OutsideCorners, "back_left_top_corner");
+            harness.frame_with(&[(key, modifiers)]);
+            assert_eq!(harness.app.probe.error, None, "{label}");
+            assert_eq!(harness.mdi_sent().len(), 1, "{label}");
+        }
+    }
+
+    #[test]
+    fn the_cut_shortcut_reaches_the_probe_x_data_reset() {
+        // `egui-winit` never delivers Ctrl+X as a key event: the page receives
+        // `Event::Cut`. This is the event the keyboard X reset really sees.
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::OutsideCorners, "back_left_top_corner");
+        harness.frame_events(vec![egui::Event::Cut]);
+        let sent = harness.mdi_sent();
+        assert_eq!(sent.len(), 1, "{:?}", harness.sent_debug());
+        assert!(sent[0].contains("o<x_data_reset> call"), "{}", sent[0]);
+        assert_eq!(harness.app.probe.error, None);
+
+        // The same shortcut under PROTECT still takes the write policy.
+        let mut harness = ProbeHarness::new(PanelMode::Auto, true, true);
+        harness.enter_probe(ProbeCategory::OutsideCorners, "back_left_top_corner");
+        harness.frame_events(vec![egui::Event::Cut]);
+        let error = harness.app.probe.error.clone().unwrap_or_default();
+        assert!(error.contains("PROTECT ON"), "{error}");
+        assert!(
+            harness.probe_writes().is_empty(),
+            "{:?}",
+            harness.sent_debug()
+        );
+    }
+
+    #[test]
+    fn the_cut_hand_off_is_scoped_to_the_probe_page() {
+        // No page other than Probe may receive a synthetic cut chord: the
+        // clipboard event belongs to text editing everywhere else.
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        let mut observed = Vec::new();
+        for page in [Page::Machine, Page::Files, Page::Offsets, Page::Probe] {
+            harness.app.set_page(page);
+            let ctx = harness.ctx.clone();
+            let app = &mut harness.app;
+            let mut output = ctx.run_ui(probe_raw_input(vec![egui::Event::Cut]), |ui| {
+                app.hand_cut_to_page(ui);
+                let cut = ui.input(|input| {
+                    input
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::Cut))
+                });
+                let key = ui.input(|input| {
+                    input.events.iter().any(|event| {
+                        matches!(event, egui::Event::Key { key: egui::Key::X, modifiers, .. } if modifiers.ctrl)
+                    })
+                });
+                observed.push((page, cut, key));
+            });
+            output.textures_delta.clear();
+        }
+        assert_eq!(
+            observed,
+            vec![
+                (Page::Machine, true, false),
+                (Page::Files, true, false),
+                (Page::Offsets, true, false),
+                (Page::Probe, false, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_cut_shortcut_never_resets_x_while_the_parameter_editor_is_open() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::OutsideCorners, "back_left_top_corner");
+        // Ctrl+P selects the first parameter, Enter opens the inline editor.
+        harness.frame_with(&[(egui::Key::P, egui::Modifiers::CTRL)]);
+        harness.frame(&[egui::Key::Enter]);
+        // One more frame: the editor takes focus and selects its whole value.
+        harness.frame(&[]);
+        assert!(harness.app.probe.param_editing, "the editor is open");
+        let buffer = harness.app.probe.param_buffer.clone();
+        assert!(!buffer.is_empty(), "the editor holds the value");
+
+        let commands = harness.frame_events(vec![egui::Event::Cut]);
+
+        assert!(
+            harness.probe_writes().is_empty(),
+            "Ctrl+X must not reset X data while the editor is open: {:?}",
+            harness.sent_debug()
+        );
+        assert!(harness.app.probe.param_editing, "the editor stays open");
+        assert_eq!(harness.app.probe.error, None);
+        // The editor kept the chord: it cut its text to the clipboard.
+        assert!(
+            commands.iter().any(
+                |command| matches!(command, egui::OutputCommand::CopyText(text) if *text == buffer)
+            ),
+            "the editor must still cut its text, got {commands:?}"
+        );
+        assert!(
+            harness.app.probe.param_buffer.is_empty(),
+            "the cut emptied the editor"
+        );
+    }
+
+    #[test]
+    fn the_cut_shortcut_still_cuts_text_in_the_gcode_editor() {
+        let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+        harness
+            .app
+            .program
+            .editor
+            .replace_text("G0 X1\nG1 X2\n".into());
+        harness.app.set_page(Page::Program);
+        harness.frame(&[]);
+
+        let id = egui::Id::unique("linc-program-editor");
+        harness.ctx.memory_mut(|memory| memory.request_focus(id));
+        let mut state = egui::text_edit::TextEditState::load(&harness.ctx, id).unwrap_or_default();
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(2),
+            )));
+        state.store(&harness.ctx, id);
+
+        let commands = harness.frame_events(vec![egui::Event::Cut]);
+
+        assert!(
+            commands.iter().any(
+                |command| matches!(command, egui::OutputCommand::CopyText(text) if text == "G0")
+            ),
+            "the editor must cut the selection, got {commands:?}"
+        );
+        assert_eq!(harness.app.program.editor.text(), " X1\nG1 X2\n");
+        assert!(
+            harness.probe_writes().is_empty(),
+            "{:?}",
+            harness.sent_debug()
+        );
+    }
+
+    #[test]
+    fn backspace_deletes_a_file_on_the_files_page() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        let path = harness.files_page_with_one_file("backspace-delete-test.ngc");
+
+        harness.frame(&[egui::Key::Backspace]);
+
+        match harness.app.modal {
+            Some(crate::state::Modal::ConfirmDelete {
+                path: deleted,
+                usb: false,
+                ..
+            }) => assert_eq!(deleted, path),
+            ref other => panic!("expected a delete confirmation, got {other:?}"),
+        }
+        assert!(path.exists(), "nothing is deleted before confirmation");
+    }
+
+    #[test]
+    fn the_cut_shortcut_does_nothing_on_the_files_page() {
+        // Ctrl+X is reserved for text editing: the Files page deletes with
+        // Backspace and must not react to the clipboard chord at all.
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        let path = harness.files_page_with_one_file("cut-does-nothing.ngc");
+
+        let commands = harness.frame_events(vec![egui::Event::Cut]);
+
+        assert!(
+            harness.app.modal.is_none(),
+            "Ctrl+X must not open a dialog: {:?}",
+            harness.app.modal
+        );
+        assert!(path.exists());
+        assert!(harness.app.files.rename.is_none());
+        // Nothing consumed the Cut event, so egui asked for no clipboard write.
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, egui::OutputCommand::CopyText(_))),
+            "{commands:?}"
+        );
+        // And the reserved chord never became a synthetic key.
+        assert_eq!(harness.app.probe.error, None);
+    }
+
+    #[test]
+    fn position_measurement_still_runs_with_protect_on() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, true, true);
+        harness.enter_probe(ProbeCategory::OutsideCorners, "back_left_top_corner");
+        harness.frame(&[]);
+        // POSITION: the Run preamble assigns probe parameters, which is setup,
+        // not a calibration or result write, so PROTECT must not block it.
+        assert!(harness.app.probe_layout.run_reason_text.is_none());
+        screens::probe::run(&mut harness.app);
+        assert_eq!(harness.app.probe.error, None);
+        let sent = harness.mdi_sent();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert!(
+            sent[0].contains("o<probe_back_left_top_corner> call"),
+            "{}",
+            sent[0]
+        );
+    }
+
+    #[test]
+    fn direct_wco_and_edge_angle_runs_keep_their_protect_gates() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, true, true);
+        harness.enter_probe(ProbeCategory::OutsideCorners, "back_left_top_corner");
+        harness.app.probe.params.probe_mode = linc_core::probe::ProbeMode::ApplyWcs;
+        harness.app.snapshot.offsets.active_index = Some(1);
+        harness.frame(&[]);
+        screens::probe::run(&mut harness.app);
+        let error = harness.app.probe.error.clone().unwrap_or_default();
+        assert!(error.contains("direct WCO"), "{error}");
+        assert!(
+            harness.probe_writes().is_empty(),
+            "{:?}",
+            harness.sent_debug()
+        );
+
+        let mut harness = ProbeHarness::new(PanelMode::Auto, true, true);
+        harness.enter_probe(ProbeCategory::EdgeAngle, "top_back_edge_angle");
+        harness.app.snapshot.offsets.active_index = Some(1);
+        harness.frame(&[]);
+        screens::probe::run(&mut harness.app);
+        let error = harness.app.probe.error.clone().unwrap_or_default();
+        assert!(error.contains("edge-angle R0 reset"), "{error}");
+        assert!(
+            harness.probe_writes().is_empty(),
+            "{:?}",
+            harness.sent_debug()
+        );
+    }
+
+    #[test]
+    fn protect_keeps_the_calibration_reset_closed() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, true, true);
+        harness.enter_probe(ProbeCategory::Calibrate, "cal_round_boss");
+        harness.frame_with(&[(egui::Key::R, egui::Modifiers::CTRL)]);
+        let error = harness.app.probe.error.clone().unwrap_or_default();
+        assert!(error.contains("PROTECT"), "{error}");
+        assert!(
+            harness.probe_writes().is_empty(),
+            "{:?}",
+            harness.sent_debug()
+        );
+    }
+
+    // PR-06: every page entry starts with nothing selected.
+
+    #[test]
+    fn files_return_clears_the_probe_selection_but_keeps_the_tab() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::EdgeAngle, "top_back_edge_angle");
+        harness.app.probe.param_focused = true;
+        harness.app.probe.param_editing = true;
+        harness.app.probe.param_buffer = "12".into();
+        harness.app.probe.dro_edit = Some(crate::state::DroEdit {
+            axis: "X".into(),
+            buffer: "1.0".into(),
+            focus: false,
+        });
+
+        harness.app.request_files();
+        assert_eq!(harness.app.page, Page::Files);
+        harness.app.escape();
+
+        assert_eq!(harness.app.page, Page::Probe);
+        assert_eq!(
+            harness.app.probe.category,
+            ProbeCategory::EdgeAngle,
+            "the tab the operator left is kept"
+        );
+        assert!(harness.app.probe.operation.is_empty());
+        assert!(!harness.app.probe.param_focused);
+        assert!(!harness.app.probe.param_editing);
+        assert!(harness.app.probe.dro_edit.is_none());
+
+        // Enter now has nothing to run.
+        harness.frame(&[egui::Key::Enter]);
+        assert_eq!(
+            harness.app.probe.error.as_deref(),
+            Some("select an operation"),
+            "{:?}",
+            harness.sent_debug()
+        );
+        assert!(
+            harness.probe_writes().is_empty(),
+            "{:?}",
+            harness.sent_debug()
+        );
+    }
+
+    #[test]
+    fn f8_opens_the_first_probe_tab_with_no_routine_selected() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.app.set_page(Page::Offsets);
+        harness.app.probe.category = ProbeCategory::InsideCorners;
+        harness.app.probe.operation = "rect_pocket_center_start".into();
+
+        harness.frame(&[egui::Key::F8]);
+        assert_eq!(harness.app.page, Page::Probe);
+        assert_eq!(harness.app.probe.category, ProbeCategory::OutsideCorners);
+        assert!(harness.app.probe.operation.is_empty());
+    }
+
+    #[test]
+    fn paging_probe_tabs_clears_the_selection() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::OutsideCorners, "back_left_top_corner");
+
+        harness.frame(&[egui::Key::PageDown]);
+        assert_eq!(harness.app.probe.category, ProbeCategory::InsideCorners);
+        assert!(harness.app.probe.operation.is_empty());
+
+        harness.app.probe.operation = "surface_z".into();
+        harness.frame(&[egui::Key::PageUp]);
+        assert_eq!(harness.app.probe.category, ProbeCategory::OutsideCorners);
+        assert!(harness.app.probe.operation.is_empty());
+    }
+
+    #[test]
+    fn escape_returns_to_offsets_and_reentry_never_restores_a_selection() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::BossAndPocket, "round_boss");
+
+        harness.frame(&[egui::Key::Escape]);
+        assert_eq!(harness.app.page, Page::Offsets);
+
+        harness.frame(&[egui::Key::F8]);
+        assert_eq!(harness.app.page, Page::Probe);
+        assert_eq!(harness.app.probe.category, ProbeCategory::OutsideCorners);
+        assert!(harness.app.probe.operation.is_empty());
+    }
+
+    // PR-06: a page restored after its mode went away is still an entry.
+
+    #[test]
+    fn restoring_the_probe_page_after_mode_loss_clears_the_selection() {
+        for (mode, mode_page) in [
+            (PanelMode::Mdi, Page::Mdi),
+            (PanelMode::Jog, Page::Manual),
+            (PanelMode::Home, Page::Homing),
+        ] {
+            for loss in [
+                PanelModeValidity::Invalid(vec![PanelMode::Auto, mode]),
+                PanelModeValidity::Unknown,
+            ] {
+                let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+                harness.enter_probe(ProbeCategory::EdgeAngle, "top_back_edge_angle");
+                harness.app.probe.param_focused = true;
+                harness.app.probe.param_editing = true;
+                harness.app.probe.param_buffer = "12".into();
+                harness.app.probe.dro_edit = Some(crate::state::DroEdit {
+                    axis: "X".into(),
+                    buffer: "1.0".into(),
+                    focus: false,
+                });
+
+                // The panel switches to a mode-driven page.
+                harness.app.last_mode = Some(PanelModeValidity::Valid(PanelMode::Auto));
+                harness.app.on_mode_change(PanelModeValidity::Valid(mode));
+                assert_eq!(harness.app.page, mode_page, "{mode:?}");
+                assert_eq!(harness.app.last_non_mode_page, Page::Probe, "{mode:?}");
+
+                // ...and the mode goes away: Probe comes back through the entry
+                // logic, with the tab kept and nothing selected.
+                harness.app.on_mode_change(loss.clone());
+                assert_eq!(harness.app.page, Page::Probe, "{mode:?}/{loss:?}");
+                assert_eq!(
+                    harness.app.probe.category,
+                    ProbeCategory::EdgeAngle,
+                    "{mode:?}: the tab is kept"
+                );
+                assert!(harness.app.probe.operation.is_empty(), "{mode:?}");
+                assert!(!harness.app.probe.param_focused, "{mode:?}");
+                assert!(!harness.app.probe.param_editing, "{mode:?}");
+                assert!(harness.app.probe.dro_edit.is_none(), "{mode:?}");
+
+                // Enter has nothing to run.
+                harness.frame(&[egui::Key::Enter]);
+                assert_eq!(
+                    harness.app.probe.error.as_deref(),
+                    Some("select an operation"),
+                    "{mode:?}"
+                );
+                assert!(
+                    harness.probe_writes().is_empty(),
+                    "{mode:?}/{loss:?}: {:?}",
+                    harness.sent_debug()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_valid_mode_takes_its_own_page_so_normal_transitions_never_restore_probe() {
+        // Every valid mode drives a page of its own, so the normal transitions
+        // (MDI -> AUTO, MANUAL -> EDIT, HOME -> JOG) end on that page and never
+        // restore a Probe page. Only a mode LOSS restores, and only that path
+        // has to clear the Probe selection.
+        for (from, to, destination) in [
+            (PanelMode::Mdi, PanelMode::Auto, Page::Program),
+            (PanelMode::Jog, PanelMode::Edit, Page::Program),
+            (PanelMode::Home, PanelMode::Jog, Page::Manual),
+        ] {
+            let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+            harness.enter_probe(ProbeCategory::BossAndPocket, "round_boss");
+            harness.app.probe.param_focused = true;
+
+            harness.app.last_mode = Some(PanelModeValidity::Valid(PanelMode::Auto));
+            harness.app.on_mode_change(PanelModeValidity::Valid(from));
+            assert!(harness.app.page.is_mode_driven(), "{from:?}");
+
+            // `sync` records the new mode before it calls back in.
+            harness.app.last_mode = Some(PanelModeValidity::Valid(from));
+            harness.app.on_mode_change(PanelModeValidity::Valid(to));
+            assert_eq!(harness.app.page, destination, "{from:?} -> {to:?}");
+        }
+    }
+
+    // PR-09 and PR-10: the 1280x720 page keeps its Run context and its targets.
+
+    /// Every clickable kind the Probe page painted, as the page recorded it.
+    fn probe_targets(
+        layout: &crate::screens::probe_view::ProbeLayout,
+    ) -> Vec<(String, egui::Rect)> {
+        let mut targets = Vec::new();
+        for (kind, slot) in [
+            ("dro", layout.dro_target),
+            ("parameter", layout.parameter_target),
+            ("result action", layout.card_action_target),
+            ("hint field", layout.hint_target),
+            ("calibration card", layout.calibrate_card),
+            ("calibration action", layout.calibrate_action),
+        ] {
+            if let Some(rect) = slot {
+                targets.push((kind.to_string(), rect));
+            }
+        }
+        for (operation, rect) in &layout.routine_cards {
+            targets.push((format!("card {operation}"), *rect));
+        }
+        targets
+    }
+
+    #[test]
+    fn every_probe_pointer_target_meets_the_44px_minimum() {
+        for (state, protect, power) in [
+            ("banner-free", false, MachinePower::On),
+            ("protect", true, MachinePower::On),
+            ("estop", true, MachinePower::Estop),
+        ] {
+            for (category, operation) in [
+                (ProbeCategory::OutsideCorners, "back_left_top_corner"),
+                (ProbeCategory::InsideCorners, "back_left_inside_corner"),
+                (ProbeCategory::BossAndPocket, "round_boss"),
+                (ProbeCategory::RidgeAndValley, "ridge_x"),
+                (ProbeCategory::EdgeAngle, "top_back_edge_angle"),
+                (ProbeCategory::Calibrate, "cal_round_boss"),
+            ] {
+                let mut harness = ProbeHarness::ready(PanelMode::Auto, protect, true, power);
+                harness.enter_probe(category, operation);
+                harness.frame(&[]);
+                let layout = harness.app.probe_layout.clone();
+
+                let targets = probe_targets(&layout);
+                assert!(
+                    !targets.is_empty(),
+                    "{state}/{category:?}: the page recorded no targets"
+                );
+                for (kind, rect) in targets {
+                    assert!(
+                        rect.width() >= theme::MIN_TARGET && rect.height() >= theme::MIN_TARGET,
+                        "{state}/{category:?}: {kind} is {:?}",
+                        rect.size()
+                    );
+                }
+
+                if category == ProbeCategory::Calibrate {
+                    assert!(
+                        layout.calibrate_card.is_some(),
+                        "{state}: the calibration cards are targets"
+                    );
+                    assert!(
+                        layout.calibrate_action.is_some(),
+                        "{state}: the calibration action is a target"
+                    );
+                    continue;
+                }
+                assert_eq!(
+                    layout.routine_cards.len(),
+                    crate::screens::probe_view::card_count(category),
+                    "{state}/{category:?}: every card must be measured"
+                );
+                if matches!(
+                    category,
+                    ProbeCategory::BossAndPocket | ProbeCategory::RidgeAndValley
+                ) {
+                    assert!(
+                        layout.hint_target.is_some(),
+                        "{state}/{category:?}: the hint field is a target"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_pointer_pick_updates_the_run_context_and_hints_in_the_same_frame() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::BossAndPocket, "round_boss");
+        harness.frame(&[]);
+        assert_eq!(
+            harness.app.probe_layout.hints_drawn.as_deref(),
+            Some(&[11usize][..]),
+            "the round boss shows only the boss/pocket diameter hint"
+        );
+
+        let target = harness
+            .app
+            .probe_layout
+            .routine_cards
+            .iter()
+            .find(|(operation, _)| operation == "rect_boss")
+            .map(|(_, rect)| rect.center())
+            .expect("the rect boss card was recorded");
+
+        harness.click_at(target);
+
+        assert_eq!(harness.app.probe.operation, "rect_boss");
+        let layout = harness.app.probe_layout.clone();
+        let name = linc_core::probe::operation("rect_boss").unwrap().name;
+        let action = layout.run_action_text.clone().unwrap_or_default();
+        assert!(
+            action.contains(name),
+            "the Run context must name the picked routine in the same frame: {action}"
+        );
+        assert_eq!(
+            layout.hints_drawn.as_deref(),
+            Some(&[12usize, 13][..]),
+            "the hint row must follow the picked routine in the same frame"
+        );
+    }
+
+    #[test]
+    fn the_result_actions_fit_their_target_width() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::OutsideCorners, "back_left_top_corner");
+        harness.frame(&[]);
+        let button = harness
+            .app
+            .probe_layout
+            .card_action_target
+            .expect("card action drawn");
+        let labels = [
+            "U UPDATE PARAMS",
+            "Ctrl+R RESET ALL",
+            "Ctrl+X RESET X",
+            "Ctrl+Y RESET Y",
+        ];
+        let mut widths = Vec::new();
+        let ctx = harness.ctx.clone();
+        let mut output = ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+            for label in labels {
+                let width = ui.fonts_mut(|fonts| {
+                    fonts
+                        .layout_no_wrap(
+                            label.to_string(),
+                            egui::FontId::proportional(8.0),
+                            egui::Color32::WHITE,
+                        )
+                        .size()
+                        .x
+                });
+                widths.push((label, width));
+            }
+        });
+        output.textures_delta.clear();
+        for (label, width) in widths {
+            assert!(
+                width <= button.width() - 8.0,
+                "{label} needs {width:.1} px of a {:.1} px button",
+                button.width()
+            );
+        }
+    }
+
+    #[test]
+    fn every_parameter_name_fits_inside_its_target() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::OutsideCorners, "back_left_top_corner");
+        harness.frame(&[]);
+        let cell = harness
+            .app
+            .probe_layout
+            .parameter_target
+            .expect("parameter field drawn")
+            .width();
+        let mut labels: Vec<&str> = crate::screens::probe_view::COMMON_PARAMS
+            .iter()
+            .map(|index| crate::screens::probe_view::PARAM_LABELS[*index])
+            .collect();
+        labels.push("STYLUS DIAM #5410");
+
+        let mut widths = Vec::new();
+        let ctx = harness.ctx.clone();
+        let mut output = ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+            for label in &labels {
+                let width = ui.fonts_mut(|fonts| {
+                    fonts
+                        .layout_no_wrap(
+                            (*label).to_string(),
+                            egui::FontId::monospace(9.0),
+                            egui::Color32::WHITE,
+                        )
+                        .size()
+                        .x
+                });
+                widths.push((label, width));
+            }
+        });
+        output.textures_delta.clear();
+
+        for (label, width) in widths {
+            assert!(
+                width <= cell - 4.0,
+                "{label} needs {width:.1} px of a {cell:.1} px field"
+            );
+        }
+    }
+
+    #[test]
+    fn the_action_and_reason_lines_fit_at_1280x720_with_banners() {
+        // PROTECT, E-stop (two banners) and banner-free all have to show the
+        // action, and the reason when Run is refused, inside the page.
+        for (label, protect, power, connected) in [
+            ("protect", true, MachinePower::On, true),
+            ("estop", true, MachinePower::Estop, true),
+            ("offline", true, MachinePower::On, false),
+            ("plain", false, MachinePower::On, true),
+        ] {
+            for (category, operation) in [
+                (ProbeCategory::OutsideCorners, "back_left_top_corner"),
+                (ProbeCategory::EdgeAngle, "top_back_edge_angle"),
+                (ProbeCategory::BossAndPocket, "round_boss"),
+                (ProbeCategory::Calibrate, "cal_round_boss"),
+            ] {
+                let mut harness = ProbeHarness::ready(PanelMode::Auto, protect, connected, power);
+                harness.enter_probe(category, operation);
+                harness.frame(&[]);
+                let layout = harness.app.probe_layout.clone();
+                let page = layout.page;
+                let action = layout
+                    .run_action
+                    .unwrap_or_else(|| panic!("{label}/{category:?}: no action line"));
+                assert!(
+                    inside(page, action),
+                    "{label}/{category:?}: {action:?} vs {page:?}"
+                );
+                // A POSITION measurement is available under PROTECT; the
+                // Edge Angle R0 reset and a calibration #3032 write are not.
+                let blocked = !connected
+                    || !matches!(power, MachinePower::On)
+                    || (protect
+                        && matches!(
+                            category,
+                            ProbeCategory::EdgeAngle | ProbeCategory::Calibrate
+                        ));
+                match (blocked, layout.run_reason) {
+                    (true, Some(reason)) => {
+                        let text = layout.run_reason_text.clone().unwrap_or_default();
+                        assert!(text.contains("RUN UNAVAILABLE"), "{label}: {text}");
+                        assert!(
+                            inside(page, reason),
+                            "{label}/{category:?}: reason {reason:?} vs {page:?}"
+                        );
+                        assert!(
+                            action.bottom() <= reason.top(),
+                            "{label}/{category:?}: action and reason overlap"
+                        );
+                    }
+                    (true, None) => {
+                        panic!("{label}/{category:?}: a blocked Run must say why")
+                    }
+                    (false, Some(reason)) => {
+                        panic!("{label}/{category:?}: an available Run shows {reason:?}")
+                    }
+                    (false, None) => {}
+                }
+                if category == ProbeCategory::Calibrate {
+                    // The Calibrate tab has its own panel instead of the
+                    // routine columns.
+                    let panel = layout.calibrate_panel.expect("calibration panel drawn");
+                    assert!(
+                        panel.bottom() <= page.bottom() + 0.5,
+                        "{label}/{category:?}: panel {panel:?} vs {page:?}"
+                    );
+                    continue;
+                }
+                let grid = layout.routine_grid.expect("grid drawn");
+                assert!(inside(page, grid), "{label}/{category:?}: grid {grid:?}");
+                let left = layout.left_column.expect("left column drawn");
+                assert!(
+                    left.bottom() <= page.bottom() + 0.5,
+                    "{label}/{category:?}: left column {left:?} vs {page:?}"
+                );
+            }
+        }
     }
 }
 

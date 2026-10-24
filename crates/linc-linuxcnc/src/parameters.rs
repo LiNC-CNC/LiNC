@@ -1,9 +1,9 @@
 //! The interpreter's numbered-parameter file.
 //!
-//! LinuxCNC only writes this file when the interpreter exits, so a session that
-//! is killed loses any offset changed during it. The Python bridge used to
-//! rewrite the G54–G59.3 rows as soon as it changed them; this is the same
-//! policy in Rust, using only `std::fs`.
+//! LinuxCNC writes this file at interpreter synchronization points and exit,
+//! not on every numbered-parameter assignment. It is therefore not a live
+//! Probe Basic result API. LiNC also mirrors its G54–G59.3 writes promptly so
+//! an unclean shutdown cannot discard an offset acknowledged by the HMI.
 //!
 //! The parameter numbers are fixed by LinuxCNC:
 //!
@@ -87,6 +87,12 @@ impl ParameterFile {
             values.insert(axis.clone(), self.get(offset_key(index, axis_index as u32)));
         }
         values
+    }
+
+    /// The stored value for one axis of `index`, when the file carries it.
+    pub fn work_axis(&self, index: u8, axis_index: usize) -> Option<f64> {
+        let key = offset_key(index, axis_index as u32);
+        self.has(key).then(|| self.get(key))
     }
 
     pub fn rotation(&self, index: u8) -> f64 {

@@ -1,6 +1,6 @@
 //! Build the typed `MachineSnapshot` from an NML status poll and HAL reads.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -11,12 +11,119 @@ use linuxcnc_nml::{
 
 use linc_core::config::Profile;
 use linc_core::model::*;
+use linc_core::probe::{
+    direct_written_axes, ProbeCategory, ProbeMode, ProbeOperation, ProbeParameters,
+};
 use linc_core::tooltable::ToolTable;
 
 use crate::panel::PanelState;
 use crate::parameters::ParameterFile;
 
 const MAX_TRAIL_POINTS: usize = 200_000;
+const MAX_PROBE_HISTORY: usize = 32;
+
+/// Difference accepted between an intended and a live work offset.
+const OFFSET_TOLERANCE: f64 = 1e-4;
+
+/// The active work offset row as it stood when the MDI block was issued.
+///
+/// DIRECT routines write `G10 L2` into that row themselves, so a poll taken
+/// after the run no longer describes the origin the result was computed from.
+/// Provenance is therefore captured in the dispatch path, before the block
+/// reaches the controller, and the commit uses it for POSITION and DIRECT
+/// alike.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ProbeProvenance {
+    pub index: Option<u8>,
+    pub wcs: String,
+    pub source_offsets: AxisMap<f64>,
+    pub rotation: f64,
+}
+
+impl ProbeProvenance {
+    pub(crate) fn from_snapshot(snapshot: &MachineSnapshot) -> Self {
+        let index = snapshot
+            .offsets
+            .active_index
+            .filter(|index| (1..=9).contains(index));
+        let row = index.and_then(|index| {
+            snapshot
+                .offsets
+                .offsets
+                .iter()
+                .find(|offset| offset.index == index)
+        });
+        Self {
+            index,
+            wcs: row
+                .map(|row| wcs_name(row.index))
+                .unwrap_or_else(|| "--".into()),
+            source_offsets: row.map(|row| row.values.clone()).unwrap_or_default(),
+            rotation: row.and_then(|row| row.rotation).unwrap_or(0.0),
+        }
+    }
+}
+
+/// Probe Basic calibration writes `#3032` twice: an initial clear to zero
+/// before the measurements and the AVG/X/Y result after them. Only a message
+/// that arrives after every measurement slot is the controller's result, so
+/// the initial clear can never satisfy completion.
+#[derive(Clone, Debug, Default)]
+struct CalibrationTrack {
+    messages: u32,
+    /// Last `#3032` seen before all measurement slots had arrived.
+    preliminary: Option<f64>,
+    /// Last `#3032` seen after all measurement slots had arrived.
+    result: Option<f64>,
+}
+
+impl CalibrationTrack {
+    fn record(&mut self, value: f64, complete: bool) {
+        self.messages += 1;
+        if complete {
+            self.result = Some(value);
+        } else {
+            self.preliminary = Some(value);
+        }
+    }
+}
+
+struct LiveProbeTransaction {
+    operation: &'static ProbeOperation,
+    parameters: ProbeParameters,
+    provenance: ProbeProvenance,
+    values: [f64; 12],
+    updated: BTreeSet<u16>,
+    seen_active: bool,
+    failed: bool,
+    calibration: CalibrationTrack,
+}
+
+impl LiveProbeTransaction {
+    fn new(
+        operation: &'static ProbeOperation,
+        parameters: ProbeParameters,
+        provenance: ProbeProvenance,
+    ) -> Self {
+        Self {
+            operation,
+            parameters,
+            provenance,
+            values: [0.0; 12],
+            updated: BTreeSet::new(),
+            seen_active: false,
+            failed: false,
+            calibration: CalibrationTrack::default(),
+        }
+    }
+
+    fn measurements_complete(&self) -> bool {
+        self.operation
+            .result_parameters()
+            .iter()
+            .all(|parameter| self.updated.contains(parameter))
+    }
+}
 
 pub struct SnapshotBuilder {
     pub(crate) profile: Profile,
@@ -32,8 +139,10 @@ pub struct SnapshotBuilder {
     next_alarm_id: u64,
     last_alarm_texts: VecDeque<String>,
     pub(crate) alarms: VecDeque<Alarm>,
-    last_probe_signature: Option<String>,
-    probe_block: Option<String>,
+    probe_transaction: Option<LiveProbeTransaction>,
+    probe_last_result: Option<ProbeResult>,
+    probe_history: VecDeque<ProbeResult>,
+    probe_error: Option<String>,
     warned_axis_mismatch: bool,
     tool_change_serial: u64,
     tool_change_active: bool,
@@ -59,8 +168,10 @@ impl SnapshotBuilder {
             next_alarm_id: 1,
             last_alarm_texts: VecDeque::new(),
             alarms: VecDeque::new(),
-            last_probe_signature: None,
-            probe_block: None,
+            probe_transaction: None,
+            probe_last_result: None,
+            probe_history: VecDeque::new(),
+            probe_error: None,
             warned_axis_mismatch: false,
             tool_change_serial: 0,
             tool_change_active: false,
@@ -71,8 +182,73 @@ impl SnapshotBuilder {
         }
     }
 
-    pub fn note_probe_block(&mut self, block: Option<String>) {
-        self.probe_block = block;
+    /// Start tracking the transaction a probe MDI block describes.
+    ///
+    /// `provenance` is the active work offset row read *before* the block was
+    /// issued; DIRECT routines rewrite that row themselves.
+    pub(crate) fn note_probe_block(&mut self, block: Option<String>, provenance: ProbeProvenance) {
+        let Some(block) = block else {
+            return;
+        };
+        let operation = probe_operation(&block);
+        let reset = block.to_ascii_lowercase().contains("reset");
+        if reset {
+            self.probe_transaction = None;
+            self.probe_last_result = None;
+            self.probe_error = None;
+        }
+        let Some(operation) = operation else {
+            // Parameter-only updates do not invalidate the previous result or
+            // start collecting a new one.
+            return;
+        };
+
+        self.probe_last_result = None;
+        self.probe_error = None;
+        self.probe_transaction = None;
+        if operation.id == "cal_reset" {
+            // Its #3032 EVAL is handled by push_probe_value. There are no
+            // #1001..#1012 results to collect for a calibration reset.
+            return;
+        }
+        let parameters = ProbeParameters::from_mdi(&block).unwrap_or_default();
+        self.probe_transaction = Some(LiveProbeTransaction::new(operation, parameters, provenance));
+    }
+
+    pub(crate) fn push_probe_value(&mut self, parameter: u32, value: f64) {
+        if !value.is_finite() {
+            return;
+        }
+        match parameter {
+            3032 => {
+                // Only the controller's final write is the calibration
+                // result. An intermediate one (the routine's initial clear to
+                // zero) is recorded but never published as the offset, so the
+                // displayed value stays the last confirmed one.
+                let mut publish = true;
+                if let Some(transaction) = self.probe_transaction.as_mut() {
+                    let complete = transaction.measurements_complete();
+                    transaction.calibration.record(value, complete);
+                    publish = complete;
+                }
+                if publish {
+                    self.calibration_offset = Some(value);
+                }
+            }
+            1001..=1012 => {
+                if let Some(transaction) = self.probe_transaction.as_mut() {
+                    transaction.values[(parameter - 1001) as usize] = value;
+                    transaction.updated.insert(parameter as u16);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn fail_probe(&mut self) {
+        if let Some(transaction) = self.probe_transaction.as_mut() {
+            transaction.failed = true;
+        }
     }
 
     pub fn confirm_tool_change(&mut self) {
@@ -83,8 +259,27 @@ impl SnapshotBuilder {
         self.tool_confirm = false;
     }
 
-    pub fn set_calibration_offset(&mut self, offset: Option<f64>) {
-        self.calibration_offset = offset;
+    /// Drop a refusal-to-claim message once its recovery has succeeded.
+    pub(crate) fn clear_probe_error(&mut self) {
+        self.probe_error = None;
+    }
+
+    /// Record that an explicit Apply put this exact result's values live, so a
+    /// repeated Apply is refused instead of writing a second time.
+    pub(crate) fn mark_probe_result_applied(&mut self, result: &ProbeResult) {
+        let matches = |candidate: &ProbeResult| {
+            candidate.timestamp_ms == result.timestamp_ms && candidate.operation == result.operation
+        };
+        if let Some(current) = self.probe_last_result.as_mut() {
+            if matches(current) {
+                current.applied = true;
+            }
+        }
+        for entry in self.probe_history.iter_mut() {
+            if matches(entry) {
+                entry.applied = true;
+            }
+        }
     }
 
     pub fn clear_trail(&mut self) {
@@ -487,84 +682,407 @@ impl SnapshotBuilder {
         parameters: &ParameterFile,
         snapshot: &mut MachineSnapshot,
     ) {
+        if self.calibration_offset.is_none() && parameters.has(3032) {
+            self.calibration_offset = Some(parameters.get(3032));
+        }
         snapshot.probe.enabled = self.profile.config.probe.enabled;
         snapshot.probe.tool_number = self.profile.config.probe.tool_number;
-        snapshot.probe.selected_wcs = self.profile.config.probe.wcs.clone();
-        snapshot.probe.running = status.motion.probing;
-        snapshot.probe.calibration_offset = self.calibration_offset;
+        snapshot.probe.selected_wcs = snapshot
+            .offsets
+            .active_index
+            .map(wcs_name)
+            .unwrap_or_else(|| "--".into());
+        snapshot.probe.calibration_diameter = Some(self.profile.config.probe.calibration_diameter);
+        snapshot.probe.input_tripped = Some(status.motion.probe_val != 0);
 
-        // The interpreter does not expose numbered parameters over NML. The
-        // parameter file is the only readable copy, and LinuxCNC writes it on
-        // interpreter exit; a probe that runs to M2 is therefore visible on
-        // the next poll only when the controller has written the file.
-        let mut values = [0.0; 12];
-        for (index, key) in (1001..=1012).enumerate() {
-            values[index] = parameters.get(key);
-        }
-        let signature = format!("{values:?}");
-        if self.last_probe_signature.as_deref() != Some(signature.as_str())
-            && (status.motion.probe_tripped || values.iter().any(|value| *value != 0.0))
-        {
-            let results = linc_core::probe::ParameterResults::from_values(&values);
-            let operation = self
-                .probe_block
-                .as_deref()
-                .and_then(|block| {
-                    linc_core::probe::operations()
+        let idle = probe_is_idle(status);
+        let finalize = if let Some(transaction) = self.probe_transaction.as_mut() {
+            if !idle {
+                transaction.seen_active = true;
+                false
+            } else if transaction.failed {
+                // Unlike a quiet just-issued block, an NML error is terminal
+                // evidence and must not leave the transaction pending.
+                true
+            } else {
+                // An idle poll immediately after issuing MDI can precede the
+                // queued command. Wait in that case, but accept a run that
+                // started and finished between polls if its updates arrived.
+                transaction.seen_active || !transaction.updated.is_empty()
+            }
+        } else {
+            false
+        };
+        if finalize {
+            let transaction = self
+                .probe_transaction
+                .take()
+                .expect("finalized probe transaction exists");
+            if transaction.failed {
+                self.probe_error = Some(format!(
+                    "{} failed in LinuxCNC; no result was committed",
+                    transaction.operation.name
+                ));
+            } else {
+                let missing = transaction
+                    .operation
+                    .result_parameters()
+                    .into_iter()
+                    .filter(|parameter| !transaction.updated.contains(parameter))
+                    .collect::<Vec<_>>();
+                // A calibration result exists only once the controller has
+                // published its final `#3032` after the measurements. Without
+                // it the run is unconfirmed, and no locally computed value is
+                // substituted.
+                let calibration_confirmed = transaction.operation.category
+                    != ProbeCategory::Calibrate
+                    || transaction.calibration.result.is_some();
+                if !missing.is_empty() {
+                    let missing = missing
                         .iter()
-                        .find(|operation| block.contains(operation.call))
-                })
-                .or_else(|| {
-                    snapshot.probe.last_routine.as_deref().and_then(|id| {
-                        linc_core::probe::operations()
-                            .iter()
-                            .find(|operation| operation.id == id)
-                    })
-                });
-            let family = operation
-                .map(|operation| operation.result_family())
-                .unwrap_or_default();
-            let mut measured = AxisMap::new();
-            if let Some(operation) = operation {
-                for (axis, value) in results.wcs_offsets(operation) {
-                    measured.insert(axis, value);
+                        .map(|parameter| format!("#{parameter}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.probe_error = Some(format!(
+                        "{} ended without fresh live updates for {missing}; no result was committed",
+                        transaction.operation.name
+                    ));
+                } else if !calibration_confirmed {
+                    self.probe_error = Some(format!(
+                        "{} ended without the controller's final #3032 calibration message; \
+                         no calibration was committed",
+                        transaction.operation.name
+                    ));
+                } else {
+                    self.commit_probe_transaction(transaction, snapshot);
                 }
             }
-            let error = operation.and_then(|operation| {
-                results.error(operation, Some(self.profile.config.probe.probe_diameter))
+        }
+
+        snapshot.probe.running = self.probe_transaction.is_some() || status.motion.probing;
+        snapshot.probe.calibration_offset = self.calibration_offset;
+        snapshot.probe.last_result = self.probe_last_result.clone();
+        snapshot.probe.history = self.probe_history.clone();
+        snapshot.probe.error = self.probe_error.clone();
+        snapshot.probe.last_routine = self
+            .probe_transaction
+            .as_ref()
+            .map(|transaction| transaction.operation.id.to_string())
+            .or_else(|| {
+                self.probe_last_result
+                    .as_ref()
+                    .map(|result| result.operation.clone())
             });
-            let routine = operation
-                .map(|operation| operation.name.to_string())
-                .unwrap_or_else(|| "probe result".into());
-            let result = ProbeResult {
-                routine,
-                measured,
-                error,
-                wcs: snapshot
-                    .offsets
-                    .active_index
-                    .map(linc_core::model::wcs_name)
-                    .unwrap_or_else(|| "--".into()),
-                mode: "measured".into(),
-                timestamp_ms: now_ms(),
-                values: values.to_vec(),
-                family,
-            };
-            snapshot.probe.last_result = Some(result.clone());
-            snapshot.probe.history.push_front(result);
-            while snapshot.probe.history.len() > 32 {
-                snapshot.probe.history.pop_back();
+    }
+
+    fn commit_probe_transaction(
+        &mut self,
+        transaction: LiveProbeTransaction,
+        snapshot: &MachineSnapshot,
+    ) {
+        let operation = transaction.operation;
+        let parameters = &transaction.parameters;
+        let direct = parameters.probe_mode == ProbeMode::ApplyWcs;
+        let results = linc_core::probe::ParameterResults::from_values(&transaction.values);
+        let provenance = transaction.provenance;
+        let rotation = (operation.category == ProbeCategory::EdgeAngle && parameters.wcs_rotation)
+            .then_some(transaction.values[11]);
+        let updated = transaction.updated.iter().copied().collect::<Vec<_>>();
+        let mut result = ProbeResult::from_operation(
+            operation,
+            &results,
+            provenance.source_offsets.clone(),
+            provenance.wcs.clone(),
+            if direct { "DIRECT WCO" } else { "POSITION" }.into(),
+            updated,
+            std::collections::BTreeMap::new(),
+            rotation,
+            // Direct-WCO is only claimed applied once the live row confirms
+            // it; see the check below.
+            false,
+        );
+
+        if operation.category == ProbeCategory::Calibrate {
+            // The controller's own final `#3032` is the calibrated offset.
+            // A locally recomputed value is never published in its place.
+            let confirmed = transaction.calibration.result;
+            result.error = confirmed;
+            if let Some(offset) = confirmed {
+                self.calibration_offset = Some(offset);
             }
-            self.last_probe_signature = Some(signature);
-        } else if self.last_probe_signature.as_deref() != Some(signature.as_str())
-            && snapshot.probe.last_result.is_some()
-        {
-            // A reset subroutine zeroes #1001..#1012. Clear the old result so
-            // the UI shows the reset values instead of stale measurements.
-            snapshot.probe.last_result = None;
-            self.last_probe_signature = Some(signature);
+        }
+
+        if direct && !operation.apply_terms().is_empty() {
+            match direct_write_check(
+                operation,
+                &results,
+                &parameters,
+                &transaction.values,
+                &provenance,
+                snapshot,
+            ) {
+                DirectWriteCheck::Confirmed => result.applied = true,
+                DirectWriteCheck::Mismatch(problems) => {
+                    self.probe_error = Some(format!(
+                        "{} reported DIRECT WCO, but the controller row does not match the \
+                         result: {}; it is not applied — press A to apply it explicitly",
+                        operation.name,
+                        problems.join(", ")
+                    ));
+                }
+                DirectWriteCheck::Unverified {
+                    anchors,
+                    uncaptured,
+                } => {
+                    let reason = match (anchors.is_empty(), uncaptured.is_empty()) {
+                        (false, true) => format!(
+                            "{} is a controller-side start/corner anchor that cannot be read back",
+                            anchors.join("/")
+                        ),
+                        (true, false) => format!(
+                            "{} had no captured origin when the run started",
+                            uncaptured.join("/")
+                        ),
+                        _ => format!(
+                            "{} is a controller-side start/corner anchor and {} had no captured \
+                             origin",
+                            anchors.join("/"),
+                            uncaptured.join("/")
+                        ),
+                    };
+                    self.probe_error = Some(format!(
+                        "{} DIRECT WCO wrote the controller row, but {reason}; the write is not \
+                         numerically verified and is not claimed applied — press A to apply the \
+                         result explicitly",
+                        operation.name
+                    ));
+                }
+            }
+        }
+        if let Some(message) = &self.probe_error {
+            log::warn!("probe {}: {message}", operation.id);
+        }
+
+        self.probe_last_result = Some(result.clone());
+        self.probe_history.push_front(result);
+        while self.probe_history.len() > MAX_PROBE_HISTORY {
+            self.probe_history.pop_back();
         }
     }
+}
+
+/// Outcome of comparing a DIRECT routine's live row with what the
+/// transaction intended before it ran.
+enum DirectWriteCheck {
+    /// Every intended axis, and the requested rotation, are live.
+    Confirmed,
+    /// The row disagrees with the result, or the target row is no longer the
+    /// active one.
+    Mismatch(Vec<String>),
+    /// Every compared value matched, but these axes are only known inside the
+    /// interpreter: an Edge Angle start/corner anchor, or an origin that was
+    /// never captured. The write is on the controller; no numeric claim is
+    /// made, and the state is deliberately not a mismatch.
+    Unverified {
+        anchors: Vec<&'static str>,
+        uncaptured: Vec<&'static str>,
+    },
+}
+
+/// Only a live controller row can confirm a DIRECT write: completion of the
+/// block, or the routine's own claim, is not evidence that `G10 L2` ran.
+fn direct_write_check(
+    operation: &ProbeOperation,
+    results: &linc_core::probe::ParameterResults,
+    parameters: &ProbeParameters,
+    values: &[f64; 12],
+    provenance: &ProbeProvenance,
+    snapshot: &MachineSnapshot,
+) -> DirectWriteCheck {
+    let Some(index) = provenance.index else {
+        return DirectWriteCheck::Mismatch(vec![
+            "no active work offset when the run started".into()
+        ]);
+    };
+    if snapshot.offsets.active_index != Some(index) {
+        return DirectWriteCheck::Mismatch(vec![format!(
+            "the active work offset is now {}, but the run wrote {}",
+            snapshot
+                .offsets
+                .active_index
+                .map(wcs_name)
+                .unwrap_or_else(|| "--".into()),
+            wcs_name(index)
+        )]);
+    }
+    let Some(row) = snapshot
+        .offsets
+        .offsets
+        .iter()
+        .find(|offset| offset.index == index)
+    else {
+        return DirectWriteCheck::Mismatch(vec![format!(
+            "{} is missing from the status poll",
+            wcs_name(index)
+        )]);
+    };
+
+    // Compare exactly the axes this operation's DIRECT branch writes, and
+    // require every other axis to be untouched.
+    let written = direct_written_axes(operation);
+    if written.is_empty() {
+        return DirectWriteCheck::Mismatch(vec![format!(
+            "{} writes no work offset in DIRECT mode",
+            operation.name
+        )]);
+    }
+    let auxiliary = std::collections::BTreeMap::new();
+    let expected = expected_row(operation, results, &provenance.source_offsets, &auxiliary);
+    let mut problems = Vec::new();
+    let mut anchors = Vec::new();
+    let mut uncaptured = Vec::new();
+    for axis in written.iter().copied() {
+        match expected.axes.get(axis).copied() {
+            Some(want) => match row.values.get(axis).copied() {
+                Some(actual) if (actual - want).abs() > OFFSET_TOLERANCE => {
+                    problems.push(format!("{axis}{actual:.6} (expected {want:.6})"));
+                }
+                Some(_) => {}
+                None => problems.push(format!("{axis} is missing from the live row")),
+            },
+            None if is_anchor_axis(operation, axis) => anchors.push(axis),
+            // No captured origin: not an anchor, and still unverifiable.
+            None => uncaptured.push(axis),
+        }
+    }
+    for (axis, before) in provenance.source_offsets.iter() {
+        if written.contains(&axis) {
+            continue;
+        }
+        let Some(actual) = row.values.get(axis).copied() else {
+            continue;
+        };
+        if (actual - before).abs() > OFFSET_TOLERANCE {
+            problems.push(format!(
+                "{axis}{actual:.6} changed although {} does not write {axis} (was {before:.6})",
+                operation.name
+            ));
+        }
+    }
+    if operation.category == ProbeCategory::EdgeAngle {
+        // Every Edge Angle run clears rotation with `R0`; the DIRECT branch
+        // adds the requested angle, so the rotation is checkable even when the
+        // anchor-dependent axes are not.
+        let intended = if parameters.wcs_rotation {
+            values[11]
+        } else {
+            0.0
+        };
+        let actual = row.rotation.unwrap_or(0.0);
+        if (actual - intended).abs() > OFFSET_TOLERANCE {
+            problems.push(format!("R{actual:.4} (expected {intended:.4})"));
+        }
+    } else if (row.rotation.unwrap_or(0.0) - provenance.rotation).abs() > OFFSET_TOLERANCE {
+        problems.push(format!(
+            "the row rotation changed to {:.4}, but {} does not write one",
+            row.rotation.unwrap_or(0.0),
+            operation.name
+        ));
+    }
+
+    if !problems.is_empty() {
+        DirectWriteCheck::Mismatch(problems)
+    } else if !anchors.is_empty() || !uncaptured.is_empty() {
+        DirectWriteCheck::Unverified {
+            anchors,
+            uncaptured,
+        }
+    } else {
+        DirectWriteCheck::Confirmed
+    }
+}
+
+/// Does this operation's Apply read `axis` from a controller-side anchor?
+fn is_anchor_axis(operation: &ProbeOperation, axis: &str) -> bool {
+    operation.apply_terms().iter().any(|term| {
+        term.axis == axis
+            && matches!(
+                term.source,
+                linc_core::probe::ApplySource::StartX
+                    | linc_core::probe::ApplySource::StartY
+                    | linc_core::probe::ApplySource::CornerX
+                    | linc_core::probe::ApplySource::CornerY
+            )
+    })
+}
+
+/// Which axes an Apply intends to write, and which of them depend on
+/// controller-side anchors that are only evaluable inside the interpreter.
+pub(crate) struct ExpectedRow {
+    pub axes: AxisMap<f64>,
+    pub unverified: Vec<&'static str>,
+}
+
+pub(crate) fn expected_row(
+    operation: &ProbeOperation,
+    results: &linc_core::probe::ParameterResults,
+    source_offsets: &AxisMap<f64>,
+    auxiliary: &std::collections::BTreeMap<String, f64>,
+) -> ExpectedRow {
+    let mut axes = AxisMap::new();
+    let mut unverified = Vec::new();
+    for term in operation.apply_terms() {
+        match (
+            term.source.value(results, auxiliary),
+            source_offsets.get(term.axis).copied(),
+        ) {
+            (Some(measured), Some(source)) => {
+                axes.insert(term.axis.to_string(), source + measured);
+            }
+            // A term whose value is only known to the interpreter, or whose
+            // origin was never captured, is never reported as verified.
+            _ => unverified.push(term.axis),
+        }
+    }
+    ExpectedRow { axes, unverified }
+}
+
+/// Numeric disagreements between an intended row and the live one.
+pub(crate) fn compare_row(
+    expected: &ExpectedRow,
+    rotation: Option<f64>,
+    live: &WorkOffset,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (axis, want) in expected.axes.iter() {
+        match live.values.get(axis).copied() {
+            Some(actual) if (actual - want).abs() > OFFSET_TOLERANCE => {
+                problems.push(format!("{axis}{actual:.6} (expected {want:.6})"));
+            }
+            Some(_) => {}
+            None => problems.push(format!("{axis} is missing from the live row")),
+        }
+    }
+    if let Some(want) = rotation {
+        let actual = live.rotation.unwrap_or(0.0);
+        if (actual - want).abs() > OFFSET_TOLERANCE {
+            problems.push(format!("R{actual:.6} (expected {want:.6})"));
+        }
+    }
+    problems
+}
+
+pub(crate) fn probe_operation(block: &str) -> Option<&'static ProbeOperation> {
+    // One exact-token resolver: the same one the simulator and the UI use.
+    linc_core::probe::operation_for_mdi(block)
+}
+
+fn probe_is_idle(status: &Status) -> bool {
+    status.task.interp_state == linuxcnc_nml::InterpState::Idle
+        && status.task.exec_state == ExecState::Done
+        && status.task.queued_mdi_commands == 0
+        && status.motion.inpos
+        && !status.motion.probing
 }
 
 pub fn initial_snapshot(profile: &Profile) -> MachineSnapshot {
@@ -811,5 +1329,704 @@ mod tests {
         carry_hal_selections(&mut converted, &stored);
         assert_eq!(converted.hal.jog_speed, Some(42.0));
         assert_eq!(converted.hal.jog_increment, Some(0.5));
+    }
+
+    fn probe_builder() -> SnapshotBuilder {
+        let profile_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../configs/sim.toml");
+        let profile = Profile::load(&profile_path, None).expect("test profile");
+        let tool_table = ToolTable::load(
+            &profile.machine_ini.tool_table,
+            &profile.machine_ini.tool_table_columns,
+            profile.changer,
+        )
+        .expect("test tool table");
+        SnapshotBuilder::new(profile, tool_table)
+    }
+
+    fn idle_status() -> Status {
+        let mut status = Status::from_raw(Default::default());
+        status.valid = true;
+        status.task.mode = NmlTaskMode::Mdi;
+        status.task.state = NmlTaskState::On;
+        status.task.exec_state = ExecState::Done;
+        status.task.interp_state = linuxcnc_nml::InterpState::Idle;
+        status.motion.enabled = true;
+        status.motion.inpos = true;
+        status.offsets.g5x_index = 1;
+        status
+    }
+
+    fn make_idle(status: &mut Status) {
+        status.task.exec_state = ExecState::Done;
+        status.task.interp_state = linuxcnc_nml::InterpState::Idle;
+        status.task.queued_mdi_commands = 0;
+        status.motion.inpos = true;
+        status.motion.probing = false;
+    }
+
+    fn poll_probe(builder: &mut SnapshotBuilder, status: &Status) -> MachineSnapshot {
+        let panel = PanelState::offline(&builder.profile);
+        builder.build(status, &panel, Vec::new(), &ParameterFile::default())
+    }
+
+    /// The active row as the dispatch path records it, before the block runs.
+    fn provenance(index: u8, x: f64, y: f64, z: f64) -> ProbeProvenance {
+        let mut source_offsets = AxisMap::new();
+        source_offsets.insert("X".to_string(), x);
+        source_offsets.insert("Y".to_string(), y);
+        source_offsets.insert("Z".to_string(), z);
+        ProbeProvenance {
+            index: Some(index),
+            wcs: wcs_name(index),
+            source_offsets,
+            rotation: 0.0,
+        }
+    }
+
+    fn direct_parameters() -> ProbeParameters {
+        let mut parameters = ProbeParameters::default();
+        parameters.probe_mode = ProbeMode::ApplyWcs;
+        parameters
+    }
+
+    fn start_direct(
+        builder: &mut SnapshotBuilder,
+        operation: &'static ProbeOperation,
+        provenance: ProbeProvenance,
+    ) {
+        let parameters = direct_parameters();
+        builder.note_probe_block(Some(parameters.mdi_text(operation)), provenance);
+    }
+
+    fn push_calibration_slots(builder: &mut SnapshotBuilder, operation: &ProbeOperation) {
+        for parameter in operation.result_parameters() {
+            let value = match parameter {
+                1001 => 50.04,
+                1002 => 1.0,
+                1003 => 49.98,
+                1004 => 2.0,
+                1010 => 50.01,
+                _ => 0.0,
+            };
+            builder.push_probe_value(parameter as u32, value);
+        }
+    }
+
+    #[test]
+    fn live_probe_commits_once_from_exact_updates() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("edge_x_plus").unwrap();
+        let parameters = ProbeParameters::default();
+        builder.note_probe_block(
+            Some(parameters.mdi_text(operation)),
+            provenance(2, 10.0, 0.0, 0.0),
+        );
+        let mut status = idle_status();
+        status.motion.probe_val = 1;
+        status.offsets.g5x_index = 2;
+        status.offsets.g5x_offset.x = 10.0;
+
+        // A just-issued transaction can be polled before LinuxCNC queues it.
+        let pending = poll_probe(&mut builder, &status);
+        assert!(pending.probe.running);
+        assert!(pending.probe.last_result.is_none());
+        assert!(pending.probe.error.is_none());
+        assert_eq!(pending.probe.selected_wcs, "G55");
+        assert_eq!(pending.probe.input_tripped, Some(true));
+
+        status.task.interp_state = linuxcnc_nml::InterpState::Reading;
+        status.task.exec_state = ExecState::WaitingForMotion;
+        status.motion.probing = true;
+        builder.push_probe_value(1006, 12.5);
+        builder.push_probe_value(1005, f64::NAN);
+        builder.push_probe_value(999, 99.0);
+        let active = poll_probe(&mut builder, &status);
+        assert!(active.probe.last_result.is_none());
+
+        // POSITION does not write the row, but provenance stays the value
+        // captured when the block was issued.
+        status.offsets.g5x_offset.x = 99.0;
+        make_idle(&mut status);
+        let completed = poll_probe(&mut builder, &status);
+        let result = completed.probe.last_result.as_ref().unwrap();
+        assert_eq!(result.operation, "edge_x_plus");
+        assert_eq!(result.updated, vec![1006]);
+        assert_eq!(result.value(1006), Some(12.5));
+        assert_eq!(result.value(1005), None);
+        assert_eq!(result.mode, "POSITION");
+        assert_eq!(result.wcs, "G55");
+        assert_eq!(result.source_offsets.get("X"), Some(&10.0));
+        assert!(!result.applied);
+        assert!(!completed.probe.running);
+        assert_eq!(completed.probe.history.len(), 1);
+
+        let timestamp = result.timestamp_ms;
+        let repeated = poll_probe(&mut builder, &status);
+        assert_eq!(repeated.probe.history.len(), 1);
+        assert_eq!(
+            repeated.probe.last_result.as_ref().unwrap().timestamp_ms,
+            timestamp
+        );
+
+        builder.note_probe_block(
+            Some(parameters.parameter_update_block()),
+            ProbeProvenance::default(),
+        );
+        let parameter_update = poll_probe(&mut builder, &status);
+        assert_eq!(parameter_update.probe.history.len(), 1);
+        assert_eq!(
+            parameter_update
+                .probe
+                .last_result
+                .as_ref()
+                .unwrap()
+                .timestamp_ms,
+            timestamp
+        );
+    }
+
+    #[test]
+    fn failed_and_incomplete_transactions_discard_pending_values() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("edge_x_plus").unwrap();
+        let parameters = ProbeParameters::default();
+        let mut status = idle_status();
+
+        builder.note_probe_block(
+            Some(parameters.mdi_text(operation)),
+            ProbeProvenance::default(),
+        );
+        builder.fail_probe();
+        let failed = poll_probe(&mut builder, &status);
+        assert!(failed.probe.last_result.is_none());
+        assert!(failed.probe.history.is_empty());
+        assert!(failed.probe.error.as_deref().unwrap().contains("failed"));
+        assert!(!failed.probe.running);
+
+        builder.note_probe_block(
+            Some(parameters.mdi_text(operation)),
+            ProbeProvenance::default(),
+        );
+        assert!(poll_probe(&mut builder, &status).probe.error.is_none());
+        status.task.queued_mdi_commands = 1;
+        poll_probe(&mut builder, &status);
+        builder.push_probe_value(1001, 999.0);
+        make_idle(&mut status);
+        let incomplete = poll_probe(&mut builder, &status);
+        assert!(incomplete.probe.last_result.is_none());
+        assert!(incomplete.probe.history.is_empty());
+        assert!(incomplete.probe.error.as_deref().unwrap().contains("#1006"));
+        assert!(!incomplete.probe.running);
+    }
+
+    #[test]
+    fn direct_write_is_applied_only_when_the_live_row_confirms_it() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("edge_x_plus").unwrap();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 0.0, 0.0));
+        builder.push_probe_value(1006, 2.0);
+
+        // The routine's own G10 took effect: raw source 10 + measured 2.
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 12.0;
+        let completed = poll_probe(&mut builder, &status);
+        let result = completed.probe.last_result.as_ref().unwrap();
+        assert_eq!(result.mode, "DIRECT WCO");
+        assert!(result.applied);
+        assert!(completed.probe.error.is_none());
+        assert_eq!(result.source_offsets.get("X"), Some(&10.0));
+        assert_eq!(completed.probe.history.len(), 1);
+
+        // Polling again must not apply or record it a second time.
+        let timestamp = result.timestamp_ms;
+        let repeated = poll_probe(&mut builder, &status);
+        assert_eq!(repeated.probe.history.len(), 1);
+        let repeated_result = repeated.probe.last_result.as_ref().unwrap();
+        assert_eq!(repeated_result.timestamp_ms, timestamp);
+        assert!(repeated_result.applied);
+        assert!(repeated_result.apply_error(Some(1)).is_err());
+    }
+
+    #[test]
+    fn direct_commit_keeps_the_pre_run_origin() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("edge_x_plus").unwrap();
+        start_direct(&mut builder, operation, provenance(3, -5.0, 0.0, 0.0));
+        builder.push_probe_value(1006, 1.25);
+
+        // The routine wrote the row itself; provenance must still be the row
+        // as it stood when the block was issued.
+        let mut status = idle_status();
+        status.offsets.g5x_index = 3;
+        status.offsets.g5x_offset.x = -3.75;
+        let completed = poll_probe(&mut builder, &status);
+        let result = completed.probe.last_result.as_ref().unwrap();
+        assert!(result.applied);
+        assert_eq!(result.wcs, "G56");
+        assert_eq!(result.source_offsets.get("X"), Some(&-5.0));
+    }
+
+    #[test]
+    fn direct_write_without_a_g10_is_not_applied() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("edge_x_plus").unwrap();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 0.0, 0.0));
+        builder.push_probe_value(1006, 2.0);
+
+        // No write at all: the live row still holds the pre-run origin.
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 10.0;
+        let completed = poll_probe(&mut builder, &status);
+        let result = completed.probe.last_result.as_ref().unwrap();
+        assert!(!result.applied);
+        assert!(completed
+            .probe
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("does not match"));
+        // The measurement is still committed, and explicit Apply remains the
+        // recovery path for an unconfirmed DIRECT write.
+        assert_eq!(completed.probe.history.len(), 1);
+        assert!(result.apply_error(Some(1)).is_ok());
+    }
+
+    #[test]
+    fn wrong_direct_write_is_not_applied() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("edge_x_plus").unwrap();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 0.0, 0.0));
+        builder.push_probe_value(1006, 2.0);
+
+        // A PR-02-style write that omits the source origin: the routine wrote
+        // the measured value instead of source + measured.
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 2.0;
+        let completed = poll_probe(&mut builder, &status);
+        let result = completed.probe.last_result.as_ref().unwrap();
+        assert!(!result.applied);
+        let error = completed.probe.error.as_deref().unwrap();
+        assert!(error.contains("X2.000000"), "{error}");
+        assert!(error.contains("expected 12.000000"), "{error}");
+        assert!(result.apply_error(Some(1)).is_ok());
+    }
+
+    #[test]
+    fn partial_direct_write_is_not_applied() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("front_left_top_corner").unwrap();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 20.0, 30.0));
+        builder.push_probe_value(1006, 1.0);
+        builder.push_probe_value(1008, 2.0);
+        builder.push_probe_value(1009, -1.0);
+
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 11.0;
+        status.offsets.g5x_offset.y = 20.0;
+        // X and the helper's Z were written; Y was not.
+        status.offsets.g5x_offset.z = 29.0;
+        let completed = poll_probe(&mut builder, &status);
+        let result = completed.probe.last_result.as_ref().unwrap();
+        assert!(!result.applied);
+        let error = completed.probe.error.as_deref().unwrap();
+        assert!(error.contains("Y20.000000"), "{error}");
+        assert!(error.contains("expected 22.000000"), "{error}");
+        assert!(!error.contains("X11"), "{error}");
+        assert!(!error.contains("Z"), "{error}");
+        assert!(result.apply_error(Some(1)).is_ok());
+    }
+
+    #[test]
+    fn direct_corner_write_is_confirmed_and_applied_exactly_once() {
+        let operation = linc_core::probe::operation("front_left_top_corner").unwrap();
+        let mut builder = probe_builder();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 20.0, 30.0));
+        builder.push_probe_value(1006, 1.0);
+        builder.push_probe_value(1008, 2.0);
+        builder.push_probe_value(1009, -1.0);
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 11.0;
+        status.offsets.g5x_offset.y = 22.0;
+        // The helper (probe_z_minus_sub, called with #3030) writes Z too.
+        status.offsets.g5x_offset.z = 29.0;
+        let completed = poll_probe(&mut builder, &status);
+        assert!(
+            completed.probe.error.is_none(),
+            "{:?}",
+            completed.probe.error
+        );
+        let result = completed.probe.last_result.as_ref().unwrap();
+        assert!(result.applied);
+        assert_eq!(result.mode, "DIRECT WCO");
+        // Polling again neither re-applies nor records a second result.
+        let timestamp = result.timestamp_ms;
+        let repeated = poll_probe(&mut builder, &status);
+        assert_eq!(repeated.probe.history.len(), 1);
+        assert_eq!(
+            repeated.probe.last_result.as_ref().unwrap().timestamp_ms,
+            timestamp
+        );
+
+        // A wrong X is still caught.
+        let mut builder = probe_builder();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 20.0, 30.0));
+        builder.push_probe_value(1006, 1.0);
+        builder.push_probe_value(1008, 2.0);
+        builder.push_probe_value(1009, -1.0);
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 10.5;
+        status.offsets.g5x_offset.y = 22.0;
+        status.offsets.g5x_offset.z = 29.0;
+        let completed = poll_probe(&mut builder, &status);
+        assert!(!completed.probe.last_result.as_ref().unwrap().applied);
+        let error = completed.probe.error.as_deref().unwrap();
+        assert!(error.contains("X10.500000"), "{error}");
+        assert!(error.contains("expected 11.000000"), "{error}");
+    }
+
+    #[test]
+    fn direct_x_plus_helper_z_write_leaves_y_alone() {
+        let operation = linc_core::probe::operation("right_top_side").unwrap();
+        let mut builder = probe_builder();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 20.0, 30.0));
+        builder.push_probe_value(1005, 0.5);
+        builder.push_probe_value(1009, -1.0);
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 10.5;
+        status.offsets.g5x_offset.y = 20.0;
+        // X inline plus the helper's Z; Y is never written.
+        status.offsets.g5x_offset.z = 29.0;
+        let completed = poll_probe(&mut builder, &status);
+        assert!(
+            completed.probe.error.is_none(),
+            "{:?}",
+            completed.probe.error
+        );
+        assert!(completed.probe.last_result.as_ref().unwrap().applied);
+
+        let mut builder = probe_builder();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 20.0, 30.0));
+        builder.push_probe_value(1005, 0.5);
+        builder.push_probe_value(1009, -1.0);
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 10.0;
+        status.offsets.g5x_offset.y = 20.0;
+        status.offsets.g5x_offset.z = 29.0;
+        let completed = poll_probe(&mut builder, &status);
+        assert!(!completed.probe.last_result.as_ref().unwrap().applied);
+        assert!(completed
+            .probe
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("X10.000000"));
+    }
+
+    #[test]
+    fn direct_y_plus_helper_z_write_leaves_x_alone() {
+        let operation = linc_core::probe::operation("front_top_side").unwrap();
+        let mut builder = probe_builder();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 20.0, 30.0));
+        builder.push_probe_value(1008, 2.0);
+        builder.push_probe_value(1009, -1.0);
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 10.0;
+        status.offsets.g5x_offset.y = 22.0;
+        // Y inline plus the helper's Z; X is never written.
+        status.offsets.g5x_offset.z = 29.0;
+        let completed = poll_probe(&mut builder, &status);
+        assert!(
+            completed.probe.error.is_none(),
+            "{:?}",
+            completed.probe.error
+        );
+        assert!(completed.probe.last_result.as_ref().unwrap().applied);
+
+        let mut builder = probe_builder();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 20.0, 30.0));
+        builder.push_probe_value(1008, 2.0);
+        builder.push_probe_value(1009, -1.0);
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 10.0;
+        status.offsets.g5x_offset.y = 21.0;
+        status.offsets.g5x_offset.z = 29.0;
+        let completed = poll_probe(&mut builder, &status);
+        assert!(!completed.probe.last_result.as_ref().unwrap().applied);
+        assert!(completed
+            .probe
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("Y21.000000"));
+    }
+
+    #[test]
+    fn direct_write_into_an_unwritten_axis_is_a_mismatch() {
+        // right_top_side writes X and the helper's Z; a stray Y write is
+        // still a write the operator did not ask for.
+        let operation = linc_core::probe::operation("right_top_side").unwrap();
+        let mut builder = probe_builder();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 20.0, 30.0));
+        builder.push_probe_value(1005, 0.5);
+        builder.push_probe_value(1009, -1.0);
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 10.5;
+        status.offsets.g5x_offset.y = 20.5;
+        status.offsets.g5x_offset.z = 29.0;
+        let completed = poll_probe(&mut builder, &status);
+        assert!(!completed.probe.last_result.as_ref().unwrap().applied);
+        let error = completed.probe.error.as_deref().unwrap();
+        assert!(error.contains("Y20.500000"), "{error}");
+        assert!(error.contains("does not write Y"), "{error}");
+    }
+
+    #[test]
+    fn angle_direct_write_is_never_claimed_applied() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("top_front_edge_angle").unwrap();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 20.0, 30.0));
+        builder.push_probe_value(1008, 25.0);
+        builder.push_probe_value(1009, -2.0);
+        builder.push_probe_value(1011, 1.0);
+        builder.push_probe_value(1012, 0.5);
+
+        let mut status = idle_status();
+        // Y = source + #1008 - #1011, Z = source + #1009 (the helper writes
+        // it); X is a controller-side start anchor and has no readback.
+        status.offsets.g5x_offset.y = 20.0 + 25.0 - 1.0;
+        status.offsets.g5x_offset.z = 30.0 - 2.0;
+        status.offsets.rotation_xy = 0.0;
+        let completed = poll_probe(&mut builder, &status);
+        let result = completed.probe.last_result.as_ref().unwrap();
+        assert!(!result.applied);
+        let error = completed.probe.error.as_deref().unwrap();
+        // The correct Z write must not be reported as a row mismatch; the only
+        // reason is the unreadable anchor.
+        assert!(error.contains("start/corner anchor"), "{error}");
+        assert!(error.contains("X is a controller-side"), "{error}");
+        assert!(!error.contains("does not match"), "{error}");
+        assert!(!error.contains("does not write"), "{error}");
+        assert!(!error.contains("changed although"), "{error}");
+        assert_eq!(result.measured.get("Y"), Some(&24.0));
+        assert_eq!(result.measured.get("Z"), Some(&-2.0));
+        assert_eq!(result.measured.get("X"), None);
+        assert!(result.apply_error(Some(1)).is_ok());
+    }
+
+    #[test]
+    fn angle_direct_write_with_a_stale_rotation_is_a_mismatch() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("top_front_edge_angle").unwrap();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 20.0, 30.0));
+        builder.push_probe_value(1008, 25.0);
+        builder.push_probe_value(1009, -2.0);
+        builder.push_probe_value(1011, 1.0);
+        builder.push_probe_value(1012, 0.5);
+
+        let mut status = idle_status();
+        status.offsets.g5x_offset.y = 44.0;
+        status.offsets.g5x_offset.z = 28.0;
+        // Every Edge Angle run clears rotation with R0; this one did not.
+        status.offsets.rotation_xy = 3.0;
+        let completed = poll_probe(&mut builder, &status);
+        let result = completed.probe.last_result.as_ref().unwrap();
+        assert!(!result.applied);
+        let error = completed.probe.error.as_deref().unwrap();
+        assert!(error.contains("R3.0000"), "{error}");
+        assert!(error.contains("expected 0.0000"), "{error}");
+    }
+
+    #[test]
+    fn missing_helper_z_write_is_a_mismatch() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("front_left_top_corner").unwrap();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 20.0, 30.0));
+        builder.push_probe_value(1006, 1.0);
+        builder.push_probe_value(1008, 2.0);
+        builder.push_probe_value(1009, -1.0);
+
+        // X and Y were written; the helper's Z write did not happen even
+        // though #1009 is -1.
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 11.0;
+        status.offsets.g5x_offset.y = 22.0;
+        status.offsets.g5x_offset.z = 30.0;
+        let completed = poll_probe(&mut builder, &status);
+        let result = completed.probe.last_result.as_ref().unwrap();
+        assert!(!result.applied);
+        let error = completed.probe.error.as_deref().unwrap();
+        assert!(error.contains("Z30.000000"), "{error}");
+        assert!(error.contains("expected 29.000000"), "{error}");
+        // Explicit Apply remains the recovery path.
+        assert!(result.apply_error(Some(1)).is_ok());
+    }
+
+    #[test]
+    fn wrong_helper_z_write_is_a_mismatch() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("front_left_top_corner").unwrap();
+        start_direct(&mut builder, operation, provenance(1, 10.0, 20.0, 30.0));
+        builder.push_probe_value(1006, 1.0);
+        builder.push_probe_value(1008, 2.0);
+        builder.push_probe_value(1009, -1.0);
+
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 11.0;
+        status.offsets.g5x_offset.y = 22.0;
+        // 27.5 instead of the intended 29.0: no applied claim.
+        status.offsets.g5x_offset.z = 27.5;
+        let completed = poll_probe(&mut builder, &status);
+        let result = completed.probe.last_result.as_ref().unwrap();
+        assert!(!result.applied);
+        let error = completed.probe.error.as_deref().unwrap();
+        assert!(error.contains("Z27.500000"), "{error}");
+        assert!(error.contains("expected 29.000000"), "{error}");
+    }
+
+    #[test]
+    fn position_run_with_a_helper_never_writes_the_row() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("front_left_top_corner").unwrap();
+        let parameters = ProbeParameters::default();
+        builder.note_probe_block(
+            Some(parameters.mdi_text(operation)),
+            provenance(1, 10.0, 20.0, 30.0),
+        );
+        builder.push_probe_value(1006, 1.0);
+        builder.push_probe_value(1008, 2.0);
+        builder.push_probe_value(1009, -1.0);
+        // The row is untouched by a measure-only run, including Z.
+        let mut status = idle_status();
+        status.offsets.g5x_offset.x = 10.0;
+        status.offsets.g5x_offset.y = 20.0;
+        status.offsets.g5x_offset.z = 30.0;
+        let completed = poll_probe(&mut builder, &status);
+        let result = completed.probe.last_result.as_ref().unwrap();
+        assert_eq!(result.mode, "POSITION");
+        assert!(!result.applied);
+        assert!(
+            completed.probe.error.is_none(),
+            "{:?}",
+            completed.probe.error
+        );
+        assert_eq!(result.measured.get("Z"), Some(&-1.0));
+    }
+
+    #[test]
+    fn position_result_can_be_applied_once_by_hand() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("edge_x_plus").unwrap();
+        let parameters = ProbeParameters::default();
+        builder.note_probe_block(
+            Some(parameters.mdi_text(operation)),
+            provenance(1, 10.0, 0.0, 0.0),
+        );
+        builder.push_probe_value(1006, 2.0);
+        let status = idle_status();
+        let completed = poll_probe(&mut builder, &status);
+        let result = completed.probe.last_result.clone().unwrap();
+        assert_eq!(result.apply_error(Some(1)), Ok(()));
+
+        // The explicit Apply path marks the exact result once the live row
+        // confirms it, so a repeated A cannot write again.
+        builder.mark_probe_result_applied(&result);
+        let after = poll_probe(&mut builder, &status);
+        let current = after.probe.last_result.clone().unwrap();
+        assert!(current.applied);
+        assert!(current.apply_error(Some(1)).is_err());
+        assert_eq!(after.probe.history.len(), 1);
+        assert!(after.probe.history[0].applied);
+    }
+
+    #[test]
+    fn calibration_requires_the_final_controller_message() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("cal_round_boss").unwrap();
+        let mut parameters = ProbeParameters::default();
+        parameters.calibration_diameter = 50.0;
+        parameters.square_cal_axis = 0;
+        builder.note_probe_block(
+            Some(parameters.mdi_text(operation)),
+            ProbeProvenance::default(),
+        );
+
+        // A stub that reports the initial clear-to-zero and every measurement
+        // slot but never the controller's final #3032.
+        builder.push_probe_value(3032, 0.0);
+        push_calibration_slots(&mut builder, operation);
+
+        let status = idle_status();
+        let unconfirmed = poll_probe(&mut builder, &status);
+        assert!(unconfirmed.probe.last_result.is_none());
+        assert!(unconfirmed.probe.history.is_empty());
+        assert!(unconfirmed
+            .probe
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("#3032"));
+        // Nothing is synthesized in its place, and the intermediate clear is
+        // not published as the calibration value.
+        assert_eq!(unconfirmed.probe.calibration_offset, None);
+        assert!(!unconfirmed.probe.running);
+    }
+
+    #[test]
+    fn calibration_publishes_the_controller_value() {
+        let mut builder = probe_builder();
+        let operation = linc_core::probe::operation("cal_round_boss").unwrap();
+        let mut parameters = ProbeParameters::default();
+        parameters.calibration_diameter = 50.0;
+        parameters.square_cal_axis = 0;
+        builder.note_probe_block(
+            Some(parameters.mdi_text(operation)),
+            ProbeProvenance::default(),
+        );
+        builder.push_probe_value(3032, 0.0);
+        push_calibration_slots(&mut builder, operation);
+        // The final message arrives after every measurement slot. The local
+        // recomputation for these widths would be 0.015.
+        builder.push_probe_value(3032, 0.031);
+
+        let status = idle_status();
+        let completed = poll_probe(&mut builder, &status);
+        let result = completed.probe.last_result.as_ref().unwrap();
+        assert_eq!(result.updated, (1001..=1010).collect::<Vec<_>>());
+        assert_eq!(result.error, Some(0.031));
+        assert_eq!(completed.probe.calibration_offset, Some(0.031));
+        assert!(!result.applied);
+        assert!(operation.apply_terms().is_empty());
+        assert!(result.measured.is_empty());
+
+        // A later controller message is still authoritative outside a run.
+        builder.push_probe_value(3032, 0.025);
+        let authoritative = poll_probe(&mut builder, &status);
+        assert_eq!(authoritative.probe.calibration_offset, Some(0.025));
+    }
+
+    #[test]
+    fn unconfirmed_reset_keeps_the_controller_value() {
+        let mut builder = probe_builder();
+        builder.push_probe_value(3032, 0.02);
+        let status = idle_status();
+        assert_eq!(
+            poll_probe(&mut builder, &status).probe.calibration_offset,
+            Some(0.02)
+        );
+
+        // The reset is issued; no #3032 message has arrived yet.
+        builder.note_probe_block(
+            Some("o<probe_cal_reset> call".into()),
+            ProbeProvenance::default(),
+        );
+        let waiting = poll_probe(&mut builder, &status);
+        assert_eq!(waiting.probe.calibration_offset, Some(0.02));
+        assert!(waiting.probe.last_result.is_none());
+
+        builder.push_probe_value(3032, 0.0);
+        let reset = poll_probe(&mut builder, &status);
+        assert_eq!(reset.probe.calibration_offset, Some(0.0));
+        assert!(reset.probe.last_result.is_none());
+        assert!(!reset.probe.running);
     }
 }

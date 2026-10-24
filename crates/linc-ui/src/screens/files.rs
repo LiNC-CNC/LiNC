@@ -113,9 +113,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
         .zip(root.as_deref())
         .map(|(current, root)| {
             current != root
-                || (!usb
-                    && app.files.allow_parent_above_root
-                    && current.parent().is_some())
+                || (!usb && app.files.allow_parent_above_root && current.parent().is_some())
         })
         .unwrap_or(false);
     let mut on_parent = parent_available
@@ -208,8 +206,11 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
                 }
             }
         }
+        // Backspace is the delete key the QMK keyboard carries; Delete stays for
+        // a desktop keyboard. Ctrl+X is a clipboard chord and belongs to text
+        // editing, so it is not a Files action.
         let delete_pressed = input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
-            || input.consume_key(egui::Modifiers::CTRL, egui::Key::X);
+            || input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace);
         if delete_pressed && !on_parent {
             if let Some(entry) = entries.get(selected) {
                 if !entry.is_dir {
@@ -294,13 +295,7 @@ fn copy_selected(app: &mut LincApp) {
 
 /// Open the NAME cell of `path` as a text field. The stem is selected so typing
 /// replaces the name and leaves the extension.
-fn start_rename(
-    app: &mut LincApp,
-    usb: bool,
-    path: PathBuf,
-    name: String,
-    is_dir: bool,
-) {
+fn start_rename(app: &mut LincApp, usb: bool, path: PathBuf, name: String, is_dir: bool) {
     let select_len = if is_dir {
         name.chars().count()
     } else {
@@ -354,7 +349,10 @@ fn commit_rename(app: &mut LincApp) {
         || name.contains('\0');
     if invalid {
         app.files.error = Some("invalid file name".into());
-        app.files.rename = Some(crate::state::FileRename { focus: true, ..rename });
+        app.files.rename = Some(crate::state::FileRename {
+            focus: true,
+            ..rename
+        });
         return;
     }
     let Some(parent) = rename.path.parent().map(Path::to_path_buf) else {
@@ -365,12 +363,18 @@ fn commit_rename(app: &mut LincApp) {
     if destination != rename.path {
         if destination.exists() {
             app.files.error = Some(format!("{name} already exists"));
-            app.files.rename = Some(crate::state::FileRename { focus: true, ..rename });
+            app.files.rename = Some(crate::state::FileRename {
+                focus: true,
+                ..rename
+            });
             return;
         }
         if let Err(error) = std::fs::rename(&rename.path, &destination) {
             app.files.error = Some(format!("rename failed: {error}"));
-            app.files.rename = Some(crate::state::FileRename { focus: true, ..rename });
+            app.files.rename = Some(crate::state::FileRename {
+                focus: true,
+                ..rename
+            });
             return;
         }
     }
@@ -707,19 +711,18 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
     let list_height = ui.available_height().max(120.0);
     let row_pitch = row_height + line_height * 0.5;
     app.files.page_rows = (((list_height - 18.0) / row_pitch).floor() as usize).max(1);
-    let scroll_row = if app.files.scroll_to_selection
-        && ((pane == Pane::Usb) == app.files.usb_focused)
-    {
-        app.files.scroll_to_selection = false;
-        let row = if parent_selected {
-            0
+    let scroll_row =
+        if app.files.scroll_to_selection && ((pane == Pane::Usb) == app.files.usb_focused) {
+            app.files.scroll_to_selection = false;
+            let row = if parent_selected {
+                0
+            } else {
+                parent_rows + selected.min(entries.len().saturating_sub(1))
+            };
+            Some(row)
         } else {
-            parent_rows + selected.min(entries.len().saturating_sub(1))
+            None
         };
-        Some(row)
-    } else {
-        None
-    };
     let mut table = TableBuilder::new(ui)
         .id_salt(("file-table", pane as u8))
         .max_scroll_height(list_height)
@@ -1005,7 +1008,6 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
         }
     }
 }
-
 
 fn load_selected(app: &mut LincApp, path: &Path) {
     let extension = path

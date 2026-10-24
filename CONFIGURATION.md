@@ -36,7 +36,8 @@ safety validation without connecting to LinuxCNC or HAL.
 |---|---|
 | `configs/base.toml` | Shared UI, keymap, safety policy, HAL output policy, panel driver contract, backend and preferences defaults. Not runnable alone. |
 | `configs/sim.toml` | Mill simulation: `configs/sim.ini` runs a real `linuxcnc` process with the in-repo simulation HAL (`hal/rio_sim.hal`), LiNC display and simulated CNC control panel. |
-| `configs/baiermill.toml` | Physical mill: `../../baiermill_pb/probe_basic.ini`, real CNC control panel over RS-485 owned by `linc-panel`. |
+| `configs/baiermill.toml` | Physical mill, machine's own INI: `../../baiermill_pb/probe_basic.ini`, real CNC control panel over RS-485 owned by `linc-panel`. Fails `--check-config`: its `SUBROUTINE_PATH` cannot resolve LiNC's reviewed probe bundle (§7). |
+| `configs/baiermill-pb.toml` | Physical mill, LiNC's reviewed configuration: `configs/baiermill-pb.ini` (a copy of the machine INI with LiNC's probe bundle first in `SUBROUTINE_PATH`), same machine values, same RS-485 panel. |
 | `configs/lathe-sim.toml` | Lathe simulation: `../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini`, lathe UI capabilities. |
 
 The profiles use:
@@ -56,7 +57,7 @@ Intended command line:
 
 ```sh
 ./scripts/start-sim.sh
-linc --config configs/baiermill.toml
+linc --config configs/baiermill-pb.toml
 ```
 
 `--config` or the `LINC_CONFIG` environment variable is required. There is
@@ -75,7 +76,7 @@ Real machine:
 
 ```ini
 [DISPLAY]
-DISPLAY = linc --config /home/jack/CNC/LiNC/configs/baiermill.toml
+DISPLAY = linc --config /home/jack/CNC/LiNC/configs/baiermill-pb.toml
 ```
 
 Simulation:
@@ -107,7 +108,7 @@ HALFILE = /home/jack/CNC/LiNC/hal/linc-pendant.hal   ; real machine only
 POSTGUI_HALFILE = /home/jack/CNC/LiNC/hal/linc-postgui.hal
 
 [DISPLAY]
-DISPLAY = linc --config /home/jack/CNC/LiNC/configs/baiermill.toml
+DISPLAY = linc --config /home/jack/CNC/LiNC/configs/baiermill-pb.toml
 ```
 
 `linc.hal` loads the `linc-panel` service and wires `cnc_panel.*` to
@@ -119,7 +120,7 @@ after the GUI has created the `linc.*` component and wires
 `LINC_CONFIG` must select the same profile as `--config`:
 
 ```sh
-export LINC_CONFIG=/home/jack/CNC/LiNC/configs/baiermill.toml
+export LINC_CONFIG=/home/jack/CNC/LiNC/configs/baiermill-pb.toml
 ```
 
 The core HAL expects the generic `cnc_panel` component. Rename or alias the
@@ -174,8 +175,8 @@ Required profile fields:
 | Machine graph bounds | INI travel limits / kinematics |
 | Program graph bounds | Last valid preview parse; never from a syntax-error state |
 | USB mount points | `udisks2` D-Bus, not config |
-| Probe subroutines | Bundled at `subroutines/probe_basic` (verbatim Probe Basic G-code); also INI `SUBROUTINE_PATH`; `[probe] subroutines = "ini"` |
-| Probe parameters/results | LinuxCNC parameters `#3014`–`#3036`, results `#1001`–`#1009` |
+| Probe subroutines | Bundled at `subroutines/probe_basic` (Probe Basic plus documented LiNC Apply context); also INI `SUBROUTINE_PATH`; `[probe] subroutines = "ini"` |
+| Probe parameters/results | LinuxCNC parameters `#3014`–`#3036`, results `#1001`–`#1012`; live values arrive through strictly parsed Probe Basic NML display messages |
 | MDI command history | HMI-local ring buffer; not a machine log |
 | Homing sequence | INI `HOME_SEQUENCE`, search/latch/index settings |
 | Homing commands | `cnc_panel.home-*` / `proghome-*` pins and physical keys; never HMI |
@@ -189,7 +190,7 @@ Required profile fields:
 | Machine identity and panel ownership | machine profile |
 | UI layout, theme, keymap, toolpath options | `base.toml` + overrides |
 | G-code help content | bundled `linuxcnc-gcode` reference, generated from linuxcnc.org |
-| Window geometry, last page, recent files | user preferences file |
+| Window geometry, last page, recent files, typed probe UI parameters | user preferences file |
 
 ### BaierMill values (reference only)
 
@@ -267,7 +268,11 @@ This profile must never be used to command real hardware.
 
 ## 7. BaierMill physical profile
 
-`configs/baiermill.toml`:
+The machine values below apply to both BaierMill profiles:
+`configs/baiermill-pb.toml` (LiNC's reviewed configuration; see "Probe Basic
+bundle deployment" below) and
+`configs/baiermill.toml` (the machine's own INI, kept as the deployment guard:
+it fails `--check-config` until the machine tree carries the probe bundle).
 
 - `machine.kind = "real"` — no `SIM` badge.
 - `linuxcnc_ini = "../../baiermill_pb/probe_basic.ini"`.
@@ -277,9 +282,10 @@ This profile must never be used to command real hardware.
   panel service. The real authority for the link remains `linc-panel` and the
   HAL pin surface.
 - The same `cnc_panel.*` pins feed the HMI and the existing panel logic.
-- Probe subroutines come from that external INI's `SUBROUTINE_PATH`. The
-  vendored bundle in this repo is wired into `configs/sim.ini`; a machine INI
-  must point at its own copy (or at `subroutines/probe_basic` if installed).
+- Probe subroutines come from the INI's `SUBROUTINE_PATH`. Because this INI
+  lists only the machine's own copy, `configs/baiermill.toml` now fails
+  `--check-config`; deploy the reviewed bundle with
+  `configs/baiermill-pb.toml` instead (see below).
 - The physical E-stop and machine-on chain remain hard-wired; the HMI has no
   software E-stop substitute.
 - `panel_link_stats = "optional"` — the Diagnostics page shows counters when
@@ -288,8 +294,124 @@ This profile must never be used to command real hardware.
 Launch:
 
 ```sh
-linc --config configs/baiermill.toml
+linc --config configs/baiermill-pb.toml
 ```
+
+### Probe Basic bundle deployment
+
+Every generated Probe Run issues `o<touch_probe_param_update> call`,
+`o<linc_probe_context> call` and the selected routine, so the machine's
+`[RS274NGC] SUBROUTINE_PATH` must resolve all three to LiNC's reviewed bundle.
+The machine's own `../../baiermill_pb/subroutines` cannot: it has no
+`linc_probe_context.ngc`, no LiNC angle anchors, and the old `[3017]`
+traverse-feed arguments.
+
+`configs/baiermill-pb.toml` and `configs/baiermill-pb.ini` are LiNC's reviewed
+deployment for that machine:
+
+- `configs/baiermill-pb.ini` is a copy of `baiermill_pb/probe_basic.ini`.
+  Axes, limits, velocities, homing, PID, ATC, tool table, parameter file and the
+  HAL composition/order are identical (one HAL entry is LiNC's own copy, below);
+  only `[DISPLAY]` (LiNC's `../scripts/linc-display.sh`),
+  `[RS274NGC] SUBROUTINE_PATH` and the paths that were relative to the machine
+  directory differ. Those are now relative to `configs/`
+  (`hallib/rio.hal` -> `../../baiermill_pb/hallib/rio.hal`, `tool.tbl` ->
+  `../../baiermill_pb/tool.tbl`, and the same for `mill.var`, the log and
+  preference files, the Probe Basic user paths and the HAL files).
+- One HAL entry is LiNC's own: `HALFILE = ../hal/baiermill-pb-szgh-panel.hal`
+  replaces the machine's `hallib/szgh_panel.hal`. That file runs
+  `loadusr ./szgh-panel-hal`, a compiled helper that is not in the machine
+  tree; LiNC's copy loads the machine's existing python driver instead
+  (`loadusr ../../baiermill_pb/szgh_panel_hal.py -c 0.01` - executable,
+  `#!/usr/bin/env python3`, LinuxCNC `hal` module plus pyserial, no display,
+  creates the same `szgh_panel` component the machine's post-GUI HAL nets, and
+  the machine's own file keeps that python form as its first-line comment).
+  Position in the `HALFILE` order and the `-c 0.01` cycle are unchanged.
+- The post-GUI file is LiNC's own too: `POSTGUI_HALFILE = ../hal/baiermill-pb-postgui.hal`
+  starts from the machine's `hallib/probe_basic_postgui.hal`. Every machine
+  net is copied verbatim and in order (SZGH panel buttons, LEDs and tool
+  display, cycle start/stop/pause, single block, K4, worklamp, lube, coolant,
+  block delete, optional stop, E-stop handling, spindle at speed, spindle
+  inhibit, ATC piston, tool-99 spindle gating, rio bits, pendant run/resume/
+  pause/stop and whb jog-enable); only the nets that existed to feed the
+  Probe Basic window are dropped, each with a comment naming what replaces it.
+  Component loading is unchanged, so nothing is loaded twice.
+- `SUBROUTINE_PATH` lists `../subroutines/probe_basic` first, then the
+  machine's own `subroutines`, then the ngcgui example paths: the same intent
+  as `configs/sim.ini`.
+- `baiermill_pb` is never edited. The machine keeps its own LinuxCNC
+  configuration; LiNC's copy is what selects the reviewed routines.
+
+Deploy:
+
+1. Install the LiNC checkout on the machine at a fixed path and keep
+   `subroutines/probe_basic` with it. Copy the whole bundle, not just
+   `linc_probe_context.ngc`: a partial copy leaves the wrong angle anchors and
+   the old `[3017]` feed expressions active.
+2. `./target/release/linc --config configs/baiermill-pb.toml --check-config`
+   must pass. It resolves the INI's `SUBROUTINE_PATH` and fails when a required
+   routine is missing (`linc_probe_context.ngc` among them) or when a resolved
+   routine is not LiNC's own reviewed copy. Passing validates the profile, the
+   INI paths and the probe bundle only: `--check-config` reads no HAL file
+   contents and starts no LinuxCNC, so it is not evidence that the profile is
+   start-ready on the machine (see the limitations below).
+3. Export `LINC_CONFIG=<LiNC>/configs/baiermill-pb.toml` and start the session
+   with `configs/baiermill-pb.ini` as the INI.
+
+What validation checks:
+
+- The required routines are the Run preamble (`touch_probe_param_update`), the
+  Apply context helper (`linc_probe_context`) and every catalogue routine in
+  `crates/linc-core/src/probe.rs`.
+- A profile whose INI declares no `SUBROUTINE_PATH` fails when
+  `machine.kind = "real"`; minimal simulation fixtures without a search path
+  stay valid.
+- Hash comparison against `subroutines/probe_basic` catches a search path that
+  resolves to an older machine copy: `machine.kind = "real"` fails, a
+  simulation profile only logs the difference, because a live test rig may keep
+  its own copy — refresh that copy whenever the bundle changes.
+
+Known limitations of this deployment, deliberate and not fixed here:
+
+- `ON_ABORT_COMMAND`: the machine INI sets none, so the copy does not add one.
+  Adding `ON_ABORT_COMMAND = O<on_abort> CALL` (as `configs/sim.ini` does)
+  would change machine behaviour and needs the machine owner's decision. Until
+  then an aborted probe leaves feed override cancelled (`M50 P0`), because the
+  routines restore it only on normal completion.
+- SZGH panel helper: fixed for the missing-binary case, otherwise unverified.
+  LiNC's `hal/baiermill-pb-szgh-panel.hal` starts the machine's python driver
+  (`../../baiermill_pb/szgh_panel_hal.py`, resolved from `configs/`),
+  which exists and is executable; `crates/linc-core/tests/baiermill_pb_hal.rs`
+  fails if the profile ever points back at a `loadusr` program that is
+  missing. Not verified here: this checkout has no panel hardware, so the
+  python driver never ran against `/dev/ttyUSB0`, no LinuxCNC HAL start
+  with this INI was performed, and LiNC's own `linc-panel` service (which owns
+  the serial port for the HMI) was not exercised together with it.
+- Not start-ready. This profile has never been through a LinuxCNC HAL start,
+  no machine hardware was touched and no probe was run; only static checks
+  and `--check-config` passed. Four pieces are still missing before a real
+  session can be expected to come up:
+  1. `hal/linc.hal` is not part of this profile's HAL set, so no `cnc_panel`
+     component exists: `linc-panel` never starts, and LiNC's panel-driven
+     jog, modes, overrides, cycle and E-stop-reset wiring is absent. LiNC's
+     panel path (`cnc_panel.*` via `hal/linc.hal`) and the machine's
+     `szgh_panel.*` python driver both claim `/dev/ttyUSB0`, so which
+     process owns the panel is an open decision; adding `hal/linc.hal` as it
+     stands also collides with this post-GUI file on the `toggle.*` and
+     `not.paused` instance names, so one side must be renamed first.
+  2. `scripts/linc-display.sh` loads `hal/linc-sim-postgui.hal` for every
+     profile, so a real session would load sim wiring (`cnc_panel.sseg_status`,
+     `rio.sim-probe`) and fail, and `hal/linc-postgui.hal` - the real
+     machine's `linc.*` wiring - is never loaded. That script needs a
+     profile-aware choice; it is outside this change.
+  3. `hal/linc-postgui.hal` must be loaded once the HMI's `linc.*`
+     component exists (it drives `iocontrol.0.tool-changed` from
+     `linc.tool-change-confirm`, among others). The post-GUI file here cannot
+     do that: LinuxCNC loads `POSTGUI_HALFILE` as soon as it spawns the
+     display, before `linc.*` exists.
+  4. Calibration and probing safety on the machine (feed override restore,
+     tool-99 spindle gating with a real probe) remain unproven: see the
+     `ON_ABORT_COMMAND` note above.
 
 ## 8. Safety policy
 
@@ -357,10 +479,13 @@ Runtime UI state is stored separately:
 ```
 
 Allowed preference keys include window geometry, last page, program view,
-toolpath view angle, recent files, visible panels and the per-tool type labels
-(`tool_kinds`, LiNC-only because the LinuxCNC tool table has no type column). Machine identity,
-HAL pins, safety flags and the LinuxCNC INI path are never read from
-preferences.
+toolpath view angle, recent files, visible panels, per-tool type labels
+(`tool_kinds`, LiNC-only because the LinuxCNC tool table has no type column),
+and typed probing feeds, clearances, feature hints and UI mode (`probe`).
+Probe enablement and tool identity remain profile-owned; the measured `#3032`
+calibration offset remains controller-owned and is synchronized after a run.
+Machine identity, HAL pins, safety flags and the LinuxCNC INI path are never
+read from preferences.
 
 `--config`/machine profile changes require a restart. Preferences may be
 written while running.
@@ -472,7 +597,10 @@ For this design repository:
 
 - `base.toml` and all three machine profiles parse with a standard TOML parser;
 - `sim.toml` extends `base.toml`, is `gui = "mill"`, and points at an existing INI;
-- `baiermill.toml` extends `base.toml`, is `gui = "mill"`, and points at an existing INI;
+- `baiermill.toml` extends `base.toml`, is `gui = "mill"`, and points at an existing INI; it is expected to fail `--check-config` until the machine tree carries the reviewed probe bundle (deployment guard);
+- `baiermill-pb.toml` extends `base.toml`, is `gui = "mill"`, points at
+  `configs/baiermill-pb.ini`, and its `SUBROUTINE_PATH` resolves every routine
+  a generated Probe Run calls to LiNC's reviewed bundle;
 - `lathe-sim.toml` extends `base.toml`, is `gui = "lathe"`, and points at an existing INI;
 - the mill simulation profile uses the built-in `cnc-panel-sim` driver, points
   at `configs/sim.ini`, and starts a real LinuxCNC process through

@@ -950,13 +950,18 @@ pub struct ProbeUi {
     pub category: ProbeCategory,
     pub operation: String,
     pub params: ProbeParameters,
+    /// Display name of the controller's actual active WCS.
     pub wcs: String,
-    pub require_apply: bool,
     pub error: Option<String>,
     pub last_run: Option<Instant>,
-    pub apply_target: u8,
+    /// Catalogue id issued by the most recent UI Run, including one still running.
+    pub last_run_operation: Option<String>,
+    /// Last controller calibration copied into the parameter block. This value is
+    /// read-only in the UI and is never restored from preferences.
+    pub calibration_offset_seen: Option<f64>,
     pub textures: HashMap<String, egui::TextureHandle>,
-    /// Inline editor for the parameter table, following the Offsets table.
+    /// Inline parameter editor. `param_selected` is the zero-based value index in
+    /// the absolute #3014..=#3036 Probe Basic parameter contract.
     pub param_selected: usize,
     pub param_focused: bool,
     pub param_editing: bool,
@@ -964,26 +969,31 @@ pub struct ProbeUi {
     pub param_edit_focus: bool,
     /// Inline editor for the probe page DRO, shared shape with the Offsets DRO.
     pub dro_edit: Option<DroEdit>,
+    pub help_topic: usize,
+    pub help_page: usize,
 }
 
 impl ProbeUi {
     pub fn new(params: ProbeParameters, wcs: String) -> Self {
+        let calibration_offset_seen = Some(params.calibration_offset);
         Self {
             category: ProbeCategory::OutsideCorners,
             operation: String::new(),
             params,
             wcs,
-            require_apply: true,
             error: None,
             last_run: None,
-            apply_target: 1,
+            last_run_operation: None,
+            calibration_offset_seen,
             textures: HashMap::new(),
-            param_selected: 0,
+            param_selected: 1,
             param_focused: false,
             param_editing: false,
             param_buffer: String::new(),
             param_edit_focus: false,
             dro_edit: None,
+            help_topic: 0,
+            help_page: 0,
         }
     }
 
@@ -1134,7 +1144,6 @@ pub fn toast(text: impl Into<String>, color: egui::Color32) -> Toast {
         until: Instant::now() + Duration::from_secs(5),
     }
 }
-
 
 pub fn page_accent(page: Page) -> egui::Color32 {
     match page {
@@ -1757,6 +1766,24 @@ mod help_dialog_tests {
         assert!(!help.dialog_back());
         help.close_dialog();
         assert!(help.dialog.is_none());
+    }
+}
+
+#[cfg(test)]
+mod probe_ui_tests {
+    use super::ProbeUi;
+    use linc_core::probe::{ProbeCategory, ProbeMode, ProbeParameters};
+
+    #[test]
+    fn probe_ui_starts_without_a_routine_and_with_empty_help_position() {
+        let ui = ProbeUi::new(ProbeParameters::default(), "G54".into());
+        assert_eq!(ui.category, ProbeCategory::OutsideCorners);
+        assert!(ui.operation.is_empty());
+        assert_eq!(ui.params.probe_mode, ProbeMode::MeasureOnly);
+        assert_eq!(ui.help_topic, 0);
+        assert_eq!(ui.help_page, 0);
+        assert_eq!(ui.param_selected, 1);
+        assert_eq!(ui.calibration_offset_seen, Some(0.0));
     }
 }
 

@@ -1,0 +1,17 @@
+(LiNC probe transaction context)
+(Issued after touch_probe_param_update and before the selected routine.)
+(Keeps explicit Apply idempotent and preserves angle origin inputs that are)
+(not part of Probe Basic's public #1001-#1012 result contract.)
+
+o<linc_probe_context> sub
+  #<_linc_probe_wcs> = #5220
+  #<_linc_probe_x_offset> = #[5201 + [20 * #5220]]
+  #<_linc_probe_y_offset> = #[5202 + [20 * #5220]]
+  #<_linc_probe_z_offset> = #[5203 + [20 * #5220]]
+  #<_linc_start_x> = #5420
+  #<_linc_start_y> = #5421
+  #<_linc_corner_x> = #5420
+  #<_linc_corner_y> = #5421
+o<linc_probe_context> endsub
+
+M2

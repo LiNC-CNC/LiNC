@@ -665,7 +665,7 @@ impl Profile {
             )));
         }
         let machine_ini = MachineIni::parse_file(&ini_path)?;
-        validate(&config, &machine_ini)?;
+        validate(&config, &machine_ini, &base_dir)?;
         let variant = if config.machine.gui == "lathe" {
             MachineVariant::Lathe
         } else {
@@ -755,7 +755,7 @@ fn deep_merge(base: &mut toml::Value, overlay: toml::Value) {
     }
 }
 
-fn validate(config: &Config, ini: &MachineIni) -> Result<(), ConfigError> {
+fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(), ConfigError> {
     if config.schema_version != 1 {
         return Err(ConfigError::Invalid(format!(
             "unsupported schema_version {}",
@@ -1069,9 +1069,7 @@ fn validate(config: &Config, ini: &MachineIni) -> Result<(), ConfigError> {
         return Err(ConfigError::Invalid("backend.kind must be linuxcnc".into()));
     }
     if config.backend.transport != "nml" {
-        return Err(ConfigError::Invalid(
-            "backend.transport must be nml".into(),
-        ));
+        return Err(ConfigError::Invalid("backend.transport must be nml".into()));
     }
     if config.backend.status_hz < 10 || config.backend.status_hz > 20 {
         return Err(ConfigError::Invalid(
@@ -1090,7 +1088,142 @@ fn validate(config: &Config, ini: &MachineIni) -> Result<(), ConfigError> {
             ini.tool_table.display()
         )));
     }
+    validate_probe_bundle(config, ini, profile_dir)?;
     Ok(())
+}
+
+/// Every routine a generated Probe Basic Run calls: the parameter preamble, the
+/// explicit-Apply context helper and one entry per catalogue operation. The
+/// names come from `crate::probe` so the catalogue stays the single source;
+/// `required_probe_routines_cover_generated_runs` holds them to `blocks()`.
+fn required_probe_routines() -> Vec<String> {
+    let mut names = vec![
+        "touch_probe_param_update".to_string(),
+        "linc_probe_context".to_string(),
+    ];
+    names.extend(
+        crate::probe::operations()
+            .iter()
+            .map(|operation| operation.call.to_string()),
+    );
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// LiNC's own reviewed bundle: the nearest ancestor of the profile directory
+/// that carries `subroutines/probe_basic`. A profile copied outside the
+/// checkout has no reference copy, so only presence is validated there.
+fn reviewed_probe_bundle(profile_dir: &Path) -> Option<PathBuf> {
+    profile_dir
+        .ancestors()
+        .map(|dir| dir.join("subroutines").join("probe_basic"))
+        .find(|dir| dir.is_dir())
+}
+
+fn routine_file(dir: &Path, routine: &str) -> Option<PathBuf> {
+    let file = dir.join(format!("{routine}.ngc"));
+    file.is_file().then_some(file)
+}
+
+fn file_hash(path: &Path) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let bytes = std::fs::read(path).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
+/// Resolve the machine INI's `SUBROUTINE_PATH` and fail before Run when the
+/// reviewed bundle is not what the search path provides. Without this a
+/// machine whose INI lacks `linc_probe_context.ngc` starts, accepts a Probe
+/// Run and then fails on the missing `o<linc_probe_context> call`.
+fn validate_probe_bundle(
+    config: &Config,
+    ini: &MachineIni,
+    profile_dir: &Path,
+) -> Result<(), ConfigError> {
+    if !config.probe.enabled {
+        return Ok(());
+    }
+    if ini.subroutine_paths.is_empty() {
+        // Minimal simulation fixtures declare no search path and never reach a
+        // machine; a physical profile without one cannot resolve any routine.
+        return match config.machine.kind.as_str() {
+            "real" => Err(ConfigError::Invalid(format!(
+                "{} declares no [RS274NGC] SUBROUTINE_PATH, so a generated Probe Basic Run cannot \
+                 resolve linc_probe_context.ngc; add LiNC's reviewed bundle first, as \
+                 configs/baiermill-pb.ini does (see CONFIGURATION.md, Probe Basic bundle)",
+                ini.path.display()
+            ))),
+            _ => Ok(()),
+        };
+    }
+    let reviewed = reviewed_probe_bundle(profile_dir);
+    let mut missing: Vec<String> = Vec::new();
+    let mut differing: Option<(String, PathBuf)> = None;
+    for routine in required_probe_routines() {
+        let Some(found) = ini
+            .subroutine_paths
+            .iter()
+            .find_map(|dir| routine_file(dir, &routine))
+        else {
+            missing.push(format!("{routine}.ngc"));
+            continue;
+        };
+        let Some(reference) = reviewed
+            .as_ref()
+            .and_then(|dir| routine_file(dir, &routine))
+        else {
+            continue;
+        };
+        if differing.is_none() && file_hash(&found) != file_hash(&reference) {
+            differing = Some((format!("{routine}.ngc"), found));
+        }
+    }
+    if !missing.is_empty() {
+        return Err(ConfigError::Invalid(format!(
+            "SUBROUTINE_PATH in {} does not provide {}; searched {}",
+            ini.path.display(),
+            summarize(missing),
+            ini.subroutine_paths
+                .iter()
+                .map(|dir| dir.display().to_string())
+                .collect::<Vec<_>>()
+                .join(":")
+        )));
+    }
+    if let Some((file, found)) = differing {
+        let message = format!(
+            "the probe bundle resolved from {} differs from LiNC's reviewed copy \
+             (for example {file} resolves to {}); list ../subroutines/probe_basic \
+             first in [RS274NGC] SUBROUTINE_PATH",
+            ini.path.display(),
+            found.display()
+        );
+        // A physical machine must run exactly the reviewed bundle. A simulation
+        // profile may keep its own copy for a live test rig, so report it there
+        // without refusing to start.
+        return if config.machine.kind == "real" {
+            Err(ConfigError::Invalid(message))
+        } else {
+            log::warn!("{message}");
+            Ok(())
+        };
+    }
+    Ok(())
+}
+
+/// Keep validation messages readable when a search path provides nothing.
+fn summarize(mut names: Vec<String>) -> String {
+    const SHOWN: usize = 6;
+    names.sort();
+    if names.len() <= SHOWN {
+        return names.join(", ");
+    }
+    let extra = names.len() - SHOWN;
+    names.truncate(SHOWN);
+    format!("{} (and {extra} more)", names.join(", "))
 }
 
 #[cfg(test)]
@@ -1407,5 +1540,179 @@ changer = "atc"
                 .len(),
             1
         );
+    }
+
+    fn repo_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    fn required_routine_files() -> Vec<String> {
+        required_probe_routines()
+            .into_iter()
+            .map(|name| format!("{name}.ngc"))
+            .collect()
+    }
+
+    fn write_bundle(dir: &Path, contents: &dyn Fn(&str) -> String) {
+        std::fs::create_dir_all(dir).unwrap();
+        for file in required_routine_files() {
+            let name = file.trim_end_matches(".ngc").to_string();
+            write(&dir.join(&file), &contents(&name));
+        }
+    }
+
+    /// A minimal machine INI plus profile. `extra` is appended after the axis
+    /// section, so it must be a complete section such as `[RS274NGC]`.
+    fn probe_profile(dir: &Path, kind: &str, extra: &str) -> PathBuf {
+        write(&dir.join("base.toml"), base_config());
+        write(
+            &dir.join("probe_basic.ini"),
+            &format!(
+                "[EMC]\nMACHINE = Test\n[DISPLAY]\nPROGRAM_PREFIX = gcode\nTOOL_TABLE_COLUMNS = TZDR\n[KINS]\nJOINTS = 3\nKINEMATICS = trivkins coordinates=XYZ\n[TRAJ]\nCOORDINATES = XYZ\nLINEAR_UNITS = mm\nSPINDLES = 1\n[EMCIO]\nTOOL_TABLE = tool.tbl\n[AXIS_X]\nMIN_LIMIT = -10\nMAX_LIMIT = 10\n{extra}"
+            ),
+        );
+        std::fs::create_dir_all(dir.join("gcode")).unwrap();
+        write(
+            &dir.join("tool.tbl"),
+            "; tool table\nT1 P1 Z0 D6 ; end mill\n",
+        );
+        let simulation = if kind == "sim" {
+            "[simulation]\nenabled = true\npanel_window = false\npanel_scale = 1.0\n"
+        } else {
+            ""
+        };
+        let profile = dir.join("profile.toml");
+        write(
+            &profile,
+            &format!(
+                r#"schema_version = 1
+profile = "probe"
+extends = "base.toml"
+[machine]
+name = "Test"
+kind = "{kind}"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[panel]
+kind = "simulated"
+label = "Sim panel"
+driver = "cnc-panel-sim"
+[panel.link]
+kind = "virtual"
+{simulation}"#
+            ),
+        );
+        profile
+    }
+
+    #[test]
+    fn shipped_profiles_resolve_the_reviewed_probe_bundle() {
+        let root = repo_root();
+        for profile in ["configs/sim.toml", "configs/baiermill-pb.toml"] {
+            Profile::load(&root.join(profile), None)
+                .unwrap_or_else(|error| panic!("{profile} must validate: {error}"));
+        }
+    }
+
+    #[test]
+    fn subroutine_path_without_the_context_helper_is_rejected() {
+        let dir = temp_dir();
+        let root = dir.path();
+        write_bundle(&root.join("subroutines"), &|name| format!("({name})\n"));
+        std::fs::remove_file(root.join("subroutines/linc_probe_context.ngc")).unwrap();
+        let profile = probe_profile(root, "sim", "\n[RS274NGC]\nSUBROUTINE_PATH = subroutines\n");
+        let message = Profile::load(&profile, None).unwrap_err().to_string();
+        assert!(message.contains("SUBROUTINE_PATH"), "{message}");
+        assert!(message.contains("linc_probe_context.ngc"), "{message}");
+    }
+
+    #[test]
+    fn machine_copy_of_the_bundle_is_rejected_as_incompatible() {
+        let dir = temp_dir();
+        let root = dir.path();
+        // LiNC's reviewed copy: the nearest ancestor of the profile directory.
+        write_bundle(&root.join("subroutines/probe_basic"), &|name| {
+            format!("({name})\n")
+        });
+        // The machine's own copy: same names, one routine differs.
+        write_bundle(&root.join("proj/subroutines"), &|name| {
+            if name == "probe_top_front_edge_angle" {
+                "(older Probe Basic copy)\n".to_string()
+            } else {
+                format!("({name})\n")
+            }
+        });
+        let profile = probe_profile(
+            &root.join("proj"),
+            "real",
+            "\n[RS274NGC]\nSUBROUTINE_PATH = subroutines\n",
+        );
+        let message = Profile::load(&profile, None).unwrap_err().to_string();
+        assert!(
+            message.contains("differs from LiNC's reviewed copy"),
+            "{message}"
+        );
+        assert!(
+            message.contains("probe_top_front_edge_angle.ngc"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn simulation_copy_of_the_bundle_only_reports_a_difference() {
+        let dir = temp_dir();
+        let root = dir.path();
+        write_bundle(&root.join("subroutines/probe_basic"), &|name| {
+            format!("({name})\n")
+        });
+        // A live test rig may carry its own copy; it must still start.
+        write_bundle(&root.join("proj/subroutines"), &|_| {
+            "(fixture copy)\n".to_string()
+        });
+        let profile = probe_profile(
+            &root.join("proj"),
+            "sim",
+            "\n[RS274NGC]\nSUBROUTINE_PATH = subroutines\n",
+        );
+        let loaded = Profile::load(&profile, None);
+        assert!(
+            loaded.is_ok(),
+            "a simulation copy must not fail validation: {:?}",
+            loaded.err()
+        );
+    }
+
+    #[test]
+    fn physical_profile_without_a_subroutine_path_is_rejected() {
+        let dir = temp_dir();
+        let profile = probe_profile(dir.path(), "real", "");
+        let message = Profile::load(&profile, None).unwrap_err().to_string();
+        assert!(message.contains("SUBROUTINE_PATH"), "{message}");
+        assert!(message.contains("linc_probe_context.ngc"), "{message}");
+    }
+
+    #[test]
+    fn bundle_validation_requires_every_routine_a_generated_run_calls() {
+        let required = required_probe_routines();
+        let parameters = crate::probe::ProbeParameters::default();
+        let mut calls = 0;
+        for operation in crate::probe::operations() {
+            for line in parameters.mdi_text(operation).lines() {
+                let Some(name) = line
+                    .trim()
+                    .strip_prefix("o<")
+                    .and_then(|rest| rest.split('>').next())
+                else {
+                    continue;
+                };
+                calls += 1;
+                assert!(
+                    required.iter().any(|routine| routine == name),
+                    "the generated Run for {} calls o<{name}>, which bundle validation ignores",
+                    operation.id
+                );
+            }
+        }
+        assert_eq!(calls, crate::probe::operations().len() * 3);
     }
 }

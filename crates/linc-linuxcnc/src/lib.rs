@@ -11,6 +11,7 @@
 
 mod panel;
 mod parameters;
+mod probe_messages;
 mod snapshot;
 
 use std::path::{Path, PathBuf};
@@ -35,7 +36,10 @@ use thiserror::Error;
 
 use panel::{PanelReader, PanelState};
 use parameters::ParameterFile;
-use snapshot::{carry_hal_selections, initial_snapshot, SnapshotBuilder};
+use snapshot::{
+    carry_hal_selections, compare_row, expected_row, initial_snapshot, ProbeProvenance,
+    SnapshotBuilder,
+};
 
 #[derive(Debug, Error)]
 pub enum BackendError {
@@ -69,6 +73,7 @@ pub struct NmlBackend {
     offsets_synced: bool,
     offset_sync_attempts: u32,
     offset_sync_next: Instant,
+    offset_sync_protect_logged: bool,
     confirm_seq: u64,
     tool_table: ToolTable,
 }
@@ -130,6 +135,7 @@ impl NmlBackend {
             offsets_synced: false,
             offset_sync_attempts: 0,
             offset_sync_next: Instant::now(),
+            offset_sync_protect_logged: false,
             confirm_seq: 0,
             tool_table,
         })
@@ -154,7 +160,7 @@ impl NmlBackend {
         let spindles = self.read_spindles(&status, &panel);
         self.poll_restore();
         self.poll_height_comp(&panel);
-        self.sync_work_offsets(&status);
+        self.sync_work_offsets(&status, &panel);
 
         let mut snapshot = self
             .builder
@@ -209,7 +215,18 @@ impl NmlBackend {
     fn poll_messages(&mut self) {
         loop {
             match self.client.poll_error() {
-                Ok(Some(message)) => self.builder.push_message(message.kind, &message.text),
+                Ok(Some(message)) => {
+                    if let Some((parameter, value)) =
+                        probe_messages::parse_probe_message(message.kind, &message.text)
+                    {
+                        self.builder.push_probe_value(parameter, value);
+                    } else {
+                        if message.kind.is_error() {
+                            self.builder.fail_probe();
+                        }
+                        self.builder.push_message(message.kind, &message.text);
+                    }
+                }
                 Ok(None) => break,
                 Err(error) => {
                     log::warn!("LinuxCNC error channel: {error}");
@@ -318,104 +335,97 @@ impl NmlBackend {
         }
     }
 
-    fn sync_work_offsets(&mut self, status: &NmlStatus) {
-        if self.offsets_synced || self.offset_sync_attempts >= 5 {
+    /// Publish the parameter file's row for the active system when the live
+    /// row does not match it.
+    ///
+    /// A blank-`OPEN_FILE` start leaves the interpreter's restored `G5X`
+    /// row unpublished, and neither an interpreter reset nor selecting the
+    /// already-active origin reloads it. A complete stored-row `G10 L2` (every
+    /// stored axis plus the stored rotation) is the deliberate write that
+    /// publishes it, and the live row is read back to confirm the result.
+    ///
+    /// That write changes machine state, so it is refused, and retried later,
+    /// while PROTECT is on or unknown. It never runs with a program open, so
+    /// the separate program-open restoration path cannot be disturbed.
+    fn sync_work_offsets(&mut self, status: &NmlStatus, panel: &PanelState) {
+        if self.offsets_synced || self.offset_sync_attempts >= MAX_OFFSET_SYNCS {
             return;
         }
         if Instant::now() < self.offset_sync_next {
             return;
         }
-        if status.io.estop
-            || status.task.state != NmlTaskState::On
-            || status.task.interp_state != linuxcnc_nml::InterpState::Idle
-            || status.motion.probing
-        {
-            return;
-        }
-        // Never re-initialize the interpreter while a program is open:
-        // `reset_interpreter` closes the file, and `sim-ready` can load the
-        // program between homing and this poll. The program open path restores
-        // the parameter file and applies its G5X offsets itself.
-        if !status.task.file.trim().is_empty() {
-            self.offsets_synced = true;
-            return;
-        }
-        // `G54` is an MDI block, and LinuxCNC refuses MDI until every axis is
-        // homed. A start-up sync that runs before homing would burn every
-        // attempt on rejections and never apply the stored offsets.
-        if status.joints.len() < self.profile.machine_ini.axes.len()
-            || status
-                .joints
-                .iter()
-                .take(self.profile.machine_ini.axes.len())
-                .any(|joint| !joint.homed)
-        {
-            return;
-        }
-        let active = if (1..=9).contains(&status.offsets.g5x_index) {
-            status.offsets.g5x_index as u8
-        } else {
-            self.parameters.active_index()
-        };
         let axes = self.axis_names();
-        if !self.parameters.has_work_offset(active, axes.len()) {
-            self.offsets_synced = true;
-            return;
-        }
-        if self.live_offsets_match(status, active, &axes) {
-            self.offsets_synced = true;
-            return;
-        }
-        self.offset_sync_attempts += 1;
-        self.offset_sync_next = Instant::now() + Duration::from_secs(2);
-
-        // The interpreter restores the parameter file at startup but only
-        // queues the G5X offset; reinitializing it while the task is running
-        // makes the queue drain. If that does not take, a G54..G59.3 MDI block
-        // is the documented fallback.
-        let _ = self.client.send(&NmlCommand::ResetInterpreter);
-        let _ = self.client.wait_complete(Duration::from_secs(2));
-        std::thread::sleep(Duration::from_millis(250));
-        if let Ok(now) = self.client.poll_status() {
-            if self.live_offsets_match(&now, active, &axes) {
+        let protect = !panel.program_protect_known || panel.program_protect;
+        let inputs =
+            OffsetSyncInputs::from_status(status, self.profile.machine_ini.axes.len(), protect);
+        match plan_offset_sync(&inputs, &self.parameters, &axes) {
+            OffsetSync::Done(reason) => {
+                if !self.offsets_synced {
+                    log::info!("stored work offsets: {reason}");
+                }
                 self.offsets_synced = true;
-                log::info!("stored work offsets applied by the interpreter restart");
-                return;
+            }
+            OffsetSync::Wait(reason) => {
+                if protect && !self.offset_sync_protect_logged {
+                    log::warn!(
+                        "stored work offsets are not published while PROTECT is on or unknown"
+                    );
+                    self.offset_sync_protect_logged = true;
+                } else {
+                    log::debug!("stored work offsets are not published yet: {reason}");
+                }
+            }
+            OffsetSync::Publish {
+                index,
+                block,
+                expected,
+                rotation,
+            } => {
+                let attempt = self.offset_sync_attempts + 1;
+                if attempt == 1 {
+                    if self.parameters.active_index() != index {
+                        // The parameter file records another system as active.
+                        // Restoring it is LinuxCNC's business, not a silent
+                        // WCS change by the HMI.
+                        log::info!(
+                            "the parameter file records {} as the active system; the controller is in {}",
+                            wcs_name(self.parameters.active_index()),
+                            wcs_name(index)
+                        );
+                    }
+                    log::info!("publishing stored {} offsets: {block}", wcs_name(index));
+                }
+                self.offset_sync_attempts = attempt;
+                self.offset_sync_next = Instant::now() + Duration::from_secs(2);
+                if let Err(error) = self.issue_blocks(&[block]) {
+                    log::warn!(
+                        "could not publish stored {} offsets: {error}",
+                        wcs_name(index)
+                    );
+                    return;
+                }
+                let _ = self.client.wait_complete(Duration::from_secs(2));
+                let Ok(now) = self.client.poll_status() else {
+                    return;
+                };
+                if row_matches(
+                    &now.offsets.g5x_offset,
+                    now.offsets.rotation_xy,
+                    &axes,
+                    &expected,
+                    rotation,
+                ) {
+                    self.offsets_synced = true;
+                    log::info!("stored {} offsets are now live", wcs_name(index));
+                } else {
+                    log::warn!(
+                        "stored {} offsets did not reach the live row (attempt {} of {MAX_OFFSET_SYNCS})",
+                        wcs_name(index),
+                        self.offset_sync_attempts
+                    );
+                }
             }
         }
-        let code = wcs_name(active);
-        if let Err(error) = self.issue_blocks(&[code.clone()]) {
-            log::warn!("could not apply stored {code} offsets: {error}");
-            return;
-        }
-        let _ = self.client.wait_complete(Duration::from_secs(2));
-        if let Ok(now) = self.client.poll_status() {
-            if self.live_offsets_match(&now, active, &axes) {
-                self.offsets_synced = true;
-                log::info!("stored work offsets applied by selecting {code}");
-            }
-        }
-    }
-
-    fn live_offsets_match(&self, status: &NmlStatus, index: u8, axes: &[String]) -> bool {
-        let live = status.offsets.g5x_offset;
-        let mut compared = 0;
-        for (axis_index, _axis) in axes.iter().enumerate() {
-            let Some(stored) = self.parameters_work_value(index, axis_index) else {
-                continue;
-            };
-            let actual = pose_component(&live, axis_index);
-            if (actual - stored).abs() > 1e-6 {
-                return false;
-            }
-            compared += 1;
-        }
-        compared > 0
-    }
-
-    fn parameters_work_value(&self, index: u8, axis_index: usize) -> Option<f64> {
-        let key = 5220 + index as u32 * 20 + 1 + axis_index as u32;
-        self.parameters.has(key).then(|| self.parameters.get(key))
     }
 
     fn axis_names(&self) -> Vec<String> {
@@ -703,7 +713,19 @@ impl NmlBackend {
                     }
                 }
                 if origin == MdiOrigin::Probe {
-                    self.builder.note_probe_block(Some(block.clone()));
+                    // Fail closed before the block reaches the controller.
+                    // The UI applies the same action rules client-side; both
+                    // gates are independent and neither replaces the other.
+                    let snapshot = self.refresh();
+                    if probe_write_blocked(&block, snapshot.writes_allowed()) {
+                        return Err(MachineError::ProgramProtected);
+                    }
+                    // Provenance is read here, before the block can run: a
+                    // DIRECT routine rewrites the active row itself.
+                    self.builder.note_probe_block(
+                        Some(block.clone()),
+                        ProbeProvenance::from_snapshot(&snapshot),
+                    );
                 }
                 self.issue_blocks(&blocks)
             }
@@ -905,30 +927,96 @@ impl NmlBackend {
             }
             MachineCommand::ApplyProbeResult { result, target } => {
                 self.validate_write()?;
-                match target {
-                    ProbeTarget::WorkOffset(index) => {
-                        self.write_work_offset(index, &result.measured, None)
-                    }
-                    ProbeTarget::Calibration => {
-                        let offset = result.measured.values().first().copied().or(Some(0.0));
-                        self.builder.set_calibration_offset(offset);
-                        if let Some(stored) = self.last_snapshot.as_mut() {
-                            stored.probe.calibration_offset = offset;
-                        }
-                        Ok(())
-                    }
+                let ProbeTarget::WorkOffset(index) = target else {
+                    return Err(MachineError::Invalid(
+                        "calibration is stored by the calibration routine, not Apply".into(),
+                    ));
+                };
+                let snapshot = self.refresh();
+                result
+                    .apply_error(snapshot.offsets.active_index)
+                    .map_err(MachineError::Invalid)?;
+                let current = snapshot
+                    .probe
+                    .last_result
+                    .as_ref()
+                    .ok_or_else(|| MachineError::Invalid("no current probe result".into()))?;
+                if current != &result {
+                    return Err(MachineError::Invalid(
+                        "stale probe result; run the probe again".into(),
+                    ));
                 }
+                if snapshot.offsets.active_index != Some(index) {
+                    return Err(MachineError::Invalid(
+                        "Apply target must be the active work offset".into(),
+                    ));
+                }
+                let operation = linc_core::probe::operation(&result.operation)
+                    .ok_or_else(|| MachineError::Invalid("unknown probe operation".into()))?;
+                let results = linc_core::probe::ParameterResults::from_values(&result.values);
+                let block = operation
+                    .apply_block(index, &results, result.rotation)
+                    .map_err(MachineError::Invalid)?;
+                self.issue_blocks(&[block])?;
+                self.wait_complete(Duration::from_secs(2))?;
+
+                // A completed block is not evidence. Read the row back and
+                // compare it with what the Apply intended.
+                let snapshot = self.refresh();
+                if snapshot.offsets.active_index != Some(index) {
+                    return Err(MachineError::Backend(format!(
+                        "the controller is no longer in {}; the apply was not verified",
+                        wcs_name(index)
+                    )));
+                }
+                let Some(live) = snapshot
+                    .offsets
+                    .offsets
+                    .iter()
+                    .find(|offset| offset.index == index)
+                else {
+                    return Err(MachineError::Backend(
+                        "no live work offset row to verify the apply against".into(),
+                    ));
+                };
+                let expected = expected_row(
+                    operation,
+                    &results,
+                    &result.source_offsets,
+                    &result.auxiliary,
+                );
+                let problems = compare_row(&expected, result.rotation, live);
+                if !problems.is_empty() {
+                    return Err(MachineError::Backend(format!(
+                        "controller did not take probe apply: {}",
+                        problems.join(", ")
+                    )));
+                }
+                // Edge Angle corner/start anchors exist only inside the
+                // interpreter, so those axes are reported as unverified rather
+                // than described as numerically read back.
+                if !expected.unverified.is_empty() {
+                    log::info!(
+                        "probe apply {}: {} not numerically verified (controller-side anchors)",
+                        operation.id,
+                        expected.unverified.join("/")
+                    );
+                }
+                self.builder.mark_probe_result_applied(&result);
+                self.builder.clear_probe_error();
+                self.capture_live_offsets();
+                self.save_parameters()
             }
             MachineCommand::ResetProbeCalibration => {
                 self.validate_write()?;
-                self.builder.set_calibration_offset(None);
-                if let Some(stored) = self.last_snapshot.as_mut() {
-                    stored.probe.calibration_offset = None;
-                }
+                // Never pre-publish the reset. The displayed offset stays
+                // controller-owned until the routine's own #3032 message
+                // confirms the new value; an unconfirmed reset changes nothing.
                 self.issue_blocks(&["o<probe_cal_reset> call".to_string()])
             }
             MachineCommand::AbortProgram => {
                 self.nml_send(&NmlCommand::Abort)?;
+                self.builder.fail_probe();
                 self.pending_restore = None;
                 self.pending_height_comp = None;
                 Ok(())
@@ -1020,6 +1108,161 @@ impl MachineBackend for NmlBackend {
     }
 }
 
+/// Number of startup attempts at publishing the stored work offsets.
+const MAX_OFFSET_SYNCS: u32 = 5;
+
+/// What startup offset publication needs from one status poll.
+pub(crate) struct OffsetSyncInputs {
+    pub program_open: bool,
+    pub estop: bool,
+    pub task_on: bool,
+    pub idle: bool,
+    pub probing: bool,
+    pub homed: bool,
+    pub live_index: i32,
+    pub live: linuxcnc_nml::Pose,
+    pub live_rotation: f64,
+    pub protect: bool,
+}
+
+impl OffsetSyncInputs {
+    pub(crate) fn from_status(status: &NmlStatus, axis_count: usize, protect: bool) -> Self {
+        Self {
+            program_open: !status.task.file.trim().is_empty(),
+            estop: status.io.estop,
+            task_on: status.task.state == NmlTaskState::On,
+            idle: status.task.interp_state == linuxcnc_nml::InterpState::Idle,
+            probing: status.motion.probing,
+            homed: status.joints.len() >= axis_count
+                && status
+                    .joints
+                    .iter()
+                    .take(axis_count)
+                    .all(|joint| joint.homed),
+            live_index: status.offsets.g5x_index,
+            live: status.offsets.g5x_offset,
+            live_rotation: status.offsets.rotation_xy,
+            protect,
+        }
+    }
+}
+
+/// What one startup poll should do about the stored work offsets.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum OffsetSync {
+    /// Nothing to publish, or the live row already matches; stop checking.
+    Done(&'static str),
+    /// Not ready yet; check again on a later poll.
+    Wait(&'static str),
+    /// Publish this complete stored row, then verify the live result.
+    Publish {
+        index: u8,
+        block: String,
+        expected: AxisMap<f64>,
+        rotation: f64,
+    },
+}
+
+/// Decide how to publish the stored row for the active work system.
+///
+/// The target is the active index the controller reports; an invalid index is
+/// read as G54, which is where LinuxCNC starts and therefore the row its live
+/// `g5x_offset` field describes. The stored `#5220` value is not used to
+/// switch coordinate systems behind the operator's back.
+pub(crate) fn plan_offset_sync(
+    inputs: &OffsetSyncInputs,
+    parameters: &ParameterFile,
+    axes: &[String],
+) -> OffsetSync {
+    // The program-open path restores the parameter file and publishes its G5X
+    // offsets itself. Never touch a session that has a file open.
+    if inputs.program_open {
+        return OffsetSync::Done("a program is open");
+    }
+    if inputs.estop || !inputs.task_on {
+        return OffsetSync::Wait("the machine is not ON");
+    }
+    if !inputs.idle || inputs.probing {
+        return OffsetSync::Wait("the interpreter is busy");
+    }
+    if !inputs.homed {
+        return OffsetSync::Wait("axes are not homed");
+    }
+    if inputs.protect {
+        return OffsetSync::Wait("PROTECT is on");
+    }
+    let index = if (1..=9).contains(&inputs.live_index) {
+        inputs.live_index as u8
+    } else {
+        1
+    };
+    if !parameters.has_work_offset(index, axes.len()) {
+        return OffsetSync::Done("no stored offsets");
+    }
+
+    let mut parts = vec![format!("G10 L2 P{index}")];
+    let mut expected = AxisMap::new();
+    for (axis_index, axis) in axes.iter().enumerate() {
+        let Some(value) = parameters.work_axis(index, axis_index) else {
+            continue;
+        };
+        parts.push(format!("{axis}{value:.6}"));
+        expected.insert(axis.clone(), value);
+    }
+    // The rotation belongs to the row: publishing only the axes would leave a
+    // stale angle behind.
+    let rotation = parameters.rotation(index);
+    parts.push(format!("R{rotation:.6}"));
+    if row_matches(
+        &inputs.live,
+        inputs.live_rotation,
+        axes,
+        &expected,
+        rotation,
+    ) {
+        return OffsetSync::Done("the live row already matches");
+    }
+    OffsetSync::Publish {
+        index,
+        block: parts.join(" "),
+        expected,
+        rotation,
+    }
+}
+
+/// Does the live row carry every stored value for `index`?
+pub(crate) fn row_matches(
+    live: &linuxcnc_nml::Pose,
+    live_rotation: f64,
+    axes: &[String],
+    expected: &AxisMap<f64>,
+    rotation: f64,
+) -> bool {
+    if expected.iter().next().is_none() {
+        return false;
+    }
+    for (axis_index, axis) in axes.iter().enumerate() {
+        let Some(want) = expected.get(axis) else {
+            continue;
+        };
+        if (pose_component(live, axis_index) - want).abs() > 1e-6 {
+            return false;
+        }
+    }
+    (live_rotation - rotation).abs() <= 1e-6
+}
+
+/// Is this probe block a write that `writes_allowed` forbids?
+///
+/// The action rules live in [`linc_core::probe::probe_write_action`] and are
+/// shared with the simulator (and meant to be shared with the UI), so the
+/// backends cannot drift. Measurement-only POSITION runs stay allowed in every
+/// state; every classified action is refused while PROTECT is on or unknown,
+/// before any MDI reaches the controller.
+pub(crate) fn probe_write_blocked(block: &str, writes_allowed: bool) -> bool {
+    linc_core::probe::probe_write_action(block).is_some() && !writes_allowed
+}
+
 fn pose_component(pose: &linuxcnc_nml::Pose, index: usize) -> f64 {
     match index {
         0 => pose.x,
@@ -1105,6 +1348,7 @@ pub(crate) fn load_tool_table(profile: &Profile) -> (ToolTableState, ToolTable) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use linc_core::probe::ProbeParameters;
 
     #[test]
     fn helper_script_is_gone() {
@@ -1113,5 +1357,365 @@ mod tests {
             "/python/linc_bridge.py"
         ))
         .exists());
+    }
+
+    fn run_block(operation: &str, mode: linc_core::probe::ProbeMode) -> String {
+        let mut parameters = ProbeParameters::default();
+        parameters.probe_mode = mode;
+        parameters.mdi_text(linc_core::probe::operation(operation).unwrap())
+    }
+
+    fn all_probe_blocks() -> Vec<(&'static str, String)> {
+        let mut blocks = vec![
+            (
+                "direct",
+                run_block("edge_x_plus", linc_core::probe::ProbeMode::ApplyWcs),
+            ),
+            (
+                "direct-angle",
+                run_block(
+                    "top_front_edge_angle",
+                    linc_core::probe::ProbeMode::ApplyWcs,
+                ),
+            ),
+            (
+                "edge-angle-position",
+                run_block(
+                    "top_front_edge_angle",
+                    linc_core::probe::ProbeMode::MeasureOnly,
+                ),
+            ),
+            (
+                "calibration-run",
+                run_block("cal_round_boss", linc_core::probe::ProbeMode::MeasureOnly),
+            ),
+            (
+                "spindle-nose-position",
+                run_block("spindle_nose", linc_core::probe::ProbeMode::MeasureOnly),
+            ),
+            ("calibration-reset", "o<probe_cal_reset> call".to_string()),
+            (
+                "parameter-update",
+                ProbeParameters::default().parameter_update_block(),
+            ),
+            ("reset-all", "o<reset_all_data> call".to_string()),
+            ("reset-x", "o<x_data_reset> call".to_string()),
+            ("reset-y", "o<y_data_reset> call".to_string()),
+            ("unknown-mode", "o<probe_x_plus_wco> call".to_string()),
+        ];
+        // Controls that must stay allowed.
+        blocks.push((
+            "position-measure-only",
+            run_block("edge_x_plus", linc_core::probe::ProbeMode::MeasureOnly),
+        ));
+        blocks.push((
+            "position-boss",
+            run_block("round_boss", linc_core::probe::ProbeMode::MeasureOnly),
+        ));
+        blocks.push(("context-only", "o<linc_probe_context> call".to_string()));
+        blocks
+    }
+
+    const WRITE_BLOCKS: [&str; 11] = [
+        "direct",
+        "direct-angle",
+        "edge-angle-position",
+        "calibration-run",
+        "spindle-nose-position",
+        "calibration-reset",
+        "parameter-update",
+        "reset-all",
+        "reset-x",
+        "reset-y",
+        "unknown-mode",
+    ];
+
+    #[test]
+    fn native_gate_refuses_every_write_action_and_allows_measure_only() {
+        use linc_core::probe::{probe_write_action, ProbeWriteAction};
+        let blocks = all_probe_blocks();
+        for (name, block) in &blocks {
+            let is_write = WRITE_BLOCKS.contains(name);
+            // PROTECT on and PROTECT unknown both land on writes_allowed=false.
+            assert_eq!(probe_write_blocked(block, false), is_write, "{name}");
+            // With writes allowed the gate never refuses.
+            assert!(!probe_write_blocked(block, true), "{name}");
+            assert_eq!(probe_write_action(block).is_some(), is_write, "{name}");
+        }
+        // Every action has an explicit classification, so a future routine
+        // cannot silently fall into "measure-only".
+        let action = |block: &str| probe_write_action(block);
+        assert_eq!(
+            action(&run_block(
+                "edge_x_plus",
+                linc_core::probe::ProbeMode::ApplyWcs
+            )),
+            Some(ProbeWriteAction::DirectWco)
+        );
+        assert_eq!(
+            action(&run_block(
+                "top_front_edge_angle",
+                linc_core::probe::ProbeMode::ApplyWcs
+            )),
+            Some(ProbeWriteAction::DirectWco),
+            "DIRECT wins over the angle label"
+        );
+        assert_eq!(
+            action(&run_block(
+                "top_front_edge_angle",
+                linc_core::probe::ProbeMode::MeasureOnly
+            )),
+            Some(ProbeWriteAction::EdgeAngleRotation)
+        );
+        assert_eq!(
+            action(&run_block(
+                "cal_round_boss",
+                linc_core::probe::ProbeMode::MeasureOnly
+            )),
+            Some(ProbeWriteAction::CalibrationRun)
+        );
+        // spindle_nose is calibration-flagged even though its category is
+        // SurfaceZ, because probe_spindle_nose.ngc:65-68 writes #3010/#3007.
+        assert_eq!(
+            action(&run_block(
+                "spindle_nose",
+                linc_core::probe::ProbeMode::MeasureOnly
+            )),
+            Some(ProbeWriteAction::CalibrationRun),
+            "spindle_nose writes controller parameters in POSITION"
+        );
+        assert_eq!(
+            action("o<probe_cal_reset> call"),
+            Some(ProbeWriteAction::CalibrationReset)
+        );
+        assert_eq!(
+            action(&ProbeParameters::default().parameter_update_block()),
+            Some(ProbeWriteAction::ParameterUpdate)
+        );
+        for block in [
+            "o<reset_all_data> call",
+            "o<x_data_reset> call",
+            "o<y_data_reset> call",
+        ] {
+            assert_eq!(
+                action(block),
+                Some(ProbeWriteAction::ResultReset),
+                "{block}"
+            );
+        }
+        assert_eq!(
+            action("o<probe_x_plus_wco> call"),
+            Some(ProbeWriteAction::UnknownRun)
+        );
+        assert_eq!(action("G0 X0"), None);
+        assert_eq!(action("M2"), None);
+    }
+
+    /// Both backends must answer exactly the same way for the same block with
+    /// the same PROTECT state, so the two gates cannot drift apart.
+    #[test]
+    fn native_and_simulator_agree_on_probe_write_gating() {
+        use linc_core::command::MdiOrigin;
+        use linc_core::sim::SimBackend;
+        let profile_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../configs/sim.toml");
+        let profile = Profile::load(&profile_path, None).expect("test profile");
+        for (protect_on, protect_known) in [(true, true), (false, false), (false, true)] {
+            let mut sim = SimBackend::new(profile.clone(), PanelMode::Mdi);
+            sim.set_program_protect(protect_on, protect_known);
+            let writes_allowed = !protect_on && protect_known;
+            for (name, block) in all_probe_blocks() {
+                let native_refuses = probe_write_blocked(&block, writes_allowed);
+                let refused = matches!(
+                    sim.send(MachineCommand::IssueMdi {
+                        block: block.clone(),
+                        origin: MdiOrigin::Probe,
+                    }),
+                    Err(MachineError::ProgramProtected)
+                );
+                if WRITE_BLOCKS.contains(&name) && !writes_allowed {
+                    assert!(refused, "{name}: simulator let a write through PROTECT");
+                    assert!(native_refuses, "{name}: native gate disagrees");
+                } else {
+                    assert!(!refused, "{name}: refused although writes are allowed");
+                    assert!(!native_refuses, "{name}: native gate disagrees");
+                }
+            }
+        }
+    }
+
+    fn offset_inputs() -> OffsetSyncInputs {
+        OffsetSyncInputs {
+            program_open: false,
+            estop: false,
+            task_on: true,
+            idle: true,
+            probing: false,
+            homed: true,
+            live_index: 1,
+            live: linuxcnc_nml::Pose::default(),
+            live_rotation: 0.0,
+            protect: false,
+        }
+    }
+
+    fn parameters_with(rows: &[(u32, f64)]) -> ParameterFile {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rs274ngc.var");
+        let text = rows
+            .iter()
+            .map(|(key, value)| format!("{key}\t{value:.6}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&path, text).unwrap();
+        ParameterFile::load(Some(path))
+    }
+
+    fn g54_row() -> Vec<(u32, f64)> {
+        vec![(5220, 1.0), (5221, -10.0), (5222, -20.0), (5223, -30.0)]
+    }
+
+    fn g55_row() -> Vec<(u32, f64)> {
+        vec![
+            (5220, 2.0),
+            (5241, -11.5),
+            (5242, -22.5),
+            (5243, -0.25),
+            (5250, 30.0),
+        ]
+    }
+
+    fn axes3() -> Vec<String> {
+        vec!["X".to_string(), "Y".to_string(), "Z".to_string()]
+    }
+
+    fn published(sync: &OffsetSync) -> (u8, &str) {
+        match sync {
+            OffsetSync::Publish { index, block, .. } => (*index, block.as_str()),
+            other => panic!("expected a publication, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn startup_publication_writes_the_complete_stored_row() {
+        let parameters = parameters_with(&g54_row());
+        let sync = plan_offset_sync(&offset_inputs(), &parameters, &axes3());
+        let (index, block) = published(&sync);
+        assert_eq!(index, 1);
+        assert_eq!(
+            block,
+            "G10 L2 P1 X-10.000000 Y-20.000000 Z-30.000000 R0.000000"
+        );
+    }
+
+    #[test]
+    fn invalid_live_index_publishes_g54() {
+        let parameters = parameters_with(&g54_row());
+        let mut inputs = offset_inputs();
+        inputs.live_index = 0;
+        let sync = plan_offset_sync(&inputs, &parameters, &axes3());
+        let (index, block) = published(&sync);
+        // The controller's live row is G54's; the stored #5220 value does not
+        // silently switch coordinate systems.
+        assert_eq!(index, 1);
+        assert!(block.starts_with("G10 L2 P1 "), "{block}");
+    }
+
+    #[test]
+    fn stale_live_values_of_the_active_system_are_republished() {
+        // G55 with stored offsets, live row still at zero.
+        let parameters = parameters_with(&g55_row());
+        let mut inputs = offset_inputs();
+        inputs.live_index = 2;
+        let sync = plan_offset_sync(&inputs, &parameters, &axes3());
+        let (index, block) = published(&sync);
+        assert_eq!(index, 2);
+        assert_eq!(
+            block,
+            "G10 L2 P2 X-11.500000 Y-22.500000 Z-0.250000 R30.000000"
+        );
+    }
+
+    #[test]
+    fn matching_live_row_needs_no_write() {
+        let parameters = parameters_with(&g55_row());
+        let mut inputs = offset_inputs();
+        inputs.live_index = 2;
+        inputs.live.x = -11.5;
+        inputs.live.y = -22.5;
+        inputs.live.z = -0.25;
+        inputs.live_rotation = 30.0;
+        assert_eq!(
+            plan_offset_sync(&inputs, &parameters, &axes3()),
+            OffsetSync::Done("the live row already matches")
+        );
+    }
+
+    #[test]
+    fn a_stale_rotation_alone_republishes_the_row() {
+        let parameters = parameters_with(&g55_row());
+        let mut inputs = offset_inputs();
+        inputs.live_index = 2;
+        inputs.live.x = -11.5;
+        inputs.live.y = -22.5;
+        inputs.live.z = -0.25;
+        // Axes match, the stored rotation does not.
+        let sync = plan_offset_sync(&inputs, &parameters, &axes3());
+        let (_, block) = published(&sync);
+        assert!(block.ends_with("R30.000000"), "{block}");
+    }
+
+    #[test]
+    fn protect_holds_the_publication() {
+        let parameters = parameters_with(&g54_row());
+        let mut inputs = offset_inputs();
+        inputs.protect = true;
+        assert_eq!(
+            plan_offset_sync(&inputs, &parameters, &axes3()),
+            OffsetSync::Wait("PROTECT is on")
+        );
+        // Releasing PROTECT resumes the normal path.
+        inputs.protect = false;
+        assert!(matches!(
+            plan_offset_sync(&inputs, &parameters, &axes3()),
+            OffsetSync::Publish { .. }
+        ));
+    }
+
+    #[test]
+    fn an_open_program_keeps_the_startup_path_out_of_the_session() {
+        let parameters = parameters_with(&g54_row());
+        let mut inputs = offset_inputs();
+        inputs.program_open = true;
+        assert_eq!(
+            plan_offset_sync(&inputs, &parameters, &axes3()),
+            OffsetSync::Done("a program is open")
+        );
+    }
+
+    #[test]
+    fn startup_waits_until_the_machine_can_take_a_write() {
+        let parameters = parameters_with(&g54_row());
+        let cases: [(fn(&mut OffsetSyncInputs), &str); 3] = [
+            (|inputs| inputs.estop = true, "the machine is not ON"),
+            (|inputs| inputs.homed = false, "axes are not homed"),
+            (|inputs| inputs.probing = true, "the interpreter is busy"),
+        ];
+        for (mutate, reason) in cases {
+            let mut inputs = offset_inputs();
+            mutate(&mut inputs);
+            assert_eq!(
+                plan_offset_sync(&inputs, &parameters, &axes3()),
+                OffsetSync::Wait(reason)
+            );
+        }
+    }
+
+    #[test]
+    fn a_parameter_file_without_the_active_row_is_left_alone() {
+        let parameters = parameters_with(&[(5220, 1.0), (1030, 5.0)]);
+        assert_eq!(
+            plan_offset_sync(&offset_inputs(), &parameters, &axes3()),
+            OffsetSync::Done("no stored offsets")
+        );
     }
 }
