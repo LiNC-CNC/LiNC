@@ -16,10 +16,12 @@
 //!   cache.
 //! - [sink] - [sink::Sim3dSignal], the seam to the machine, and
 //!   [sink::MockSignal].
+//! - [browser] - the in-app file picker and the recent-setup list.
 //!
 //! Cutting material is not simulated: the simulator models the machine, the
 //! probe and the cutters, and reports contact and collision.
 
+pub mod browser;
 pub mod bvh;
 pub mod config;
 pub mod engine;

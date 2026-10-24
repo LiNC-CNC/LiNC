@@ -14,7 +14,9 @@ use std::path::{Path, PathBuf};
 
 use linc_core::ini::MachineIni;
 use linc_sim3d::config::{CutterConfig, CutterKind, Sim3dConfig, WorkpieceEntry};
-use linc_sim3d::model::{Action, CollisionTarget, ModelError, SharedState, SimModel, Snapshot};
+use linc_sim3d::model::{
+    Action, CollisionTarget, ModelError, PlacedWorkpiece, SharedState, SimModel, Snapshot,
+};
 use linc_sim3d::tools::{self, CutterShape};
 use linc_sim3d::types::Transform;
 
@@ -583,6 +585,87 @@ fn reload_rereads_the_config_workpieces() {
         .faults()
         .iter()
         .any(|fault| fault.contains("model_absent")));
+}
+
+#[test]
+fn loading_a_setup_replaces_only_the_workpiece_list() {
+    let config = contact_config();
+    let mut model = SimModel::from_config(&config).expect("model");
+    let bounds = model.machine_bounds();
+    let cutters = model.config().cutters.clone();
+    let tools = model.config().tools.clone();
+
+    model
+        .apply(Action::LoadWorkpieces {
+            entries: vec![PlacedWorkpiece {
+                path: PathBuf::from("/nonexistent/setup_part.step"),
+                name: "setup part".to_string(),
+                transform: Transform::identity(),
+                visible: true,
+            }],
+            source: Some(PathBuf::from("/nonexistent/setup.toml")),
+        })
+        .expect("load workpieces");
+
+    assert!(model.workpieces().is_empty(), "a missing STEP is a fault");
+    assert!(model
+        .faults()
+        .iter()
+        .any(|fault| fault.contains("setup_part")));
+    assert_eq!(model.machine_bounds(), bounds, "the machine is unchanged");
+    assert_eq!(model.config().cutters, cutters, "the cutters are unchanged");
+    assert_eq!(model.config().tools, tools, "the tool section is unchanged");
+    assert_eq!(
+        model.config().source_path.as_deref(),
+        Some(Path::new("/nonexistent/setup.toml")),
+        "the setup file becomes the source a reload reads"
+    );
+    assert_eq!(model.config().workpieces.len(), 1);
+    assert_eq!(model.config().workpieces[0].name, "setup part");
+}
+
+#[test]
+fn a_reload_after_a_setup_keeps_this_session_machine() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let ini = fixture("model_machine.ini");
+    let setup = dir.path().join("setup.toml");
+    fs::write(
+        &setup,
+        format!(
+            "[machine]\nini = {:?}\n\n\
+             [[workpieces]]\nname = \"reloaded\"\npath = \"/nonexistent/reloaded.step\"\n",
+            ini.display().to_string()
+        ),
+    )
+    .expect("write setup");
+
+    let config = contact_config();
+    let mut model = SimModel::from_config(&config).expect("model");
+    let bounds = model.machine_bounds();
+
+    model
+        .apply(Action::LoadWorkpieces {
+            entries: Vec::new(),
+            source: Some(setup.clone()),
+        })
+        .expect("load workpieces");
+    assert!(model.workpieces().is_empty());
+
+    model.apply(Action::Reload).expect("reload");
+    assert!(
+        model
+            .faults()
+            .iter()
+            .any(|fault| fault.contains("reloaded")),
+        "reload reads the setup file: {:?}",
+        model.faults()
+    );
+    assert_eq!(model.machine_bounds(), bounds, "the machine is unchanged");
+    assert_eq!(
+        model.config().cutters,
+        config.cutters,
+        "the setup's own sections are ignored"
+    );
 }
 
 // ----------------------------------------------------------- contract

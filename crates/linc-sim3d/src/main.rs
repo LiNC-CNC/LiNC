@@ -281,7 +281,9 @@ impl eframe::App for Window {
             .stop
             .as_ref()
             .is_some_and(|stop| stop.load(Ordering::Relaxed));
-        let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
+        // The picker owns Escape while it is up: there it means "cancel".
+        let escape =
+            ui.input(|input| input.key_pressed(egui::Key::Escape)) && !self.panel.browser_open();
         if viewer::close_request(stop_requested, escape).is_some() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }

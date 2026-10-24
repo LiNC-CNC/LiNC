@@ -93,12 +93,38 @@ impl Snapshot {
     }
 }
 
+/// One workpiece to load, with its path already resolved against the config
+/// it came from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedWorkpiece {
+    pub path: PathBuf,
+    /// Display name; the file stem when empty.
+    pub name: String,
+    pub transform: Transform,
+    pub visible: bool,
+}
+
 /// A change the UI asks the model to make.
 #[derive(Debug, Clone)]
 pub enum Action {
-    AddWorkpiece { path: PathBuf, transform: Transform },
-    RemoveWorkpiece { index: usize },
-    SetTransform { index: usize, transform: Transform },
+    AddWorkpiece {
+        path: PathBuf,
+        transform: Transform,
+    },
+    RemoveWorkpiece {
+        index: usize,
+    },
+    SetTransform {
+        index: usize,
+        transform: Transform,
+    },
+    /// Replace the workpiece list without touching the machine or the tools.
+    /// source is the setup file the list came from, so a later Reload reads it
+    /// again.
+    LoadWorkpieces {
+        entries: Vec<PlacedWorkpiece>,
+        source: Option<PathBuf>,
+    },
     Reload,
 }
 
@@ -367,6 +393,7 @@ impl SimModel {
                 workpiece.index = MeshIndex::build(&mesh);
                 workpiece.mesh = mesh;
             }
+            Action::LoadWorkpieces { entries, source } => self.load_workpieces(entries, source)?,
             Action::Reload => self.reload()?,
         }
         Ok(())
@@ -400,11 +427,54 @@ impl SimModel {
         })
     }
 
+    /// Replace the workpiece list from a setup file.
+    ///
+    /// A setup saved from another profile can name a different INI, tool table
+    /// and HAL section. Loading it moves only the workpieces: the machine body
+    /// and the tools were built once, and a HAL component keeps the pins it was
+    /// started with, so adopting them would leave the model describing a
+    /// machine nobody is driving.
+    fn load_workpieces(
+        &mut self,
+        entries: Vec<PlacedWorkpiece>,
+        source: Option<PathBuf>,
+    ) -> Result<(), ModelError> {
+        let mut workpieces = Vec::new();
+        let mut faults: Vec<String> = self.tool_warning.iter().cloned().collect();
+        for entry in &entries {
+            let label = workpiece_label(&entry.name, &entry.path);
+            match self.load_workpiece(
+                &entry.path,
+                entry.transform,
+                Some(entry.name.as_str()),
+                entry.visible,
+            ) {
+                Ok(workpiece) => workpieces.push(workpiece),
+                Err(error) => faults.push(format!("workpiece {label} skipped: {error}")),
+            }
+        }
+        self.config.workpieces = entries
+            .iter()
+            .map(|entry| crate::config::WorkpieceEntry {
+                name: entry.name.clone(),
+                path: entry.path.clone(),
+                translate_mm: entry.transform.translation,
+                rotate_deg: entry.transform.rotation_deg,
+                visible: entry.visible,
+            })
+            .collect();
+        self.config.source_path = source;
+        self.workpieces = workpieces;
+        self.faults = faults;
+        Ok(())
+    }
+
     /// Reread the config file and re-import every workpiece it names.
     ///
     /// Without a config file (a model built from an in-memory config) the
     /// recorded entries are re-imported instead, which still picks up changed
-    /// STEP files.
+    /// STEP files. The machine body and the tool table are not rebuilt: they
+    /// were built once, and the file may name another machine.
     fn reload(&mut self) -> Result<(), ModelError> {
         let config = match self.config.source_path.clone() {
             Some(path) => Sim3dConfig::load(&path).map_err(|error| ModelError::Config {
@@ -428,7 +498,7 @@ impl SimModel {
                 Err(error) => faults.push(format!("workpiece {label} skipped: {error}")),
             }
         }
-        self.config = config;
+        self.config.workpieces = config.workpieces;
         self.workpieces = workpieces;
         self.faults = faults;
         Ok(())

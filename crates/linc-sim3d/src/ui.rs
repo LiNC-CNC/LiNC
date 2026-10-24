@@ -11,9 +11,10 @@ use std::sync::Arc;
 
 use egui::{Color32, RichText, Sense, Ui};
 
+use crate::browser::{self, Browser, Purpose, Recents};
 use crate::config::Sim3dConfig;
 use crate::engine::{MockPositionSource, Positions};
-use crate::model::{Action, CollisionTarget, SharedState, Snapshot};
+use crate::model::{Action, CollisionTarget, PlacedWorkpiece, SharedState, Snapshot};
 use crate::tools::{ActiveTool, CutterShape};
 use crate::types::{Transform, P3};
 use crate::viewer::Viewer;
@@ -83,28 +84,7 @@ pub fn sync_config(config: &mut Sim3dConfig, rows: &[WorkpieceRow]) -> usize {
     updated
 }
 
-/// Expand a typed path: a leading ~ is the home directory, everything else is
-/// used as typed and resolves against the working directory.
-pub fn expand_path(text: &str) -> PathBuf {
-    let text = text.trim();
-    if text == "~" {
-        if let Some(home) = home_dir() {
-            return home;
-        }
-    }
-    if let Some(rest) = text.strip_prefix("~/") {
-        if let Some(home) = home_dir() {
-            return home.join(rest);
-        }
-    }
-    PathBuf::from(text)
-}
-
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .filter(|home| !home.is_empty())
-        .map(PathBuf::from)
-}
+pub use crate::browser::expand_path;
 
 /// The cutter profile in one line, for the status block.
 pub fn shape_label(shape: &CutterShape) -> String {
@@ -160,6 +140,19 @@ pub struct Panel {
     add_path: String,
     selected: Option<usize>,
     notice: Option<Notice>,
+    /// The picker, while one is open.
+    browser: Option<Browser>,
+    /// Where each picker starts: the directory it was last used in.
+    step_dir: PathBuf,
+    setup_dir: PathBuf,
+    /// The setup files this machine has opened or saved, newest first.
+    recents: Recents,
+    /// Where the recent list is stored; None when there is no state
+    /// directory to write it to.
+    recents_path: Option<PathBuf>,
+    /// The setup file the workpiece list was loaded from, when that is not
+    /// the config this panel saves to.
+    setup_source: Option<PathBuf>,
 }
 
 impl Panel {
@@ -179,6 +172,23 @@ impl Panel {
         let mut positions = jog.get();
         positions.tool_number = tool_number;
         jog.set(positions);
+        let recents_path = browser::state_path();
+        let mut recents = recents_path
+            .as_deref()
+            .map(Recents::load)
+            .unwrap_or_default();
+        recents.prune();
+        // The session config is not recorded here: it would sit at the top of
+        // every run and clicking it would reload what is already loaded. A save
+        // or an open records it.
+        let fallback = usable_dir(setup_dir(&config));
+        let start = |purpose: Purpose| {
+            recents
+                .dir_for(purpose)
+                .map(Path::to_path_buf)
+                .filter(|dir| dir.is_dir())
+                .unwrap_or_else(|| fallback.clone())
+        };
         Self {
             config,
             config_path,
@@ -189,6 +199,12 @@ impl Panel {
             add_path: String::new(),
             selected: None,
             notice: None,
+            browser: None,
+            step_dir: start(Purpose::Step),
+            setup_dir: start(Purpose::Setup),
+            recents,
+            recents_path,
+            setup_source: None,
         }
     }
 
@@ -228,6 +244,7 @@ impl Panel {
                     ui.colored_label(color, &notice.text);
                 }
             });
+        changed |= self.browse(ui.ctx(), shared);
         changed
     }
 
@@ -414,22 +431,19 @@ impl Panel {
             ui.label("STEP");
             ui.add(
                 egui::TextEdit::singleline(&mut self.add_path)
-                    .desired_width(190.0)
+                    .desired_width(150.0)
                     .hint_text("~/parts/block.step"),
             );
             if ui.button("Add").clicked() && !self.add_path.trim().is_empty() {
                 let path = expand_path(&self.add_path);
-                if self.apply(
-                    shared,
-                    Action::AddWorkpiece {
-                        path,
-                        transform: Transform::identity(),
-                    },
-                ) {
-                    self.selected = Some(rows.len());
-                    self.add_path.clear();
-                    changed = true;
-                }
+                changed |= self.add_workpiece(shared, path);
+            }
+            if ui
+                .button("browse...")
+                .on_hover_text("pick a STEP or STL file")
+                .clicked()
+            {
+                self.open_picker(Purpose::Step);
             }
         });
 
@@ -444,12 +458,43 @@ impl Panel {
             if ui.button("Reload").clicked() {
                 changed |= self.apply(shared, Action::Reload);
             }
+            if ui
+                .button("Open setup...")
+                .on_hover_text("load another setup file's workpieces")
+                .clicked()
+            {
+                self.open_picker(Purpose::Setup);
+            }
         });
         ui.label(
             RichText::new(format!("config {}", self.config_path.display()))
                 .small()
                 .weak(),
         );
+        if let Some(source) = &self.setup_source {
+            ui.label(
+                RichText::new(format!("workpieces from {}", source.display()))
+                    .small()
+                    .weak(),
+            );
+        }
+        if !self.recents.entries().is_empty() {
+            let mut open: Option<PathBuf> = None;
+            ui.collapsing("Recent setups", |ui| {
+                for path in self.recents.entries() {
+                    if ui
+                        .selectable_label(false, recent_label(path))
+                        .on_hover_text(path.display().to_string())
+                        .clicked()
+                    {
+                        open = Some(path.clone());
+                    }
+                }
+            });
+            if let Some(path) = open {
+                changed |= self.open_setup(shared, &path);
+            }
+        }
         changed
     }
 
@@ -557,12 +602,15 @@ impl Panel {
 
     fn save(&mut self, rows: &[WorkpieceRow]) {
         let updated = sync_config(&mut self.config, rows);
-        self.notice = Some(match self.config.save(&self.config_path) {
+        let config_path = self.config_path.clone();
+        let saved = self.config.save(&config_path);
+        let ok = saved.is_ok();
+        self.notice = Some(match saved {
             Ok(()) => Notice {
                 error: false,
                 text: format!(
                     "saved {updated} workpiece row(s) to {}",
-                    self.config_path.display()
+                    config_path.display()
                 ),
             },
             Err(error) => Notice {
@@ -570,6 +618,9 @@ impl Panel {
                 text: format!("cannot save the config: {error}"),
             },
         });
+        if ok {
+            self.record_recent(&config_path);
+        }
     }
 
     fn apply(&mut self, shared: &Arc<SharedState>, action: Action) -> bool {
@@ -582,6 +633,167 @@ impl Panel {
                 });
                 false
             }
+        }
+    }
+
+    // ------------------------------------------------------------ pickers
+
+    /// True while a picker is up, so Escape closes it instead of the window.
+    pub fn browser_open(&self) -> bool {
+        self.browser.as_ref().is_some_and(Browser::is_open)
+    }
+
+    /// Open the picker for one purpose, where it was last used.
+    fn open_picker(&mut self, purpose: Purpose) {
+        let remembered = self
+            .recents
+            .dir_for(purpose)
+            .map(Path::to_path_buf)
+            .filter(|dir| dir.is_dir());
+        let dir = remembered.unwrap_or_else(|| match purpose {
+            Purpose::Step => self.step_dir.clone(),
+            Purpose::Setup => self.setup_dir.clone(),
+        });
+        self.browser = Some(Browser::new(purpose, usable_dir(dir)));
+    }
+
+    /// Draw the open picker and act on its choice.
+    fn browse(&mut self, ctx: &egui::Context, shared: &Arc<SharedState>) -> bool {
+        let Some((purpose, picked, still_open, dir)) = self.browser.as_mut().map(|browser| {
+            let purpose = browser.purpose();
+            let picked = browser.show(ctx);
+            (
+                purpose,
+                picked,
+                browser.is_open(),
+                browser.dir().to_path_buf(),
+            )
+        }) else {
+            return false;
+        };
+        if !still_open {
+            match purpose {
+                Purpose::Step => self.step_dir = dir.clone(),
+                Purpose::Setup => self.setup_dir = dir.clone(),
+            }
+            self.browser = None;
+            if self.recents.remember_dir(purpose, &dir) {
+                self.persist_recents();
+            }
+        }
+        let Some(path) = picked else {
+            return false;
+        };
+        match purpose {
+            Purpose::Step => {
+                self.add_path = path.display().to_string();
+                self.add_workpiece(shared, path)
+            }
+            Purpose::Setup => self.open_setup(shared, &path),
+        }
+    }
+
+    /// Import one STEP or STL file and select the new row.
+    fn add_workpiece(&mut self, shared: &Arc<SharedState>, path: PathBuf) -> bool {
+        if !self.apply(
+            shared,
+            Action::AddWorkpiece {
+                path,
+                transform: Transform::identity(),
+            },
+        ) {
+            return false;
+        }
+        self.add_path.clear();
+        self.selected = shared.read_model().workpieces().len().checked_sub(1);
+        true
+    }
+
+    /// Load a setup file's workpiece list.
+    ///
+    /// Only the workpieces move. A setup saved from another profile carries
+    /// its own INI, tool table and HAL section, and none of those can change
+    /// under a running session: the machine body and the tools were built from
+    /// this session's config, and the HAL component holds the pins it started
+    /// with.
+    fn open_setup(&mut self, shared: &Arc<SharedState>, path: &Path) -> bool {
+        let config = match Sim3dConfig::load(path) {
+            Ok(config) => config,
+            Err(error) => {
+                self.notice = Some(Notice {
+                    error: true,
+                    text: format!("cannot open {}: {error}", path.display()),
+                });
+                return false;
+            }
+        };
+        let source = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let entries: Vec<PlacedWorkpiece> = config
+            .workpieces
+            .iter()
+            .map(|entry| PlacedWorkpiece {
+                path: config.resolve(&entry.path),
+                name: entry.name.clone(),
+                transform: entry.transform(),
+                visible: entry.visible,
+            })
+            .collect();
+        let requested = entries.len();
+        if let Err(error) = shared.write_model().apply(Action::LoadWorkpieces {
+            entries: entries.clone(),
+            source: Some(source.clone()),
+        }) {
+            self.notice = Some(Notice {
+                error: true,
+                text: error.to_string(),
+            });
+            return false;
+        }
+        // The panel keeps its own entry list so a save or a visibility toggle
+        // still finds the row it started from. Entries stay relative when the
+        // setup lives beside this config, and become absolute otherwise.
+        let beside = config.base_dir == self.config.base_dir;
+        self.config.workpieces = config
+            .workpieces
+            .iter()
+            .map(|entry| {
+                let mut entry = entry.clone();
+                if !beside {
+                    entry.path = config.resolve(&entry.path);
+                }
+                entry
+            })
+            .collect();
+        self.selected = None;
+        self.setup_source = Some(source.clone());
+        let loaded = shared.read_model().workpieces().len();
+        self.record_recent(&source);
+        self.notice = Some(Notice {
+            error: false,
+            text: format!(
+                "loaded {loaded} of {requested} workpiece(s) from {}; the machine and the tools are unchanged",
+                path.display()
+            ),
+        });
+        true
+    }
+
+    /// Remember a setup file, newest first, and write the store out.
+    fn record_recent(&mut self, path: &Path) {
+        if self.recents.record(path) {
+            self.persist_recents();
+        }
+    }
+
+    fn persist_recents(&mut self) {
+        let Some(store) = self.recents_path.clone() else {
+            return;
+        };
+        if let Err(error) = self.recents.save(&store) {
+            self.notice = Some(Notice {
+                error: true,
+                text: error,
+            });
         }
     }
 
@@ -616,6 +828,45 @@ impl Panel {
                 .small()
                 .weak(),
         );
+    }
+}
+
+/// The directory a picker starts in when no better one is known.
+fn setup_dir(config: &Sim3dConfig) -> PathBuf {
+    if config.base_dir.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        config.base_dir.clone()
+    }
+}
+
+/// A directory that exists, as an absolute path: the one asked for, else home,
+/// else the root. A config loaded from a relative path has a relative base
+/// directory, and a picker started there could not walk up out of it.
+fn usable_dir(dir: PathBuf) -> PathBuf {
+    if let Ok(resolved) = std::fs::canonicalize(&dir) {
+        return resolved;
+    }
+    if dir.is_dir() {
+        return dir;
+    }
+    browser::home_dir()
+        .filter(|home| home.is_dir())
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+/// A recent setup as the panel lists it: file name, then its directory.
+fn recent_label(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    match path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        Some(parent) => format!("{name}   {}", parent.display()),
+        None => name,
     }
 }
 

@@ -74,6 +74,7 @@ Short list, by crate module:
 | `hal` | the `linc-sim3d` HAL component, its pin table, `HalSignal`, `HalPositionSource`, and `Rig` (publish and sample, with or without a window) |
 | `viewer` | the perspective camera, the scene baked from the model, the egui mesh |
 | `ui` | the side panel: status, position source, workpieces, placement, camera |
+| `browser` | the in-app file picker (STEP and setup files) and the recent-setup store |
 
 ## HAL pins
 
@@ -159,11 +160,36 @@ fast. A file that will not import is reported as a fault and skipped: one bad
 path never leaves the simulator without a machine.
 
 In the window, the **Workpieces** panel does the same thing without editing the
-file by hand: type a path (a leading `~` is your home directory, a relative path
-resolves against the working directory) and press **Add**; select a part to edit
-its placement, press *use current position as origin* to place it under the
-probe, then **Save config** to write `translate_mm`, `rotate_deg` and
+file by hand: press **browse...** to pick a `.step`, `.stp` or `.stl` file out of
+a directory listing, or type a path and press **Add** (a leading `~` is your home
+directory, a relative path resolves against the picker's directory); select a
+part to edit its placement, press *use current position as origin* to place it
+under the probe, then **Save config** to write `translate_mm`, `rotate_deg` and
 `visible` back into the config.
+
+The picker is drawn by the simulator rather than handed to a desktop portal, so
+it behaves the same in a headless Xvfb run and on the desktop. It lists the
+directories and the files the purpose accepts, keeps ten rows on show whatever
+the listing size, has *up* and *home*, a `hidden` toggle, and a typed path for
+everything else. Escape cancels it instead of closing the window.
+
+### Opening a setup file
+
+**Open setup...** loads another setup file's workpieces — its `[[workpieces]]`
+entries, with their placement and visibility — into the running model. Only the
+workpieces move: the machine body, the tool table and the HAL section were built
+when the window started, and a HAL component keeps the pins it was started with,
+so a setup saved from another profile contributes its parts and nothing else.
+The panel says which file the workpiece list came from, and **Reload** re-reads
+that file, not the config the window was started on.
+
+Each picker reopens in the directory it last closed in, so a STEP folder is
+typed once. The last eight setups opened or saved are listed under **Recent
+setups** in the panel; clicking one loads it. The recent list and both
+remembered directories share one store, The list lives in
+`${XDG_STATE_HOME:-~/.local/state}/linc/sim3d-recent.json`, is pruned of files
+that have since gone, and is written only when it changes. **Save config** still
+writes the session config (`--config`), and records it as recent.
 
 ## Running it
 
