@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use linc_sim3d::config::Sim3dConfig;
 use linc_sim3d::model::SimModel;
 use linc_sim3d::tools::{ActiveTool, CutterShape};
-use linc_sim3d::types::{Bounds, Transform, TriMesh, P3};
-use linc_sim3d::ui::{self, WorkpieceRow};
+use linc_sim3d::types::{Bounds, TriMesh, P3};
+use linc_sim3d::ui;
 use linc_sim3d::viewer::{self, Camera, Projector, Scene};
 
 fn manifest_dir() -> PathBuf {
@@ -408,46 +408,6 @@ fn expand_path_takes_tilde_and_keeps_relative_paths() {
         PathBuf::from("../parts/a.step")
     );
     assert_eq!(ui::expand_path("/abs/b.step"), PathBuf::from("/abs/b.step"));
-}
-
-#[test]
-fn sync_config_writes_the_model_placement_back() {
-    let mut config = fixture_config();
-    config.workpieces = vec![
-        linc_sim3d::config::WorkpieceEntry {
-            name: "block".to_string(),
-            path: PathBuf::from("tests/fixtures/box.step"),
-            translate_mm: [0.0; 3],
-            rotate_deg: [0.0; 3],
-            visible: true,
-        },
-        linc_sim3d::config::WorkpieceEntry {
-            name: "other".to_string(),
-            path: PathBuf::from("tests/fixtures/other.step"),
-            translate_mm: [1.0, 2.0, 3.0],
-            rotate_deg: [0.0; 3],
-            visible: true,
-        },
-    ];
-    let rows = vec![WorkpieceRow {
-        name: "block".to_string(),
-        source: config.workpiece_path(&config.workpieces[0].clone()),
-        transform: Transform::identity()
-            .with_translation([-10.0, -20.0, -30.0])
-            .with_rotation([0.0, 0.0, 90.0]),
-        visible: false,
-        triangles: 12,
-    }];
-    let updated = ui::sync_config(&mut config, &rows);
-    assert_eq!(updated, 1);
-    assert_eq!(config.workpieces[0].translate_mm, [-10.0, -20.0, -30.0]);
-    assert_eq!(config.workpieces[0].rotate_deg, [0.0, 0.0, 90.0]);
-    assert!(!config.workpieces[0].visible, "visibility is stored too");
-    assert_eq!(
-        config.workpieces[1].translate_mm,
-        [1.0, 2.0, 3.0],
-        "a row the model does not have keeps its entry"
-    );
 }
 
 #[test]

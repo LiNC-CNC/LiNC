@@ -12,7 +12,7 @@ use std::sync::Arc;
 use egui::{Color32, RichText, Sense, Ui};
 
 use crate::browser::{self, Browser, Purpose, Recents};
-use crate::config::Sim3dConfig;
+use crate::config::{Sim3dConfig, WorkpieceEntry};
 use crate::engine::{MockPositionSource, Positions};
 use crate::model::{Action, CollisionTarget, PlacedWorkpiece, SharedState, Snapshot};
 use crate::tools::{ActiveTool, CutterShape};
@@ -58,30 +58,92 @@ pub struct WorkpieceRow {
     pub triangles: usize,
 }
 
-/// Write the model's placement and visibility back into the config entries.
+/// The config's workpiece list, built from the model's rows.
 ///
-/// Entries are matched by resolved source path, so a part that failed to import
-/// keeps the entry it came from. Entries the model has no row for are left
-/// alone. Returns how many entries were updated.
-pub fn sync_config(config: &mut Sim3dConfig, rows: &[WorkpieceRow]) -> usize {
-    let resolved: Vec<(usize, PathBuf)> = config
+/// The rows are the truth. An entry the list already names keeps its name and
+/// takes the row's placement and visibility; a row the list never named is
+/// added under the part's label; an entry the model has no row for is dropped,
+/// because that workpiece was removed. A path under base is stored relative to
+/// it, so a saved setup reads the same beside its STEP files.
+pub fn entries_from_rows(
+    rows: &[WorkpieceRow],
+    existing: &[WorkpieceEntry],
+    base: &Path,
+) -> Vec<WorkpieceEntry> {
+    let base = canonical(base);
+    rows.iter()
+        .map(|row| {
+            let source = canonical(&row.source);
+            let name = existing
+                .iter()
+                .find(|entry| canonical(&resolve(&entry.path, &base)) == source)
+                .map(|entry| entry.name.clone())
+                .unwrap_or_else(|| row.name.clone());
+            WorkpieceEntry {
+                name,
+                path: relative_to(&source, &base).unwrap_or(source),
+                translate_mm: row.transform.translation,
+                rotate_deg: row.transform.rotation_deg,
+                visible: row.visible,
+            }
+        })
+        .collect()
+}
+
+/// The entries as a target file should store them: each path resolved against
+/// this session's config and made relative to the target's directory when it
+/// lies under it.
+pub fn entries_for_file(config: &Sim3dConfig, target: &Path) -> Vec<WorkpieceEntry> {
+    let base = canonical(target.parent().unwrap_or_else(|| Path::new(".")));
+    config
         .workpieces
         .iter()
-        .enumerate()
-        .map(|(index, entry)| (index, config.resolve(&entry.path)))
-        .collect();
-    let mut updated = 0;
-    for row in rows {
-        let Some((index, _)) = resolved.iter().find(|(_, path)| *path == row.source) else {
-            continue;
-        };
-        let entry = &mut config.workpieces[*index];
-        entry.translate_mm = row.transform.translation;
-        entry.rotate_deg = row.transform.rotation_deg;
-        entry.visible = row.visible;
-        updated += 1;
+        .map(|entry| {
+            let mut entry = entry.clone();
+            let absolute = canonical(&config.resolve(&entry.path));
+            entry.path = relative_to(&absolute, &base).unwrap_or(absolute);
+            entry
+        })
+        .collect()
+}
+
+/// Write a workpiece list into a config file.
+///
+/// The file keeps its own machine, probe, tool, cutter and HAL sections: a
+/// setup saved from another profile must not have this session's machine
+/// written into it. A file that does not exist yet is written from fallback.
+pub fn write_workpieces(
+    target: &Path,
+    workpieces: Vec<WorkpieceEntry>,
+    fallback: &Sim3dConfig,
+) -> Result<(), String> {
+    let mut config = if target.is_file() {
+        Sim3dConfig::load(target).map_err(|error| error.to_string())?
+    } else {
+        fallback.clone()
+    };
+    config.workpieces = workpieces;
+    config.save(target).map_err(|error| error.to_string())
+}
+
+/// path taken relative to base, when it lies under it.
+pub fn relative_to(path: &Path, base: &Path) -> Option<PathBuf> {
+    path.strip_prefix(base)
+        .ok()
+        .filter(|rest| !rest.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+}
+
+fn resolve(path: &Path, base: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base.join(path)
     }
-    updated
+}
+
+fn canonical(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 pub use crate::browser::expand_path;
@@ -452,7 +514,14 @@ impl Panel {
         }
 
         ui.horizontal(|ui| {
-            if ui.button("Save config").clicked() {
+            if ui
+                .button("Save")
+                .on_hover_text(format!(
+                    "write the workpieces to {}",
+                    self.save_target().display()
+                ))
+                .clicked()
+            {
                 self.save(rows);
             }
             if ui.button("Reload").clicked() {
@@ -471,13 +540,11 @@ impl Panel {
                 .small()
                 .weak(),
         );
-        if let Some(source) = &self.setup_source {
-            ui.label(
-                RichText::new(format!("workpieces from {}", source.display()))
-                    .small()
-                    .weak(),
-            );
-        }
+        ui.label(
+            RichText::new(format!("save writes {}", self.save_target().display()))
+                .small()
+                .weak(),
+        );
         if !self.recents.entries().is_empty() {
             let mut open: Option<PathBuf> = None;
             ui.collapsing("Recent setups", |ui| {
@@ -567,10 +634,13 @@ impl Panel {
             return;
         };
         self.config.workpieces[index].visible = visible;
-        if let Err(error) = self.config.save(&self.config_path) {
+        let target = self.save_target();
+        let entries = entries_for_file(&self.config, &target);
+        let fallback = self.config.clone();
+        if let Err(text) = write_workpieces(&target, entries, &fallback) {
             self.notice = Some(Notice {
                 error: true,
-                text: format!("cannot save the config: {error}"),
+                text: format!("cannot save the workpieces: {text}"),
             });
             return;
         }
@@ -578,10 +648,7 @@ impl Panel {
             Ok(()) => {
                 self.notice = Some(Notice {
                     error: false,
-                    text: format!(
-                        "visibility stored in {} and reloaded",
-                        self.config_path.display()
-                    ),
+                    text: format!("visibility stored in {} and reloaded", target.display()),
                 });
             }
             Err(error) => {
@@ -600,27 +667,40 @@ impl Panel {
             .position(|entry| self.config.resolve(&entry.path) == source)
     }
 
+    /// Write the workpiece state, every row and nothing else, into the setup
+    /// file in use.
     fn save(&mut self, rows: &[WorkpieceRow]) {
-        let updated = sync_config(&mut self.config, rows);
-        let config_path = self.config_path.clone();
-        let saved = self.config.save(&config_path);
+        let target = self.save_target();
+        // Two spellings of the same list: the panel keeps paths relative to this
+        // session's config, while the file gets paths relative to itself.
+        let entries = entries_from_rows(rows, &self.config.workpieces, &self.config.base_dir);
+        self.config.workpieces = entries;
+        let entries = entries_for_file(&self.config, &target);
+        let count = entries.len();
+        let fallback = self.config.clone();
+        let saved = write_workpieces(&target, entries, &fallback);
         let ok = saved.is_ok();
         self.notice = Some(match saved {
             Ok(()) => Notice {
                 error: false,
-                text: format!(
-                    "saved {updated} workpiece row(s) to {}",
-                    config_path.display()
-                ),
+                text: format!("saved {count} workpiece(s) to {}", target.display()),
             },
-            Err(error) => Notice {
+            Err(text) => Notice {
                 error: true,
-                text: format!("cannot save the config: {error}"),
+                text: format!("cannot save the workpieces: {text}"),
             },
         });
         if ok {
-            self.record_recent(&config_path);
+            self.record_recent(&target);
         }
+    }
+
+    /// The file Save writes: the setup the workpieces came from, else the config
+    /// this window was started on.
+    fn save_target(&self) -> PathBuf {
+        self.setup_source
+            .clone()
+            .unwrap_or_else(|| self.config_path.clone())
     }
 
     fn apply(&mut self, shared: &Arc<SharedState>, action: Action) -> bool {

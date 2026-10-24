@@ -164,8 +164,13 @@ file by hand: press **browse...** to pick a `.step`, `.stp` or `.stl` file out o
 a directory listing, or type a path and press **Add** (a leading `~` is your home
 directory, a relative path resolves against the picker's directory); select a
 part to edit its placement, press *use current position as origin* to place it
-under the probe, then **Save config** to write `translate_mm`, `rotate_deg` and
-`visible` back into the config.
+under the probe, then **Save** to write the list back out: every part in the
+model, in model order, with its `translate_mm`, `rotate_deg` and `visible`. A
+part removed in the panel leaves the file with it. The file written is the setup
+opened with **Open setup**, or the config this window was started on when none
+is open; the panel prints the target under the button. Only the workpiece list
+moves, so the target keeps its own machine, probe, tool, cutter and HAL
+sections, and a part under the target's directory is stored relative to it.
 
 The picker is drawn by the simulator rather than handed to a desktop portal, so
 it behaves the same in a headless Xvfb run and on the desktop. It lists the
@@ -188,8 +193,8 @@ typed once. The last eight setups opened or saved are listed under **Recent
 setups** in the panel; clicking one loads it. The recent list and both
 remembered directories share one store, The list lives in
 `${XDG_STATE_HOME:-~/.local/state}/linc/sim3d-recent.json`, is pruned of files
-that have since gone, and is written only when it changes. **Save config** still
-writes the session config (`--config`), and records it as recent.
+that have since gone, and is written only when it changes. **Save** records the
+file it wrote as recent.
 
 ## Running it
 
