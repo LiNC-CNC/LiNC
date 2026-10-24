@@ -154,10 +154,14 @@ fn shipped_sim3d_toml_loads_and_matches_the_ini() {
         repo_root().join("configs/sim.ini")
     );
     assert_eq!(config.probe.tool_number, 99);
-    assert!(
-        config.workpieces.is_empty(),
-        "the shipped file keeps its workpieces commented out"
-    );
+    // The shipped file may carry the parts an operator saved into it, so only
+    // the shape of the list is checked here: every entry names a file.
+    for entry in &config.workpieces {
+        assert!(
+            !entry.path.as_os_str().is_empty(),
+            "a workpiece in the shipped file names no file"
+        );
+    }
     assert_eq!(config.hal.component, "linc-sim3d");
 
     let ini = MachineIni::parse_file(&config.machine_ini_path()).expect("configs/sim.ini");
