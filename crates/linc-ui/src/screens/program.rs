@@ -411,7 +411,17 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
     let syntax_error_line = app.program.preview.error.as_ref().map(|error| error.line);
     let line_count = app.program.editor.line_count();
     let desired_rows = line_count.max(12);
-    let numbers: String = number_gutter(ui, line_count);
+    let gutter_font = FontId::monospace(editor_font());
+    let gutter_width = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                line_count.max(1).to_string(),
+                gutter_font.clone(),
+                theme::LINE_NUMBER,
+            )
+            .size()
+            .x
+    }) + 10.0;
     // `vertical_scroll_offset` does not move this scroll area, so the view is
     // asked to reveal a rect instead — the same call the text edit makes when
     // its cursor moves.
@@ -428,20 +438,16 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
         .id_salt("program-editor")
         .max_height(height)
         .auto_shrink([false, false]);
+    let mut scroll_target: Option<f32> = None;
     scroll.show(ui, |ui| {
         ui.horizontal_top(|ui| {
             // Lane for the current-line bar, so it sits left of the numbers
             // instead of on top of them.
             ui.add_space(common::SELECTION_EDGE_PADDING + theme::SELECTION_BAR + 4.0);
-            ui.add(
-                egui::Label::new(
-                    RichText::new(numbers)
-                        .monospace()
-                        .size(editor_font())
-                        .color(theme::LINE_NUMBER),
-                )
-                .selectable(false),
-            );
+            // Numbers are painted after the galley is laid out, aligned to each
+            // logical line's first visual row. A separate multiline label would
+            // keep one row per line and drift away from wrapped text.
+            ui.add_space(gutter_width);
             ui.separator();
             let available = (ui.available_width() - 12.0).max(240.0);
             // Lexing and laying out the whole buffer every frame is the most
@@ -449,12 +455,11 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             // revision plus the highlight inputs, so a still buffer is laid
             // out once (SPEC §7.3 "cache tokens by buffer revision", §10
             // "cache text layout and visible-line tokens").
-            // No soft wrap: a wrapped line occupies several galley rows, while
-            // the line numbers and the selection band are one row per G-code
-            // line. Wrapping therefore shifted both by the number of wrapped
-            // rows above the selection, and the graph (which uses logical line
-            // numbers) appeared one line ahead of the editor. Long lines are
-            // clipped; G-code stays one numbered row per line.
+            // Wrap long lines to the editor's width. The line number stays on
+            // the logical line's first row; the gutter and selection band are
+            // painted from the galley's row mapping below, not counted in
+            // screen rows, so logical line numbers still match the graph.
+            let wrap_width = available.max(64.0);
             let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
                 // `pixels_per_point` is part of the key: the shell changes the
                 // design zoom with the window, and reusing a galley laid out at
@@ -466,6 +471,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     matches.clone(),
                     buffer.as_str().len(),
                     ui.ctx().pixels_per_point().to_bits(),
+                    wrap_width.to_bits(),
                 );
                 let cache_id = egui::Id::unique("linc-editor-galley");
                 if let Some((cached, galley)) = ui
@@ -477,7 +483,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     }
                 }
                 let mut job = highlight_job(buffer.as_str(), syntax_error_line, &search, &matches);
-                job.wrap.max_width = f32::INFINITY;
+                job.wrap.max_width = wrap_width;
                 let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
                 ui.ctx()
                     .data_mut(|data| data.insert_temp(cache_id, (key, galley.clone())));
@@ -541,29 +547,51 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     app.program.selected_line = line.max(1).min(line_count.max(1));
                 }
             }
+            // Logical line starts, in characters, and their first galley row.
+            let starts = line_start_chars(&text);
+            let rows = &output.galley.rows;
+            let clip = ui.clip_rect();
+            let painter = ui.painter_at(clip);
+            for (line, start) in starts.iter().enumerate() {
+                let row = row_for_char(&output.galley, *start);
+                let y = output.galley_pos.y + rows.get(row).map_or(0.0, |placed| placed.pos.y);
+                if y + line_height() < clip.top() || y > clip.bottom() {
+                    continue;
+                }
+                painter.text(
+                    egui::pos2(output.galley_pos.x - 6.0, y),
+                    egui::Align2::RIGHT_TOP,
+                    (line + 1).to_string(),
+                    gutter_font.clone(),
+                    theme::LINE_NUMBER,
+                );
+            }
             // The current line, styled like the tool table's selected row: a
-            // translucent accent band across the row and a solid bar on the
-            // rim. The shell keeps the selection on the executing line while a
-            // program runs, so this is also what follows the cut.
+            // translucent accent band across every wrapped row of the logical
+            // line, and a solid bar on the rim. The shell keeps the selection
+            // on the executing line while a program runs.
             let current = app.program.selected_line.max(1);
-            if current <= line_count {
-                let clip = ui.clip_rect();
-                // Anchor on the galley's own rows: the font's nominal line
-                // height is not the row pitch egui lays out, and the difference
-                // accumulated into the band sitting half a line low.
-                let rows = &output.galley.rows;
-                let first_top = output.galley_pos.y + rows.first().map_or(0.0, |row| row.pos.y);
-                let pitch = if rows.len() >= 2 {
-                    rows[1].pos.y - rows[0].pos.y
+            if current <= starts.len() {
+                let (first, next) = line_rows(&output.galley, &starts, current);
+                let top = output.galley_pos.y + rows.get(first).map_or(0.0, |placed| placed.pos.y);
+                let bottom = if next < rows.len() {
+                    output.galley_pos.y + rows[next].pos.y
                 } else {
-                    line_height()
+                    rows.last()
+                        .map_or(top + line_height(), |placed| output.galley_pos.y + placed.rect().bottom())
                 };
-                let top = first_top + (current as f32 - 1.0) * pitch;
                 let band = egui::Rect::from_min_max(
                     egui::pos2(clip.left() + common::SELECTION_EDGE_PADDING, top),
-                    egui::pos2(clip.right(), top + pitch),
+                    egui::pos2(clip.right(), bottom.max(top + line_height())),
                 );
                 common::selection_band(ui, band);
+            }
+            if let Some(line) = scroll_to {
+                let index = line.max(1).min(starts.len());
+                let row = row_for_char(&output.galley, starts[index - 1]);
+                scroll_target = rows
+                    .get(row)
+                    .map(|placed| output.galley_pos.y + placed.pos.y);
             }
             // A little room under the last line, so it does not sit flush
             // against the bottom of the scroll viewport.
@@ -571,10 +599,10 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             let _ = output.state;
             let _ = available;
         });
-        if let Some(line) = scroll_to {
+        if let Some(top) = scroll_target {
             let content = ui.min_rect();
             let rect = egui::Rect::from_min_size(
-                egui::pos2(content.left(), content.top() + line as f32 * line_height()),
+                egui::pos2(content.left(), top),
                 Vec2::new(content.width().max(10.0), line_height()),
             );
             ui.scroll_to_rect(rect, Some(egui::Align::Center));
@@ -584,26 +612,52 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
 
 /// Cache key for the editor galley: editor revision, highlight inputs, wrap
 /// width and buffer length.
-type GalleyKey = (u64, Option<usize>, String, Vec<usize>, usize, u32);
+type GalleyKey = (u64, Option<usize>, String, Vec<usize>, usize, u32, u32);
 
-/// The line-number gutter only changes when the line count does.
-fn number_gutter(ui: &egui::Ui, line_count: usize) -> String {
-    let cache_id = egui::Id::unique("linc-editor-gutter");
-    if let Some((cached, text)) = ui
-        .ctx()
-        .data(|data| data.get_temp::<(usize, String)>(cache_id))
-    {
-        if cached == line_count {
-            return text;
+/// Character offset at which each logical line starts.
+fn line_start_chars(text: &str) -> Vec<usize> {
+    let mut starts = vec![0];
+    for (index, character) in text.chars().enumerate() {
+        if character == '\n' {
+            starts.push(index + 1);
         }
     }
-    let text: String = (1..=line_count)
-        .map(|index| format!("{index:>4}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    ui.ctx()
-        .data_mut(|data| data.insert_temp(cache_id, (line_count, text.clone())));
-    text
+    starts
+}
+
+/// First visual galley row of the logical line containing char_index.
+fn row_for_char(galley: &Galley, char_index: usize) -> usize {
+    let mut consumed = 0usize;
+    for (row, placed) in galley.rows.iter().enumerate() {
+        let width = placed.glyphs.len() + usize::from(placed.ends_with_newline);
+        if char_index < consumed + width {
+            return row;
+        }
+        consumed += width;
+    }
+    galley.rows.len().saturating_sub(1)
+}
+
+/// First row of line (1-based) and the row where the next logical line starts,
+/// so a wrapped line's band covers all of its visual rows.
+fn line_rows(galley: &Galley, starts: &[usize], line: usize) -> (usize, usize) {
+    let first = row_for_char(galley, starts[line - 1]);
+    let next = starts
+        .get(line)
+        .map_or(galley.rows.len(), |start| row_for_char(galley, *start));
+    (first, next.max(first + 1).min(galley.rows.len()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logical_line_starts_are_character_offsets() {
+        assert_eq!(line_start_chars("abc\ndef\n"), vec![0, 4, 8]);
+        assert_eq!(line_start_chars("one line"), vec![0]);
+    }
+
 }
 
 fn highlight_job(

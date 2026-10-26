@@ -135,10 +135,10 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
   plain Enter everywhere and broke opening a file from NC_FILES. The MDI pane is keyed to the panel mode, so its keys are guarded by that mode, not by a page.
 - A focused editor keeps Home/End/PgUp/PgDn. Check `memory.has_focus(egui::Id::unique("linc-program-editor"))` first, and keep that id stable.
 - Use `theme` constants and the `SPEC.md §7` palette, not literals.
-- The program editor does not soft-wrap: one galley row per G-code line, so the
-  line-number gutter, the selection band and the graph's selected line agree. A
-  wrapped line occupies several rows and shifted both by the number of wrapped
-  rows above the selection.
+- The program editor soft-wraps long lines at the editor width. The gutter paints
+  one number at each logical line's first galley row, and the selection band covers
+  all of that line's wrapped rows. Map character offsets to rows (row_for_char /
+  line_rows) instead of counting screen rows, so line numbers still match the graph.
 
 ## Keyboard reality
 
