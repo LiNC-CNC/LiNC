@@ -7,6 +7,7 @@ pub mod machine;
 pub mod manual;
 pub mod mdi;
 pub mod offsets;
+pub mod plc;
 pub mod probe;
 pub mod probe_view;
 pub mod program;

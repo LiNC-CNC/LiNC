@@ -2,17 +2,18 @@
 
 LiNC is a Rust/`egui` HMI for LinuxCNC. The physical CNC panel and QMK keyboard
 drive the machine; the screen reads state and issues only explicit, validated
-commands (MDI, probe, tool change, program/offset writes). Three binaries:
+commands (MDI, probe, tool change, program/offset writes). Four binaries:
 
 - `linc` (`crates/linc-app`) — display/UI; loads the profile, selects the backend, creates the `linc.*` outputs.
 - `linc-panel` (`crates/linc-panel`) — panel service; owns RS-485 or the sim window, creates `cnc_panel.*`, and runs separately so a UI crash cannot remove panel control.
 - `linc-mcp` (`crates/linc-mcp`) — MCP server for diagnostics; speaks the `linc-diag` socket protocol and never links the UI, HAL, LinuxCNC or the panel driver.
+- `linc-plc` (`crates/linc-plc`) — userspace ladder PLC service; owns its own `linc_plc.*` HAL component and serves the PLC page over a Unix socket.
 
 ## Build, test, run
 
 ```bash
-cargo build --release                       # all three binaries
-cargo test --workspace                      # 584 tests today
+cargo build --release                       # all four binaries
+cargo test --workspace                      # whole workspace
 python3 scripts/mcp-smoke.py                # phase 3+4 acceptance, real binaries
 ./target/release/linc --config configs/sim.toml --check-config
 ./target/release/linc --config configs/baiermill-pb.toml --check-config

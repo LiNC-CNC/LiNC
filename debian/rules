@@ -15,6 +15,7 @@ override_dh_auto_install:
 	install -Dm755 target/release/linc debian/linc/usr/bin/linc
 	install -Dm755 target/release/linc-panel debian/linc/usr/bin/linc-panel
 	install -Dm755 target/release/linc-mcp debian/linc/usr/bin/linc-mcp
+	install -Dm755 target/release/linc-plc debian/linc/usr/bin/linc-plc
 	install -d debian/linc/usr/share/linc/configs debian/linc/usr/share/linc/hal
 	install -d debian/linc/usr/share/linc/subroutines
 	install -m644 configs/base.toml configs/sim.toml configs/sim.ini debian/linc/usr/share/linc/configs/

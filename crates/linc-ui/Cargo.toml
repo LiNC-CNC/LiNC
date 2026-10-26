@@ -14,5 +14,10 @@ tempfile.workspace = true
 log.workspace = true
 linc-core = { path = "../linc-core" }
 linc-view = { path = "../linc-view" }
+# The PLC page speaks the daemon protocol through the client only: no HAL,
+# no serial, no LinuxCNC link in the UI crate.
+linc-plc-client = { path = "../linc-plc-client" }
+linc-plc-core = { path = "../linc-plc-core" }
+serde_json.workspace = true
 image.workspace = true
 zbus = "4.4"

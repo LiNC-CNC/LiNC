@@ -17,7 +17,15 @@ window_title = "LiNC"
 scale = "auto"
 axis_order = ["X", "Y", "Z"]
 # Order matches the keyboard: MAIN, FILE, TOOL, OFFSET, WIN.
-pages = ["machine", "program", "tools", "offsets", "diagnostics", "help"]
+pages = [
+    "machine",
+    "program",
+    "tools",
+    "offsets",
+    "diagnostics",
+    "plc",
+    "help",
+]
 # Load bars on the Machine page: machine axes plus "S" for the spindle. An
 # empty list removes the SERVO LOAD pane.
 servo_load = ["X", "Y", "Z"]

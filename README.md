@@ -352,10 +352,14 @@ LiNC/
 │   ├── linc-hal/         # typed linc.* HAL output component
 │   ├── linc-linuxcnc/    # native LinuxCNC NML backend
 │   ├── linc-panel/       # RS-485 panel service and simulator panel
+│   ├── linc-plc/         # userspace ladder PLC service and linc_plc.* pins
+│   ├── linc-plc-core/    # ladder model, compiler and scan VM
+│   ├── linc-plc-client/  # Unix-socket client for the PLC page
 │   ├── linc-ui/          # egui shell, pages, keyboard model
 │   └── linc-view/        # toolpath and lathe graph rendering
 ├── hal/
 │   ├── linc.hal
+│   ├── linc-plc.hal      # example PLC wiring, documentation only
 │   ├── linc-postgui.hal
 │   └── linc-pendant.hal
 ├── scripts/
@@ -450,14 +454,17 @@ are commissioned (see `CONFIGURATION.md`).
 - `linc` loads and validates a machine profile, renders the fixed shell, and
   switches pages from the panel mode and keyboard.
 - The mill and lathe Machine, Program `SPLIT`/`CODE`, Offsets, Tools,
-  Diagnostics, Settings, G-code Help, Files, Touch Probe, Manual and Homing
-  screens are implemented; the MDI pane is part of Machine.
+  Diagnostics, Settings, G-code Help, Files, Touch Probe, Manual, PLC and
+  Homing screens are implemented; the MDI pane is part of Machine.
 - The Program editor has syntax highlighting, undo/redo/find, dirty/save
   state, a debounced live preview, program-protect locking and the live trail.
 - `linc-panel` owns the panel driver, HAL pins and the standalone simulator
   panel. Simulation HMI and panel exchange state over two atomic JSON files so
   panel modes, power, E-stop, overrides and protect drive the HMI, while the
   HMI drives the panel status and tool displays.
+- `linc-plc` is a separate userspace ladder PLC: it compiles a project, scans
+  it at a 1-5 ms target and owns `linc_plc.*`; the PLC page speaks to it over a
+  same-user Unix socket. It is not in the safety chain.
 - The typed `linc.*` HAL component, the native LinuxCNC backend, the WHB04B-6 pendant
   wiring and the generated G-code help index are present.
 - `linc-mcp` exposes the HMI and panel diagnostic sockets to an agent: state,

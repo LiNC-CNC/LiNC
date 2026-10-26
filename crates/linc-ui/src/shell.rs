@@ -78,6 +78,8 @@ pub struct LincApp {
     pub homing_return_page: Page,
     pub manual: ManualUi,
     pub settings: SettingsUi,
+    /// Ladder editor, worker link and live daemon state (PLC page).
+    pub plc: screens::plc::PlcUi,
     pub diagnostics_tab: DiagnosticsTab,
     pub diagnostics_search: String,
     pub diagnostics_severity: Option<AlarmSeverity>,
@@ -435,6 +437,7 @@ impl LincApp {
                 density: configured_scale,
                 ..Default::default()
             },
+            plc: screens::plc::PlcUi::default(),
             diagnostics_tab: DiagnosticsTab::Overview,
             diagnostics_search: String::new(),
             diagnostics_severity: None,
@@ -2009,6 +2012,11 @@ impl LincApp {
                 || memory.has_focus(egui::Id::unique("linc-goto-line-input"))
                 || memory.has_focus(egui::Id::unique("linc-mdi-input"))
                 || memory.has_focus(egui::Id::unique("linc-diagnostics-search"))
+                || memory.has_focus(egui::Id::unique("linc-plc-socket"))
+                || memory.has_focus(egui::Id::unique("linc-plc-file"))
+                || memory.has_focus(egui::Id::unique("linc-plc-var"))
+                || memory.has_focus(egui::Id::unique("linc-plc-coil"))
+                || memory.has_focus(egui::Id::unique("linc-plc-comment"))
         });
         let mut nav_page = None;
         let mut escape = false;
@@ -2738,6 +2746,7 @@ impl LincApp {
                         Page::Homing => screens::homing::show(self, ui),
                         Page::Manual => screens::manual::show(self, ui),
                         Page::Settings => screens::settings::show(self, ui),
+                        Page::Plc => screens::plc::show(self, ui),
                     },
                 );
             });
@@ -3455,6 +3464,17 @@ impl LincApp {
                         });
                     }
                 }
+            }
+            Page::Plc => {
+                groups.push(ShortcutGroup {
+                    title: "LADDER",
+                    items: vec![
+                        ("Enter".into(), "SELECT"),
+                        ("Bksp".into(), "DELETE"),
+                        (k.save.label(), "SAVE"),
+                        ("Ctrl+Enter".into(), "DOWNLOAD"),
+                    ],
+                });
             }
             Page::Tools => {
                 hints.push(("Arrows".into(), "SELECT"));
@@ -4282,6 +4302,31 @@ fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Page, color: C
                 color,
             );
         }
+        Page::Plc => {
+            // Ladder: two rails, a rung between them with a contact gap.
+            let left = rect.left() + 4.0;
+            let right = rect.right() - 4.0;
+            let top = rect.top() + 3.0;
+            let bottom = rect.bottom() - 3.0;
+            painter.line_segment([egui::pos2(left, top), egui::pos2(left, bottom)], s);
+            painter.line_segment([egui::pos2(right, top), egui::pos2(right, bottom)], s);
+            for y in [c.y - 4.0, c.y + 4.0] {
+                painter.line_segment(
+                    [egui::pos2(left, y), egui::pos2(c.x - 2.0, y)],
+                    s,
+                );
+                painter.line_segment(
+                    [egui::pos2(c.x + 2.0, y), egui::pos2(right, y)],
+                    s,
+                );
+            }
+            painter.rect_stroke(
+                egui::Rect::from_center_size(c, Vec2::new(4.0, 11.0)),
+                0.0,
+                s,
+                StrokeKind::Inside,
+            );
+        }
         Page::Files | Page::Probe | Page::Homing | Page::Manual => {
             painter.rect_stroke(rect.shrink(3.0), 2.0, s, StrokeKind::Inside);
         }
@@ -4340,6 +4385,7 @@ pub fn page_from_name(name: &str) -> Option<Page> {
         Page::Homing,
         Page::Manual,
         Page::Settings,
+        Page::Plc,
     ] {
         let label = page.label().to_ascii_uppercase().replace(['-', '_'], " ");
         if label == wanted || format!("{page:?}").to_ascii_uppercase() == wanted {
@@ -4357,13 +4403,14 @@ pub fn page_from_name(name: &str) -> Option<Page> {
 /// Ordered to match the keyboard: MAIN (F5), FILE (F6), TOOL (F7), OFFSET
 /// (F8); Diagnostics and Help use Ctrl+D and Ctrl+H. A page that has no
 /// function key follows the ones that do.
-pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
+pub const NAV_ITEMS: [(Page, &str, &str); 8] = [
     (Page::Machine, "MACHINE", "MAIN"),
     (Page::Program, "PROGRAM", "FILE"),
     (Page::Tools, "TOOLS", "TOOL"),
     (Page::Offsets, "OFFSETS", "PROBE"),
     (Page::Diagnostics, "DIAGNOSTICS", "Ctrl+D"),
     (Page::Help, "G-CODE HELP", "Ctrl+H"),
+    (Page::Plc, "PLC", ""),
     (Page::Settings, "SETTINGS", ""),
 ];
 
@@ -4392,6 +4439,7 @@ fn page_key(page: Page) -> &'static str {
         Page::Settings => "settings",
         Page::Homing => "homing",
         Page::Manual => "manual",
+        Page::Plc => "plc",
     }
 }
 
@@ -4405,6 +4453,7 @@ fn page_from_config(value: &str) -> Page {
         "files" => Page::Files,
         "probe" => Page::Probe,
         "settings" => Page::Settings,
+        "plc" => Page::Plc,
         _ => Page::Machine,
     }
 }

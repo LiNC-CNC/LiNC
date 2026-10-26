@@ -28,6 +28,8 @@ pub enum Page {
     Homing,
     Manual,
     Settings,
+    /// Ladder editor and live monitor for the `linc-plc` daemon.
+    Plc,
 }
 
 impl Page {
@@ -53,6 +55,7 @@ impl Page {
             Page::Homing => "HOMING",
             Page::Manual => "MANUAL",
             Page::Settings => "SETTINGS",
+            Page::Plc => "PLC",
         }
     }
 
@@ -1364,6 +1367,7 @@ pub fn page_accent(page: Page) -> egui::Color32 {
         Page::Probe => theme::C6,
         Page::Homing | Page::Manual => theme::C3,
         Page::Settings => theme::MUTED,
+        Page::Plc => theme::C5,
     }
 }
 
