@@ -65,7 +65,10 @@ pub mod buttons {
     pub const JOG_BP: u64 = 1 << 58;
     pub const JOG_ZN: u64 = 1 << 50;
     pub const WORKLAMP: u64 = 1 << 42;
-    pub const K1: u64 = 1 << 32;
+    /// Hardware-verified on the machine: the panel reports K1 and K2 on the
+    /// same bit, so pressing either raises both pins. Bit 32 belongs to LUB.
+    /// This must stay in step with `linc-linuxcnc/src/panel.rs`.
+    pub const K1: u64 = 1 << 34;
     pub const CHIP_SP: u64 = 1 << 26;
     pub const SAFE_DOOR: u64 = 1 << 57;
     pub const JOG_YN: u64 = 1 << 49;
@@ -76,7 +79,7 @@ pub mod buttons {
     pub const JOG_BN: u64 = 1 << 56;
     pub const JOG_XP: u64 = 1 << 48;
     pub const OPT: u64 = 1 << 40;
-    pub const LUB: u64 = 1 << 31;
+    pub const LUB: u64 = 1 << 32;
     pub const SPD_CCW: u64 = 1 << 24;
     pub const K3: u64 = 1 << 16;
     // Lathe-only keys. The lathe panel carries a second spindle (SPD.2.*), a
@@ -549,30 +552,36 @@ pub fn make_snapshot(
 mod tests {
     use super::*;
 
-    /// The panel bit tables are transcribed from the proven Python driver
-    /// (`baiermill_pb/szgh_panel_hal.py`). Two names collide there:
-    /// `POT_DN`/`CHUCK` on bit 29 and `K2`/`K1` on bit 34. LiNC therefore moves
-    /// exactly those two names onto bits that are free in the reference table,
-    /// so no real button is shadowed. Every other bit, and the whole LED table,
-    /// must match the reference exactly.
+    /// The panel bit tables are verified against the machine. This serial
+    /// driver and the NML reader in `linc-linuxcnc/src/panel.rs` must agree: the
+    /// driver decodes the panel's bitfield into pins, and the reader encodes
+    /// those pins back into a bitfield for the UI.
+    ///
+    /// Two names share a bit in the panel's own table: `POT_DN`/`CHUCK` on bit 29
+    /// and `K2`/`K1` on bit 34. `CHUCK` moves to the free bit 28, which hardware
+    /// verification confirmed. `K1`/`K2` stay on bit 34 because the panel really
+    /// does report both keys there; the pins alias instead of one of them being
+    /// invented.
     #[test]
-    fn button_table_matches_the_reference_driver() {
-        // Reference: `LUB = 1 << 31`, `K2 = 1 << 34`.
-        assert_eq!(buttons::LUB, 1 << 31);
+    fn button_table_matches_the_verified_panel() {
+        // Hardware-verified on the SZGH-1080 panel.
+        assert_eq!(buttons::LUB, 1 << 32);
+        assert_eq!(buttons::K1, 1 << 34);
         assert_eq!(buttons::K2, 1 << 34);
-        // Deliberate deviations: bits that are free in the reference.
         assert_eq!(buttons::CHUCK, 1 << 28);
-        assert_eq!(buttons::K1, 1 << 32);
+        assert_eq!(buttons::POT_DN, 1 << 29);
 
-        let mut bits = std::collections::HashSet::new();
+        // Every other button keeps its own bit; only K1/K2 may alias.
+        let mut seen: std::collections::HashMap<u32, &str> = std::collections::HashMap::new();
         for (name, mask) in BUTTON_PINS {
-            assert!(
-                bits.insert(mask),
-                "button {name} reuses bit {} — panel bits must stay distinct",
-                mask.trailing_zeros()
-            );
+            let bit = mask.trailing_zeros();
+            if let Some(previous) = seen.insert(bit, name) {
+                assert!(
+                    bit == 34 && (previous == "k1" || previous == "k2"),
+                    "button {name} reuses bit {bit} of {previous}; only K1/K2 alias on this panel"
+                );
+            }
         }
-        assert_eq!(bits.len(), BUTTON_PINS.len());
     }
 
     #[test]
@@ -608,16 +617,19 @@ mod tests {
         for (name, _) in BUTTON_PINS {
             assert!(seen.insert(name));
         }
-        // Names alone are not enough: two names sharing one bit would make the
-        // pins indistinguishable on the wire. K1 and K2 collided on bit 34.
-        let mut bits = std::collections::HashSet::new();
+        // Names alone are not enough: two names sharing one bit make the pins
+        // indistinguishable on the wire. K1 and K2 do share bit 34 on this panel
+        // (hardware-verified), so that one alias is expected; any other
+        // collision is a bug.
+        let mut bits: std::collections::HashMap<u64, &str> = std::collections::HashMap::new();
         for (name, mask) in BUTTON_PINS {
-            assert!(
-                bits.insert(mask),
-                "button {name} reuses a bit mask already assigned to another button"
-            );
+            if let Some(previous) = bits.insert(mask, name) {
+                assert!(
+                    mask.trailing_zeros() == 34 && (previous == "k1" || previous == "k2"),
+                    "button {name} reuses a bit mask already assigned to {previous}"
+                );
+            }
         }
-        assert_eq!(bits.len(), BUTTON_PINS.len());
     }
 
     #[test]
