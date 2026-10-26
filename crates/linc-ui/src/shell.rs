@@ -2609,12 +2609,12 @@ impl LincApp {
     pub fn page_up(&mut self) {
         match self.page {
             Page::Diagnostics => {
-                let index = DiagnosticsTab::ALL
+                let tabs = DiagnosticsTab::visible(&self.profile);
+                let index = tabs
                     .iter()
                     .position(|tab| *tab == self.diagnostics_tab)
                     .unwrap_or(0);
-                self.diagnostics_tab = DiagnosticsTab::ALL
-                    [(index + DiagnosticsTab::ALL.len() - 1) % DiagnosticsTab::ALL.len()];
+                self.diagnostics_tab = tabs[(index + tabs.len() - 1) % tabs.len()];
             }
             Page::Offsets => {
                 self.offsets.selected = if self.offsets.selected <= 1 {
@@ -2631,11 +2631,12 @@ impl LincApp {
     pub fn page_down(&mut self) {
         match self.page {
             Page::Diagnostics => {
-                let index = DiagnosticsTab::ALL
+                let tabs = DiagnosticsTab::visible(&self.profile);
+                let index = tabs
                     .iter()
                     .position(|tab| *tab == self.diagnostics_tab)
                     .unwrap_or(0);
-                self.diagnostics_tab = DiagnosticsTab::ALL[(index + 1) % DiagnosticsTab::ALL.len()];
+                self.diagnostics_tab = tabs[(index + 1) % tabs.len()];
             }
             Page::Offsets => {
                 self.offsets.selected = if self.offsets.selected >= 9 {
@@ -4659,7 +4660,7 @@ mod tests {
 #[cfg(test)]
 mod ui_tests {
     use super::*;
-    use linc_core::model::PanelModeValidity;
+    use linc_core::model::{PanelModeValidity, ToolChangerKind};
 
     fn fixture() -> (tempfile::TempDir, Profile) {
         let dir = tempfile::tempdir().unwrap();
@@ -4706,6 +4707,91 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         .unwrap();
         let profile = Profile::load(&root.join("sim.toml"), None).unwrap();
         (dir, profile)
+    }
+
+    /// A real profile (base.toml merged with a sim profile) with the two
+    /// fields the Diagnostics turret tab is decided by, overridden.
+    fn diagnostics_profile(turret_tab: bool, changer: ToolChangerKind) -> Profile {
+        let (_dir, mut profile) = fixture();
+        profile.config.diagnostics.turret_tab = turret_tab;
+        profile.changer = changer;
+        profile
+    }
+
+    #[test]
+    fn diagnostics_turret_tab_needs_the_profile_key_and_stations() {
+        let has_turret =
+            |profile: &Profile| DiagnosticsTab::visible(profile).contains(&DiagnosticsTab::Turret);
+        assert!(!has_turret(&diagnostics_profile(
+            false,
+            ToolChangerKind::Manual
+        )));
+        assert!(!has_turret(&diagnostics_profile(
+            true,
+            ToolChangerKind::Manual
+        )));
+        assert!(has_turret(&diagnostics_profile(true, ToolChangerKind::Atc)));
+        assert!(has_turret(&diagnostics_profile(
+            true,
+            ToolChangerKind::Turret
+        )));
+        assert!(!has_turret(&diagnostics_profile(
+            false,
+            ToolChangerKind::Turret
+        )));
+        // Visible, the list is the whole strip in its usual order; hidden, it
+        // is the same list minus the turret entry.
+        assert_eq!(
+            DiagnosticsTab::visible(&diagnostics_profile(true, ToolChangerKind::Turret)),
+            DiagnosticsTab::ALL.to_vec()
+        );
+        let hidden = DiagnosticsTab::visible(&diagnostics_profile(false, ToolChangerKind::Atc));
+        assert_eq!(hidden.len(), DiagnosticsTab::ALL.len() - 1);
+        assert!(hidden.iter().all(|tab| DiagnosticsTab::ALL.contains(tab)));
+    }
+
+    #[test]
+    fn diagnostics_navigation_and_body_skip_a_hidden_turret_tab() {
+        let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::On);
+        harness.app.profile.config.diagnostics.turret_tab = false;
+        harness.app.profile.changer = ToolChangerKind::Turret;
+        harness.app.set_page(Page::Diagnostics);
+
+        harness.app.diagnostics_tab = DiagnosticsTab::Motion;
+        harness.app.page_down();
+        assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Io);
+        harness.app.page_up();
+        assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Motion);
+        harness.app.page_up();
+        assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::HalNml);
+
+        // Wrapping stays inside the visible list.
+        harness.app.diagnostics_tab = DiagnosticsTab::Logs;
+        harness.app.page_down();
+        assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Overview);
+        harness.app.page_up();
+        assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Logs);
+
+        // A remembered or restored turret tab never reaches the body.
+        harness.app.diagnostics_tab = DiagnosticsTab::Turret;
+        let output = harness.frame_full(Vec::new());
+        assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Overview);
+        let texts = painted_text(&output);
+        assert!(!texts.iter().any(|(text, _)| text == "TURRET / LIVE TOOL"));
+        assert!(texts.iter().any(|(text, _)| text == "OVERVIEW"));
+
+        // Visible, the same tab is kept, drawn and navigated like any other.
+        harness.app.profile.config.diagnostics.turret_tab = true;
+        harness.app.diagnostics_tab = DiagnosticsTab::Turret;
+        let output = harness.frame_full(Vec::new());
+        assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Turret);
+        assert!(painted_text(&output)
+            .iter()
+            .any(|(text, _)| text == "TURRET / LIVE TOOL"));
+        harness.app.page_down();
+        assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Io);
+        harness.app.page_up();
+        assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Turret);
     }
 
     fn make_app(mode: PanelMode) -> (tempfile::TempDir, LincApp) {

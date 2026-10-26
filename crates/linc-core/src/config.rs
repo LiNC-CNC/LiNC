@@ -487,6 +487,8 @@ pub struct PreferencesConfig {
 pub struct DiagnosticsConfig {
     pub event_log_capacity: usize,
     pub panel_link_stats: String,
+    #[serde(default)]
+    pub turret_tab: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1374,6 +1376,62 @@ enabled = true
         );
         let profile = Profile::load(&profile_path, None).unwrap();
         assert!(profile.config.files.show_parent_above_root);
+    }
+
+    #[test]
+    fn turret_tab_is_off_by_default_and_a_profile_can_enable_it() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let profile_path = dir.path().join("sim.toml");
+        let profile_text = |diagnostics: &str| {
+            format!(
+                r#"schema_version = 1
+profile = "sim"
+extends = "base.toml"
+{diagnostics}
+[machine]
+name = "Test"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[panel]
+kind = "simulated"
+driver = "cnc-panel-sim"
+[panel.link]
+kind = "virtual"
+[simulation]
+enabled = true
+"#
+            )
+        };
+
+        let omitted: DiagnosticsConfig =
+            toml::from_str("event_log_capacity = 1000\npanel_link_stats = \"optional\"").unwrap();
+        assert!(
+            !omitted.turret_tab,
+            "turret_tab without the key is {}",
+            omitted.turret_tab
+        );
+
+        write(&profile_path, &profile_text(""));
+        let profile = Profile::load(&profile_path, None).unwrap();
+        assert!(
+            !profile.config.diagnostics.turret_tab,
+            "turret_tab resolved to {}",
+            profile.config.diagnostics.turret_tab
+        );
+
+        write(
+            &profile_path,
+            &profile_text("[diagnostics]\nturret_tab = true"),
+        );
+        let profile = Profile::load(&profile_path, None).unwrap();
+        assert!(
+            profile.config.diagnostics.turret_tab,
+            "turret_tab resolved to {}",
+            profile.config.diagnostics.turret_tab
+        );
     }
 
     #[test]

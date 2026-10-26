@@ -269,6 +269,8 @@ event_log_capacity = 1000
 # "none": no link counters exist; "optional": show them if exposed; "required":
 # fail diagnostics if they are missing.
 panel_link_stats = "optional"
+# Show the Diagnostics TURRET / LIVE TOOL tab; off by default.
+turret_tab = false
 
 [simulation]
 enabled = false

@@ -9,13 +9,19 @@ use crate::state::DiagnosticsTab;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
+    let tabs = DiagnosticsTab::visible(&app.profile);
+    // A tab remembered or restored from an earlier profile can name one this
+    // profile hides; nothing below may draw its body.
+    if !tabs.contains(&app.diagnostics_tab) {
+        app.diagnostics_tab = DiagnosticsTab::Overview;
+    }
     // No page title: the navigation names the page.
     common::focus_anchor(ui, "diagnostics-page-focus");
     if app.diagnostics_clear_view {
         app.diagnostics_clear_view = false;
     }
     ui.horizontal(|ui| {
-        for tab in DiagnosticsTab::ALL {
+        for tab in tabs {
             if common::page_tab(ui, tab.label(), app.diagnostics_tab == tab).clicked() {
                 app.diagnostics_tab = tab;
             }
@@ -293,12 +299,13 @@ fn overview(app: &mut LincApp, ui: &mut Ui) {
     });
 }
 
-/// Compact the key/value rows of a summary card.
+/// Compact a card's rows so each key/value line reads as one line.
 ///
-/// The default row pitch (text plus `item_spacing.y`) is too tall for a card
-/// with eight rows in the smallest window: the layout ran out of card and the
-/// last rows were drawn on top of one another. The spacing is set on the card's
-/// own `Ui`, so it does not leak to the rest of the page.
+/// `interact_size.y` sizes a `ui.horizontal` row and the minimum height of a
+/// grid row, so at `MIN_TARGET` every row carries a blank line of 44 pt plus
+/// `item_spacing.y`: eight rows overflowed a summary card, and the same pitch
+/// spaced the diagnostics panes apart. The spacing is set on the card's own
+/// `Ui`, so it does not leak to the rest of the page.
 fn compact_rows(ui: &mut Ui) {
     ui.spacing_mut().interact_size.y = 14.0;
     ui.spacing_mut().item_spacing.y = 2.0;
@@ -332,6 +339,7 @@ fn panel_link(app: &mut LincApp, ui: &mut Ui) {
             |ui| {
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "RS-485 / VIRTUAL LINK");
+                    compact_rows(ui);
                     let link = &app.snapshot.panel.link;
                     theme::kv_row(
                         ui,
@@ -371,6 +379,7 @@ fn panel_link(app: &mut LincApp, ui: &mut Ui) {
                 });
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "CAPABILITIES");
+                    compact_rows(ui);
                     let caps = &app.snapshot.panel.capabilities;
                     theme::kv_row(ui, "BUTTONS", caps.buttons.to_string());
                     theme::kv_row(ui, "LEDS", caps.leds.to_string());
@@ -396,6 +405,7 @@ fn panel_link(app: &mut LincApp, ui: &mut Ui) {
             |ui| {
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "MODE / OVERRIDES");
+                    compact_rows(ui);
                     theme::kv_row(ui, "MODE", app.snapshot.panel.mode.label());
                     if let linc_core::model::PanelModeValidity::Invalid(active) =
                         &app.snapshot.panel.mode
@@ -439,6 +449,7 @@ fn panel_link(app: &mut LincApp, ui: &mut Ui) {
                 });
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "RAW BUTTON / LED BITMAPS");
+                    compact_rows(ui);
                     theme::kv_row(
                         ui,
                         "BUTTONS",
@@ -473,6 +484,7 @@ fn hal_nml(app: &mut LincApp, ui: &mut Ui) {
             |ui| {
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "NML CHANNELS");
+                    compact_rows(ui);
                     theme::kv_row(
                         ui,
                         "COMMAND",
@@ -518,6 +530,7 @@ fn hal_nml(app: &mut LincApp, ui: &mut Ui) {
                 });
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "DECLARED linc.* OUTPUTS");
+                    compact_rows(ui);
                     for output in linc_core::command::LincOutput::ALLOWED {
                         let value = match output {
                             linc_core::command::LincOutput::HmiAlive => {
@@ -568,6 +581,7 @@ fn hal_nml(app: &mut LincApp, ui: &mut Ui) {
                             .hint_text("filter pin")
                             .desired_width(220.0),
                     );
+                    compact_rows(ui);
                     let filter = app.diagnostics_search.to_ascii_lowercase();
                     let pins = hal_pin_rows(app);
                     egui::ScrollArea::vertical()
@@ -615,6 +629,7 @@ fn motion(app: &mut LincApp, ui: &mut Ui) {
             |ui| {
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "AXIS MOTION");
+                    compact_rows(ui);
                     egui::Grid::new("motion-grid")
                         .num_columns(5)
                         .striped(true)
@@ -696,6 +711,7 @@ fn motion(app: &mut LincApp, ui: &mut Ui) {
             |ui| {
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "SPINDLES");
+                    compact_rows(ui);
                     for spindle in &app.snapshot.spindles {
                         theme::kv_row(
                             ui,
@@ -728,6 +744,7 @@ fn motion(app: &mut LincApp, ui: &mut Ui) {
                 });
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "HOMING STATE");
+                    compact_rows(ui);
                     for axis in app.axes() {
                         let homed = app
                             .snapshot
@@ -764,6 +781,7 @@ fn motion(app: &mut LincApp, ui: &mut Ui) {
 fn turret(app: &mut LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
         theme::section_header(ui, "TURRET / LIVE TOOL");
+        compact_rows(ui);
         let Some(atc) = app.snapshot.atc.as_ref() else {
             ui.label(
                 RichText::new("No turret/ATC configured for this profile.").color(theme::MUTED),
@@ -920,6 +938,7 @@ fn io(app: &mut LincApp, ui: &mut Ui) {
                             .hint_text("filter pin")
                             .desired_width(220.0),
                     );
+                    compact_rows(ui);
                     let filter = app.diagnostics_search.to_ascii_lowercase();
                     egui::ScrollArea::vertical()
                         .id_salt("io-hal-pins-scroll")

@@ -569,7 +569,7 @@ bar.
 | `[panel.link]` | `read_only`, `kind`, optional `port`, `baud`, `data_bits`, `parity`, `stop_bits`, `cycle_time_ms` |
 | `[pendant]` | `enabled`, `kind`, `jog_only`, `ignored_functions` |
 | `[preferences]` | `file` |
-| `[diagnostics]` | `event_log_capacity`, `panel_link_stats` |
+| `[diagnostics]` | `event_log_capacity`, `panel_link_stats`, `turret_tab` |
 | `[simulation]` | `enabled`, optional `panel`, `rio`, `estop`, `panel_window`, `panel_title`, `panel_scale` |
 
 Enums:
@@ -590,6 +590,12 @@ Enums:
 - `diagnostics.panel_link_stats`: `none`, `optional`, `required`
 - `files.usb_backend`: `udisks2`, `none`
 - `files.overwrite`: `confirm`
+
+### `[diagnostics]`
+
+`turret_tab` only shows the Diagnostics TURRET / LIVE TOOL tab when the
+profile also declares a turret/ATC changer (`tools.changer = "atc"` or
+`"turret"`); with `changer = "manual"` the tab stays hidden.
 
 ### `[files]`
 

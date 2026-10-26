@@ -762,6 +762,10 @@ Read-only detail view. Tabs:
 | I/O | Panel LEDs, machine inputs, coolant/lube/door/ATC/turret states, HAL pin browser |
 | Logs | Searchable event history, severity/source filters, export/copy |
 
+The Turret / Live Tool tab appears only with `[diagnostics] turret_tab = true`
+on a profile whose `[tools] changer` is `atc` or `turret`; for every other
+profile it is absent from the strip and from the PgUp/PgDn cycle.
+
 No fault reset, acknowledge, cycle, jog, override, or E-stop controls here.
 `CLEAR VIEW` clears only the UI log view, never machine faults.
 

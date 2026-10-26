@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use linc_core::backend::BackendHandle;
 use linc_core::command::{BackendEvent, MachineCommand, MachineError};
+use linc_core::config::Profile;
 use linc_core::editor::Editor;
 use linc_core::gcode::Preview;
 use linc_core::help::HelpBundle;
@@ -111,6 +112,16 @@ impl DiagnosticsTab {
         DiagnosticsTab::Io,
         DiagnosticsTab::Logs,
     ];
+
+    /// The tabs `profile` can show, in `ALL` order: the turret tab needs both
+    /// the profile key and a changer that has stations to report.
+    pub fn visible(profile: &Profile) -> Vec<DiagnosticsTab> {
+        let turret = profile.config.diagnostics.turret_tab && profile.changer.uses_pockets();
+        Self::ALL
+            .into_iter()
+            .filter(|tab| *tab != Self::Turret || turret)
+            .collect()
+    }
 
     pub fn label(self) -> &'static str {
         match self {
