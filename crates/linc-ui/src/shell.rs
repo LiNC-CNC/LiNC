@@ -1340,6 +1340,13 @@ impl LincApp {
             self.modal = None;
             return;
         }
+        // The Help viewer owns Escape while it is open: closing it must not
+        // fall through to the global program reset, which would stop a running
+        // program behind the reader's back.
+        if self.help.dialog.is_some() {
+            self.help.close_dialog();
+            return;
+        }
         // A latched probe trip is cleared by the controller reset alone. Esc
         // is that reset here, the same key that resets a running program.
         if self.snapshot.probe_trip_active() {
@@ -5044,6 +5051,21 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         app.snapshot.task.running = true;
         app.sync_program();
         assert!(app.program.follow_current);
+    }
+
+    #[test]
+    fn escape_closes_the_help_dialog_before_resetting_a_running_program() {
+        let (_dir, mut app) = make_app(PanelMode::Auto);
+        app.poll_backend();
+        app.snapshot.task.running = true;
+        app.snapshot.task.interp = linc_core::model::InterpState::Reading;
+        app.help.open_dialog("g0");
+        app.escape();
+        assert!(app.help.dialog.is_none(), "Escape closes the Help viewer");
+        assert!(
+            !app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
+            "the running program behind the Help viewer must not be reset"
+        );
     }
 
     #[test]
