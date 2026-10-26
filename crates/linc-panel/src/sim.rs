@@ -901,8 +901,12 @@ const SPINDLE_KNOB: (f32, f32, f32) = (1260.0, 145.0, 48.0);
 const KNOB_HIT_PAD: f32 = 14.0;
 const PROTECT_AT: (f32, f32) = (1530.0, 145.0);
 const PROTECT_HIT: f32 = 110.0;
-const CYCLE_START_AT: (f32, f32) = (123.0, 870.0);
-const CYCLE_STOP_AT: (f32, f32) = (235.0, 870.0);
+/// Cycle pushbuttons sit under the POWER/E-STOP cluster (centred on x=179)
+/// and on the machine-status lamp array's vertical centre. The centres are a
+/// ring diameter plus half a button radius apart, so the chrome rings keep a
+/// 24-unit gap (r/2).
+const CYCLE_START_AT: (f32, f32) = (111.0, 336.0);
+const CYCLE_STOP_AT: (f32, f32) = (247.0, 336.0);
 const CYCLE_R: f32 = 48.0;
 /// Chrome mounting ring around the cycle buttons; part of the hit target.
 const CYCLE_RING: f32 = 8.0;
@@ -910,8 +914,8 @@ const CYCLE_RING: f32 = 8.0;
 /// button row, to the right of the buttons and centred on the same midline
 /// (the two buttons stay centred under the power/E-stop cluster).
 const CYCLE_PLATE_SIZE: (f32, f32) = (52.0, 30.0);
-const CYCLE_START_PLATE_AT: (f32, f32) = (335.0, 870.0);
-const CYCLE_STOP_PLATE_AT: (f32, f32) = (397.0, 870.0);
+const CYCLE_START_PLATE_AT: (f32, f32) = (111.0, 259.0);
+const CYCLE_STOP_PLATE_AT: (f32, f32) = (247.0, 259.0);
 const PROBE_KEY_AT: (f32, f32) = (1507.0, 850.0);
 
 /// Sentinel mask for the PROBE CONTACT key in the hold tracker. The probe is
@@ -2331,11 +2335,12 @@ fn paint_panel(
         handle.set(|state| state.program_protect = !state.program_protect);
     }
 
-    // Axis and alarm lamps.
+    // Machine-status lamps (2x6). Shifted right of the cycle pushbuttons and
+    // in shared columns, so every lamp lines up vertically with its alarm.
     label(
         painter,
         l,
-        58.0,
+        310.0,
         250.0,
         13.0,
         "AXIS",
@@ -2351,7 +2356,7 @@ fn paint_panel(
         (crate::leds::C, "C"),
     ];
     for (index, (bit, name)) in axes.iter().enumerate() {
-        let x = 40.0 + index as f32 * 48.0;
+        let x = 322.0 + index as f32 * 43.0;
         lamp(painter, l, x, 285.0, 14.0, state.leds & bit != 0, GREEN);
         label(
             painter,
@@ -2367,7 +2372,7 @@ fn paint_panel(
     label(
         painter,
         l,
-        58.0,
+        310.0,
         350.0,
         13.0,
         "ALARM",
@@ -2383,12 +2388,12 @@ fn paint_panel(
         (crate::leds::READY, "READY", GREEN),
     ];
     for (index, (bit, name, color)) in alarms.iter().enumerate() {
-        let x = 40.0 + index as f32 * 52.0;
+        let x = 322.0 + index as f32 * 43.0;
         // The MC alarm lamp also mirrors a latched E-stop, so the panel shows
         // the fault even when no controller is driving the lamps.
         let lit = state.leds & bit != 0 || (*bit == crate::leds::MC_ALARM && state.estop);
         lamp(painter, l, x, 388.0, 14.0, lit, *color);
-        label(painter, l, x, 415.0, 9.0, name, TEXT, Align2::CENTER_CENTER);
+        label(painter, l, x, 415.0, 8.0, name, TEXT, Align2::CENTER_CENTER);
     }
 
     draw_display(
