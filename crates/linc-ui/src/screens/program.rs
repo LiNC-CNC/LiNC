@@ -176,7 +176,7 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
             &mut fit,
             &mut auto_fit,
             Some(app.program.selected_line),
-            Some(app.snapshot.program.executing_line()),
+            app.snapshot.program.highlight_line(),
             false,
             false,
             false,

@@ -1659,7 +1659,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
         let header_height = ui.cursor().top() - body_top;
         let graph_height = (rect.height() - 8.0 - header_height - 2.0).max(60.0);
         let preview = app.program.last_valid_preview.clone();
-        let current_line = app.snapshot.program.executing_line();
+        let current_line = app.snapshot.program.highlight_line();
         let view = app.manual.view;
         let mut zoom = app.manual.zoom;
         let mut pan = app.manual.pan;
@@ -1680,7 +1680,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
             &mut fit,
             &mut auto_fit,
             None,
-            Some(current_line),
+            current_line,
             false,
             false,
             false,

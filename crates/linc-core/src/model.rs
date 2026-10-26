@@ -672,6 +672,13 @@ impl ProgramState {
             self.current_line
         }
     }
+
+    /// The line to mark in the toolpath, but only while the program is active.
+    /// An idle controller keeps its last motion_line, which can be a later G1
+    /// and must not override the operator's selected G0 line in the graph.
+    pub fn highlight_line(&self) -> Option<usize> {
+        (self.running || self.paused).then(|| self.executing_line())
+    }
 }
 
 impl Default for ProgramState {
@@ -1631,6 +1638,17 @@ mod tests {
         assert_eq!(program.executing_line(), 3);
         program.motion_line = 0;
         assert_eq!(program.executing_line(), 11);
+
+        // The graph only marks a line while the program is active: an idle
+        // controller keeps its last motion_line, which must not override the
+        // G0 line the operator selected.
+        program.motion_line = 22;
+        assert_eq!(program.highlight_line(), None);
+        program.running = true;
+        assert_eq!(program.highlight_line(), Some(22));
+        program.running = false;
+        program.paused = true;
+        assert_eq!(program.highlight_line(), Some(22));
     }
 
     #[test]
