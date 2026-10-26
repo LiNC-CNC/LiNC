@@ -909,7 +909,8 @@ const CYCLE_RING: f32 = 8.0;
 /// Illuminated cycle-status plate above each cycle button (the cabinet has a
 /// lamp window there, not an LED in the button).
 const CYCLE_PLATE_SIZE: (f32, f32) = (52.0, 30.0);
-const CYCLE_PLATE_Y: f32 = 794.0;
+/// Plate centre; its bottom (y + 15) nearly touches the chrome ring at 814.
+const CYCLE_PLATE_Y: f32 = 798.0;
 const PROBE_KEY_AT: (f32, f32) = (1507.0, 850.0);
 
 /// Sentinel mask for the PROBE CONTACT key in the hold tracker. The probe is
