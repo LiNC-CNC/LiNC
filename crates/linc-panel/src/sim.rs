@@ -933,8 +933,8 @@ const PROTECT_HIT: f32 = 110.0;
 /// and on the machine-status lamp array's vertical centre. The centres are a
 /// ring diameter plus half a button radius apart, so the chrome rings keep a
 /// 24-unit gap (r/2).
-const CYCLE_START_AT: (f32, f32) = (111.0, 336.0);
-const CYCLE_STOP_AT: (f32, f32) = (247.0, 336.0);
+const CYCLE_START_AT: (f32, f32) = (111.0, 372.0);
+const CYCLE_STOP_AT: (f32, f32) = (247.0, 372.0);
 const CYCLE_R: f32 = 48.0;
 /// Chrome mounting ring around the cycle buttons; part of the hit target.
 const CYCLE_RING: f32 = 8.0;
@@ -942,8 +942,8 @@ const CYCLE_RING: f32 = 8.0;
 /// button row, to the right of the buttons and centred on the same midline
 /// (the two buttons stay centred under the power/E-stop cluster).
 const CYCLE_PLATE_SIZE: (f32, f32) = (52.0, 30.0);
-const CYCLE_START_PLATE_AT: (f32, f32) = (111.0, 259.0);
-const CYCLE_STOP_PLATE_AT: (f32, f32) = (247.0, 259.0);
+const CYCLE_START_PLATE_AT: (f32, f32) = (111.0, 295.0);
+const CYCLE_STOP_PLATE_AT: (f32, f32) = (247.0, 295.0);
 const PROBE_KEY_AT: (f32, f32) = (1507.0, 850.0);
 
 /// Sentinel mask for the PROBE CONTACT key in the hold tracker. The probe is
@@ -2401,7 +2401,7 @@ fn paint_panel(
         painter,
         l,
         390.0,
-        250.0,
+        286.0,
         13.0,
         "AXIS",
         MUTED,
@@ -2417,12 +2417,12 @@ fn paint_panel(
     ];
     for (index, (bit, name)) in axes.iter().enumerate() {
         let x = 415.0 + index as f32 * 38.0;
-        lamp(painter, l, x, 285.0, 14.0, state.leds & bit != 0, GREEN);
+        lamp(painter, l, x, 321.0, 14.0, state.leds & bit != 0, GREEN);
         label(
             painter,
             l,
             x,
-            311.0,
+            347.0,
             11.0,
             name,
             TEXT,
@@ -2433,7 +2433,7 @@ fn paint_panel(
         painter,
         l,
         390.0,
-        350.0,
+        386.0,
         13.0,
         "ALARM",
         MUTED,
@@ -2452,8 +2452,8 @@ fn paint_panel(
         // The MC alarm lamp also mirrors a latched E-stop, so the panel shows
         // the fault even when no controller is driving the lamps.
         let lit = state.leds & bit != 0 || (*bit == crate::leds::MC_ALARM && state.estop);
-        lamp(painter, l, x, 388.0, 14.0, lit, *color);
-        label(painter, l, x, 415.0, 7.5, name, TEXT, Align2::CENTER_CENTER);
+        lamp(painter, l, x, 424.0, 14.0, lit, *color);
+        label(painter, l, x, 451.0, 7.5, name, TEXT, Align2::CENTER_CENTER);
     }
 
     // The MAG TOOL bezel's left edge lines up with the FEEDRATE dial's
@@ -2463,7 +2463,7 @@ fn paint_panel(
         painter,
         l,
         720.0,
-        300.0,
+        336.0,
         250.0,
         105.0,
         "MAG TOOL",
@@ -2474,7 +2474,7 @@ fn paint_panel(
         painter,
         l,
         1030.0,
-        300.0,
+        336.0,
         250.0,
         105.0,
         "SPD TOOL",
@@ -2485,7 +2485,7 @@ fn paint_panel(
         painter,
         l,
         1340.0,
-        300.0,
+        336.0,
         250.0,
         105.0,
         "STATUS",
