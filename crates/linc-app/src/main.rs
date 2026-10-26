@@ -15,6 +15,8 @@ use linc_hal::{HalPinValue, HalReader};
 use linc_linuxcnc::NmlBackend;
 use linc_ui::{LincApp, UiBackend};
 
+mod plc;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum BackendChoice {
     Auto,
@@ -258,6 +260,18 @@ fn main() -> Result<()> {
     let backend = linc_core::loobric::wrap_backend(backend, &profile, lease);
     let backend = linc_core::network::wrap_backend(backend, supervisor);
 
+    // The ladder PLC is a separate service: when the profile or LINC_PLC asks
+    // for it the HMI spawns linc-plc and then leaves it alone — it does not
+    // wait for it and does not kill it on exit. Start it only after the
+    // backend connected, so a failed HMI attach cannot leave an orphan. HAL
+    // exists only under the LinuxCNC backend, so the simulation and --no-hal
+    // runs start it without pins. The effective state is handed to the page
+    // below, so a disabled PLC says so instead of looking like a failed daemon.
+    let plc_enabled = plc::enabled(&profile);
+    let plc_socket = plc::socket_path(&profile);
+    let plc_project = plc::project_path(&profile);
+    plc::start(&profile, args.no_hal || !use_linuxcnc);
+
     let hal = if args.no_hal {
         None
     } else {
@@ -359,6 +373,7 @@ fn main() -> Result<()> {
         Box::new(move |cc| {
             let mut app = LincApp::new(profile.clone(), handle, &cc.egui_ctx);
             app.set_diag_bus(diag_bus.clone());
+            app.configure_plc(plc_enabled, plc_socket, plc_project);
             Ok(Box::new(MachineOffGuard::new(
                 app,
                 hal_enabled,

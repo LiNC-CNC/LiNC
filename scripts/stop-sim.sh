@@ -34,6 +34,10 @@ stop_pid() {
 }
 
 stop_pid "LiNC display" "$RUNTIME_DIR/linc.pid"
+# The HMI only starts the ladder PLC and never kills it, so the simulation's
+# stop script owns it. Stop it after the display but before LinuxCNC: the daemon
+# holds HAL pins, and the display is its only socket client.
+stop_pid "ladder PLC" "$RUNTIME_DIR/plc.pid"
 stop_pid "LinuxCNC sim" "$RUNTIME_DIR/sim.pid"
 stop_pid "panel sim" "$RUNTIME_DIR/panel-sim.pid"
 rm -f "$IPC_BASE.state.json" "$IPC_BASE.display.json"

@@ -119,6 +119,21 @@ pub struct LincApp {
 }
 
 impl LincApp {
+    /// Effective PLC service state, decided in `main` from the profile and the
+    /// `LINC_PLC` override. `LincApp::new` keeps its signature, so the page
+    /// starts from its defaults and is told here where the daemon listens.
+    pub fn configure_plc(&mut self, enabled: bool, socket: PathBuf, project: PathBuf) {
+        self.plc.enabled = enabled;
+        if !socket.as_os_str().is_empty() {
+            self.plc.socket_text = socket.display().to_string();
+        }
+        // No project in the profile is not "no file": the page keeps the example
+        // path it starts with so an operator can still edit, validate and save one.
+        if !project.as_os_str().is_empty() {
+            self.plc.path_text = project.display().to_string();
+        }
+    }
+
     pub fn new(profile: Profile, mut backend: Box<dyn UiBackend>, ctx: &egui::Context) -> Self {
         theme::apply(ctx);
         theme::install_font_fallback(ctx);

@@ -868,6 +868,28 @@ directory below it carries a `..` row that is selectable and opens the parent.
 |---|---|---|
 | `show_parent_above_root` | `false` | Draw the `..` row in NC_FILES at its root too, so the pane can walk above `PROGRAM_PREFIX`. Off, the browser stops at the root: no parent row, and `Up` does not leave it. Loading still requires a file inside NC_FILES. |
 
+### `[plc]`
+
+The userspace ladder PLC service (`linc-plc`). **Off by default**: with
+`enabled = false` the HMI starts no daemon, no `linc_plc.*` pins exist and
+`scripts/linc-display.sh` does not load `hal/linc-plc-postgui.hal`. The PLC
+page stays reachable and works offline, and its service card says the PLC is
+disabled. `start-sim.sh --plc` / `--no-plc` export `LINC_PLC=1` / `LINC_PLC=0`,
+which overrides this table for one run; see `docs/plc.md`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Start the daemon at HMI start-up. |
+| `project` | `""` | Ladder project JSON, resolved relative to the profile directory. Required when `enabled = true`. |
+| `socket` | `""` | Daemon socket. Empty uses `linc_plc_client::default_socket_path()` (`$XDG_RUNTIME_DIR/linc/plc-<uid>.sock`); a relative path resolves against the profile directory. |
+| `scan_us` | `2000` | Scan period in microseconds, 100..=1000000. |
+| `allow_force` | `false` | Let the PLC page force I/O; the daemon refuses forces without it. |
+
+Validation: `enabled = true` with an empty `project` fails with
+`plc.project must name a ladder project when [plc] enabled = true`; a
+`scan_us` outside 100..=1000000 fails with `plc.scan_us must be between 100 and
+1000000 microseconds`. The table is `deny_unknown_fields` like every other.
+
 ### `[mdi]`
 
 The MDI pane on the MAIN page: the persistent block buffer, the input and the

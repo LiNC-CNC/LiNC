@@ -1,0 +1,48 @@
+# LiNC ladder PLC - post-GUI HAL hook
+#
+# THIS FILE IS DOCUMENTATION ONLY. It nets no pins and loads nothing.
+#
+# scripts/linc-display.sh loads it after the two linc post-GUI files, and only
+# when the ladder PLC is actually running:
+#
+#   1. [plc] enabled = true in the profile (.toml), or start-sim.sh --plc
+#      (LINC_PLC=1), made the HMI start the linc-plc daemon;
+#   2. the daemon wrote its pid (LINC_PLC_PID_FILE, or
+#      $XDG_RUNTIME_DIR/linc/plc.pid);
+#   3. halcmd show pin linc_plc.alive succeeded within 5 s.
+#
+# With the PLC off - the default - there is no daemon, no linc_plc.* pin and
+# this file is never loaded. If the pid file exists but the pin does not appear,
+# the wrapper prints a warning and leaves the HMI running; it does not load.
+#
+# ---------------------------------------------------------------------------
+# Why this file ships empty
+# ---------------------------------------------------------------------------
+#
+# The linc_plc pin map is project-defined. linc-plc creates one
+# linc_plc.<binding> HAL_BIT pin per I/O point in the ladder project it was
+# started with, in project order, before it calls hal_ready(), and it locks that
+# map for the life of the process (the socket answers a mismatched Load with
+# io_map_locked). A file in this tree therefore cannot know the pin names, and a
+# guessed net either fails on a missing pin or, worse, links a project output to
+# a machine input nobody reviewed.
+#
+# So the machine's wiring lives in the machine's own HAL file, written against
+# that machine's project:
+#
+#   loadusr -W linc-plc --project /home/operator/linc/ladder.json
+#   # or let the HMI start it: [plc] enabled = true, project = "ladder.json"
+#
+#   # one signal per pin: a HAL pin takes exactly one writer
+#   net plc-run    linc_plc.run        => rio.worklamp.bit
+#   net plc-ready  linc_plc.cycle-ready => cnc_panel.led_cycle
+#
+#   # the heartbeat the machine watchdog must see, and the fault bit
+#   net plc-alive  linc_plc.alive
+#   net plc-fault  linc_plc.fault      => cnc_panel.led_plc
+#
+# hal/linc-plc.hal is the reference example for those nets, and docs/plc.md
+# documents the pin map and the enabling switch.
+#
+# Nothing here is a safety function: E-stop, limits, guards and interlocks stay
+# in the machine HAL and in the hardwired circuit.

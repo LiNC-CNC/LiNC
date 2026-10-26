@@ -296,6 +296,9 @@ does not happen, `scripts/sim-ready.py` prints the HAL pins holding it.
 
 To check a profile without opening a window or touching HAL:
 
+The ladder PLC service is off by default; `--plc` starts its daemon for one
+run and `--no-plc` forces it off even when the profile enables it.
+
 ```sh
 linc --config configs/sim.toml --check-config
 ```

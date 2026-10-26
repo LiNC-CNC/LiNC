@@ -5,6 +5,51 @@ in its own process, owns its own `linc_plc.*` HAL component, and serves the
 LiNC **PLC** page over a same-user Unix socket. It is not part of the `linc`
 process and never touches the closed `linc.*` HMI surface.
 
+## Enabling
+
+The PLC is **off by default**. With it off the HMI starts no daemon, no
+`linc_plc.*` pins exist, and `linc-display.sh` does not load the PLC HAL hook.
+The PLC page stays reachable and works offline: it edits, validates and saves a
+project with no daemon, and its service card says the PLC is disabled.
+
+Three switches, highest first:
+
+| switch | scope | effect |
+| --- | --- | --- |
+| `LINC_PLC=1` / `LINC_PLC=0` | one process | forces on / off, ignoring the profile |
+| `start-sim.sh --plc` / `--no-plc` | one simulation run | exports `LINC_PLC=1` / `LINC_PLC=0` |
+| `[plc] enabled = true` | the profile | on for every launch of that profile |
+
+`LINC_PLC` accepts `1|true|on` and `0|false|off` in any case; anything else
+leaves the profile in charge. `--plc` implies no other start-up step, and
+`--no-plc` wins over a profile that enables the PLC.
+
+```toml
+[plc]
+enabled = false        # off unless this or LINC_PLC says otherwise
+project = "ladder.json" # ladder project, relative to the profile directory
+socket = ""            # empty: $XDG_RUNTIME_DIR/linc/plc-<uid>.sock
+scan_us = 2000         # scan period, 100..=1000000 microseconds
+allow_force = false    # let the PLC page force I/O
+```
+
+`configs/base.toml` carries exactly that block; `configs/sim.toml` adds
+`project = "plc-sim.json"` and leaves `enabled` false, so the simulation shows
+the page offline until `start-sim.sh --plc` asks for the daemon.
+
+Validation: `enabled = true` with an empty `project` is an error naming
+`plc.project`, and `scan_us` outside 100..=1000000 is an error naming
+`plc.scan_us`. Both are reported by `linc --check-config`.
+
+When enabled, `linc` spawns `linc-plc` (from `LINC_PLC_BIN`, else the sibling
+of its own executable) with `--project`, `--socket`, `--scan-us`,
+`--allow-force` when set, and `--no-hal` when there is no LinuxCNC back end. It
+writes the pid to `LINC_PLC_PID_FILE`, else `$XDG_RUNTIME_DIR/linc/plc.pid`,
+else `/tmp/linc-plc.pid`. The HMI never waits for the daemon and never kills it:
+it is a separate service, and `scripts/stop-sim.sh` stops the simulation's copy.
+`scripts/linc-display.sh` loads `hal/linc-plc-postgui.hal` only after
+`linc_plc.alive` appears.
+
 ## Safety boundary
 
 This is not a safety PLC and not a safety function. E-stop, limits, guards,

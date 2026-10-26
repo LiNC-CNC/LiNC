@@ -1776,6 +1776,34 @@ fn the_main_page_cards_end_on_the_page_bottom_edge() {
 }
 
 #[test]
+fn configure_plc_sets_the_service_fields_and_names_the_disabled_hint() {
+let (_dir, mut app) = make_app(PanelMode::Auto);
+assert!(!app.plc.enabled, "the page starts with the PLC off");
+app.configure_plc(
+true,
+std::path::PathBuf::from("/run/linc/plc.sock"),
+std::path::PathBuf::from("/profiles/plc-sim.json"),
+);
+assert!(app.plc.enabled);
+assert_eq!(app.plc.socket_text, "/run/linc/plc.sock");
+assert_eq!(app.plc.path_text, "/profiles/plc-sim.json");
+
+// The hint is what the status and diagnostics cards show when the
+// profile leaves the service off, so both parts must be spelled out.
+let hint = crate::screens::plc::DISABLED_HINT;
+assert!(hint.contains("[plc] enabled = true"), "{hint}");
+assert!(hint.contains("start-sim.sh --plc"), "{hint}");
+
+app.configure_plc(
+false,
+std::path::PathBuf::from("/run/linc/plc.sock"),
+std::path::PathBuf::new(),
+);
+assert!(!app.plc.enabled);
+assert_eq!(app.plc.socket_text, "/run/linc/plc.sock");
+}
+
+#[test]
 fn machine_bounds_follow_the_ini_and_classify_the_toolpath() {
     let (_dir, profile) = fixture();
     let bounds = machine_bounds(&profile).expect("the INI has X/Y/Z limits");

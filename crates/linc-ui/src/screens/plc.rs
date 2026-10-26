@@ -38,6 +38,9 @@ const POLL_OFFLINE: Duration = Duration::from_millis(900);
 /// Force lifetime requested from the daemon. The page never holds a force for
 /// ever: a lost HMI must not leave a pin pinned.
 const FORCE_TTL_MS: u32 = 10_000;
+/// What the operator can do when the profile leaves the PLC off. The page stays
+/// usable offline, so this is a hint, not an error.
+pub const DISABLED_HINT: &str = "set [plc] enabled = true or run start-sim.sh --plc";
 
 /// One selectable node: the section, the rung, and the child indices that lead
 /// from the rung's logic root to the node. An empty path is the rung itself.
@@ -563,6 +566,9 @@ pub struct PlcUi {
     buffer_key: Option<NodePath>,
     link: Option<Link>,
     pub online: bool,
+    /// Effective service state from the profile (or `LINC_PLC`). False means no
+    /// daemon was started at all, which is not the same as a daemon gone away.
+    pub enabled: bool,
     pub banner: String,
     pub state: RunState,
     pub daemon_project: String,
@@ -597,6 +603,7 @@ impl Default for PlcUi {
             buffer_key: None,
             link: None,
             online: false,
+            enabled: false,
             banner: String::new(),
             state: RunState::Idle,
             daemon_project: String::new(),
@@ -1157,34 +1164,37 @@ fn card<R>(ui: &mut Ui, size: Vec2, add: impl FnOnce(&mut Ui, f32) -> R) -> R {
 fn status_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
     let (state_label, state_color) = run_state_label(plc.state);
     let banner = plc.banner.clone();
+    let enabled = plc.enabled;
     let project_name = plc.project.name.clone();
     let online = plc.online;
+    let (dot_text, dot_color) = if !enabled {
+        ("PLC DISABLED", theme::WARNING)
+    } else if online {
+        ("SERVICE ONLINE", theme::SUCCESS)
+    } else {
+        ("SERVICE OFFLINE", theme::ERROR)
+    };
+    let status_text = if !enabled {
+        format!("disabled in the profile — {DISABLED_HINT}")
+    } else if banner.is_empty() {
+        "no daemon banner".to_string()
+    } else {
+        banner
+    };
     let running = matches!(plc.state, RunState::Running);
     let any_force = !plc.forced.is_empty();
     common::card_title(ui, "PLC SERVICE");
     ui.horizontal(|ui| {
         ui.add_space(2.0);
-        theme::status_dot(
-            ui,
-            if online { theme::SUCCESS } else { theme::ERROR },
-            if online {
-                "SERVICE ONLINE"
-            } else {
-                "SERVICE OFFLINE"
-            },
-        );
+        theme::status_dot(ui, dot_color, dot_text);
         ui.add_space(10.0);
         common::nav_badge(ui, state_label, state_color);
         ui.add_space(10.0);
         ui.label(
-            RichText::new(if banner.is_empty() {
-                "no daemon banner".to_string()
-            } else {
-                banner
-            })
-            .monospace()
-            .size(theme::font_size(9.0))
-            .color(theme::MUTED),
+            RichText::new(status_text)
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
         );
         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
             ui.label(
@@ -1848,6 +1858,14 @@ fn diagnostics_card(plc: &PlcUi, ui: &mut Ui, height: f32) {
         .max_height(list_height)
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            if !plc.enabled {
+                ui.label(
+                    RichText::new(format!("PLC DISABLED IN THE PROFILE — {DISABLED_HINT}"))
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::WARNING),
+                );
+            }
             if matches!(plc.state, RunState::Running) {
                 ui.label(
                     RichText::new("RUNNING: DOWNLOAD STOPS THE LADDER. PRESS START AFTERWARDS.")
