@@ -1,25 +1,25 @@
-(1/2-13 UNC screw - LiNC lathe test)
-(5/8 in stock, 2.0 in turned and threaded, external right-hand thread.)
+(M12x1.75 metric screw - LiNC lathe test)
+(18 mm stock, 50 mm turned and threaded, external right-hand thread.)
 (Head on the left, on the chuck side; the shank runs toward +Z.)
 (Turning: G71 roughing + G70 finishing, profile in O100.)
-(Threading: G76, 13 TPI, 29.5 deg compound infeed, exit taper.)
+(Threading: G76, 1.75 mm pitch, 29.5 deg compound infeed, exit taper.)
 (G7 diameter mode: X, I, J, K are diameters - LinuxCNC 2.9 G7x cycles.)
 (Tool 1 turning, tool 2 threading; simulation offsets are zero.)
 
-G20 G7 G18 G90 G95
+G21 G7 G18 G90 G95
 G40 G49 G80
 G54
-F0.008
+F0.2
 
 (Profile for G71/G70: finish contour, free end at +Z, head at Z0.)
 O100 SUB
-G0 X0.5 Z2.0
-G1 Z0.06
-G1 X0.63 Z0
-G1 X0.7
+G0 X12.0 Z50.0
+G1 Z1.5
+G1 X15.0 Z0
+G1 X18.0
 O100 ENDSUB
 
-(Rough turn: leave 0.02 on the profile, 0.04 per pass, 0.02 retract.)
+(Rough turn: leave 0.5 on the profile, 1.0 per pass, 0.5 retract.)
 (No M6 in the simulator test: the manual tool-change confirmation blocks)
 (an unattended run. Select the tool and apply these zero offsets instead.)
 T1 G43
@@ -27,28 +27,28 @@ T1 G43
 (a CSS setpoint that moves with X never holds it in this simulator.)
 G97 S800 M3
 M8
-G0 X0.66 Z2.05
-G71 Q100 X0.66 Z2.05 D0.02 I0.04 R0.02
+G0 X17.0 Z52.0
+G71 Q100 X17.0 Z52.0 D0.5 I1.0 R0.5
 (Finish pass.)
-G70 Q100 X0.66 Z2.05 D0.02 E0 P1
-G0 X0.8 Z2.1
+G70 Q100 X17.0 Z52.0 D0.5 E0 P1
+G0 X20.0 Z53.0
 M9
 M5
 
-(Thread 1/2-13: drive line X0.54, peak offset -0.04 gives major 0.5.)
-(K0.094 is full thread depth in diameter mode: 0.5 - 0.094 = 0.406.)
-(E0.05 with L2 tapers the exit so the tool leaves the thread cleanly.)
+(Thread M12x1.75: drive line X13, peak offset -1 gives major 12.)
+(K2.147 is the full thread depth in diameter mode: 12 - 2.147 = 9.853.)
+(E1.27 with L2 tapers the exit so the tool leaves the thread cleanly.)
 (Tool travels -Z, toward the head, so M3 still cuts a right-hand thread.)
 T2 G43
 G97 S400 M3
 G4 P0.5
 M8
-G0 X0.54 Z2.0
-G76 P0.076923 Z0.1 I-0.04 J0.01 K0.094 R1.0 Q29.5 H0 E0.05 L2
-G0 X0.8 Z2.1
+G0 X13.0 Z50.0
+G76 P1.75 Z2.54 I-1.0 J0.25 K2.147 R1.0 Q29.5 H0 E1.27 L2
+G0 X20.0 Z53.0
 M9
 M5
 
-G0 X1.0 Z2.1
+G0 X25.0 Z53.0
 M30
 %

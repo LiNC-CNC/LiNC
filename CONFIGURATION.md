@@ -38,7 +38,7 @@ safety validation without connecting to LinuxCNC or HAL.
 | `configs/sim.toml` | Mill simulation: `configs/sim.ini` runs a real `linuxcnc` process with the in-repo simulation HAL (`hal/rio_sim.hal`), LiNC display and simulated CNC control panel. |
 | `configs/baiermill.toml` | Physical mill, machine's own INI: `../../baiermill_pb/probe_basic.ini`, real CNC control panel over RS-485 owned by `linc-panel`. Fails `--check-config`: its `SUBROUTINE_PATH` cannot resolve LiNC's reviewed probe bundle (§7). |
 | `configs/baiermill-pb.toml` | Physical mill, LiNC's reviewed configuration: `configs/baiermill-pb.ini` (a copy of the machine INI with LiNC's probe bundle first in `SUBROUTINE_PATH`), same machine values, same RS-485 panel. |
-| `configs/lathe-sim.toml` | Lathe simulation: `configs/lathe-sim.ini` boots LiNC against Probe Basic's lathe HAL and subroutines in a `../probe_basic_dev` checkout; `configs/lathe-sim.tbl` carries the turret `P` column. Lathe UI capabilities. |
+| `configs/lathe-sim.toml` | Lathe simulation: `configs/lathe-sim.ini` (metric, millimetres) boots LiNC against Probe Basic's lathe HAL and subroutines in a `../probe_basic_dev` checkout; `configs/lathe-sim.tbl` carries the turret `P` column. Lathe UI capabilities. |
 
 The profiles use:
 

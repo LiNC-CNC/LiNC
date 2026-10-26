@@ -44,10 +44,10 @@ y_axis = false
 sub_spindle = true
 
 [jog]
-# The lathe INI is in inch units (MAX_VELOCITY 3.33 in/s = 200 in/min). Base's
-# mill defaults (3000/6000) would drive the axis into its limit instantly.
-max_speed = 100
-rapid_speed = 200
+# The lathe INI is metric (MAX_VELOCITY 84.6667 mm/s = 5080 mm/min). Base's mill
+# defaults (3000/6000) already sit under that, but the lathe jogs slower.
+max_speed = 2540
+rapid_speed = 5080
 
 [ui]
 window_title = "LiNC - Smartlathe SL36 Simulation"
