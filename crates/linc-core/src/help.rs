@@ -50,6 +50,49 @@ pub struct HelpSection {
     pub related: Vec<String>,
 }
 
+/// One inline run of a paragraph, list item or admonition.
+///
+/// The generator collapses whitespace, so concatenating a block's spans
+/// reproduces that block's plain text.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct HelpSpan {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub bold: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub italic: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub code: bool,
+    /// Internal document anchor this run links to, without the leading hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+}
+
+impl HelpSpan {
+    pub fn plain(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            ..Self::default()
+        }
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// The admonition types the LinuxCNC documentation uses, each carried by its
+/// own cell colour in the source (Probe Basic's _ADMON_REMAP).
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum HelpAdmonition {
+    Note,
+    Tip,
+    Warning,
+    Important,
+    Caution,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HelpBlock {
@@ -60,12 +103,17 @@ pub enum HelpBlock {
     },
     Para {
         text: String,
+        #[serde(default)]
+        spans: Vec<HelpSpan>,
     },
     Code {
         text: String,
     },
     Table {
         rows: Vec<Vec<String>>,
+        /// The first row is a header row, not data.
+        #[serde(default)]
+        header: bool,
     },
     List {
         items: Vec<HelpItem>,
@@ -75,8 +123,11 @@ pub enum HelpBlock {
         #[serde(default)]
         text: String,
     },
-    Note {
+    Admonition {
+        admonition: HelpAdmonition,
         text: String,
+        #[serde(default)]
+        spans: Vec<HelpSpan>,
     },
 }
 
@@ -85,6 +136,8 @@ pub enum HelpBlock {
 pub enum HelpItem {
     ListItem {
         text: String,
+        #[serde(default)]
+        spans: Vec<HelpSpan>,
     },
     Image {
         image: String,
@@ -110,7 +163,8 @@ impl HelpBundle {
     }
 
     /// Search code, parameters, description, meaning and group names.
-    /// Code matching removes spaces and commas, so `g2g3` finds `G2, G3`.
+    /// Code matching removes spaces and commas, so g2g3 finds G2, G3.
+
     pub fn filter(&self, query: &str) -> Vec<HelpGroup> {
         let query = query.trim();
         if query.is_empty() {
@@ -184,6 +238,22 @@ impl HelpBundle {
 mod tests {
     use super::*;
 
+    fn block_spans(block: &HelpBlock) -> Vec<&HelpSpan> {
+        match block {
+            HelpBlock::Para { spans, .. } | HelpBlock::Admonition { spans, .. } => {
+                spans.iter().collect()
+            }
+            HelpBlock::List { items } => items
+                .iter()
+                .flat_map(|item| match item {
+                    HelpItem::ListItem { spans, .. } => spans.iter().collect::<Vec<_>>(),
+                    HelpItem::Image { .. } => Vec::new(),
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
     #[test]
     fn bundle_matches_the_accepted_contents() {
         let bundle = HelpBundle::load_bundled().unwrap();
@@ -221,5 +291,142 @@ mod tests {
         assert!(related
             .iter()
             .all(|anchor| bundle.section(anchor).is_some()));
+    }
+
+    #[test]
+    fn spans_reconstruct_the_plain_text() {
+        let bundle = HelpBundle::load_bundled().unwrap();
+        let mut checked = 0;
+        for section in bundle.sections.values() {
+            for block in &section.blocks {
+                let plain = match block {
+                    HelpBlock::Para { text, .. } | HelpBlock::Admonition { text, .. } => text,
+                    HelpBlock::List { items } => {
+                        for item in items {
+                            if let HelpItem::ListItem { text, spans } = item {
+                                let joined: String =
+                                    spans.iter().map(|span| span.text.as_str()).collect();
+                                assert_eq!(&joined, text, "{}", section.title);
+                                checked += 1;
+                            }
+                        }
+                        continue;
+                    }
+                    _ => continue,
+                };
+                let joined: String = block_spans(block)
+                    .iter()
+                    .map(|span| span.text.as_str())
+                    .collect();
+                assert_eq!(&joined, plain, "{}", section.title);
+                checked += 1;
+            }
+        }
+        assert!(checked > 500, "expected the whole bundle, saw {checked}");
+    }
+
+    #[test]
+    fn inline_spans_keep_emphasis_code_and_links() {
+        let bundle = HelpBundle::load_bundled().unwrap();
+        let section = bundle.section("gcode:g2-g3").unwrap();
+        let spans: Vec<&HelpSpan> = section
+            .blocks
+            .iter()
+            .filter(|block| {
+                matches!(block, HelpBlock::Para { spans, .. } if spans.iter().any(|span| span.link.is_some()))
+            })
+            .flat_map(block_spans)
+            .collect();
+        assert!(spans.iter().any(|span| span.text == "G2" && span.italic));
+        assert!(spans.iter().any(|span| {
+            span.text == "feed rate" && span.link.as_deref() == Some("sec:set-feed-rate")
+        }));
+    }
+
+    #[test]
+    fn bundle_carries_bold_code_and_italic_runs() {
+        let bundle = HelpBundle::load_bundled().unwrap();
+        let spans: Vec<&HelpSpan> = bundle
+            .sections
+            .values()
+            .flat_map(|section| section.blocks.iter())
+            .flat_map(block_spans)
+            .collect();
+        assert!(spans.iter().any(|span| span.bold && !span.text.is_empty()));
+        assert!(spans.iter().any(|span| span.code && !span.text.is_empty()));
+        assert!(spans.iter().any(|span| span.italic && !span.text.is_empty()));
+    }
+
+    #[test]
+    fn every_admonition_kind_decodes_to_its_own_type() {
+        let cases = [
+            ("warning", HelpAdmonition::Warning),
+            ("note", HelpAdmonition::Note),
+            ("tip", HelpAdmonition::Tip),
+            ("important", HelpAdmonition::Important),
+            ("caution", HelpAdmonition::Caution),
+        ];
+        for (name, kind) in cases {
+            let json = format!(r#"{{"kind":"admonition","admonition":"{name}","text":"body"}}"#);
+            let block: HelpBlock = serde_json::from_str(&json).unwrap();
+            assert!(
+                matches!(block, HelpBlock::Admonition { admonition, .. } if admonition == kind),
+                "{name} decoded to the wrong type"
+            );
+        }
+    }
+
+    #[test]
+    fn a_table_says_whether_its_first_row_is_a_header() {
+        let with = r#"{"kind":"table","rows":[["a","b"],["1","2"]],"header":true}"#;
+        let block: HelpBlock = serde_json::from_str(with).unwrap();
+        assert!(matches!(block, HelpBlock::Table { header: true, .. }));
+        let without = r#"{"kind":"table","rows":[["a","b"]]}"#;
+        let block: HelpBlock = serde_json::from_str(without).unwrap();
+        assert!(matches!(block, HelpBlock::Table { header: false, .. }));
+    }
+
+    #[test]
+    fn an_admonition_without_spans_still_decodes() {
+        let json = r#"{"kind":"admonition","admonition":"caution","text":"body"}"#;
+        let block: HelpBlock = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            block,
+            HelpBlock::Admonition {
+                admonition: HelpAdmonition::Caution,
+                spans,
+                ..
+            } if spans.is_empty()
+        ));
+    }
+
+    #[test]
+    fn admonition_types_survive_the_bundle() {
+        let bundle = HelpBundle::load_bundled().unwrap();
+        let mut kinds = BTreeSet::new();
+        for block in bundle
+            .sections
+            .values()
+            .flat_map(|section| section.blocks.iter())
+        {
+            if let HelpBlock::Admonition {
+                admonition,
+                text,
+                spans,
+            } = block
+            {
+                kinds.insert(*admonition);
+                assert!(!text.trim().is_empty());
+                assert!(!spans.is_empty());
+                let first = spans[0].text.trim().to_ascii_lowercase();
+                assert!(
+                    !matches!(first.as_str(), "warning" | "note" | "tip" | "important" | "caution"),
+                    "the type label must not be part of the body"
+                );
+            }
+        }
+        assert!(kinds.contains(&HelpAdmonition::Warning));
+        assert!(kinds.contains(&HelpAdmonition::Note));
+        assert!(kinds.contains(&HelpAdmonition::Important));
     }
 }

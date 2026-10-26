@@ -829,7 +829,7 @@ fn reference_bounds(app: &LincApp) -> Bounds3 {
     let mut bounds = program.unwrap_or(default_bounds());
     let mut any = program.is_some();
     for point in app.snapshot.live_trail.as_slice() {
-        bounds.include(*point);
+        bounds.include(point.position);
         any = true;
     }
     bounds.include(app.tool_tip());

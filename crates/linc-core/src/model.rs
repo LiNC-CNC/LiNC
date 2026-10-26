@@ -1247,6 +1247,27 @@ impl Alarm {
     }
 }
 
+/// One sampled point of the live trail: where the tool tip was and whether the
+/// move that reached it was a rapid.
+///
+/// The flag is what lets the graph draw a rapid dotted and a cut solid, the way
+/// the preview's own segments are drawn. It is per point — the move *ending* at
+/// the point — so a trail is a list of points plus the kind of each hop, with no
+/// second parallel list to keep in step.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TrailPoint {
+    /// Tool tip in machine coordinates, matching the preview and the tool marker.
+    pub position: [f64; 3],
+    /// The move that reached this point was a rapid (G0); false for a cut.
+    pub rapid: bool,
+}
+
+impl TrailPoint {
+    pub fn new(position: [f64; 3], rapid: bool) -> Self {
+        Self { position, rapid }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SnapshotMeta {
     pub sequence: u64,
@@ -1284,8 +1305,9 @@ pub struct MachineSnapshot {
     /// operator performs the controller reset; it never expires.
     #[serde(default)]
     pub probe_trip: Option<ProbeTripFault>,
-    /// Live tool-tip trail in machine coordinates, oldest first.
-    pub live_trail: Arc<Vec<[f64; 3]>>,
+    /// Live tool-tip trail in machine coordinates, oldest first, each point
+    /// carrying the kind of move that reached it.
+    pub live_trail: Arc<Vec<TrailPoint>>,
     /// Actual tool tip in machine coordinates, if known.
     pub tool_tip: Option<[f64; 3]>,
     /// The LinuxCNC bridge's own health; `None` for the simulator backend.

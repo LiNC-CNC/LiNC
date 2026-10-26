@@ -578,7 +578,12 @@ Program rules:
 - The graph always draws the **loaded program's full toolpath** and the
   **live toolpath** as separate layers. The program path uses the program
   colour (cut) and muted dotted rapids; the live trail uses a distinct
-  `--success` stroke.
+  `--success` stroke, solid for a cut and dotted for a rapid, so both layers
+  read a rapid the same way.
+- The program path is drawn in machine coordinates, the frame the tool marker
+  and the live trail use: the work offset the program selects is applied, and in
+  lathe `G7` diameter mode an X word is a diameter, halved exactly as the
+  interpreter halves it, so the path lands where the machine goes.
 - A leading rapid that only approaches the program from the live tool position
   is not drawn: the path starts at the program's first move, so no dotted
   connector crosses the part. A program whose only move is that rapid still
@@ -591,8 +596,10 @@ Program rules:
   position, not a shape centred on it: the operator reads the tip, and a circle
   with a crosshair left it ambiguous at display size.
 - The live trail is the actual tool-tip path since the last clear, including
-  program, MDI and jog motion. It is not the commanded program path and must
-  never overwrite or hide the loaded program.
+  program, MDI and jog motion. Each sample carries whether the interpreter's
+  active motion mode was G0, which is what makes a rapid hop dotted. It is not
+  the commanded program path and must never overwrite or hide the loaded
+  program.
 - A focusable, view-only `CLEAR TRAIL` action clears only the live trail and
   re-seeds it at the current tool tip. It does not clear the loaded program,
   selected line, offsets or machine state, and is safe while running. A
@@ -776,6 +783,20 @@ stopping a running program.
   opens it, and `Enter` with no chip chosen closes the dialog. Related links
   navigate inside it and `Backspace` returns through that history. It blocks the
   page behind it while open.
+- The dialog renders the generated documentation natively; there is no HTML
+  engine or webview. It keeps the source's inline markup (bold, italic, inline
+  code and internal links), and an inline link opens its target by the same
+  history path as a RELATED chip. A link to a section this bundle does not carry
+  is drawn as plain text, so nothing clickable is dead.
+- Code blocks are syntax-coloured with one egui `LayoutJob`: G/M words, o-words,
+  axis letters, numbers, parameter references and comments take Probe Basic's
+  `_SYNTAX_REMAP` colours, and a comment is italic.
+- Warning, Note, Tip, Important and Caution admonitions each keep their own
+  label, accent and background, so none collapses into one warning banner.
+- A documentation table draws a header band, alternating zebra rows, one cell
+  pad on each side of every column, centred header cells and right-aligned
+  numeric cells. The pinned bundle carries single-cell layout tables only, so
+  today the header band and zebra rows show on the index table.
 - Current bundle: 125 sections, 89 index rows, 14 figures, generated from the
   pinned LinuxCNC online documentation.
 - Read-only; no machine-control actions. The top-level HELP action opens this

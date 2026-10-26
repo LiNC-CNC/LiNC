@@ -598,7 +598,8 @@ impl LincApp {
         if self.trail_cleared {
             if cleared_trail_pending(&snapshot, self.trail_cleared_tip) {
                 let tip = snapshot.tool_tip.unwrap_or([0.0; 3]);
-                snapshot.live_trail = std::sync::Arc::new(vec![tip]);
+                snapshot.live_trail =
+                    std::sync::Arc::new(vec![linc_core::model::TrailPoint::new(tip, false)]);
             } else {
                 self.trail_cleared = false;
             }
@@ -1894,7 +1895,8 @@ impl LincApp {
         // snapshots still carry the old points; `trail_cleared` masks them until
         // either that clear lands or the tool moves.
         let tip = self.tool_tip();
-        self.snapshot.live_trail = std::sync::Arc::new(vec![tip]);
+        self.snapshot.live_trail =
+            std::sync::Arc::new(vec![linc_core::model::TrailPoint::new(tip, false)]);
         self.snapshot.tool_tip = Some(tip);
         self.trail_cleared = true;
         self.trail_cleared_tip = Some(tip);
@@ -3952,56 +3954,9 @@ impl LincApp {
                     ui.add_space(6.0);
                     ui.label(format!("{name} already exists in the destination. Replace it atomically?"));
                     ui.add_space(12.0);
-                    ui.horizontal(|ui| {
-                        let replace = theme::danger_button(ui, "OVERWRITE", true);
-                        if replace.clicked() {
-                            overwrite = Some(true);
-                        }
-                        let cancel = theme::action_button(ui, "CANCEL", true);
-                        if cancel.clicked() {
-                            overwrite = Some(false);
-                        }
-                        // The dialog owns the keyboard: arrows flip between the
-                        // two choices instead of walking out to the page behind.
-                        for button in [&replace, &cancel] {
-                            ui.memory_mut(|memory| {
-                                memory.set_focus_lock_filter(
-                                    button.id,
-                                    egui::EventFilter {
-                                        tab: true,
-                                        horizontal_arrows: true,
-                                        vertical_arrows: true,
-                                        escape: false,
-                                    },
-                                );
-                            });
-                        }
-                        if focus_default
-                            || (!replace.has_focus() && !cancel.has_focus())
-                        {
-                            cancel.request_focus();
-                        }
-                        let mut flip = false;
-                        ui.input_mut(|input| {
-                            for key in [
-                                egui::Key::ArrowLeft,
-                                egui::Key::ArrowRight,
-                                egui::Key::ArrowUp,
-                                egui::Key::ArrowDown,
-                            ] {
-                                if input.consume_key(egui::Modifiers::NONE, key) {
-                                    flip = true;
-                                }
-                            }
-                        });
-                        if flip {
-                            if replace.has_focus() {
-                                cancel.request_focus();
-                            } else {
-                                replace.request_focus();
-                            }
-                        }
-                    });
+                    if let Some(choice) = screens::files::overwrite_dialog(ui, focus_default) {
+                        overwrite = Some(choice);
+                    }
                 }
                 Modal::Error(text) => {
                     ui.label(RichText::new("ERROR").size(theme::font_size(18.0)).strong().color(theme::ERROR));
@@ -5252,16 +5207,21 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         let (_dir, app) = make_app(PanelMode::Jog);
         let mut snapshot = app.snapshot.clone();
         snapshot.tool_tip = Some([1.0, 2.0, 3.0]);
-        snapshot.live_trail = std::sync::Arc::new(vec![[0.0; 3]; 5]);
+        snapshot.live_trail =
+            std::sync::Arc::new(vec![linc_core::model::TrailPoint::new([0.0; 3], false); 5]);
         let tip = Some([1.0, 2.0, 3.0]);
         assert!(cleared_trail_pending(&snapshot, tip), "old points masked");
 
         // The backend applied the clear: one point left.
-        snapshot.live_trail = std::sync::Arc::new(vec![[1.0, 2.0, 3.0]]);
+        snapshot.live_trail = std::sync::Arc::new(vec![linc_core::model::TrailPoint::new(
+            [1.0, 2.0, 3.0],
+            false,
+        )]);
         assert!(!cleared_trail_pending(&snapshot, tip), "clear accepted");
 
         // The tool moved: the points are new, not stale.
-        snapshot.live_trail = std::sync::Arc::new(vec![[0.0; 3]; 5]);
+        snapshot.live_trail =
+            std::sync::Arc::new(vec![linc_core::model::TrailPoint::new([0.0; 3], false); 5]);
         snapshot.tool_tip = Some([5.0, 2.0, 3.0]);
         assert!(!cleared_trail_pending(&snapshot, tip), "new motion kept");
     }
@@ -7240,6 +7200,54 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             "the dialog stays open with the reason"
         );
         assert!(!prefix.join("part.ngc").exists());
+    }
+
+    #[test]
+    fn the_parent_row_is_selectable_and_enter_opens_the_parent() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        // Keep the removable-media poll out of the test; the NC pane is enough.
+        harness.app.files.usb_root = Some(harness.app.files.nc_root.clone());
+        let root = harness.app.files.nc_root.clone();
+        let part = root.join("part");
+        std::fs::create_dir_all(&part).unwrap();
+        std::fs::write(part.join("a.ngc"), "G0 X0\n").unwrap();
+        harness.app.set_page(Page::Files);
+        harness.app.files.nc_current = part.clone();
+        harness.app.files.nc_entries = crate::state::read_dir_entries(&part);
+        harness.app.files.nc_selected = 0;
+        harness.app.files.nc_parent_selected = false;
+
+        harness.frame(&[]);
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert!(
+            harness.app.files.nc_parent_selected,
+            "Up from the first entry selects the .. row inside a directory"
+        );
+        assert_eq!(harness.app.files.nc_selected, 0);
+
+        harness.frame(&[egui::Key::Enter]);
+        assert_eq!(
+            harness.app.files.nc_current, root,
+            "Enter on the .. row opens the parent directory"
+        );
+        assert!(!harness.app.files.nc_parent_selected);
+    }
+
+    #[test]
+    fn nc_files_has_no_parent_row_at_its_root_by_default() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.files_page_with_one_file("part.ngc");
+        assert!(
+            !harness.app.files.allow_parent_above_root,
+            "[files] show_parent_above_root is off in base.toml"
+        );
+        harness.frame(&[]);
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert!(
+            !harness.app.files.nc_parent_selected,
+            "NC_FILES stops at PROGRAM_PREFIX without the profile option"
+        );
+        assert_eq!(harness.app.files.nc_current, harness.app.files.nc_root);
     }
 
     #[test]

@@ -58,6 +58,24 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     copy_status(app, ui);
 }
 
+/// The `..` row's target for one pane: `Some(parent)` when the row is drawn
+/// and Enter opens it, `None` when the pane has no parent row.
+///
+/// USB never leaves the mount. NC_FILES stops at PROGRAM_PREFIX unless the
+/// profile sets `[files] show_parent_above_root`.
+fn parent_row(
+    current: Option<&Path>,
+    root: Option<&Path>,
+    allow_above_root: bool,
+) -> Option<PathBuf> {
+    let (current, root) = (current?, root?);
+    let parent = current.parent()?;
+    if current == root && !allow_above_root {
+        return None;
+    }
+    (allow_above_root || parent.starts_with(root)).then(|| parent.to_path_buf())
+}
+
 /// Page keys, consumed before the lists draw.
 ///
 /// Handling them inside the list let a focused row widget take Enter and the
@@ -106,16 +124,12 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     } else {
         app.files.nc_selected
     };
-    // `..` is reachable when inside the tree, and in NC_FILES at its root when
-    // `show_parent_above_root` is enabled.
-    let parent_available = current
-        .as_deref()
-        .zip(root.as_deref())
-        .map(|(current, root)| {
-            current != root
-                || (!usb && app.files.allow_parent_above_root && current.parent().is_some())
-        })
-        .unwrap_or(false);
+    let parent = parent_row(
+        current.as_deref(),
+        root.as_deref(),
+        !usb && app.files.allow_parent_above_root,
+    );
+    let parent_available = parent.is_some();
     let mut on_parent = parent_available
         && if usb {
             app.files.usb_parent_selected
@@ -192,9 +206,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
             if on_parent {
-                if let Some(parent) = current.as_deref().and_then(Path::parent) {
-                    open_dir = Some(parent.to_path_buf());
-                }
+                open_dir = parent.clone();
             } else if let Some(entry) = entries.get(selected) {
                 if entry.is_dir {
                     open_dir = Some(entry.path.clone());
@@ -639,16 +651,12 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
         Pane::Nc => app.files.nc_selected,
     };
     selected = selected.min(entries.len().saturating_sub(1));
-    let can_up = current
-        .as_deref()
-        .zip(root.as_deref())
-        .map(|(current, root)| {
-            current != root
-                || (pane == Pane::Nc
-                    && app.files.allow_parent_above_root
-                    && current.parent().is_some())
-        })
-        .unwrap_or(false);
+    let parent = parent_row(
+        current.as_deref(),
+        root.as_deref(),
+        pane == Pane::Nc && app.files.allow_parent_above_root,
+    );
+    let can_up = parent.is_some();
     let parent_rows = usize::from(can_up);
     let parent_selected = can_up
         && if pane == Pane::Usb {
@@ -968,22 +976,7 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
         }
     }
     if open_parent {
-        if let Some(parent) = current.as_deref().and_then(Path::parent) {
-            let allowed = if pane == Pane::Usb {
-                root.as_deref()
-                    .map(|root| parent.starts_with(root))
-                    .unwrap_or(false)
-            } else {
-                app.files.allow_parent_above_root
-                    || root
-                        .as_deref()
-                        .map(|root| parent.starts_with(root))
-                        .unwrap_or(false)
-            };
-            if allowed {
-                open_dir = Some(parent.to_path_buf());
-            }
-        }
+        open_dir = parent;
     }
     if let Some(dir) = open_dir {
         if pane == Pane::Usb {
@@ -1116,6 +1109,71 @@ fn start_copy_job(
     app.files.error = None;
 }
 
+/// The overwrite confirmation's two buttons, and the keyboard that belongs to
+/// them while the dialog is open.
+///
+/// Arrows flip between exactly these two, Enter takes the focused one and
+/// Escape closes the dialog in the shell; focus never walks out to the page
+/// behind. Returns `Some(true)` for OVERWRITE, `Some(false)` for CANCEL.
+pub fn overwrite_dialog(ui: &mut Ui, focus_default: bool) -> Option<bool> {
+    let mut choice = None;
+    ui.horizontal(|ui| {
+        let replace = theme::danger_button(ui, "OVERWRITE", true);
+        if replace.clicked() {
+            choice = Some(true);
+        }
+        let cancel = theme::action_button(ui, "CANCEL", true);
+        if cancel.clicked() {
+            choice = Some(false);
+        }
+        // A locked button keeps the arrows for itself, so egui's focus
+        // navigation cannot read them as "move focus".
+        for button in [&replace, &cancel] {
+            ui.memory_mut(|memory| {
+                memory.set_focus_lock_filter(
+                    button.id,
+                    egui::EventFilter {
+                        tab: true,
+                        horizontal_arrows: true,
+                        vertical_arrows: true,
+                        escape: false,
+                    },
+                );
+            });
+        }
+        if focus_default || (!replace.has_focus() && !cancel.has_focus()) {
+            cancel.request_focus();
+        }
+        let mut flip = false;
+        ui.input_mut(|input| {
+            for key in [
+                egui::Key::ArrowLeft,
+                egui::Key::ArrowRight,
+                egui::Key::ArrowUp,
+                egui::Key::ArrowDown,
+            ] {
+                if input.consume_key(egui::Modifiers::NONE, key) {
+                    flip = true;
+                }
+            }
+        });
+        if flip {
+            if replace.has_focus() {
+                cancel.request_focus();
+            } else {
+                replace.request_focus();
+            }
+            // A fresh focus request carries egui's empty default filter, so the
+            // arrow that just moved the focus would still be applied as focus
+            // navigation at the end of the pass, and a second one would land on
+            // a widget behind the dialog. The event was consumed above; drop
+            // the pending direction as well.
+            ui.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+        }
+    });
+    choice
+}
+
 pub fn finish_overwrite(app: &mut LincApp, overwrite: bool) {
     let Some((source, root, destination)) = app.files.pending_overwrite.take() else {
         return;
@@ -1217,6 +1275,183 @@ mod tests {
         );
         assert!(text.contains("\n\n(program body)\n\n"), "{text}");
         assert!(text.trim_end().ends_with("M30"), "{text}");
+    }
+
+    #[test]
+    fn the_parent_row_inside_the_tree_opens_the_parent() {
+        assert_eq!(
+            parent_row(
+                Some(Path::new("/gcode/part")),
+                Some(Path::new("/gcode")),
+                false
+            ),
+            Some(PathBuf::from("/gcode"))
+        );
+        assert_eq!(
+            parent_row(
+                Some(Path::new("/gcode/part/sub")),
+                Some(Path::new("/gcode")),
+                false
+            ),
+            Some(PathBuf::from("/gcode/part"))
+        );
+    }
+
+    #[test]
+    fn nc_files_hides_the_parent_row_at_its_root_by_default() {
+        let root = Path::new("/gcode");
+        assert_eq!(parent_row(Some(root), Some(root), false), None);
+        // The same call the USB pane makes: the media root keeps no parent row.
+        assert_eq!(
+            parent_row(
+                Some(Path::new("/media/usb")),
+                Some(Path::new("/media/usb")),
+                false
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn the_profile_option_shows_the_parent_row_above_the_nc_root() {
+        let root = Path::new("/gcode");
+        assert_eq!(
+            parent_row(Some(root), Some(root), true),
+            Some(PathBuf::from("/")),
+            "[files] show_parent_above_root = true puts .. above PROGRAM_PREFIX"
+        );
+    }
+
+    #[test]
+    fn the_profile_option_reaches_the_files_page() {
+        let root = tempfile::tempdir().unwrap();
+        let hidden = crate::state::FilesUi::new(root.path().to_path_buf(), false);
+        assert_eq!(
+            parent_row(
+                Some(&hidden.nc_current),
+                Some(&hidden.nc_root),
+                hidden.allow_parent_above_root
+            ),
+            None
+        );
+        let shown = crate::state::FilesUi::new(root.path().to_path_buf(), true);
+        assert_eq!(
+            parent_row(
+                Some(&shown.nc_current),
+                Some(&shown.nc_root),
+                shown.allow_parent_above_root
+            ),
+            root.path().parent().map(Path::to_path_buf)
+        );
+    }
+
+    /// One headless pass with a page of focusable widgets behind the dialog.
+    struct OverwriteHarness {
+        ctx: egui::Context,
+        page_buttons: std::cell::RefCell<Vec<egui::Id>>,
+        first_frame: std::cell::Cell<bool>,
+        choice: std::cell::Cell<Option<bool>>,
+    }
+
+    impl OverwriteHarness {
+        fn new() -> Self {
+            Self {
+                ctx: egui::Context::default(),
+                page_buttons: std::cell::RefCell::new(Vec::new()),
+                first_frame: std::cell::Cell::new(true),
+                choice: std::cell::Cell::new(None),
+            }
+        }
+
+        fn frame(&self, keys: &[egui::Key]) -> Option<bool> {
+            let events: Vec<egui::Event> = keys
+                .iter()
+                .map(|key| egui::Event::Key {
+                    key: *key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect();
+            self.choice.set(None);
+            let focus_default = self.first_frame.replace(false);
+            let mut output = self.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 720.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    // The page behind the dialog: the arrows would otherwise
+                    // walk into these.
+                    ui.horizontal(|ui| {
+                        for label in ["A", "B", "C", "D"] {
+                            self.page_buttons
+                                .borrow_mut()
+                                .push(ui.add(egui::Button::new(label)).id);
+                        }
+                    });
+                    egui::Window::new("LiNC")
+                        .collapsible(false)
+                        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                        .show(ui.ctx(), |ui| {
+                            if let Some(choice) = overwrite_dialog(ui, focus_default) {
+                                self.choice.set(Some(choice));
+                            }
+                        });
+                },
+            );
+            output.textures_delta.clear();
+            self.choice.get()
+        }
+
+        fn focused(&self) -> Option<egui::Id> {
+            self.ctx.memory(|memory| memory.focused())
+        }
+    }
+
+    #[test]
+    fn the_overwrite_dialog_traps_the_focus_between_its_two_buttons() {
+        let harness = OverwriteHarness::new();
+        harness.frame(&[]);
+        let cancel = harness
+            .focused()
+            .expect("CANCEL takes the focus when it opens");
+        harness.frame(&[]);
+        assert_eq!(harness.focused(), Some(cancel));
+
+        harness.frame(&[egui::Key::ArrowLeft]);
+        let replace = harness
+            .focused()
+            .expect("an arrow moves to the other button");
+        assert_ne!(replace, cancel, "the two buttons are the whole cycle");
+        let page_buttons = harness.page_buttons.borrow().clone();
+        assert!(!page_buttons.contains(&replace));
+
+        // The second press used to be read as focus navigation and landed on
+        // the page behind; it has to come back to CANCEL.
+        for _ in 0..2 {
+            harness.frame(&[egui::Key::ArrowLeft]);
+            assert_eq!(harness.focused(), Some(cancel));
+            harness.frame(&[egui::Key::ArrowLeft]);
+            assert_eq!(harness.focused(), Some(replace));
+        }
+        // Up/Down stay inside the dialog as well.
+        harness.frame(&[egui::Key::ArrowDown]);
+        assert_eq!(harness.focused(), Some(cancel));
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert_eq!(harness.focused(), Some(replace));
+
+        // Enter takes the focused button, not a widget behind the dialog.
+        assert_eq!(harness.frame(&[egui::Key::Enter]), Some(true));
+        assert!(!harness
+            .page_buttons
+            .borrow()
+            .contains(&harness.focused().unwrap()));
     }
 
     #[test]

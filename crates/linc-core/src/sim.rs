@@ -465,25 +465,26 @@ impl SimBackend {
             self.current_tool_tip(),
         );
         let limit = self.snapshot.program.current_line.max(1);
-        let mut points: Vec<[f64; 3]> = Vec::new();
+        let mut points: Vec<TrailPoint> = Vec::new();
         for segment in preview
             .segments
             .iter()
             .filter(|segment| segment.line <= limit)
         {
-            if points.last().copied() != Some(segment.start) {
-                points.push(segment.start);
+            let rapid = segment.kind == SegmentKind::Rapid;
+            if points.last().map(|point| point.position) != Some(segment.start) {
+                points.push(TrailPoint::new(segment.start, rapid));
             }
-            points.push(segment.end);
+            points.push(TrailPoint::new(segment.end, rapid));
         }
         if points.is_empty() {
-            points.push(self.current_tool_tip());
+            points.push(TrailPoint::new(self.current_tool_tip(), false));
         }
         let max = self.trail_limit.max(2);
         if points.len() > max {
             points = points.split_off(points.len() - max);
         }
-        self.snapshot.tool_tip = points.last().copied();
+        self.snapshot.tool_tip = points.last().map(|point| point.position);
         self.snapshot.live_trail = Arc::new(points);
     }
 
@@ -554,10 +555,10 @@ impl SimBackend {
         }
     }
 
-    fn append_trail(&mut self, point: [f64; 3]) {
+    fn append_trail(&mut self, point: [f64; 3], rapid: bool) {
         let mut trail = (*self.snapshot.live_trail).clone();
-        if trail.last().copied() != Some(point) {
-            trail.push(point);
+        if trail.last().map(|last| last.position) != Some(point) {
+            trail.push(TrailPoint::new(point, rapid));
             while trail.len() > self.trail_limit.max(2) {
                 trail.remove(0);
             }
@@ -595,7 +596,7 @@ impl SimBackend {
 
     pub fn clear_trail(&mut self) {
         let tip = self.current_tool_tip();
-        self.snapshot.live_trail = Arc::new(vec![tip]);
+        self.snapshot.live_trail = Arc::new(vec![TrailPoint::new(tip, false)]);
         self.snapshot.tool_tip = Some(tip);
     }
 
@@ -810,11 +811,8 @@ impl SimBackend {
                 }
             }
             // Simple straight-line trail sampling keeps the graph lively.
-            let steps = if segment.kind == SegmentKind::Rapid {
-                3
-            } else {
-                12
-            };
+            let rapid = segment.kind == SegmentKind::Rapid;
+            let steps = if rapid { 3 } else { 12 };
             for step in 1..=steps {
                 let t = step as f64 / steps as f64;
                 let point = [
@@ -822,7 +820,7 @@ impl SimBackend {
                     start[1] + (end[1] - start[1]) * t,
                     start[2] + (end[2] - start[2]) * t,
                 ];
-                self.append_trail(point);
+                self.append_trail(point, rapid);
             }
         }
         if upper.contains("M30") || upper.contains("M2") {

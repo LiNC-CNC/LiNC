@@ -1334,6 +1334,49 @@ panel_scale = 1.0
     }
 
     #[test]
+    fn the_files_parent_row_is_off_by_default_and_a_profile_can_enable_it() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let profile_path = dir.path().join("sim.toml");
+        let profile_text = |files: &str| {
+            format!(
+                r#"schema_version = 1
+profile = "sim"
+extends = "base.toml"
+[files]
+{files}
+[machine]
+name = "Test"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[panel]
+kind = "simulated"
+driver = "cnc-panel-sim"
+[panel.link]
+kind = "virtual"
+[simulation]
+enabled = true
+"#
+            )
+        };
+
+        // base.toml carries the key, and it is off.
+        write(&profile_path, &profile_text(""));
+        let profile = Profile::load(&profile_path, None).unwrap();
+        assert!(!profile.config.files.show_parent_above_root);
+
+        // A profile turns the .. row above PROGRAM_PREFIX on.
+        write(
+            &profile_path,
+            &profile_text("show_parent_above_root = true"),
+        );
+        let profile = Profile::load(&profile_path, None).unwrap();
+        assert!(profile.config.files.show_parent_above_root);
+    }
+
+    #[test]
     fn manual_changer_accepts_a_p_column() {
         let dir = temp_dir();
         write(&dir.path().join("base.toml"), base_config());

@@ -13,7 +13,7 @@ use egui::{
     StrokeKind, Ui, Vec2,
 };
 use linc_core::gcode::{ArcSpec, Bounds3, PathSegment, Plane, Preview, SegmentKind};
-use linc_core::model::MachineVariant;
+use linc_core::model::{MachineVariant, TrailPoint};
 
 pub mod theme {
     use egui::Color32;
@@ -95,7 +95,9 @@ pub const DEFAULT_PITCH: f32 = 0.615;
 #[derive(Clone, Debug)]
 pub struct TrajectoryView<'a> {
     pub preview: &'a Preview,
-    pub live_trail: &'a [[f64; 3]],
+    /// The live trail with the kind of move that reached each point, so a
+    /// rapid is dotted here exactly as it is in the preview.
+    pub live_trail: &'a [TrailPoint],
     pub tool_tip: Option<[f64; 3]>,
     pub machine_bounds: Option<Bounds3>,
     /// Where the work-zero cross is drawn, in the frame the view uses. The
@@ -161,7 +163,11 @@ pub struct TrajectoryView<'a> {
 }
 
 impl<'a> TrajectoryView<'a> {
-    pub fn new(preview: &'a Preview, live_trail: &'a [[f64; 3]], variant: MachineVariant) -> Self {
+    pub fn new(
+        preview: &'a Preview,
+        live_trail: &'a [TrailPoint],
+        variant: MachineVariant,
+    ) -> Self {
         Self {
             origin: [0.0; 3],
             highlight_origin: None,
@@ -541,7 +547,7 @@ fn fit_target(view: &TrajectoryView<'_>, reference: Bounds3) -> Bounds3 {
         return target;
     }
     for point in view.live_trail {
-        target.include(*point);
+        target.include(point.position);
     }
     if let Some(tip) = view.tool_tip {
         target.include(tip);
@@ -699,7 +705,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     });
     let mut has_data = view.preview.bounds.is_some();
     for point in view.live_trail {
-        bounds.include(*point);
+        bounds.include(point.position);
         has_data = true;
     }
     if let Some(tip) = view.tool_tip {
@@ -972,22 +978,39 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
                     1.0,
                 );
             }
-            draw_bounds_dimensions(&painter, &projection, program, view.work_offset);
+            draw_bounds_dimensions(
+                &painter,
+                &projection,
+                program,
+                view.work_offset,
+                view.variant,
+            );
         }
     }
 
-    // Live trail, always distinct from the loaded program.
+    // Live trail, always distinct from the loaded program. Hops are drawn one at
+    // a time: the ones a rapid reached are dotted exactly like the preview's
+    // rapid segments, the cuts stay solid, so the two layers read the same way.
     if view.show_live_trail && view.live_trail.len() >= 2 {
-        let points: Vec<Pos2> = view
-            .live_trail
-            .iter()
-            .map(|p| projection.project(*p))
-            .collect();
-        painter.add(egui::Shape::line(points, Stroke::new(2.0, theme::SUCCESS)));
+        let cut = Stroke::new(2.0, theme::SUCCESS);
+        let rapid = Stroke::new(1.4, theme::SUCCESS);
+        for pair in view.live_trail.windows(2) {
+            let (from, to) = (pair[0], pair[1]);
+            Projection::draw_line(
+                &painter,
+                projection.project(from.position),
+                projection.project(to.position),
+                if to.rapid { rapid } else { cut },
+                to.rapid,
+            );
+        }
     }
     // Live tool position. Amber, matching the accepted mockup, so the toolhead
     // is distinguishable from the green live trail it sits on.
-    if let Some(tip) = view.tool_tip.or_else(|| view.live_trail.last().copied()) {
+    if let Some(tip) = view
+        .tool_tip
+        .or_else(|| view.live_trail.last().map(|point| point.position))
+    {
         let pos = projection.project(tip);
         // An inverted triangle whose point sits exactly on the tool position:
         // the tip is the datum, so the shape has to end there rather than be
@@ -1273,6 +1296,7 @@ fn draw_bounds_dimensions(
     projection: &Projection,
     bounds: Bounds3,
     work_offset: Option<[f64; 3]>,
+    variant: MachineVariant,
 ) {
     let min = bounds.min;
     let max = bounds.max;
@@ -1436,7 +1460,49 @@ fn draw_bounds_dimensions(
     // Y stays on the line so every label is coplanar with it.
     let z_line_x = min[0] - gap * 1.4;
     let z_label_y = min[1] - gap * 1.4;
-    if hidden != Some('Z') {
+    if hidden != Some('Z') && variant == MachineVariant::Lathe {
+        // The turning view draws Z across the screen with X up it, so the mill's
+        // label plane would stand every one of these on its head: they read along
+        // the line instead, upright, one row clear of it.
+        let up = z_label_up(projection, variant);
+        let row = glyph * 1.7;
+        let at = |z: f64, shift: f64| [z_line_x + up[0] * row, z_label_y + up[1] * row, z + shift];
+        put_label(
+            painter,
+            projection,
+            at(min[2] + size[2] * 0.5, 0.0),
+            [0.0, 0.0, 1.0],
+            up,
+            glyph,
+            &format!("{:.2}", size[2]),
+            color,
+            None,
+        );
+        let start_width = text_width(&start_text, glyph);
+        put_label(
+            painter,
+            projection,
+            at(min[2], -pad - start_width * 0.5),
+            [0.0, 0.0, 1.0],
+            up,
+            glyph,
+            &start_text,
+            color,
+            None,
+        );
+        let end_width = text_width(&end_text, glyph);
+        put_label(
+            painter,
+            projection,
+            at(max[2], pad + end_width * 0.5),
+            [0.0, 0.0, 1.0],
+            up,
+            glyph,
+            &end_text,
+            color,
+            None,
+        );
+    } else if hidden != Some('Z') {
         put_label(
             painter,
             projection,
@@ -1534,6 +1600,26 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
         a[2] * b[0] - a[0] * b[2],
         a[0] * b[1] - a[1] * b[0],
     ]
+}
+
+/// Glyph-up direction of the Z dimension labels.
+///
+/// The mill reads them up the XZ plane with -X as the glyph tops. The lathe
+/// turns X vertical on screen (and the mirror turns it over), so that same
+/// vector points at the floor there and the labels come out upside down: the
+/// lathe reads them along the line instead, tops up the screen whichever way X
+/// runs.
+fn z_label_up(projection: &Projection, variant: MachineVariant) -> [f64; 3] {
+    const PLUS_X: [f64; 3] = [1.0, 0.0, 0.0];
+    const MINUS_X: [f64; 3] = [-1.0, 0.0, 0.0];
+    if variant != MachineVariant::Lathe {
+        return MINUS_X;
+    }
+    if screen_direction(projection, PLUS_X).y < 0.0 {
+        PLUS_X
+    } else {
+        MINUS_X
+    }
 }
 
 /// Roll a label's glyph-up vector a quarter turn about its baseline so the text
@@ -1928,7 +2014,7 @@ pub fn draw_sparkline(ui: &mut Ui, values: &[f64], color: Color32, height: f32) 
 }
 
 /// Mini graph used by the Program CODE view; draws only XY program layers.
-pub fn draw_mini_xy(ui: &mut Ui, preview: &Preview, live: &[[f64; 3]], height: f32) -> Response {
+pub fn draw_mini_xy(ui: &mut Ui, preview: &Preview, live: &[TrailPoint], height: f32) -> Response {
     let mut view = TrajectoryView::new(preview, live, MachineVariant::Mill);
     view.view = ViewMode::TopXy;
     view.height = height;
@@ -2115,6 +2201,136 @@ mod tests {
         }
     }
 
+    /// One frame of a card's live trail: the line segments painted in the
+    /// trail's colour, whether they came from one solid hop or from dots.
+    fn trail_shapes(
+        trail: &[TrailPoint],
+        variant: MachineVariant,
+        mode: ViewMode,
+    ) -> Vec<[Pos2; 2]> {
+        let bounds = Bounds3 {
+            min: [-50.0, -50.0, -50.0],
+            max: [50.0, 50.0, 50.0],
+        };
+        let preview = Preview {
+            bounds: Some(bounds),
+            ..Preview::empty()
+        };
+        let mut view = TrajectoryView::new(&preview, trail, variant);
+        view.view = mode;
+        view.machine_bounds = Some(bounds);
+        view.height = 400.0;
+        view.show_grid = false;
+        view.show_legend = false;
+        view.show_program_bounds = false;
+        view.show_stock = false;
+        view.show_selected_line = false;
+        view.show_live_trail = true;
+        view.fit = false;
+        view.auto_fit = false;
+        view.tool_tip = None;
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            draw_trajectory(ui, &mut view);
+        });
+        output.textures_delta.clear();
+        let mut shapes = Vec::new();
+        for clipped in &output.shapes {
+            if let egui::Shape::LineSegment { points, stroke } = &clipped.shape {
+                if stroke.color == theme::SUCCESS {
+                    shapes.push(*points);
+                }
+            }
+        }
+        shapes
+    }
+
+    fn hop(pos: [f64; 3], rapid: bool) -> TrailPoint {
+        TrailPoint::new(pos, rapid)
+    }
+
+    #[test]
+    fn a_live_rapid_is_dotted_and_a_live_cut_is_solid() {
+        let start = [-40.0, -40.0, 0.0];
+        let end = [40.0, 40.0, 0.0];
+
+        // A cut: one solid hop, drawn end to end.
+        let cut = trail_shapes(
+            &[hop(start, false), hop(end, false)],
+            MachineVariant::Mill,
+            ViewMode::TopXy,
+        );
+        assert_eq!(cut.len(), 1, "a cut is one solid segment: {cut:?}");
+        let length = (cut[0][1] - cut[0][0]).length();
+        assert!(length > 100.0, "the cut spans the hop: {length}");
+
+        // A rapid: the same hop, broken into the preview's dots.
+        let rapid = trail_shapes(
+            &[hop(start, true), hop(end, true)],
+            MachineVariant::Mill,
+            ViewMode::TopXy,
+        );
+        assert!(
+            rapid.len() > 5,
+            "a rapid is a dot pattern, not one segment: {}",
+            rapid.len()
+        );
+        for segment in &rapid {
+            let length = (segment[1] - segment[0]).length();
+            assert!(length <= 1.7, "each dot is short: {length}");
+        }
+        // The dots cover less than half the hop: the gaps are what read as a
+        // rapid at a glance.
+        let covered: f32 = rapid
+            .iter()
+            .map(|segment| (segment[1] - segment[0]).length())
+            .sum();
+        assert!(
+            covered < length * 0.5,
+            "dots leave gaps: {covered} of {length}"
+        );
+
+        // Mixed: the cut half stays one solid line, the rapid half is dotted.
+        let middle = [0.0, 0.0, 0.0];
+        let mixed = trail_shapes(
+            &[hop(start, false), hop(middle, false), hop(end, true)],
+            MachineVariant::Mill,
+            ViewMode::TopXy,
+        );
+        assert!(
+            mixed.len() > 6,
+            "the rapid half adds dots to the single cut: {}",
+            mixed.len()
+        );
+        assert!(
+            mixed
+                .iter()
+                .any(|segment| (segment[1] - segment[0]).length() > 40.0),
+            "the cut half is still drawn as one segment"
+        );
+    }
+
+    #[test]
+    fn the_lathe_trail_uses_the_same_rapid_pattern() {
+        let trail = [hop([0.0, 0.0, -40.0], true), hop([0.0, 0.0, 40.0], true)];
+        let shapes = trail_shapes(&trail, MachineVariant::Lathe, ViewMode::LatheXz);
+        assert!(
+            shapes.len() > 5,
+            "the turning view dots its rapids too: {}",
+            shapes.len()
+        );
+        let cut = trail_shapes(
+            &[hop([0.0, 0.0, -40.0], false), hop([0.0, 0.0, 40.0], false)],
+            MachineVariant::Lathe,
+            ViewMode::LatheXz,
+        );
+        assert_eq!(cut.len(), 1, "a lathe cut trail is solid");
+    }
+
     #[test]
     fn the_fit_for_the_demo_program_is_sane() {
         let machine = Bounds3 {
@@ -2208,6 +2424,41 @@ mod tests {
         let (up, shift) = rolled_up(&view, [-100.0, 0.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]);
         assert_eq!(up, [0.0, -1.0, 0.0]);
         assert!(!shift, "the label is left of the drawing: {shift}");
+    }
+
+    #[test]
+    fn the_lathe_z_labels_read_up_the_screen() {
+        // The lathe turns X vertical: a label whose glyph tops run along -X
+        // (the mill's plane) is upside down there, so the lathe picks the X
+        // direction that reads up the screen instead.
+        let lathe = projection(ViewMode::LatheXz);
+        let up = z_label_up(&lathe, MachineVariant::Lathe);
+        assert!(
+            screen_direction(&lathe, up).y < 0.0,
+            "glyph tops point up the screen: {up:?}"
+        );
+        assert_eq!(up, [1.0, 0.0, 0.0], "the lathe reads Z with +X as tops");
+        // The baseline runs along Z, to the right: a proper, unmirrored frame.
+        let right = screen_direction(&lathe, [0.0, 0.0, 1.0]);
+        let up_screen = screen_direction(&lathe, up);
+        assert!(right.x > 0.9, "the label reads along +Z: {right:?}");
+        assert!(
+            right.x * up_screen.y - right.y * up_screen.x < 0.0,
+            "the label plane is not mirrored"
+        );
+
+        // The mirror turns X over, so the same case must follow it.
+        let mirrored = projection(ViewMode::LatheXz).mirrored(true);
+        let up = z_label_up(&mirrored, MachineVariant::Lathe);
+        assert_eq!(up, [-1.0, 0.0, 0.0]);
+        assert!(
+            screen_direction(&mirrored, up).y < 0.0,
+            "still upright when the picture is mirrored"
+        );
+
+        // The mill keeps the XZ plane it has always used.
+        let mill = projection(ViewMode::Iso3d);
+        assert_eq!(z_label_up(&mill, MachineVariant::Mill), [-1.0, 0.0, 0.0]);
     }
 
     #[test]

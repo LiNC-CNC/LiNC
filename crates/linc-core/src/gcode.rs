@@ -777,6 +777,11 @@ pub fn parse_preview(
     let mut tool: Option<u16> = None;
     let mut wcs = "G54".to_string();
     let mut units = "G21".to_string();
+    // G7 lathe diameter mode: the interpreter halves every X word before it
+    // becomes a machine position, so a preview that draws the word as written
+    // puts the whole path at twice the X the machine goes to. G8 (radius, the
+    // default) leaves the words alone.
+    let mut lathe_diameter = false;
     let mut saw_motion = false;
     let mut line_count = 0;
     // Drilling canned cycle: modal, one hole per block with X/Y.
@@ -905,6 +910,10 @@ pub fn parse_preview(
                         absolute = true;
                     } else if value == 91.0 {
                         absolute = false;
+                    } else if value == 7.0 {
+                        lathe_diameter = true;
+                    } else if value == 8.0 {
+                        lathe_diameter = false;
                     } else if (54.0..=59.3).contains(&value) {
                         wcs = format_g(value);
                     }
@@ -917,6 +926,10 @@ pub fn parse_preview(
                 }
             }
         }
+
+        // One X word, in machine units. Only X is a diameter; the work offset
+        // an absolute word is drawn against is already in machine units.
+        let dia = |value: f64| if lathe_diameter { value * 0.5 } else { value };
 
         if let Some(value) = word_value(&tokens, 'f') {
             feed = Some(value);
@@ -989,6 +1002,7 @@ pub fn parse_preview(
             for (letter, axis) in [('x', 0usize), ('y', 1)] {
                 if let Some(value) = word_value(&tokens, letter) {
                     has_hole_axis = true;
+                    let value = if axis == 0 { dia(value) } else { value };
                     hole[axis] = if absolute {
                         value + offset_values(&letter.to_ascii_uppercase().to_string())
                     } else {
@@ -1094,6 +1108,7 @@ pub fn parse_preview(
             let Some(value) = word_value(&tokens, name.chars().next().unwrap_or('X')) else {
                 continue;
             };
+            let value = if axis == 0 { dia(value) } else { value };
             let base = if absolute {
                 value + offset_values(name)
             } else {
@@ -1105,6 +1120,7 @@ pub fn parse_preview(
         // Handle XYZ even when axis_names is unexpected.
         for (letter, axis) in [('x', 0usize), ('y', 1), ('z', 2)] {
             if let Some(value) = word_value(&tokens, letter) {
+                let value = if axis == 0 { dia(value) } else { value };
                 target[axis] = if absolute {
                     value + offset_values(&letter.to_ascii_uppercase().to_string())
                 } else {
@@ -1358,6 +1374,69 @@ mod tests {
 
     fn preview_axes() -> Vec<String> {
         vec!["X".to_string(), "Y".to_string(), "Z".to_string()]
+    }
+
+    fn lathe_axes() -> Vec<String> {
+        vec!["X".to_string(), "Z".to_string()]
+    }
+
+    /// G7 lathe diameter mode: the interpreter halves an X word before it
+    /// becomes a machine position (checked against LinuxCNC: "G7 G53 G0 X1"
+    /// lands on machine X 0.5), so the preview must halve it too or the whole
+    /// path is drawn at twice the X the machine goes to.
+    #[test]
+    fn g7_diameter_mode_halves_the_x_words_the_interpreter_halves() {
+        // Radius mode, the default, leaves the words alone.
+        let preview = parse_preview("G8 G18 G90\nG0 X1.0 Z-1\n", &lathe_axes(), None, [0.0; 3]);
+        let end = preview.segments.last().expect("a move").end;
+        assert!((end[0] - 1.0).abs() < 1e-9, "G8 X {}", end[0]);
+
+        // Diameter mode turns the same block into half the X. Z is not a
+        // diameter and keeps its word.
+        let preview = parse_preview("G7 G18 G90\nG0 X1.0 Z-1\n", &lathe_axes(), None, [0.0; 3]);
+        let end = preview.segments.last().expect("a move").end;
+        assert!((end[0] - 0.5).abs() < 1e-9, "G7 X {}", end[0]);
+        assert!((end[2] + 1.0).abs() < 1e-9, "G7 Z {}", end[2]);
+
+        // The work offset is a machine position already: only the word halves.
+        let mut offset = AxisMap::new();
+        offset.insert("X", -2.0);
+        let preview = parse_preview(
+            "G7 G18 G90\nG0 X1.0\n",
+            &lathe_axes(),
+            Some(&offset),
+            [0.0; 3],
+        );
+        let end = preview.segments.last().expect("a move").end;
+        assert!(
+            (end[0] + 1.5).abs() < 1e-9,
+            "offset + diameter X {}",
+            end[0]
+        );
+
+        // Incremental moves carry a diameter increment, not a diameter position.
+        let preview = parse_preview(
+            "G8 G18 G90\nG0 X2.0\nG7 G91\nG1 X1.0\n",
+            &lathe_axes(),
+            None,
+            [0.0; 3],
+        );
+        let end = preview.segments.last().expect("a move").end;
+        assert!(
+            (end[0] - 2.5).abs() < 1e-9,
+            "G91 diameter step X {}",
+            end[0]
+        );
+
+        // A later G8 restores the literal word.
+        let preview = parse_preview(
+            "G7 G18 G90\nG0 X1.0\nG8\nG0 X1.0\n",
+            &lathe_axes(),
+            None,
+            [0.0; 3],
+        );
+        let end = preview.segments.last().expect("a move").end;
+        assert!((end[0] - 1.0).abs() < 1e-9, "G8 again X {}", end[0]);
     }
 
     #[test]

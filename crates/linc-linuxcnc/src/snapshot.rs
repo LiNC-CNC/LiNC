@@ -135,7 +135,7 @@ pub struct SnapshotBuilder {
     program_mtime: Option<std::time::SystemTime>,
     program_revision: u64,
     program_loaded_at_ms: u64,
-    live_trail: Vec<[f64; 3]>,
+    live_trail: Vec<TrailPoint>,
     last_tool_tip: Option<[f64; 3]>,
     next_alarm_id: u64,
     last_alarm_texts: VecDeque<String>,
@@ -288,7 +288,7 @@ impl SnapshotBuilder {
     pub fn clear_trail(&mut self) {
         let tip = self.last_tool_tip.unwrap_or([0.0; 3]);
         self.live_trail.clear();
-        self.live_trail.push(tip);
+        self.live_trail.push(TrailPoint::new(tip, false));
         self.last_tool_tip = Some(tip);
     }
 
@@ -607,7 +607,8 @@ impl SnapshotBuilder {
             .unwrap_or(false)
             || self.live_trail.is_empty()
         {
-            self.live_trail.push(tip);
+            let rapid = trail_hop_is_rapid(&status.active_gcodes);
+            self.live_trail.push(TrailPoint::new(tip, rapid));
             let max = self
                 .profile
                 .config
@@ -1342,6 +1343,17 @@ fn modal_lines(gcodes: &[i32], mcodes: &[i32]) -> Vec<(String, String)> {
     entries
 }
 
+/// Whether the move that just reached a new tool-tip sample is a rapid.
+///
+/// The trail keeps one point per poll, so the hop that reached the point is the
+/// move the interpreter is in: the first active G-code is the motion mode, where
+/// G0 is 0, G1 is 10, G2 is 20 and G3 is 30. Rapid is the dotted layer of the
+/// graph, so only G0 counts. A jog in MANUAL leaves the last motion mode in
+/// place, and a jog is not a rapid: it draws solid, like a cut.
+fn trail_hop_is_rapid(active_gcodes: &[i32]) -> bool {
+    active_gcodes.first() == Some(&0)
+}
+
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
 }
@@ -1374,6 +1386,17 @@ mod tests {
             text,
             vec!["G8", "G17", "G21", "G40", "G54", "G80", "G90", "G94", "M5", "M9"]
         );
+    }
+
+    #[test]
+    fn only_g0_trail_hops_are_rapids() {
+        // The motion mode is the first entry: G0, G1, G2 or G3.
+        assert!(trail_hop_is_rapid(&[0, 210, 900, 540]));
+        assert!(!trail_hop_is_rapid(&[10, 210, 900, 540]), "G1 cuts");
+        assert!(!trail_hop_is_rapid(&[20, 170, 900]), "G2 cuts");
+        assert!(!trail_hop_is_rapid(&[30, 170, 900]), "G3 cuts");
+        // No modal state yet (first poll): not a rapid, so the hop is solid.
+        assert!(!trail_hop_is_rapid(&[]));
     }
 
     #[test]

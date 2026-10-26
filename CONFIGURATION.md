@@ -591,6 +591,16 @@ Enums:
 - `files.usb_backend`: `udisks2`, `none`
 - `files.overwrite`: `confirm`
 
+### `[files]`
+
+The two panes of the FILE screen: removable USB media and NC_FILES. NC_FILES
+starts at the LinuxCNC INI `PROGRAM_PREFIX` (`nc_files = "ini"`); every
+directory below it carries a `..` row that is selectable and opens the parent.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `show_parent_above_root` | `false` | Draw the `..` row in NC_FILES at its root too, so the pane can walk above `PROGRAM_PREFIX`. Off, the browser stops at the root: no parent row, and `Up` does not leave it. Loading still requires a file inside NC_FILES. |
+
 ### `[mdi]`
 
 The MDI pane on the MAIN page: the temporary block buffer, the input and the
