@@ -1466,7 +1466,11 @@ fn draw_bounds_dimensions(
         // the line instead, upright, one row clear of it.
         let up = z_label_up(projection, variant);
         let row = glyph * 1.7;
-        let at = |z: f64, shift: f64| [z_line_x + up[0] * row, z_label_y + up[1] * row, z + shift];
+        // The measuring line runs outside the box at min X; the labels sit
+        // further outside it, on the -X side. Glyph-up stays up so the text
+        // remains upright, but it must not double as the row offset: +X there
+        // pushed every label back toward the box.
+        let at = |z: f64, shift: f64| lathe_z_label_anchor(z_line_x, z_label_y, row, z, shift);
         put_label(
             painter,
             projection,
@@ -1552,6 +1556,12 @@ fn draw_bounds_dimensions(
             )),
         );
     }
+}
+
+/// Anchor of a lathe Z boundary label: one row on the -X side of the measuring
+/// line, so the value clears the line away from the box.
+fn lathe_z_label_anchor(line_x: f64, line_y: f64, row: f64, z: f64, shift: f64) -> [f64; 3] {
+    [line_x - row, line_y, z + shift]
 }
 
 /// Width of `text` at `glyph` height, in model units.
@@ -2424,6 +2434,13 @@ mod tests {
         let (up, shift) = rolled_up(&view, [-100.0, 0.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]);
         assert_eq!(up, [0.0, -1.0, 0.0]);
         assert!(!shift, "the label is left of the drawing: {shift}");
+    }
+
+    #[test]
+    fn the_lathe_z_labels_sit_on_the_minus_x_side_of_the_line() {
+        let anchor = lathe_z_label_anchor(10.0, 4.0, 1.5, -2.0, 0.25);
+        assert_eq!(anchor, [8.5, 4.0, -1.75]);
+        assert!(anchor[0] < 10.0, "labels clear the line toward -X");
     }
 
     #[test]
