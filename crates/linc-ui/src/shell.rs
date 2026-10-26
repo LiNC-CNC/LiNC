@@ -3792,18 +3792,19 @@ impl LincApp {
         let mut save_name: Option<String> = None;
         let mut save_wrap: Option<bool> = None;
         let mut save_confirm = false;
-        egui::Window::new("LiNC")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
-            .max_width(520.0)
+        // A real modal, not a Window: the backdrop and modal layer stop the
+        // page behind from receiving Enter/clicks while a dialog owns the
+        // keyboard.
+        egui::Modal::new(egui::Id::new("linc-modal"))
             .frame(
                 Frame::new()
                     .fill(theme::PANEL_RAISED)
                     .stroke(Stroke::new(1.0, theme::BORDER))
                     .inner_margin(Margin::same(18)),
             )
-            .show(ctx, |ui| match &modal {
+            .show(ctx, |ui| {
+                ui.set_max_width(520.0);
+                match &modal {
                 Modal::ConfirmDiscard(pending) => {
                     ui.label(RichText::new("UNSAVED CHANGES").size(theme::font_size(18.0)).strong().color(theme::FG));
                     ui.add_space(6.0);
@@ -4063,6 +4064,7 @@ impl LincApp {
                     if field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
                         save_confirm = true;
                     }
+                }
                 }
             });
         if let Some(text) = goto_buffer {
@@ -4746,6 +4748,34 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
 
         harness.frame(&[egui::Key::Escape]);
         assert!(harness.app.modal.is_none(), "Escape dismisses the dialog");
+    }
+
+    #[test]
+    fn enter_in_the_save_dialog_does_not_act_on_the_page_behind() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.files_page_with_one_file("behind.ngc");
+        harness.frame(&[]);
+        harness.app.modal = Some(Modal::MdiSave(crate::state::MdiSaveDialog {
+            name: "part".into(),
+            wrap: false,
+            ..Default::default()
+        }));
+        harness.sent.borrow_mut().clear();
+        harness.frame(&[egui::Key::Enter]);
+        assert_eq!(
+            harness.app.page,
+            Page::Files,
+            "Enter must not open the selected file behind the save dialog"
+        );
+        assert!(
+            !harness
+                .sent
+                .borrow()
+                .iter()
+                .any(|command| matches!(command, MachineCommand::LoadProgram { .. })),
+            "the dialog leaked Enter into the FILE page: {:?}",
+            harness.sent_debug()
+        );
     }
 
     #[test]
