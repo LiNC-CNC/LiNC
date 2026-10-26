@@ -800,7 +800,10 @@ fn program_window_rows(height: f32, codes: usize, row_height: f32) -> usize {
     const HEADER: f32 = 26.0;
     const MODAL_LABEL: f32 = 12.0;
     const PROGRESS: f32 = 46.0;
-    let strip = codes.max(1).div_ceil(6) as f32 * 26.0;
+    // Reserve the modal grid's real height, not one short line per row: its
+    // cells are 41 px tall, and underestimating grew the strip down into the
+    // progress line instead of taking rows from the listing above it.
+    let strip = modal_height(codes, 6);
     let budget = (height - 24.0) - HEADER - MODAL_LABEL - strip - PROGRESS;
     (budget / (row_height + 2.0)).floor().max(6.0) as usize
 }
@@ -1923,7 +1926,9 @@ pub fn live_coordinates_card(ui: &mut Ui, header: &str, units_label: &str, rows:
 
 #[cfg(test)]
 mod tests {
-    use super::{dro_axis_label, dro_value, feed_rows, modal_mnemonic, program_window_rows};
+    use super::{
+        dro_axis_label, dro_value, feed_rows, modal_height, modal_mnemonic, program_window_rows,
+    };
     use linc_core::model::FeedState;
 
     #[test]
@@ -2029,7 +2034,7 @@ mod tests {
         let rows = program_window_rows(height, 5, row_height);
         // The listing fills the card down to the progress line rather than
         // stopping at a round number of rows.
-        let used = 26.0 + rows as f32 * (row_height + 2.0) + 12.0 + 26.0 + 46.0;
+        let used = 26.0 + rows as f32 * (row_height + 2.0) + 12.0 + modal_height(5, 6) + 46.0;
         let inner = height - 24.0;
         assert!(used <= inner, "{used} > {inner}");
         assert!(
@@ -2037,7 +2042,7 @@ mod tests {
             "another row would have fitted"
         );
 
-        // A strip that wraps to two rows gives one back.
-        assert_eq!(program_window_rows(height, 7, row_height), rows - 1);
+        // A strip that wraps to two 41 px rows takes two listing rows back.
+        assert_eq!(program_window_rows(height, 7, row_height), rows - 2);
     }
 }
