@@ -1579,8 +1579,8 @@ enum CyclePlate {
 }
 
 /// Illuminated cycle-status plate above a cycle button: a smoked lamp window
-/// with a loop-and-arrows glyph. Unlit it stays dim grey; lit it glows in its
-/// own colour (white for start, red for stop).
+/// with a loop-and-arrows glyph. Unlit it stays dim; lit it glows in its own
+/// colour (green for start, red for stop).
 fn draw_cycle_plate(
     painter: &egui::Painter,
     l: &PanelLayout,
@@ -1592,10 +1592,7 @@ fn draw_cycle_plate(
     let (w, h) = CYCLE_PLATE_SIZE;
     let rect = l.r(cx - w * 0.5, cy - h * 0.5, w, h);
     let (lit_color, dim) = match kind {
-        CyclePlate::Start => (
-            Color32::from_rgb(0xf2, 0xf3, 0xf4),
-            Color32::from_rgb(0x55, 0x59, 0x5c),
-        ),
+        CyclePlate::Start => (GREEN, Color32::from_rgb(0x3f, 0x4a, 0x41)),
         CyclePlate::Stop => (RED, Color32::from_rgb(0x5a, 0x2a, 0x28)),
     };
     let ink = if lit { lit_color } else { dim };
