@@ -84,14 +84,16 @@ impl ParameterFile {
     pub fn work_offset(&self, index: u8, axes: &[String]) -> AxisMap<f64> {
         let mut values = AxisMap::new();
         for (axis_index, axis) in axes.iter().enumerate() {
-            values.insert(axis.clone(), self.get(offset_key(index, axis_index as u32)));
+            let slot = axis_slot(axis).unwrap_or(axis_index as u32);
+            values.insert(axis.clone(), self.get(offset_key(index, slot)));
         }
         values
     }
 
     /// The stored value for one axis of `index`, when the file carries it.
-    pub fn work_axis(&self, index: u8, axis_index: usize) -> Option<f64> {
-        let key = offset_key(index, axis_index as u32);
+    pub fn work_axis(&self, index: u8, axis: &str) -> Option<f64> {
+        let slot = axis_slot(axis)?;
+        let key = offset_key(index, slot);
         self.has(key).then(|| self.get(key))
     }
 
@@ -119,7 +121,8 @@ impl ParameterFile {
     pub fn record_offset_axes(&mut self, index: u8, values: &AxisMap<f64>, axes: &[String]) {
         for (axis_index, axis) in axes.iter().enumerate() {
             if let Some(value) = values.get(axis) {
-                let key = offset_key(index, axis_index as u32);
+                let slot = axis_slot(axis).unwrap_or(axis_index as u32);
+                let key = offset_key(index, slot);
                 self.values.insert(key, *value);
                 self.dirty.insert(key);
             }
@@ -142,7 +145,8 @@ impl ParameterFile {
     pub fn record_g92(&mut self, values: &AxisMap<f64>, axes: &[String]) {
         for (axis_index, axis) in axes.iter().enumerate() {
             if let Some(value) = values.get(axis) {
-                let key = G92_BASE + axis_index as u32;
+                let slot = axis_slot(axis).unwrap_or(axis_index as u32);
+                let key = G92_BASE + slot;
                 self.values.insert(key, *value);
                 self.dirty.insert(key);
             }
@@ -150,8 +154,8 @@ impl ParameterFile {
     }
 
     /// Does any axis row for `index` exist in the file?
-    pub fn has_work_offset(&self, index: u8, axis_count: usize) -> bool {
-        (0..axis_count as u32).any(|axis| self.has(offset_key(index, axis)))
+    pub fn has_work_offset(&self, index: u8) -> bool {
+        (0..9).any(|slot| self.has(offset_key(index, slot)))
     }
 
     /// Write the changed values back. Returns an error instead of reporting a
@@ -262,6 +266,24 @@ impl ParameterFile {
     }
 }
 
+/// Fixed parameter slot of an axis letter: X=0, Y=1, Z=2 ... W=8. The INI
+/// coordinate list is machine-specific ([X, Z] on a lathe), the parameter
+/// file is not.
+fn axis_slot(axis: &str) -> Option<u32> {
+    match axis.to_ascii_uppercase().as_str() {
+        "X" => Some(0),
+        "Y" => Some(1),
+        "Z" => Some(2),
+        "A" => Some(3),
+        "B" => Some(4),
+        "C" => Some(5),
+        "U" => Some(6),
+        "V" => Some(7),
+        "W" => Some(8),
+        _ => None,
+    }
+}
+
 fn offset_key(index: u8, axis_index: u32) -> u32 {
     WORK_OFFSET_BASE + index as u32 * WORK_OFFSET_STRIDE + 1 + axis_index
 }
@@ -332,6 +354,40 @@ mod tests {
         let reread = ParameterFile::load(Some(dir.path().join("rs274ngc.var")));
         assert_eq!(reread.work_offset(1, &axes).get("X"), Some(&-1.0));
         assert_eq!(reread.work_offset(1, &axes).get("Y"), Some(&5.0));
+    }
+
+    #[test]
+    fn lathe_z_offsets_use_the_z_parameter_slot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rs274ngc.var");
+        // 5221 = X, 5223 = Z for G54. A lathe's coordinate list is [X, Z];
+        // reading or writing by list position would hit 5222 (Y) instead.
+        std::fs::write(&path, "5220\t1\n5221\t-1.5\n5223\t-3.25\n").unwrap();
+        let axes = vec!["X".into(), "Z".into()];
+        let mut parameters = ParameterFile::load(Some(path.clone()));
+        let row = parameters.work_offset(1, &axes);
+        assert_eq!(row.get("X"), Some(&-1.5));
+        assert_eq!(row.get("Z"), Some(&-3.25));
+        assert!(parameters.has_work_offset(1));
+
+        let mut values = AxisMap::new();
+        values.insert("Z".to_string(), -4.5);
+        parameters.record_offset_axes(1, &values, &axes);
+        parameters.save().unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("5223\t-4.500000"), "Z must land in 5223: {text}");
+        assert!(!text.contains("5222\t-4.500000"), "Z must not land in Y: {text}");
+        let reread = ParameterFile::load(Some(path));
+        assert_eq!(reread.work_offset(1, &axes).get("Z"), Some(&-4.5));
+    }
+
+    #[test]
+    fn a_lathe_row_with_only_z_counts_as_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rs274ngc.var");
+        std::fs::write(&path, "5223\t-2.0\n").unwrap();
+        let parameters = ParameterFile::load(Some(path));
+        assert!(parameters.has_work_offset(1));
     }
 
     #[test]

@@ -37,8 +37,8 @@ use thiserror::Error;
 use panel::{PanelReader, PanelState};
 use parameters::ParameterFile;
 use snapshot::{
-    carry_hal_selections, compare_row, expected_row, initial_snapshot, ProbeProvenance,
-    SnapshotBuilder,
+    axis_pose_index, carry_hal_selections, compare_row, expected_row, initial_snapshot,
+    ProbeProvenance, SnapshotBuilder,
 };
 
 #[derive(Debug, Error)]
@@ -570,7 +570,10 @@ impl NmlBackend {
         for (axis_index, axis) in axes.iter().enumerate() {
             values.insert(
                 axis.clone(),
-                pose_component(&status.offsets.g5x_offset, axis_index),
+                pose_component(
+                    &status.offsets.g5x_offset,
+                    axis_pose_index(axis).unwrap_or(axis_index),
+                ),
             );
         }
         self.parameters.record_offset_axes(index, &values, &axes);
@@ -616,7 +619,10 @@ impl NmlBackend {
                 if values.get(axis).is_some() {
                     kept.insert(
                         axis.clone(),
-                        pose_component(&status.offsets.g5x_offset, axis_index),
+                        pose_component(
+                            &status.offsets.g5x_offset,
+                            axis_pose_index(axis).unwrap_or(axis_index),
+                        ),
                     );
                 }
             }
@@ -669,7 +675,10 @@ impl NmlBackend {
             for (axis_index, axis) in axes.iter().enumerate() {
                 computed.insert(
                     axis.clone(),
-                    pose_component(&status.offsets.g5x_offset, axis_index),
+                    pose_component(
+                        &status.offsets.g5x_offset,
+                        axis_pose_index(axis).unwrap_or(axis_index),
+                    ),
                 );
             }
             self.parameters.record_offset_axes(index, &computed, axes);
@@ -683,9 +692,10 @@ impl NmlBackend {
             let mut computed = AxisMap::new();
             for (axis_index, axis) in axes.iter().enumerate() {
                 if let Some(requested) = values.get(axis) {
-                    let machine = pose_component(&status.positions.actual, axis_index);
-                    let g92 = pose_component(&status.offsets.g92_offset, axis_index);
-                    let tool = pose_component(&status.offsets.tool_offset, axis_index);
+                    let pose_index = axis_pose_index(axis).unwrap_or(axis_index);
+                    let machine = pose_component(&status.positions.actual, pose_index);
+                    let g92 = pose_component(&status.offsets.g92_offset, pose_index);
+                    let tool = pose_component(&status.offsets.tool_offset, pose_index);
                     computed.insert(axis.clone(), machine - g92 - tool - requested);
                 }
             }
@@ -703,7 +713,10 @@ impl NmlBackend {
         for (axis_index, axis) in axes.iter().enumerate() {
             values.insert(
                 axis.clone(),
-                pose_component(&status.offsets.g92_offset, axis_index),
+                pose_component(
+                    &status.offsets.g92_offset,
+                    axis_pose_index(axis).unwrap_or(axis_index),
+                ),
             );
         }
         self.parameters.record_g92(&values, &axes);
@@ -1255,14 +1268,14 @@ pub(crate) fn plan_offset_sync(
     } else {
         1
     };
-    if !parameters.has_work_offset(index, axes.len()) {
+    if !parameters.has_work_offset(index) {
         return OffsetSync::Done("no stored offsets");
     }
 
     let mut parts = vec![format!("G10 L2 P{index}")];
     let mut expected = AxisMap::new();
-    for (axis_index, axis) in axes.iter().enumerate() {
-        let Some(value) = parameters.work_axis(index, axis_index) else {
+    for axis in axes {
+        let Some(value) = parameters.work_axis(index, axis) else {
             continue;
         };
         parts.push(format!("{axis}{value:.6}"));
@@ -1304,7 +1317,7 @@ pub(crate) fn row_matches(
         let Some(want) = expected.get(axis) else {
             continue;
         };
-        if (pose_component(live, axis_index) - want).abs() > 1e-6 {
+        if (pose_component(live, axis_pose_index(axis).unwrap_or(axis_index)) - want).abs() > 1e-6 {
             return false;
         }
     }

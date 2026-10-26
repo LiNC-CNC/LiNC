@@ -499,7 +499,10 @@ impl SnapshotBuilder {
                 let mut rotation = parameters.rotation(index);
                 if index == active_index {
                     for (axis_index, axis) in axes.iter().enumerate() {
-                        values.insert(axis.name.clone(), pose_component(&g5x, axis_index));
+                        values.insert(
+                            axis.name.clone(),
+                            pose_component(&g5x, axis_pose_index(&axis.name).unwrap_or(axis_index)),
+                        );
                     }
                     rotation = status.offsets.rotation_xy;
                 }
@@ -513,7 +516,10 @@ impl SnapshotBuilder {
         snapshot.offsets.g92 = {
             let mut values = AxisMap::new();
             for (index, axis) in axes.iter().enumerate() {
-                values.insert(axis.name.clone(), pose_component(&g92, index));
+                values.insert(
+                    axis.name.clone(),
+                    pose_component(&g92, axis_pose_index(&axis.name).unwrap_or(index)),
+                );
             }
             values
         };
@@ -1228,7 +1234,7 @@ fn motion_active(status: &Status) -> bool {
 
 /// Pose slot of an axis letter. INI coordinate lists are machine-specific
 /// (`X Z` on a lathe), while the NML pose is always X,Y,Z,A,B,C,U,V,W.
-fn axis_pose_index(name: &str) -> Option<usize> {
+pub(crate) fn axis_pose_index(name: &str) -> Option<usize> {
     match name.to_ascii_uppercase().as_str() {
         "X" => Some(0),
         "Y" => Some(1),
