@@ -58,7 +58,11 @@ fi
 # not commissioned yet) has no cnc_panel component, so it gets the wiring that
 # only touches linc.*, iocontrol and halui pins.
 POSTGUI="$LINC_DIR/hal/linc-sim-postgui.hal"
-if ! halcmd show pin cnc_panel.sseg_status >/dev/null 2>&1; then
+# `halcmd show pin` reports a missing pin on stderr and still exits 0, so test
+# the listing on stdout. Redirecting stderr and trusting the status picked the
+# mill file on the lathe, where the post-GUI HAL then failed on
+# cnc_panel.sseg_status.
+if ! halcmd show pin cnc_panel.sseg_status 2>/dev/null | grep -q 'cnc_panel\.sseg_status'; then
     POSTGUI="$LINC_DIR/hal/linc-lathe-postgui.hal"
 fi
 halcmd -f "$POSTGUI"

@@ -11,8 +11,10 @@
 # declared output is still exercised, without inventing a consumer.
 net linc-status linc.status-display
 
-# Manual tool-change acknowledgement from the HMI.
-net linc-tool-confirm linc.tool-change-confirm => iocontrol.0.tool-changed
+# Manual tool-change acknowledgement from the HMI. Probe Basic's core_sim HAL
+# already creates `tool-change-confirmed => iocontrol.0.tool-changed`; attach
+# the HMI's pulse as that signal's driver instead of linking the pin twice.
+net tool-change-confirmed linc.tool-change-confirm
 
 # UI heartbeat. A machine/PLC watchdog may consume this signal.
 net linc-hmi-heartbeat linc.hmi-alive
