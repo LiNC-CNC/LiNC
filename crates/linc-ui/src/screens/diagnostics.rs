@@ -50,250 +50,261 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         });
 }
 
+/// `theme::card`'s frame margin, on each side.
+const CARD_PAD: f32 = 12.0;
+
+/// Draw a card pinned to `width`, and to `height` when one is given.
+///
+/// A frame takes its size from its content, so a card inside a column of fixed
+/// height used to end on its last row and leave the column's remainder empty.
+/// The body is laid out top-down here instead of inheriting the caller's layout,
+/// and the frame content is given the exact rect the column reserved.
+fn pinned_card(ui: &mut Ui, width: f32, height: Option<f32>, add: impl FnOnce(&mut Ui)) {
+    theme::card(ui, |ui| {
+        ui.set_width((width - 2.0 * CARD_PAD).max(0.0));
+        if let Some(height) = height {
+            ui.set_height((height - 2.0 * CARD_PAD).max(0.0));
+        }
+        ui.with_layout(egui::Layout::top_down(egui::Align::Min), add);
+    });
+}
+
+/// The width of one of `remaining` equal columns left in the row, so rounding
+/// never accumulates and the last card still ends on the page margin.
+fn even_width(ui: &Ui, remaining: f32, gap: f32) -> f32 {
+    (ui.available_width() - gap * (remaining - 1.0)) / remaining
+}
+
+/// A card as wide as `width` whose height follows its rows.
+fn width_pinned_card(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui)) {
+    pinned_card(ui, width, None, add);
+}
+
+/// A card that occupies exactly `width` x `height`.
+fn sized_card(ui: &mut Ui, width: f32, height: f32, add: impl FnOnce(&mut Ui)) {
+    pinned_card(ui, width, Some(height), add);
+}
+
 fn overview(app: &mut LincApp, ui: &mut Ui) {
+    // The page's card rhythm: 12 px between cards across a row, 8 px between the
+    // two cards of the right column.
+    const COLUMN_GAP: f32 = 12.0;
+    const GAP: f32 = 8.0;
     let available = ui.available_width();
+    // Each card is as tall as its three lines and pins its own width: a fixed
+    // height left a blank strip under the detail line of all four.
     ui.horizontal_top(|ui| {
-        let card_width = (available - 36.0) / 4.0;
-        ui.allocate_ui_with_layout(
-            egui::Vec2::new(card_width, 130.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                health_card(
-                    ui,
-                    "CONTROL",
-                    if app.snapshot.machine.estop {
-                        "E-STOP"
-                    } else {
-                        "HEALTHY"
-                    },
-                    app.snapshot.machine.estop,
-                    &format!(
-                        "{} / {}",
-                        app.snapshot.task.mode.label(),
-                        app.snapshot.task.interp.label()
-                    ),
-                );
+        ui.spacing_mut().item_spacing.x = COLUMN_GAP;
+        health_card(
+            ui,
+            even_width(ui, 4.0, COLUMN_GAP),
+            "CONTROL",
+            if app.snapshot.machine.estop {
+                "E-STOP"
+            } else {
+                "HEALTHY"
             },
+            app.snapshot.machine.estop,
+            &format!(
+                "{} / {}",
+                app.snapshot.task.mode.label(),
+                app.snapshot.task.interp.label()
+            ),
         );
-        ui.allocate_ui_with_layout(
-            egui::Vec2::new(card_width, 130.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                health_card(
-                    ui,
-                    "PANEL LINK",
-                    if app.snapshot.panel.connected {
-                        "ONLINE"
-                    } else {
-                        "OFFLINE"
-                    },
-                    !app.snapshot.panel.connected,
-                    &format!(
-                        "{} {} / CRC {} / TO {}",
-                        app.snapshot.panel.capabilities.transport.to_uppercase(),
-                        app.snapshot.panel.link.port,
-                        app.snapshot.panel.link.crc_errors,
-                        app.snapshot.panel.link.timeouts
-                    ),
-                );
+        health_card(
+            ui,
+            even_width(ui, 3.0, COLUMN_GAP),
+            "PANEL LINK",
+            if app.snapshot.panel.connected {
+                "ONLINE"
+            } else {
+                "OFFLINE"
             },
+            !app.snapshot.panel.connected,
+            &format!(
+                "{} {} / CRC {} / TO {}",
+                app.snapshot.panel.capabilities.transport.to_uppercase(),
+                app.snapshot.panel.link.port,
+                app.snapshot.panel.link.crc_errors,
+                app.snapshot.panel.link.timeouts
+            ),
         );
-        ui.allocate_ui_with_layout(
-            egui::Vec2::new(card_width, 130.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                health_card(
-                    ui,
-                    "NML / COMMAND",
-                    if app.snapshot.machine.nml_command_connected {
-                        "CONNECTED"
-                    } else {
-                        "LOST"
-                    },
-                    !app.snapshot.machine.nml_command_connected,
-                    &format!(
-                        "STATUS {} ms / ECHO {}",
-                        app.snapshot.machine.status_age_ms, app.snapshot.machine.echo_serial
-                    ),
-                );
+        health_card(
+            ui,
+            even_width(ui, 2.0, COLUMN_GAP),
+            "NML / COMMAND",
+            if app.snapshot.machine.nml_command_connected {
+                "CONNECTED"
+            } else {
+                "LOST"
             },
+            !app.snapshot.machine.nml_command_connected,
+            &format!(
+                "STATUS {} ms / ECHO {}",
+                app.snapshot.machine.status_age_ms, app.snapshot.machine.echo_serial
+            ),
         );
-        ui.allocate_ui_with_layout(
-            egui::Vec2::new(card_width, 130.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                let following = max_following_error(app);
-                let servo = max_servo_load(app);
-                health_card(
-                    ui,
-                    "MOTION",
-                    if following > 50.0 {
-                        "ELEVATED"
-                    } else {
-                        "NOMINAL"
-                    },
-                    following > 50.0,
-                    &format!("FOLLOW {following:.1} µm / SERVO {servo:.0}%"),
-                );
+        let following = max_following_error(app);
+        let servo = max_servo_load(app);
+        health_card(
+            ui,
+            even_width(ui, 1.0, COLUMN_GAP),
+            "MOTION",
+            if following > 50.0 {
+                "ELEVATED"
+            } else {
+                "NOMINAL"
             },
+            following > 50.0,
+            &format!("FOLLOW {following:.1} µm / SERVO {servo:.0}%"),
         );
     });
     ui.add_space(6.0);
-    let available = ui.available_width();
+    // Two columns: the alarm table owns the left one outright, the summaries
+    // stack in the right one. Each card is handed the rect its column reserves,
+    // so the two columns end on the same line instead of on their content.
+    // The row runs down to the status line, less a small pad, so the page has no
+    // dead band under the cards at any window height.
+    const ROW_PAD: f32 = 8.0;
+    let row_height = (ui.available_height() - ROW_PAD).max(240.0);
+    // The right column takes whatever the left one and the gap leave, so the row
+    // ends on the page margin with the health row above.
+    let left_width = available * 0.58;
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
-            egui::Vec2::new(available * 0.58, 360.0),
+            egui::Vec2::new(left_width, row_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                ui.allocate_ui_with_layout(
-                    egui::Vec2::new(ui.available_width(), 174.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        theme::card(ui, |ui| {
-                            ui.set_max_height(170.0);
-                            ui.horizontal(|ui| {
-                                theme::section_header(ui, "ACTIVE ALARMS & MESSAGES");
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        let logs = app.logs();
-                                        let alarms =
-                                            logs.iter().filter(|a| a.severity.is_alarm()).count();
-                                        let messages = logs.len().saturating_sub(alarms);
-                                        for (label, count) in [
-                                            ("MESSAGES", messages),
-                                            ("ALARMS", alarms),
-                                            ("ALL", logs.len()),
-                                        ] {
-                                            ui.label(
-                                                RichText::new(format!("{label} {count}"))
-                                                    .monospace()
-                                                    .size(theme::font_size(8.0))
-                                                    .color(theme::MUTED),
-                                            );
-                                            ui.add_space(8.0);
-                                        }
-                                    },
-                                );
-                            });
+                sized_card(ui, left_width, row_height, |ui| {
+                    let room = ui.available_height();
+                    let top = ui.cursor().top();
+                    ui.horizontal(|ui| {
+                        theme::section_header(ui, "ACTIVE ALARMS & MESSAGES");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let logs = app.logs();
-                            log_table(ui, "overview-alarms", &logs, 5);
+                            let alarms = logs.iter().filter(|a| a.severity.is_alarm()).count();
+                            let messages = logs.len().saturating_sub(alarms);
+                            for (label, count) in [
+                                ("MESSAGES", messages),
+                                ("ALARMS", alarms),
+                                ("ALL", logs.len()),
+                            ] {
+                                ui.label(
+                                    RichText::new(format!("{label} {count}"))
+                                        .monospace()
+                                        .size(theme::font_size(8.0))
+                                        .color(theme::MUTED),
+                                );
+                                ui.add_space(8.0);
+                            }
                         });
-                    },
-                );
-                ui.allocate_ui_with_layout(
-                    egui::Vec2::new(ui.available_width(), 174.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        theme::card(ui, |ui| {
-                            ui.set_max_height(170.0);
-                            theme::section_header(ui, "MOTION HEALTH");
-                            compact_rows(ui);
-                            theme::kv_row(ui, "POWER", app.snapshot.task.power.label());
-                            theme::kv_row(
-                                ui,
-                                "FOLLOWING ERROR",
-                                format!("{:.3} µm", max_following_error(app)),
-                            );
-                            theme::kv_row(ui, "SERVO", format!("{:.0}%", max_servo_load(app)));
-                            theme::kv_row(
-                                ui,
-                                "SPINDLE",
-                                format!(
-                                    "{:.0} RPM / {:.0}%",
-                                    app.snapshot
-                                        .spindles
-                                        .first()
-                                        .map(|spindle| spindle.actual_speed)
-                                        .unwrap_or(0.0),
-                                    app.snapshot
-                                        .spindles
-                                        .first()
-                                        .and_then(|spindle| spindle.load)
-                                        .unwrap_or(0.0)
-                                ),
-                            );
-                            theme::kv_row(ui, "HOMED", homed_summary(app));
-                        });
-                    },
-                );
+                    });
+                    // The whole card is the table now, so it scrolls through the
+                    // log rather than cutting it at five rows.
+                    let header = ui.cursor().top() - top;
+                    let logs = app.logs();
+                    egui::ScrollArea::vertical()
+                        .id_salt("overview-alarms-scroll")
+                        .max_height((room - header).max(60.0))
+                        .show(ui, |ui| log_table(ui, "overview-alarms", &logs, usize::MAX));
+                });
             },
         );
-        ui.add_space(8.0);
+        // The layout already spaces the two columns; top the gap up to the page
+        // rhythm without touching the spacing the card bodies are laid out with.
+        ui.add_space((COLUMN_GAP - ui.spacing().item_spacing.x).max(0.0));
+        let right_width = ui.available_width().max(300.0);
         ui.allocate_ui_with_layout(
-            egui::Vec2::new((available - available * 0.58 - 8.0).max(300.0), 360.0),
+            egui::Vec2::new(right_width, row_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                ui.allocate_ui_with_layout(
-                    egui::Vec2::new(ui.available_width(), 178.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        theme::card(ui, |ui| {
-                            ui.set_max_height(174.0);
-                            theme::section_header(ui, "PANEL SUMMARY");
-                            compact_rows(ui);
-                            theme::kv_row(ui, "MODE", app.snapshot.panel.mode.label());
-                            theme::kv_row(
-                                ui,
-                                "PROTECT",
-                                if app.program_protected() {
-                                    "ON / LOCKED"
-                                } else {
-                                    "OFF"
-                                },
-                            );
-                            theme::kv_row(
-                                ui,
-                                "E-STOP",
-                                if app.snapshot.panel.estop {
-                                    "ACTIVE"
-                                } else {
-                                    "OK"
-                                },
-                            );
-                            theme::kv_row(
-                                ui,
-                                "FEED OVR",
-                                format!("{:.0}%", app.snapshot.panel.feed_override * 100.0),
-                            );
-                            theme::kv_row(
-                                ui,
-                                "RAPID OVR",
-                                format!("{:.0}%", app.snapshot.panel.rapid_override * 100.0),
-                            );
-                            theme::kv_row(
-                                ui,
-                                "SPINDLE OVR",
-                                format!("{:.0}%", app.snapshot.panel.spindle_override * 100.0),
-                            );
-                            theme::kv_row(
-                                ui,
-                                "STATUS DISPLAY",
-                                status_display_text(app.snapshot.panel.sseg_status),
-                            );
-                            theme::kv_row(
-                                ui,
-                                "TOOLS",
-                                format!(
-                                    "T{} / NEXT T{}",
-                                    app.snapshot.panel.sseg_tool, app.snapshot.panel.sseg_next_tool
-                                ),
-                            );
-                        });
-                    },
-                );
-                ui.allocate_ui_with_layout(
-                    egui::Vec2::new(ui.available_width(), 170.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        theme::card(ui, |ui| {
-                            ui.set_max_height(166.0);
-                            theme::section_header(ui, "EVENT LOG");
-                            let logs = app.logs();
-                            log_table(ui, "overview-events", &logs, 5);
-                        });
-                    },
-                );
+                ui.spacing_mut().item_spacing.y = GAP;
+                // Eight rows decide PANEL SUMMARY's height, and a frame cannot be
+                // shorter than them: let it take its content height and hand
+                // MOTION HEALTH the rest of the column, so the column ends on the
+                // same line as the alarm card whatever the row pitch is.
+                let top = ui.cursor().top();
+                width_pinned_card(ui, right_width, |ui| {
+                    compact_rows(ui);
+                    theme::section_header(ui, "PANEL SUMMARY");
+                    theme::kv_row(ui, "MODE", app.snapshot.panel.mode.label());
+                    theme::kv_row(
+                        ui,
+                        "PROTECT",
+                        if app.program_protected() {
+                            "ON / LOCKED"
+                        } else {
+                            "OFF"
+                        },
+                    );
+                    theme::kv_row(
+                        ui,
+                        "E-STOP",
+                        if app.snapshot.panel.estop {
+                            "ACTIVE"
+                        } else {
+                            "OK"
+                        },
+                    );
+                    theme::kv_row(
+                        ui,
+                        "FEED OVR",
+                        format!("{:.0}%", app.snapshot.panel.feed_override * 100.0),
+                    );
+                    theme::kv_row(
+                        ui,
+                        "RAPID OVR",
+                        format!("{:.0}%", app.snapshot.panel.rapid_override * 100.0),
+                    );
+                    theme::kv_row(
+                        ui,
+                        "SPINDLE OVR",
+                        format!("{:.0}%", app.snapshot.panel.spindle_override * 100.0),
+                    );
+                    theme::kv_row(
+                        ui,
+                        "STATUS DISPLAY",
+                        status_display_text(app.snapshot.panel.sseg_status),
+                    );
+                    theme::kv_row(
+                        ui,
+                        "TOOLS",
+                        format!(
+                            "T{} / NEXT T{}",
+                            app.snapshot.panel.sseg_tool, app.snapshot.panel.sseg_next_tool
+                        ),
+                    );
+                });
+                let used = ui.cursor().top() - top;
+                sized_card(ui, right_width, (row_height - used).max(120.0), |ui| {
+                    compact_rows(ui);
+                    theme::section_header(ui, "MOTION HEALTH");
+                    theme::kv_row(ui, "POWER", app.snapshot.task.power.label());
+                    theme::kv_row(
+                        ui,
+                        "FOLLOWING ERROR",
+                        format!("{:.3} µm", max_following_error(app)),
+                    );
+                    theme::kv_row(ui, "SERVO", format!("{:.0}%", max_servo_load(app)));
+                    theme::kv_row(
+                        ui,
+                        "SPINDLE",
+                        format!(
+                            "{:.0} RPM / {:.0}%",
+                            app.snapshot
+                                .spindles
+                                .first()
+                                .map(|spindle| spindle.actual_speed)
+                                .unwrap_or(0.0),
+                            app.snapshot
+                                .spindles
+                                .first()
+                                .and_then(|spindle| spindle.load)
+                                .unwrap_or(0.0)
+                        ),
+                    );
+                    theme::kv_row(ui, "HOMED", homed_summary(app));
+                });
             },
         );
     });
@@ -311,9 +322,8 @@ fn compact_rows(ui: &mut Ui) {
     ui.spacing_mut().item_spacing.y = 2.0;
 }
 
-fn health_card(ui: &mut Ui, title: &str, value: &str, fault: bool, detail: &str) {
-    theme::card(ui, |ui| {
-        ui.set_min_height(120.0);
+fn health_card(ui: &mut Ui, width: f32, title: &str, value: &str, fault: bool, detail: &str) {
+    width_pinned_card(ui, width, |ui| {
         theme::section_header(ui, title);
         ui.label(
             RichText::new(value)
