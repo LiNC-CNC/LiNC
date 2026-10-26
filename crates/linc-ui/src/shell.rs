@@ -63,6 +63,7 @@ pub struct LincApp {
     pub page: Page,
     pub last_non_mode_page: Page,
     pub files_return_page: Page,
+    pub help_return_page: Page,
     pub nav_focus: usize,
     pub focus_region: FocusRegion,
     pub last_mode: Option<PanelModeValidity>,
@@ -393,6 +394,7 @@ impl LincApp {
                 initial_page
             },
             files_return_page: Page::Machine,
+            help_return_page: Page::Machine,
             nav_focus: 0,
             focus_region: FocusRegion::Page,
             last_mode: Some(mode),
@@ -1037,6 +1039,15 @@ impl LincApp {
 
     pub fn set_page(&mut self, page: Page) {
         self.remember_page(page);
+        if page == Page::Help && self.page != Page::Help {
+            // Captured before the assignment below, which would otherwise make
+            // the Help page its own return destination.
+            self.help_return_page = if self.page.is_mode_driven() {
+                self.last_non_mode_page
+            } else {
+                self.page
+            };
+        }
         if page == Page::Files {
             self.files_return_page = if self.page == Page::Files {
                 Page::Program
@@ -1347,6 +1358,13 @@ impl LincApp {
             self.help.close_dialog();
             return;
         }
+        // The top-level Help page is a view, not the machine: Esc leaves it for
+        // the page it came from. It must not fall through to the program reset;
+        // the next Esc, on that page, is the one that stops a running program.
+        if self.page == Page::Help {
+            self.set_page(self.help_return_page);
+            return;
+        }
         // A latched probe trip is cleared by the controller reset alone. Esc
         // is that reset here, the same key that resets a running program.
         if self.snapshot.probe_trip_active() {
@@ -1367,15 +1385,6 @@ impl LincApp {
             return;
         }
         match self.page {
-            Page::Help => {
-                if self.help.dialog.is_some() {
-                    self.help.close_dialog();
-                } else if !self.help.query.is_empty() {
-                    self.help.query.clear();
-                } else {
-                    self.set_page(self.last_non_mode_page);
-                }
-            }
             Page::Files => self.set_page(self.files_return_page),
             Page::Probe => self.set_page(Page::Offsets),
             Page::Settings => self.set_page(self.last_non_mode_page),
@@ -5051,6 +5060,29 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         app.snapshot.task.running = true;
         app.sync_program();
         assert!(app.program.follow_current);
+    }
+
+    #[test]
+    fn escape_leaves_the_help_page_before_it_resets_a_running_program() {
+        let (_dir, mut app) = make_app(PanelMode::Auto);
+        app.poll_backend();
+        app.snapshot.task.running = true;
+        app.snapshot.task.interp = linc_core::model::InterpState::Reading;
+        app.help.query = "G71".into();
+        app.set_page(Page::Help);
+        let back = app.help_return_page;
+        assert_eq!(back, Page::Machine, "Help remembers the page it came from");
+        app.escape();
+        assert_eq!(app.page, back, "Esc leaves the Help page for the main view");
+        assert!(
+            !app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
+            "leaving the Help page must not reset the program"
+        );
+        app.escape();
+        assert!(
+            app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
+            "the next Esc on the main view is the program reset"
+        );
     }
 
     #[test]
