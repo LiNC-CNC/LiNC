@@ -1,5 +1,27 @@
 All previously listed GUI tasks are done as of da93ab0 (graph/toolpath,
-FILE screen, G-code Help).
+FILE screen, G-code Help). The Ctrl+0 fit padding fix is b550d3a.
+
+LATHE TEST SETUP -> METRIC (deferred, keep imperial for now):
+    - The imperial fixture is what exposed b550d3a: on inch units the fixed
+      one-unit projection padding framed an inch of empty card per side.
+      Keep configs/lathe-sim.ini (LINEAR_UNITS = inch), lathe-sim.tbl,
+      lathe-sim.toml [jog] and configs/gcode/linc-lathe-screw.ngc (G20,
+      1/2-13 UNC) imperial until the fit has been exercised on it, then
+      migrate the four together in one change.
+    - INI: LINEAR_UNITS = mm; MAX_VELOCITY 3.333334 in/s -> 84.6667 mm/s;
+      AXIS/JOINT limits +-5 in -> +-127 mm, Z 0..12 in -> 0..304.8 mm;
+      HOME_OFFSET 1 in -> 25.4 mm; FERROR 0.050 -> 1.27, MIN_FERROR 0.010 ->
+      0.254; HOME_SEARCH_VEL/LATCH_VEL 5/1 in/s -> 127/25.4 mm/s.
+    - Tool table: D column in inch -> mm (0.062500 -> 1.5875, 0.031200 ->
+      0.7925, 0.015600 -> 0.3962, 0.250000 -> 6.35).
+    - Profile: [jog] max_speed/rapid_speed 100/200 in/min -> 2540/5080
+      mm/min; replace the inch comment with the metric basis.
+    - Program: G21; a metric coarse thread as the direct 1/2-13 replacement
+      (M12x1.75, pitch 1.75, 12 mm stock, ~50 mm turned and threaded);
+      G76 K/R/I values from the ISO depth; F in mm/rev; keep the G71/G70 +
+      G76 structure and the no-M6 / G97 notes.
+    - Keep a_fit_frames_a_small_inch_part_not_the_padding in linc-view: it
+      records the b550d3a bug and does not depend on the lathe fixture.
 
 G-CODE HELP:
     - Do NOT add an embedded HTML engine/webview. The Probe Basic "HTML view" is a Qt
