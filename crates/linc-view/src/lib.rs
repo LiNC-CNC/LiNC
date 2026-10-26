@@ -280,7 +280,11 @@ impl Projection {
         zoom: f32,
         pan: Vec2,
     ) -> Self {
-        let expanded = bounds.expanded(1.0);
+        // No fixed clearance here: one machine unit is nothing on a
+        // millimetre envelope and most of a small part, so Ctrl+0 on the
+        // inch-scale lathe framed the padding and left a third of the card
+        // empty on each side. The 0.82 keeps the margin below.
+        let expanded = bounds;
         let center = [
             (expanded.min[0] + expanded.max[0]) * 0.5,
             (expanded.min[1] + expanded.max[1]) * 0.5,
@@ -2674,6 +2678,49 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn a_fit_frames_a_small_inch_part_not_the_padding() {
+        // The lathe screw: X 0.2..0.5, Z 0..2.1 inches against an envelope of
+        // a few inches. A fixed one-unit clearance per side used to be most of
+        // the part, so the fit left the toolpath in the middle third of the
+        // card. The program must cover most of the width it is fitted into.
+        let machine = Bounds3 {
+            min: [-6.0, -6.0, -6.0],
+            max: [6.0, 6.0, 12.0],
+        };
+        let program = Bounds3 {
+            min: [0.2, -0.05, 0.0],
+            max: [0.5, 0.05, 2.1],
+        };
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(700.0, 600.0));
+        let (zoom, pan) = fit_zoom_pan(
+            machine,
+            program,
+            rect,
+            ViewMode::LatheXz,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            false,
+        );
+        let projection = Projection::new(
+            machine,
+            rect,
+            ViewMode::LatheXz,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            zoom,
+            pan,
+        );
+        let start = projection.project([0.2, 0.0, 0.0]);
+        let end = projection.project([0.5, 0.0, 2.1]);
+        let filled = (end.x - start.x).abs() / rect.width();
+        assert!(filled > 0.65, "the part fills {filled:.2} of the width");
+        // And it stays inside the card.
+        for point in [start, end] {
+            assert!(rect.contains(point), "{point:?} outside {rect:?}");
         }
     }
 
