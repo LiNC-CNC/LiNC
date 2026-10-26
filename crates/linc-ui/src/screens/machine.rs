@@ -279,7 +279,13 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                     );
                     app.program.graph_zoom = zoom;
                     app.program.graph_pan = pan;
+                    app.program.graph_yaw = yaw;
+                    app.program.graph_pitch = pitch;
                     app.program.fit_requested = false;
+                    // Persist auto-fit too: dropping it here made every frame
+                    // reload the default true, refitting and discarding the
+                    // operator's zoom immediately.
+                    app.program.graph_auto_fit = auto_fit;
                     crate::screens::mdi::draw_overlay(
                         app,
                         ui,
