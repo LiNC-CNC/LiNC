@@ -645,6 +645,26 @@ profile that rebinds either of them onto a bare `Up`/`Down` is rejected the way
 an unparsable chord is — the default holds and Settings names the rejected
 text — so recall is never shadowed silently.
 
+### `[keys]` toolpath view bindings
+
+Every page that draws a toolpath: Machine, Program, Manual, Homing and the
+Offsets preview. They fire only while the pointer is over the toolpath card,
+so the chords keep their other meanings elsewhere (see below).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `view_pan_left` | `Ctrl+Left` | Move the view left by 40 px. |
+| `view_pan_right` | `Ctrl+Right` | Move the view right by 40 px. |
+| `view_pan_up` | `Ctrl+Up` | Move the view up by 40 px. |
+| `view_pan_down` | `Ctrl+Down` | Move the view down by 40 px. |
+| `view_zoom_in` | `Ctrl+Plus` | Zoom in by 1.25x, clamped to the fit range (0.05-40x). The panel keyboard sends `+` from its symbols layer. |
+| `view_zoom_out` | `Ctrl+Minus` | Zoom out by 1.25x, same clamp. |
+
+A pan or zoom stops the auto-fit: while it is on, the view is refitted every
+frame and would undo the press. The hover scope is what keeps these chords from
+taking `Ctrl+Left`/`Ctrl+Right` (region focus) and `Ctrl+Up`/`Ctrl+Down` (line
+moves in the G-code editor and the MDI buffer) away from those controls.
+
 ### `[keys]` lathe view bindings
 
 Lathe profiles only; on a mill the chords do nothing.

@@ -692,6 +692,21 @@ mod follow_tests {
     }
 }
 
+/// Where the toolpath records whether the pointer was over it.
+///
+/// The shell's pan and zoom chords are hover-scoped for the same reason the
+/// wheel is: Ctrl+Left/Right already moves region focus and Ctrl+Up/Down
+/// already moves the selected line in the G-code editor and the MDI buffer,
+/// so a keyboard pan may only take those chords where the view is the thing
+/// under the pointer.
+pub const TOOLPATH_HOVER_ID: &str = "linc-toolpath-hovered";
+
+/// Whether the pointer was over a toolpath card on the last frame.
+pub fn toolpath_hovered(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(egui::Id::unique(TOOLPATH_HOVER_ID)))
+        .unwrap_or(false)
+}
+
 /// Draw the toolpath graph. `TrajectoryView::fit` requests a one-shot fit;
 /// zoom/pan are mutated in place so the caller can persist them.
 pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
@@ -704,6 +719,11 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         view.height.max(120.0).min(screen.height().max(120.0)),
     );
     let (rect, response) = ui.allocate_exact_size(desired, Sense::click_and_drag());
+    // Before the keys are read: the shell decides the pan/zoom chords from
+    // this value at the top of the same frame.
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(egui::Id::unique(TOOLPATH_HOVER_ID), response.hovered());
+    });
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, CornerRadius::same(6), theme::SURFACE);
     painter.rect_stroke(

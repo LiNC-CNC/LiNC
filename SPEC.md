@@ -114,6 +114,14 @@ else, so it cannot shadow another page's command.
 | Offsets | `Up`/`Down` select a row, `X`/`Y`/`Z` edit the DRO, `A` activate the selected work system |
 | Tools, Probe | Arrows select a row |
 
+Every page that draws a toolpath (Machine, Program, Manual, Homing and the
+Offsets preview) pans with `Ctrl+Left`/`Ctrl+Right`/`Ctrl+Up`/`Ctrl+Down` and
+zooms with `Ctrl++`/`Ctrl+-` while the pointer is over the toolpath card. The
+chords are hover-scoped because they already belong to something else away from
+the graph: `Ctrl+Left`/`Ctrl+Right` moves region focus and `Ctrl+Up`/`Ctrl+Down`
+moves the selected line in the G-code editor and the MDI buffer. Wheel zoom
+works the same way.
+
 A page-local binding is only listed in the sidebar's `SHORTCUTS` pane while its
 page is in front (the pane scrolls when a page has more commands than the
 sidebar holds); nav keys are never listed. The list is grouped by purpose

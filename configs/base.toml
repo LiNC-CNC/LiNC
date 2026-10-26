@@ -131,6 +131,16 @@ toggle_lathe_diameter = "Ctrl+E"
 # Page-local to Program: fit the toolpath, clear the live trail.
 graph_fit = "Ctrl+0"
 graph_clear = "Ctrl+L"
+# Every page that draws a toolpath: pan with the arrows and zoom with +/-.
+# They fire only while the pointer is over the toolpath card, like the wheel:
+# Ctrl+Left/Right stays the shell's region focus elsewhere, and the G-code
+# editor and MDI buffer keep Ctrl+Up/Down for their line moves.
+view_pan_left = "Ctrl+Left"
+view_pan_right = "Ctrl+Right"
+view_pan_up = "Ctrl+Up"
+view_pan_down = "Ctrl+Down"
+view_zoom_in = "Ctrl+Plus"
+view_zoom_out = "Ctrl+Minus"
 goto_line = "Ctrl+G"
 # Page-local to Program: start the loaded program at a line.
 program_run_from_line = "Ctrl+R"

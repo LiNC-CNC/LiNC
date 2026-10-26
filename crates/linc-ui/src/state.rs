@@ -1587,6 +1587,9 @@ pub fn key_name(key: egui::Key) -> &'static str {
         Key::PageDown => "PgDn",
         Key::Slash => "/",
         Key::Space => "Space",
+        Key::Plus => "+",
+        Key::Minus => "-",
+        Key::Equals => "=",
         _ => "?",
     }
 }
@@ -1658,6 +1661,9 @@ fn parse_key(text: &str) -> Option<egui::Key> {
         "PAGEDOWN" | "PGDN" => Key::PageDown,
         "/" | "SLASH" => Key::Slash,
         "SPACE" => Key::Space,
+        "+" | "PLUS" => Key::Plus,
+        "-" | "MINUS" => Key::Minus,
+        "=" | "EQUALS" => Key::Equals,
         _ => return None,
     })
 }
@@ -1684,6 +1690,14 @@ pub struct Keymap {
     /// Page-local to Program: fit the toolpath and clear the live trail.
     pub graph_fit: Binding,
     pub graph_clear: Binding,
+    /// Pages with a toolpath: pan the view while the pointer is over it.
+    pub view_pan_left: Binding,
+    pub view_pan_right: Binding,
+    pub view_pan_up: Binding,
+    pub view_pan_down: Binding,
+    /// Pages with a toolpath: zoom the view while the pointer is over it.
+    pub view_zoom_in: Binding,
+    pub view_zoom_out: Binding,
     /// Page-local to Program: ask for a line number and jump there.
     pub goto_line: Binding,
     /// Page-local to Program: start the loaded program at the current line.
@@ -1789,6 +1803,36 @@ impl Keymap {
                 &mut rejected,
             ),
             graph_clear: binding(&keys.graph_clear, Binding::new(Key::L, ctrl), &mut rejected),
+            view_pan_left: binding(
+                &keys.view_pan_left,
+                Binding::new(Key::ArrowLeft, ctrl),
+                &mut rejected,
+            ),
+            view_pan_right: binding(
+                &keys.view_pan_right,
+                Binding::new(Key::ArrowRight, ctrl),
+                &mut rejected,
+            ),
+            view_pan_up: binding(
+                &keys.view_pan_up,
+                Binding::new(Key::ArrowUp, ctrl),
+                &mut rejected,
+            ),
+            view_pan_down: binding(
+                &keys.view_pan_down,
+                Binding::new(Key::ArrowDown, ctrl),
+                &mut rejected,
+            ),
+            view_zoom_in: binding(
+                &keys.view_zoom_in,
+                Binding::new(Key::Plus, ctrl),
+                &mut rejected,
+            ),
+            view_zoom_out: binding(
+                &keys.view_zoom_out,
+                Binding::new(Key::Minus, ctrl),
+                &mut rejected,
+            ),
             goto_line: binding(&keys.goto_line, Binding::new(Key::G, ctrl), &mut rejected),
             program_run_from_line: binding(
                 &keys.program_run_from_line,
@@ -1861,6 +1905,27 @@ impl Keymap {
             rejected,
         };
         keymap
+    }
+
+    /// `Ctrl+Arrows` for the toolpath hint row, built from the configured pan
+    /// binding: a profile that rebinds the pan shows the new modifier.
+    pub fn view_pan_hint(&self) -> String {
+        let label = self.view_pan_left.label();
+        let key = key_name(self.view_pan_left.key);
+        format!("{}Arrows", label.strip_suffix(key).unwrap_or(""))
+    }
+
+    /// The two zoom keys under one modifier, e.g. `Ctrl+-/+`.
+    pub fn view_zoom_hint(&self) -> String {
+        let out = self.view_zoom_out.label();
+        let out_key = key_name(self.view_zoom_out.key);
+        let in_key = key_name(self.view_zoom_in.key);
+        format!(
+            "{}{}/{}",
+            out.strip_suffix(out_key).unwrap_or(""),
+            out_key,
+            in_key
+        )
     }
 }
 
@@ -1988,6 +2053,16 @@ mod keymap_tests {
             Binding::parse("/"),
             Some(Binding::new(egui::Key::Slash, egui::Modifiers::NONE))
         );
+        // The view zoom chords: both the named form and the bare symbol.
+        let ctrl_plus = Binding::parse("Ctrl+Plus").expect("ctrl+plus");
+        assert_eq!(ctrl_plus.key, egui::Key::Plus);
+        assert!(ctrl_plus.modifiers.ctrl);
+        assert_eq!(Binding::parse("Ctrl++"), Some(ctrl_plus));
+        assert_eq!(
+            Binding::parse("Ctrl+-"),
+            Binding::parse("Ctrl+Minus"),
+            "the symbol form is the named form"
+        );
         assert!(Binding::parse("NotAKey").is_none());
     }
 
@@ -2017,6 +2092,28 @@ mod keymap_tests {
         assert_eq!(eval_expression("(1+2"), None);
         assert_eq!(eval_expression("1+"), None);
         assert_eq!(eval_expression("abc"), None);
+    }
+
+    #[test]
+    fn the_view_chords_default_to_ctrl_arrows_and_plus_minus() {
+        let keymap = Keymap::from_config(&linc_core::config::KeysConfig::spec_default());
+        assert!(keymap.rejected.is_empty());
+        assert_eq!(keymap.view_pan_left.key, egui::Key::ArrowLeft);
+        assert_eq!(keymap.view_pan_right.key, egui::Key::ArrowRight);
+        assert_eq!(keymap.view_pan_up.key, egui::Key::ArrowUp);
+        assert_eq!(keymap.view_pan_down.key, egui::Key::ArrowDown);
+        for pan in [
+            &keymap.view_pan_left,
+            &keymap.view_pan_right,
+            &keymap.view_pan_up,
+            &keymap.view_pan_down,
+        ] {
+            assert!(pan.modifiers.ctrl);
+        }
+        assert_eq!(keymap.view_zoom_in.key, egui::Key::Plus);
+        assert_eq!(keymap.view_zoom_out.key, egui::Key::Minus);
+        assert_eq!(keymap.view_pan_hint(), "Ctrl+Arrows");
+        assert_eq!(keymap.view_zoom_hint(), "Ctrl+-/+");
     }
 
     #[test]

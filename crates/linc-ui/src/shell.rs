@@ -36,6 +36,15 @@ pub enum FocusRegion {
 /// Lines a PageUp/PageDown moves the selection in a read-only G-code view.
 const LINE_PAGE: isize = 10;
 
+/// Screen pixels the toolpath moves per arrow-key pan.
+///
+/// A few presses should cross the part, but one press must not jump it out of
+/// the card; 40 px is about a short drag.
+const VIEW_PAN_STEP: f32 = 40.0;
+
+/// Zoom per key press, matching one wheel notch.
+const VIEW_ZOOM_STEP: f32 = 1.25;
+
 /// The clipboard shortcut `egui-winit` converts into `Event::Cut`. It is the
 /// platform convention rather than a profile binding, and it is what the two
 /// page-local consumers bind: the Probe page's X data reset and the Files
@@ -1904,6 +1913,42 @@ impl LincApp {
         }
     }
 
+    /// Pan and zoom the toolpath on the page in front.
+    ///
+    /// The chords are hover-scoped, so the page decides which view state they
+    /// move. A view the operator has moved stops auto-fitting: while it is on,
+    /// the fit is recomputed every frame and would undo the press.
+    fn pan_view(&mut self, pan: Vec2, zoom: f32) {
+        let (zoom_out, pan_out, auto_fit) = match self.page {
+            Page::Manual | Page::Homing => (
+                &mut self.manual.zoom,
+                &mut self.manual.pan,
+                &mut self.manual.auto_fit,
+            ),
+            Page::Offsets => (
+                &mut self.offsets.preview_zoom,
+                &mut self.offsets.preview_pan,
+                &mut self.offsets.preview_auto_fit,
+            ),
+            _ => (
+                &mut self.program.graph_zoom,
+                &mut self.program.graph_pan,
+                &mut self.program.graph_auto_fit,
+            ),
+        };
+        // Zoom about the card's centre, not the point the projection happens to
+        // anchor on: the projection keeps the screen point at
+        // `rect.center() + pan` fixed, so carrying the pan with the factor is
+        // what keeps the part where the operator sees it instead of walking it
+        // off the card. The arrow pan is a screen distance and comes after.
+        let before = *zoom_out;
+        let after = (before * zoom).clamp(0.05, 40.0);
+        *pan_out *= after / before;
+        *zoom_out = after;
+        *pan_out += pan;
+        *auto_fit = false;
+    }
+
     pub fn clear_trail(&mut self) {
         // View-only action. The backend is not asked to change machine state;
         // the live trail is re-seeded at the current tool tip in the local view.
@@ -2062,6 +2107,8 @@ impl LincApp {
         let mut toggle_bounds = false;
         let mut toggle_lathe_mirror = false;
         let mut toggle_lathe_diameter = false;
+        let mut view_pan = egui::Vec2::ZERO;
+        let mut view_zoom = 1.0f32;
         let mut open_messages = false;
         let mut mdi_up = false;
         let mut mdi_down = false;
@@ -2073,6 +2120,7 @@ impl LincApp {
         let mut mdi_goto = false;
         let mut mdi_save = false;
         let text_editing = ui.ctx().text_edit_focused();
+        let toolpath_hovered = linc_view::toolpath_hovered(ui.ctx());
         let mdi_pane = self.mdi_pane_visible();
 
         ui.input_mut(|input| {
@@ -2190,6 +2238,36 @@ impl LincApp {
                     self.keymap.program_run_from_line.key,
                 ) {
                     run_from_line = true;
+                }
+            }
+            // Hover-scoped like the wheel: the view takes the pan/zoom chords
+            // only where it is the thing under the pointer. Ctrl+Left/Right
+            // stays region focus everywhere else, and the G-code editor and
+            // MDI buffer keep Ctrl+Up/Down for their line moves.
+            let view_keys = matches!(
+                self.page,
+                Page::Machine | Page::Program | Page::Manual | Page::Homing | Page::Offsets
+            ) && !text_focused
+                && toolpath_hovered;
+            if view_keys {
+                let k = &self.keymap;
+                if input.consume_key(k.view_pan_left.modifiers, k.view_pan_left.key) {
+                    view_pan.x -= VIEW_PAN_STEP;
+                }
+                if input.consume_key(k.view_pan_right.modifiers, k.view_pan_right.key) {
+                    view_pan.x += VIEW_PAN_STEP;
+                }
+                if input.consume_key(k.view_pan_up.modifiers, k.view_pan_up.key) {
+                    view_pan.y -= VIEW_PAN_STEP;
+                }
+                if input.consume_key(k.view_pan_down.modifiers, k.view_pan_down.key) {
+                    view_pan.y += VIEW_PAN_STEP;
+                }
+                if input.consume_key(k.view_zoom_in.modifiers, k.view_zoom_in.key) {
+                    view_zoom *= VIEW_ZOOM_STEP;
+                }
+                if input.consume_key(k.view_zoom_out.modifiers, k.view_zoom_out.key) {
+                    view_zoom /= VIEW_ZOOM_STEP;
                 }
             }
             if input.consume_key(self.keymap.tools.modifiers, self.keymap.tools.key) {
@@ -2396,10 +2474,18 @@ impl LincApp {
             if !text_focused && input.consume_key(egui::Modifiers::NONE, egui::Key::End) {
                 end = true;
             }
-            if !text_focused && input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowLeft) {
+            // A hovered toolpath has taken these for panning above: the view
+            // under the pointer wins over moving the focus ring.
+            if !text_focused
+                && !view_keys
+                && input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowLeft)
+            {
                 focus_left = true;
             }
-            if !text_focused && input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowRight) {
+            if !text_focused
+                && !view_keys
+                && input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowRight)
+            {
                 focus_right = true;
             }
             // The Help search owns `/`; on other pages the character must reach
@@ -2498,6 +2584,9 @@ impl LincApp {
         }
         if graph_fit {
             self.fit_graph();
+        }
+        if view_pan != egui::Vec2::ZERO || view_zoom != 1.0 {
+            self.pan_view(view_pan, view_zoom);
         }
         if graph_clear {
             self.clear_trail();
@@ -3280,6 +3369,8 @@ impl LincApp {
                             (k.graph_fit.label(), "FIT"),
                             (k.graph_clear.label(), "CLEAR TRAIL"),
                             (k.toggle_bounds.label(), "BOUNDS"),
+                            (k.view_pan_hint(), "PAN"),
+                            (k.view_zoom_hint(), "ZOOM"),
                         ],
                         lathe_hints.clone(),
                     ]
@@ -3310,6 +3401,8 @@ impl LincApp {
                             (k.graph_fit.label(), "FIT"),
                             (k.graph_clear.label(), "CLEAR TRAIL"),
                             (k.toggle_bounds.label(), "BOUNDS"),
+                            (k.view_pan_hint(), "PAN"),
+                            (k.view_zoom_hint(), "ZOOM"),
                         ],
                         lathe_hints.clone(),
                     ]
@@ -3403,6 +3496,8 @@ impl LincApp {
                 hints.push((format!("Ctrl+{square}"), "VIEW"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
+                hints.push((k.view_pan_hint(), "PAN"));
+                hints.push((k.view_zoom_hint(), "ZOOM"));
                 hints.extend(lathe_hints.clone());
                 hints.push(("Arrows".into(), "SELECT"));
                 hints.push(("X/Y/Z".into(), "ZERO AXIS"));
@@ -3414,6 +3509,8 @@ impl LincApp {
                 hints.push(("X/Y/Z".into(), "EDIT DRO"));
                 hints.push(("OFFSET".into(), "PROBE"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
+                hints.push((k.view_pan_hint(), "PAN"));
+                hints.push((k.view_zoom_hint(), "ZOOM"));
                 hints.extend(lathe_hints.clone());
             }
             Page::Probe => {
@@ -6007,6 +6104,76 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             harness.probe_writes().is_empty(),
             "{:?}",
             harness.sent_debug()
+        );
+    }
+
+    #[test]
+    fn a_hovered_toolpath_takes_the_pan_and_zoom_chords() {
+        let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+        harness.app.set_page(Page::Machine);
+        // The widget records hover at the end of a frame; the shell reads it at
+        // the top of the next one, which is the frame under test here.
+        harness.ctx.data_mut(|data| {
+            data.insert_temp(egui::Id::unique(linc_view::TOOLPATH_HOVER_ID), true);
+        });
+        // Let the first frame auto-fit, so the pan under test is the key's own.
+        harness.frame(&[]);
+        let before = harness.app.program.graph_pan;
+        harness.ctx.data_mut(|data| {
+            data.insert_temp(egui::Id::unique(linc_view::TOOLPATH_HOVER_ID), true);
+        });
+        harness.frame_with(&[(egui::Key::ArrowLeft, ctrl())]);
+        assert!(
+            (harness.app.program.graph_pan.x - (before.x - VIEW_PAN_STEP)).abs() < 1e-3,
+            "Ctrl+Left pans the view left by one step, {:?} -> {:?}",
+            before,
+            harness.app.program.graph_pan
+        );
+        assert_eq!(
+            harness.app.focus_region,
+            FocusRegion::Page,
+            "the hovered view keeps Ctrl+Left from moving the focus ring"
+        );
+        assert!(
+            !harness.app.program.graph_auto_fit,
+            "a moved view stops fitting"
+        );
+
+        let zoom_before = harness.app.program.graph_zoom;
+        let pan_before = harness.app.program.graph_pan;
+        harness.ctx.data_mut(|data| {
+            data.insert_temp(egui::Id::unique(linc_view::TOOLPATH_HOVER_ID), true);
+        });
+        harness.frame_with(&[(egui::Key::Plus, ctrl())]);
+        assert!(
+            (harness.app.program.graph_zoom - zoom_before * VIEW_ZOOM_STEP).abs() < 1e-6,
+            "Ctrl+Plus zooms in one step, got {}",
+            harness.app.program.graph_zoom
+        );
+        assert!(
+            (harness.app.program.graph_pan - pan_before * VIEW_ZOOM_STEP)
+                .length()
+                < 1e-3,
+            "the pan carries the zoom so the card centre stays put, {:?} -> {:?}",
+            pan_before,
+            harness.app.program.graph_pan
+        );
+    }
+
+    #[test]
+    fn ctrl_left_still_moves_region_focus_away_from_the_toolpath() {
+        let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+        harness.app.set_page(Page::Machine);
+        harness.ctx.data_mut(|data| {
+            data.insert_temp(egui::Id::unique(linc_view::TOOLPATH_HOVER_ID), false);
+        });
+        harness.frame(&[]);
+        let before = harness.app.program.graph_pan;
+        harness.frame_with(&[(egui::Key::ArrowLeft, egui::Modifiers::CTRL)]);
+        assert_eq!(harness.app.focus_region, FocusRegion::Nav);
+        assert_eq!(
+            harness.app.program.graph_pan, before,
+            "no pan without the pointer on the toolpath"
         );
     }
 

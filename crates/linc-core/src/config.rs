@@ -256,6 +256,16 @@ pub struct KeysConfig {
     pub toggle_lathe_diameter: String,
     pub graph_fit: String,
     pub graph_clear: String,
+    /// Pages with a toolpath: pan the view with the modifier and the arrows.
+    /// Taken only while the pointer is over the toolpath, so the shell keeps
+    /// Ctrl+Left/Right for region focus and the editor keeps Ctrl+Up/Down.
+    pub view_pan_left: String,
+    pub view_pan_right: String,
+    pub view_pan_up: String,
+    pub view_pan_down: String,
+    /// Pages with a toolpath: zoom the view in and out.
+    pub view_zoom_in: String,
+    pub view_zoom_out: String,
     /// Page-local to Program: jump to a line number.
     pub goto_line: String,
     pub program_run_from_line: String,
@@ -309,6 +319,12 @@ impl KeysConfig {
             toggle_lathe_diameter: "Ctrl+E".into(),
             graph_fit: "Ctrl+0".into(),
             graph_clear: "Ctrl+L".into(),
+            view_pan_left: "Ctrl+Left".into(),
+            view_pan_right: "Ctrl+Right".into(),
+            view_pan_up: "Ctrl+Up".into(),
+            view_pan_down: "Ctrl+Down".into(),
+            view_zoom_in: "Ctrl+Plus".into(),
+            view_zoom_out: "Ctrl+Minus".into(),
             goto_line: "Ctrl+G".into(),
             program_run_from_line: "Ctrl+R".into(),
             files_delete: "Delete".into(),
