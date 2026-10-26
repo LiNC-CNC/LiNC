@@ -906,11 +906,12 @@ const CYCLE_STOP_AT: (f32, f32) = (235.0, 870.0);
 const CYCLE_R: f32 = 48.0;
 /// Chrome mounting ring around the cycle buttons; part of the hit target.
 const CYCLE_RING: f32 = 8.0;
-/// Illuminated cycle-status plate above each cycle button (the cabinet has a
-/// lamp window there, not an LED in the button).
+/// Illuminated cycle-status plates, one per cycle button. They sit in the
+/// button row, to the right of the buttons and centred on the same midline
+/// (the two buttons stay centred under the power/E-stop cluster).
 const CYCLE_PLATE_SIZE: (f32, f32) = (52.0, 30.0);
-/// Plate centre; its bottom (y + 15) nearly touches the chrome ring at 814.
-const CYCLE_PLATE_Y: f32 = 798.0;
+const CYCLE_START_PLATE_AT: (f32, f32) = (335.0, 870.0);
+const CYCLE_STOP_PLATE_AT: (f32, f32) = (397.0, 870.0);
 const PROBE_KEY_AT: (f32, f32) = (1507.0, 850.0);
 
 /// Sentinel mask for the PROBE CONTACT key in the hold tracker. The probe is
@@ -2440,16 +2441,16 @@ fn paint_panel(
     draw_cycle_plate(
         painter,
         l,
-        CYCLE_START_AT.0,
-        CYCLE_PLATE_Y,
+        CYCLE_START_PLATE_AT.0,
+        CYCLE_START_PLATE_AT.1,
         CyclePlate::Start,
         state.leds & crate::leds::CYCLE_ON != 0,
     );
     draw_cycle_plate(
         painter,
         l,
-        CYCLE_STOP_AT.0,
-        CYCLE_PLATE_Y,
+        CYCLE_STOP_PLATE_AT.0,
+        CYCLE_STOP_PLATE_AT.1,
         CyclePlate::Stop,
         state.leds & crate::leds::CYCLE_OFF != 0,
     );
