@@ -318,27 +318,15 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
     });
     ui.add_space(6.0);
     let servo = !app.servo_load_rows().is_empty();
-    let cards = if servo { 3.0 } else { 2.0 };
+    // The lathe dashboard keeps feed/spindle and servo load; the turret pane
+    // belongs to the mill layout.
+    let cards = if servo { 2.0 } else { 1.0 };
     let card_width = bottom_row_card_width(available, cards, 220.0);
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         bottom_card(app, ui, card_width, bottom_height, "feed", |app, ui, _h| {
             common::feed_speed_card(app, ui, bottom_height);
         });
-        ui.add_space(8.0);
-        bottom_card(
-            app,
-            ui,
-            card_width,
-            bottom_height,
-            "turret",
-            |app, ui, h| {
-                egui::ScrollArea::vertical()
-                    .id_salt("lathe-turret")
-                    .max_height(h - 50.0)
-                    .show(ui, |ui| common::turret_card(app, ui));
-            },
-        );
         if servo {
             ui.add_space(8.0);
             bottom_card(
