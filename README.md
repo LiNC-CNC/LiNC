@@ -33,39 +33,6 @@ Click any image for the full-size PNG.
 | **Touch Probe** | **Files** |
 | [![Touch probe: illustrated routines, parameters and results](docs/screenshots/probe.png)](docs/screenshots/probe.png) | [![Files: USB media beside NC_FILES](docs/screenshots/files.png)](docs/screenshots/files.png) |
 
-## Accepted references
-
-| Purpose | File |
-|---|---|
-| Machine dashboard | `svg/machine-dashboard.svg` |
-| Program — G-code and graph side by side | `svg/program-split.svg` |
-| Program — editable code-focused editor with mini graph | `svg/program-code.svg` |
-| Diagnostics | `svg/diagnostics.svg` |
-| G-code Help | `svg/gcode-help.svg` |
-| Files / USB transfer | `svg/files.svg` |
-| Lathe dashboard | `svg/lathe-dashboard.svg` |
-| Touch probe — outside corners | `svg/probe.svg` |
-| Touch probe — inside corners | `svg/probe-inside-corners.svg` |
-| Touch probe — boss and pocket | `svg/probe-boss-pocket.svg` |
-| Touch probe — ridge and valley | `svg/probe-ridge-valley.svg` |
-| Touch probe — edge angle | `svg/probe-edge-angle.svg` |
-| Touch probe — calibrate | `svg/probe-calibrate.svg` |
-| Touch probe — help | `svg/probe-help.svg` |
-| MDI pane | `svg/mdi.svg` |
-| Manual JOG/INC/MPG | `svg/manual.svg` |
-| Homing screen | `svg/homing.svg` |
-| Tools / tool change | `svg/tools.svg` |
-| Simulator panel (separate window) | `svg/sim-panel.svg` |
-
-Only the accepted versions are included. The earlier vendor-style studies and
-intermediate layout explorations have been removed. The screenshots above are
-live captures of the current implementation; these SVGs remain the design
-references.
-
-The SVGs are self-contained: they use the literal graphite theme colors and a
-full dark canvas instead of unresolved CSS custom properties, so `eog`,
-librsvg and browsers render the same image without a theme stylesheet.
-
 ## Build and run
 
 ```sh
