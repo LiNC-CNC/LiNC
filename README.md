@@ -29,7 +29,7 @@ Click any image for the full-size PNG.
 | **Touch Probe** | **Files** |
 | [![Touch probe: illustrated routines, parameters and results](docs/screenshots/probe.png)](docs/screenshots/probe.png) | [![Files: USB media beside NC_FILES](docs/screenshots/files.png)](docs/screenshots/files.png) |
 | **CNC Control Panel** (separate window) | **MDI** |
-| [![Simulator CNC control panel: power, E-stop, mode and override dials, status lamps and 7-segment displays](docs/screenshots/panel.png)](docs/screenshots/panel.png) | [![MDI pane on the Machine page, with the panel in MDI mode](docs/screenshots/mdi.png)](docs/screenshots/mdi.png) |
+| [![Simulator CNC control panel: power, E-stop, mode and override dials, status lamps and 7-segment displays](docs/screenshots/panel.png)](docs/screenshots/panel.png) | [![MDI pane: issued blocks, the block being edited and its toolpath preview](docs/screenshots/mdi.png)](docs/screenshots/mdi.png) |
 
 ## Accepted references
 
