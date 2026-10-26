@@ -100,6 +100,11 @@ fn zero_keys_active(mode: Option<PanelMode>) -> bool {
 /// covers machine ON, idle, homed, program protect and an E-stopped or offline
 /// panel.
 pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
+    // A dialog or the manual tool-change prompt owns the keyboard. Without
+    // this, `A` could zero every axis behind the prompt.
+    if app.overlay_open() {
+        return;
+    }
     let zeroable = zero_keys_active(app.snapshot.panel.mode.mode());
     // Only a text field keeps these keys for itself. The page holds focus on an
     // anchor widget for arrow navigation, so any focus at all is too broad a
@@ -108,7 +113,7 @@ pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
         memory.has_focus(egui::Id::unique("linc-program-editor"))
             || memory.has_focus(egui::Id::unique("linc-tool-cell"))
     });
-    if !zeroable || text_focused {
+    if !zeroable || text_focused || ui.ctx().text_edit_focused() {
         return;
     }
     let axes = app.axes();

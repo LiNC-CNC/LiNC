@@ -564,6 +564,7 @@ fn hal_nml(app: &mut LincApp, ui: &mut Ui) {
                     theme::section_header(ui, "HAL PIN BROWSER");
                     ui.add(
                         egui::TextEdit::singleline(&mut app.diagnostics_search)
+                            .id(egui::Id::unique("linc-diagnostics-search"))
                             .hint_text("filter pin")
                             .desired_width(220.0),
                     );
@@ -915,6 +916,7 @@ fn io(app: &mut LincApp, ui: &mut Ui) {
                     theme::section_header(ui, "HAL PIN BROWSER");
                     ui.add(
                         egui::TextEdit::singleline(&mut app.diagnostics_search)
+                            .id(egui::Id::unique("linc-diagnostics-search"))
                             .hint_text("filter pin")
                             .desired_width(220.0),
                     );
@@ -963,6 +965,7 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
         );
         ui.add(
             egui::TextEdit::singleline(&mut app.diagnostics_search)
+                .id(egui::Id::unique("linc-diagnostics-search"))
                 .hint_text("message, code, source")
                 .desired_width(240.0),
         );

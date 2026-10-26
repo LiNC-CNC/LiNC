@@ -200,7 +200,13 @@ impl<'a> TrajectoryView<'a> {
     }
 }
 
-struct Projection {
+/// The card's orthographic camera: the fit, the orbit and the pan in one
+/// place.
+///
+/// Public because the MDI overlay draws the block being edited on the same
+/// picture: a second copy of this fitting is what lets the overlay drift away
+/// from the program after a change to the orbit or the scale.
+pub struct Projection {
     min: [f64; 3],
     max: [f64; 3],
     rect: Rect,
@@ -242,7 +248,7 @@ fn view_xy(local: [f32; 3], mode: ViewMode, yaw: f32, pitch: f32) -> (f32, f32) 
 }
 
 impl Projection {
-    fn new(
+    pub fn new(
         bounds: Bounds3,
         rect: Rect,
         mode: ViewMode,
@@ -304,7 +310,7 @@ impl Projection {
         }
     }
 
-    fn project(&self, point: [f64; 3]) -> Pos2 {
+    pub fn project(&self, point: [f64; 3]) -> Pos2 {
         let center = [
             (self.min[0] + self.max[0]) * 0.5,
             (self.min[1] + self.max[1]) * 0.5,
@@ -364,7 +370,7 @@ fn draw_dashed(painter: &Painter, start: Pos2, end: Pos2, stroke: Stroke, dash: 
 /// The classifier works in machine coordinates, so the split point is exact in
 /// the model: the inside uses the caller's stroke (cut, rapid or selected) and
 /// only the part past a limit turns `theme::ERROR`.
-fn draw_travel_line(
+pub fn draw_travel_line(
     painter: &Painter,
     projection: &Projection,
     start: [f64; 3],
@@ -416,7 +422,11 @@ fn draw_travel_line(
     }
 }
 
-fn arc_points(segment: &PathSegment, arc: &ArcSpec) -> Vec<[f64; 3]> {
+/// The chords an arc is painted with.
+///
+/// Shared with the MDI overlay for the same reason as `Projection`: a block's
+/// arc has to be the same curve as the program's, sampled the same way.
+pub fn arc_points(segment: &PathSegment, arc: &ArcSpec) -> Vec<[f64; 3]> {
     let mut points = Vec::new();
     let (u, v) = match arc.plane {
         Plane::Xy => (0, 1),
@@ -539,6 +549,55 @@ fn draw_origin_arrow(painter: &egui::Painter, from: Pos2, to: Pos2, colour: Colo
     ));
 }
 
+/// How far the pan must move to put `value` back between `low` and `high`.
+fn edge_shift(value: f32, low: f32, high: f32) -> f32 {
+    if value < low {
+        low - value
+    } else if value > high {
+        high - value
+    } else {
+        0.0
+    }
+}
+
+/// Whether the tool moved since this card last drew it.
+///
+/// The previous position is kept per card, in egui's own memory: the pane's
+/// zoom and pan are persisted by the caller, and a card that only follows a
+/// moving head must not follow the operator's own panning.
+fn tool_moved(ui: &Ui, tip: [f64; 3]) -> bool {
+    let id = ui.scope_id().with("toolpath-follow-tool");
+    let previous: Option<[f64; 3]> = ui.ctx().data(|data| data.get_temp(id));
+    ui.ctx().data_mut(|data| data.insert_temp(id, tip));
+    previous.map_or(true, |previous| {
+        previous
+            .iter()
+            .zip(tip.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-6)
+    })
+}
+
+/// Clearance kept between the tool marker and the card's edge when the view
+/// follows a moving tool.
+const TOOL_MARGIN: f32 = 30.0;
+
+#[cfg(test)]
+mod follow_tests {
+    use super::edge_shift;
+
+    #[test]
+    fn the_pan_moves_only_far_enough_to_bring_the_marker_back() {
+        // Inside: nothing moves, so a view the operator aimed is not disturbed.
+        assert_eq!(edge_shift(100.0, 10.0, 200.0), 0.0);
+        // Past the low edge, past the high edge: the marker lands on the line,
+        // not in the middle.
+        assert_eq!(edge_shift(-20.0, 10.0, 200.0), 30.0);
+        assert_eq!(edge_shift(260.0, 10.0, 200.0), -60.0);
+        assert_eq!(edge_shift(10.0, 10.0, 200.0), 0.0);
+        assert_eq!(edge_shift(200.0, 10.0, 200.0), 0.0);
+    }
+}
+
 /// Draw the toolpath graph. `TrajectoryView::fit` requests a one-shot fit;
 /// zoom/pan are mutated in place so the caller can persist them.
 pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
@@ -646,6 +705,31 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         );
         view.zoom = zoom;
         view.pan = pan;
+    }
+    // Keep the tool on the card while it moves. At a zoomed or panned view a jog
+    // otherwise walks the head off the picture with nothing to show where it
+    // went. The pan shifts by the least amount that brings the marker back, and
+    // only on a frame where the tool actually moved: panning away to look at
+    // another part of the program is left alone.
+    if let Some(tip) = view.tool_tip {
+        if tool_moved(ui, tip) {
+            let inner = rect.shrink(TOOL_MARGIN);
+            let at = Projection::new(
+                reference,
+                rect.shrink(12.0),
+                view.view,
+                view.yaw,
+                view.pitch,
+                view.zoom,
+                view.pan,
+            )
+            .project(tip);
+            let shift = Vec2::new(
+                edge_shift(at.x, inner.left(), inner.right()),
+                edge_shift(at.y, inner.top(), inner.bottom()),
+            );
+            view.pan += shift;
+        }
     }
     let projection = Projection::new(
         reference,
@@ -1824,6 +1908,153 @@ mod tests {
         ] {
             let pos = projection.project(point);
             assert!(rect.contains(pos), "{pos:?} outside {rect:?}");
+        }
+    }
+
+    /// One frame of the card, with the program cut it painted.
+    ///
+    /// The shapes are the card's own output, so a test can hold the shared
+    /// projection to what the card actually draws instead of to a second copy
+    /// of the maths.
+    fn card_cut(
+        preview: &Preview,
+        bounds: Bounds3,
+        mode: ViewMode,
+        yaw: f32,
+        pitch: f32,
+    ) -> (Rect, Vec<[Pos2; 2]>) {
+        let mut view = TrajectoryView::new(preview, &[], MachineVariant::Mill);
+        view.view = mode;
+        view.yaw = yaw;
+        view.pitch = pitch;
+        view.zoom = 1.0;
+        view.pan = Vec2::ZERO;
+        view.machine_bounds = Some(bounds);
+        view.height = 400.0;
+        view.show_grid = false;
+        view.show_legend = false;
+        view.show_program_bounds = false;
+        view.show_stock = false;
+        view.show_selected_line = false;
+        view.show_live_trail = false;
+        view.fit = false;
+        view.auto_fit = false;
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            ..Default::default()
+        };
+        let mut rect = Rect::ZERO;
+        let mut output = ctx.run_ui(input, |ui| {
+            rect = draw_trajectory(ui, &mut view).rect;
+        });
+        // Nothing here paints the textures the fonts ask for.
+        output.textures_delta.clear();
+        let mut cut = Vec::new();
+        for clipped in &output.shapes {
+            if let egui::Shape::LineSegment { points, stroke } = &clipped.shape {
+                // The program cut is the card's only accent-coloured 1.8 px
+                // line: grid, axes, bounds and the legend use their own.
+                if stroke.color == theme::ACCENT && (stroke.width - 1.8).abs() < 1e-6 {
+                    cut.push(*points);
+                }
+            }
+        }
+        (rect, cut)
+    }
+
+    fn assert_card_matches_projection(mode: ViewMode, yaw: f32, pitch: f32) {
+        let bounds = Bounds3 {
+            min: [0.0, 0.0, 0.0],
+            max: [100.0, 50.0, 20.0],
+        };
+        let segment = PathSegment {
+            start: [10.0, 10.0, 5.0],
+            end: [90.0, 40.0, 15.0],
+            kind: SegmentKind::Feed,
+            line: 1,
+            arc: None,
+            tool: None,
+        };
+        let preview = Preview {
+            segments: vec![segment.clone()],
+            bounds: Some(bounds),
+            ..Preview::empty()
+        };
+        let (rect, cut) = card_cut(&preview, bounds, mode, yaw, pitch);
+        assert_eq!(cut.len(), 1, "{mode:?}: the card draws the move once");
+        let projection =
+            Projection::new(bounds, rect.shrink(12.0), mode, yaw, pitch, 1.0, Vec2::ZERO);
+        for (drawn, model) in [(cut[0][0], segment.start), (cut[0][1], segment.end)] {
+            let expected = projection.project(model);
+            assert!(
+                (drawn - expected).length() < 0.01,
+                "{mode:?}: drawn {drawn:?} vs projected {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_card_draws_through_the_shared_projection() {
+        assert_card_matches_projection(ViewMode::TopXy, DEFAULT_YAW, DEFAULT_PITCH);
+    }
+
+    /// The overlay's old agreement test covered only the flat views, where the
+    /// mapping is linear; the card opens in 3D/ISO, so an orbited camera is the
+    /// case that was unpinned.
+    #[test]
+    fn the_card_draws_through_the_shared_projection_when_orbited() {
+        assert_card_matches_projection(ViewMode::Iso3d, 0.9, 0.42);
+    }
+
+    #[test]
+    fn the_card_samples_an_arc_with_the_shared_sampler() {
+        let bounds = Bounds3 {
+            min: [20.0, -5.0, -5.0],
+            max: [75.0, 50.0, 10.0],
+        };
+        let arc = ArcSpec {
+            center: [50.0, 25.0, 0.0],
+            radius: 20.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::FRAC_PI_2,
+            clockwise: false,
+            plane: Plane::Xy,
+        };
+        let segment = PathSegment {
+            start: [70.0, 25.0, 0.0],
+            end: [50.0, 45.0, 0.0],
+            kind: SegmentKind::Feed,
+            line: 1,
+            arc: Some(arc.clone()),
+            tool: None,
+        };
+        let preview = Preview {
+            segments: vec![segment.clone()],
+            bounds: Some(bounds),
+            ..Preview::empty()
+        };
+        let (rect, cut) = card_cut(&preview, bounds, ViewMode::Iso3d, 0.9, 0.42);
+        let projection = Projection::new(
+            bounds,
+            rect.shrink(12.0),
+            ViewMode::Iso3d,
+            0.9,
+            0.42,
+            1.0,
+            Vec2::ZERO,
+        );
+        let points = arc_points(&segment, &arc);
+        assert_eq!(cut.len(), points.len() - 1, "one chord per sample pair");
+        for pair in points.windows(2) {
+            let from = projection.project(pair[0]);
+            let to = projection.project(pair[1]);
+            assert!(
+                cut.iter()
+                    .any(|drawn| (drawn[0] - from).length() < 0.01
+                        && (drawn[1] - to).length() < 0.01),
+                "missing chord {from:?}-{to:?}"
+            );
         }
     }
 

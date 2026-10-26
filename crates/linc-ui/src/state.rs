@@ -25,7 +25,6 @@ pub enum Page {
     Help,
     Files,
     Probe,
-    Mdi,
     Homing,
     Manual,
     Settings,
@@ -51,7 +50,6 @@ impl Page {
             Page::Help => "G-CODE HELP",
             Page::Files => "FILES",
             Page::Probe => "TOUCH PROBE",
-            Page::Mdi => "MDI",
             Page::Homing => "HOMING",
             Page::Manual => "MANUAL",
             Page::Settings => "SETTINGS",
@@ -70,8 +68,10 @@ impl Page {
         }
     }
 
+    /// Pages the panel position opens and closes by itself. MAIN is not one of
+    /// them: MDI shows the pane *on* MAIN, it does not own a page.
     pub fn is_mode_driven(self) -> bool {
-        matches!(self, Page::Mdi | Page::Homing | Page::Manual)
+        matches!(self, Page::Homing | Page::Manual)
     }
 }
 
@@ -150,10 +150,14 @@ pub enum Modal {
         line: u32,
         block: String,
     },
-    /// Ask for a line number to jump to in the G-code view.
+    /// Ask for a line number to jump to: a line of the loaded program, or,
+    /// with `mdi`, a line of the MDI buffer.
     GoToLine {
         buffer: String,
+        mdi: bool,
     },
+    /// Write the MDI buffer to a new program file under `PROGRAM_PREFIX`.
+    MdiSave(MdiSaveDialog),
     /// Delete a file from one of the Files panes.
     ConfirmDelete {
         path: std::path::PathBuf,
@@ -163,6 +167,34 @@ pub enum Modal {
     ConfirmOverwrite(String),
     Error(String),
     Info(String),
+}
+
+/// The MDI pane's save dialog: a file name and the pre/postamble wrapper.
+///
+/// An existing name is confirmed here, not in a second dialog: the same window
+/// turns its write button into REPLACE, so the buffer cannot be lost to a
+/// cascade of prompts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MdiSaveDialog {
+    pub name: String,
+    /// Write `mdi.save_preamble` above the buffer and `save_postamble` below.
+    pub wrap: bool,
+    /// Set once the name collides: the dialog then writes over it.
+    pub confirm_overwrite: bool,
+    pub error: Option<String>,
+}
+
+impl Default for MdiSaveDialog {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            // The profile's pre/postamble is what a saved block list needs to
+            // run on its own, so the wrapper starts ticked.
+            wrap: true,
+            confirm_overwrite: false,
+            error: None,
+        }
+    }
 }
 
 pub trait UiBackend {
@@ -1024,40 +1056,214 @@ impl ProbeUi {
     }
 }
 
+/// The MDI pane's working state.
+///
+/// It is keyed to the panel mode, not to a page, and lives for the app
+/// session: leaving MDI keeps the buffer, and the only thing `Esc` clears is
+/// the uncommitted input.
 pub struct MdiUi {
+    /// The block being typed, or one recalled from the buffer for editing.
     pub input: String,
+    /// One-shot request for the input to take the keyboard on the next draw.
     pub focus: bool,
-    pub history: VecDeque<(String, u64)>,
-    pub history_index: Option<usize>,
+    /// One-shot request to put the text caret after the input. Recall replaces
+    /// the text under the widget, whose own caret would otherwise stay where
+    /// the previous block left it — at the start of the new one.
+    pub caret_to_end: bool,
+    /// The blocks committed this session, oldest first, in issue order.
+    pub blocks: VecDeque<(String, u64)>,
+    /// The buffer line the arrows, `Ctrl+R`, `Ctrl+Bksp` and `Ctrl+G` point at.
+    pub selection: Option<usize>,
+    /// The last block handed to the controller.
     pub last_result: Option<String>,
+    /// Why the last issue or save did nothing; shown in the strip.
     pub last_error: Option<String>,
-    pub quick_commands: Vec<String>,
-    pub syntax_ok: bool,
-    pub panel_mode: Option<linc_core::model::PanelMode>,
+    /// The move the input block would make, cached: MAIN's toolpath draws it
+    /// over the loaded program while the pane is up.
+    pub overlay: Option<BlockOverlay>,
+}
+
+/// One block's move, parsed once per change of its inputs.
+///
+/// The toolpath repaints at the display rate, so the parse cannot run per
+/// frame: "screens::mdi::overlay" keeps this and re-parses only when the input,
+/// the machine position or the modal state behind it changes.
+pub struct BlockOverlay {
+    /// The trimmed block that was parsed.
+    pub input: String,
+    /// Where the block starts, in machine coordinates.
+    pub start: [f64; 3],
+    /// Fingerprint of the modal state and work offset it was parsed with.
+    pub modal: u64,
+    /// The parsed moves. Empty when the block is empty, too long or unparsable:
+    /// the pane would refuse it, so the graph draws nothing for it.
+    pub segments: Vec<linc_core::gcode::PathSegment>,
+    /// Bumped on every recompute. The cache is otherwise invisible, and this is
+    /// how a test holds the pane to one parse per change.
+    pub generation: u64,
+}
+
+impl Default for MdiUi {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MdiUi {
-    pub fn new(quick_commands: Vec<String>) -> Self {
+    pub fn new() -> Self {
         Self {
             input: String::new(),
+            // The pane asks for the keyboard the first time it appears.
             focus: true,
-            history: VecDeque::new(),
-            history_index: None,
+            caret_to_end: true,
+            blocks: VecDeque::new(),
+            selection: None,
             last_result: None,
             last_error: None,
-            quick_commands,
-            syntax_ok: true,
-            panel_mode: None,
+            overlay: None,
         }
     }
 
-    pub fn push_history(&mut self, limit: usize, command: String) {
-        self.history
-            .push_front((command, linc_core::model::now_ms()));
-        while self.history.len() > limit {
-            self.history.pop_back();
+    pub fn len(&self) -> usize {
+        self.blocks.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+
+    /// The buffer line a key press acts on, if any.
+    pub fn selected(&self) -> Option<&str> {
+        self.selection
+            .and_then(|index| self.blocks.get(index))
+            .map(|(block, _)| block.as_str())
+    }
+
+    /// The buffer as program lines, for `mdi_file::compose`.
+    pub fn block_texts(&self) -> Vec<String> {
+        self.blocks.iter().map(|(block, _)| block.clone()).collect()
+    }
+
+    /// Commit an issued block: a line recalled with `Up`/`Down` is
+    /// overwritten in place, anything else appends. Past `limit` the oldest
+    /// block goes, so the buffer stays a session-sized working list.
+    pub fn commit(&mut self, limit: usize, block: String) {
+        let at = linc_core::model::now_ms();
+        match self.selection.filter(|index| *index < self.blocks.len()) {
+            Some(index) => self.blocks[index] = (block, at),
+            None => self.blocks.push_back((block, at)),
         }
-        self.history_index = None;
+        while self.blocks.len() > limit.max(1) {
+            self.blocks.pop_front();
+        }
+        self.input.clear();
+        self.selection = None;
+        self.focus = true;
+        self.caret_to_end = true;
+    }
+
+    /// `Up`: the block before the selected one, starting from the newest, and
+    /// load it into the input. The buffer line itself stays put, so `Ctrl+R`
+    /// still has a selected line to run while it is edited.
+    pub fn recall_older(&mut self) -> bool {
+        let Some(newest) = self.blocks.len().checked_sub(1) else {
+            return false;
+        };
+        let index = self
+            .selection
+            .map_or(newest, |index| index.saturating_sub(1));
+        self.select(index)
+    }
+
+    /// `Down`: the block after the selected one. Past the newest block the
+    /// selection clears with the input, ready for a fresh block.
+    pub fn recall_newer(&mut self) -> bool {
+        let Some(index) = self.selection else {
+            return false;
+        };
+        match index + 1 {
+            next if next < self.blocks.len() => self.select(next),
+            _ => {
+                self.clear_input();
+                true
+            }
+        }
+    }
+
+    /// `Ctrl+Bksp`: drop the selected buffer line. With no such line in the
+    /// buffer yet it clears the uncommitted input instead.
+    pub fn delete_selected(&mut self) -> Option<String> {
+        let index = self.selection.filter(|index| *index < self.blocks.len());
+        let Some(index) = index else {
+            self.clear_input();
+            return None;
+        };
+        let removed = self.blocks.remove(index).map(|(block, _)| block);
+        // Keep the band on a line: the row that slid into this slot, else the
+        // new last row.
+        self.selection = if self.blocks.is_empty() {
+            None
+        } else {
+            Some(index.min(self.blocks.len() - 1))
+        };
+        self.input.clear();
+        self.last_error = None;
+        self.caret_to_end = true;
+        removed
+    }
+
+    /// `Ctrl+G`: select a buffer line by its 1-based number, bounded by the
+    /// buffer, and load it for editing.
+    pub fn goto(&mut self, line: usize) -> bool {
+        if self.blocks.is_empty() {
+            return false;
+        }
+        self.select(line.saturating_sub(1).min(self.blocks.len() - 1))
+    }
+
+    /// `Ctrl+Up` / `Ctrl+Down`: swap the selected block with its neighbour.
+    ///
+    /// The selection follows the moved block, so a second press keeps moving
+    /// the same line. At the ends, and with no line selected, it does nothing:
+    /// no wrap and no pop, and the input is left exactly as it is — the block
+    /// being edited stays the block being edited.
+    pub fn move_selected(&mut self, up: bool) -> bool {
+        let Some(index) = self.selection.filter(|index| *index < self.blocks.len()) else {
+            return false;
+        };
+        let target = if up {
+            index.checked_sub(1)
+        } else {
+            (index + 1 < self.blocks.len()).then_some(index + 1)
+        };
+        let Some(target) = target else {
+            return false;
+        };
+        self.blocks.swap(index, target);
+        self.selection = Some(target);
+        true
+    }
+
+    /// `Esc`: clear the uncommitted input and the pointer at a buffer line.
+    /// Issued blocks are never cancelled.
+    pub fn clear_input(&mut self) {
+        self.input.clear();
+        self.selection = None;
+        self.last_error = None;
+        self.focus = true;
+        self.caret_to_end = true;
+    }
+
+    fn select(&mut self, index: usize) -> bool {
+        let Some((block, _)) = self.blocks.get(index) else {
+            return false;
+        };
+        self.input = block.clone();
+        self.selection = Some(index);
+        self.last_error = None;
+        self.focus = true;
+        self.caret_to_end = true;
+        true
     }
 }
 
@@ -1153,7 +1359,7 @@ pub fn page_accent(page: Page) -> egui::Color32 {
         Page::Help => theme::C2,
         Page::Files => theme::C4,
         Page::Probe => theme::C6,
-        Page::Mdi | Page::Homing | Page::Manual => theme::C3,
+        Page::Homing | Page::Manual => theme::C3,
         Page::Settings => theme::MUTED,
     }
 }
@@ -1477,8 +1683,18 @@ pub struct Keymap {
     pub find: Binding,
     pub refresh: Binding,
     pub mdi_issue: Binding,
+    /// Page-local to the MDI pane: clear the uncommitted input. It shares
+    /// Escape with `back` by default, and the pane leaves that chord to the
+    /// shell then: Esc still resets a running program first.
+    pub mdi_clear: Binding,
     pub mdi_history_up: Binding,
     pub mdi_history_down: Binding,
+    /// Page-local to the MDI pane: swap the selected buffer block with its
+    /// neighbour. Ctrl by default — the panel keyboard has no Shift key.
+    pub mdi_line_up: Binding,
+    pub mdi_line_down: Binding,
+    /// Page-local to the MDI pane: drop the selected buffer line.
+    pub mdi_buffer_delete: Binding,
     pub help_search: Binding,
     /// Bindings from the profile that could not be parsed, reported in Settings.
     pub rejected: Vec<String>,
@@ -1492,6 +1708,23 @@ fn binding(value: &str, default: Binding, rejected: &mut Vec<String>) -> Binding
             default
         }
     }
+}
+
+/// A buffer line-move binding, held to a chord that cannot be taken for recall.
+///
+/// `Up`/`Down` already recall a buffer line and the shell navigates with the
+/// bare arrows, so a profile that rebinds the move onto one of them would
+/// shadow recall with no sign of it. The chord is rejected the way an
+/// unparsable one is: Settings names it and the default holds.
+fn line_move_binding(value: &str, default: Binding, rejected: &mut Vec<String>) -> Binding {
+    let binding = binding(value, default, rejected);
+    if binding.modifiers.is_none()
+        && matches!(binding.key, egui::Key::ArrowUp | egui::Key::ArrowDown)
+    {
+        rejected.push(value.to_string());
+        return default;
+    }
+    binding
 }
 
 impl Keymap {
@@ -1558,6 +1791,11 @@ impl Keymap {
                 Binding::new(Key::Enter, none),
                 &mut rejected,
             ),
+            mdi_clear: binding(
+                &keys.mdi_clear,
+                Binding::new(Key::Escape, none),
+                &mut rejected,
+            ),
             mdi_history_up: binding(
                 &keys.mdi_history_up,
                 Binding::new(Key::ArrowUp, none),
@@ -1566,6 +1804,21 @@ impl Keymap {
             mdi_history_down: binding(
                 &keys.mdi_history_down,
                 Binding::new(Key::ArrowDown, none),
+                &mut rejected,
+            ),
+            mdi_line_up: line_move_binding(
+                &keys.mdi_line_up,
+                Binding::new(Key::ArrowUp, ctrl),
+                &mut rejected,
+            ),
+            mdi_line_down: line_move_binding(
+                &keys.mdi_line_down,
+                Binding::new(Key::ArrowDown, ctrl),
+                &mut rejected,
+            ),
+            mdi_buffer_delete: binding(
+                &keys.mdi_buffer_delete,
+                Binding::new(Key::Backspace, ctrl),
                 &mut rejected,
             ),
             help_search: binding(
@@ -1741,6 +1994,87 @@ mod keymap_tests {
         let keymap = Keymap::from_config(&keys);
         assert_eq!(keymap.machine.key, egui::Key::F5);
         assert_eq!(keymap.rejected, vec!["Hyper+Z".to_string()]);
+    }
+
+    #[test]
+    fn the_mdi_keys_survive_the_parser_and_a_bad_delete_chord_is_reported() {
+        // The shipped default must parse: a rejected default would leave the
+        // pane's delete key bound to nothing while Settings showed the text.
+        let keys = linc_core::config::KeysConfig::spec_default();
+        let keymap = Keymap::from_config(&keys);
+        assert!(keymap.rejected.is_empty(), "{:?}", keymap.rejected);
+        assert_eq!(keymap.mdi_issue.key, egui::Key::Enter);
+        assert!(keymap.mdi_issue.modifiers.is_none());
+        assert_eq!(keymap.mdi_clear.key, egui::Key::Escape);
+        assert_eq!(keymap.mdi_history_up.key, egui::Key::ArrowUp);
+        assert_eq!(keymap.mdi_history_down.key, egui::Key::ArrowDown);
+        assert_eq!(keymap.mdi_buffer_delete.key, egui::Key::Backspace);
+        assert!(keymap.mdi_buffer_delete.modifiers.ctrl);
+        // Ctrl, not Shift: the panel keyboard has no Shift key. Plain Up/Down
+        // stay with recall, so the move must keep its modifier.
+        assert_eq!(keymap.mdi_line_up.key, egui::Key::ArrowUp);
+        assert!(keymap.mdi_line_up.modifiers.ctrl);
+        assert_eq!(keymap.mdi_line_down.key, egui::Key::ArrowDown);
+        assert!(keymap.mdi_line_down.modifiers.ctrl);
+        assert_ne!(keymap.mdi_line_up, keymap.mdi_history_up);
+        assert_ne!(keymap.mdi_line_down, keymap.mdi_history_down);
+
+        // An unparseable chord is rejected like every other binding: the
+        // default stays and the profile's text is reported.
+        let mut keys = linc_core::config::KeysConfig::spec_default();
+        keys.mdi_buffer_delete = "Ctrl+NoSuchKey".to_string();
+        let keymap = Keymap::from_config(&keys);
+        assert_eq!(keymap.mdi_buffer_delete.key, egui::Key::Backspace);
+        assert!(keymap.mdi_buffer_delete.modifiers.ctrl);
+        assert_eq!(keymap.rejected, vec!["Ctrl+NoSuchKey".to_string()]);
+
+        // A line move rebound onto a bare arrow would shadow recall: it is
+        // rejected the same way, and the default holds.
+        let mut keys = linc_core::config::KeysConfig::spec_default();
+        keys.mdi_line_up = "Up".to_string();
+        keys.mdi_line_down = "Down".to_string();
+        let keymap = Keymap::from_config(&keys);
+        assert_eq!(keymap.mdi_line_up.key, egui::Key::ArrowUp);
+        assert!(keymap.mdi_line_up.modifiers.ctrl, "the default chord holds");
+        assert!(keymap.mdi_line_down.modifiers.ctrl);
+        assert_eq!(keymap.rejected, vec!["Up".to_string(), "Down".to_string()]);
+    }
+
+    #[test]
+    fn moving_a_buffer_line_swaps_the_neighbours_and_carries_the_selection() {
+        let mut mdi = MdiUi::new();
+        for block in ["G0 X1", "G1 X2", "G1 X3"] {
+            mdi.commit(8, block.to_string());
+        }
+        // No selection: nothing moves, nothing is issued.
+        assert!(!mdi.move_selected(true));
+        assert!(!mdi.move_selected(false));
+        assert_eq!(mdi.block_texts(), ["G0 X1", "G1 X2", "G1 X3"]);
+
+        mdi.recall_older();
+        assert_eq!(mdi.input, "G1 X3");
+        assert!(mdi.move_selected(true));
+        assert_eq!(mdi.block_texts(), ["G0 X1", "G1 X3", "G1 X2"]);
+        assert_eq!(mdi.selection, Some(1), "the selection follows the block");
+        assert_eq!(mdi.input, "G1 X3", "the move leaves the input alone");
+        assert_eq!(mdi.selected(), Some("G1 X3"));
+
+        // At the top it stops: no wrap, no pop.
+        assert!(mdi.move_selected(true));
+        assert_eq!(mdi.block_texts(), ["G1 X3", "G0 X1", "G1 X2"]);
+        assert_eq!(mdi.selection, Some(0));
+        assert!(!mdi.move_selected(true));
+        assert_eq!(mdi.selection, Some(0));
+        assert_eq!(mdi.len(), 3);
+
+        // And at the bottom.
+        assert!(mdi.move_selected(false));
+        assert!(mdi.move_selected(false));
+        assert_eq!(mdi.block_texts(), ["G0 X1", "G1 X2", "G1 X3"]);
+        assert_eq!(mdi.selection, Some(2));
+        assert!(!mdi.move_selected(false));
+        assert_eq!(mdi.selection, Some(2));
+        assert_eq!(mdi.len(), 3);
     }
 }
 

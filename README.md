@@ -45,7 +45,7 @@ Click any image for the full-size PNG.
 | Touch probe — edge angle | `svg/probe-edge-angle.svg` |
 | Touch probe — calibrate | `svg/probe-calibrate.svg` |
 | Touch probe — help | `svg/probe-help.svg` |
-| MDI screen | `svg/mdi.svg` |
+| MDI pane | `svg/mdi.svg` |
 | Manual JOG/INC/MPG | `svg/manual.svg` |
 | Homing screen | `svg/homing.svg` |
 | Tools / tool change | `svg/tools.svg` |
@@ -238,10 +238,15 @@ performance and limitations - is in [docs/sim3d.md](docs/sim3d.md).
   the `#3014`–`#3036` parameter block and issues the selected `o<probe_...>`
   call via Probe Basic `issue_mdi` after validation. Results come from
   `#1001`–`#1012`. Rotary-axis probing is not offered.
-- **MDI is a mode-driven screen**: the panel's MDI position opens it, focuses
-  the command line and shows DRO/modal/history. `Enter` issues one block via
-  `issue_mdi`; leaving MDI discards unissued input but does not cancel an
-  already-issued command.
+- **MDI is a pane on the Machine page**: the panel's MDI position opens MAIN
+  with the `PROGRAM` card replaced by the block listing, a syntax-highlighted
+  input that holds focus, a one-line result strip and the MODAL band AUTO shows.
+  `Enter` issues one block via `issue_mdi` and commits it to the buffer, `Ctrl+R`
+  re-runs the selected line, `Ctrl+Up`/`Ctrl+Down` move it in the buffer and
+  `Ctrl+S` saves the buffer to a new `.ngc`. A value word typed against a digit
+  gets its space (`G1X10` becomes `G1 X10`), and the block being edited is drawn
+  on MAIN's toolpath in the pane's own colour. The buffer lasts the app session;
+  leaving MDI keeps it, and `Esc` clears uncommitted input only.
 - **JOG, INC and MPG open a shared read-only Manual screen.** A large live
   graph dominates, with large work coordinates plus machine coordinates and
   DTG. Jog/increment/handwheel input remains on the panel; the screen never
@@ -268,7 +273,7 @@ performance and limitations - is in [docs/sim3d.md](docs/sim3d.md).
   actions.
 - **Tools is the quick-change surface.** Select a table row or type a target
   tool and `CHANGE TOOL`; the HMI issues `Tn M6` through Probe Basic
-  `issue_mdi` without opening the MDI screen. Manual changes get an
+  `issue_mdi` without MDI entry. Manual changes get an
   install/confirm prompt; ATC/turret support reuses the existing `M6` G-code
   and is optional. The tool table is the standard LinuxCNC format; its pocket
   column exists only when a changer uses it.
@@ -403,8 +408,8 @@ column required by a power turret (see `CONFIGURATION.md`).
 - `linc` loads and validates a machine profile, renders the fixed shell, and
   switches pages from the panel mode and keyboard.
 - The mill and lathe Machine, Program `SPLIT`/`CODE`, Offsets, Tools,
-  Diagnostics, Settings, G-code Help, Files, Touch Probe, MDI, Manual and
-  Homing screens are implemented.
+  Diagnostics, Settings, G-code Help, Files, Touch Probe, Manual and Homing
+  screens are implemented; the MDI pane is part of Machine.
 - The Program editor has syntax highlighting, undo/redo/find, dirty/save
   state, a debounced live preview, program-protect locking and the live trail.
 - `linc-panel` owns the panel driver, HAL pins and the standalone simulator

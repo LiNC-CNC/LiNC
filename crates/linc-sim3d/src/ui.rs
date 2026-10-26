@@ -903,6 +903,13 @@ impl Panel {
                 preset(viewer, crate::viewer::Camera::front());
             }
         });
+        ui.horizontal(|ui| {
+            ui.label("machine:");
+            ui.checkbox(&mut viewer.show_column, "Z column")
+                .on_hover_text("draw the moving column; hidden by default");
+            ui.checkbox(&mut viewer.show_head, "milling head")
+                .on_hover_text("draw the moving head; hidden by default");
+        });
         ui.label(
             RichText::new("drag orbits, middle/right drag pans, wheel zooms")
                 .small()

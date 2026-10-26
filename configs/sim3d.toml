@@ -24,6 +24,21 @@ kind = "ball"
 tool = 11
 kind = "flat"
 
+[[workpieces]]
+name = "RoundedTestCube-RoundedTestCube"
+path = "/home/jack/CAD/RoundedTestCube-RoundedTestCube.step"
+translate_mm = [
+    -150.0,
+    -150.0,
+    -150.0,
+]
+rotate_deg = [
+    0.0,
+    0.0,
+    0.0,
+]
+visible = true
+
 [hal]
 component = "linc-sim3d"
 sample_ms = 2.0

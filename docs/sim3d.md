@@ -208,6 +208,9 @@ Window, no LinuxCNC needed:
 The window opens on the machine from the three-quarter view, with the probe in
 the spindle. Drag orbits, middle or right drag pans, the wheel zooms, and the
 camera row has *fit*, *probe* (centre on the live tip), *iso*, *top* and *front*.
+The moving column and milling head are hidden by default so neither hides the
+tool; *machine: Z column* and *milling head* in the Camera section draw them
+when the machine layout matters.
 
 The *Position* heading always names the live source:
 

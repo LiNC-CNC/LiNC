@@ -491,7 +491,7 @@ impl NmlBackend {
         Ok(candidate)
     }
 
-    fn validate_issue(&mut self, origin: MdiOrigin) -> Result<(), MachineError> {
+    fn validate_ready(&mut self) -> Result<MachineSnapshot, MachineError> {
         let snapshot = self.refresh();
         if !snapshot.panel.connected || snapshot.panel.communication_error {
             return Err(MachineError::PanelOffline);
@@ -510,6 +510,14 @@ impl NmlBackend {
         {
             return Err(MachineError::NotHomed);
         }
+        if snapshot.probe_trip_active() {
+            return Err(MachineError::ProbeTripped);
+        }
+        Ok(snapshot)
+    }
+
+    fn validate_issue(&mut self, origin: MdiOrigin) -> Result<(), MachineError> {
+        let snapshot = self.validate_ready()?;
         if origin == MdiOrigin::Mdi && snapshot.panel.mode.mode() != Some(PanelMode::Mdi) {
             return Err(MachineError::WrongPanelMode);
         }
@@ -532,6 +540,19 @@ impl NmlBackend {
         }
         if snapshot.task.interp != InterpState::Idle || snapshot.task.running {
             return Err(MachineError::NotIdle);
+        }
+        Ok(snapshot)
+    }
+
+    /// A controller write that must also fail closed on a latched probe trip.
+    ///
+    /// `SaveProgram` keeps using `validate_write`: it writes a file, not
+    /// machine state, and losing an operator's buffer would be worse than
+    /// letting them save it while the fault is latched.
+    fn validate_controller_write(&mut self) -> Result<MachineSnapshot, MachineError> {
+        let snapshot = self.validate_write()?;
+        if snapshot.probe_trip_active() {
+            return Err(MachineError::ProbeTripped);
         }
         Ok(snapshot)
     }
@@ -770,6 +791,9 @@ impl NmlBackend {
                 self.issue_blocks(&[format!("M61 Q{tool}")])
             }
             MachineCommand::ToggleLimitsOverride => {
+                if self.refresh().probe_trip_active() {
+                    return Err(MachineError::ProbeTripped);
+                }
                 self.nml_send(&NmlCommand::OverrideLimits)?;
                 self.wait_complete(Duration::from_secs(1))?;
                 if self.poll_status()?.task.state != NmlTaskState::On {
@@ -823,11 +847,35 @@ impl NmlBackend {
                 values,
                 rotation,
             } => {
-                self.validate_write()?;
+                self.validate_controller_write()?;
                 self.write_work_offset(index, &values, rotation)
             }
+            MachineCommand::ActivateWorkOffset { index } => {
+                // Selecting a coordinate system is not an offset write, so it
+                // does not need PROTECT off; it does need a ready, idle
+                // machine. `issue_blocks` switches to MDI and restores the
+                // panel's mode, as a tool change does.
+                self.validate_ready()?;
+                if !(1..=9).contains(&index) {
+                    return Err(MachineError::Invalid(
+                        "work offset must be G54-G59.3".into(),
+                    ));
+                }
+                self.issue_blocks(&[wcs_name(index)])?;
+                let _ = self.client.wait_complete(Duration::from_secs(2));
+                let status = self.poll_status()?;
+                if (status.offsets.g5x_index as u8).clamp(1, 9) != index {
+                    return Err(MachineError::Backend(format!(
+                        "the controller did not activate {}",
+                        wcs_name(index)
+                    )));
+                }
+                self.parameters.record_active_index(index);
+                self.save_parameters()?;
+                Ok(())
+            }
             MachineCommand::RunFromLine { line } => {
-                self.validate_write()?;
+                self.validate_controller_write()?;
                 if line == 0 {
                     return Err(MachineError::Invalid("line must be 1 or greater".into()));
                 }
@@ -839,7 +887,7 @@ impl NmlBackend {
                 self.nml_send(&NmlCommand::AutoRun { line: line as i32 })
             }
             MachineCommand::ZeroWorkOffset { index, axes } => {
-                self.validate_write()?;
+                self.validate_controller_write()?;
                 if !(1..=9).contains(&index) {
                     return Err(MachineError::Invalid(
                         "work offset must be G54-G59.3".into(),
@@ -861,7 +909,7 @@ impl NmlBackend {
                 self.touch_off(index, &values, &axes)
             }
             MachineCommand::SetWorkPosition { index, values } => {
-                self.validate_write()?;
+                self.validate_controller_write()?;
                 if !(1..=9).contains(&index) {
                     return Err(MachineError::Invalid(
                         "work offset must be G54-G59.3".into(),
@@ -885,7 +933,7 @@ impl NmlBackend {
                 self.touch_off(index, &values, &axes)
             }
             MachineCommand::SetG92Offset { values } => {
-                self.validate_write()?;
+                self.validate_controller_write()?;
                 let parts = values
                     .iter()
                     .map(|(axis, value)| format!("{axis}{value:.6}"))
@@ -899,7 +947,7 @@ impl NmlBackend {
                 row,
                 expected_revision,
             } => {
-                self.validate_write()?;
+                self.validate_controller_write()?;
                 if expected_revision != self.tool_table.revision {
                     return Err(MachineError::RevisionConflict);
                 }
@@ -926,7 +974,7 @@ impl NmlBackend {
                 Ok(())
             }
             MachineCommand::ApplyProbeResult { result, target } => {
-                self.validate_write()?;
+                self.validate_controller_write()?;
                 let ProbeTarget::WorkOffset(index) = target else {
                     return Err(MachineError::Invalid(
                         "calibration is stored by the calibration routine, not Apply".into(),
@@ -1008,7 +1056,7 @@ impl NmlBackend {
                 self.save_parameters()
             }
             MachineCommand::ResetProbeCalibration => {
-                self.validate_write()?;
+                self.validate_controller_write()?;
                 // Never pre-publish the reset. The displayed offset stays
                 // controller-owned until the routine's own #3032 message
                 // confirms the new value; an unconfirmed reset changes nothing.
@@ -1016,6 +1064,9 @@ impl NmlBackend {
             }
             MachineCommand::AbortProgram => {
                 self.nml_send(&NmlCommand::Abort)?;
+                // EMC_TASK_ABORT is the controller reset that clears the motion
+                // error a probe trip sets. This is the only clear path.
+                self.builder.clear_probe_trip();
                 self.builder.fail_probe();
                 self.pending_restore = None;
                 self.pending_height_comp = None;
@@ -1028,6 +1079,14 @@ impl NmlBackend {
             MachineCommand::SetHalOutput { output, value } => {
                 if !value.matches(output) {
                     return Err(MachineError::Invalid("wrong HAL value type".into()));
+                }
+                if matches!(output, LincOutput::JogIncrement | LincOutput::JogSpeed)
+                    && self
+                        .last_snapshot
+                        .as_ref()
+                        .is_some_and(MachineSnapshot::probe_trip_active)
+                {
+                    return Err(MachineError::ProbeTripped);
                 }
                 match output {
                     LincOutput::ToolChangeConfirm => {

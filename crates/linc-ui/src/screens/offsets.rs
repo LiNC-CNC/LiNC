@@ -32,6 +32,9 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         }
     }
     app.offsets.last_frame_ms = now;
+    // Page-local: `A` selects the highlighted row as the active work system.
+    // The handler lives here, so no other page consumes or sees the key.
+    handle_activate_key(app, ui);
     let writable = app.snapshot.writes_allowed();
     if !writable {
         let reason = if app.snapshot.panel.protect_effective() {
@@ -222,6 +225,44 @@ fn handle_axis_keys(app: &mut LincApp, ui: &mut Ui) {
     });
 }
 
+/// `A` makes the selected table row the active work system (`G54`..`G59.3`).
+///
+/// Page-local by construction: only `offsets::show` calls this, so the key is
+/// neither consumed nor acted on while another page is in front. An in-place
+/// edit or a dialog owns the keyboard first, and a plain text field keeps `A`
+/// as typed input.
+fn handle_activate_key(app: &mut LincApp, ui: &mut Ui) {
+    if app.overlay_open()
+        || app.offsets.editing
+        || app.offsets.dro_edit.is_some()
+        || ui.ctx().text_edit_focused()
+    {
+        return;
+    }
+    let activate = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::A));
+    if !activate {
+        return;
+    }
+    let Some(index) = app
+        .snapshot
+        .offsets
+        .offsets
+        .get(app.offsets.selected_row)
+        .map(|offset| offset.index)
+    else {
+        app.toast("no work offset selected", theme::WARNING);
+        return;
+    };
+    if app.snapshot.offsets.active_index == Some(index) {
+        app.toast(
+            format!("{} is already active", linc_core::model::wcs_name(index)),
+            theme::MUTED,
+        );
+        return;
+    }
+    app.send(MachineCommand::ActivateWorkOffset { index });
+}
+
 /// Height of the toolpath panel beside the table.
 const PREVIEW_HEIGHT: f32 = 260.0;
 
@@ -391,7 +432,7 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
             theme::section_header(ui, "WORK OFFSETS");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
-                    RichText::new("ARROWS MOVE · ENTER EDIT · + - * / ACCEPTED")
+                    RichText::new("ARROWS MOVE · ENTER EDIT · A ACTIVATE · + - * / ACCEPTED")
                         .monospace()
                         .size(theme::font_size(9.0))
                         .color(theme::MUTED),

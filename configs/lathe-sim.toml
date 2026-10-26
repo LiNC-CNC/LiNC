@@ -21,7 +21,9 @@ changer = "turret"
 # turret is enabled. The current lathe table is TXZIJDQR.
 
 [mdi]
-quick_commands = ["G0", "G1", "G2", "G3", "G7", "G8", "G95", "G96", "M3", "M4", "M5", "M8", "M9", "T"]
+# The lathe writes arcs in XZ, so a saved program must not carry base's G17
+# (XY plane). Everything else stays at the base preamble and postamble.
+save_preamble = ["G18", "G21", "G40", "G49", "G80", "G90"]
 
 [probe]
 enabled = false

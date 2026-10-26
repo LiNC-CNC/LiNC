@@ -690,7 +690,7 @@ impl SimBackend {
         }
     }
 
-    fn require_issue(&self, origin: MdiOrigin) -> Result<(), MachineError> {
+    fn require_ready(&self) -> Result<(), MachineError> {
         if !self.snapshot.panel.connected || self.snapshot.panel.communication_error {
             return Err(MachineError::PanelOffline);
         }
@@ -711,6 +711,14 @@ impl SimBackend {
         if self.snapshot.task.interp != InterpState::Idle {
             return Err(MachineError::NotIdle);
         }
+        if self.snapshot.probe_trip_active() {
+            return Err(MachineError::ProbeTripped);
+        }
+        Ok(())
+    }
+
+    fn require_issue(&self, origin: MdiOrigin) -> Result<(), MachineError> {
+        self.require_ready()?;
         if origin == MdiOrigin::Mdi && self.snapshot.panel.mode.mode() != Some(PanelMode::Mdi) {
             return Err(MachineError::WrongPanelMode);
         }
@@ -1259,6 +1267,44 @@ impl MachineBackend for SimBackend {
                     Err(MachineError::Invalid("unknown work offset".into()))
                 }
             }
+            MachineCommand::ActivateWorkOffset { index } => {
+                self.require_ready()?;
+                if !(1..=9).contains(&index) {
+                    return Err(MachineError::Invalid(
+                        "work offset must be G54-G59.3".into(),
+                    ));
+                }
+                let Some(values) = self
+                    .snapshot
+                    .offsets
+                    .offsets
+                    .iter()
+                    .find(|offset| offset.index == index)
+                    .map(|offset| offset.values.clone())
+                else {
+                    return Err(MachineError::Invalid("unknown work offset".into()));
+                };
+                self.snapshot.offsets.active_index = Some(index);
+                self.snapshot.offsets.revision += 1;
+                // The simulator keeps the DRO's work values directly. Rebase
+                // them from the machine position so the display follows the
+                // newly active system, as the native backend's poll does.
+                let axes: Vec<String> = self
+                    .snapshot
+                    .positions
+                    .axes
+                    .keys()
+                    .map(str::to_string)
+                    .collect();
+                for axis in axes {
+                    if let Some(offset) = values.get(&axis) {
+                        if let Some(position) = self.snapshot.positions.axes.get_mut(&axis) {
+                            position.work = position.machine - offset;
+                        }
+                    }
+                }
+                Ok(())
+            }
             MachineCommand::RunFromLine { line } => {
                 if !self.snapshot.writes_allowed() {
                     if self.snapshot.panel.protect_effective() {
@@ -1463,7 +1509,9 @@ impl MachineBackend for SimBackend {
             }
             MachineCommand::AbortProgram => {
                 // K4 is halui.program.stop: no mode or idle gate, because a
-                // reset has to be able to stop whatever is running.
+                // reset has to be able to stop whatever is running. The same
+                // reset clears a latched probe trip.
+                self.snapshot.probe_trip = None;
                 self.snapshot.task.running = false;
                 self.snapshot.task.paused = false;
                 self.snapshot.task.motion_active = false;
@@ -1478,6 +1526,11 @@ impl MachineBackend for SimBackend {
             MachineCommand::SetHalOutput { output, value } => {
                 if !value.matches(output) {
                     return Err(MachineError::Invalid("wrong HAL value type".into()));
+                }
+                if matches!(output, LincOutput::JogIncrement | LincOutput::JogSpeed)
+                    && self.snapshot.probe_trip_active()
+                {
+                    return Err(MachineError::ProbeTripped);
                 }
                 match output {
                     LincOutput::ToolChangeConfirm => {
@@ -1608,6 +1661,42 @@ enabled = true
     }
 
     #[test]
+    fn activating_a_work_system_changes_the_active_row_and_rebases_the_dro() {
+        use crate::command::MachineCommand;
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        {
+            let g55 = backend
+                .snapshot
+                .offsets
+                .offsets
+                .iter_mut()
+                .find(|offset| offset.index == 2)
+                .expect("G55 row");
+            g55.values.insert("X", 12.5);
+        }
+        backend
+            .send(MachineCommand::ActivateWorkOffset { index: 2 })
+            .expect("G55 activates");
+        let snapshot = backend.snapshot();
+        assert_eq!(snapshot.offsets.active_index, Some(2));
+        assert_eq!(
+            snapshot
+                .positions
+                .axes
+                .get("X")
+                .map(|position| position.work),
+            Some(-12.5),
+            "the DRO follows the newly active system"
+        );
+
+        let error = backend
+            .send(MachineCommand::ActivateWorkOffset { index: 10 })
+            .unwrap_err();
+        assert!(matches!(error, MachineError::Invalid(message) if message.contains("G54")));
+    }
+
+    #[test]
     fn jog_selections_survive_a_poll() {
         // Regression: the jog selections were stored in `panel`, which is
         // rebuilt from the panel service on every poll, so they were reset to
@@ -1644,6 +1733,51 @@ enabled = true
             .unwrap_err();
         assert_eq!(error, MachineError::WrongPanelMode);
         backend.set_panel_mode(PanelMode::Mdi);
+        backend
+            .send(MachineCommand::IssueMdi {
+                block: "G0 X0".into(),
+                origin: MdiOrigin::Mdi,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn probe_trip_refuses_commands_until_the_reset_clears_it() {
+        use crate::faults::{ProbeTripFault, ProbeTripKind};
+
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        backend.snapshot.probe_trip = Some(ProbeTripFault::new(
+            ProbeTripKind::CoordinateJog,
+            ProbeTripKind::CoordinateJog.message(),
+            1,
+        ));
+
+        let refused = backend
+            .send(MachineCommand::IssueMdi {
+                block: "G0 X0".into(),
+                origin: MdiOrigin::Mdi,
+            })
+            .unwrap_err();
+        assert_eq!(refused, MachineError::ProbeTripped);
+        assert_eq!(
+            backend.snapshot.positions.axes.get("X").map(|p| p.machine),
+            Some(0.0)
+        );
+
+        // Jog parameters are motion commands too; the fault stops them before
+        // the controller sees a new value.
+        let refused = backend
+            .send(MachineCommand::SetHalOutput {
+                output: LincOutput::JogSpeed,
+                value: HalValue::Float(10.0),
+            })
+            .unwrap_err();
+        assert_eq!(refused, MachineError::ProbeTripped);
+
+        // The controller reset is the only clear path.
+        backend.send(MachineCommand::AbortProgram).unwrap();
+        assert!(backend.snapshot().probe_trip.is_none());
         backend
             .send(MachineCommand::IssueMdi {
                 block: "G0 X0".into(),

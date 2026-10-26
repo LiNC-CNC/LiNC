@@ -156,6 +156,12 @@ pub enum MachineCommand {
         values: AxisMap<f64>,
         rotation: Option<f64>,
     },
+    /// Make work system `index` (`G54`..`G59.3`) the active one. This selects
+    /// the coordinate system; it does not write the stored row. The OFFSETS
+    /// page's `A` key is the only caller.
+    ActivateWorkOffset {
+        index: u8,
+    },
     SetG92Offset {
         values: AxisMap<f64>,
     },
@@ -214,6 +220,7 @@ impl MachineCommand {
             Self::LoadProgram { .. } => "Load program",
             Self::SaveProgram { .. } => "Save program",
             Self::SetWorkOffset { .. } => "Set work offset",
+            Self::ActivateWorkOffset { .. } => "Activate work offset",
             Self::SetG92Offset { .. } => "Set G92 offset",
             Self::ZeroWorkOffset { .. } => "Zero work offset",
             Self::SetWorkPosition { .. } => "Set work position",
@@ -248,6 +255,8 @@ pub enum MachineError {
     ProgramRunning,
     #[error("panel mode does not permit this action")]
     WrongPanelMode,
+    #[error("probe tripped; reset the controller first")]
+    ProbeTripped,
     #[error("unsupported command: {0}")]
     Unsupported(String),
     #[error("invalid command: {0}")]
@@ -286,6 +295,7 @@ impl MachineError {
             Self::NotIdle => "NOT IDLE",
             Self::ProgramRunning => "RUNNING",
             Self::WrongPanelMode => "WRONG MODE",
+            Self::ProbeTripped => "PROBE TRIPPED",
             Self::Unsupported(_) => "UNSUPPORTED",
             Self::Invalid(_) => "INVALID",
             Self::Io(_) => "I/O",

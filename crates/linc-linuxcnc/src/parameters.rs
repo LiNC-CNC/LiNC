@@ -132,6 +132,13 @@ impl ParameterFile {
         self.dirty.insert(key);
     }
 
+    /// Record the active work system (`5220`), so a session killed before the
+    /// interpreter syncs still restores the system the operator selected.
+    pub fn record_active_index(&mut self, index: u8) {
+        self.values.insert(ACTIVE_WCS, index.clamp(1, 9) as f64);
+        self.dirty.insert(ACTIVE_WCS);
+    }
+
     pub fn record_g92(&mut self, values: &AxisMap<f64>, axes: &[String]) {
         for (axis_index, axis) in axes.iter().enumerate() {
             if let Some(value) = values.get(axis) {
@@ -325,5 +332,16 @@ mod tests {
         let reread = ParameterFile::load(Some(dir.path().join("rs274ngc.var")));
         assert_eq!(reread.work_offset(1, &axes).get("X"), Some(&-1.0));
         assert_eq!(reread.work_offset(1, &axes).get("Y"), Some(&5.0));
+    }
+
+    #[test]
+    fn the_selected_work_system_is_mirrored_to_the_parameter_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rs274ngc.var");
+        std::fs::write(&path, "5220\t1.000000\n").unwrap();
+        let mut parameters = ParameterFile::load(Some(path.clone()));
+        parameters.record_active_index(5);
+        parameters.save().unwrap();
+        assert_eq!(ParameterFile::load(Some(path)).active_index(), 5);
     }
 }

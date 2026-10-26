@@ -10,10 +10,9 @@
 //! - Scene::build walks the model's meshes once, orients their normals, bakes
 //!   the flat lighting into vertex colours and collects the grid, the
 //!   limit-plane outlines and the axis labels. It runs when the model changes.
-//! - Scene::screen_mesh projects the scene for the current camera. It runs when
-//!   the camera, the viewport or the scene changes, and the tool - a few
-//!   hundred triangles that follow the live tip - is a per-frame mesh of its
-//!   own.
+//! - Scene::screen_mesh projects the fixed scene for the current camera. The
+//!   column, belt-drive head and tool follow the live position in a second,
+//!   much smaller per-frame mesh.
 //!
 //! Machine coordinates, the same convention the model uses: millimetres, X to
 //! the right, Y to the back, Z up, origin at machine X0Y0Z0.
@@ -299,11 +298,13 @@ pub struct Label {
 #[derive(Debug, Clone, Default)]
 pub struct Scene {
     pub tris: Vec<Tri>,
+    column_tris: Vec<Tri>,
+    head_tris: Vec<Tri>,
+    reference_gauge: P3,
     /// Drawn over the triangles: the table grid, which sits on the table's own
     /// top face and is hidden by it otherwise.
     pub grid: Vec<Line>,
-    /// Drawn under the triangles: the X/Y/Z triad, so a part in front of it
-    /// occludes it.
+    /// Drawn over every mesh: the always-visible machine origin triad.
     pub axes: Vec<Line>,
     /// Drawn over the triangles: travel box and limit planes.
     pub outlines: Vec<Line>,
@@ -322,6 +323,19 @@ impl Scene {
         for part in &model.machine().parts {
             scene.tris.extend(mesh_tris(part, part_color(&part.name)));
         }
+        scene.reference_gauge = model.machine().reference_gauge;
+        scene.column_tris = model
+            .machine()
+            .column_parts
+            .iter()
+            .flat_map(|part| mesh_tris(part, part_color(&part.name)))
+            .collect();
+        scene.head_tris = model
+            .machine()
+            .head_parts
+            .iter()
+            .flat_map(|part| mesh_tris(part, part_color(&part.name)))
+            .collect();
         for workpiece in model.workpieces() {
             if !workpiece.visible || workpiece.mesh.is_empty() {
                 continue;
@@ -341,6 +355,8 @@ impl Scene {
     /// True when there is nothing to draw.
     pub fn is_empty(&self) -> bool {
         self.tris.is_empty()
+            && self.column_tris.is_empty()
+            && self.head_tris.is_empty()
             && self.grid.is_empty()
             && self.axes.is_empty()
             && self.outlines.is_empty()
@@ -351,6 +367,23 @@ impl Scene {
         self.tris.len()
     }
 
+    /// The X/Y-moving column at a live gauge-line position.
+    pub fn column_at(&self, gauge: P3) -> Vec<Tri> {
+        translated_tris(
+            &self.column_tris,
+            [
+                gauge[0] - self.reference_gauge[0],
+                gauge[1] - self.reference_gauge[1],
+                0.0,
+            ],
+        )
+    }
+
+    /// The X/Y/Z-moving head at a live gauge-line position.
+    pub fn head_at(&self, gauge: P3) -> Vec<Tri> {
+        translated_tris(&self.head_tris, sub(gauge, self.reference_gauge))
+    }
+
     /// Project the scene into an egui mesh.
     ///
     /// Triangles facing away from the eye and triangles crossing the near
@@ -359,6 +392,30 @@ impl Scene {
     pub fn screen_mesh(&self, projector: &Projector) -> egui::Mesh {
         screen_mesh_of(&self.tris, projector)
     }
+}
+
+fn translated_tris(tris: &[Tri], delta: P3) -> Vec<Tri> {
+    tris.iter()
+        .map(|tri| {
+            let mut moved = *tri;
+            moved.a = [
+                tri.a[0] + delta[0],
+                tri.a[1] + delta[1],
+                tri.a[2] + delta[2],
+            ];
+            moved.b = [
+                tri.b[0] + delta[0],
+                tri.b[1] + delta[1],
+                tri.b[2] + delta[2],
+            ];
+            moved.c = [
+                tri.c[0] + delta[0],
+                tri.c[1] + delta[1],
+                tri.c[2] + delta[2],
+            ];
+            moved
+        })
+        .collect()
 }
 
 /// The machine table's top face, or the bottom of travel when the model has no
@@ -672,13 +729,17 @@ fn push_tri_away(out: &mut Vec<Tri>, a: P3, b: P3, c: P3, color: Color32, inside
 
 fn part_color(name: &str) -> Color32 {
     match name {
-        "base" => Color32::from_rgb(0x38, 0x3b, 0x3f),
-        "table" => Color32::from_rgb(0x51, 0x54, 0x59),
-        "column" => Color32::from_rgb(0x45, 0x48, 0x4c),
-        "head" => Color32::from_rgb(0x5b, 0x5e, 0x63),
-        "spindle" => Color32::from_rgb(0x69, 0x6c, 0x71),
-        "holder" => Color32::from_rgb(0x77, 0x7a, 0x7f),
-        _ => Color32::from_rgb(0x4d, 0x50, 0x55),
+        "base" | "column-foot" => Color32::from_rgb(0x43, 0x50, 0x5a),
+        "table" => Color32::from_rgb(0x7c, 0x87, 0x90),
+        "column" => Color32::from_rgb(0x50, 0x64, 0x72),
+        "z-rail-left" | "z-rail-right" => Color32::from_rgb(0xb3, 0xbb, 0xc1),
+        "head" => Color32::from_rgb(0xb9, 0xc2, 0xc8),
+        "spindle" => Color32::from_rgb(0x7f, 0x8d, 0x97),
+        "holder" => Color32::from_rgb(0xc2, 0xc8, 0xcd),
+        "motor" => Color32::from_rgb(0x35, 0x60, 0x7c),
+        "spindle-pulley" | "motor-pulley" => Color32::from_rgb(0xd0, 0xb3, 0x5e),
+        "belt-front" | "belt-back" => Color32::from_rgb(0x20, 0x23, 0x26),
+        _ => Color32::from_rgb(0x68, 0x72, 0x79),
     }
 }
 
@@ -787,7 +848,7 @@ fn axis_triad(lines: &mut Vec<Line>, labels: &mut Vec<Label>, travel: &Bounds) {
     let origin: P3 = [
         0.0f64.clamp(travel.min[0], travel.max[0]),
         0.0f64.clamp(travel.min[1], travel.max[1]),
-        travel.min[2] + size[2] * 0.05,
+        0.0f64.clamp(travel.min[2], travel.max[2]),
     ];
     let reach = size[0].max(size[1]).max(size[2]).max(50.0) * 0.12;
     let axes = [
@@ -834,6 +895,11 @@ pub struct Live {
 /// the scene changes, so a still camera costs one Arc clone per frame.
 pub struct Viewer {
     pub camera: Camera,
+    /// Draw the X/Y-moving column. Off by default: it stands between the eye
+    /// and the tool in the usual views.
+    pub show_column: bool,
+    /// Draw the X/Y/Z-moving milling head. Off by default for the same reason.
+    pub show_head: bool,
     scene: Scene,
     generation: u64,
     cache: Option<CachedMesh>,
@@ -885,6 +951,8 @@ impl Viewer {
         camera.fit(&scene.bounds);
         Self {
             camera,
+            show_column: false,
+            show_head: false,
             scene,
             generation: 0,
             cache: None,
@@ -915,6 +983,19 @@ impl Viewer {
     pub fn look_at(&mut self, point: P3, distance_mm: f64) {
         self.camera.target = point;
         self.camera.distance_mm = distance_mm.clamp(MIN_DISTANCE_MM, MAX_DISTANCE_MM);
+    }
+
+    /// The moving column and head at a live gauge-line position, under this
+    /// view's visibility toggles. Both start hidden so the tool is unobstructed.
+    pub fn moving_machine_at(&self, gauge: P3) -> Vec<Tri> {
+        let mut parts = Vec::new();
+        if self.show_column {
+            parts.extend(self.scene.column_at(gauge));
+        }
+        if self.show_head {
+            parts.extend(self.scene.head_at(gauge));
+        }
+        parts
     }
 
     /// Draw the view into the remaining space of a UI.
@@ -950,11 +1031,6 @@ impl Viewer {
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, BACKGROUND);
 
-        // Annotations that live in the machine, so the body and the parts
-        // occlude them: the triad and the limit planes.
-        for line in &self.scene.axes {
-            draw_line(&painter, &projector, line);
-        }
         for line in &self.scene.outlines {
             draw_line(&painter, &projector, line);
         }
@@ -962,12 +1038,23 @@ impl Viewer {
         let mesh = self.cached_mesh(&projector, rect);
         painter.add(egui::Shape::mesh(mesh));
 
-        // The grid sits on the table's own top face, so drawing it before the
-        // mesh would hide it behind the opaque table. egui blends in draw
-        // order, which is not a depth test: a hairline over the table reads the
-        // way an engraved grid does.
+        // The grid reads as engraved into the opaque table rather than hidden
+        // beneath it; egui has no depth buffer between these draw calls.
         for line in &self.scene.grid {
             draw_line(&painter, &projector, line);
+        }
+
+        let gauge = [live.tip[0], live.tip[1], live.tip[2] - live.tool.z_offset];
+        let mut moving = self.moving_machine_at(gauge);
+        moving.extend(tool_tris(&live.tool, live.tip, live.colliding));
+        if !moving.is_empty() {
+            painter.add(egui::Shape::mesh(screen_mesh_of(&moving, &projector)));
+        }
+
+        // The origin is an annotation, not a physical object: keep it visible
+        // even when the tool or casting occupies the same machine coordinates.
+        for line in &self.scene.axes {
+            draw_axis_line(&painter, &projector, line);
         }
         for label in &self.scene.labels {
             if let Some((pos, _)) = projector.project(label.at) {
@@ -979,11 +1066,6 @@ impl Viewer {
                     label.color,
                 );
             }
-        }
-
-        let tool = tool_tris(&live.tool, live.tip, live.colliding);
-        if !tool.is_empty() {
-            painter.add(egui::Shape::mesh(screen_mesh_of(&tool, &projector)));
         }
         if let Some(point) = live.marker {
             if let Some((pos, depth)) = projector.project(point) {
@@ -1011,11 +1093,19 @@ impl Viewer {
 }
 
 fn draw_line(painter: &egui::Painter, projector: &Projector, line: &Line) {
+    draw_stroked_line(painter, projector, line, 1.0);
+}
+
+fn draw_axis_line(painter: &egui::Painter, projector: &Projector, line: &Line) {
+    draw_stroked_line(painter, projector, line, 2.0);
+}
+
+fn draw_stroked_line(painter: &egui::Painter, projector: &Projector, line: &Line, width: f32) {
     let (Some((a, _)), Some((b, _))) = (projector.project(line.a), projector.project(line.b))
     else {
         return;
     };
-    painter.line_segment([a, b], Stroke::new(1.0, line.color));
+    painter.line_segment([a, b], Stroke::new(width, line.color));
 }
 
 /// The colours the side panel's legend explains.

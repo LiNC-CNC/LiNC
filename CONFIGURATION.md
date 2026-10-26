@@ -556,9 +556,9 @@ bar.
 | `[tools]` | `changer`, `atc_pockets`, `manual_confirm` |
 | `[manual]` | `auto_open`, `close_on_mode_exit`, `show_machine_coordinates`, `show_dtg`, `trail` |
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
-| `[mdi]` | `execute_on_enter`, `auto_focus`, `history_limit`, `max_command_length`, `quick_commands` |
+| `[mdi]` | `execute_on_enter`, `auto_focus`, `history_limit`, `max_command_length`, `save_preamble`, `save_postamble` |
 | `[toolpath]` | `show_grid`, `show_live_trail`, `trail_max_points`, `clear_trail_action`, `show_program_bounds`, `show_machine_bounds`, `show_stock`, `stock_alpha`, `bounds_mode` (preference), `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
-| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds` |
+| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `mdi_buffer_delete`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
 | `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_execution`, `quit_requires_idle`, `confirm_quit` |
 | `[backend]` | `kind`, `transport`, `status_hz`, `hal_hz`, `connect_timeout_ms` |
@@ -590,6 +590,44 @@ Enums:
 - `diagnostics.panel_link_stats`: `none`, `optional`, `required`
 - `files.usb_backend`: `udisks2`, `none`
 - `files.overwrite`: `confirm`
+
+### `[mdi]`
+
+The MDI pane on the MAIN page: the temporary block buffer, the input and the
+`Ctrl+S` save. There is no MDI page and no quick-command button row.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `execute_on_enter` | `true` | `Enter` issues and commits the block. |
+| `auto_focus` | `true` | The single-line input takes focus when the pane appears. |
+| `history_limit` | `50` | Maximum number of blocks held in the buffer. |
+| `max_command_length` | `256` | Longest accepted block, in characters. |
+| `save_preamble` | `["G17", "G21", "G40", "G49", "G80", "G90"]` | Lines the `Ctrl+S` save writes above the buffer when `add pre/postamble` is ticked. |
+| `save_postamble` | `["M5", "M9", "M30"]` | Lines the `Ctrl+S` save writes below the buffer when `add pre/postamble` is ticked. |
+
+`quick_commands` is removed. It configured the old MDI page's quick-command
+button row, which no longer exists; the config structs reject unknown keys, so a
+profile that still sets it fails to load instead of ignoring it.
+
+### `[keys]` MDI bindings
+
+The pane's bindings; the rest of `[keys]` is unchanged.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `mdi_issue` | `Enter` | Issue and commit the block in the input. |
+| `mdi_clear` | `Escape` | Clear the uncommitted input; the buffer keeps its lines. |
+| `mdi_history_up` | `Up` | Select the previous buffer line and load it into the input. |
+| `mdi_history_down` | `Down` | Select the next buffer line and load it into the input. |
+| `mdi_line_up` | `Ctrl+Up` | Swap the selected buffer line with the one above it; the selection follows the line. At the first line it does nothing. |
+| `mdi_line_down` | `Ctrl+Down` | Swap the selected buffer line with the one below it; the selection follows the line. At the last line it does nothing. |
+| `mdi_buffer_delete` | `Ctrl+Backspace` | Delete the selected buffer line, or clear the input when that line is not in the buffer yet. |
+
+The line moves use `Ctrl`, not `Shift`: the panel keyboard has no Shift key
+(AGENTS.md, "Keyboard reality"), and the bare arrows already recall a line. A
+profile that rebinds either of them onto a bare `Up`/`Down` is rejected the way
+an unparsable chord is — the default holds and Settings names the rejected
+text — so recall is never shadowed silently.
 
 ## 11. Validation checklist
 

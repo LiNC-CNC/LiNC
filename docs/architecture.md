@@ -78,6 +78,17 @@ link the native NML client.
   `wait_complete` is used for mode switches and offset read-back. A long wait
   delays that worker's snapshots; splitting status and command clients is the
   next robustness step if command latency starts to matter.
+- **Probe trip path.** LinuxCNC's motion controller aborts the move itself and
+  sends `Probe tripped during non-probe move.`, `... during homing motion.`,
+  `... during a joint jog.` or `... during a coordinate jog.` on the `emcError`
+  channel. `poll_messages` reads it through `NmlClient::poll_error`, the
+  snapshot builder classifies the exact text into a latched
+  [`ProbeTripFault`](../crates/linc-core/src/faults.rs), and `MachineSnapshot`
+  carries it to the UI. The Messages page keeps the controller's text, the
+  shell draws a persistent banner on every page, and
+  `issue_allowed`/`validate_ready`/`validate_controller_write` fail closed
+  until `EMC_TASK_ABORT` (Esc or the banner's `RESET`) clears it. No timer, poll
+  or reconnect clears the fault, and no power-off policy is added.
 
 ### Crash isolation
 

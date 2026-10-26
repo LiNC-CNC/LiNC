@@ -203,9 +203,18 @@ pub struct HomingConfig {
 pub struct MdiConfig {
     pub execute_on_enter: bool,
     pub auto_focus: bool,
+    /// Cap on the MDI block buffer: the blocks entered this session, oldest
+    /// dropped first. The buffer outlives leaving the mode, so it is not a
+    /// per-visit list.
     pub history_limit: usize,
     pub max_command_length: usize,
-    pub quick_commands: Vec<String>,
+    /// Blocks written ahead of the buffer when the save dialog asks for a
+    /// pre/postamble. A lathe profile overrides the plane word: G17 is XY and
+    /// would put a lathe's XZ arcs in the wrong plane.
+    pub save_preamble: Vec<String>,
+    /// Blocks written after the buffer, so the saved program stops the spindle,
+    /// stops coolant and rewinds instead of leaving the machine running.
+    pub save_postamble: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -273,6 +282,12 @@ pub struct KeysConfig {
     pub mdi_clear: String,
     pub mdi_history_up: String,
     pub mdi_history_down: String,
+    /// Page-local to the MDI pane: move the selected buffer block up/down.
+    /// Ctrl by default: the panel keyboard has no Shift key.
+    pub mdi_line_up: String,
+    pub mdi_line_down: String,
+    /// Page-local to the MDI pane: drop the selected buffer block.
+    pub mdi_buffer_delete: String,
     pub help_search: String,
 }
 
@@ -315,6 +330,9 @@ impl KeysConfig {
             mdi_clear: "Escape".into(),
             mdi_history_up: "Up".into(),
             mdi_history_down: "Down".into(),
+            mdi_line_up: "Ctrl+Up".into(),
+            mdi_line_down: "Ctrl+Down".into(),
+            mdi_buffer_delete: "Ctrl+Backspace".into(),
             help_search: "/".into(),
         }
     }
@@ -1540,6 +1558,72 @@ changer = "atc"
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn mdi_and_keys_defaults_parse() {
+        let root = repo_root();
+        let profile = Profile::load(&root.join("configs/sim.toml"), None).unwrap();
+        let mdi = &profile.config.mdi;
+        assert!(mdi.execute_on_enter);
+        assert!(mdi.auto_focus);
+        assert_eq!(mdi.history_limit, 50);
+        assert_eq!(mdi.max_command_length, 256);
+        assert_eq!(
+            mdi.save_preamble,
+            ["G17", "G21", "G40", "G49", "G80", "G90"]
+        );
+        assert_eq!(mdi.save_postamble, ["M5", "M9", "M30"]);
+        let keys = &profile.config.keys;
+        assert_eq!(keys.mdi_issue, "Enter");
+        assert_eq!(keys.mdi_history_up, "Up");
+        assert_eq!(keys.mdi_buffer_delete, "Ctrl+Backspace");
+        assert_eq!(
+            KeysConfig::spec_default().mdi_buffer_delete,
+            keys.mdi_buffer_delete
+        );
+    }
+
+    #[test]
+    fn shipped_profiles_drop_quick_commands_and_keep_a_preamble() {
+        let base = include_str!("../../../configs/base.toml");
+        let lathe = include_str!("../../../configs/lathe-sim.toml");
+        for text in [base, lathe] {
+            assert!(!text.contains("quick_commands"));
+        }
+        assert!(base.contains("save_preamble = [\"G17\""));
+        // A lathe writes arcs in XZ: the XY plane word would put them elsewhere.
+        assert!(lathe.contains("save_preamble = [\"G18\""));
+    }
+
+    #[test]
+    fn a_profile_that_sets_quick_commands_no_longer_parses() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let profile = dir.path().join("sim.toml");
+        write(
+            &profile,
+            r#"schema_version = 1
+profile = "sim"
+extends = "base.toml"
+[machine]
+name = "Test"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[panel]
+kind = "simulated"
+label = "Sim panel"
+driver = "cnc-panel-sim"
+[simulation]
+enabled = true
+[mdi]
+quick_commands = ["G0"]
+"#,
+        );
+        let error = Profile::load(&profile, None).unwrap_err();
+        assert!(error.to_string().contains("quick_commands"), "{error}");
     }
 
     fn repo_root() -> PathBuf {

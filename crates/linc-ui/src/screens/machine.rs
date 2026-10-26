@@ -80,7 +80,14 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
                 let pane_bottom = viewport.bottom() - theme::BOTTOM_BAR_HEIGHT + 15.0;
                 let pane_width = (viewport.right() - 16.0 - ui.cursor().min.x).max(120.0);
                 ui.set_width(pane_width);
-                common::program_card_sized(app, ui, (pane_bottom - pane_top - 2.0).max(200.0));
+                let card_height = (pane_bottom - pane_top - 2.0).max(200.0);
+                // The panel position decides which card owns this slot: while
+                // it sits in MDI the program card is replaced by the pane.
+                if app.mdi_pane_visible() {
+                    crate::screens::mdi::pane(app, ui, card_height);
+                } else {
+                    common::program_card_sized(app, ui, card_height);
+                }
             },
         );
     });
@@ -151,7 +158,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
             let mut pitch = app.program.graph_pitch;
             let mut fit = app.program.fit_requested;
             let mut auto_fit = app.program.graph_auto_fit;
-            common::trajectory(
+            let response = common::trajectory(
                 app,
                 ui,
                 &preview,
@@ -177,6 +184,10 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
             app.program.graph_pitch = pitch;
             app.program.fit_requested = false;
             app.program.graph_auto_fit = auto_fit;
+            // The block the MDI pane is composing, drawn over the program in
+            // the pane's own colour. Nothing is drawn for an empty or
+            // unparsable block, and the pane is only up in MDI.
+            crate::screens::mdi::draw_overlay(app, ui, response.rect, view, zoom, pan, yaw, pitch);
             ui.horizontal(|ui| {
                 let program = if app.snapshot.program.display_name.is_empty() {
                     "NO PROGRAM".to_string()
@@ -246,7 +257,7 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                     let mut pitch = app.program.graph_pitch;
                     let mut fit = app.program.fit_requested;
                     let mut auto_fit = app.program.graph_auto_fit;
-                    common::trajectory(
+                    let response = common::trajectory(
                         app,
                         ui,
                         &preview,
@@ -269,6 +280,16 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                     app.program.graph_zoom = zoom;
                     app.program.graph_pan = pan;
                     app.program.fit_requested = false;
+                    crate::screens::mdi::draw_overlay(
+                        app,
+                        ui,
+                        response.rect,
+                        ViewMode::LatheXz,
+                        zoom,
+                        pan,
+                        yaw,
+                        pitch,
+                    );
                 });
             },
         );
@@ -277,11 +298,15 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
             Vec2::new(right_width, main_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("lathe-program")
-                    .max_height(main_height)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| common::program_card(app, ui));
+                if app.mdi_pane_visible() {
+                    crate::screens::mdi::pane(app, ui, main_height);
+                } else {
+                    egui::ScrollArea::vertical()
+                        .id_salt("lathe-program")
+                        .max_height(main_height)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| common::program_card(app, ui));
+                }
             },
         );
     });

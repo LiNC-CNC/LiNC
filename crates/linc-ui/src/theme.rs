@@ -1,8 +1,8 @@
 //! Graphite/blue visual system and shared widgets.
 
 use egui::{
-    Align2, Color32, CornerRadius, FontId, Frame, Margin, Response, RichText, Sense, Stroke,
-    StrokeKind, TextStyle, Ui, Vec2,
+    Align, Align2, Color32, CornerRadius, FontId, Frame, Layout, Margin, Response, RichText, Sense,
+    Stroke, StrokeKind, TextStyle, Ui, Vec2,
 };
 
 pub const SURFACE: Color32 = Color32::from_rgb(0x14, 0x16, 0x19);
@@ -31,6 +31,12 @@ pub const C5: Color32 = Color32::from_rgb(0xfb, 0x92, 0x3c);
 pub const C6: Color32 = Color32::from_rgb(0xf4, 0x72, 0xb6);
 pub const COMMENT: Color32 = Color32::from_rgb(0x94, 0xa3, 0xb8);
 pub const LINE_NUMBER: Color32 = Color32::from_rgb(0x6b, 0x72, 0x80);
+/// The MDI pane's block preview over MAIN's toolpath. Yellow is on none of the
+/// path layers the card draws — accent blue cut, muted rapid, green live trail —
+/// so the block under the caret cannot be read as one of them. The card's only
+/// other warm marks are the amber tool and the current-line dot, both flat
+/// markers rather than strokes.
+pub const MDI_PREVIEW: Color32 = C3;
 
 pub const TOP_BAR_HEIGHT: f32 = 48.0;
 /// A single read-only status line: one text row plus a small frame margin.
@@ -423,6 +429,28 @@ pub fn banner(ui: &mut Ui, color: Color32, text: &str) {
         .show(ui, |ui| {
             ui.label(RichText::new(text).strong().color(color));
         });
+}
+
+/// A persistent banner with one operator action on the right.
+///
+/// The action is the only way to clear a latched fault; the banner itself has
+/// no timer and does not disappear when the toast or message strip expires.
+pub fn banner_action(ui: &mut Ui, color: Color32, text: &str, action: &str) -> bool {
+    let mut clicked = false;
+    Frame::new()
+        .fill(color.linear_multiply(0.22))
+        .stroke(Stroke::new(1.0, color))
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(text).strong().color(color));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    clicked = action_button(ui, action, true).clicked();
+                });
+            });
+        });
+    clicked
 }
 
 pub fn separator(ui: &mut Ui) {

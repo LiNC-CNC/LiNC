@@ -10,6 +10,7 @@ use linuxcnc_nml::{
 };
 
 use linc_core::config::Profile;
+use linc_core::faults::ProbeTripState;
 use linc_core::model::*;
 use linc_core::probe::{
     direct_written_axes, ProbeCategory, ProbeMode, ProbeOperation, ProbeParameters,
@@ -139,6 +140,7 @@ pub struct SnapshotBuilder {
     next_alarm_id: u64,
     last_alarm_texts: VecDeque<String>,
     pub(crate) alarms: VecDeque<Alarm>,
+    probe_trip: ProbeTripState,
     probe_transaction: Option<LiveProbeTransaction>,
     probe_last_result: Option<ProbeResult>,
     probe_history: VecDeque<ProbeResult>,
@@ -168,6 +170,7 @@ impl SnapshotBuilder {
             next_alarm_id: 1,
             last_alarm_texts: VecDeque::new(),
             alarms: VecDeque::new(),
+            probe_trip: ProbeTripState::new(),
             probe_transaction: None,
             probe_last_result: None,
             probe_history: VecDeque::new(),
@@ -290,9 +293,20 @@ impl SnapshotBuilder {
     }
 
     pub fn push_message(&mut self, kind: MessageKind, text: &str) {
-        let message = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        // The Messages page shows the controller's text verbatim, so trim the
+        // transport's trailing newline but keep internal spacing.
+        let message = text.trim().to_string();
         if message.is_empty() {
             return;
+        }
+        if kind.is_error() {
+            // A probe trip is a latching operator fault, not just a log line.
+            // Latch before the duplicate check so a repeated trip after a
+            // clear raises the fault even when the text is still in the
+            // dedupe window.
+            if let Some(trip) = self.probe_trip.raise(&message, now_ms()) {
+                log::error!("probe trip latched ({:?}): {}", trip, message);
+            }
         }
         if self
             .last_alarm_texts
@@ -320,6 +334,18 @@ impl SnapshotBuilder {
         }
         while self.alarms.len() > MAX_EVENT_LOG {
             self.alarms.pop_back();
+        }
+    }
+
+    /// Clear the latched probe trip after the controller reset was accepted.
+    ///
+    /// The controller no longer reports the error once it is consumed, so
+    /// nothing else can clear this: no poll, age or reconnect does. Forgetting
+    /// the text in the dedupe window lets the next trip appear as a fresh
+    /// Messages entry.
+    pub fn clear_probe_trip(&mut self) {
+        if let Some(fault) = self.probe_trip.clear() {
+            self.last_alarm_texts.retain(|text| text != &fault.message);
         }
     }
 
@@ -553,6 +579,7 @@ impl SnapshotBuilder {
         self.update_program(status, &mut snapshot);
         self.update_probe(status, parameters, &mut snapshot);
         snapshot.alarms = self.alarms.clone();
+        snapshot.probe_trip = self.probe_trip.fault().cloned();
 
         let tip = ["X", "Y", "Z"].map(|axis| {
             snapshot
@@ -1329,6 +1356,83 @@ mod tests {
         carry_hal_selections(&mut converted, &stored);
         assert_eq!(converted.hal.jog_speed, Some(42.0));
         assert_eq!(converted.hal.jog_increment, Some(0.5));
+    }
+
+    #[test]
+    fn every_probe_trip_wording_latches_and_survives_rebuilds() {
+        use linc_core::faults::ProbeTripKind;
+
+        let mut builder = probe_builder();
+        let mut status = idle_status();
+        for kind in ProbeTripKind::ALL {
+            builder.clear_probe_trip();
+            builder.push_message(MessageKind::OperatorError, kind.message());
+
+            let first = poll_probe(&mut builder, &status);
+            let fault = first.probe_trip.as_ref().expect("trip latched");
+            assert_eq!(fault.kind, kind);
+            assert_eq!(fault.message, kind.message());
+
+            // Unrelated controller errors and further status polls are not a
+            // clear: only the reset path clears the fault.
+            builder.push_message(MessageKind::OperatorError, "spindle amplifier fault");
+            for _ in 0..10 {
+                status.motion.heartbeat = status.motion.heartbeat.wrapping_add(1);
+                let later = poll_probe(&mut builder, &status);
+                assert_eq!(later.probe_trip.as_ref().map(|f| f.kind), Some(kind));
+            }
+        }
+    }
+
+    #[test]
+    fn the_clear_path_is_the_only_clear() {
+        let mut builder = probe_builder();
+        let status = idle_status();
+        builder.push_message(
+            MessageKind::OperatorError,
+            "Probe tripped during a coordinate jog.",
+        );
+        assert!(poll_probe(&mut builder, &status).probe_trip_active());
+
+        builder.clear_probe_trip();
+        assert!(poll_probe(&mut builder, &status).probe_trip.is_none());
+
+        // A later non-trip message cannot resurrect it.
+        builder.push_message(MessageKind::OperatorText, "program end");
+        assert!(poll_probe(&mut builder, &status).probe_trip.is_none());
+
+        // The same wording after a clear latches again and is a new Messages
+        // entry, because the clear also forgets the dedupe text.
+        builder.push_message(
+            MessageKind::OperatorError,
+            "Probe tripped during a coordinate jog.",
+        );
+        let tripped = poll_probe(&mut builder, &status);
+        assert!(tripped.probe_trip_active());
+        assert_eq!(
+            tripped
+                .alarms
+                .iter()
+                .filter(|alarm| alarm.message == "Probe tripped during a coordinate jog.")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn probe_trip_text_reaches_messages_verbatim() {
+        let mut builder = probe_builder();
+        let status = idle_status();
+        builder.push_message(
+            MessageKind::OperatorError,
+            "  Probe tripped during a joint jog.\n",
+        );
+        let snapshot = poll_probe(&mut builder, &status);
+        assert_eq!(
+            snapshot.alarms.front().map(|alarm| alarm.message.as_str()),
+            Some("Probe tripped during a joint jog.")
+        );
+        assert!(snapshot.probe_trip_active());
     }
 
     fn probe_builder() -> SnapshotBuilder {

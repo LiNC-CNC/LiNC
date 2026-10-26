@@ -85,9 +85,15 @@ close_on_mode_exit = true
 # Enter issues through Probe Basic issue_mdi; no staging, no cycle-start gate.
 execute_on_enter = true
 auto_focus = true
+# Cap on the MDI block buffer. The buffer survives leaving the mode, so this is
+# the session's block count, not one visit's.
 history_limit = 50
 max_command_length = 256
-quick_commands = ["G0", "G1", "G2", "G3", "M3", "M5", "M6", "M8", "M9", "G54", "G38.2", "T"]
+# Ctrl+S writes the buffer to a new .ngc file. The preamble runs before the
+# blocks and the postamble after them; the dialog's checkbox turns both off.
+# G17 is the mill plane: a lathe profile overrides it with G18.
+save_preamble = ["G17", "G21", "G40", "G49", "G80", "G90"]
+save_postamble = ["M5", "M9", "M30"]
 
 [toolpath]
 show_grid = false
@@ -156,6 +162,12 @@ mdi_issue = "Enter"
 mdi_clear = "Escape"
 mdi_history_up = "Up"
 mdi_history_down = "Down"
+# Move the selected buffer block. Ctrl, not Shift: the CNC keyboard has no Shift
+# key (AGENTS.md "Keyboard reality"), and the plain arrows recall.
+mdi_line_up = "Ctrl+Up"
+mdi_line_down = "Ctrl+Down"
+# The panel has no Delete key; Ctrl+Backspace drops the selected buffer block.
+mdi_buffer_delete = "Ctrl+Backspace"
 help_search = "/"
 
 [help]

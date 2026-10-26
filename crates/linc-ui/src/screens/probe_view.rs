@@ -386,8 +386,6 @@ pub struct ProbeLayout {
     pub routine_grid: Option<egui::Rect>,
     /// One parameter value field: the click target for Ctrl+P/arrow editing.
     pub parameter_target: Option<egui::Rect>,
-    /// One "U UPDATE PARAMS" / reset button from the results card.
-    pub card_action_target: Option<egui::Rect>,
     /// The whole left column (DRO, parameters, results) as it was laid out.
     pub left_column: Option<egui::Rect>,
     /// The routines card, whose Run context must stay inside the page.
@@ -418,7 +416,6 @@ impl Default for ProbeLayout {
             run_reason_text: None,
             routine_grid: None,
             parameter_target: None,
-            card_action_target: None,
             left_column: None,
             routines_card: None,
             calibrate_panel: None,
@@ -1170,39 +1167,15 @@ fn param_field_sized(
 fn results_card(app: &mut LincApp, ui: &mut Ui) {
     theme::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
+        // The result grid is the dense part of the card: one 44 px target per
+        // row would carry the left column past the 1280x720 page.
         ui.spacing_mut().interact_size.y = 12.0;
         ui.spacing_mut().item_spacing.y = 1.0;
-        ui.spacing_mut().button_padding.y = 1.0;
         ui.style_mut().text_styles.insert(
             egui::TextStyle::Body,
             FontId::monospace(theme::font_size(9.0)),
         );
         theme::section_header(ui, "PROBE RESULTS");
-        ui.horizontal(|ui| {
-            // One target-height row of four: the results card has to pay for
-            // its taller targets inside the 1280x720 column height.
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let button_w = ((ui.available_width() - 12.0) / 4.0).max(80.0);
-            let update = small_button(ui, "U UPDATE PARAMS", button_w);
-            #[cfg(test)]
-            {
-                app.probe_layout
-                    .card_action_target
-                    .get_or_insert(update.rect);
-            }
-            if update.clicked() {
-                update_probe_params(app);
-            }
-            if small_button(ui, "Ctrl+R RESET ALL", button_w).clicked() {
-                reset_probe_data(app, ProbeDataReset::All);
-            }
-            if small_button(ui, "Ctrl+X RESET X", button_w).clicked() {
-                reset_probe_data(app, ProbeDataReset::X);
-            }
-            if small_button(ui, "Ctrl+Y RESET Y", button_w).clicked() {
-                reset_probe_data(app, ProbeDataReset::Y);
-            }
-        });
         let result = app.snapshot.probe.last_result.as_ref();
         let units = if app.snapshot.positions.units.trim().is_empty() {
             "—"
@@ -1362,30 +1335,6 @@ fn reset_probe_data(app: &mut LincApp, reset: ProbeDataReset) {
         ProbeDataReset::Y => ("o<y_data_reset> call", "probe Y data reset"),
     };
     issue_probe_mdi(app, block.into(), toast);
-}
-
-fn small_button(ui: &mut Ui, text: &str, width: f32) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, TARGET), Sense::click());
-    let fill = if response.hovered() {
-        theme::PANEL_RAISED
-    } else {
-        theme::SURFACE
-    };
-    ui.painter().rect_filled(rect, CornerRadius::same(3), fill);
-    ui.painter().rect_stroke(
-        rect,
-        CornerRadius::same(3),
-        Stroke::new(1.0, theme::BORDER),
-        StrokeKind::Inside,
-    );
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        text,
-        FontId::proportional(8.0),
-        theme::FG,
-    );
-    response
 }
 
 fn result_field(ui: &mut Ui, label: &str, value: Option<f64>, relevant: bool, apply_source: bool) {

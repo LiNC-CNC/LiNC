@@ -10,6 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::faults::ProbeTripFault;
+
 pub const MAX_EVENT_LOG: usize = 1000;
 
 /// Ordered axis map. Axis order is the LinuxCNC `COORDINATES` order.
@@ -1278,6 +1280,10 @@ pub struct MachineSnapshot {
     pub panel: PanelSnapshot,
     pub hal: HalOutputs,
     pub alarms: VecDeque<Alarm>,
+    /// A LinuxCNC probe trip latched by the HMI. It stays set until the
+    /// operator performs the controller reset; it never expires.
+    #[serde(default)]
+    pub probe_trip: Option<ProbeTripFault>,
     /// Live tool-tip trail in machine coordinates, oldest first.
     pub live_trail: Arc<Vec<[f64; 3]>>,
     /// Actual tool tip in machine coordinates, if known.
@@ -1310,6 +1316,7 @@ impl MachineSnapshot {
             panel: PanelSnapshot::default(),
             hal: HalOutputs::default(),
             alarms: VecDeque::new(),
+            probe_trip: None,
             live_trail: Arc::new(Vec::new()),
             tool_tip: None,
             bridge: None,
@@ -1323,11 +1330,19 @@ impl MachineSnapshot {
 
     /// Program/offset/tool writes require idle, machine on, and no protect.
     pub fn writes_allowed(&self) -> bool {
-        self.task.power == MachinePower::On
+        self.probe_trip.is_none()
+            && self.task.power == MachinePower::On
             && self.task.interp == InterpState::Idle
             && !self.task.running
             && !self.panel.protect_effective()
             && self.can_modify_machine()
+    }
+
+    /// True while a LinuxCNC probe trip is latched. The move already stopped in
+    /// the controller; every motion/MDI write fails closed until the operator's
+    /// reset clears the fault.
+    pub fn probe_trip_active(&self) -> bool {
+        self.probe_trip.is_some()
     }
 
     pub fn program_editing_allowed(&self) -> bool {
@@ -1343,7 +1358,8 @@ impl MachineSnapshot {
     }
 
     pub fn mdi_allowed(&self) -> bool {
-        self.panel.connected
+        !self.probe_trip_active()
+            && self.panel.connected
             && !self.panel.communication_error
             && self.panel.mode.mode() == Some(PanelMode::Mdi)
             && self.task.power == MachinePower::On
@@ -1355,6 +1371,9 @@ impl MachineSnapshot {
 
     /// Probe/tool-change issue uses Probe Basic `issue_mdi` preconditions.
     pub fn issue_allowed(&self) -> Result<(), String> {
+        if self.probe_trip_active() {
+            return Err("probe tripped; reset the controller before issuing commands".into());
+        }
         if !self.panel.connected || self.panel.communication_error {
             return Err("panel link is not available".into());
         }
@@ -1515,6 +1534,33 @@ mod tests {
         assert!(snapshot.issue_allowed().is_err());
         snapshot.panel.mode = PanelModeValidity::Valid(PanelMode::Auto);
         assert!(snapshot.issue_allowed().is_ok());
+    }
+
+    #[test]
+    fn probe_trip_fails_closed_for_mdi_and_writes() {
+        use crate::faults::{ProbeTripFault, ProbeTripKind};
+
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.panel.connected = true;
+        snapshot.panel.mode = PanelModeValidity::Valid(PanelMode::Mdi);
+        snapshot.panel.program_protect = false;
+        snapshot.panel.program_protect_known = true;
+        snapshot.task.power = MachinePower::On;
+        snapshot.task.interp = InterpState::Idle;
+        snapshot.machine.homed.insert("X", true);
+        assert!(snapshot.issue_allowed().is_ok());
+        assert!(snapshot.mdi_allowed());
+        assert!(snapshot.writes_allowed());
+
+        snapshot.probe_trip = Some(ProbeTripFault::new(
+            ProbeTripKind::CoordinateJog,
+            ProbeTripKind::CoordinateJog.message(),
+            1,
+        ));
+        assert!(snapshot.probe_trip_active());
+        assert!(snapshot.issue_allowed().is_err());
+        assert!(!snapshot.mdi_allowed());
+        assert!(!snapshot.writes_allowed());
     }
 
     #[test]

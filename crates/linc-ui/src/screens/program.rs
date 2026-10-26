@@ -635,32 +635,54 @@ fn highlight_job(
         if line.is_empty() {
             job.append(" ", 0.0, format.clone());
         } else {
-            let mut cursor = 0usize;
-            for token in lex_line(line) {
-                if token.start > cursor {
-                    job.append(&line[cursor..token.start], 0.0, format.clone());
-                }
-                let mut token_format = TextFormat {
-                    font_id: FontId::monospace(editor_font()),
-                    color: token_color(token.kind),
-                    background: format.background,
-                    italics: token.kind == TokenKind::Comment,
-                    ..Default::default()
-                };
-                if token.kind == TokenKind::Comment {
-                    token_format.color = theme::COMMENT;
-                }
-                job.append(&token.display(), 0.0, token_format);
-                cursor = token.end;
-            }
-            if cursor < line.len() {
-                job.append(&line[cursor..], 0.0, format.clone());
-            }
+            append_gcode_line(&mut job, line, &format);
         }
         if index + 1 < lines.len() {
             job.append("\n", 0.0, format.clone());
         }
     }
+    job
+}
+
+/// Append one G-code line in highlighted runs, gaps included: every token plus
+/// the source text between and after them, so the laid-out job is the line
+/// character for character. `format` supplies the font and any background.
+fn append_gcode_line(job: &mut LayoutJob, line: &str, format: &TextFormat) {
+    let mut cursor = 0usize;
+    for token in lex_line(line) {
+        if token.start > cursor {
+            job.append(&line[cursor..token.start], 0.0, format.clone());
+        }
+        let mut token_format = format.clone();
+        token_format.color = token_color(token.kind);
+        token_format.italics = token.kind == TokenKind::Comment;
+        if token.kind == TokenKind::Comment {
+            token_format.color = theme::COMMENT;
+        }
+        job.append(&token.display(), 0.0, token_format);
+        cursor = token.end;
+    }
+    if cursor < line.len() {
+        job.append(&line[cursor..], 0.0, format.clone());
+    }
+}
+
+/// One block laid out at `size`, for a caller outside the editor (the MDI
+/// pane's listing rows and its input). The same gap-preserving layout as the
+/// editor, so the pane reads exactly the block it will issue.
+pub(crate) fn line_job(line: &str, size: f32) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    append_gcode_line(
+        &mut job,
+        line,
+        &TextFormat {
+            font_id: FontId::monospace(theme::font_size(size)),
+            color: theme::FG,
+            background: Color32::TRANSPARENT,
+            italics: false,
+            ..Default::default()
+        },
+    );
     job
 }
 

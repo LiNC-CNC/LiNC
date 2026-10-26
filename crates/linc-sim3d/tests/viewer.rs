@@ -12,7 +12,7 @@ use linc_sim3d::model::SimModel;
 use linc_sim3d::tools::{ActiveTool, CutterShape};
 use linc_sim3d::types::{Bounds, TriMesh, P3};
 use linc_sim3d::ui;
-use linc_sim3d::viewer::{self, Camera, Projector, Scene};
+use linc_sim3d::viewer::{self, Camera, Projector, Scene, Viewer};
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -185,17 +185,46 @@ fn corners(bounds: &Bounds) -> Vec<P3> {
 fn scene_bakes_the_body_grid_limit_planes_and_triad() {
     let config = fixture_config();
     let model = SimModel::from_config(&config).expect("fixture model");
+    let machine = model.machine();
     let scene = Scene::build(&model);
 
+    let fixed_triangles: usize = machine.parts.iter().map(|part| part.triangle_count()).sum();
+    assert_eq!(scene.triangle_count(), fixed_triangles);
+    let gauge = machine.reference_gauge;
+    let column = scene.column_at(gauge);
+    let head = scene.head_at(gauge);
     assert_eq!(
-        scene.triangle_count(),
-        model.machine().parts.len() * 12,
-        "every body box contributes 12 triangles"
+        column.len(),
+        machine
+            .column_parts
+            .iter()
+            .map(|part| part.triangle_count())
+            .sum::<usize>()
     );
+    assert_eq!(
+        head.len(),
+        machine
+            .head_parts
+            .iter()
+            .map(|part| part.triangle_count())
+            .sum::<usize>()
+    );
+    assert!(
+        scene
+            .tris
+            .iter()
+            .chain(&column)
+            .chain(&head)
+            .all(|tri| tri.color.a() == 255),
+        "machine surfaces must be opaque"
+    );
+
     assert!(!scene.grid.is_empty(), "the table grid is drawn");
     assert_eq!(scene.axes.len(), 3, "one line per axis");
+    let origin = [0.0, 0.0, 0.0];
+    assert!(scene.axes.iter().all(|axis| axis.a == origin));
     assert!(
-        scene.outlines.len() >= model.machine().limit_planes.len() * 12,
+        scene.outlines.len() >= machine.limit_planes.len() * 12,
         "every limit plane contributes its box outline"
     );
     assert_eq!(scene.labels.len(), 3, "X, Y and Z are labelled");
@@ -211,6 +240,66 @@ fn scene_bakes_the_body_grid_limit_planes_and_triad() {
     }
     assert_eq!(scene.bounds, model.machine_bounds());
     assert!(!scene.is_empty());
+}
+
+#[test]
+fn moving_assemblies_follow_the_live_gauge_line() {
+    let model = SimModel::from_config(&fixture_config()).expect("fixture model");
+    let scene = Scene::build(&model);
+    let reference = model.machine().reference_gauge;
+    let gauge = [
+        reference[0] + 32.0,
+        reference[1] - 24.0,
+        reference[2] - 60.0,
+    ];
+
+    fn check(before: &[viewer::Tri], after: &[viewer::Tri], delta: P3) {
+        assert_eq!(before.len(), after.len());
+        for (source, moved) in before.iter().zip(after) {
+            for axis in 0..3 {
+                for (a, b) in [
+                    (source.a, moved.a),
+                    (source.b, moved.b),
+                    (source.c, moved.c),
+                ] {
+                    assert!((b[axis] - a[axis] - delta[axis]).abs() < 1e-9);
+                }
+            }
+            assert_eq!(moved.normal, source.normal);
+            assert_eq!(moved.color, source.color);
+        }
+    }
+
+    check(
+        &scene.column_at(reference),
+        &scene.column_at(gauge),
+        [32.0, -24.0, 0.0],
+    );
+    check(
+        &scene.head_at(reference),
+        &scene.head_at(gauge),
+        [32.0, -24.0, -60.0],
+    );
+}
+
+#[test]
+fn the_moving_column_and_head_start_hidden() {
+    let model = SimModel::from_config(&fixture_config()).expect("fixture model");
+    let scene = Scene::build(&model);
+    let gauge = model.machine().reference_gauge;
+    let column = scene.column_at(gauge).len();
+    let head = scene.head_at(gauge).len();
+    assert!(column > 0 && head > 0, "the fixture has both assemblies");
+
+    let mut viewer = Viewer::new(scene);
+    assert!(
+        viewer.moving_machine_at(gauge).is_empty(),
+        "the tool must be unobstructed by the column and head by default"
+    );
+    viewer.show_column = true;
+    assert_eq!(viewer.moving_machine_at(gauge).len(), column);
+    viewer.show_head = true;
+    assert_eq!(viewer.moving_machine_at(gauge).len(), column + head);
 }
 
 #[test]

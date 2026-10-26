@@ -132,7 +132,7 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
 - Measure text with `theme::measure(ui, text, base)` instead of hardcoding column widths. The tool table is the reference.
 - Page-local keys go before widgets draw (`screens/files.rs`, `editor_pane` in `program.rs`), so a focused row cannot eat Enter or the arrows first.
 - Test the page before `consume_key`. It swallows the key even when the rest of the condition is false; `consume_key(mdi_issue) && page == Mdi` ate
-  plain Enter everywhere and broke opening a file from NC_FILES.
+  plain Enter everywhere and broke opening a file from NC_FILES. The MDI pane is keyed to the panel mode, so its keys are guarded by that mode, not by a page.
 - A focused editor keeps Home/End/PgUp/PgDn. Check `memory.has_focus(egui::Id::unique("linc-program-editor"))` first, and keep that id stable.
 - Use `theme` constants and the `SPEC.md §7` palette, not literals.
 - The program editor does not soft-wrap: one galley row per G-code line, so the
@@ -152,7 +152,8 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
 - Global keys navigate: F5 Machine, F6 Program (again → Files), F7 Tools, F8 Offsets, `Ctrl+D` Diagnostics, `Ctrl+H` G-code Help,
   `M` Messages, `Ctrl+Q` guarded quit, Esc, arrows/Page/Home/End, Enter. `[keys]` drives the shell; `Keymap::from_config` is the only source.
 - Everything else is page-local and consumed only on that page: `Ctrl+S`, `Ctrl+Z/Y`, editor keys, `Ctrl+R` run-from-line, `Ctrl+0` fit, `Ctrl+L`
-  clear trail, Files copy/delete, MDI history. A page-local key consumed elsewhere shadows another page's command.
+  clear trail, Files copy/delete, MDI buffer recall, line move and issue. A page-local key consumed elsewhere shadows another page's command.
+  The pane's line move is `Ctrl+Up`/`Ctrl+Down` because the panel keyboard has no Shift key.
 - The sidebar SHORTCUTS pane lists page-local commands only; navigation keys are never listed, except the Program page's FILE key, which is shown because it opens the file browser. While a program is active it also shows Esc → RESET: Esc stops and resets the program like the panel's K4. The bottom bar carries live machine state only.
 - `Ctrl+F` focuses the Help search (`[keys].find`); it is not an editor find. Do not add a find UI without changing SPEC §6.2.
 - `[ui] pages` selects and orders nav entries but does not unbind keys. If you hide a page, decide what its `[keys]` binding does. `[keys]` is authoritative.

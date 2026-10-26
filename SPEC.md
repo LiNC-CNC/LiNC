@@ -55,7 +55,7 @@ Available navigation keys:
 | Arrows | — | Focus/lists/scroll/parameter adjustment |
 | `PageUp` / `PageDown` | — | Page or tab navigation |
 | `Home` / `End` | — | First/last row or line start/end |
-| `Enter` | — | Select / apply / execute MDI |
+| `Enter` | — | Select / apply / issue the MDI block |
 | `Backspace` | — | Edit text |
 | `MO(1)` | layer key | Symbols and mouse layer |
 
@@ -95,10 +95,10 @@ else, so it cannot shadow another page's command.
 |---|---|
 | `F5` `F6` `F7` `F8` `Ctrl+D` `Ctrl+H` | Go to Machine / Program / Tools / Offsets / Diagnostics / G-code Help |
 | `M` | Open the full-screen messages dialog (`Enter`/`Esc`/`CLOSE` closes it) |
-| `Esc` | Back, cancel, close detail; while a program is active it stops and resets it, the same as the panel's K4 |
+| `Esc` | Back, cancel, close detail; while a probe-trip fault is latched it resets and clears it; while a program is active it stops and resets it, the same as the panel's K4 |
 | `Ctrl+Q` | Guarded quit |
 | Arrows, `PageUp`/`PageDown`, `Home`/`End` | Focus, page, first/last item |
-| `Enter` | Select / apply / issue MDI |
+| `Enter` | Select / apply / issue the MDI block |
 | `Backspace` | Edit text |
 | `Ctrl+O` | Open the Files page, except on Program where `FILE` does it |
 
@@ -107,17 +107,23 @@ else, so it cannot shadow another page's command.
 | Page | Keys |
 |---|---|
 | Machine (MAIN) | `Ctrl+F10`/`Ctrl+▢` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail, `Ctrl+R` run from line, `Ctrl+G` go to a line number |
+| Machine (MAIN), MDI pane | `Enter` issue and commit the block, `Up`/`Down` recall a buffer line into the input, `Ctrl+Up`/`Ctrl+Down` move the selected line in the buffer (`Ctrl` because the panel keyboard has no Shift), `Ctrl+G` go to a buffer line, `Ctrl+R` run the selected line, `Ctrl+Backspace` delete the selected line or clear the input, `Ctrl+S` save the buffer to a new `.ngc` file under `PROGRAM_PREFIX`, `Esc` clear the uncommitted input; while the pane is up these replace the Machine bindings in the row above |
 | Program | `FILE` open the file browser, `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
 | Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Backspace` delete |
-| MDI | `Enter` issue, `Up`/`Down` history, `Esc` clear the unissued block |
 | Help | `/` or `Ctrl+F` focus search, `Up`/`Down` select, `Enter` open the reference, `Backspace` back in the reference dialog |
-| Offsets, Tools, Probe | Arrows select a row |
+| Offsets | `Up`/`Down` select a row, `X`/`Y`/`Z` edit the DRO, `A` activate the selected work system |
+| Tools, Probe | Arrows select a row |
 
 A page-local binding is only listed in the sidebar's `SHORTCUTS` pane while its
 page is in front (the pane scrolls when a page has more commands than the
 sidebar holds); nav keys are never listed. The list is grouped by purpose
 (`VIEW`, `PROGRAM`) with half a text line between entries; the view toggles read
 `▢` and `Ctrl+▢`. The bottom bar carries only live machine state.
+
+While a dialog or the manual tool-change prompt is open it owns the keyboard:
+its focused buttons and fields handle Enter, arrows and typing, the shell keeps
+only Escape for a dismissible dialog, and navigation or page shortcuts do not
+act on the page behind it.
 
 ### 3.2 Physical panel
 
@@ -650,6 +656,12 @@ Program rules:
   accepts arithmetic (`-12.5`, `10+2.5`); committing writes the position with
   `G10 L20`, so the DRO then reads the entered value and the offset moves to
   match. It is a work coordinate, so it is not checked against machine travel.
+- `A` makes the highlighted table row the active work system (`G54`..`G59.3`)
+  without leaving the page. The binding is page-local to Offsets: Manual keeps
+  `A` for ZERO ALL and Probe keeps it for APPLY RESULT. The controller selects
+  the system with an MDI `G5x`; the HMI verifies the active index it reports
+  and mirrors it into the parameter file. An open cell editor or dialog owns
+  the key first.
 - Current axis values and distance-to-go.
 - Read-only while running; blocked when program protect is active.
 - Offsets edited in the table are validated against LinuxCNC limits and units.
@@ -659,7 +671,7 @@ Program rules:
 
 ### 6.4 Tools
 
-Primary quick tool-change surface; no MDI screen required.
+Primary quick tool-change surface; no MDI entry required.
 
 - Tool table backend is the **standard LinuxCNC tool table**, read/written at
   the path in INI `[EMCIO] TOOL_TABLE`. Columns come from
@@ -864,8 +876,10 @@ choose a routine group, then pick the operation card.
   error issues nothing and marks the failing condition.
 - Read results from the subroutine outputs (`#1001`–`#1012`): X-/X+/Y-/Y+ and
   Z- probed positions, widths and centres, averaged diameter, edge delta and
-  edge angle. `UPDATE PROBE PARAMS`, `RESET ALL DATA`, `X DATA RESET` and
-  `Y DATA RESET` issue the matching Probe Basic subroutines.
+  edge angle. `U` issues `UPDATE PROBE PARAMS`; `Ctrl+R`, `Ctrl+X` and
+  `Ctrl+Y` issue `RESET ALL DATA`, `X DATA RESET` and `Y DATA RESET`. The
+  results panel carries no buttons: those keys are the whole surface, and the
+  shortcuts rail lists them.
 - Calibration routines update the probe calibration offset; `RESET CAL` clears
   it through `probe_cal_reset.ngc`.
 - The page has no general cycle-start, jog, override or E-stop controls. The
@@ -874,35 +888,85 @@ choose a routine group, then pick the operation card.
 
 ### 6.9 MDI
 
-Mode-driven screen. Moving the physical mode selector to `MDI` opens this page
-immediately, focuses the command line and shows `PANEL MODE: MDI`; moving out
-closes it and discards unissued input. No left-nav item is added.
+There is no MDI page. Selecting `MDI` on the physical panel opens the MAIN page
+with the right-hand `PROGRAM` card replaced by the MDI pane; any other panel
+position restores the program card. The pane is keyed to the panel mode, not to
+page entry, so returning to MAIN while the panel still sits in MDI shows it
+again. No left-nav item is added.
 
-Industry-standard layout:
+Layout, top to bottom:
 
-- Large single-block command input with line number and G-code token colours.
-- Quick-insert chips for G0/G1/G2/G3, M3/M5/M6/M8/M9, G54, G38.2 and T;
-  variant-specific chips for lathe (G7/G8, G95/G96).
-- Position/DRO and modal G-code panel.
-- Last-issued block and result panel with syntax status, requirements and
-  error/result.
-- Local MDI history with timestamps. Up/Down selects entries; `Enter` on a
-  selected row, `Ctrl+Enter`, or `RUN SELECTED` re-issues that exact block
-  through the same `issue_mdi` validation. This mirrors Probe Basic's history
-  selection/run workflow without a queue or mouse.
+- Block listing: the MDI blocks entered so far, in the order they were issued,
+  with the selection band on the row the arrow keys point at.
+- Syntax-highlighted single-line input. It holds focus by default
+  (`mdi.auto_focus`), so a block can be typed as soon as the pane appears.
+- One-line result/error strip under the input: the last issue result, or the
+  validation error that stopped it.
+- MODAL band at the bottom of the card, under the strip: the same MODAL card
+  AUTO shows, same widget and same columns, so the active codes read the same on
+  both pages. It is anchored to the card's rect and takes its height from the
+  code count, so a tall band shrinks the block listing and never moves the band.
+- The quick-command button row is gone: no chip row, no `RUN SELECTED` button.
+
+The pane's card stays exactly in the slot the `PROGRAM` card would have filled;
+every part is laid out from the card's rect in the same frame, never from a
+height measured on the previous one.
+
+Keys, all page-local to the pane:
+
+- `Enter` issues the block through Probe Basic's `issue_mdi` semantics and
+  commits it to the buffer (`mdi.execute_on_enter`). A block recalled with
+  `Up`/`Down` overwrites that same buffer line in place; otherwise `Enter`
+  appends a new line.
+- `Up`/`Down` move the selection through the buffer and load that line into the
+  input for editing. Recall is in place: the line stays visible in the listing
+  while it is being edited, and the text cursor lands at its end.
+- `Ctrl+Up`/`Ctrl+Down` swap the selected buffer line with the one above or
+  below it. The selection follows the moved line, so a second press keeps moving
+  the same block; at the first and last line the key does nothing (no wrap, no
+  pop), with no selection it does nothing, and it never issues a command, opens
+  a dialog or edits the input. `Ctrl`, not `Shift`: the panel keyboard has no
+  Shift key. `[keys] mdi_line_up`/`mdi_line_down` rebind it; a profile that sets
+  one to a bare `Up`/`Down` is rejected like an unparsable chord, so it can never
+  shadow recall.
+- Typing a value word against anything that is not a space, a tab or the start
+  of the line inserts one space first: `G1X10` arrives as `G1 X10`, `X10Y5` as
+  `X10 Y5`, and `M3 S1200` as typed. The words are `X Y Z A B C U V W F S`,
+  either case. Nothing is inserted inside a `(...)` comment or a `[...]`
+  expression, the caret ends after the typed character, a replaced selection is
+  replaced as a whole, and a block recalled from the buffer keeps its text until
+  the operator actually types. The rule is unconditional: it has no config key.
+- `Ctrl+G` opens the same go-to-line editor as AUTO and selects a line in the
+  buffer instead of a line in the loaded program.
+- `Ctrl+R` issues the selected buffer line directly, with no confirmation
+  dialog.
+- `Ctrl+Bksp` deletes the selected buffer line; while no such line is in the
+  buffer yet it clears the input instead.
+- `Ctrl+S` opens the save dialog: a file name field and an `add pre/postamble`
+  checkbox. It writes the buffer to a new `.ngc` file under the INI's
+  `PROGRAM_PREFIX`. Ticked, the box writes the `[mdi] save_preamble` lines
+  above the buffer and the `[mdi] save_postamble` lines below it.
+- `Esc` clears the uncommitted input only.
 
 Rules:
 
-- `Enter` or `ISSUE MDI` issues one block through Probe Basic's `issue_mdi`
-  semantics. This is an explicit on-screen command action, not a general
-  cycle-start control.
 - Issue requires machine ON, homed axes, idle interpreter and no active
   program. A syntax error issues nothing and marks the input.
 - The command may temporarily select MDI and restores the previous task mode
   when the interpreter returns idle. No physical CYCLE START is involved.
-- Leaving MDI, pressing `ESC`, or clearing discards unissued input; it does not
-  cancel a command already issued.
-- History is HMI-local, bounded (`mdi.history_limit`), and not a machine log.
+- The buffer lives for the app session: leaving MDI keeps it, and returning to
+  the pane shows the same blocks. Only `Esc` clears state, and it clears the
+  uncommitted input alone; no command already issued is cancelled.
+- MAIN's toolpath draws the block being edited as an overlay over the loaded
+  program: its move starts at the machine's current position, in the pane's own
+  colour (`theme::MDI_PREVIEW`), dashed for a rapid and solid for a cut, the way
+  the program path already distinguishes them. An empty, over-long or unparsable
+  block draws nothing extra — the strip carries the error and the pane would
+  refuse the block. The overlay is parsed once per change of the input, the
+  current position or the modal state, not once per frame.
+- The buffer is a temporary HMI-local working list, bounded by
+  `mdi.history_limit`, and not a machine log. It reaches disk only through
+  `Ctrl+S`.
 - No on-screen jog, override, spindle, coolant or E-stop controls.
 
 ### 6.10 Homing
@@ -1086,10 +1150,15 @@ Implementation:
 - `LOAD` / `Ctrl+O`: Files, when idle and allowed.
 - `OFFSET`: cycles Offsets → probe tabs → Offsets. `Enter` runs the selected
   routine; there is no separate Touch Probe action.
-- MDI mode: `Enter` issues the block; `Esc` clears unissued input; `Up`/`Down`
-  select history; `Enter` on a focused history row or `Ctrl+Enter` runs the
-  selected history entry through the same validation. No physical CYCLE START
-  is required.
+- MDI mode: the panel position opens the MAIN page with the MDI pane in place
+  of the `PROGRAM` card. `Enter` issues and commits the block, `Up`/`Down`
+  recall a buffer line into the input, `Ctrl+Up`/`Ctrl+Down` move the selected
+  line in the buffer, `Ctrl+G` goes to a buffer line, `Ctrl+R` runs the selected
+  line, `Ctrl+Bksp` deletes the selected line or clears the input, `Ctrl+S`
+  saves the buffer, `Esc` clears the uncommitted input. No physical CYCLE START
+  is required. `Ctrl+Up`/`Ctrl+Down` are `Ctrl` rather than `Shift` because
+  the panel keyboard has no Shift key; a profile may rebind them, but a bare
+  arrow is rejected so it cannot shadow recall.
 - `ESC`: back/cancel; on Help, clear search or return from detail history.
 - Arrows: focus/list/scroll.
 - `/`: focus G-code Help search when Help is active.
@@ -1110,9 +1179,13 @@ etc.
 - The physical panel mode switch is authoritative for panel functions. The GUI
   displays panel mode and LinuxCNC task mode; if they differ, show both only
   when useful.
-- The MDI screen is available when the panel is in MDI mode; probe and
-  tool-change pages may still issue their specific commands through
-  `issue_mdi`, which temporarily selects MDI and restores the prior mode.
+- The MDI pane replaces the `PROGRAM` card on the MAIN page while the panel is
+  in MDI mode; it is keyed to the panel mode, so returning to MAIN from another
+  page while still in MDI shows it again. Selecting AUTO brings up MAIN from
+  every page: leaving MDI restores the normal read-only program card there, and
+  the run is started from the machine page. Probe and tool-change pages may still
+  issue their specific commands through `issue_mdi`, which temporarily selects
+  MDI and restores the prior mode.
 - HOME/PROG.HOME open the Homing screen; all homing/program-zero motion
   originates in the panel's home/proghome pins and keys. The HMI never homes an
   axis and never intercepts the panel's existing direct `issue_mdi` PROG.HOME
@@ -1146,8 +1219,19 @@ etc.
   active program), the HMI may temporarily select MDI, issue the specific
   command, and restore the previous task mode. This is an intentional exception
   to panel-exclusive machine control; it is not a general cycle-start action.
-- Leaving the MDI screen clears unissued input only; an already issued command
-  is not cancelled.
+- Leaving MDI keeps the buffer for the app session; `Esc` clears the
+  uncommitted input only, and an already issued command is not cancelled.
+- **Probe trip.** LinuxCNC aborts the move and reports one of four operator
+  errors when `motion.probe-input` rises during a non-probe move, a homing
+  move, a joint jog or a coordinate jog. LiNC treats that report as a latched
+  machine fault, not as a transient toast: the exact controller text goes to
+  the Messages page and a persistent `PROBE TRIPPED` banner carries it on every
+  page. While it is latched, MDI, probe, tool-change, jog-parameter and
+  offset/tool writes fail closed and no command is sent. The banner does not
+  time out; it clears only when the operator performs the controller reset
+  (`Esc` or the banner's `RESET`), which sends `EMC_TASK_ABORT` — the same
+  action that clears LinuxCNC's motion error. LiNC never powers the machine off
+  for this fault and does not add a software E-stop.
 - Program start is physical CYCLE START only. The HMI never starts AUTO.
 - The WHB pendant contributes jog/handwheel input only in JOG mode; all other
   pendant controls are ignored.
@@ -1191,6 +1275,7 @@ pub struct MachineSnapshot {
     pub panel: PanelSnapshot,
     pub hal: HalOutputs,                 // linc.* output state
     pub alarms: Vec<Alarm>,
+    pub probe_trip: Option<ProbeTripFault>, // latched; clears only on reset
 }
 
 pub struct PositionSet {
@@ -1309,6 +1394,10 @@ HAL pins is still open.
   unknown or stale.
 - Manual modes are read-only: no HMI jog, increment, handwheel, mode or
   override command exists. The WHB pendant is accepted for jog only.
+- A probe trip reported by LinuxCNC latches a persistent banner and blocks
+  motion/MDI/probe/tool/offset commands until the operator's reset clears it.
+  The banner has no timeout. The clear action is the controller's
+  `EMC_TASK_ABORT`, never a software power-off.
 - Do not hide alarms behind tabs; persistent banner plus Diagnostics.
 - HMI crash must not stop the machine or remove panel control. The panel
   service is separate; `linc.hmi-alive` exposes UI health to HAL.
@@ -1329,9 +1418,14 @@ For this design repository:
 - The Touch Probe screen represents routine selection, WCS/parameters,
   explicit `RUN PROBE` via Probe Basic `issue_mdi`, results/apply and
   calibration, with no separate cycle-start step.
-- The MDI screen opens at the panel MDI position and represents command issue,
-  DRO/modal state and history; `Enter` issues immediately through `issue_mdi`,
-  and a selected history row can be re-run with `Enter`/`RUN SELECTED`.
+- Selecting the panel MDI position opens the MAIN page with the `PROGRAM` card
+  replaced by the MDI pane: block listing, syntax-highlighted input with default
+  focus, the one-line result strip and the MODAL band AUTO shows, inside the same
+  slot the program card fills. `Enter` issues and commits through `issue_mdi`,
+  `Ctrl+R` re-runs the selected buffer line with no confirmation dialog,
+  `Ctrl+Up`/`Ctrl+Down` reorder the buffer, a value word typed against a digit
+  gets its space, the block being edited is drawn over MAIN's toolpath, and there
+  is no quick-command button row.
 - The Homing/Program Zero screen opens at HOME/PROG.HOME, shows per-axis/sequence
   state and documents the exact physical-panel key mapping without providing
   home controls.
@@ -1463,8 +1557,8 @@ For the future implementation:
 24. Decide lathe touch-probe/tool-setter support separately; the first Touch
     Probe page is mill-oriented (X/Y/Z and WCS).
 25. Implement MDI issue through Probe Basic `issue_mdi`: syntax validation,
-    history recall, discard of unissued input on mode exit, and restoration of
-    the prior task mode when the interpreter returns idle.
+    buffer recall into the input, clearing the uncommitted input on `Esc`, and
+    restoration of the prior task mode when the interpreter returns idle.
 26. Verify Homing UI against the panel's `home-*`/`proghome-*` pins and the
     existing `baiermill_pb` gating. Test Z-first homing, individual axes,
     PROG.HOME current-WCS moves, faults and optional-axis display.
@@ -1533,7 +1627,7 @@ Only the accepted versions are included.
 | `svg/probe-edge-angle.svg` | Touch probe — edge angle: four corner and four top-edge angle routines with the WCO-rotation note |
 | `svg/probe-calibrate.svg` | Touch probe — calibrate: calibration offset, 2×2 round/square boss/pocket routines, diameter/width fields and reset |
 | `svg/probe-help.svg` | Touch probe — help: topic list, step-off-width explanation and dimensioned probe diagram |
-| `svg/mdi.svg` | MDI: single-block command, quick inserts, DRO/modal, command issue via `issue_mdi`, history and last result |
+| `svg/mdi.svg` | MDI pane: block listing, syntax-highlighted single-line input, command issue via `issue_mdi`, the one-line result/error strip and the MODAL band under it |
 | `svg/manual.svg` | Manual JOG/INC/MPG: dominant live graph, large work/machine/DTG coordinates and mode context; no on-screen jog controls |
 | `svg/homing.svg` | Homing: per-axis/sequence state, HOME/PROG.HOME physical-key mapping and machine position; no software home controls |
 | `svg/tools.svg` | Tools: standard tool table, conditional pocket column, current/next tool, explicit `Tn M6`, manual confirm, optional ATC/turret state |

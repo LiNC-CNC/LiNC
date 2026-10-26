@@ -1,63 +1,49 @@
-//! The machine body and travel envelope, built from the LinuxCNC INI.
+//! A simple moving-column milling machine built from the LinuxCNC INI.
 //!
-//! Machine millimetres, Z up, origin at the machine X0Y0Z0. The body is a small
-//! set of axis-aligned boxes sized from the axis limits, so a change in the INI
-//! moves the model: the table spans the X/Y travel, the spindle stands at the
-//! machine origin (joint zero puts the tip at X0Y0) and everything else hangs
-//! off that.
+//! Machine millimetres, Z up. The base and table are fixed, the column follows
+//! the spindle in X/Y, and the complete belt-drive head follows its gauge line
+//! in X/Y/Z. Meshes are stored at the reference position; the viewer applies the
+//! live translation without rebuilding their lighting.
 
 use linc_core::ini::MachineIni;
 
 use crate::config::Sim3dConfig;
 use crate::types::{Bounds, TriMesh, P3};
 
-/// Clearance between the lowest tip and the table top, in mm.
 const TABLE_CLEARANCE_MM: f64 = 20.0;
-/// Table thickness, in mm.
 const TABLE_THICKNESS_MM: f64 = 40.0;
-/// Base thickness below the table, in mm.
 const BASE_THICKNESS_MM: f64 = 70.0;
-/// Half width of the column, in mm.
-const COLUMN_HALF_WIDTH_MM: f64 = 90.0;
-/// Half width of the head, in mm.
-const HEAD_HALF_WIDTH_MM: f64 = 80.0;
-/// Height of the head above the top of Z travel, in mm.
-const HEAD_BOTTOM_MM: f64 = 30.0;
-/// Head height, in mm.
-const HEAD_HEIGHT_MM: f64 = 100.0;
-/// How far the column stops below the top of the head, in mm.
-const COLUMN_TOP_INSET_MM: f64 = 10.0;
-/// Half width of the spindle, in mm.
-const SPINDLE_HALF_WIDTH_MM: f64 = 35.0;
-/// Spindle height, in mm.
-const SPINDLE_HEIGHT_MM: f64 = 40.0;
-/// Half width of the tool holder, in mm.
-const HOLDER_HALF_WIDTH_MM: f64 = 22.0;
-/// Extra reach of the base in X, in mm.
-const BASE_OVERHANG_MM: f64 = 20.0;
-/// Thickness of a limit plane slab, in mm.
+const BASE_OVERHANG_MM: f64 = 45.0;
+const COLUMN_HALF_WIDTH_MM: f64 = 70.0;
+const COLUMN_FRONT_OFFSET_MM: f64 = 50.0;
+const COLUMN_DEPTH_MM: f64 = 80.0;
+const HEAD_HALF_WIDTH_MM: f64 = 75.0;
+const SPINDLE_RADIUS_MM: f64 = 32.0;
+const SPINDLE_HEIGHT_MM: f64 = 65.0;
+const HOLDER_RADIUS_MM: f64 = 18.0;
+const MOTOR_OFFSET_X_MM: f64 = 105.0;
+const MOTOR_HALF_WIDTH_MM: f64 = 28.0;
 const LIMIT_PLANE_THICKNESS_MM: f64 = 2.0;
 
-/// The machine: its travel envelope and the boxes that make up the body.
+/// The machine geometry at its reference position, grouped by axis motion.
 #[derive(Debug, Clone)]
 pub struct MachineModel {
-    /// Display name, from the INI.
     pub name: String,
-    /// Axis travel limits, from the INI.
     pub travel: Bounds,
-    /// The body boxes, named base/table/column/head/spindle/holder.
+    /// Fixed base and table.
     pub parts: Vec<TriMesh>,
-    /// Thin slabs at each travel limit, for drawing.
+    /// Column casting and Z ways; these follow the head in X/Y.
+    pub column_parts: Vec<TriMesh>,
+    /// Head, spindle, motor and belt; these follow the gauge line in X/Y/Z.
+    pub head_parts: Vec<TriMesh>,
+    /// Gauge-line position corresponding to the stored moving meshes.
+    pub reference_gauge: P3,
     pub limit_planes: Vec<(String, TriMesh)>,
-    /// Envelope of every body part.
+    /// Visual envelope, including the moving assemblies throughout travel.
     pub bounds: Bounds,
 }
 
 impl MachineModel {
-    /// Build the body from the INI's axis limits.
-    ///
-    /// The config supplies the body margin and the holder length; the limits
-    /// themselves come from the INI alone.
     pub fn from_ini(ini: &MachineIni, config: &Sim3dConfig) -> Self {
         let margin = config.machine.margin_mm.max(0.0);
         let (xmin, xmax) = axis_limits(ini, "X", (-300.0, 0.0));
@@ -67,29 +53,26 @@ impl MachineModel {
             min: [xmin, ymin, zmin],
             max: [xmax, ymax, zmax],
         };
-
-        // The spindle stands at the machine origin. Clamp it into travel so a
-        // machine whose limits exclude zero still gets a body over its table.
         let sx = 0.0f64.clamp(xmin, xmax);
         let sy = 0.0f64.clamp(ymin, ymax);
+        let holder_len = config.tools.fallback_tip_offset_mm.abs().max(10.0);
+        let reference_gauge = [sx, sy, zmax + holder_len];
 
         let table_top = zmin - TABLE_CLEARANCE_MM;
         let table_bottom = table_top - TABLE_THICKNESS_MM;
         let base_bottom = table_bottom - BASE_THICKNESS_MM;
-        let head_top = zmax + HEAD_BOTTOM_MM + HEAD_HEIGHT_MM;
-        // The holder stands in for the gauge line, so its length follows the
-        // configured tool offset.
-        let holder_len = config.tools.fallback_tip_offset_mm.abs().max(10.0);
+        let head_top = reference_gauge[2] + 100.0;
+        let base_x_margin = (margin + BASE_OVERHANG_MM).max(COLUMN_HALF_WIDTH_MM + 20.0);
 
         let base = Bounds {
             min: [
-                xmin - margin - BASE_OVERHANG_MM,
+                xmin - base_x_margin,
                 ymin - margin - BASE_OVERHANG_MM,
                 base_bottom,
             ],
             max: [
-                xmax + margin + BASE_OVERHANG_MM,
-                ymax + margin * 3.0,
+                xmax + base_x_margin,
+                ymax + margin + COLUMN_FRONT_OFFSET_MM + COLUMN_DEPTH_MM + 20.0,
                 table_bottom,
             ],
         };
@@ -97,45 +80,106 @@ impl MachineModel {
             min: [xmin - margin, ymin - margin, table_bottom],
             max: [xmax + margin, ymax + margin, table_top],
         };
-        let column = Bounds {
-            min: [sx - COLUMN_HALF_WIDTH_MM, ymax + margin, base_bottom],
-            max: [
-                sx + COLUMN_HALF_WIDTH_MM,
-                ymax + margin * 3.0,
-                head_top - COLUMN_TOP_INSET_MM,
-            ],
-        };
-        let head = Bounds {
-            min: [
-                sx - HEAD_HALF_WIDTH_MM,
-                sy - margin * 2.0,
-                zmax + HEAD_BOTTOM_MM,
-            ],
-            max: [sx + HEAD_HALF_WIDTH_MM, ymax + margin * 2.0, head_top],
-        };
-        let spindle = Bounds {
-            min: [sx - SPINDLE_HALF_WIDTH_MM, sy - SPINDLE_HALF_WIDTH_MM, zmax],
-            max: [
-                sx + SPINDLE_HALF_WIDTH_MM,
-                sy + SPINDLE_HALF_WIDTH_MM,
-                zmax + SPINDLE_HEIGHT_MM,
-            ],
-        };
-        let holder = Bounds {
-            min: [
-                sx - HOLDER_HALF_WIDTH_MM,
-                sy - HOLDER_HALF_WIDTH_MM,
-                zmax - holder_len,
-            ],
-            max: [sx + HOLDER_HALF_WIDTH_MM, sy + HOLDER_HALF_WIDTH_MM, zmax],
-        };
         let parts = vec![
             TriMesh::box_mesh("base", &base),
             TriMesh::box_mesh("table", &table),
+        ];
+
+        let column = Bounds {
+            min: [
+                sx - COLUMN_HALF_WIDTH_MM,
+                sy + COLUMN_FRONT_OFFSET_MM,
+                table_bottom,
+            ],
+            max: [
+                sx + COLUMN_HALF_WIDTH_MM,
+                sy + COLUMN_FRONT_OFFSET_MM + COLUMN_DEPTH_MM,
+                head_top,
+            ],
+        };
+        let column_foot = Bounds {
+            min: [sx - COLUMN_HALF_WIDTH_MM - 18.0, sy + 30.0, table_bottom],
+            max: [
+                sx + COLUMN_HALF_WIDTH_MM + 18.0,
+                sy + COLUMN_FRONT_OFFSET_MM + COLUMN_DEPTH_MM + 18.0,
+                table_bottom + 30.0,
+            ],
+        };
+        let rail = |name: &str, x: f64| {
+            TriMesh::box_mesh(
+                name,
+                &Bounds {
+                    min: [x - 9.0, sy + COLUMN_FRONT_OFFSET_MM - 8.0, table_top],
+                    max: [x + 9.0, sy + COLUMN_FRONT_OFFSET_MM, head_top - 20.0],
+                },
+            )
+        };
+        let column_parts = vec![
             TriMesh::box_mesh("column", &column),
+            TriMesh::box_mesh("column-foot", &column_foot),
+            rail("z-rail-left", sx - 45.0),
+            rail("z-rail-right", sx + 45.0),
+        ];
+
+        let gauge = reference_gauge[2];
+        let head = Bounds {
+            min: [sx - HEAD_HALF_WIDTH_MM, sy - 42.0, gauge + 10.0],
+            max: [sx + HEAD_HALF_WIDTH_MM, sy + 62.0, gauge + 85.0],
+        };
+        let motor = Bounds {
+            min: [
+                sx + MOTOR_OFFSET_X_MM - MOTOR_HALF_WIDTH_MM,
+                sy - 32.0,
+                gauge + 20.0,
+            ],
+            max: [
+                sx + MOTOR_OFFSET_X_MM + MOTOR_HALF_WIDTH_MM,
+                sy + 32.0,
+                gauge + 84.0,
+            ],
+        };
+        let belt = |name: &str, y0: f64, y1: f64| {
+            TriMesh::box_mesh(
+                name,
+                &Bounds {
+                    min: [sx, sy + y0, gauge + 87.0],
+                    max: [sx + MOTOR_OFFSET_X_MM, sy + y1, gauge + 93.0],
+                },
+            )
+        };
+        let head_parts = vec![
             TriMesh::box_mesh("head", &head),
-            TriMesh::box_mesh("spindle", &spindle),
-            TriMesh::box_mesh("holder", &holder),
+            cylinder_z(
+                "spindle",
+                sx,
+                sy,
+                gauge,
+                gauge + SPINDLE_HEIGHT_MM,
+                SPINDLE_RADIUS_MM,
+                24,
+            ),
+            cylinder_z("holder", sx, sy, zmax, gauge, HOLDER_RADIUS_MM, 24),
+            TriMesh::box_mesh("motor", &motor),
+            cylinder_z(
+                "spindle-pulley",
+                sx,
+                sy,
+                gauge + 84.0,
+                gauge + 96.0,
+                32.0,
+                24,
+            ),
+            cylinder_z(
+                "motor-pulley",
+                sx + MOTOR_OFFSET_X_MM,
+                sy,
+                gauge + 84.0,
+                gauge + 96.0,
+                25.0,
+                24,
+            ),
+            belt("belt-front", -31.0, -25.0),
+            belt("belt-back", 25.0, 31.0),
         ];
 
         let thickness = LIMIT_PLANE_THICKNESS_MM;
@@ -147,51 +191,121 @@ impl MachineModel {
         };
         let limit_planes = vec![
             slab("x-min", [xmin, ymin, zmin], [xmin + thickness, ymax, zmax]),
-            slab("x-max", [xmax - thickness, ymin, zmin], [xmax, ymax, zmax]),
+            slab("x-max", [xmax - thickness, ymin, zmax], [xmax, ymax, zmax]),
             slab("y-min", [xmin, ymin, zmin], [xmax, ymin + thickness, zmax]),
             slab("y-max", [xmin, ymax - thickness, zmin], [xmax, ymax, zmax]),
             slab("z-min", [xmin, ymin, zmin], [xmax, ymax, zmin + thickness]),
             slab("z-max", [xmin, ymin, zmax - thickness], [xmax, ymax, zmax]),
         ];
 
-        let bounds = parts
+        let mut bounds = parts
             .iter()
             .fold(Bounds::empty(), |acc, part| acc.union(&part.bounds));
+        for part in &column_parts {
+            for x in [xmin, xmax] {
+                for y in [ymin, ymax] {
+                    bounds = bounds.union(&translated_bounds(&part.bounds, [x - sx, y - sy, 0.0]));
+                }
+            }
+        }
+        for part in &head_parts {
+            for x in [xmin, xmax] {
+                for y in [ymin, ymax] {
+                    for z in [zmin - zmax, 0.0] {
+                        bounds =
+                            bounds.union(&translated_bounds(&part.bounds, [x - sx, y - sy, z]));
+                    }
+                }
+            }
+        }
 
         Self {
             name: ini.machine_name.clone(),
             travel,
             parts,
+            column_parts,
+            head_parts,
+            reference_gauge,
             limit_planes,
             bounds,
         }
     }
 
-    /// Envelope of the body.
     pub fn machine_bounds(&self) -> Bounds {
         self.bounds
     }
 
-    /// A body part by name.
+    /// A body part by name, regardless of its motion group.
     pub fn part(&self, name: &str) -> Option<&TriMesh> {
-        self.parts.iter().find(|part| part.name == name)
+        self.parts
+            .iter()
+            .chain(&self.column_parts)
+            .chain(&self.head_parts)
+            .find(|part| part.name == name)
     }
 
-    /// True when the tip leaves the travel envelope, or the tool body leaves
-    /// the machine body.
-    ///
-    /// The spindle and holder legitimately stand above the top of Z travel, so
-    /// only the tip is tested against the travel box; the body that rises from
-    /// the tip is tested against the machine body instead. Without that split
-    /// every cutter at Z 0 would report a collision, because its flutes reach
-    /// above the top of travel.
+    /// True when the tip leaves travel or the tool body leaves the visual envelope.
     pub fn envelope_violated(&self, tip: P3, body_top: P3) -> bool {
         const EPS: f64 = 1e-9;
         !self.travel.contains(tip, EPS) || !self.bounds.contains(body_top, EPS)
     }
 }
 
-/// Limits for one axis, or the fallback when the INI has no such axis.
+fn translated_bounds(bounds: &Bounds, delta: P3) -> Bounds {
+    Bounds {
+        min: [
+            bounds.min[0] + delta[0],
+            bounds.min[1] + delta[1],
+            bounds.min[2] + delta[2],
+        ],
+        max: [
+            bounds.max[0] + delta[0],
+            bounds.max[1] + delta[1],
+            bounds.max[2] + delta[2],
+        ],
+    }
+}
+
+/// A capped vertical cylinder with outward-wound triangles.
+fn cylinder_z(
+    name: &str,
+    x: f64,
+    y: f64,
+    z0: f64,
+    z1: f64,
+    radius: f64,
+    segments: usize,
+) -> TriMesh {
+    let segments = segments.max(3);
+    let mut positions = Vec::with_capacity(segments * 2 + 2);
+    for z in [z0, z1] {
+        for segment in 0..segments {
+            let theta = std::f64::consts::TAU * segment as f64 / segments as f64;
+            positions.push([x + radius * theta.cos(), y + radius * theta.sin(), z]);
+        }
+    }
+    let bottom_center = positions.len() as u32;
+    positions.push([x, y, z0]);
+    let top_center = positions.len() as u32;
+    positions.push([x, y, z1]);
+
+    let mut indices = Vec::with_capacity(segments * 4);
+    for segment in 0..segments {
+        let next = (segment + 1) % segments;
+        let low = segment as u32;
+        let low_next = next as u32;
+        let high = (segments + segment) as u32;
+        let high_next = (segments + next) as u32;
+        indices.extend([
+            [low, low_next, high_next],
+            [low, high_next, high],
+            [bottom_center, low_next, low],
+            [top_center, high, high_next],
+        ]);
+    }
+    TriMesh::new(name, positions, indices)
+}
+
 fn axis_limits(ini: &MachineIni, name: &str, fallback: (f64, f64)) -> (f64, f64) {
     match ini.limits_for(name) {
         Some((min, max)) if min < max => (min, max),
@@ -224,16 +338,28 @@ mod tests {
          MAX_LIMIT = 10\n"
     }
 
+    fn machine() -> MachineModel {
+        let ini = MachineIni::parse(std::path::Path::new("test.ini"), ini_text()).unwrap();
+        MachineModel::from_ini(&ini, &Sim3dConfig::default())
+    }
+
     #[test]
     fn body_follows_the_axis_limits() {
-        let ini = MachineIni::parse(std::path::Path::new("test.ini"), ini_text()).unwrap();
-        let machine = MachineModel::from_ini(&ini, &Sim3dConfig::default());
+        let machine = machine();
         assert_eq!(machine.name, "Test Mill");
         assert_eq!(machine.travel.min, [-100.0, -80.0, -50.0]);
         assert_eq!(machine.travel.max, [0.0, 2.0, 10.0]);
-        assert_eq!(machine.parts.len(), 6);
+        assert_eq!(machine.parts.len(), 2);
+        assert_eq!(machine.column_parts.len(), 4);
+        assert_eq!(machine.head_parts.len(), 8);
         assert_eq!(machine.limit_planes.len(), 6);
-        for part in &machine.parts {
+        assert_eq!(machine.reference_gauge, [0.0, 0.0, 40.0]);
+        for part in machine
+            .parts
+            .iter()
+            .chain(&machine.column_parts)
+            .chain(&machine.head_parts)
+        {
             assert!(!part.is_empty(), "{} is empty", part.name);
             assert!(
                 machine.bounds.contains(part.bounds.min, 1e-9)
@@ -248,21 +374,55 @@ mod tests {
     }
 
     #[test]
+    fn belt_drive_and_spindle_share_the_head_reference() {
+        let machine = machine();
+        for name in [
+            "head",
+            "spindle",
+            "holder",
+            "motor",
+            "spindle-pulley",
+            "motor-pulley",
+            "belt-front",
+            "belt-back",
+        ] {
+            assert!(machine.part(name).is_some(), "missing {name}");
+        }
+        let gauge = machine.reference_gauge;
+        let spindle = machine.part("spindle").unwrap();
+        assert_eq!(
+            spindle.bounds.min,
+            [gauge[0] - 32.0, gauge[1] - 32.0, gauge[2]]
+        );
+        assert!(machine.part("spindle-pulley").unwrap().triangle_count() > 12);
+        assert!(machine.part("motor-pulley").unwrap().triangle_count() > 12);
+    }
+
+    #[test]
+    fn cylinders_are_closed_and_outward_wound() {
+        let mesh = cylinder_z("test", 0.0, 0.0, 0.0, 20.0, 10.0, 16);
+        assert_eq!(mesh.triangle_count(), 64);
+        for index in 0..mesh.triangle_count() {
+            let [a, b, c] = mesh.triangle(index).unwrap();
+            let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let normal = [
+                ab[1] * ac[2] - ab[2] * ac[1],
+                ab[2] * ac[0] - ab[0] * ac[2],
+                ab[0] * ac[1] - ab[1] * ac[0],
+            ];
+            let center = [(a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0];
+            let radial = normal[0] * center[0] + normal[1] * center[1];
+            assert!(radial >= -1e-9, "triangle {index} points inward");
+        }
+    }
+
+    #[test]
     fn envelope_checks_the_tip_and_the_body() {
-        let ini = MachineIni::parse(std::path::Path::new("test.ini"), ini_text()).unwrap();
-        let machine = MachineModel::from_ini(&ini, &Sim3dConfig::default());
+        let machine = machine();
         assert!(!machine.envelope_violated([-50.0, -40.0, -50.0], [-50.0, -40.0, -30.0]));
-        assert!(
-            machine.envelope_violated([10.0, -40.0, -50.0], [10.0, -40.0, -30.0]),
-            "X past the travel maximum"
-        );
-        assert!(
-            !machine.envelope_violated([0.0, 0.0, 10.0], [0.0, 0.0, 30.0]),
-            "a cutter at the top of travel still fits inside the machine body"
-        );
-        assert!(
-            machine.envelope_violated([-50.0, -40.0, -500.0], [-50.0, -40.0, -480.0]),
-            "below the base"
-        );
+        assert!(machine.envelope_violated([10.0, -40.0, -50.0], [10.0, -40.0, -30.0]));
+        assert!(!machine.envelope_violated([0.0, 0.0, 10.0], [0.0, 0.0, 30.0]));
+        assert!(machine.envelope_violated([-50.0, -40.0, -500.0], [-50.0, -40.0, -480.0]));
     }
 }

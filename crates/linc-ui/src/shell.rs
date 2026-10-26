@@ -12,10 +12,11 @@ use egui::{
 use linc_core::command::{BackendEvent, CommandResult, MachineCommand};
 use linc_core::config::Profile;
 use linc_core::gcode::{parse_preview, Bounds3, Preview};
+use linc_core::mdi_file::SaveError;
 use linc_core::model::{
     format_clock, now_ms, Alarm, AlarmSeverity, AlarmSource, AxisMap, MachinePower,
     MachineSnapshot, MachineVariant, PanelMode, PanelModeValidity, PositionSet, ProgramState,
-    TaskMode, ToolChangeState, ToolChangeStatus,
+    ToolChangeState, ToolChangeStatus,
 };
 use linc_core::probe::ProbeParameters;
 
@@ -65,7 +66,6 @@ pub struct LincApp {
     pub nav_focus: usize,
     pub focus_region: FocusRegion,
     pub last_mode: Option<PanelModeValidity>,
-    pub last_task_mode: TaskMode,
     pub start_page: Page,
     pub graph_style: GraphStyle,
     pub program: ProgramUi,
@@ -389,7 +389,6 @@ impl LincApp {
             nav_focus: 0,
             focus_region: FocusRegion::Page,
             last_mode: Some(mode),
-            last_task_mode: snapshot.task.mode,
             start_page,
             graph_style,
             program: ProgramUi {
@@ -410,7 +409,7 @@ impl LincApp {
             offsets: OffsetsUi::default(),
             tools: ToolsUi::default(),
             probe: ProbeUi::new(probe_params, active_probe_wcs),
-            mdi: MdiUi::new(profile.config.mdi.quick_commands.clone()),
+            mdi: MdiUi::new(),
             help: HelpUi::default(),
             files: FilesUi::new(
                 profile.machine_ini.program_prefix.clone(),
@@ -623,10 +622,14 @@ impl LincApp {
         // snapshot is rebuilt every poll, and comparing with it published on
         // every frame and starved the controller.
         let wanted = self.jog_speed_value();
-        if self
-            .jog_speed_published
-            .map(|value| (value - wanted).abs() > 1e-9)
-            .unwrap_or(true)
+        // A fault blocks new jog commands; keep the last published value
+        // untouched so a slider change is published once the reset clears the
+        // fault.
+        if !self.snapshot.probe_trip_active()
+            && self
+                .jog_speed_published
+                .map(|value| (value - wanted).abs() > 1e-9)
+                .unwrap_or(true)
         {
             self.jog_speed_published = Some(wanted);
             self.send_quiet(linc_core::command::MachineCommand::SetHalOutput {
@@ -771,7 +774,24 @@ impl LincApp {
     /// so the HMI issues it; everything else that guards a program start is
     /// still checked here rather than assumed.
     pub fn run_from_line_block(&self) -> Option<&'static str> {
-        if self.snapshot.program.line_count == 0 {
+        self.start_gate(PanelMode::Auto, true)
+    }
+
+    /// The MDI pane's "run the selected block" gate.
+    ///
+    /// Every check `run_from_line_block` makes except the AUTO-mode one and
+    /// the loaded-program one: the pane starts a buffer block in MDI, and the
+    /// issue path re-checks the mode before it sends anything.
+    pub fn mdi_run_block(&self) -> Option<&'static str> {
+        self.start_gate(PanelMode::Mdi, false)
+    }
+
+    /// Why a block may not start now, or `None` when it may.
+    ///
+    /// `mode` is the panel position the path needs; `needs_program` adds the
+    /// loaded-program check the AUTO path has and the MDI buffer does not.
+    fn start_gate(&self, mode: PanelMode, needs_program: bool) -> Option<&'static str> {
+        if needs_program && self.snapshot.program.line_count == 0 {
             return Some("no program is loaded");
         }
         if self.snapshot.task.running
@@ -785,8 +805,11 @@ impl LincApp {
         if self.snapshot.task.power != linc_core::model::MachinePower::On {
             return Some("machine is not ON");
         }
-        if self.snapshot.panel.mode.mode() != Some(PanelMode::Auto) {
-            return Some("select AUTO on the panel first");
+        if self.snapshot.panel.mode.mode() != Some(mode) {
+            return Some(match mode {
+                PanelMode::Mdi => "panel mode is not MDI",
+                _ => "select AUTO on the panel first",
+            });
         }
         if self.panel_offline() || self.snapshot.meta.stale {
             return Some("panel state is not current");
@@ -803,6 +826,97 @@ impl LincApp {
             return Some("home every axis first");
         }
         None
+    }
+
+    /// MAIN shows the MDI pane while the panel sits in MDI.
+    ///
+    /// Keyed to the panel mode, not to page entry: returning to MAIN from
+    /// another page while the panel still sits in MDI shows the pane again.
+    pub fn mdi_pane_visible(&self) -> bool {
+        self.page == Page::Machine && self.snapshot.panel.mode.mode() == Some(PanelMode::Mdi)
+    }
+
+    /// Why the MDI buffer may not be written to disk, or `None` when it may.
+    ///
+    /// The same policy `save_program` applies, minus the EDIT-mode one: a save
+    /// needs an idle interpreter (`safety.save_requires_idle`), a live panel
+    /// and no program protect, not the editor.
+    pub fn mdi_save_block(&self) -> Option<&'static str> {
+        if self.program_protected() {
+            return Some("PROTECT ON — SAVE BLOCKED");
+        }
+        if self.panel_offline() {
+            return Some("PANEL OFFLINE — SAVE BLOCKED");
+        }
+        if self.snapshot.task.running
+            || self.snapshot.task.interp != linc_core::model::InterpState::Idle
+        {
+            return Some("not idle — save blocked");
+        }
+        None
+    }
+
+    /// `Ctrl+S` on the pane: open the save dialog, or say why it cannot write.
+    pub fn request_mdi_save(&mut self) {
+        if let Some(reason) = self.mdi_save_block() {
+            self.toast(reason, theme::ERROR);
+            return;
+        }
+        if self.mdi.is_empty() {
+            self.mdi.last_error = Some("the MDI buffer is empty".into());
+            return;
+        }
+        self.modal = Some(crate::state::Modal::MdiSave(
+            crate::state::MdiSaveDialog::default(),
+        ));
+    }
+
+    /// Edit the open save dialog. A closed dialog is not an error: the frame
+    /// that confirms a write clears it before these run.
+    fn edit_mdi_save(&mut self, update: impl FnOnce(&mut crate::state::MdiSaveDialog)) {
+        if let Some(crate::state::Modal::MdiSave(dialog)) = &mut self.modal {
+            update(dialog);
+        }
+    }
+
+    /// One step of the save dialog: write the buffer, or, when the name is
+    /// taken, arm the overwrite step inside the same dialog.
+    fn confirm_mdi_save(&mut self) {
+        let Some(crate::state::Modal::MdiSave(dialog)) = self.modal.clone() else {
+            return;
+        };
+        if let Some(reason) = self.mdi_save_block() {
+            self.edit_mdi_save(|dialog| dialog.error = Some(reason.to_string()));
+            return;
+        }
+        match screens::mdi::save(self, &dialog.name, dialog.wrap, dialog.confirm_overwrite) {
+            Ok(path) => {
+                // The buffer is kept: the blocks are still the session's
+                // working list, and a save is not a reset.
+                self.modal = None;
+                self.mdi.last_error = None;
+                self.toast(format!("saved {}", path.display()), theme::SUCCESS);
+            }
+            Err(SaveError::Exists(_)) if !dialog.confirm_overwrite => {
+                self.edit_mdi_save(|dialog| {
+                    dialog.confirm_overwrite = true;
+                    dialog.error = None;
+                });
+            }
+            Err(error) => {
+                self.edit_mdi_save(|dialog| dialog.error = Some(error.to_string()));
+            }
+        }
+    }
+
+    /// Accept the go-to-line dialog: a program line, or the MDI buffer line
+    /// the pane points at.
+    pub fn go_to_line(&mut self, line: usize, mdi: bool) {
+        if mdi {
+            self.mdi.goto(line);
+        } else {
+            self.jump_to_line(line);
+        }
     }
 
     /// Ask to run from the selected line: opens the confirmation, or explains
@@ -951,6 +1065,13 @@ impl LincApp {
         if page == Page::Program && self.program.view == ProgramView::Code && self.editing_allowed()
         {
             self.program.focus_editor = true;
+        }
+        if page == Page::Machine {
+            // Entering MAIN while the panel sits in MDI is also the pane
+            // appearing, so it takes the keyboard like a mode entry does. It
+            // only asks here: a click elsewhere on the page gives it up again
+            // and the flag is one-shot.
+            self.mdi.focus = self.snapshot.panel.mode.mode() == Some(PanelMode::Mdi);
         }
     }
 
@@ -1210,10 +1331,23 @@ impl LincApp {
             self.modal = None;
             return;
         }
+        // A latched probe trip is cleared by the controller reset alone. Esc
+        // is that reset here, the same key that resets a running program.
+        if self.snapshot.probe_trip_active() {
+            self.clear_probe_trip();
+            return;
+        }
         // K4's program reset on the keyboard: Esc stops the running program
         // wherever the operator is, before it means "go back".
         if self.program_active() {
             self.abort_program();
+            return;
+        }
+        // The pane is keyed to the panel mode, so its Esc is too. It clears the
+        // uncommitted input only, and only once the global meanings above (a
+        // dialog, a probe trip, a running program) have had their turn.
+        if self.mdi_pane_visible() && !self.mdi.input.is_empty() {
+            self.mdi.clear_input();
             return;
         }
         match self.page {
@@ -1229,12 +1363,6 @@ impl LincApp {
             Page::Files => self.set_page(self.files_return_page),
             Page::Probe => self.set_page(Page::Offsets),
             Page::Settings => self.set_page(self.last_non_mode_page),
-            Page::Mdi => {
-                self.mdi.input.clear();
-                self.mdi.history_index = None;
-                self.mdi.last_error = None;
-                // Leaving MDI discards unissued input only.
-            }
             Page::Program => {
                 if self.program.focus_editor {
                     self.program.focus_editor = false;
@@ -1244,6 +1372,24 @@ impl LincApp {
             }
             Page::Diagnostics => self.set_page(Page::Machine),
             _ => self.set_page(Page::Machine),
+        }
+    }
+
+    /// Clear a latched probe trip with the controller reset.
+    ///
+    /// `EMC_TASK_ABORT` is what clears the motion error LinuxCNC set when the
+    /// probe tripped. The local fault clears only when that send succeeds; no
+    /// timeout, poll or reconnect clears it.
+    pub fn clear_probe_trip(&mut self) {
+        if self.panel_offline() {
+            self.toast("PANEL OFFLINE — CANNOT RESET", theme::ERROR);
+            return;
+        }
+        self.send(linc_core::command::MachineCommand::AbortProgram);
+        if self.snapshot.probe_trip_active() {
+            self.toast("PROBE TRIP RESET NOT CONFIRMED", theme::ERROR);
+        } else {
+            self.toast("PROBE TRIP RESET", theme::WARNING);
         }
     }
 
@@ -1263,13 +1409,6 @@ impl LincApp {
         if self.last_mode.as_ref() != Some(&mode) {
             self.on_mode_change(mode.clone());
             self.last_mode = Some(mode);
-        }
-        if self.snapshot.task.mode != self.last_task_mode {
-            if self.snapshot.task.mode == TaskMode::Mdi && self.page != Page::Mdi {
-                // The panel mode remains authoritative; task-mode MDI from a
-                // probe/tool command must not hijack the screen.
-            }
-            self.last_task_mode = self.snapshot.task.mode;
         }
 
         if self.snapshot.panel.connected != self.last_connection.unwrap_or(false) {
@@ -1317,13 +1456,6 @@ impl LincApp {
         {
             self.restore_page(self.last_non_mode_page);
         }
-        if prior_mode == Some(PanelMode::Mdi)
-            && new_mode != PanelMode::Mdi
-            && self.page == Page::Mdi
-        {
-            self.mdi.input.clear();
-            self.restore_page(self.last_non_mode_page);
-        }
         if matches!(
             prior_mode,
             Some(PanelMode::Home) | Some(PanelMode::ProgHome)
@@ -1334,11 +1466,12 @@ impl LincApp {
         }
         match new_mode {
             PanelMode::Mdi => {
-                if self.page != Page::Mdi {
-                    self.homing_return_page = self.page;
+                // MDI is not a page: the panel position opens MAIN, whose
+                // program card the mode swaps for the MDI pane.
+                self.page = Page::Machine;
+                if self.profile.config.mdi.auto_focus {
+                    self.mdi.focus = true;
                 }
-                self.page = Page::Mdi;
-                self.mdi.focus = true;
             }
             PanelMode::Home | PanelMode::ProgHome => {
                 if self.page != Page::Homing {
@@ -1374,12 +1507,12 @@ impl LincApp {
                 self.program.focus_editor = self.program_editing_allowed();
             }
             PanelMode::Auto => {
-                // Selecting AUTO on the panel shows the program, as Probe
-                // Basic does: the operator watches the active line and the
-                // running code without hunting for the page. This runs on the
-                // mode change only, so navigating away afterwards is left
-                // alone.
-                self.page = Page::Program;
+                // Selecting AUTO brings up MAIN from any page: the run is
+                // started from the machine page, whose toolpath and program
+                // cards carry the active line. Leaving MDI swaps the pane back
+                // for the normal read-only program card. This runs on the mode
+                // change only, so navigating away afterwards is left alone.
+                self.page = Page::Machine;
             }
         }
     }
@@ -1795,6 +1928,19 @@ impl LincApp {
             }
             return;
         }
+        // Every other dialog owns the keyboard too. Its focused buttons and
+        // fields handle Enter, arrows and typing during `draw`; the shell only
+        // keeps Escape for a dismissible dialog. Without this, F5-F8, Ctrl+D/H,
+        // Ctrl+Q and the page keys could act on the page behind the dialog.
+        if self.overlay_open() {
+            let escape = ui.input_mut(|input| {
+                input.consume_key(self.keymap.back.modifiers, self.keymap.back.key)
+            });
+            if escape && (self.modal.is_some() || self.help.dialog.is_some()) {
+                self.escape();
+            }
+            return;
+        }
         // A text field keeps Home, End and the page keys while it holds the
         // keyboard; they are cursor movement there and focus navigation here.
         // Add every text field that can hold focus to this list.
@@ -1806,6 +1952,10 @@ impl LincApp {
                 || memory.has_focus(egui::Id::unique("linc-file-rename"))
                 || memory.has_focus(egui::Id::unique("linc-probe-param"))
                 || memory.has_focus(egui::Id::unique("linc-probe-dro"))
+                || memory.has_focus(egui::Id::unique("linc-help-search"))
+                || memory.has_focus(egui::Id::unique("linc-goto-line-input"))
+                || memory.has_focus(egui::Id::unique("linc-mdi-input"))
+                || memory.has_focus(egui::Id::unique("linc-diagnostics-search"))
         });
         let mut nav_page = None;
         let mut escape = false;
@@ -1840,9 +1990,90 @@ impl LincApp {
         let mut cycle_toolpath_view = false;
         let mut toggle_bounds = false;
         let mut open_messages = false;
+        let mut mdi_up = false;
+        let mut mdi_down = false;
+        let mut mdi_line_up = false;
+        let mut mdi_line_down = false;
+        let mut mdi_delete = false;
+        let mut mdi_clear = false;
+        let mut mdi_run = false;
+        let mut mdi_goto = false;
+        let mut mdi_save = false;
         let text_editing = ui.ctx().text_edit_focused();
+        let mdi_pane = self.mdi_pane_visible();
 
         ui.input_mut(|input| {
+            // The MDI pane replaces the MAIN page's program card while the
+            // panel sits in MDI, so its keys are guarded by the mode and the
+            // page rather than by a Page variant. They come first: plain Enter
+            // is the shell's activate key, the arrows navigate, and Ctrl+R is
+            // run-from-line on MAIN, so the pane would lose every one of them.
+            if mdi_pane {
+                // The buffer line moves go first: they share the arrow keys
+                // with recall, and a chord that arrived here must not be left
+                // for the plain arrow to take. `consume_key` matches the
+                // modifiers exactly, so the order is belt and braces.
+                if input.consume_key(
+                    self.keymap.mdi_line_up.modifiers,
+                    self.keymap.mdi_line_up.key,
+                ) {
+                    mdi_line_up = true;
+                }
+                if input.consume_key(
+                    self.keymap.mdi_line_down.modifiers,
+                    self.keymap.mdi_line_down.key,
+                ) {
+                    mdi_line_down = true;
+                }
+                if input.consume_key(
+                    self.keymap.mdi_history_up.modifiers,
+                    self.keymap.mdi_history_up.key,
+                ) {
+                    mdi_up = true;
+                }
+                if input.consume_key(
+                    self.keymap.mdi_history_down.modifiers,
+                    self.keymap.mdi_history_down.key,
+                ) {
+                    mdi_down = true;
+                }
+                if input.consume_key(
+                    self.keymap.mdi_buffer_delete.modifiers,
+                    self.keymap.mdi_buffer_delete.key,
+                ) {
+                    mdi_delete = true;
+                }
+                if input.consume_key(
+                    self.keymap.program_run_from_line.modifiers,
+                    self.keymap.program_run_from_line.key,
+                ) {
+                    mdi_run = true;
+                }
+                if input.consume_key(self.keymap.goto_line.modifiers, self.keymap.goto_line.key) {
+                    mdi_goto = true;
+                }
+                if input.consume_key(self.keymap.save.modifiers, self.keymap.save.key) {
+                    mdi_save = true;
+                }
+                // `Esc` keeps its global meanings (a dialog, a latched probe
+                // trip, a running program reset). The pane only takes the
+                // clear chord itself when the profile moved it off the back
+                // key; otherwise that path clears the input after the global
+                // checks have declined the key.
+                if self.keymap.mdi_clear != self.keymap.back
+                    && input.consume_key(self.keymap.mdi_clear.modifiers, self.keymap.mdi_clear.key)
+                {
+                    mdi_clear = true;
+                }
+                // Enter issues the block. The binding is configurable, so the
+                // pane test comes first and the mode flag second: consume_key
+                // swallows the key whatever the rest of the condition says.
+                if self.profile.config.mdi.execute_on_enter
+                    && input.consume_key(self.keymap.mdi_issue.modifiers, self.keymap.mdi_issue.key)
+                {
+                    mdi_issue = true;
+                }
+            }
             if input.consume_key(self.keymap.machine.modifiers, self.keymap.machine.key) {
                 nav_page = Some(Page::Machine);
             }
@@ -1939,38 +2170,50 @@ impl LincApp {
             {
                 request_files = true;
             }
-            if input.consume_key(self.keymap.save.modifiers, self.keymap.save.key) {
+            // Page-local commands: test the page before `consume_key`, or the
+            // key is swallowed on every other page (and in every text field).
+            // This is the same rule the MDI binding below documents.
+            if self.page == Page::Program
+                && input.consume_key(self.keymap.save.modifiers, self.keymap.save.key)
+            {
                 save = true;
             }
-            if input.consume_key(self.keymap.find.modifiers, self.keymap.find.key) {
+            if self.page == Page::Help
+                && input.consume_key(self.keymap.find.modifiers, self.keymap.find.key)
+            {
                 find = true;
             }
-            if editing_program && input.consume_key(egui::Modifiers::CTRL, egui::Key::D) {
-                duplicate_line = true;
+            if editing_program {
+                if input.consume_key(egui::Modifiers::CTRL, egui::Key::D) {
+                    duplicate_line = true;
+                }
+                if input.consume_key(egui::Modifiers::CTRL, egui::Key::K) {
+                    delete_line = true;
+                }
+                if input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowUp) {
+                    move_line_up = true;
+                }
+                if input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowDown) {
+                    move_line_down = true;
+                }
             }
-            if input.consume_key(egui::Modifiers::CTRL, egui::Key::K) {
-                delete_line = true;
-            }
-            if input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowUp) {
-                move_line_up = true;
-            }
-            if input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowDown) {
-                move_line_down = true;
-            }
-            // Probe owns Ctrl+R (reset data) and Ctrl+Y (reset Y data) while
-            // that page is open; elsewhere these retain their global meanings.
-            if self.page != Page::Probe
+            // Files owns Ctrl+R (refresh). Program and the toolpath pages bind
+            // it to RUN FROM LINE above; Probe binds it to RESET DATA, so those
+            // pages must leave the key alone rather than swallow it.
+            if self.page == Page::Files
                 && input.consume_key(self.keymap.refresh.modifiers, self.keymap.refresh.key)
             {
                 refresh = true;
             }
-            if input.consume_key(self.keymap.undo.modifiers, self.keymap.undo.key) {
-                undo = true;
-            }
-            if self.page != Page::Probe
-                && input.consume_key(self.keymap.redo.modifiers, self.keymap.redo.key)
-            {
-                redo = true;
+            // Undo/redo belong to the focused G-code editor. Every other text
+            // field keeps the chords for its own undo stack.
+            if self.page == Page::Program && self.program.focus_editor {
+                if input.consume_key(self.keymap.undo.modifiers, self.keymap.undo.key) {
+                    undo = true;
+                }
+                if input.consume_key(self.keymap.redo.modifiers, self.keymap.redo.key) {
+                    redo = true;
+                }
             }
             // An edit or a page popup owns Escape: it cancels the edit (or
             // closes the selector) rather than leaving the page.
@@ -2059,26 +2302,22 @@ impl LincApp {
             if !text_focused && input.consume_key(egui::Modifiers::NONE, egui::Key::End) {
                 end = true;
             }
-            if input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowLeft) {
+            if !text_focused && input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowLeft) {
                 focus_left = true;
             }
-            if input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowRight) {
+            if !text_focused && input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowRight) {
                 focus_right = true;
             }
-            if input.consume_key(
-                self.keymap.help_search.modifiers,
-                self.keymap.help_search.key,
-            ) {
-                help_search = true;
-            }
-            // The page test comes first: `consume_key` swallows the key whether
-            // or not the rest of the condition holds, and this binding is plain
-            // Enter, so on every other page it ate the key that opens a file.
-            if self.page == Page::Mdi
-                && self.profile.config.mdi.execute_on_enter
-                && input.consume_key(self.keymap.mdi_issue.modifiers, self.keymap.mdi_issue.key)
+            // The Help search owns `/`; on other pages the character must reach
+            // the page or text field instead of being consumed for nothing.
+            if self.page == Page::Help
+                && !text_focused
+                && input.consume_key(
+                    self.keymap.help_search.modifiers,
+                    self.keymap.help_search.key,
+                )
             {
-                mdi_issue = true;
+                help_search = true;
             }
         });
 
@@ -2101,6 +2340,7 @@ impl LincApp {
         if goto_line && matches!(self.page, Page::Program | Page::Machine) {
             self.modal = Some(crate::state::Modal::GoToLine {
                 buffer: String::new(),
+                mdi: false,
             });
         }
         if line_step != 0 && self.page == Page::Program {
@@ -2210,6 +2450,36 @@ impl LincApp {
         }
         if mdi_issue {
             screens::mdi::issue(self);
+        }
+        if mdi_line_up {
+            self.mdi.move_selected(true);
+        }
+        if mdi_line_down {
+            self.mdi.move_selected(false);
+        }
+        if mdi_up {
+            self.mdi.recall_older();
+        }
+        if mdi_down {
+            self.mdi.recall_newer();
+        }
+        if mdi_delete {
+            self.mdi.delete_selected();
+        }
+        if mdi_clear {
+            self.mdi.clear_input();
+        }
+        if mdi_run {
+            screens::mdi::run_selected(self);
+        }
+        if mdi_goto {
+            self.modal = Some(crate::state::Modal::GoToLine {
+                buffer: String::new(),
+                mdi: true,
+            });
+        }
+        if mdi_save {
+            self.request_mdi_save();
         }
 
         if self.focus_region == FocusRegion::Nav {
@@ -2383,7 +2653,6 @@ impl LincApp {
                         Page::Help => screens::help::show(self, ui),
                         Page::Files => screens::files::show(self, ui),
                         Page::Probe => screens::probe::show(self, ui),
-                        Page::Mdi => screens::mdi::show(self, ui),
                         Page::Homing => screens::homing::show(self, ui),
                         Page::Manual => screens::manual::show(self, ui),
                         Page::Settings => screens::settings::show(self, ui),
@@ -2912,15 +3181,33 @@ impl LincApp {
                         (k.toggle_bounds.label(), "BOUNDS"),
                     ],
                 });
-                groups.push(ShortcutGroup {
-                    title: "PROGRAM",
-                    items: vec![
-                        ("FILE".into(), "BROWSER"),
-                        (k.program_run_from_line.label(), "RUN LINE"),
-                        (k.goto_line.label(), "GOTO"),
-                        (k.messages.label(), "MESSAGES"),
-                    ],
-                });
+                if self.mdi_pane_visible() {
+                    // While the pane is up its keys replace the MAIN ones:
+                    // Enter and the arrows act on the buffer, Ctrl+R runs the
+                    // selected block instead of a program line.
+                    groups.push(ShortcutGroup {
+                        title: "MDI",
+                        items: vec![
+                            (k.mdi_issue.label(), "ISSUE"),
+                            ("Up/Down".into(), "BUFFER"),
+                            (k.goto_line.label(), "GOTO"),
+                            (k.program_run_from_line.label(), "RUN LINE"),
+                            (k.mdi_buffer_delete.label(), "DELETE"),
+                            (k.save.label(), "SAVE"),
+                            (k.back.label(), "CLEAR"),
+                        ],
+                    });
+                } else {
+                    groups.push(ShortcutGroup {
+                        title: "PROGRAM",
+                        items: vec![
+                            ("FILE".into(), "BROWSER"),
+                            (k.program_run_from_line.label(), "RUN LINE"),
+                            (k.goto_line.label(), "GOTO"),
+                            (k.messages.label(), "MESSAGES"),
+                        ],
+                    });
+                }
             }
             Page::Files => {
                 // Enter is contextual: a folder opens, a USB file copies into
@@ -2977,10 +3264,6 @@ impl LincApp {
                 hints.push(("PgUp/PgDn".into(), "PAGE"));
             }
             Page::Diagnostics => hints.push(("PgUp/PgDn".into(), "TABS")),
-            Page::Mdi => {
-                hints.push((k.mdi_issue.label(), "ISSUE"));
-                hints.push((k.mdi_history_up.label(), "HISTORY"));
-            }
             Page::Manual | Page::Homing => {
                 hints.push((k.graph_fit.label(), "FIT"));
                 hints.push((format!("Ctrl+{square}"), "VIEW"));
@@ -2992,6 +3275,7 @@ impl LincApp {
             }
             Page::Offsets => {
                 hints.push(("Arrows".into(), "SELECT"));
+                hints.push(("A".into(), "ACTIVATE"));
                 hints.push(("X/Y/Z".into(), "EDIT DRO"));
                 hints.push(("OFFSET".into(), "PROBE"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
@@ -3049,7 +3333,7 @@ impl LincApp {
                             items: vec![
                                 ("U".into(), "UPDATE PARAMS"),
                                 ("Ctrl+R".into(), "RESET ALL DATA"),
-                                ("Ctrl+X / Ctrl+Y".into(), "RESET X / Y DATA"),
+                                ("Ctrl+X/Y".into(), "RESET X/Y DATA"),
                             ],
                         });
                     }
@@ -3231,6 +3515,16 @@ impl LincApp {
             theme::banner(ui, theme::ERROR, "PANEL MODE INVALID — FAILS CLOSED");
             ui.add_space(4.0);
         }
+        if let Some(fault) = self.snapshot.probe_trip.clone() {
+            let text = format!(
+                "PROBE TRIPPED — {} — MOTION AND MDI BLOCKED. RESET TO CLEAR.",
+                fault.message
+            );
+            if theme::banner_action(ui, theme::ERROR, &text, "RESET") {
+                self.clear_probe_trip();
+            }
+            ui.add_space(4.0);
+        }
         if self.program_protected()
             && matches!(
                 self.page,
@@ -3360,6 +3654,9 @@ impl LincApp {
         let mut overwrite: Option<bool> = None;
         let mut goto_buffer: Option<String> = None;
         let mut goto_accept = false;
+        let mut save_name: Option<String> = None;
+        let mut save_wrap: Option<bool> = None;
+        let mut save_confirm = false;
         egui::Window::new("LiNC")
             .collapsible(false)
             .resizable(false)
@@ -3481,7 +3778,7 @@ impl LincApp {
                         }
                     });
                 }
-                Modal::GoToLine { buffer } => {
+                Modal::GoToLine { buffer, mdi } => {
                     ui.label(
                         RichText::new("GO TO LINE")
                             .size(theme::font_size(18.0))
@@ -3489,10 +3786,15 @@ impl LincApp {
                             .color(theme::FG),
                     );
                     ui.add_space(6.0);
-                    ui.label(format!(
-                        "Line number (1-{}):",
-                        self.program.editor.line_count().max(1)
-                    ));
+                    // The same editor either way; only the list it selects in
+                    // changes, so MAIN's Ctrl+G walks the MDI buffer while the
+                    // Program page keeps walking the loaded program.
+                    let (limit, what) = if *mdi {
+                        (self.mdi.len().max(1), "Buffer line")
+                    } else {
+                        (self.program.editor.line_count().max(1), "Line number")
+                    };
+                    ui.label(format!("{what} (1-{limit}):"));
                     ui.add_space(6.0);
                     let mut text = buffer.clone();
                     let field = ui.add(
@@ -3602,19 +3904,109 @@ impl LincApp {
                         close = true;
                     }
                 }
+                Modal::MdiSave(dialog) => {
+                    ui.label(
+                        RichText::new("SAVE MDI BUFFER")
+                            .size(theme::font_size(18.0))
+                            .strong()
+                            .color(theme::FG),
+                    );
+                    ui.add_space(6.0);
+                    ui.label(format!(
+                        "{} block(s) to {}:",
+                        self.mdi.len(),
+                        self.profile.machine_ini.program_prefix.display()
+                    ));
+                    ui.add_space(6.0);
+                    let mut text = dialog.name.clone();
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut text)
+                            .id(egui::Id::unique("linc-mdi-save-name"))
+                            .desired_width(260.0)
+                            .hint_text("part"),
+                    );
+                    if focus_default {
+                        field.request_focus();
+                    }
+                    if field.changed() {
+                        save_name = Some(text);
+                    }
+                    let mut wrap = dialog.wrap;
+                    if ui
+                        .checkbox(&mut wrap, "ADD PRE/POSTAMBLE")
+                        .changed()
+                    {
+                        save_wrap = Some(wrap);
+                    }
+                    ui.add_space(6.0);
+                    if let Some(error) = &dialog.error {
+                        ui.label(
+                            RichText::new(error)
+                                .size(theme::font_size(10.0))
+                                .color(theme::ERROR),
+                        );
+                    }
+                    if dialog.confirm_overwrite {
+                        ui.label(
+                            RichText::new(
+                                "That name already exists. REPLACE overwrites it; CANCEL keeps their file.",
+                            )
+                            .size(theme::font_size(10.0))
+                            .color(theme::WARNING),
+                        );
+                    }
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        // The overwrite step is this button, not a second
+                        // dialog: the buffer and the typed name stay put.
+                        let write = if dialog.confirm_overwrite {
+                            theme::danger_button(ui, "REPLACE", true)
+                        } else {
+                            theme::accent_button(ui, "SAVE", true)
+                        };
+                        if write.clicked() {
+                            save_confirm = true;
+                        }
+                        let cancel = theme::action_button(ui, "CANCEL", true);
+                        if cancel.clicked() {
+                            close = true;
+                        }
+                    });
+                    if field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                        save_confirm = true;
+                    }
+                }
             });
         if let Some(text) = goto_buffer {
-            self.modal = Some(Modal::GoToLine { buffer: text });
+            let mdi = matches!(self.modal, Some(Modal::GoToLine { mdi: true, .. }));
+            self.modal = Some(Modal::GoToLine { buffer: text, mdi });
         }
         if goto_accept {
-            let line = match self.modal.as_ref() {
-                Some(Modal::GoToLine { buffer }) => buffer.trim().parse::<usize>().ok(),
+            let target = match self.modal.as_ref() {
+                Some(Modal::GoToLine { buffer, mdi }) => {
+                    buffer.trim().parse::<usize>().ok().map(|line| (line, *mdi))
+                }
                 _ => None,
             };
-            if let Some(line) = line {
+            if let Some((line, mdi)) = target {
                 self.modal = None;
-                self.jump_to_line(line);
+                self.go_to_line(line, mdi);
             }
+        }
+        if let Some(name) = save_name {
+            // Typing a new name drops an armed overwrite: it belongs to the
+            // name it was armed for.
+            self.edit_mdi_save(|dialog| {
+                dialog.name = name;
+                dialog.confirm_overwrite = false;
+                dialog.error = None;
+            });
+        }
+        if let Some(wrap) = save_wrap {
+            self.edit_mdi_save(|dialog| dialog.wrap = wrap);
+        }
+        if save_confirm {
+            self.confirm_mdi_save();
         }
         if close {
             self.modal = None;
@@ -3773,7 +4165,7 @@ fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Page, color: C
                 color,
             );
         }
-        Page::Files | Page::Probe | Page::Mdi | Page::Homing | Page::Manual => {
+        Page::Files | Page::Probe | Page::Homing | Page::Manual => {
             painter.rect_stroke(rect.shrink(3.0), 2.0, s, StrokeKind::Inside);
         }
     }
@@ -3828,7 +4220,6 @@ pub fn page_from_name(name: &str) -> Option<Page> {
         Page::Diagnostics,
         Page::Help,
         Page::Probe,
-        Page::Mdi,
         Page::Homing,
         Page::Manual,
         Page::Settings,
@@ -3882,7 +4273,6 @@ fn page_key(page: Page) -> &'static str {
         Page::Files => "files",
         Page::Probe => "probe",
         Page::Settings => "settings",
-        Page::Mdi => "mdi",
         Page::Homing => "homing",
         Page::Manual => "manual",
     }
@@ -3904,7 +4294,9 @@ fn page_from_config(value: &str) -> Page {
 
 pub fn mode_page(mode: &PanelModeValidity) -> Option<Page> {
     match mode.mode()? {
-        PanelMode::Mdi => Some(Page::Mdi),
+        // MDI has no page of its own: it opens MAIN, where the mode swaps
+        // the program card for the MDI pane.
+        PanelMode::Mdi => Some(Page::Machine),
         PanelMode::Home | PanelMode::ProgHome => Some(Page::Homing),
         PanelMode::Jog | PanelMode::Inc | PanelMode::Mpg => Some(Page::Manual),
         PanelMode::Edit => Some(Page::Program),
@@ -4079,9 +4471,10 @@ mod tests {
 
     #[test]
     fn pages_follow_physical_mode() {
+        // MDI opens MAIN, whose program card the mode swaps for the pane.
         assert_eq!(
             mode_page(&PanelModeValidity::Valid(PanelMode::Mdi)),
-            Some(Page::Mdi)
+            Some(Page::Machine)
         );
         assert_eq!(
             mode_page(&PanelModeValidity::Valid(PanelMode::Home)),
@@ -4251,6 +4644,96 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     }
 
     #[test]
+    fn a_dialog_owns_the_keyboard_in_front_of_the_page() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.app.set_page(Page::Program);
+        harness.app.modal = Some(Modal::Info("test".into()));
+
+        harness.frame(&[egui::Key::F7]);
+        assert_eq!(
+            harness.app.page,
+            Page::Program,
+            "F7 must not navigate behind the dialog"
+        );
+
+        harness.frame(&[egui::Key::Escape]);
+        assert!(harness.app.modal.is_none(), "Escape dismisses the dialog");
+    }
+
+    #[test]
+    fn zero_keys_do_not_fire_behind_a_dialog() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.frame(&[]);
+        assert_eq!(harness.app.page, Page::Manual);
+
+        harness.sent.borrow_mut().clear();
+        harness.app.modal = Some(Modal::Info("test".into()));
+        harness.frame(&[egui::Key::A]);
+        assert!(
+            !harness.sent.borrow().iter().any(|command| matches!(
+                command,
+                MachineCommand::ZeroWorkOffset { .. } | MachineCommand::SetWorkPosition { .. }
+            )),
+            "A must not zero axes behind a dialog: {:?}",
+            harness.sent_debug()
+        );
+    }
+
+    #[test]
+    fn a_activates_the_selected_work_offset_only_on_the_offsets_page() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.app.set_page(Page::Offsets);
+        harness.app.snapshot.offsets.active_index = Some(1);
+        // G55. Keep the page's entry auto-select from resetting the row to the
+        // active system if the test thread is descheduled for >200 ms before
+        // the first frame. A future stamp makes that gap negative.
+        harness.app.offsets.selected_row = 1;
+        harness.app.offsets.last_frame_ms = linc_core::diag::now_ms() + 60_000;
+        harness.frame(&[egui::Key::A]);
+        assert!(
+            harness
+                .sent
+                .borrow()
+                .iter()
+                .any(|command| matches!(command, MachineCommand::ActivateWorkOffset { index: 2 })),
+            "A on OFFSETS must activate the selected G55 row: {:?}",
+            harness.sent_debug()
+        );
+        assert_eq!(harness.app.snapshot.offsets.active_index, Some(2));
+
+        // An in-place edit owns the keyboard first.
+        harness.sent.borrow_mut().clear();
+        harness.app.offsets.selected_row = 1;
+        harness.app.offsets.editing = true;
+        harness.frame(&[egui::Key::A]);
+        assert!(
+            !harness
+                .sent
+                .borrow()
+                .iter()
+                .any(|command| matches!(command, MachineCommand::ActivateWorkOffset { .. })),
+            "A must not activate while a cell edit is open: {:?}",
+            harness.sent_debug()
+        );
+        harness.app.offsets.editing = false;
+
+        // The key is page-local: it must not reach the Offsets command from
+        // another page.
+        harness.sent.borrow_mut().clear();
+        harness.app.set_page(Page::Machine);
+        harness.frame(&[egui::Key::A]);
+        assert!(
+            !harness
+                .sent
+                .borrow()
+                .iter()
+                .any(|command| matches!(command, MachineCommand::ActivateWorkOffset { .. })),
+            "A must not leak off OFFSETS: {:?}",
+            harness.sent_debug()
+        );
+    }
+
+    #[test]
     fn probe_preferences_restore_only_operator_owned_values() {
         let (_dir, mut app) = make_app(PanelMode::Auto);
         app.probe.params.slow_feed = 0.0;
@@ -4342,9 +4825,19 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     #[test]
     fn mode_driven_pages_open_and_close() {
         let (_dir, mut app) = make_app(PanelMode::Mdi);
-        assert_eq!(app.page, Page::Mdi);
-        app.on_mode_change(PanelModeValidity::Valid(PanelMode::Auto));
-        assert_eq!(app.page, Page::Program, "AUTO shows the running program");
+        assert_eq!(app.page, Page::Machine, "MDI opens the MAIN page");
+        assert!(app.mdi_pane_visible());
+        switch_mode(&mut app, PanelMode::Auto);
+        assert_eq!(app.page, Page::Machine, "AUTO brings up MAIN");
+        assert!(
+            !app.mdi_pane_visible(),
+            "and the normal program card takes the pane's slot"
+        );
+        // From anywhere else AUTO lands on MAIN as well.
+        switch_mode(&mut app, PanelMode::Mdi);
+        app.set_page(Page::Files);
+        switch_mode(&mut app, PanelMode::Auto);
+        assert_eq!(app.page, Page::Machine, "AUTO brings up MAIN");
         app.on_mode_change(PanelModeValidity::Valid(PanelMode::Home));
         assert_eq!(app.page, Page::Homing);
         app.on_mode_change(PanelModeValidity::Valid(PanelMode::Jog));
@@ -4849,6 +5342,13 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         /// Paint one frame with raw events and return what egui asked the
         /// platform to do (clipboard writes prove a TextEdit consumed the cut).
         fn frame_events(&mut self, events: Vec<egui::Event>) -> Vec<egui::OutputCommand> {
+            let mut output = self.frame_full(events);
+            std::mem::take(&mut output.platform_output.commands)
+        }
+
+        /// Paint one frame and keep the whole output: a test that checks what
+        /// reached the screen reads the shapes.
+        fn frame_full(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
             let app = &mut self.app;
             let mut output = self.ctx.run_ui(probe_raw_input(events), |ui| {
                 // The same prologue as \`eframe::App::ui\`, minus the frame.
@@ -4856,10 +5356,31 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 app.handle_keyboard(ui);
                 app.draw(ui);
             });
-            // A headless frame has no painter to upload the textures to.
-            let mut textures = output.textures_delta;
-            textures.clear();
-            std::mem::take(&mut output.platform_output.commands)
+            // A headless frame has no painter to upload the textures to; the
+            // deltas must be cleared, not dropped.
+            output.textures_delta.clear();
+            output
+        }
+
+        /// Draw the MDI pane alone into `slot`, and report the card frames and
+        /// every text it painted. Calling the pane directly keeps the slot a
+        /// known number instead of the page's computed column.
+        fn draw_mdi_pane(
+            &mut self,
+            slot: egui::Rect,
+        ) -> (Vec<egui::Rect>, Vec<(String, egui::Rect)>) {
+            let app = &mut self.app;
+            let mut output = self.ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+                theme::apply_design_zoom(ui.ctx(), app.design_scale);
+                let mut child = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(slot)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                crate::screens::mdi::pane(app, &mut child, slot.height());
+            });
+            output.textures_delta.clear();
+            (painted_cards(&output), painted_text(&output))
         }
 
         /// Open the page on \`category\` with a routine selected, bypassing the
@@ -5243,6 +5764,25 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     }
 
     #[test]
+    fn ctrl_arrow_stays_in_a_focused_text_editor() {
+        let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+        harness
+            .app
+            .program
+            .editor
+            .replace_text("G0 X1\nG1 X2\n".into());
+        harness.app.set_page(Page::Program);
+        let id = egui::Id::unique("linc-program-editor");
+        harness.ctx.memory_mut(|memory| memory.request_focus(id));
+        harness.frame_with(&[(egui::Key::ArrowLeft, egui::Modifiers::CTRL)]);
+        assert_eq!(
+            harness.app.focus_region,
+            FocusRegion::Page,
+            "Ctrl+Left must stay in the editor instead of moving focus to the nav"
+        );
+    }
+
+    #[test]
     fn backspace_deletes_a_file_on_the_files_page() {
         let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
         let path = harness.files_page_with_one_file("backspace-delete-test.ngc");
@@ -5441,8 +5981,9 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
 
     #[test]
     fn restoring_the_probe_page_after_mode_loss_clears_the_selection() {
+        // MDI is not in this list: it opens MAIN, which is not a mode-driven
+        // page, so a mode loss there has no page to restore.
         for (mode, mode_page) in [
-            (PanelMode::Mdi, Page::Mdi),
             (PanelMode::Jog, Page::Manual),
             (PanelMode::Home, Page::Homing),
         ] {
@@ -5503,8 +6044,9 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         // (MDI -> AUTO, MANUAL -> EDIT, HOME -> JOG) end on that page and never
         // restore a Probe page. Only a mode LOSS restores, and only that path
         // has to clear the Probe selection.
+        // MDI opens MAIN, which is not mode-driven: it never has a page to
+        // restore, so only the mode-driven positions are in this table.
         for (from, to, destination) in [
-            (PanelMode::Mdi, PanelMode::Auto, Page::Program),
             (PanelMode::Jog, PanelMode::Edit, Page::Program),
             (PanelMode::Home, PanelMode::Jog, Page::Manual),
         ] {
@@ -5533,7 +6075,6 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         for (kind, slot) in [
             ("dro", layout.dro_target),
             ("parameter", layout.parameter_target),
-            ("result action", layout.card_action_target),
             ("hint field", layout.hint_target),
             ("calibration card", layout.calibrate_card),
             ("calibration action", layout.calibrate_action),
@@ -5645,49 +6186,6 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             Some(&[12usize, 13][..]),
             "the hint row must follow the picked routine in the same frame"
         );
-    }
-
-    #[test]
-    fn the_result_actions_fit_their_target_width() {
-        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
-        harness.enter_probe(ProbeCategory::OutsideCorners, "back_left_top_corner");
-        harness.frame(&[]);
-        let button = harness
-            .app
-            .probe_layout
-            .card_action_target
-            .expect("card action drawn");
-        let labels = [
-            "U UPDATE PARAMS",
-            "Ctrl+R RESET ALL",
-            "Ctrl+X RESET X",
-            "Ctrl+Y RESET Y",
-        ];
-        let mut widths = Vec::new();
-        let ctx = harness.ctx.clone();
-        let mut output = ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
-            for label in labels {
-                let width = ui.fonts_mut(|fonts| {
-                    fonts
-                        .layout_no_wrap(
-                            label.to_string(),
-                            egui::FontId::proportional(8.0),
-                            egui::Color32::WHITE,
-                        )
-                        .size()
-                        .x
-                });
-                widths.push((label, width));
-            }
-        });
-        output.textures_delta.clear();
-        for (label, width) in widths {
-            assert!(
-                width <= button.width() - 8.0,
-                "{label} needs {width:.1} px of a {:.1} px button",
-                button.width()
-            );
-        }
     }
 
     #[test]
@@ -5811,6 +6309,836 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 );
             }
         }
+    }
+
+    // The MDI pane: the panel position replaces MAIN's program card.
+
+    fn mdi_harness() -> ProbeHarness {
+        ProbeHarness::new(PanelMode::Mdi, false, true)
+    }
+
+    fn blocks(app: &LincApp) -> Vec<String> {
+        app.mdi
+            .blocks
+            .iter()
+            .map(|(block, _)| block.clone())
+            .collect()
+    }
+
+    fn history_limit(app: &LincApp) -> usize {
+        app.profile.config.mdi.history_limit
+    }
+
+    use linc_core::gcode::SegmentKind;
+
+    /// Turn the panel switch the way a frame sees it: the snapshot reports the
+    /// new position and the mode handler runs against it, as `sync` does.
+    fn switch_mode(app: &mut LincApp, mode: PanelMode) {
+        app.snapshot.panel.mode = PanelModeValidity::Valid(mode);
+        app.on_mode_change(PanelModeValidity::Valid(mode));
+    }
+
+    /// The card frames the frame painted: a rounded rect with the border
+    /// colour, which is what `theme::card` and `common::shell_card` draw.
+    fn painted_cards(output: &egui::FullOutput) -> Vec<egui::Rect> {
+        fn walk(shape: &egui::Shape, out: &mut Vec<egui::Rect>) {
+            match shape {
+                egui::Shape::Rect(rect) => {
+                    if rect.stroke.color == theme::BORDER && rect.corner_radius.nw == 6 {
+                        out.push(rect.rect);
+                    }
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut rects = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut rects);
+        }
+        rects
+    }
+
+    /// Every text the frame painted, with the rect it landed in.
+    fn painted_text(output: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
+        fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => out.push((
+                    text.galley.text().to_string(),
+                    egui::Rect::from_min_size(text.pos, text.galley.size()),
+                )),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut texts = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut texts);
+        }
+        texts
+    }
+
+    /// Type one character per frame, the way the panel delivers them.
+    fn type_text(harness: &mut ProbeHarness, text: &str) {
+        for character in text.chars() {
+            harness.frame_events(vec![egui::Event::Text(character.to_string())]);
+        }
+    }
+
+    /// Where the input's text cursor sits, in characters.
+    fn mdi_caret(harness: &ProbeHarness) -> usize {
+        let id = egui::Id::unique("linc-mdi-input");
+        egui::text_edit::TextEditState::load(&harness.ctx, id)
+            .and_then(|state| state.cursor.char_range())
+            .map(|range| range.primary.index.0)
+            .unwrap_or(0)
+    }
+
+    /// Select a character range of the MDI input, the way a drag would.
+    fn select_mdi_chars(harness: &ProbeHarness, start: usize, end: usize) {
+        let id = egui::Id::unique("linc-mdi-input");
+        let mut state = egui::text_edit::TextEditState::load(&harness.ctx, id).unwrap_or_default();
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(start),
+                egui::text::CCursor::new(end),
+            )));
+        state.store(&harness.ctx, id);
+    }
+
+    fn mdi_input_focused(harness: &ProbeHarness) -> bool {
+        harness
+            .ctx
+            .memory(|memory| memory.has_focus(egui::Id::unique("linc-mdi-input")))
+    }
+
+    /// What egui-winit delivers on a non-Mac keyboard: Ctrl also sets
+    /// command, and a binding parsed from "Ctrl+..." requires it.
+    fn ctrl() -> egui::Modifiers {
+        egui::Modifiers::CTRL | egui::Modifiers::COMMAND
+    }
+
+    /// The pane reserves the MODAL band at the bottom of its card and still
+    /// fills the slot it was given: the column beside it ends on the same line.
+    #[test]
+    fn the_mdi_pane_draws_the_modal_band_and_fills_its_slot() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        let slot = egui::Rect::from_min_size(egui::pos2(920.0, 90.0), egui::vec2(352.0, 560.0));
+        let (cards, texts) = harness.draw_mdi_pane(slot);
+        // The pane's own card fills the slot it was given, to the pixel: the
+        // column beside it ends on the same line.
+        let card = cards
+            .iter()
+            .find(|rect| (rect.width() - slot.width()).abs() < 0.5)
+            .expect("the pane's card is drawn at the slot's width");
+        assert!(
+            (card.height() - slot.height()).abs() < 0.5,
+            "the card fills its slot: {} of {}",
+            card.height(),
+            slot.height()
+        );
+        assert!((card.min.y - slot.min.y).abs() < 0.5);
+        assert!(texts.iter().any(|(text, _)| text.contains("BLOCKS")));
+        // An idle strip draws nothing: the issue keys are already on the rail.
+        assert!(
+            !texts.iter().any(|(text, _)| text.starts_with("ENTER ISSUES")),
+            "the idle strip must not repeat the shortcuts rail"
+        );
+        harness.app.mdi.last_result = Some("G1 X10".into());
+        let (_, texts) = harness.draw_mdi_pane(slot);
+        let strip = texts
+            .iter()
+            .find(|(text, _)| text.starts_with("ISSUED"))
+            .expect("the result strip is drawn");
+        let modal = texts
+            .iter()
+            .find(|(text, _)| text == "MODAL")
+            .expect("the MODAL band is drawn");
+        // Inside the card, at its bottom, and under the strip.
+        assert!(
+            modal.1.min.y > strip.1.max.y,
+            "the band sits below the strip"
+        );
+        assert!(modal.1.min.x >= slot.left() + 12.0 - 0.5);
+        assert!(modal.1.max.x <= slot.right() - 12.0 + 0.5);
+        assert!(modal.1.max.y <= slot.bottom() - 12.0 + 0.5);
+        assert!(
+            modal.1.min.y > slot.center().y,
+            "the band takes the bottom of the card, not the middle"
+        );
+    }
+
+    #[test]
+    fn a_block_that_leaves_the_machine_envelope_is_refused() {
+        // The pane lights the frame red from the same segments; the gate is what
+        // stops Enter from sending a move the machine cannot make.
+        let mut harness = mdi_harness();
+        harness.app.mdi.input = "G0 X1000".into();
+        screens::mdi::issue(&mut harness.app);
+        let error = harness.app.mdi.last_error.clone().unwrap_or_default();
+        assert!(error.contains("travel limit"), "{error}");
+        assert!(harness.mdi_sent().is_empty(), "{:?}", harness.sent_debug());
+
+        // The same axis, inside the envelope, still goes out.
+        harness.app.mdi.input = "G0 X-100".into();
+        harness.app.mdi.last_error = None;
+        screens::mdi::issue(&mut harness.app);
+        assert_eq!(harness.app.mdi.last_error, None);
+        assert_eq!(harness.mdi_sent(), vec!["G0 X-100".to_string()]);
+    }
+
+    #[test]
+    fn typing_a_block_inserts_the_space_before_each_value_word() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        harness.frame(&[]);
+        assert!(mdi_input_focused(&harness), "the pane holds the keyboard");
+
+        type_text(&mut harness, "G1X10");
+        assert_eq!(harness.app.mdi.input, "G1 X10");
+        assert_eq!(mdi_caret(&harness), 6, "the caret ends after the character");
+
+        // The same rule from a value word, twice in one block.
+        let mut second = mdi_harness();
+        second.frame(&[]);
+        second.frame(&[]);
+        type_text(&mut second, "X10Y5");
+        assert_eq!(second.app.mdi.input, "X10 Y5");
+        assert_eq!(mdi_caret(&second), 6);
+
+        // A block that is already spaced is left exactly as typed.
+        let mut third = mdi_harness();
+        third.frame(&[]);
+        third.frame(&[]);
+        type_text(&mut third, "M3 S1200");
+        assert_eq!(third.app.mdi.input, "M3 S1200");
+    }
+
+    #[test]
+    fn a_leading_value_letter_and_a_spaced_one_get_no_extra_space() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        harness.frame(&[]);
+        type_text(&mut harness, "X10");
+        assert_eq!(
+            harness.app.mdi.input, "X10",
+            "nothing before the first word"
+        );
+
+        // A letter after an existing space is not touched, and a second space is
+        // never typed for it.
+        type_text(&mut harness, " Y5");
+        assert_eq!(harness.app.mdi.input, "X10 Y5");
+    }
+
+    #[test]
+    fn a_value_letter_inside_a_comment_or_an_expression_is_left_alone() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        harness.frame(&[]);
+        type_text(&mut harness, "G1(aX");
+        assert_eq!(harness.app.mdi.input, "G1(aX", "a comment is prose");
+
+        let mut brackets = mdi_harness();
+        brackets.frame(&[]);
+        brackets.frame(&[]);
+        type_text(&mut brackets, "G1[#1X");
+        assert_eq!(
+            brackets.app.mdi.input, "G1[#1X",
+            "an expression is not words"
+        );
+
+        // Closed again, the rule applies once more.
+        type_text(&mut brackets, "]Y");
+        assert_eq!(brackets.app.mdi.input, "G1[#1X] Y");
+    }
+
+    #[test]
+    fn a_recalled_block_is_not_rewritten_until_a_key_is_typed() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        let limit = history_limit(&harness.app);
+        harness.app.mdi.commit(limit, "G1X10".into());
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert_eq!(harness.app.mdi.input, "G1X10");
+        harness.frame(&[]);
+        harness.frame(&[]);
+        assert_eq!(
+            harness.app.mdi.input, "G1X10",
+            "recall keeps the block as it was issued"
+        );
+        // The first typed character applies the rule at the caret.
+        type_text(&mut harness, "Y");
+        assert_eq!(harness.app.mdi.input, "G1X10 Y");
+        assert_eq!(mdi_caret(&harness), 7);
+    }
+
+    #[test]
+    fn a_selection_is_replaced_with_the_space_in_front_of_the_word() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        harness.frame(&[]);
+        harness.app.mdi.input = "G1X10".into();
+        harness.frame(&[]);
+        // Replace the `X10` the way Enter-in-a-cell selects a value.
+        select_mdi_chars(&harness, 2, 5);
+        type_text(&mut harness, "Y");
+        assert_eq!(harness.app.mdi.input, "G1 Y");
+        assert_eq!(mdi_caret(&harness), 4, "the caret ends after the character");
+    }
+
+    #[test]
+    fn auto_brings_up_main_from_anywhere() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        assert_eq!(harness.app.page, Page::Machine, "MDI opens MAIN");
+        switch_mode(&mut harness.app, PanelMode::Auto);
+        assert_eq!(harness.app.page, Page::Machine, "AUTO brings up MAIN");
+        assert!(
+            !harness.app.mdi_pane_visible(),
+            "the pane goes with the mode, so MAIN shows the program card"
+        );
+
+        // From any other page too.
+        switch_mode(&mut harness.app, PanelMode::Edit);
+        harness.app.set_page(Page::Files);
+        switch_mode(&mut harness.app, PanelMode::Auto);
+        assert_eq!(harness.app.page, Page::Machine, "AUTO brings up MAIN");
+
+        // The other positions keep their mapping.
+        harness.app.set_page(Page::Files);
+        switch_mode(&mut harness.app, PanelMode::Edit);
+        assert_eq!(harness.app.page, Page::Program);
+        assert_eq!(harness.app.program.view, ProgramView::Code);
+        switch_mode(&mut harness.app, PanelMode::Jog);
+        assert_eq!(harness.app.page, Page::Manual);
+        switch_mode(&mut harness.app, PanelMode::Home);
+        assert_eq!(harness.app.page, Page::Homing);
+        switch_mode(&mut harness.app, PanelMode::Mdi);
+        assert_eq!(harness.app.page, Page::Machine);
+        // AUTO still has no page of its own, so the boot path is unchanged.
+        assert!(mode_page(&PanelModeValidity::Valid(PanelMode::Auto)).is_none());
+    }
+
+    #[test]
+    fn a_block_previews_in_the_machines_distance_mode() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        // No work offset: the block's numbers are the machine's in this test.
+        harness.app.program.preview_offset = None;
+        // Away from zero, or an absolute move and a relative one would land on
+        // the same number and the test would prove nothing.
+        if let Some(x) = harness.app.snapshot.positions.axes.get_mut("X") {
+            x.machine = -100.0;
+            x.work = -100.0;
+        }
+        harness.app.mdi.input = "G0 X-10".into();
+        let absolute = crate::screens::mdi::overlay(&mut harness.app).to_vec();
+        let end = absolute.last().expect("a move").end[0];
+        assert!((end + 10.0).abs() < 1e-6, "G90 lands on X-10: {end}");
+
+        // The machine sits in G91: the same block is a 10 mm move from where the
+        // tool is, not a jump across the part.
+        harness.app.snapshot.program.modal = vec![("G91".into(), String::new())];
+        let start = harness.app.tool_tip();
+        assert!((start[0] + 100.0).abs() < 1e-6, "the tool is at {start:?}");
+        let relative = crate::screens::mdi::overlay(&mut harness.app).to_vec();
+        let end = relative.last().expect("a move").end[0];
+        assert!(
+            (end - (start[0] - 10.0)).abs() < 1e-6,
+            "G91 moves 10 mm from {}: {end}",
+            start[0]
+        );
+    }
+
+    #[test]
+    fn the_overlay_starts_at_the_tool_and_ends_where_the_block_says() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        // A known frame: no work offset, so the block's numbers are the
+        // machine's in this test.
+        harness.app.program.preview_offset = None;
+        let start = harness.app.tool_tip();
+        harness.app.mdi.input = "G1 X10".into();
+        let segments = crate::screens::mdi::overlay(&mut harness.app).to_vec();
+        assert_eq!(segments.len(), 1, "one block, one move");
+        assert_eq!(segments[0].start, start, "the move starts at the tool");
+        assert_eq!(segments[0].end, [10.0, start[1], start[2]]);
+        assert_eq!(
+            segments[0].kind,
+            SegmentKind::Feed,
+            "a fast move is the cut colour, a solid line"
+        );
+
+        // A rapid is the other layer: the renderer dashes it.
+        harness.app.mdi.input = "G0 X10".into();
+        let rapid = crate::screens::mdi::overlay(&mut harness.app).to_vec();
+        assert_eq!(rapid[0].kind, SegmentKind::Rapid);
+        assert_ne!(rapid[0].kind, segments[0].kind);
+        assert_eq!(rapid[0].start, start);
+        assert_eq!(rapid[0].end, [10.0, start[1], start[2]]);
+
+        // Nothing to draw for a block the pane would refuse.
+        for block in ["", "   ", "G1 X"] {
+            harness.app.mdi.input = block.into();
+            assert!(
+                crate::screens::mdi::overlay(&mut harness.app).is_empty(),
+                "{block:?} draws nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn the_overlay_is_parsed_once_per_change() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        harness.app.mdi.input = "G1 X10".into();
+        crate::screens::mdi::overlay(&mut harness.app);
+        let first = harness.app.mdi.overlay.as_ref().expect("cached").generation;
+        // Every frame of an unchanged pane keeps the same parse.
+        crate::screens::mdi::overlay(&mut harness.app);
+        crate::screens::mdi::overlay(&mut harness.app);
+        assert_eq!(
+            harness.app.mdi.overlay.as_ref().map(|c| c.generation),
+            Some(first)
+        );
+        // A typed character, a moved machine or a changed modal state re-parses.
+        harness.app.mdi.input.push('5');
+        crate::screens::mdi::overlay(&mut harness.app);
+        let typed = harness.app.mdi.overlay.as_ref().expect("cached").generation;
+        assert!(typed > first, "the input changed");
+        harness.app.mdi.input.pop();
+        harness.app.program.preview_offset = Some(linc_core::model::AxisMap::new());
+        crate::screens::mdi::overlay(&mut harness.app);
+        let modal = harness.app.mdi.overlay.as_ref().expect("cached").generation;
+        assert!(modal > typed, "the modal state changed");
+    }
+
+    #[test]
+    fn ctrl_up_and_down_move_the_selected_block_and_carry_the_selection() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        let limit = history_limit(&harness.app);
+        for block in ["G0 X1", "G1 X2", "G1 X3"] {
+            harness.app.mdi.commit(limit, block.into());
+        }
+        let sent = harness.mdi_sent().len();
+        // No selection: the chords do nothing at all.
+        harness.app.mdi.selection = None;
+        harness.app.mdi.input.clear();
+        harness.frame_with(&[(egui::Key::ArrowUp, ctrl())]);
+        harness.frame_with(&[(egui::Key::ArrowDown, ctrl())]);
+        assert_eq!(
+            blocks(&harness.app),
+            ["G0 X1", "G1 X2", "G1 X3"],
+            "nothing moves without a selection"
+        );
+
+        // Recall the last line, then move it up: the selection follows.
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert_eq!(harness.app.mdi.selection, Some(2));
+        harness.frame_with(&[(egui::Key::ArrowUp, ctrl())]);
+        assert_eq!(blocks(&harness.app), ["G0 X1", "G1 X3", "G1 X2"]);
+        assert_eq!(harness.app.mdi.selection, Some(1));
+        assert_eq!(
+            harness.app.mdi.input, "G1 X3",
+            "the move leaves the input alone"
+        );
+        harness.frame_with(&[(egui::Key::ArrowUp, ctrl())]);
+        assert_eq!(blocks(&harness.app), ["G1 X3", "G0 X1", "G1 X2"]);
+        assert_eq!(harness.app.mdi.selection, Some(0));
+        // At the top: no wrap, no pop.
+        harness.frame_with(&[(egui::Key::ArrowUp, ctrl())]);
+        assert_eq!(blocks(&harness.app), ["G1 X3", "G0 X1", "G1 X2"]);
+        assert_eq!(harness.app.mdi.selection, Some(0));
+        // Back down to the last line and stop there.
+        harness.frame_with(&[(egui::Key::ArrowDown, ctrl())]);
+        harness.frame_with(&[(egui::Key::ArrowDown, ctrl())]);
+        assert_eq!(blocks(&harness.app), ["G0 X1", "G1 X2", "G1 X3"]);
+        assert_eq!(harness.app.mdi.selection, Some(2));
+        harness.frame_with(&[(egui::Key::ArrowDown, ctrl())]);
+        assert_eq!(harness.app.mdi.selection, Some(2));
+        assert_eq!(harness.app.mdi.len(), 3);
+
+        // The moves never issue anything and never open a dialog.
+        assert_eq!(harness.mdi_sent().len(), sent);
+        assert!(harness.app.modal.is_none());
+        // Plain arrows still recall.
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert_eq!(harness.app.mdi.selection, Some(1));
+        assert_eq!(harness.app.mdi.input, "G1 X2");
+    }
+
+    #[test]
+    fn the_moved_block_is_the_one_run_delete_and_save_act_on() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        let limit = history_limit(&harness.app);
+        for block in ["G0 X1", "G1 X2", "G1 X3"] {
+            harness.app.mdi.commit(limit, block.into());
+        }
+        harness.app.mdi.input.clear();
+        harness.app.mdi.selection = Some(2);
+        harness.frame_with(&[(egui::Key::ArrowUp, ctrl())]);
+        assert_eq!(blocks(&harness.app), ["G0 X1", "G1 X3", "G1 X2"]);
+        assert_eq!(harness.app.mdi.selection, Some(1));
+
+        // Ctrl+R runs the moved block, not the one that was in that slot.
+        harness.frame_with(&[(egui::Key::R, ctrl())]);
+        assert_eq!(harness.mdi_sent().last().map(String::as_str), Some("G1 X3"));
+
+        // Ctrl+S writes the buffer in the order the operator sees.
+        let dir = harness._dir.path().to_path_buf();
+        let path = crate::screens::mdi::save_buffer(&harness.app, &dir, "order", false, false)
+            .expect("the buffer saves");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "G0 X1\nG1 X3\nG1 X2\n"
+        );
+
+        // Ctrl+Bksp deletes the moved line.
+        harness.frame_with(&[(egui::Key::Backspace, ctrl())]);
+        assert_eq!(blocks(&harness.app), ["G0 X1", "G1 X2"]);
+    }
+
+    #[test]
+    fn the_mdi_pane_owns_the_program_slot_on_main_and_outlives_the_page() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        assert_eq!(harness.app.page, Page::Machine, "MDI opens MAIN");
+        assert!(harness.app.mdi_pane_visible());
+
+        let limit = history_limit(&harness.app);
+        harness.app.mdi.commit(limit, "G0 X0".into());
+
+        // Another page restores the program card and keeps the buffer.
+        harness.frame(&[egui::Key::F6]);
+        assert_eq!(harness.app.page, Page::Program);
+        assert!(!harness.app.mdi_pane_visible());
+        harness.frame(&[egui::Key::F5]);
+        assert!(harness.app.mdi_pane_visible(), "MAIN shows the pane again");
+
+        // So does leaving the mode and coming back.
+        harness
+            .app
+            .on_mode_change(PanelModeValidity::Valid(PanelMode::Jog));
+        assert!(!harness.app.mdi_pane_visible());
+        harness
+            .app
+            .on_mode_change(PanelModeValidity::Valid(PanelMode::Mdi));
+        assert_eq!(harness.app.page, Page::Machine);
+        assert!(harness.app.mdi_pane_visible());
+        assert_eq!(blocks(&harness.app), vec!["G0 X0".to_string()]);
+        // auto_focus: the pane takes the keyboard when it appears, so a block
+        // can be typed without reaching for the mouse.
+        harness.frame(&[]);
+        assert!(
+            harness
+                .ctx
+                .memory(|memory| memory.has_focus(egui::Id::unique("linc-mdi-input"))),
+            "the input holds the keyboard"
+        );
+
+        // Esc clears only the uncommitted input.
+        harness.app.mdi.input = "G0 Z5".into();
+        harness.frame(&[egui::Key::Escape]);
+        assert!(harness.app.mdi.input.is_empty());
+        assert_eq!(harness.app.mdi.len(), 1, "Esc never clears the buffer");
+    }
+
+    #[test]
+    fn enter_issues_a_block_and_a_recalled_line_is_overwritten_in_place() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        let limit = history_limit(&harness.app);
+
+        harness.app.mdi.input = "G0 X1".into();
+        harness.frame(&[egui::Key::Enter]);
+        assert_eq!(harness.mdi_sent(), vec!["G0 X1".to_string()]);
+        assert_eq!(blocks(&harness.app), vec!["G0 X1".to_string()]);
+        assert!(harness.app.mdi.input.is_empty(), "the input is clear again");
+
+        harness.app.mdi.input = "G1 Z-1 F100".into();
+        harness.frame(&[egui::Key::Enter]);
+        assert_eq!(harness.mdi_sent().len(), 2);
+        assert_eq!(harness.app.mdi.len(), 2, "a typed block appends");
+
+        // Recall the first block, edit it, and Enter overwrites that line.
+        harness.frame(&[egui::Key::ArrowUp]);
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert_eq!(harness.app.mdi.selection, Some(0));
+        harness.app.mdi.input = "G0 X5".into();
+        harness.frame(&[egui::Key::Enter]);
+        assert_eq!(
+            blocks(&harness.app),
+            vec!["G0 X5".to_string(), "G1 Z-1 F100".to_string()]
+        );
+        assert_eq!(harness.mdi_sent().last().map(String::as_str), Some("G0 X5"));
+
+        // A block that does not parse is not committed and nothing is sent.
+        let sent = harness.mdi_sent().len();
+        harness.app.mdi.input = "G1 X".into();
+        harness.frame(&[egui::Key::Enter]);
+        assert_eq!(harness.mdi_sent().len(), sent);
+        assert_eq!(harness.app.mdi.len(), 2);
+        assert!(harness.app.mdi.last_error.is_some(), "the strip says why");
+        let _ = limit;
+    }
+
+    #[test]
+    fn up_and_down_recall_a_buffer_line_and_keep_the_selection_on_it() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        let limit = history_limit(&harness.app);
+        harness.app.mdi.commit(limit, "G0 X1".into());
+        harness.app.mdi.commit(limit, "G1 X2".into());
+
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert_eq!(harness.app.mdi.input, "G1 X2", "Up starts at the newest");
+        assert_eq!(harness.app.mdi.selection, Some(1));
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert_eq!(harness.app.mdi.input, "G0 X1");
+        assert_eq!(harness.app.mdi.selection, Some(0));
+
+        harness.frame(&[egui::Key::ArrowDown]);
+        assert_eq!(harness.app.mdi.input, "G1 X2");
+        assert_eq!(harness.app.mdi.selection, Some(1));
+        harness.frame(&[egui::Key::ArrowDown]);
+        assert_eq!(harness.app.mdi.selection, None, "past the newest block");
+        assert!(harness.app.mdi.input.is_empty());
+
+        // Recall is in place: both lines stay in the listing.
+        assert_eq!(harness.app.mdi.len(), 2);
+        assert!(harness.mdi_sent().is_empty(), "recall issues nothing");
+    }
+
+    #[test]
+    fn ctrl_backspace_deletes_the_selected_block_and_otherwise_clears_the_input() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        let limit = history_limit(&harness.app);
+
+        // No buffer line selected: the chord clears the whole input, so the
+        // text edit never got it (it would have deleted one word).
+        harness.app.mdi.input = "G0 X1 Y2".into();
+        harness.frame_with(&[(egui::Key::Backspace, ctrl())]);
+        assert!(harness.app.mdi.input.is_empty());
+        assert!(harness.mdi_sent().is_empty());
+
+        harness.app.mdi.commit(limit, "G0 X1".into());
+        harness.app.mdi.commit(limit, "G1 X2".into());
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert_eq!(harness.app.mdi.selection, Some(1));
+        harness.frame_with(&[(egui::Key::Backspace, ctrl())]);
+        assert_eq!(blocks(&harness.app), vec!["G0 X1".to_string()]);
+        assert_eq!(
+            harness.app.mdi.selection,
+            Some(0),
+            "the band stays on a line"
+        );
+        assert!(harness.mdi_sent().is_empty(), "deleting issues nothing");
+    }
+
+    #[test]
+    fn ctrl_r_issues_the_selected_block_with_no_dialog() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        let limit = history_limit(&harness.app);
+        harness.app.mdi.commit(limit, "G0 X3".into());
+        harness.app.mdi.selection = Some(0);
+
+        harness.frame_with(&[(egui::Key::R, ctrl())]);
+        assert_eq!(harness.mdi_sent(), vec!["G0 X3".to_string()]);
+        assert!(harness.app.modal.is_none(), "Ctrl+R confirms nothing");
+        assert_eq!(harness.app.mdi.len(), 1, "the block is already buffered");
+    }
+
+    #[test]
+    fn a_blocked_run_puts_the_reason_in_the_strip_and_sends_nothing() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        let limit = history_limit(&harness.app);
+        harness.app.mdi.commit(limit, "G0 X3".into());
+        harness.app.mdi.selection = Some(0);
+
+        // Axes unhomed: the run-from-line gate, reported without a dialog.
+        harness.app.snapshot.machine.homed.insert("X", false);
+        harness.frame_with(&[(egui::Key::R, ctrl())]);
+        assert!(harness.mdi_sent().is_empty(), "{:?}", harness.sent_debug());
+        assert_eq!(
+            harness.app.mdi.last_error.as_deref(),
+            Some("home every axis first")
+        );
+        assert!(harness.app.modal.is_none());
+
+        // The panel not in MDI blocks it the same way.
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        let limit = history_limit(&harness.app);
+        harness.app.mdi.commit(limit, "G0 X3".into());
+        harness.app.mdi.selection = Some(0);
+        screens::mdi::run_selected(&mut harness.app);
+        assert!(harness.mdi_sent().is_empty());
+        assert_eq!(
+            harness.app.mdi.last_error.as_deref(),
+            Some("panel mode is not MDI")
+        );
+    }
+
+    #[test]
+    fn ctrl_g_selects_a_buffer_line_and_leaves_the_program_goto_alone() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        let limit = history_limit(&harness.app);
+        harness.app.mdi.commit(limit, "G0 X1".into());
+        harness.app.mdi.commit(limit, "G1 X2".into());
+
+        harness.frame_with(&[(egui::Key::G, ctrl())]);
+        assert!(
+            matches!(harness.app.modal, Some(Modal::GoToLine { mdi: true, .. })),
+            "Ctrl+G on the pane targets the buffer"
+        );
+        // Accepting closes the dialog first, the way the modal handler does.
+        harness.app.modal = None;
+        harness.app.go_to_line(99, true);
+        assert_eq!(harness.app.mdi.selection, Some(1), "bounded by the buffer");
+        assert_eq!(harness.app.mdi.input, "G1 X2");
+
+        // The Program page keeps its own go-to-line.
+        harness.app.set_page(Page::Program);
+        harness.frame_with(&[(egui::Key::G, ctrl())]);
+        assert!(matches!(
+            harness.app.modal,
+            Some(Modal::GoToLine { mdi: false, .. })
+        ));
+        harness.app.go_to_line(1, false);
+        assert_eq!(harness.app.program.selected_line, 1);
+        assert_eq!(
+            harness.app.mdi.selection,
+            Some(1),
+            "the buffer selection is untouched"
+        );
+    }
+
+    #[test]
+    fn ctrl_s_writes_the_buffer_through_mdi_file() {
+        let mut harness = mdi_harness();
+        harness.frame(&[]);
+        let limit = history_limit(&harness.app);
+        harness.app.mdi.commit(limit, "G0 X0 Y0".into());
+        harness.app.mdi.commit(limit, "G1 Z-1 F100".into());
+        let prefix = harness.app.profile.machine_ini.program_prefix.clone();
+
+        harness.frame_with(&[(egui::Key::S, ctrl())]);
+        assert!(
+            matches!(harness.app.modal, Some(Modal::MdiSave(_))),
+            "Ctrl+S opens the dialog"
+        );
+        // The wrapper starts ticked, so the saved program carries the
+        // profile's preamble and postamble.
+        harness
+            .app
+            .edit_mdi_save(|dialog| dialog.name = "part".into());
+        harness.app.confirm_mdi_save();
+        assert!(harness.app.modal.is_none());
+        let wrapped = std::fs::read_to_string(prefix.join("part.ngc")).unwrap();
+        let mut lines = wrapped.lines();
+        assert_eq!(lines.next(), Some("G17"));
+        assert_eq!(lines.last(), Some("M30"));
+        assert!(wrapped.contains("G0 X0 Y0\nG1 Z-1 F100\n"));
+        assert_eq!(harness.app.mdi.len(), 2, "the buffer is kept after a save");
+
+        // Unticked: the blocks alone.
+        harness.app.modal = Some(crate::state::Modal::MdiSave(crate::state::MdiSaveDialog {
+            name: "plain".into(),
+            wrap: false,
+            ..Default::default()
+        }));
+        harness.app.confirm_mdi_save();
+        assert_eq!(
+            std::fs::read_to_string(prefix.join("plain.ngc")).unwrap(),
+            "G0 X0 Y0\nG1 Z-1 F100\n"
+        );
+
+        // An existing name needs the confirm inside the dialog first.
+        harness.app.mdi.commit(limit, "G0 Z5".into());
+        harness.app.modal = Some(crate::state::Modal::MdiSave(crate::state::MdiSaveDialog {
+            name: "plain".into(),
+            wrap: false,
+            ..Default::default()
+        }));
+        harness.app.confirm_mdi_save();
+        assert!(
+            matches!(
+                harness.app.modal,
+                Some(Modal::MdiSave(crate::state::MdiSaveDialog {
+                    confirm_overwrite: true,
+                    ..
+                }))
+            ),
+            "the same dialog asks for the overwrite"
+        );
+        assert_eq!(
+            std::fs::read_to_string(prefix.join("plain.ngc")).unwrap(),
+            "G0 X0 Y0\nG1 Z-1 F100\n",
+            "nothing is written before the confirm"
+        );
+        harness.app.confirm_mdi_save();
+        assert!(harness.app.modal.is_none());
+        assert_eq!(
+            std::fs::read_to_string(prefix.join("plain.ngc")).unwrap(),
+            "G0 X0 Y0\nG1 Z-1 F100\nG0 Z5\n"
+        );
+    }
+
+    #[test]
+    fn protect_refuses_the_mdi_save_before_it_opens_the_dialog() {
+        let mut harness = ProbeHarness::new(PanelMode::Mdi, true, true);
+        harness.frame(&[]);
+        let limit = history_limit(&harness.app);
+        harness.app.mdi.commit(limit, "G0 X0".into());
+        let prefix = harness.app.profile.machine_ini.program_prefix.clone();
+
+        harness.frame_with(&[(egui::Key::S, ctrl())]);
+        assert!(harness.app.modal.is_none(), "protect keeps the dialog shut");
+        assert!(!prefix.join("part.ngc").exists());
+
+        // A protect that turns on while the dialog is open still refuses.
+        harness.app.modal = Some(crate::state::Modal::MdiSave(crate::state::MdiSaveDialog {
+            name: "part".into(),
+            ..Default::default()
+        }));
+        harness.app.confirm_mdi_save();
+        assert!(
+            harness.app.modal.is_some(),
+            "the dialog stays open with the reason"
+        );
+        assert!(!prefix.join("part.ngc").exists());
+    }
+
+    #[test]
+    fn history_limit_drops_the_oldest_block() {
+        let mut mdi = MdiUi::new();
+        mdi.commit(2, "G0 X1".into());
+        mdi.commit(2, "G1 X2".into());
+        mdi.commit(2, "G2 X3".into());
+        let texts: Vec<String> = mdi.blocks.iter().map(|(block, _)| block.clone()).collect();
+        assert_eq!(texts, vec!["G1 X2".to_string(), "G2 X3".to_string()]);
+
+        // Committing over a selected line rewrites it instead of growing.
+        mdi.selection = Some(1);
+        mdi.commit(2, "G3 X4".into());
+        assert_eq!(mdi.len(), 2);
+        assert_eq!(mdi.blocks[1].0, "G3 X4");
     }
 }
 

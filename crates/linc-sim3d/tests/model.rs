@@ -200,12 +200,34 @@ fn machine_body_matches_the_ini_limits() {
         machine
             .parts
             .iter()
+            .chain(&machine.column_parts)
+            .chain(&machine.head_parts)
             .map(|part| part.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["base", "table", "column", "head", "spindle", "holder"]
+        vec![
+            "base",
+            "table",
+            "column",
+            "column-foot",
+            "z-rail-left",
+            "z-rail-right",
+            "head",
+            "spindle",
+            "holder",
+            "motor",
+            "spindle-pulley",
+            "motor-pulley",
+            "belt-front",
+            "belt-back",
+        ]
     );
     assert_eq!(machine.limit_planes.len(), 6);
-    for part in &machine.parts {
+    for part in machine
+        .parts
+        .iter()
+        .chain(&machine.column_parts)
+        .chain(&machine.head_parts)
+    {
         assert!(!part.is_empty(), "{} has no triangles", part.name);
         assert!(
             machine.machine_bounds().contains(part.bounds.min, TOL)
@@ -226,15 +248,26 @@ fn machine_body_follows_the_fixture_limits() {
     assert_eq!(travel.min, [-372.0, -346.0, -253.0]);
     assert_eq!(travel.max, [5.0, 4.0, 19.0]);
 
-    // The spindle stands at the machine origin, the table spans the travel.
+    // At the reference pose the holder reaches Z max and the spindle starts
+    // at the gauge line one holder length above it.
+    let gauge = model.machine().reference_gauge;
+    assert_eq!(gauge, [0.0, 0.0, 49.0]);
     let spindle = model.machine().part("spindle").expect("spindle");
-    assert!(spindle.bounds.contains([0.0, 0.0, 19.0], TOL));
+    assert!(spindle.bounds.contains(gauge, TOL));
+    let holder = model.machine().part("holder").expect("holder");
+    assert!(holder.bounds.contains([0.0, 0.0, 19.0], TOL));
     let table = model.machine().part("table").expect("table");
     assert!(
         table.bounds.max[2] < -253.0,
         "the table sits below the travel"
     );
-    for part in &model.machine().parts {
+    for part in model
+        .machine()
+        .parts
+        .iter()
+        .chain(&model.machine().column_parts)
+        .chain(&model.machine().head_parts)
+    {
         assert!(!part.is_empty(), "{} has no triangles", part.name);
     }
 }
