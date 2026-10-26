@@ -29,6 +29,8 @@ pub enum Page {
     Probe,
     Homing,
     Manual,
+    /// Ladder editor and live monitor for the `linc-plc` daemon.
+    Plc,
 }
 
 impl Page {
@@ -53,6 +55,7 @@ impl Page {
             Page::Probe => "TOUCH PROBE",
             Page::Homing => "HOMING",
             Page::Manual => "MANUAL",
+            Page::Plc => "PLC",
         }
     }
 
@@ -2015,6 +2018,7 @@ pub fn page_accent(page: Page) -> egui::Color32 {
         Page::Files => theme::C4,
         Page::Probe => theme::C6,
         Page::Homing | Page::Manual => theme::C3,
+        Page::Plc => theme::C5,
     }
 }
 

@@ -436,6 +436,17 @@ impl LincApp {
                     }
                 }
             }
+            Page::Plc => {
+                groups.push(ShortcutGroup {
+                    title: "LADDER",
+                    items: vec![
+                        ("Enter".into(), "SELECT"),
+                        ("Bksp".into(), "DELETE"),
+                        (k.save.label(), "SAVE"),
+                        ("Ctrl+Enter".into(), "DOWNLOAD"),
+                    ],
+                });
+            }
             Page::Tools => {
                 hints.push(("Arrows".into(), "SELECT"));
                 hints.push(("Enter".into(), "EDIT"));

@@ -118,6 +118,7 @@ stage() {
     install -m755 "$bin_dir/linc" "$stage_dir/usr/bin/linc"
     install -m755 "$bin_dir/linc-panel" "$stage_dir/usr/bin/linc-panel"
     install -m755 "$bin_dir/linc-mcp" "$stage_dir/usr/bin/linc-mcp"
+    install -m755 "$bin_dir/linc-plc" "$stage_dir/usr/bin/linc-plc"
 
     # The sim profile is the self-contained example; machine profiles come from
     # the vendor, so only the sample and its INI/HAL are shipped.
@@ -162,9 +163,10 @@ Description: touch-first HMI for LinuxCNC
  offset writes); the physical CNC panel remains authoritative for mode, cycle,
  jog, spindle and coolant.
  .
- The package ships three programs: linc (the display), linc-panel (the panel
- service, run separately so a UI crash cannot remove panel control) and linc-mcp
- (a read-only diagnostic server for agents).
+ The package ships four programs: linc (the display), linc-panel (the panel
+ service, run separately so a UI crash cannot remove panel control), linc-mcp
+ (a read-only diagnostic server for agents) and linc-plc (a userspace ladder
+ PLC service with its own linc_plc.* HAL component).
  .
  Example profiles are installed under /usr/share/linc; a machine profile is
  supplied by the vendor and selected with --config or LINC_CONFIG.

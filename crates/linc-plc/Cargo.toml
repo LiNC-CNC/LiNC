@@ -1,0 +1,19 @@
+[package]
+name = "linc-plc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+linc-plc-core = { path = "../linc-plc-core" }
+linc-plc-client = { path = "../linc-plc-client" }
+linc-hal = { path = "../linc-hal" }
+clap.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true
+env_logger.workspace = true
+signal-hook.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

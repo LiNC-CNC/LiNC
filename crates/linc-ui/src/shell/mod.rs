@@ -103,6 +103,8 @@ pub struct LincApp {
     pub help: HelpUi,
     pub files: FilesUi,
     pub manual: ManualUi,
+    /// Ladder editor, worker link and live daemon state (PLC page).
+    pub plc: screens::plc::PlcUi,
     pub design_scale: f32,
     pub(super) nav: NavUi,
     pub(super) diagnostics: DiagnosticsUi,
@@ -253,6 +255,7 @@ impl LincApp {
                 },
                 ..Default::default()
             },
+            plc: screens::plc::PlcUi::default(),
             design_scale: configured_scale,
             diag_bus: None,
             fps: 0.0,
@@ -497,6 +500,7 @@ impl LincApp {
                         Page::Probe => screens::probe::show(self, ui),
                         Page::Homing => screens::homing::show(self, ui),
                         Page::Manual => screens::manual::show(self, ui),
+                        Page::Plc => screens::plc::show(self, ui),
                     },
                 );
             });

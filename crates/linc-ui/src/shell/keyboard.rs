@@ -111,6 +111,11 @@ impl LincApp {
                 || memory.has_focus(egui::Id::unique("linc-mdi-input"))
                 || memory.has_focus(egui::Id::unique("linc-diagnostics-search"))
                 || memory.has_focus(egui::Id::unique("linc-diagnostics-hal-search"))
+                || memory.has_focus(egui::Id::unique("linc-plc-socket"))
+                || memory.has_focus(egui::Id::unique("linc-plc-file"))
+                || memory.has_focus(egui::Id::unique("linc-plc-var"))
+                || memory.has_focus(egui::Id::unique("linc-plc-coil"))
+                || memory.has_focus(egui::Id::unique("linc-plc-comment"))
                 // A diagnostics list that holds the keyboard keeps the page
                 // keys for its own scrolling.
                 || (self.nav.page == Page::Diagnostics && self.diagnostics.list_focused)

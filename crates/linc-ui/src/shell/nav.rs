@@ -92,6 +92,25 @@ pub(super) fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Pag
                 color,
             );
         }
+        Page::Plc => {
+            // Ladder: two rails, a rung between them with a contact gap.
+            let left = rect.left() + 4.0;
+            let right = rect.right() - 4.0;
+            let top = rect.top() + 3.0;
+            let bottom = rect.bottom() - 3.0;
+            painter.line_segment([egui::pos2(left, top), egui::pos2(left, bottom)], s);
+            painter.line_segment([egui::pos2(right, top), egui::pos2(right, bottom)], s);
+            for y in [c.y - 4.0, c.y + 4.0] {
+                painter.line_segment([egui::pos2(left, y), egui::pos2(c.x - 2.0, y)], s);
+                painter.line_segment([egui::pos2(c.x + 2.0, y), egui::pos2(right, y)], s);
+            }
+            painter.rect_stroke(
+                egui::Rect::from_center_size(c, Vec2::new(4.0, 11.0)),
+                0.0,
+                s,
+                StrokeKind::Inside,
+            );
+        }
         Page::Files | Page::Probe | Page::Homing | Page::Manual => {
             painter.rect_stroke(rect.shrink(3.0), 2.0, s, StrokeKind::Inside);
         }
@@ -116,6 +135,7 @@ pub fn page_from_name(name: &str) -> Option<Page> {
         Page::Probe,
         Page::Homing,
         Page::Manual,
+        Page::Plc,
     ] {
         let label = page.label().to_ascii_uppercase().replace(['-', '_'], " ");
         if label == wanted || format!("{page:?}").to_ascii_uppercase() == wanted {
@@ -140,13 +160,14 @@ pub fn page_from_name(name: &str) -> Option<Page> {
 ///
 /// The keycap is the panel's printed label; [`nav_keycap`] swaps it for the
 /// binding a normal keyboard sends when the profile asks for PC legends.
-pub const NAV_ITEMS: [(Page, &str, &str); 6] = [
+pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
     (Page::Machine, "MACHINE", "MAIN"),
     (Page::Program, "PROGRAM", "FILE"),
     (Page::Tools, "TOOLS", "TOOL"),
     (Page::Offsets, "OFFSETS", "PROBE"),
     (Page::Diagnostics, "DIAG", "Ctrl+D"),
     (Page::Help, "G-CODE", "Ctrl+H"),
+    (Page::Plc, "PLC", ""),
 ];
 
 /// The key hint a navigation row prints.
@@ -237,6 +258,7 @@ pub(super) fn page_key(page: Page) -> &'static str {
         Page::Probe => "probe",
         Page::Homing => "homing",
         Page::Manual => "manual",
+        Page::Plc => "plc",
     }
 }
 
@@ -249,6 +271,7 @@ pub(super) fn page_from_config(value: &str) -> Page {
         "help" => Page::Help,
         "files" => Page::Files,
         "probe" => Page::Probe,
+        "plc" => Page::Plc,
         _ => Page::Machine,
     }
 }

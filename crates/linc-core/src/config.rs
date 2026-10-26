@@ -1164,12 +1164,13 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
     }
     // `[ui] pages` selects which entries the navigation shows. Unknown keys
     // would silently disappear from the sidebar, so reject them.
-    const KNOWN_PAGES: [&str; 7] = [
+    const KNOWN_PAGES: [&str; 8] = [
         "machine",
         "program",
         "offsets",
         "tools",
         "diagnostics",
+        "plc",
         "help",
         "probe",
     ];

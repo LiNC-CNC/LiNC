@@ -1,0 +1,75 @@
+# LiNC ladder PLC service - example HAL wiring
+#
+# linc-plc is a userspace PLC: it loads a ladder project JSON, compiles it with
+# linc-plc-core, creates its own linc_plc.* HAL component and scans the ladder
+# in its own process. It never touches the linc.* HMI component; those five
+# outputs stay the closed LiNC surface they are.
+#
+# THIS FILE IS DOCUMENTATION ONLY.
+#
+#   * It is not loaded by default. No machine INI or HAL file in this tree
+#     includes it; copy the lines you need into the machine's own HAL file.
+#   * It is not a safety function. linc-plc drives ordinary HAL outputs with
+#     no safety rating, no redundancy and no independent watchdog. E-stop,
+#     limits, guards and interlocks stay in the machine HAL and in the
+#     physical circuit.
+#   * The pin names below follow the example ladder project, not a fixed
+#     contract: there is one linc_plc.<binding> pin per I/O binding in the
+#     project, so edit the nets to match your project. The pin map is captured
+#     when the daemon starts; changing the project's I/O bindings needs a
+#     daemon restart (the socket answers Load with "io_map_locked").
+#
+# Pins linc-plc creates, in this order, before it calls hal_ready():
+#
+#   linc_plc.<binding>     HAL_BIT  in   for every ladder "In" binding
+#   linc_plc.<binding>     HAL_BIT  out  for every ladder "Out" binding
+#   linc_plc.alive         HAL_BIT  out  toggles every scan while the ladder runs,
+#                                       held false in Idle, Loaded and Fault
+#   linc_plc.scan-count    HAL_S32  out  wrapping scan counter
+#   linc_plc.scan-time-us  HAL_S32  out  duration of the last scan, microseconds
+#   linc_plc.fault         HAL_BIT  out  set when the scan loop faulted or stopped
+#   linc_plc.overruns      HAL_S32  out  wrapping count of scans that ran long
+#
+# Example ladder project bindings used below: inputs estop, oil-lube, air-ok;
+# outputs worklamp, chip-conveyor, cycle-ready.
+
+# --- example, do not load blindly -------------------------------------------
+#
+# loadusr -W linc-plc --project /home/operator/linc/ladder.json
+#
+# # Ladder inputs read from the machine's own rio.* signals. rio.estop-in.bit
+# # and rio.machine-on-switch.bit are rio outputs (HAL sources); each signal
+# # below drives exactly one linc_plc input pin.
+# net ladder-estop rio.estop-in.bit => linc_plc.estop
+# net ladder-on    rio.machine-on-switch.bit => linc_plc.air-ok
+#
+# # Ladder outputs consumed by the machine. rio.worklamp.bit and
+# # rio.tool-change.bit are rio inputs (HAL sinks); one writer per signal.
+# net ladder-worklamp linc_plc.worklamp => rio.worklamp.bit
+# net ladder-chip     linc_plc.chip-conveyor => rio.oil-lube.bit
+#
+# # The heartbeat: linc_plc.alive changes state every scan while the ladder is
+# # running, so a consumer that stops seeing edges knows the scan loop stalled,
+# # the ladder is not running, or the daemon exited. It is held false in Idle,
+# # Loaded and Fault and on the way out, so the watchdog condition is
+# #
+# #     alive must show edges  AND  linc_plc.fault must be false
+# #
+# # Requiring only the edges is not enough, and requiring only "not fault" is
+# # not enough either. Net both into the watchdog; a bare net only makes the
+# # pins visible in halcmd/halscope.
+# net plc-alive linc_plc.alive
+#
+# # Fault. The daemon raises this after a HAL error and on the way out; wire it
+# # to the lamp or input the machine already uses for a controller fault.
+# net plc-fault linc_plc.fault => cnc_panel.led_plc
+#
+# # Optional: scan timing on the diagnostics scope.
+# net plc-scan-time linc_plc.scan-time-us
+#
+# Failure behaviour you are wiring against: on Stop, on a HAL error and on
+# daemon exit, linc-plc drives every ladder output false and sets
+# linc_plc.fault. A clean stop then removes the component (hal_exit). A panic
+# or a release build's abort leaves the last values latched in HAL, which is
+# why the machine needs the alive heartbeat on a real watchdog rather than a
+# plain net.

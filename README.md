@@ -426,9 +426,12 @@ LiNC/
 │   ├── linc-hal/         # typed linc.* HAL output component
 │   ├── linc-linuxcnc/    # native LinuxCNC NML backend
 │   ├── linc-panel/       # RS-485 panel service and simulated panel
+│   ├── linc-plc/         # userspace ladder PLC service and linc_plc.* pins
+│   ├── linc-plc-core/    # ladder model, compiler and scan VM
+│   ├── linc-plc-client/  # Unix-socket client for the PLC page
 │   ├── linc-ui/          # egui shell, pages, keyboard model
 │   └── linc-view/        # toolpath and lathe graph rendering
-├── hal/                  # linc.hal, linc-postgui.hal
+├── hal/                  # linc.hal, linc-plc.hal, linc-postgui.hal
 ├── scripts/              # start-sim.sh, start-lathe-sim.sh, stop-sim.sh, ...
 ├── tools/                # G-code help generator
 └── svg/                  # accepted mockups for every screen
