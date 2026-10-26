@@ -767,7 +767,9 @@ pub fn draw_overlay(
     if cache.segments.is_empty() {
         return;
     }
-    let camera = card_projection(reference_bounds(app), rect, view, zoom, pan, yaw, pitch);
+    // The card's own mirror, so a lathe block lands where the program does.
+    let camera = card_projection(reference_bounds(app), rect, view, zoom, pan, yaw, pitch)
+        .mirrored(app.graph_style.lathe_mirror);
     let painter = ui.painter_at(rect);
     let stroke = Stroke::new(2.4, theme::MDI_PREVIEW);
     // The block's chords go through the program's own travel split, so the part

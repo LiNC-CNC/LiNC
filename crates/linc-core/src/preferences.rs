@@ -57,6 +57,15 @@ pub struct Preferences {
     /// box, 3 all off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounds_mode: Option<u8>,
+    /// Lathe only: mirror X about the Z centreline in the XZ/TURN toolpath
+    /// (`Ctrl+M`). Screen only — no coordinate and no machine value changes.
+    /// Absent from a file written before this key existed, which reads as off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lathe_mirror: Option<bool>,
+    /// Lathe only: show the X position as a diameter (`2X`) instead of a radius
+    /// (`Ctrl+E`). A display factor; the controller still works in radius.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lathe_diameter: Option<bool>,
     /// Page keys the operator has chosen to show.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub visible_panels: Vec<String>,
@@ -146,6 +155,32 @@ mod tests {
         .unwrap();
         let loaded = Preferences::load(&path);
         assert_eq!(loaded, Preferences::default());
+    }
+
+    #[test]
+    fn lathe_display_toggles_round_trip_and_an_old_file_still_parses() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("lathe.preferences.toml");
+        let preferences = Preferences {
+            lathe_mirror: Some(true),
+            lathe_diameter: Some(false),
+            ..Default::default()
+        };
+        preferences.save(&path).expect("save");
+        assert_eq!(Preferences::load(&path), preferences);
+
+        // A file from before the two keys existed: every present key is kept
+        // and the new ones read as absent, not as an unreadable file.
+        fs::write(
+            &path,
+            "last_page = \"machine\"\nbounds_mode = 1\ntoolpath_view = \"lathe\"\n",
+        )
+        .unwrap();
+        let loaded = Preferences::load(&path);
+        assert_eq!(loaded.last_page.as_deref(), Some("machine"));
+        assert_eq!(loaded.bounds_mode, Some(1));
+        assert_eq!(loaded.lathe_mirror, None);
+        assert_eq!(loaded.lathe_diameter, None);
     }
 
     #[test]

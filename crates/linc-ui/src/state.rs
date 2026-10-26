@@ -1315,6 +1315,8 @@ pub struct GraphStyle {
     pub bounds_mode: u8,
     pub show_stock: bool,
     pub stock_alpha: u8,
+    /// Lathe only: mirror X about the Z centreline of the turning view.
+    pub lathe_mirror: bool,
     pub highlight_selected_line: bool,
     pub show_legend: bool,
     pub trail_max_points: usize,
@@ -1336,6 +1338,7 @@ impl GraphStyle {
         view.show_program_box = box_at;
         view.show_stock = self.show_stock;
         view.stock_alpha = self.stock_alpha;
+        view.mirror_x = self.lathe_mirror;
         view.show_selected_line = self.highlight_selected_line;
         view.show_legend = self.show_legend;
         view.selected_line = selected_line;
@@ -1385,6 +1388,8 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
         ),
         show_stock: profile.config.toolpath.show_stock,
         stock_alpha: profile.config.toolpath.stock_alpha,
+        // Remembered per operator in the preferences file, not in the profile.
+        lathe_mirror: false,
         highlight_selected_line: profile.config.toolpath.highlight_selected_line,
         // SPEC §6.2: the legend must identify the loaded program path and the
         // live trail as separate layers. It was hardcoded off, so the two
@@ -1659,6 +1664,12 @@ pub struct Keymap {
     pub view_cycle: Binding,
     /// Pages with a toolpath: show or hide the program bounding box.
     pub toggle_bounds: Binding,
+    /// Lathe only: mirror X about the Z centreline of the XZ/TURN view. The
+    /// projection flips, so the part, the trail, the tool and the MDI overlay
+    /// move together; no coordinate changes.
+    pub toggle_lathe_mirror: Binding,
+    /// Lathe only: read the X position as a radius (`X`) or a diameter (`2X`).
+    pub toggle_lathe_diameter: Binding,
     /// Page-local to Program: fit the toolpath and clear the live trail.
     pub graph_fit: Binding,
     pub graph_clear: Binding,
@@ -1744,6 +1755,16 @@ impl Keymap {
             toggle_bounds: binding(
                 &keys.toggle_bounds,
                 Binding::new(Key::B, ctrl),
+                &mut rejected,
+            ),
+            toggle_lathe_mirror: binding(
+                &keys.toggle_lathe_mirror,
+                Binding::new(Key::M, ctrl),
+                &mut rejected,
+            ),
+            toggle_lathe_diameter: binding(
+                &keys.toggle_lathe_diameter,
+                Binding::new(Key::E, ctrl),
                 &mut rejected,
             ),
             program_cycle_view: binding(
@@ -2124,6 +2145,42 @@ mod probe_ui_tests {
 #[cfg(test)]
 mod page_key_tests {
     use super::Keymap;
+
+    #[test]
+    fn the_lathe_display_toggles_resolve_to_ctrl_m_and_ctrl_e() {
+        let keymap = Keymap::from_config(&linc_core::config::KeysConfig::spec_default());
+        assert!(keymap.rejected.is_empty(), "{:?}", keymap.rejected);
+        assert_eq!(keymap.toggle_lathe_mirror.key, egui::Key::M);
+        assert!(keymap.toggle_lathe_mirror.modifiers.ctrl);
+        assert_eq!(keymap.toggle_lathe_diameter.key, egui::Key::E);
+        assert!(keymap.toggle_lathe_diameter.modifiers.ctrl);
+        // Both chords must be free: Ctrl+D is diagnostics, Ctrl+R run-from-line,
+        // and no two bindings may share one chord.
+        for (label, binding) in [
+            ("mirror", keymap.toggle_lathe_mirror),
+            ("diameter", keymap.toggle_lathe_diameter),
+        ] {
+            let clashes = [
+                ("bounds", keymap.toggle_bounds),
+                ("view", keymap.view_cycle),
+                ("diagnostics", keymap.diagnostics),
+                ("run-line", keymap.program_run_from_line),
+                ("goto", keymap.goto_line),
+                ("messages", keymap.messages),
+            ];
+            for (other, candidate) in clashes {
+                assert!(
+                    binding != candidate,
+                    "{label} shares its chord with {other}"
+                );
+            }
+        }
+        // A profile can rebind them like any other key.
+        let mut keys = linc_core::config::KeysConfig::spec_default();
+        keys.toggle_lathe_mirror = "Ctrl+F11".to_string();
+        let keymap = Keymap::from_config(&keys);
+        assert_eq!(keymap.toggle_lathe_mirror.key, egui::Key::F11);
+    }
 
     #[test]
     fn diagnostics_and_help_use_ctrl_d_and_ctrl_h() {

@@ -146,6 +146,10 @@ pub struct TrajectoryView<'a> {
     /// Show the machine envelope regardless of the Ctrl+B bounds cycle. The
     /// Offsets preview wants the travel as context around the offset.
     pub machine_bounds_always: bool,
+    /// Lathe only: mirror X about the Z centreline of the turning view. It
+    /// moves the projection, not the data: the preview, the live trail and the
+    /// tool marker stay the same coordinates.
+    pub mirror_x: bool,
     pub selected_line_color: Color32,
     pub height: f32,
     pub fit: bool,
@@ -191,6 +195,7 @@ impl<'a> TrajectoryView<'a> {
             fit_all: false,
             origin_tether: false,
             machine_bounds_always: false,
+            mirror_x: false,
             selected_line_color: theme::CURRENT,
             height: 400.0,
             fit: false,
@@ -216,6 +221,8 @@ pub struct Projection {
     mode: ViewMode,
     yaw: f32,
     pitch: f32,
+    /// Lathe only: draw X on the other side of the Z centreline.
+    mirror_x: bool,
 }
 
 /// The screen-plane coordinates of a point in the view's frame.
@@ -224,7 +231,7 @@ pub struct Projection {
 /// axis (0 looks from the front, -Y, towards +Y), `pitch` raises it above the
 /// XY plane. Screen y grows downwards, so the vertical component is negated —
 /// the opposite sign drew +Z downwards.
-fn view_xy(local: [f32; 3], mode: ViewMode, yaw: f32, pitch: f32) -> (f32, f32) {
+fn view_xy(local: [f32; 3], mode: ViewMode, yaw: f32, pitch: f32, mirror_x: bool) -> (f32, f32) {
     match mode {
         ViewMode::Iso3d => {
             let (sin_yaw, cos_yaw) = yaw.sin_cos();
@@ -243,7 +250,17 @@ fn view_xy(local: [f32; 3], mode: ViewMode, yaw: f32, pitch: f32) -> (f32, f32) 
         ViewMode::SideYz => (local[1], -local[2]),
         ViewMode::SideXz => (local[0], -local[2]),
         ViewMode::TopXy => (local[0], -local[1]),
-        ViewMode::LatheXz => (local[2], -local[0]),
+        // The turning view looks down +Y at the XZ plane: Z runs across the
+        // screen and X up it. The mirror keeps Z and flips the sign of X, so the
+        // part reads on the other side of the Z centreline with the same
+        // numbers under it. Only this view has a centreline to mirror about.
+        ViewMode::LatheXz => {
+            if mirror_x {
+                (local[2], local[0])
+            } else {
+                (local[2], -local[0])
+            }
+        }
     }
 }
 
@@ -290,7 +307,10 @@ impl Projection {
                 (point[1] - center[1]) as f32,
                 (point[2] - center[2]) as f32,
             ];
-            let (x, y) = view_xy(local, mode, yaw, pitch);
+            // The mirror only negates one screen coordinate about the centre,
+            // so the fitted extent — and therefore the scale the fit produces —
+            // is the same either way.
+            let (x, y) = view_xy(local, mode, yaw, pitch, false);
             min = [min[0].min(x), min[1].min(y)];
             max = [max[0].max(x), max[1].max(y)];
         }
@@ -307,7 +327,19 @@ impl Projection {
             mode,
             yaw,
             pitch,
+            mirror_x: false,
         }
+    }
+
+    /// Draw the lathe's X on the other side of the Z centreline.
+    ///
+    /// A camera property rather than a flag on the data: the program, the live
+    /// trail, the tool marker and anything else drawing through this projection
+    /// flip together, and no coordinate in the model changes. The views without
+    /// a centreline ignore it.
+    pub fn mirrored(mut self, mirror_x: bool) -> Self {
+        self.mirror_x = mirror_x;
+        self
     }
 
     pub fn project(&self, point: [f64; 3]) -> Pos2 {
@@ -321,7 +353,7 @@ impl Projection {
             (point[1] - center[1]) as f32,
             (point[2] - center[2]) as f32,
         ];
-        let (x, y) = view_xy(local, self.mode, self.yaw, self.pitch);
+        let (x, y) = view_xy(local, self.mode, self.yaw, self.pitch, self.mirror_x);
         let center_screen = self.rect.center() + self.pan;
         Pos2::new(
             center_screen.x + x * self.scale * self.zoom,
@@ -482,9 +514,15 @@ fn fit_zoom_pan(
     mode: ViewMode,
     yaw: f32,
     pitch: f32,
+    mirror_x: bool,
 ) -> (f32, Vec2) {
-    let target_projection = Projection::new(target, rect, mode, yaw, pitch, 1.0, Vec2::ZERO);
-    let base = Projection::new(reference, rect, mode, yaw, pitch, 1.0, Vec2::ZERO);
+    // The mirror is part of the camera here as everywhere: a fit that ignored
+    // it would centre the part on the unmirrored picture and push it off the
+    // card the moment the operator flipped X.
+    let target_projection =
+        Projection::new(target, rect, mode, yaw, pitch, 1.0, Vec2::ZERO).mirrored(mirror_x);
+    let base =
+        Projection::new(reference, rect, mode, yaw, pitch, 1.0, Vec2::ZERO).mirrored(mirror_x);
     let zoom = (target_projection.scale / base.scale).clamp(0.05, 40.0);
     let centre = base.project(target.center());
     (zoom, (rect.center() - centre) * zoom)
@@ -702,6 +740,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             view.view,
             view.yaw,
             view.pitch,
+            view.mirror_x,
         );
         view.zoom = zoom;
         view.pan = pan;
@@ -723,6 +762,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
                 view.zoom,
                 view.pan,
             )
+            .mirrored(view.mirror_x)
             .project(tip);
             let shift = Vec2::new(
                 edge_shift(at.x, inner.left(), inner.right()),
@@ -739,7 +779,8 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         view.pitch,
         view.zoom,
         view.pan,
-    );
+    )
+    .mirrored(view.mirror_x);
 
     // Grid and axis labels.
     if view.show_grid {
@@ -1098,6 +1139,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         view.view,
         view.yaw,
         view.pitch,
+        view.mirror_x,
         &view.axis_labels,
     );
 
@@ -1110,6 +1152,7 @@ pub fn axis_triad(
     mode: ViewMode,
     yaw: f32,
     pitch: f32,
+    mirror_x: bool,
     labels: &[String],
 ) -> Vec<(&'static str, Option<Vec2>)> {
     let mut out = Vec::new();
@@ -1121,7 +1164,7 @@ pub fn axis_triad(
         if !labels.iter().any(|axis| axis == label) {
             continue;
         }
-        let (dx, dy) = view_xy(unit, mode, yaw, pitch);
+        let (dx, dy) = view_xy(unit, mode, yaw, pitch, mirror_x);
         let length = (dx * dx + dy * dy).sqrt();
         let direction = if length < 0.2 {
             None
@@ -1145,6 +1188,7 @@ fn draw_axis_triad(
     mode: ViewMode,
     yaw: f32,
     pitch: f32,
+    mirror_x: bool,
     labels: &[String],
 ) {
     let center = rect.right_top() + Vec2::new(-46.0, 42.0);
@@ -1154,7 +1198,7 @@ fn draw_axis_triad(
     let half_text = 5.0;
     let mut bottom = center.y + 4.0;
     let mut at_viewer = Vec::new();
-    for (label, direction) in axis_triad(mode, yaw, pitch, labels) {
+    for (label, direction) in axis_triad(mode, yaw, pitch, mirror_x, labels) {
         match direction {
             Some(direction) => {
                 let tip = center + direction * length;
@@ -1457,7 +1501,13 @@ fn view_axis(projection: &Projection) -> Option<char> {
         ('Y', [0.0, 1.0, 0.0]),
         ('Z', [0.0, 0.0, 1.0]),
     ] {
-        let (dx, dy) = view_xy(unit, projection.mode, projection.yaw, projection.pitch);
+        let (dx, dy) = view_xy(
+            unit,
+            projection.mode,
+            projection.yaw,
+            projection.pitch,
+            projection.mirror_x,
+        );
         if (dx * dx + dy * dy).sqrt() < 0.2 {
             return Some(axis);
         }
@@ -1473,6 +1523,7 @@ fn screen_direction(projection: &Projection, vector: [f64; 3]) -> Vec2 {
         projection.mode,
         projection.yaw,
         projection.pitch,
+        projection.mirror_x,
     );
     Vec2::new(dx, dy)
 }
@@ -1809,7 +1860,13 @@ fn draw_axes(
     // +Y pointed at the viewer no matter where the camera stood.
     let font = FontId::monospace(10.0 * FONT_SCALE);
     for (label, unit) in axes {
-        let (dx, dy) = view_xy(unit, projection.mode, projection.yaw, projection.pitch);
+        let (dx, dy) = view_xy(
+            unit,
+            projection.mode,
+            projection.yaw,
+            projection.pitch,
+            projection.mirror_x,
+        );
         let len = (dx * dx + dy * dy).sqrt();
         if len < 0.2 {
             // Along the view, so it has no screen direction: a dot, the way the
@@ -2076,6 +2133,7 @@ mod tests {
             ViewMode::Iso3d,
             DEFAULT_YAW,
             DEFAULT_PITCH,
+            false,
         );
         println!("zoom={zoom} pan={pan:?}");
         assert!(zoom > 1.0 && zoom < 10.0, "{zoom}");
@@ -2086,7 +2144,7 @@ mod tests {
     fn the_axis_triad_follows_the_orbit() {
         let labels = vec!["X".to_string(), "Y".to_string(), "Z".to_string()];
         // Front view: X across, Z up, Y at the viewer (a circle).
-        let triad = axis_triad(ViewMode::SideXz, DEFAULT_YAW, DEFAULT_PITCH, &labels);
+        let triad = axis_triad(ViewMode::SideXz, DEFAULT_YAW, DEFAULT_PITCH, false, &labels);
         assert_eq!(triad.len(), 3);
         let x = triad[0].1.expect("X has a direction");
         assert!(x.x > 0.9, "X points right: {x:?}");
@@ -2095,19 +2153,19 @@ mod tests {
         assert!(triad[1].1.is_none(), "Y is at the viewer: {:?}", triad[1]);
 
         // Top view: X right, Y down, Z at the viewer.
-        let triad = axis_triad(ViewMode::TopXy, DEFAULT_YAW, DEFAULT_PITCH, &labels);
+        let triad = axis_triad(ViewMode::TopXy, DEFAULT_YAW, DEFAULT_PITCH, false, &labels);
         assert!(triad[0].1.unwrap().x > 0.9);
         assert!(triad[1].1.unwrap().y < -0.9, "+Y points up on screen");
         assert!(triad[2].1.is_none(), "Z is at the viewer: {:?}", triad[2]);
 
         // ISO: every axis projects, none is a circle.
-        let triad = axis_triad(ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH, &labels);
+        let triad = axis_triad(ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH, false, &labels);
         assert!(triad.iter().all(|(_, direction)| direction.is_some()));
 
         // An axis the machine does not have is not drawn.
         let two = vec!["X".to_string(), "Z".to_string()];
         assert_eq!(
-            axis_triad(ViewMode::SideXz, DEFAULT_YAW, DEFAULT_PITCH, &two).len(),
+            axis_triad(ViewMode::SideXz, DEFAULT_YAW, DEFAULT_PITCH, false, &two).len(),
             2
         );
     }
@@ -2180,6 +2238,7 @@ mod tests {
             ViewMode::SideYz,
             DEFAULT_YAW,
             DEFAULT_PITCH,
+            false,
         );
         assert!((x - 2.0).abs() < 1e-6 && (y + 3.0).abs() < 1e-6, "{x},{y}");
         // Looking along Y: X is horizontal, Z is vertical.
@@ -2188,11 +2247,90 @@ mod tests {
             ViewMode::SideXz,
             DEFAULT_YAW,
             DEFAULT_PITCH,
+            false,
         );
         assert!((x - 1.0).abs() < 1e-6 && (y + 3.0).abs() < 1e-6, "{x},{y}");
         // Looking down Z: X is horizontal, Y is vertical (downwards).
-        let (x, y) = view_xy([1.0, 2.0, 3.0], ViewMode::TopXy, DEFAULT_YAW, DEFAULT_PITCH);
+        let (x, y) = view_xy(
+            [1.0, 2.0, 3.0],
+            ViewMode::TopXy,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            false,
+        );
         assert!((x - 1.0).abs() < 1e-6 && (y + 2.0).abs() < 1e-6, "{x},{y}");
+    }
+
+    #[test]
+    fn the_lathe_mirror_flips_x_about_the_z_centreline() {
+        // `(Z, -X)` unmirrored, `(Z, +X)` mirrored: Z is the horizontal
+        // coordinate either way, and X only changes which side it lands on.
+        let point = [5.0f32, 0.0, 20.0];
+        let (x, y) = view_xy(point, ViewMode::LatheXz, DEFAULT_YAW, DEFAULT_PITCH, false);
+        assert!((x - 20.0).abs() < 1e-6 && (y + 5.0).abs() < 1e-6, "{x},{y}");
+        let (x, y) = view_xy(point, ViewMode::LatheXz, DEFAULT_YAW, DEFAULT_PITCH, true);
+        assert!((x - 20.0).abs() < 1e-6 && (y - 5.0).abs() < 1e-6, "{x},{y}");
+
+        // The camera carries the flag, so everything drawn through it flips
+        // together: the same point, one sign about the card's centre line.
+        let plain = projection(ViewMode::LatheXz);
+        let mirrored = projection(ViewMode::LatheXz).mirrored(true);
+        let tip = [12.0, 0.0, 0.0];
+        let center = Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0)).center();
+        assert!(plain.project(tip).y < center.y, "+X above the centreline");
+        assert!(mirrored.project(tip).y > center.y, "+X below it, mirrored");
+        assert!(
+            (plain.project(tip).x - mirrored.project(tip).x).abs() < 1e-3,
+            "the mirror leaves Z alone"
+        );
+        // A mill view has no centreline: the flag changes nothing there.
+        assert_eq!(
+            projection(ViewMode::SideXz).project(tip),
+            projection(ViewMode::SideXz).mirrored(true).project(tip)
+        );
+    }
+
+    #[test]
+    fn a_mirrored_lathe_view_still_frames_the_program() {
+        let machine = Bounds3 {
+            min: [-200.0, -200.0, -400.0],
+            max: [200.0, 200.0, 0.0],
+        };
+        let program = Bounds3 {
+            min: [0.0, -10.0, -120.0],
+            max: [40.0, 10.0, -20.0],
+        };
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 400.0));
+        for mirror in [false, true] {
+            let (zoom, pan) = fit_zoom_pan(
+                machine,
+                program,
+                rect,
+                ViewMode::LatheXz,
+                DEFAULT_YAW,
+                DEFAULT_PITCH,
+                mirror,
+            );
+            let camera = Projection::new(
+                machine,
+                rect,
+                ViewMode::LatheXz,
+                DEFAULT_YAW,
+                DEFAULT_PITCH,
+                zoom,
+                pan,
+            )
+            .mirrored(mirror);
+            for x in [program.min[0], program.max[0]] {
+                for z in [program.min[2], program.max[2]] {
+                    let pos = camera.project([x, 0.0, z]);
+                    assert!(
+                        rect.contains(pos),
+                        "mirror {mirror}: {pos:?} outside {rect:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -2214,8 +2352,15 @@ mod tests {
             ViewMode::SideXz,
             ViewMode::TopXy,
         ] {
-            let (zoom, pan) =
-                fit_zoom_pan(machine, program, rect, mode, DEFAULT_YAW, DEFAULT_PITCH);
+            let (zoom, pan) = fit_zoom_pan(
+                machine,
+                program,
+                rect,
+                mode,
+                DEFAULT_YAW,
+                DEFAULT_PITCH,
+                false,
+            );
             let projection =
                 Projection::new(machine, rect, mode, DEFAULT_YAW, DEFAULT_PITCH, zoom, pan);
             for corner in 0..8 {
@@ -2247,11 +2392,29 @@ mod tests {
         // LinuxCNC puts +Y to the back of the machine. From the default orbit
         // it must therefore run up the screen, away from the operator, and to
         // the right; +X runs right and towards the viewer, +Z straight up.
-        let (x, y) = view_xy([1.0, 0.0, 0.0], ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        let (x, y) = view_xy(
+            [1.0, 0.0, 0.0],
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            false,
+        );
         assert!(x > 0.5 && y > 0.0, "+X is right and near: {x},{y}");
-        let (x, y) = view_xy([0.0, 1.0, 0.0], ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        let (x, y) = view_xy(
+            [0.0, 1.0, 0.0],
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            false,
+        );
         assert!(x > 0.5 && y < 0.0, "+Y goes right and away: {x},{y}");
-        let (x, y) = view_xy([0.0, 0.0, 1.0], ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        let (x, y) = view_xy(
+            [0.0, 0.0, 1.0],
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            false,
+        );
         assert!(x.abs() < 1e-6 && y < 0.0, "+Z is straight up: {x},{y}");
         // Looking from the front (+Y away) means the near corner of a box is
         // the min-Y one: it sits lowest on the screen.
@@ -2260,27 +2423,46 @@ mod tests {
             ViewMode::Iso3d,
             DEFAULT_YAW,
             DEFAULT_PITCH,
+            false,
         );
-        let far = view_xy([0.0, 1.0, 0.0], ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        let far = view_xy(
+            [0.0, 1.0, 0.0],
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            false,
+        );
         assert!(near.1 > far.1, "min Y is the near side: {near:?} {far:?}");
     }
 
     #[test]
     fn the_orbit_turns_the_view_about_the_vertical_axis() {
         let point = [1.0f32, 0.0, 0.0];
-        let (x0, y0) = view_xy(point, ViewMode::Iso3d, 0.0, 0.0);
+        let (x0, y0) = view_xy(point, ViewMode::Iso3d, 0.0, 0.0, false);
         assert!((x0 - 1.0).abs() < 1e-6, "{x0}");
         assert!(y0.abs() < 1e-6, "{y0}");
 
         // A quarter turn puts the X axis exactly into the depth, so it stops
         // contributing to the screen position.
-        let (x90, _) = view_xy(point, ViewMode::Iso3d, std::f32::consts::FRAC_PI_2, 0.0);
+        let (x90, _) = view_xy(
+            point,
+            ViewMode::Iso3d,
+            std::f32::consts::FRAC_PI_2,
+            0.0,
+            false,
+        );
         assert!(x90.abs() < 1e-6, "{x90}");
 
         // +Z is up on screen, and raising the camera flattens it.
-        let (_, up) = view_xy([0.0, 0.0, 1.0], ViewMode::Iso3d, DEFAULT_YAW, DEFAULT_PITCH);
+        let (_, up) = view_xy(
+            [0.0, 0.0, 1.0],
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            false,
+        );
         assert!(up < 0.0, "z must project upwards, got {up}");
-        let (_, flat) = view_xy([0.0, 0.0, 1.0], ViewMode::Iso3d, DEFAULT_YAW, 0.0);
+        let (_, flat) = view_xy([0.0, 0.0, 1.0], ViewMode::Iso3d, DEFAULT_YAW, 0.0, false);
         assert!(flat.abs() > up.abs(), "{flat} vs {up}");
     }
 
@@ -2305,6 +2487,7 @@ mod tests {
             ViewMode::Iso3d,
             DEFAULT_YAW,
             DEFAULT_PITCH,
+            false,
         );
         assert!((zoom - 1.0).abs() < 1e-4, "zoom {zoom}");
         assert!(pan.length() < 1e-3, "pan {pan:?}");
@@ -2383,6 +2566,7 @@ mod tests {
             ViewMode::Iso3d,
             DEFAULT_YAW,
             DEFAULT_PITCH,
+            false,
         );
         assert!(zoom > 1.5, "zoom {zoom}");
         let fitted = Projection::new(

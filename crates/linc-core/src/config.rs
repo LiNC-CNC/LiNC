@@ -250,6 +250,10 @@ pub struct KeysConfig {
     pub view_cycle: String,
     /// Show or hide the program bounding box and its dimensions.
     pub toggle_bounds: String,
+    /// Lathe only: mirror X about the Z centreline in the XZ/TURN toolpath.
+    pub toggle_lathe_mirror: String,
+    /// Lathe only: read the X position as a radius (`X`) or a diameter (`2X`).
+    pub toggle_lathe_diameter: String,
     pub graph_fit: String,
     pub graph_clear: String,
     /// Page-local to Program: jump to a line number.
@@ -301,6 +305,8 @@ impl KeysConfig {
             program_cycle_view: "F10".into(),
             view_cycle: "Ctrl+F10".into(),
             toggle_bounds: "Ctrl+B".into(),
+            toggle_lathe_mirror: "Ctrl+M".into(),
+            toggle_lathe_diameter: "Ctrl+E".into(),
             graph_fit: "Ctrl+0".into(),
             graph_clear: "Ctrl+L".into(),
             goto_line: "Ctrl+G".into(),
@@ -1581,6 +1587,18 @@ changer = "atc"
         assert_eq!(
             KeysConfig::spec_default().mdi_buffer_delete,
             keys.mdi_buffer_delete
+        );
+        // The lathe display toggles ship with a chord each, and the profile
+        // carries the same text the spec default does.
+        assert_eq!(keys.toggle_lathe_mirror, "Ctrl+M");
+        assert_eq!(keys.toggle_lathe_diameter, "Ctrl+E");
+        assert_eq!(
+            KeysConfig::spec_default().toggle_lathe_mirror,
+            keys.toggle_lathe_mirror
+        );
+        assert_eq!(
+            KeysConfig::spec_default().toggle_lathe_diameter,
+            keys.toggle_lathe_diameter
         );
     }
 

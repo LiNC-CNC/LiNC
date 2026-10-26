@@ -123,6 +123,11 @@ program_cycle_view = "F10"
 view_cycle = "Ctrl+F10"
 # Show the program bounding box with its dimension lines.
 toggle_bounds = "Ctrl+B"
+# Lathe only: mirror X about the Z centreline in the XZ/TURN toolpath. The
+# projection flips on screen; no coordinate and no machine value changes.
+toggle_lathe_mirror = "Ctrl+M"
+# Lathe only: read the X position as a radius (X) or a diameter (2X).
+toggle_lathe_diameter = "Ctrl+E"
 # Page-local to Program: fit the toolpath, clear the live trail.
 graph_fit = "Ctrl+0"
 graph_clear = "Ctrl+L"

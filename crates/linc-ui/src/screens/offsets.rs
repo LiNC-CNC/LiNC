@@ -115,7 +115,16 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
             let machine = position.map(|p| p.machine).unwrap_or(0.0);
             // The Machine page's readout, without its DTG line and move bar.
             common::paint_dro_frame(ui, rect, editing);
-            common::paint_dro_readout(ui, rect, axis, work, machine, false, !editing);
+            common::paint_dro_readout(
+                ui,
+                rect,
+                axis,
+                work,
+                machine,
+                false,
+                !editing,
+                app.reads_x_as_diameter(),
+            );
             if editing {
                 // Below the axis label, on the value line. The edit field covers
                 // the machine coordinate while it is open; it returns on commit.

@@ -558,7 +558,7 @@ bar.
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
 | `[mdi]` | `execute_on_enter`, `auto_focus`, `history_limit`, `max_command_length`, `save_preamble`, `save_postamble` |
 | `[toolpath]` | `show_grid`, `show_live_trail`, `trail_max_points`, `clear_trail_action`, `show_program_bounds`, `show_machine_bounds`, `show_stock`, `stock_alpha`, `bounds_mode` (preference), `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
-| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `mdi_buffer_delete`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds` |
+| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `mdi_buffer_delete`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds`, `toggle_lathe_mirror`, `toggle_lathe_diameter` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
 | `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_execution`, `quit_requires_idle`, `confirm_quit` |
 | `[backend]` | `kind`, `transport`, `status_hz`, `hal_hz`, `connect_timeout_ms` |
@@ -628,6 +628,15 @@ The line moves use `Ctrl`, not `Shift`: the panel keyboard has no Shift key
 profile that rebinds either of them onto a bare `Up`/`Down` is rejected the way
 an unparsable chord is — the default holds and Settings names the rejected
 text — so recall is never shadowed silently.
+
+### `[keys]` lathe view bindings
+
+Lathe profiles only; on a mill the chords do nothing.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `toggle_lathe_mirror` | `Ctrl+M` | Mirror the lathe XZ/TURN picture about the Z centreline (graph, live trail, tool marker and MDI block preview). Persisted as `lathe_mirror`. |
+| `toggle_lathe_diameter` | `Ctrl+E` | Show the X readout as diameter (2X) or radius. Persisted as `lathe_diameter`. |
 
 ## 11. Validation checklist
 

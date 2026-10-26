@@ -325,12 +325,37 @@ pub fn paint_dro_frame(ui: &Ui, rect: egui::Rect, accent: bool) {
     );
 }
 
+/// The X factor of the lathe's radius/diameter display: a radius reads `X`, a
+/// diameter reads `2X`. `Z` (and every mill axis) is a position, never a
+/// diameter, so it never scales — doubling it would put a second wrong number
+/// on the screen. The controller keeps reporting a radius either way; this is
+/// the display only.
+pub fn dro_value(axis: &str, value: f64, diameter: bool) -> f64 {
+    if diameter && axis == "X" {
+        value * 2.0
+    } else {
+        value
+    }
+}
+
+/// The axis name, with the `DIA` mark while the readout shows a diameter.
+pub fn dro_axis_label(axis: &str, diameter: bool) -> String {
+    if diameter && axis == "X" {
+        format!("{axis} DIA")
+    } else {
+        axis.to_string()
+    }
+}
+
 /// The top half of an axis readout: the axis name, the work value and the
 /// dimmed machine value beside it.
 ///
 /// The Offsets page draws the same card without the bottom band, so the two
 /// readouts cannot drift apart; `show_work` is false while an inline edit field
 /// replaces the value.
+// The card chrome and the axis it shows travel together; splitting it would
+// make every caller reassemble the same six fields.
+#[allow(clippy::too_many_arguments)]
 pub fn paint_dro_readout(
     ui: &Ui,
     rect: egui::Rect,
@@ -339,12 +364,16 @@ pub fn paint_dro_readout(
     machine: f64,
     compact: bool,
     show_work: bool,
+    // Lathe only: X reads as a diameter (`2X`) and carries the mark.
+    diameter: bool,
 ) {
     let painter = ui.painter_at(rect);
+    let work = dro_value(axis, work, diameter);
+    let machine = dro_value(axis, machine, diameter);
     painter.text(
         rect.left_top() + Vec2::new(14.0, 10.0),
         egui::Align2::LEFT_TOP,
-        axis,
+        dro_axis_label(axis, diameter),
         FontId::proportional(theme::font_size(13.0)),
         theme::C3,
     );
@@ -411,7 +440,16 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
     // shrinks, and sits full once it arrives (see `LincApp::move_progress`).
     let fraction = app.move_progress.get(axis).copied().unwrap_or(1.0);
     paint_dro_frame(ui, rect, active);
-    paint_dro_readout(ui, rect, axis, work, machine, compact, true);
+    paint_dro_readout(
+        ui,
+        rect,
+        axis,
+        work,
+        machine,
+        compact,
+        true,
+        app.reads_x_as_diameter(),
+    );
     paint_dro_progress(ui, rect, dtg, fraction);
 }
 
@@ -1844,8 +1882,22 @@ pub fn live_coordinates_card(ui: &mut Ui, header: &str, units_label: &str, rows:
 
 #[cfg(test)]
 mod tests {
-    use super::{feed_rows, modal_mnemonic, program_window_rows};
+    use super::{dro_axis_label, dro_value, feed_rows, modal_mnemonic, program_window_rows};
     use linc_core::model::FeedState;
+
+    #[test]
+    fn the_lathe_reads_x_in_radius_or_diameter() {
+        // Radius is the controller's own number; diameter is the same number
+        // doubled, and it changes nothing else.
+        assert_eq!(dro_value("X", 1.25, false), 1.25);
+        assert_eq!(dro_value("X", 1.25, true), 2.5);
+        // Z is a length along the bed: the factor belongs to the lathe's X.
+        assert_eq!(dro_value("Z", 1.25, true), 1.25);
+        // The card says which one is on.
+        assert_eq!(dro_axis_label("X", false), "X");
+        assert_eq!(dro_axis_label("X", true), "X DIA");
+        assert_eq!(dro_axis_label("Z", true), "Z");
+    }
 
     #[test]
     fn feed_rows_show_the_programmed_and_effective_rate() {

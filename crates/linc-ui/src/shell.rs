@@ -160,6 +160,10 @@ pub struct LincApp {
     /// Named shell rectangles from the last frame.
     pub diag_regions: Vec<linc_core::diag::ScreenRegion>,
     pub diag_frame_time_ms: f32,
+    /// Lathe only: read the X position as a diameter (`2X`) instead of a
+    /// radius. A display factor — the controller keeps working in radius, and
+    /// no command is issued from it.
+    pub lathe_diameter: bool,
     preferences_dirty: bool,
     preferences_saved_at: std::time::Instant,
 }
@@ -354,6 +358,9 @@ impl LincApp {
             .bounds_mode
             .map(|mode| mode % 4)
             .unwrap_or(graph_style.bounds_mode);
+        // A lathe-only view toggle; a mill profile never sees it and a file
+        // written before the key existed reads as off.
+        graph_style.lathe_mirror = preferences.lathe_mirror.unwrap_or(false);
         let remembered_page = preferences
             .last_page
             .as_deref()
@@ -448,6 +455,7 @@ impl LincApp {
             jog_increments: crate::state::finite_increments(&profile.machine_ini.increments),
             jog_increment_index: preferences.jog_increment.unwrap_or(0),
             jog_speed_percent: 100.0,
+            lathe_diameter: preferences.lathe_diameter.unwrap_or(false),
             diag_viewport: linc_core::diag::ViewportInfo::default(),
             diag_regions: Vec::new(),
             diag_frame_time_ms: 0.0,
@@ -1810,6 +1818,51 @@ impl LincApp {
         self.toast(label, theme::MUTED);
     }
 
+    /// `Ctrl+M`: mirror the lathe's X about the Z centreline of the turning
+    /// view. Screen only; the model keeps its coordinates.
+    pub fn cycle_lathe_mirror(&mut self) {
+        let on = !self.graph_style.lathe_mirror;
+        self.graph_style.lathe_mirror = on;
+        self.preferences.lathe_mirror = Some(on);
+        self.preferences_dirty = true;
+        // The pan was aimed at the picture the other way round, so re-frame:
+        // a flipped part that keeps the old pan can slide off the card.
+        self.program.fit_requested = true;
+        self.manual.fit = true;
+        self.toast(
+            if on {
+                "lathe X: mirrored"
+            } else {
+                "lathe X: not mirrored"
+            },
+            theme::MUTED,
+        );
+    }
+
+    /// `Ctrl+E`: read the lathe's X as a radius or a diameter. Presentation
+    /// only: the X position the controller reports is a radius, and every
+    /// command still carries that number.
+    pub fn cycle_lathe_diameter(&mut self) {
+        let diameter = !self.lathe_diameter;
+        self.lathe_diameter = diameter;
+        self.preferences.lathe_diameter = Some(diameter);
+        self.preferences_dirty = true;
+        self.toast(
+            if diameter {
+                "lathe X: diameter (2X)"
+            } else {
+                "lathe X: radius (X)"
+            },
+            theme::MUTED,
+        );
+    }
+
+    /// Whether the X readouts show a diameter. A mill's X is a position, never
+    /// a diameter, so the flag only lives on a lathe.
+    pub fn reads_x_as_diameter(&self) -> bool {
+        self.lathe_diameter && self.profile.variant == MachineVariant::Lathe
+    }
+
     pub fn cycle_toolpath_view(&mut self) {
         let next = linc_view::cycle_view(self.program.graph_view, self.profile.variant);
         self.program.graph_view = next;
@@ -1989,6 +2042,8 @@ impl LincApp {
         let mut goto_line = false;
         let mut cycle_toolpath_view = false;
         let mut toggle_bounds = false;
+        let mut toggle_lathe_mirror = false;
+        let mut toggle_lathe_diameter = false;
         let mut open_messages = false;
         let mut mdi_up = false;
         let mut mdi_down = false;
@@ -2275,6 +2330,27 @@ impl LincApp {
             ) {
                 toggle_bounds = true;
             }
+            // The two lathe display toggles are global rather than page-local:
+            // the operator flips them while looking at the DRO, and the same
+            // keys work on every page that shows the turning view or its
+            // readout. A mill has neither, so the profile's variant guards
+            // them and the chords stay free for the mill keys.
+            if self.profile.variant == MachineVariant::Lathe
+                && input.consume_key(
+                    self.keymap.toggle_lathe_mirror.modifiers,
+                    self.keymap.toggle_lathe_mirror.key,
+                )
+            {
+                toggle_lathe_mirror = true;
+            }
+            if self.profile.variant == MachineVariant::Lathe
+                && input.consume_key(
+                    self.keymap.toggle_lathe_diameter.modifiers,
+                    self.keymap.toggle_lathe_diameter.key,
+                )
+            {
+                toggle_lathe_diameter = true;
+            }
             // The tool table pages its own cursor with these keys, so they must
             // reach the page instead of being consumed for tab navigation.
             let page_keys_belong_to_page = matches!(self.page, Page::Tools | Page::Files)
@@ -2336,6 +2412,12 @@ impl LincApp {
         }
         if toggle_bounds {
             self.cycle_bounds();
+        }
+        if toggle_lathe_mirror {
+            self.cycle_lathe_mirror();
+        }
+        if toggle_lathe_diameter {
+            self.cycle_lathe_diameter();
         }
         if goto_line && matches!(self.page, Page::Program | Page::Machine) {
             self.modal = Some(crate::state::Modal::GoToLine {
@@ -3128,6 +3210,31 @@ impl LincApp {
         // SPLIT/CODE, Ctrl+F10 cycles the toolpath view. Both sit at the top of
         // the pane so the display commands are the first things in reach.
         let square = "\u{25a2}";
+        // The lathe display toggles: the label names what the key does next, so
+        // the pane reads as an action rather than as the current state.
+        let lathe_hints: Vec<(String, &'static str)> =
+            if self.profile.variant == MachineVariant::Lathe {
+                vec![
+                    (
+                        k.toggle_lathe_mirror.label(),
+                        if self.graph_style.lathe_mirror {
+                            "UNMIRROR"
+                        } else {
+                            "MIRROR"
+                        },
+                    ),
+                    (
+                        k.toggle_lathe_diameter.label(),
+                        if self.lathe_diameter {
+                            "RADIUS"
+                        } else {
+                            "DIAMETER"
+                        },
+                    ),
+                ]
+            } else {
+                Vec::new()
+            };
         let mut groups: Vec<ShortcutGroup> = Vec::new();
         if self.program_active() {
             groups.push(ShortcutGroup {
@@ -3140,20 +3247,24 @@ impl LincApp {
             Page::Program => {
                 groups.push(ShortcutGroup {
                     title: "VIEW",
-                    items: vec![
-                        (
-                            square.to_string(),
-                            if self.program.view == ProgramView::Split {
-                                "CODE"
-                            } else {
-                                "SPLIT"
-                            },
-                        ),
-                        (format!("Ctrl+{square}"), "VIEW"),
-                        (k.graph_fit.label(), "FIT"),
-                        (k.graph_clear.label(), "CLEAR TRAIL"),
-                        (k.toggle_bounds.label(), "BOUNDS"),
-                    ],
+                    items: [
+                        vec![
+                            (
+                                square.to_string(),
+                                if self.program.view == ProgramView::Split {
+                                    "CODE"
+                                } else {
+                                    "SPLIT"
+                                },
+                            ),
+                            (format!("Ctrl+{square}"), "VIEW"),
+                            (k.graph_fit.label(), "FIT"),
+                            (k.graph_clear.label(), "CLEAR TRAIL"),
+                            (k.toggle_bounds.label(), "BOUNDS"),
+                        ],
+                        lathe_hints.clone(),
+                    ]
+                    .concat(),
                 });
                 groups.push(ShortcutGroup {
                     title: "PROGRAM",
@@ -3174,12 +3285,16 @@ impl LincApp {
                 // editor in front (run from line and go to line).
                 groups.push(ShortcutGroup {
                     title: "VIEW",
-                    items: vec![
-                        (format!("Ctrl+{square}"), "VIEW"),
-                        (k.graph_fit.label(), "FIT"),
-                        (k.graph_clear.label(), "CLEAR TRAIL"),
-                        (k.toggle_bounds.label(), "BOUNDS"),
-                    ],
+                    items: [
+                        vec![
+                            (format!("Ctrl+{square}"), "VIEW"),
+                            (k.graph_fit.label(), "FIT"),
+                            (k.graph_clear.label(), "CLEAR TRAIL"),
+                            (k.toggle_bounds.label(), "BOUNDS"),
+                        ],
+                        lathe_hints.clone(),
+                    ]
+                    .concat(),
                 });
                 if self.mdi_pane_visible() {
                     // While the pane is up its keys replace the MAIN ones:
@@ -3269,6 +3384,7 @@ impl LincApp {
                 hints.push((format!("Ctrl+{square}"), "VIEW"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
+                hints.extend(lathe_hints.clone());
                 hints.push(("Arrows".into(), "SELECT"));
                 hints.push(("X/Y/Z".into(), "ZERO AXIS"));
                 hints.push(("A".into(), "ZERO ALL"));
@@ -3279,6 +3395,7 @@ impl LincApp {
                 hints.push(("X/Y/Z".into(), "EDIT DRO"));
                 hints.push(("OFFSET".into(), "PROBE"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
+                hints.extend(lathe_hints.clone());
             }
             Page::Probe => {
                 use linc_core::probe::ProbeCategory;
