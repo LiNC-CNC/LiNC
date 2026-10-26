@@ -6,7 +6,9 @@ LiNC is a Rust `egui` HMI for LinuxCNC, designed for a machine with:
   `linc-panel` service
 - a **QMK Syntec-style CNC keyboard** defined in
   `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/keymap.c`
-- **no on-screen machine control panel**
+- **no on-screen machine control panel in the HMI**; the simulation build
+  opens the physical panel's controls in a separate `linc-panel` window, which
+  is never part of the HMI and is not present on a real machine
 - FANUC / SYNTEC / Siemens-inspired information architecture, without copying
   any vendor's proprietary artwork
 
@@ -203,7 +205,11 @@ performance and limitations - is in [docs/sim3d.md](docs/sim3d.md).
 - **The physical panel is the primary machine-control surface.** The GUI has no
   general mode buttons, cycle start/hold/stop, jog buttons, spindle/coolant
   controls, override sliders, or software E-stop. Specific MDI, probe and
-  tool-change commands are explicit exceptions.
+  tool-change commands are explicit exceptions. Simulation only: `linc-panel`
+  can show the same panel controls in its own window (`[simulation]
+  panel_window`), so the panel can be exercised without the hardware; that
+  window is a separate process, not an HMI page, and a real-machine profile
+  leaves it off.
 - **The panel driver is LiNC-owned and modular.** `linc-panel` runs as a
   supervised process, decodes steady one-hot modes and steady overrides, and
   hides panel technology behind a driver/capability trait. Only it owns RS-485.
