@@ -26,6 +26,8 @@ Click any image for the full-size PNG.
 | [![Tool table](docs/screenshots/tools.png)](docs/screenshots/tools.png) | [![Work offsets](docs/screenshots/offsets.png)](docs/screenshots/offsets.png) |
 | **Diagnostics** | **G-code Help** |
 | [![Diagnostics overview](docs/screenshots/diagnostics.png)](docs/screenshots/diagnostics.png) | [![G-code help index](docs/screenshots/help.png)](docs/screenshots/help.png) |
+| **Touch Probe** | **Files** |
+| [![Touch probe: illustrated routines, parameters and results](docs/screenshots/probe.png)](docs/screenshots/probe.png) | [![Files: USB media beside NC_FILES](docs/screenshots/files.png)](docs/screenshots/files.png) |
 
 ## Accepted references
 
@@ -237,16 +239,25 @@ performance and limitations - is in [docs/sim3d.md](docs/sim3d.md).
   subroutines are vendored verbatim under `subroutines/probe_basic`; LiNC builds
   the `#3014`–`#3036` parameter block and issues the selected `o<probe_...>`
   call via Probe Basic `issue_mdi` after validation. Results come from
-  `#1001`–`#1012`. Rotary-axis probing is not offered.
+  `#1001`–`#1012`. The results panel carries no buttons: `U` updates the
+  parameter block and `Ctrl+R`/`Ctrl+X`/`Ctrl+Y` reset all, X and Y data, all
+  listed on the shortcuts rail. Rotary-axis probing is not offered.
 - **MDI is a pane on the Machine page**: the panel's MDI position opens MAIN
   with the `PROGRAM` card replaced by the block listing, a syntax-highlighted
   input that holds focus, a one-line result strip and the MODAL band AUTO shows.
   `Enter` issues one block via `issue_mdi` and commits it to the buffer, `Ctrl+R`
   re-runs the selected line, `Ctrl+Up`/`Ctrl+Down` move it in the buffer and
   `Ctrl+S` saves the buffer to a new `.ngc`. A value word typed against a digit
-  gets its space (`G1X10` becomes `G1 X10`), and the block being edited is drawn
-  on MAIN's toolpath in the pane's own colour. The buffer lasts the app session;
-  leaving MDI keeps it, and `Esc` clears uncommitted input only.
+  gets its space (`G1X10` becomes `G1 X10`). The block being edited is drawn on
+  MAIN's toolpath in yellow, and whatever part of it would run past an INI travel
+  limit is red: a block that leaves the envelope is refused before it is sent,
+  the input's frame turning red while `Enter` names the limit in the result
+  strip. The preview reads the block in the machine's modal groups, so a block
+  typed in `G91` is drawn as the relative move it is. The input has no
+  placeholder and grows upward — the listing above gives way — and that listing
+  scrolls, staying on the newest block until the operator scrolls away. The
+  buffer lasts the app session; leaving MDI keeps it, and `Esc` clears
+  uncommitted input only. AUTO on the panel brings MAIN up from any page.
 - **JOG, INC and MPG open a shared read-only Manual screen.** A large live
   graph dominates, with large work coordinates plus machine coordinates and
   DTG. Jog/increment/handwheel input remains on the panel; the screen never
@@ -257,6 +268,10 @@ performance and limitations - is in [docs/sim3d.md](docs/sim3d.md).
   position. Any part of the loaded path outside the machine's INI travel
   envelope is solid red, split at the crossing, so red means outside the
   machine boundary; the inside keeps the cut, rapid or selected-line colour.
+  The view follows the head while it moves: when a zoomed or panned card would
+  leave the marker outside it, the pan shifts by the least amount that brings
+  it back. A still head is never pulled back, so panning or zooming to inspect
+  another part of the program stays possible.
 - **The panel status 7-segment shows the active work offset** (`54`–`59`),
   because two digits fit exactly and the coordinate frame matters during
   setup. It shows `--` when unknown; spindle load or units are optional
