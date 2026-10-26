@@ -718,13 +718,15 @@ pub fn status_display_text(value: i32) -> String {
 pub enum PanelFace {
     #[default]
     Mill,
-    Lathe,
+    /// Lathe face. The flag is the profile's sub-spindle capability: only a
+    /// machine that declares one gets the second SPD.2.* control column.
+    Lathe(bool),
 }
 
 impl PanelFace {
-    pub fn for_profile(gui: &str, driver: &str) -> Self {
+    pub fn for_profile(gui: &str, driver: &str, sub_spindle: bool) -> Self {
         if gui.eq_ignore_ascii_case("lathe") || driver.eq_ignore_ascii_case("lathe-sim") {
-            Self::Lathe
+            Self::Lathe(sub_spindle)
         } else {
             Self::Mill
         }
@@ -996,10 +998,14 @@ fn key_tables(face: PanelFace) -> KeyTables {
             middle: &MIDDLE_KEYS,
             right: &RIGHT_KEYS,
         },
-        PanelFace::Lathe => KeyTables {
+        PanelFace::Lathe(second_spindle) => KeyTables {
             left: &LATHE_LEFT_KEYS,
             middle: &LATHE_MIDDLE_KEYS,
-            right: &LATHE_RIGHT_KEYS,
+            right: if second_spindle {
+                &LATHE_RIGHT_KEYS
+            } else {
+                &LATHE_RIGHT_KEYS_SINGLE
+            },
         },
     }
 }
@@ -1108,10 +1114,29 @@ const LATHE_MIDDLE_KEYS: [KeySpec; 15] = [
     ("K4", None, buttons::K4, Some(crate::leds::K4)),
 ];
 
+/// Lathe right column with the second spindle, for machines whose profile
+/// declares [lathe] sub_spindle = true.
 const LATHE_RIGHT_KEYS: [KeySpec; 15] = [
     ("SPD.2.CW", None, buttons::SPD2_CW, None),
     ("SPD.2.SP", None, buttons::SPD2_SP, None),
     ("SPD.2.CCW", None, buttons::SPD2_CCW, None),
+    ("SPD.CW", None, buttons::SPD_CW, Some(crate::leds::SPD_CW)),
+    ("SPD.SP", None, buttons::SPD_SP, Some(crate::leds::SPD_SP)),
+    ("SPD.CCW", None, buttons::SPD_CCW, Some(crate::leds::SPD_CCW)),
+    ("SPD. JOG", None, buttons::SPD_JOG, None),
+    ("FEED BRAKE", None, buttons::FEED_BRAKE, None),
+    ("LUB", None, buttons::LUB, Some(crate::leds::LUB)),
+    ("CHUCK", None, buttons::CHUCK, Some(crate::leds::CHUCK)),
+    ("TAIL", None, buttons::TAIL, None),
+    ("CHIP", None, buttons::CHIP, None),
+    ("COOLANT", None, buttons::COOLANT, Some(crate::leds::COOLANT)),
+    ("TOOL CHG.", None, buttons::TOOL_CHG, None),
+    ("WORKLAMP", None, buttons::WORKLAMP, Some(crate::leds::WORKLAMP)),
+];
+
+/// Lathe right column for a single-spindle machine: same controls, without the
+/// SPD.2.* row (the profile does not declare a sub-spindle).
+const LATHE_RIGHT_KEYS_SINGLE: [KeySpec; 12] = [
     ("SPD.CW", None, buttons::SPD_CW, Some(crate::leds::SPD_CW)),
     ("SPD.SP", None, buttons::SPD_SP, Some(crate::leds::SPD_SP)),
     ("SPD.CCW", None, buttons::SPD_CCW, Some(crate::leds::SPD_CCW)),
@@ -1164,7 +1189,7 @@ fn lamp_tables(face: PanelFace) -> LampTables {
         },
         // The lathe's alarm column is NC / PLC / MMC / EMG, and the E-stop
         // mushroom shows up on EMG.
-        PanelFace::Lathe => LampTables {
+        PanelFace::Lathe(_) => LampTables {
             axes,
             alarms: [
                 (crate::leds::NC, "NC", RED),
@@ -1185,7 +1210,7 @@ fn lamp_tables(face: PanelFace) -> LampTables {
 fn display_titles(face: PanelFace) -> [&'static str; 3] {
     match face {
         PanelFace::Mill => ["MAG TOOL", "SPD TOOL", "STATUS"],
-        PanelFace::Lathe => ["TOOL.", "TOOL COMP.", "STATUS."],
+        PanelFace::Lathe(_) => ["TOOL.", "TOOL COMP.", "STATUS."],
     }
 }
 
@@ -2948,7 +2973,7 @@ mod tests {
 
     #[test]
     fn every_drawn_key_has_a_cnc_panel_pin() {
-        for face in [PanelFace::Mill, PanelFace::Lathe] {
+        for face in [PanelFace::Mill, PanelFace::Lathe(false), PanelFace::Lathe(true)] {
             for mask in drawn_masks(face) {
                 assert!(
                     crate::BUTTON_PINS.iter().any(|(_, bit)| *bit == mask),
@@ -2962,8 +2987,14 @@ mod tests {
     /// connectivity greying has something to grey and the HAL can wire it.
     #[test]
     fn every_lathe_key_has_a_cnc_panel_pin() {
-        let masks = drawn_masks(PanelFace::Lathe);
+        let masks = drawn_masks(PanelFace::Lathe(true));
         assert_eq!(masks.len(), 42, "12 jog + 15 middle + 15 right");
+        let single = drawn_masks(PanelFace::Lathe(false));
+        assert_eq!(single.len(), 39, "12 jog + 15 middle + 12 right");
+        for mask in [buttons::SPD2_CW, buttons::SPD2_SP, buttons::SPD2_CCW] {
+            assert!(masks.contains(&mask), "the sub-spindle face must draw it");
+            assert!(!single.contains(&mask), "a single-spindle profile must not");
+        }
         for mask in &masks {
             assert!(
                 crate::BUTTON_PINS.iter().any(|(_, bit)| bit == mask),
@@ -2996,17 +3027,19 @@ mod tests {
     #[test]
     fn the_profile_selects_the_panel_face() {
         assert_eq!(
-            PanelFace::for_profile("mill", "cnc-panel-sim"),
+            PanelFace::for_profile("mill", "cnc-panel-sim", false),
             PanelFace::Mill
         );
         assert_eq!(
-            PanelFace::for_profile("lathe", "lathe-sim"),
-            PanelFace::Lathe
+            PanelFace::for_profile("lathe", "lathe-sim", true),
+            PanelFace::Lathe(true)
         );
-        // Either key alone selects the lathe face.
-        assert_eq!(PanelFace::for_profile("lathe", ""), PanelFace::Lathe);
-        assert_eq!(PanelFace::for_profile("", "lathe-sim"), PanelFace::Lathe);
-        assert_eq!(PanelFace::for_profile("", ""), PanelFace::Mill);
+        // Either key alone selects the lathe face; the capability rides with it.
+        assert_eq!(PanelFace::for_profile("lathe", "", false), PanelFace::Lathe(false));
+        assert_eq!(PanelFace::for_profile("", "lathe-sim", true), PanelFace::Lathe(true));
+        assert_eq!(PanelFace::for_profile("", "", false), PanelFace::Mill);
+        // A mill ignores the sub-spindle flag.
+        assert_eq!(PanelFace::for_profile("mill", "", true), PanelFace::Mill);
     }
 
     #[test]
@@ -3567,7 +3600,7 @@ mod tests {
     /// at least 44 px at 1280x720.
     #[test]
     fn every_lathe_interactive_target_is_at_least_44px_at_1280x720() {
-        let (smallest, min_w, min_h, count) = check_target_sizes(PanelFace::Lathe, true);
+        let (smallest, min_w, min_h, count) = check_target_sizes(PanelFace::Lathe(true), true);
         eprintln!(
             "smallest lathe interactive target at 1280x720: {smallest} at {min_w:.1}x{min_h:.1} px ({count} targets)"
         );
@@ -3580,7 +3613,7 @@ mod tests {
     /// painter reads.
     #[test]
     fn the_lathe_face_carries_the_photo_legends() {
-        let tables = key_tables(PanelFace::Lathe);
+        let tables = key_tables(PanelFace::Lathe(true));
         let mut legends: Vec<&str> = tables
             .left
             .iter()
@@ -3588,10 +3621,10 @@ mod tests {
             .chain(tables.right.iter())
             .map(|(name, _, _, _)| *name)
             .collect();
-        let lamps = lamp_tables(PanelFace::Lathe);
+        let lamps = lamp_tables(PanelFace::Lathe(true));
         legends.extend(lamps.axes.iter().map(|(_, name, _)| *name));
         legends.extend(lamps.alarms.iter().map(|(_, name, _)| *name));
-        legends.extend(display_titles(PanelFace::Lathe));
+        legends.extend(display_titles(PanelFace::Lathe(true)));
 
         for legend in [
             // Left jog group.
@@ -3720,7 +3753,7 @@ mod tests {
     /// on a lathe-only key asserts its own pin.
     #[test]
     fn lathe_touch_press_asserts_a_lathe_only_key() {
-        let mut fix = PanelFixture::with_face(PanelFace::Lathe, false);
+        let mut fix = PanelFixture::with_face(PanelFace::Lathe(true), false);
         let mut touch = TouchEmu::new();
         let tail = fix.momentary_rect(buttons::TAIL, false);
         fix.frame(vec![]);

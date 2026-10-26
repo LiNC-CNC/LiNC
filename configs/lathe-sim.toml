@@ -38,6 +38,7 @@ live_tooling = true
 live_tool_max_rpm = 6000
 c_axis = true
 y_axis = false
+# Show the SPD.2.* second-spindle column on the simulator panel face.
 sub_spindle = false
 
 [ui]
@@ -65,7 +66,7 @@ panel_link_stats = "none"
 enabled = true
 # The lathe has no physical panel; the simulator panel window stands in for
 # it, drawing the lathe face. Only the wired controls act (power, E-stop,
-# AUTO/MDI/JOG, cycle, X/Z jog, both spindles, feed brake); the remaining
+# AUTO/MDI/JOG, cycle, X/Z jog, spindle, feed brake); the remaining
 # machine I/O (tailstock, chip, turret/TOOL CHG., worklamp, chuck, MST, C/S,
 # C-axis jog, SPD. JOG) has no equivalent here and stays grey.
 panel_window = true

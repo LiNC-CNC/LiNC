@@ -344,8 +344,8 @@ present in the real-machine build.
 - The profile selects the face. `machine.gui = "lathe"` (or `[panel] driver =
   "lathe-sim"`) draws the lathe panel transcribed from the lathe photo:
   C/C-S/X/Y/Z/A/B jog keys with RAPID, MPG SIM/SAFE DOOR/CORRIDOR,
-  S.B.K/B.D.T/OPT, M.LK/MST/D.R.N, K1–K4, SPD.2.CW/SP/CCW (second spindle),
-  SPD.CW/SP/CCW, SPD. JOG, FEED BRAKE, LUB, CHUCK, TAIL, CHIP, COOLANT,
+  S.B.K/B.D.T/OPT, M.LK/MST/D.R.N, K1–K4, SPD.2.CW/SP/CCW (second spindle,
+  only with `[lathe] sub_spindle = true`), SPD.CW/SP/CCW, SPD. JOG, FEED BRAKE, LUB, CHUCK, TAIL, CHIP, COOLANT,
   TOOL CHG. and WORKLAMP, with NC/PLC/MMC/EMG/RUN/READY alarm lamps and
   TOOL / TOOL COMP. / STATUS windows. The mill face is unchanged. Turret and
   live-tool drive stay unwired, so those keys grey out until

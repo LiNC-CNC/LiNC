@@ -273,6 +273,12 @@ fn run_simulated(
         let face = linc_panel::sim::PanelFace::for_profile(
             &profile.config.machine.gui,
             &profile.config.panel.driver,
+            profile
+                .config
+                .lathe
+                .as_ref()
+                .and_then(|lathe| lathe.sub_spindle)
+                .unwrap_or(false),
         );
         let loop_handle = handle.clone();
         let loop_shutdown = shutdown.clone();

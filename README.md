@@ -94,8 +94,9 @@ simulated lathe HAL (a `../probe_basic_dev` checkout) and shares the mill
 script's lifecycle, so `stop-sim.sh` stops either. The lathe session loads
 the simulator panel (`[simulation] panel_window`) with the lathe face, and
 `hal/linc-lathe.hal` wires the lathe-relevant controls — power, E-stop,
-AUTO/MDI/JOG, cycle start/pause, X/Z jog, both spindles, the feed brake and
-their lamps; the remaining machine I/O is unwired and greyed. The cabinet
+AUTO/MDI/JOG, cycle start/pause, X/Z jog, the spindle (the SPD.2.*
+second-spindle column appears only with `[lathe] sub_spindle = true`), the
+feed brake and their lamps; the remaining machine I/O is unwired and greyed. The cabinet
 still boots the
 way a real one is found — E-stop latched, power off — unless you ask for more:
 `--release-estop`, `--power-on`, `--home`, `--load [FILE]` and `--float` each
@@ -441,8 +442,9 @@ validates, with `configs/lathe-sim.ini` and `configs/lathe-sim.tbl` carrying
 the standard `P` turret column. The panel window draws a lathe layout of its
 own: the profile's `machine.gui = "lathe"` / `[panel] driver = "lathe-sim"`
 selects the lathe key matrix, alarm lamps and TOOL / TOOL COMP. / STATUS
-windows, and `hal/linc-lathe.hal` wires both spindles, the feed brake, power,
-E-stop, AUTO/MDI/JOG, cycle, X/Z jog and the lamps. The remaining machine I/O —
+windows, and `hal/linc-lathe.hal` wires the spindle(s), the feed brake, power,
+E-stop, AUTO/MDI/JOG, cycle, X/Z jog and the lamps. The second-spindle column
+is capability-gated: `[lathe] sub_spindle = true` shows SPD.2.*, false hides it. The remaining machine I/O —
 tailstock, chip conveyor, turret (`TOOL CHG.`), worklamp, MST, C/S, the C-axis
 jog keys and `SPD. JOG` — is unwired and greyed until the machine's PLC pins
 are commissioned (see `CONFIGURATION.md`).
