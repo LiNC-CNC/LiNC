@@ -2337,7 +2337,7 @@ fn paint_panel(
     label(
         painter,
         l,
-        310.0,
+        322.0,
         250.0,
         13.0,
         "AXIS",
@@ -2353,7 +2353,7 @@ fn paint_panel(
         (crate::leds::C, "C"),
     ];
     for (index, (bit, name)) in axes.iter().enumerate() {
-        let x = 322.0 + index as f32 * 43.0;
+        let x = 337.0 + index as f32 * 38.0;
         lamp(painter, l, x, 285.0, 14.0, state.leds & bit != 0, GREEN);
         label(
             painter,
@@ -2369,7 +2369,7 @@ fn paint_panel(
     label(
         painter,
         l,
-        310.0,
+        322.0,
         350.0,
         13.0,
         "ALARM",
@@ -2385,12 +2385,12 @@ fn paint_panel(
         (crate::leds::READY, "READY", GREEN),
     ];
     for (index, (bit, name, color)) in alarms.iter().enumerate() {
-        let x = 322.0 + index as f32 * 43.0;
+        let x = 337.0 + index as f32 * 38.0;
         // The MC alarm lamp also mirrors a latched E-stop, so the panel shows
         // the fault even when no controller is driving the lamps.
         let lit = state.leds & bit != 0 || (*bit == crate::leds::MC_ALARM && state.estop);
         lamp(painter, l, x, 388.0, 14.0, lit, *color);
-        label(painter, l, x, 415.0, 8.0, name, TEXT, Align2::CENTER_CENTER);
+        label(painter, l, x, 415.0, 7.5, name, TEXT, Align2::CENTER_CENTER);
     }
 
     draw_display(
