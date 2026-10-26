@@ -547,14 +547,25 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     app.program.selected_line = line.max(1).min(line_count.max(1));
                 }
             }
-            // Logical line starts, in characters, and their first galley row.
-            let starts = line_start_chars(&text);
+            // A row ends a logical line only when the text had a newline there;
+            // wrapped continuation rows do not. Deriving the starts from that
+            // flag keeps the gutter aligned even when wrapping drops whitespace
+            // (a character-offset mapping skipped a number at the first wrap).
+            let starts = line_row_starts(
+                output
+                    .galley
+                    .rows
+                    .iter()
+                    .map(|placed| placed.ends_with_newline),
+            );
             let rows = &output.galley.rows;
             let clip = ui.clip_rect();
             let painter = ui.painter_at(clip);
             for (line, start) in starts.iter().enumerate() {
-                let row = row_for_char(&output.galley, *start);
-                let y = output.galley_pos.y + rows.get(row).map_or(0.0, |placed| placed.pos.y);
+                let Some(placed) = rows.get(*start) else {
+                    continue;
+                };
+                let y = output.galley_pos.y + placed.pos.y;
                 if y + line_height() < clip.top() || y > clip.bottom() {
                     continue;
                 }
@@ -572,7 +583,8 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             // on the executing line while a program runs.
             let current = app.program.selected_line.max(1);
             if current <= starts.len() {
-                let (first, next) = line_rows(&output.galley, &starts, current);
+                let first = starts[current - 1];
+                let next = starts.get(current).copied().unwrap_or(rows.len());
                 let top = output.galley_pos.y + rows.get(first).map_or(0.0, |placed| placed.pos.y);
                 let bottom = if next < rows.len() {
                     output.galley_pos.y + rows[next].pos.y
@@ -588,7 +600,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             }
             if let Some(line) = scroll_to {
                 let index = line.max(1).min(starts.len());
-                let row = row_for_char(&output.galley, starts[index - 1]);
+                let row = starts[index - 1];
                 scroll_target = rows
                     .get(row)
                     .map(|placed| output.galley_pos.y + placed.pos.y);
@@ -614,38 +626,16 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
 /// width and buffer length.
 type GalleyKey = (u64, Option<usize>, String, Vec<usize>, usize, u32, u32);
 
-/// Character offset at which each logical line starts.
-fn line_start_chars(text: &str) -> Vec<usize> {
+/// First galley row of each logical line, derived from whether the row ended
+/// with a newline. Wrapped rows continue the same logical line.
+fn line_row_starts(ends_with_newline: impl Iterator<Item = bool>) -> Vec<usize> {
     let mut starts = vec![0];
-    for (index, character) in text.chars().enumerate() {
-        if character == '\n' {
-            starts.push(index + 1);
+    for (row, ends) in ends_with_newline.enumerate() {
+        if ends {
+            starts.push(row + 1);
         }
     }
     starts
-}
-
-/// First visual galley row of the logical line containing char_index.
-fn row_for_char(galley: &Galley, char_index: usize) -> usize {
-    let mut consumed = 0usize;
-    for (row, placed) in galley.rows.iter().enumerate() {
-        let width = placed.glyphs.len() + usize::from(placed.ends_with_newline);
-        if char_index < consumed + width {
-            return row;
-        }
-        consumed += width;
-    }
-    galley.rows.len().saturating_sub(1)
-}
-
-/// First row of line (1-based) and the row where the next logical line starts,
-/// so a wrapped line's band covers all of its visual rows.
-fn line_rows(galley: &Galley, starts: &[usize], line: usize) -> (usize, usize) {
-    let first = row_for_char(galley, starts[line - 1]);
-    let next = starts
-        .get(line)
-        .map_or(galley.rows.len(), |start| row_for_char(galley, *start));
-    (first, next.max(first + 1).min(galley.rows.len()))
 }
 
 #[cfg(test)]
@@ -653,9 +643,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn logical_line_starts_are_character_offsets() {
-        assert_eq!(line_start_chars("abc\ndef\n"), vec![0, 4, 8]);
-        assert_eq!(line_start_chars("one line"), vec![0]);
+    fn wrapped_rows_do_not_start_new_logical_lines() {
+        // long line wrapped to two rows, then a short line, then a blank line.
+        assert_eq!(
+            line_row_starts([false, true, true].into_iter()),
+            vec![0, 2, 3]
+        );
+        // A single few-row line with no trailing newline.
+        assert_eq!(line_row_starts([false].into_iter()), vec![0]);
+        // Blank lines are rows that end with a newline.
+        assert_eq!(line_row_starts([true, true].into_iter()), vec![0, 1, 2]);
     }
 
 }

@@ -1385,6 +1385,30 @@ mod tests {
     /// lands on machine X 0.5), so the preview must halve it too or the whole
     /// path is drawn at twice the X the machine goes to.
     #[test]
+    fn straight_and_arc_moves_keep_their_own_line_numbers() {
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../configs/gcode/linc-demo-mill.ngc"
+        ))
+        .unwrap();
+        let axes = vec!["X".to_string(), "Y".to_string(), "Z".to_string()];
+        let preview = parse_preview(&text, &axes, None, [0.0; 3]);
+        for segment in preview.segments.iter().filter(|s| (10..=16).contains(&s.line)) {
+            eprintln!(
+                "line {} {:?} {:?} -> {:?}",
+                segment.line, segment.kind, segment.start, segment.end
+            );
+        }
+        let line11: Vec<_> = preview.segments_for_line(11).collect();
+        assert_eq!(line11.len(), 1, "line 11 is one straight move");
+        assert_eq!(line11[0].kind, SegmentKind::Feed);
+        assert_eq!(line11[0].end, [-100.0, -210.0, -2.0]);
+        let line12: Vec<_> = preview.segments_for_line(12).collect();
+        assert_eq!(line12.len(), 1, "line 12 is the arc");
+        assert_eq!(line12[0].kind, SegmentKind::Arc);
+    }
+
+    #[test]
     fn g7_diameter_mode_halves_the_x_words_the_interpreter_halves() {
         // Radius mode, the default, leaves the words alone.
         let preview = parse_preview("G8 G18 G90\nG0 X1.0 Z-1\n", &lathe_axes(), None, [0.0; 3]);
