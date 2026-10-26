@@ -418,6 +418,11 @@ impl SnapshotBuilder {
 
         let axes = &self.profile.machine_ini.axes;
         for (index, axis) in axes.iter().enumerate() {
+            // Pose components are indexed by axis letter (X=0, Y=1, Z=2, ...),
+            // not by position in the INI's coordinate list: a lathe's list is
+            // [X, Z], so using the list index read Z as Y and the Z DRO stayed
+            // at 0 while the joint moved.
+            let pose_index = axis_pose_index(&axis.name).unwrap_or(index);
             let joint = status.joints.get(index);
             snapshot.machine.homed.insert(
                 axis.name.clone(),
@@ -434,11 +439,11 @@ impl SnapshotBuilder {
             snapshot.machine.servo_load.insert(axis.name.clone(), 0.0);
             snapshot.machine.commanded.insert(
                 axis.name.clone(),
-                pose_component(&status.positions.commanded, index),
+                pose_component(&status.positions.commanded, pose_index),
             );
             snapshot.machine.actual.insert(
                 axis.name.clone(),
-                pose_component(&status.positions.actual, index),
+                pose_component(&status.positions.actual, pose_index),
             );
         }
         snapshot.machine.limits = limit_labels(status, axes);
@@ -449,17 +454,18 @@ impl SnapshotBuilder {
         let dtg = status.positions.dtg;
         snapshot.positions.axes = AxisMap::new();
         for (index, axis) in axes.iter().enumerate() {
-            let machine = pose_component(&status.positions.actual, index);
+            let pose_index = axis_pose_index(&axis.name).unwrap_or(index);
+            let machine = pose_component(&status.positions.actual, pose_index);
             let work = machine
-                - pose_component(&g5x, index)
-                - pose_component(&g92, index)
-                - pose_component(&tool_offset, index);
+                - pose_component(&g5x, pose_index)
+                - pose_component(&g92, pose_index)
+                - pose_component(&tool_offset, pose_index);
             snapshot.positions.axes.insert(
                 axis.name.clone(),
                 PositionSet {
                     work,
                     machine,
-                    dtg: pose_component(&dtg, index),
+                    dtg: pose_component(&dtg, pose_index),
                     velocity: status
                         .joints
                         .get(index)
@@ -1220,6 +1226,23 @@ fn motion_active(status: &Status) -> bool {
     status.motion.current_vel.abs() > 1e-6 || status.motion.probing
 }
 
+/// Pose slot of an axis letter. INI coordinate lists are machine-specific
+/// (`X Z` on a lathe), while the NML pose is always X,Y,Z,A,B,C,U,V,W.
+fn axis_pose_index(name: &str) -> Option<usize> {
+    match name.to_ascii_uppercase().as_str() {
+        "X" => Some(0),
+        "Y" => Some(1),
+        "Z" => Some(2),
+        "A" => Some(3),
+        "B" => Some(4),
+        "C" => Some(5),
+        "U" => Some(6),
+        "V" => Some(7),
+        "W" => Some(8),
+        _ => None,
+    }
+}
+
 fn pose_component(pose: &linuxcnc_nml::Pose, index: usize) -> f64 {
     match index {
         0 => pose.x,
@@ -1345,6 +1368,17 @@ mod tests {
             text,
             vec!["G8", "G17", "G21", "G40", "G54", "G80", "G90", "G94", "M5", "M9"]
         );
+    }
+
+    #[test]
+    fn axis_letters_map_to_pose_slots_not_coordinate_order() {
+        // A lathe's coordinate list is [X, Z]; Z must read pose.z, not pose.y.
+        assert_eq!(axis_pose_index("X"), Some(0));
+        assert_eq!(axis_pose_index("Z"), Some(2));
+        assert_eq!(axis_pose_index("z"), Some(2));
+        assert_eq!(axis_pose_index("A"), Some(3));
+        assert_eq!(axis_pose_index("W"), Some(8));
+        assert_eq!(axis_pose_index("9"), None);
     }
 
     #[test]
