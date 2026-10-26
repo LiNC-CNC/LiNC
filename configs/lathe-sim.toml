@@ -1,10 +1,10 @@
 # Smartlathe SL36-style lathe simulation profile.
 #
 # Uses configs/lathe-sim.ini, which boots LiNC as the display against Probe
-# Basic's lathe simulation HAL (a sibling checkout). The lathe panel mockup is a
-# separate companion window; it is not part of the HMI shell. Live tooling and
-# power-turret support are UI capabilities here; HAL pin binding is still to be
-# added to the lathe simulator.
+# Basic's lathe simulation HAL (a sibling checkout). The lathe has no physical
+# panel, so the simulator panel window stands in for one; it is a separate
+# process, not part of the HMI shell, and hal/linc-lathe.hal wires the lathe
+# controls it can drive. Turret/live-tool controls are still to be built.
 
 schema_version = 1
 profile = "lathe-sim"
@@ -61,4 +61,7 @@ panel_link_stats = "none"
 
 [simulation]
 enabled = true
-panel_window = false
+# The lathe has no physical panel; the simulator panel window stands in for it.
+# Only the wired controls (power, E-stop, AUTO/MDI/JOG, cycle, X/Z jog,
+# spindle) act; the rest stay grey until the lathe panel is built.
+panel_window = true

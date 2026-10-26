@@ -91,9 +91,11 @@ still links NML.
 HAL (`hal/rio_sim.hal`) and the LiNC HMI/panel pair. `start-lathe-sim.sh` is
 the lathe sibling: it runs `configs/lathe-sim.ini` against Probe Basic's
 simulated lathe HAL (a `../probe_basic_dev` checkout) and shares the mill
-script's lifecycle, so `stop-sim.sh` stops either. The lathe panel's
-`cnc_panel.*` binding is not commissioned yet, so that session starts with
-the panel offline. The cabinet still boots the
+script's lifecycle, so `stop-sim.sh` stops either. The lathe session loads
+the simulator panel (`[simulation] panel_window`) and `hal/linc-lathe.hal`
+wires the lathe-relevant controls — power, E-stop, AUTO/MDI/JOG, cycle
+start/pause, X/Z jog, spindle and their lamps; unwired keys stay grey until
+the lathe-specific panel exists. The cabinet still boots the
 way a real one is found — E-stop latched, power off — unless you ask for more:
 `--release-estop`, `--power-on`, `--home`, `--load [FILE]` and `--float` each
 imply the step before, because the E-stop mushroom and POWER ON belong to the
@@ -435,9 +437,10 @@ aborted probe leaves feed override cancelled.
 The workspace implements the specification in simulation. The shipped mill
 profile runs end to end; the lathe UI is implemented and `lathe-sim.toml`
 now validates: `configs/lathe-sim.ini` and `configs/lathe-sim.tbl` carry the
-standard `P` turret column. Its panel HAL binding is still to be
-commissioned, so a lathe session runs with the panel offline (see
-`CONFIGURATION.md`).
+standard `P` turret column, and a lathe session runs with the simulator
+panel window and lathe-relevant panel wiring (`hal/linc-lathe.hal`). The
+turret/live-tool controls and the keys without a lathe function remain to be
+commissioned (see `CONFIGURATION.md`).
 
 - `linc` loads and validates a machine profile, renders the fixed shell, and
   switches pages from the panel mode and keyboard.

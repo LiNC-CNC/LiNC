@@ -26,7 +26,7 @@ scripts/build-deb.sh                        # Debian packages, amd64 + arm64
   and `debian/` still supports a native `dpkg-buildpackage`.
 
 - `--check-config` merges the profile, reads the INI, resolves paths and checks safety without a window or HAL; it fails if the INI or a `../../` sibling checkout is missing.
-- `lathe-sim.toml` now validates: `configs/lathe-sim.ini` declares the standard `P` turret column and `configs/lathe-sim.tbl` carries it. Its panel HAL binding is still uncommissioned, so `scripts/start-lathe-sim.sh` starts the lathe with the panel offline.
+- `lathe-sim.toml` now validates: `configs/lathe-sim.ini` declares the standard `P` turret column and `configs/lathe-sim.tbl` carries it. `configs/lathe-sim.ini` loads `hal/linc-lathe.hal`, so `scripts/start-lathe-sim.sh` opens the simulator panel window with the lathe-relevant controls wired (power, E-stop, AUTO/MDI/JOG, cycle, X/Z jog, spindle); turret/live-tool keys stay unwired and greyed.
 - `baiermill.toml` is expected to fail `--check-config` until the BaierMill machine tree carries the reviewed probe bundle; that is the deployment guard. Validate the machine with `baiermill-pb.toml`, whose `configs/baiermill-pb.ini` lists `../subroutines/probe_basic` first.
 - `./scripts/start-sim.sh` (`--detach`; stop with `./scripts/stop-sim.sh`) runs `linuxcnc configs/sim.ini` from `configs/`, exports
   `LINC_CONFIG=configs/sim.toml`, builds only when a release binary is missing, and needs `DISPLAY`/`WAYLAND_DISPLAY`.

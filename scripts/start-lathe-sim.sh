@@ -69,9 +69,9 @@ if [[ -x "$BIN" ]]; then
     fi
 fi
 
-# The lathe's cnc_panel.* binding is still to be commissioned, so the INI loads
-# no panel service and the HMI starts with the panel offline.
-echo "lathe sim: panel HAL binding is not commissioned; the HMI starts with the panel offline" >&2
+# The INI loads the simulator panel (profile panel_window) and wires the
+# lathe-relevant controls; keys without a lathe function stay greyed.
+echo "lathe sim: simulator panel window with the lathe-relevant controls; turret/live-tool keys are not wired yet" >&2
 
 export LINC_SIM_CONFIG="$PROFILE"
 export LINC_SIM_INI="$INI"

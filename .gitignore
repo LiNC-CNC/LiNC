@@ -3,6 +3,8 @@
 configs/linc-sim.log
 configs/linc-sim.pref
 configs/sim.var.bak
+configs/lathe-sim.var
+configs/lathe-sim.var.bak
 
 __pycache__/
 *.pyc

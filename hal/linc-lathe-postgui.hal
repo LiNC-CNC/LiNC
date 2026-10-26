@@ -1,15 +1,11 @@
 # LiNC lathe post-GUI wiring.
 #
-# Loaded by linc-display after the linc GUI has created its linc.* component,
-# when the machine has no cnc_panel component (the lathe's panel binding is not
-# commissioned yet, so there is no panel service and no cnc_panel.sseg_status).
-#
-# The mill simulation's post-GUI file nets cnc_panel.sseg_status and
-# cnc_panel.probe; this one wires only what a panel-less lathe session has.
+# Loaded by linc-display after the linc GUI has created its linc.* component.
+# The mill simulation's post-GUI file also nets cnc_panel.probe to the software
+# FPGA (rio.sim-probe); the lathe has no such component, so it has its own file.
 
-# No panel display consumes the active WCS yet: keep the signal so the HMI's
-# declared output is still exercised, without inventing a consumer.
-net linc-status linc.status-display
+# Two-digit panel status display: active WCS from linc, 54-59 or --.
+net linc-status linc.status-display => cnc_panel.sseg_status
 
 # Manual tool-change acknowledgement from the HMI. Probe Basic's core_sim HAL
 # already creates `tool-change-confirmed => iocontrol.0.tool-changed`; attach

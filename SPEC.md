@@ -333,7 +333,8 @@ present in the real-machine build.
 - It may live on a second monitor. The calibration/mockup is
   `svg/sim-panel.svg`.
 - A lathe-specific panel mockup still needs turret and live-tool controls;
-  until then, the lathe simulation profile runs without a panel window.
+  until then, the lathe simulation profile uses the mill simulator panel
+  window with only the lathe-relevant controls wired, and the rest greyed.
 
 ### 4.5 HAL wiring
 

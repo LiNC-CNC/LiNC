@@ -53,16 +53,13 @@ if ! halcmd show pin linc.status-display >/dev/null 2>&1; then
     echo "linc-display: linc.* HAL pins did not appear" >&2
     exit 1
 fi
-# The mill simulation's post-GUI file nets cnc_panel.sseg_status and
-# cnc_panel.probe. A panel-less machine (the lathe sim, whose panel binding is
-# not commissioned yet) has no cnc_panel component, so it gets the wiring that
-# only touches linc.*, iocontrol and halui pins.
+# The mill simulation's post-GUI file nets cnc_panel.probe to the software
+# FPGA (rio.sim-probe), which the lathe does not have. Pick by profile rather
+# than by pins: the lathe now loads a panel service, so cnc_panel exists in
+# both machines and a pin test cannot tell them apart.
 POSTGUI="$LINC_DIR/hal/linc-sim-postgui.hal"
-# `halcmd show pin` reports a missing pin on stderr and still exits 0, so test
-# the listing on stdout. Redirecting stderr and trusting the status picked the
-# mill file on the lathe, where the post-GUI HAL then failed on
-# cnc_panel.sseg_status.
-if ! halcmd show pin cnc_panel.sseg_status 2>/dev/null | grep -q 'cnc_panel\.sseg_status'; then
+if [ -n "${LINC_CONFIG:-}" ] && [ -f "$LINC_CONFIG" ] && \
+   grep -Eq '^[[:space:]]*gui[[:space:]]*=[[:space:]]*"lathe"' "$LINC_CONFIG"; then
     POSTGUI="$LINC_DIR/hal/linc-lathe-postgui.hal"
 fi
 halcmd -f "$POSTGUI"

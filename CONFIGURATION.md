@@ -643,8 +643,9 @@ For this design repository:
 - the mill simulation profile uses the built-in `cnc-panel-sim` driver, points
   at `configs/sim.ini`, and starts a real LinuxCNC process through
   `scripts/start-sim.sh`;
-- the lathe profile declares turret/live-tool capabilities, has no panel window yet, and boots panel-lessly through
-  `configs/lathe-sim.ini` (post-GUI wiring in `hal/linc-lathe-postgui.hal`);
+- the lathe profile declares turret/live-tool capabilities and boots the simulator panel window through
+  `configs/lathe-sim.ini` (panel wiring in `hal/linc-lathe.hal`, post-GUI wiring in `hal/linc-lathe-postgui.hal`);
+  keys without a lathe function stay unwired and greyed until the lathe panel is built;
 - the real profile contains no simulated panel or `rio_sim.py` path;
 - the simulation profile contains no serial device path;
 - all safety flags match the policy above;

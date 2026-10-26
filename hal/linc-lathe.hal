@@ -1,0 +1,48 @@
+# LiNC lathe panel wiring (pre-GUI).
+#
+# The lathe has no physical panel yet, so the simulator panel service stands in
+# for one: it creates cnc_panel.* and (with [simulation] panel_window = true in
+# the profile) shows the panel window. Only the controls a lathe uses are wired;
+# unwired keys stay grey in the window, which is the honest state until the
+# lathe-specific panel (turret, live tool) is built.
+#
+# halui.* pins are single pins: one signal each, no second net.
+
+loadusr -Wn cnc_panel linc-panel --no-ipc
+
+# Operator-owned power and E-stop.
+net lathe-estop cnc_panel.estop => halui.estop.activate
+net lathe-estop-reset cnc_panel.estop_reset => halui.estop.reset
+net lathe-power-on cnc_panel.power_on => halui.machine.on
+net lathe-power-off cnc_panel.power_off => halui.machine.off
+
+# Steady one-hot modes. AUTO, MDI and JOG (manual jogging) are wired; INC, MPG
+# and the homing positions stay unwired until the lathe panel exists.
+net lathe-mode-auto cnc_panel.mode_auto => halui.mode.auto
+net lathe-mode-mdi cnc_panel.mode_mdi => halui.mode.mdi
+net lathe-mode-jog cnc_panel.mode_jog => halui.mode.manual
+
+# Program cycle: CYCLE START runs the loaded program, CYCLE STOP pauses it.
+net lathe-cycle-start cnc_panel.cycle_start => halui.program.run
+net lathe-cycle-stop cnc_panel.cycle_stop => halui.program.pause
+
+# Jogging: the lathe has X and Z joints only.
+net lathe-jog-xp cnc_panel.jog_xp => halui.joint.0.plus
+net lathe-jog-xn cnc_panel.jog_xn => halui.joint.0.minus
+net lathe-jog-zp cnc_panel.jog_zp => halui.joint.1.plus
+net lathe-jog-zn cnc_panel.jog_zn => halui.joint.1.minus
+
+# Spindle.
+net lathe-spindle-cw cnc_panel.spd_cw => halui.spindle.0.forward
+net lathe-spindle-ccw cnc_panel.spd_ccw => halui.spindle.0.reverse
+net lathe-spindle-stop cnc_panel.spd_sp => halui.spindle.0.stop
+
+# Lamps driven by the controller.
+net lathe-ready halui.machine.is-on => cnc_panel.led_ready
+net lathe-homed-x halui.joint.0.is-homed => cnc_panel.led_x
+net lathe-homed-z halui.joint.1.is-homed => cnc_panel.led_z
+net lathe-running halui.program.is-running => cnc_panel.led_cycle_on cnc_panel.led_run
+net lathe-paused halui.program.is-paused => cnc_panel.led_cycle_off
+net lathe-alarm halui.estop.is-activated => cnc_panel.led_mc_alarm
+net lathe-spindle-fwd halui.spindle.0.runs-forward => cnc_panel.led_spd_cw
+net lathe-spindle-rev halui.spindle.0.runs-backward => cnc_panel.led_spd_ccw
