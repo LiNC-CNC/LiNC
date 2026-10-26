@@ -233,6 +233,11 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
     let main_height = (page_height - bottom_height - 10.0).max(200.0);
     let graph_width = (available * 0.62).max(460.0);
     let right_width = (available - graph_width - 8.0).max(280.0);
+    let servo = !app.servo_load_rows().is_empty();
+    // The lathe dashboard keeps feed/spindle and servo load; the turret pane
+    // belongs to the mill layout.
+    let cards = if servo { 2.0 } else { 1.0 };
+    let full_height = (page_height - 10.0).max(main_height);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
             Vec2::new(graph_width, main_height),
@@ -297,47 +302,46 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                         pitch,
                     );
                 });
+                ui.add_space(6.0);
+                // The bottom cards share the TOOLPATH column's width, so the
+                // servo card's right edge lines up with the graph's. Measure
+                // the column itself, not the pre-layout estimate.
+                let card_width = bottom_row_card_width(ui.available_width(), cards, 180.0);
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    bottom_card(app, ui, card_width, bottom_height, "feed", |app, ui, _h| {
+                        common::feed_speed_card(app, ui, bottom_height);
+                    });
+                    if servo {
+                        ui.add_space(8.0);
+                        bottom_card(
+                            app,
+                            ui,
+                            card_width,
+                            bottom_height,
+                            "servo",
+                            |app, ui, _h| common::servo_load_card(app, ui, bottom_height),
+                        );
+                    }
+                });
             },
         );
         ui.add_space(8.0);
         ui.allocate_ui_with_layout(
-            Vec2::new(right_width, main_height),
+            Vec2::new(right_width, full_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 if app.mdi_pane_visible() {
-                    crate::screens::mdi::pane(app, ui, main_height);
+                    crate::screens::mdi::pane(app, ui, full_height);
                 } else {
                     egui::ScrollArea::vertical()
                         .id_salt("lathe-program")
-                        .max_height(main_height)
+                        .max_height(full_height)
                         .auto_shrink([false, false])
                         .show(ui, |ui| common::program_card(app, ui));
                 }
             },
         );
-    });
-    ui.add_space(6.0);
-    let servo = !app.servo_load_rows().is_empty();
-    // The lathe dashboard keeps feed/spindle and servo load; the turret pane
-    // belongs to the mill layout.
-    let cards = if servo { 2.0 } else { 1.0 };
-    let card_width = bottom_row_card_width(available, cards, 220.0);
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        bottom_card(app, ui, card_width, bottom_height, "feed", |app, ui, _h| {
-            common::feed_speed_card(app, ui, bottom_height);
-        });
-        if servo {
-            ui.add_space(8.0);
-            bottom_card(
-                app,
-                ui,
-                card_width,
-                bottom_height,
-                "servo",
-                |app, ui, _h| common::servo_load_card(app, ui, bottom_height),
-            );
-        }
     });
 }
 
