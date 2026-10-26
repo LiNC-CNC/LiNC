@@ -77,6 +77,9 @@ cargo build --release
 # ready to run: released E-stop, powered on, homed, demo part loaded, window
 # floated at 1280x720 for Hyprland
 ./scripts/start-sim.sh --detach --release-estop --power-on --home --load --float
+
+# lathe simulation: same lifecycle and flags, its own profile and INI
+./scripts/start-lathe-sim.sh --detach --release-estop --power-on --home
 ```
 
 The native LinuxCNC backend links `liblinuxcnc`/`libnml` and the sibling
@@ -85,7 +88,12 @@ and a C++ compiler. The simulator uses `SimBackend` at runtime but the binary
 still links NML.
 
 `start-sim.sh` launches a real LinuxCNC process with the in-repo simulation
-HAL (`hal/rio_sim.hal`) and the LiNC HMI/panel pair. The cabinet still boots the
+HAL (`hal/rio_sim.hal`) and the LiNC HMI/panel pair. `start-lathe-sim.sh` is
+the lathe sibling: it runs `configs/lathe-sim.ini` against Probe Basic's
+simulated lathe HAL (a `../probe_basic_dev` checkout) and shares the mill
+script's lifecycle, so `stop-sim.sh` stops either. The lathe panel's
+`cnc_panel.*` binding is not commissioned yet, so that session starts with
+the panel offline. The cabinet still boots the
 way a real one is found — E-stop latched, power off — unless you ask for more:
 `--release-estop`, `--power-on`, `--home`, `--load [FILE]` and `--float` each
 imply the step before, because the E-stop mushroom and POWER ON belong to the
@@ -425,9 +433,11 @@ aborted probe leaves feed override cancelled.
 ## Implementation status
 
 The workspace implements the specification in simulation. The shipped mill
-profile runs end to end; the lathe UI is implemented, but `lathe-sim.toml`
-intentionally refuses to load until its INI/tool table has the standard `P`
-column required by a power turret (see `CONFIGURATION.md`).
+profile runs end to end; the lathe UI is implemented and `lathe-sim.toml`
+now validates: `configs/lathe-sim.ini` and `configs/lathe-sim.tbl` carry the
+standard `P` turret column. Its panel HAL binding is still to be
+commissioned, so a lathe session runs with the panel offline (see
+`CONFIGURATION.md`).
 
 - `linc` loads and validates a machine profile, renders the fixed shell, and
   switches pages from the panel mode and keyboard.

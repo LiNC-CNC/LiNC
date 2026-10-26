@@ -38,7 +38,7 @@ safety validation without connecting to LinuxCNC or HAL.
 | `configs/sim.toml` | Mill simulation: `configs/sim.ini` runs a real `linuxcnc` process with the in-repo simulation HAL (`hal/rio_sim.hal`), LiNC display and simulated CNC control panel. |
 | `configs/baiermill.toml` | Physical mill, machine's own INI: `../../baiermill_pb/probe_basic.ini`, real CNC control panel over RS-485 owned by `linc-panel`. Fails `--check-config`: its `SUBROUTINE_PATH` cannot resolve LiNC's reviewed probe bundle (§7). |
 | `configs/baiermill-pb.toml` | Physical mill, LiNC's reviewed configuration: `configs/baiermill-pb.ini` (a copy of the machine INI with LiNC's probe bundle first in `SUBROUTINE_PATH`), same machine values, same RS-485 panel. |
-| `configs/lathe-sim.toml` | Lathe simulation: `../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini`, lathe UI capabilities. |
+| `configs/lathe-sim.toml` | Lathe simulation: `configs/lathe-sim.ini` boots LiNC against Probe Basic's lathe HAL and subroutines in a `../probe_basic_dev` checkout; `configs/lathe-sim.tbl` carries the turret `P` column. Lathe UI capabilities. |
 
 The profiles use:
 
@@ -639,11 +639,12 @@ For this design repository:
 - `baiermill-pb.toml` extends `base.toml`, is `gui = "mill"`, points at
   `configs/baiermill-pb.ini`, and its `SUBROUTINE_PATH` resolves every routine
   a generated Probe Run calls to LiNC's reviewed bundle;
-- `lathe-sim.toml` extends `base.toml`, is `gui = "lathe"`, and points at an existing INI;
+- `lathe-sim.toml` extends `base.toml`, is `gui = "lathe"`, and points at `configs/lathe-sim.ini`;
 - the mill simulation profile uses the built-in `cnc-panel-sim` driver, points
   at `configs/sim.ini`, and starts a real LinuxCNC process through
   `scripts/start-sim.sh`;
-- the lathe profile declares turret/live-tool capabilities and has no panel window yet;
+- the lathe profile declares turret/live-tool capabilities, has no panel window yet, and boots panel-lessly through
+  `configs/lathe-sim.ini` (post-GUI wiring in `hal/linc-lathe-postgui.hal`);
 - the real profile contains no simulated panel or `rio_sim.py` path;
 - the simulation profile contains no serial device path;
 - all safety flags match the policy above;

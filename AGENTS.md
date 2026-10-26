@@ -26,7 +26,7 @@ scripts/build-deb.sh                        # Debian packages, amd64 + arm64
   and `debian/` still supports a native `dpkg-buildpackage`.
 
 - `--check-config` merges the profile, reads the INI, resolves paths and checks safety without a window or HAL; it fails if the INI or a `../../` sibling checkout is missing.
-- `lathe-sim.toml` is expected to fail `--check-config` until its tool table has `P`; that is the turret guard.
+- `lathe-sim.toml` now validates: `configs/lathe-sim.ini` declares the standard `P` turret column and `configs/lathe-sim.tbl` carries it. Its panel HAL binding is still uncommissioned, so `scripts/start-lathe-sim.sh` starts the lathe with the panel offline.
 - `baiermill.toml` is expected to fail `--check-config` until the BaierMill machine tree carries the reviewed probe bundle; that is the deployment guard. Validate the machine with `baiermill-pb.toml`, whose `configs/baiermill-pb.ini` lists `../subroutines/probe_basic` first.
 - `./scripts/start-sim.sh` (`--detach`; stop with `./scripts/stop-sim.sh`) runs `linuxcnc configs/sim.ini` from `configs/`, exports
   `LINC_CONFIG=configs/sim.toml`, builds only when a release binary is missing, and needs `DISPLAY`/`WAYLAND_DISPLAY`.
@@ -174,7 +174,8 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
   Remove `WAYLAND_DISPLAY` from the child environment when a capture or smoke test must use Xvfb's 1280×720 screen.
 - **Profile selection.** `--config` or `LINC_CONFIG` is mandatory; there is no default. Under LinuxCNC they must match the `[DISPLAY]` line, and
   `-ini` overrides `machine.linuxcnc_ini`.
-- **Sibling checkouts.** `sim.toml` is self-contained (`configs/` + `hal/`), but `baiermill-pb.toml` (via `configs/baiermill-pb.ini`), `baiermill.toml`
-  and `lathe-sim.toml` point outside the repo (`../../baiermill_pb`, `../../probe_basic_dev`); `--check-config` fails without them.
+- **Sibling checkouts.** `sim.toml` is self-contained (`configs/` + `hal/`), but `baiermill.toml` and `baiermill-pb.toml` point into
+  `../../baiermill_pb`; `configs/lathe-sim.ini` keeps the INI in-repo, while its `HALFILE`s and `SUBROUTINE_PATH` resolve into
+  `../probe_basic_dev`. `--check-config` fails without the mill tree; `start-lathe-sim.sh` refuses to start without its checkout.
 - **egui 0.37.** The workspace pins `egui`/`eframe`/`egui_extras` 0.37. Copy API style from `theme.rs`/`shell.rs`; older egui examples may not
   compile, and a second egui version breaks type compatibility.

@@ -1,7 +1,8 @@
 # Smartlathe SL36-style lathe simulation profile.
 #
-# Uses the existing Probe Basic lathe simulation INI. The lathe panel mockup is
-# a separate companion window; it is not part of the HMI shell. Live tooling and
+# Uses configs/lathe-sim.ini, which boots LiNC as the display against Probe
+# Basic's lathe simulation HAL (a sibling checkout). The lathe panel mockup is a
+# separate companion window; it is not part of the HMI shell. Live tooling and
 # power-turret support are UI capabilities here; HAL pin binding is still to be
 # added to the lathe simulator.
 
@@ -13,7 +14,7 @@ extends = "base.toml"
 name = "Smartlathe SL36 Simulation"
 kind = "sim"
 gui = "lathe"
-linuxcnc_ini = "../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini"
+linuxcnc_ini = "lathe-sim.ini"
 
 [tools]
 changer = "turret"

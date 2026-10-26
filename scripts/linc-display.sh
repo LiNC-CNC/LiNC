@@ -53,6 +53,14 @@ if ! halcmd show pin linc.status-display >/dev/null 2>&1; then
     echo "linc-display: linc.* HAL pins did not appear" >&2
     exit 1
 fi
-halcmd -f "$LINC_DIR/hal/linc-sim-postgui.hal"
+# The mill simulation's post-GUI file nets cnc_panel.sseg_status and
+# cnc_panel.probe. A panel-less machine (the lathe sim, whose panel binding is
+# not commissioned yet) has no cnc_panel component, so it gets the wiring that
+# only touches linc.*, iocontrol and halui pins.
+POSTGUI="$LINC_DIR/hal/linc-sim-postgui.hal"
+if ! halcmd show pin cnc_panel.sseg_status >/dev/null 2>&1; then
+    POSTGUI="$LINC_DIR/hal/linc-lathe-postgui.hal"
+fi
+halcmd -f "$POSTGUI"
 
 wait "$LINC_PID"

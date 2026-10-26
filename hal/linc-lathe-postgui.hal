@@ -1,0 +1,24 @@
+# LiNC lathe post-GUI wiring.
+#
+# Loaded by linc-display after the linc GUI has created its linc.* component,
+# when the machine has no cnc_panel component (the lathe's panel binding is not
+# commissioned yet, so there is no panel service and no cnc_panel.sseg_status).
+#
+# The mill simulation's post-GUI file nets cnc_panel.sseg_status and
+# cnc_panel.probe; this one wires only what a panel-less lathe session has.
+
+# No panel display consumes the active WCS yet: keep the signal so the HMI's
+# declared output is still exercised, without inventing a consumer.
+net linc-status linc.status-display
+
+# Manual tool-change acknowledgement from the HMI.
+net linc-tool-confirm linc.tool-change-confirm => iocontrol.0.tool-changed
+
+# UI heartbeat. A machine/PLC watchdog may consume this signal.
+net linc-hmi-heartbeat linc.hmi-alive
+
+# Jog speed, scaled in the HMI from [DISPLAY] DEFAULT_LINEAR_VELOCITY.
+net jog-speed linc.jog-speed => halui.joint.jog-speed
+
+# Jog step for INC mode, selected in the HMI from [DISPLAY] INCREMENTS.
+net jog-increment linc.jog-increment => halui.axis.x.increment halui.axis.z.increment

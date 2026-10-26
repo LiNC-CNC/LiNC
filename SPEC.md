@@ -1649,8 +1649,9 @@ Configuration is per machine and layered:
   `../../baiermill_pb/probe_basic.ini`, with the real CNC control panel owned by
   `linc-panel`.
 - `configs/lathe-sim.toml` — lathe simulation profile pointing at
-  `../../probe_basic_dev/configs/probe_basic_lathe/probe_basic_lathe.ini`,
-  with `gui = "lathe"` and turret/live-tool capabilities.
+  `configs/lathe-sim.ini`, which boots LiNC against Probe Basic's lathe HAL
+  and subroutines in `../probe_basic_dev`; `gui = "lathe"` and
+  turret/live-tool capabilities.
 - `hal/linc.hal` — core pre-GUI panel/HAL wiring.
 - `hal/linc-postgui.hal` — post-GUI `linc.*` output wiring.
 - `hal/linc-pendant.hal` — optional real-machine pendant jog-only wiring.
