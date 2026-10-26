@@ -38,8 +38,10 @@ live_tooling = true
 live_tool_max_rpm = 6000
 c_axis = true
 y_axis = false
-# Show the SPD.2.* second-spindle column on the simulator panel face.
-sub_spindle = false
+# The lathe simulation INI runs [TRAJ] SPINDLES = 2 and the reference photo
+# has the SPD.2.* row, so this machine has a second spindle. Set false for a
+# single-spindle lathe: the panel then draws only the SPD.* column.
+sub_spindle = true
 
 [ui]
 window_title = "LiNC - Smartlathe SL36 Simulation"
