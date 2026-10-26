@@ -98,6 +98,8 @@ AUTO/MDI/JOG, cycle start/pause, X/Z jog, both spindles, the feed brake and
 their lamps; the remaining machine I/O is unwired and greyed. The cabinet
 still boots the
 way a real one is found — E-stop latched, power off — unless you ask for more:
+`--plc` starts the ladder PLC daemon for one run (`--no-plc` forces it off
+even when the profile enables it; the PLC is off by default). The start-up steps
 `--release-estop`, `--power-on`, `--home`, `--load [FILE]` and `--float` each
 imply the step before, because the E-stop mushroom and POWER ON belong to the
 panel and cannot be pressed behind its back. The panel releases the mushroom
@@ -464,7 +466,12 @@ are commissioned (see `CONFIGURATION.md`).
   HMI drives the panel status and tool displays.
 - `linc-plc` is a separate userspace ladder PLC: it compiles a project, scans
   it at a 1-5 ms target and owns `linc_plc.*`; the PLC page speaks to it over a
-  same-user Unix socket. It is not in the safety chain.
+  same-user Unix socket. It is not in the safety chain. It is off by default: the
+  HMI starts the daemon only when the profile sets `[plc] enabled = true` or a
+  session exports `LINC_PLC=1` (`start-sim.sh --plc`), and then
+  `linc-display.sh` loads `hal/linc-plc-postgui.hal` after `linc_plc.alive`
+  appears. Disabled, there is no daemon, no `linc_plc.*` pin and no PLC HAL
+  file. See `docs/plc.md`.
 - The typed `linc.*` HAL component, the native LinuxCNC backend, the WHB04B-6 pendant
   wiring and the generated G-code help index are present.
 - `linc-mcp` exposes the HMI and panel diagnostic sockets to an agent: state,

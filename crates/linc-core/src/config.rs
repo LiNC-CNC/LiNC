@@ -73,6 +73,8 @@ pub struct Config {
     pub diagnostics: DiagnosticsConfig,
     #[serde(default)]
     pub simulation: SimulationConfig,
+    #[serde(default)]
+    pub plc: PlcConfig,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -508,6 +510,41 @@ pub struct SimulationConfig {
     pub panel_scale: Option<f64>,
 }
 
+/// Userspace ladder PLC service. Off unless the profile or the sim launcher
+/// turns it on: no daemon, no `linc_plc.*` pins and no PLC HAL file.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlcConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Ladder project JSON, resolved relative to the profile directory.
+    #[serde(default)]
+    pub project: String,
+    /// Daemon socket; empty means `linc_plc_client::default_socket_path()`.
+    #[serde(default)]
+    pub socket: String,
+    #[serde(default = "default_plc_scan_us")]
+    pub scan_us: u64,
+    #[serde(default)]
+    pub allow_force: bool,
+}
+
+fn default_plc_scan_us() -> u64 {
+    2000
+}
+
+impl Default for PlcConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            project: String::new(),
+            socket: String::new(),
+            scan_us: default_plc_scan_us(),
+            allow_force: false,
+        }
+    }
+}
+
 /// Fully resolved profile.
 #[derive(Clone, Debug)]
 pub struct Profile {
@@ -750,6 +787,14 @@ impl Profile {
             ),
             ("Panel driver".into(), self.config.panel.driver.clone()),
             ("Changer".into(), self.config.tools.changer.clone()),
+            (
+                "PLC".into(),
+                if self.config.plc.enabled {
+                    format!("enabled ({})", self.config.plc.project)
+                } else {
+                    "disabled".into()
+                },
+            ),
         ]
     }
 }
@@ -811,6 +856,18 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
                 "simulation.panel_scale must be a factor in 0.5..3.0".into(),
             ));
         }
+    }
+    // The PLC is off by default; when it is on the daemon needs a project to
+    // bind its pin map, and the scan period is the one timing the ladder runs at.
+    if config.plc.enabled && config.plc.project.trim().is_empty() {
+        return Err(ConfigError::Invalid(
+            "plc.project must name a ladder project when [plc] enabled = true".into(),
+        ));
+    }
+    if !(100..=1_000_000).contains(&config.plc.scan_us) {
+        return Err(ConfigError::Invalid(
+            "plc.scan_us must be between 100 and 1000000 microseconds".into(),
+        ));
     }
     let scale = config.ui.scale.trim().to_ascii_lowercase();
     if scale != "auto" {
@@ -1405,6 +1462,90 @@ enabled = true
             error.to_string().contains("simulation.panel_scale"),
             "{error}"
         );
+    }
+
+    /// A profile that differs only in its `[plc]` table.
+    fn plc_profile(dir: &Path, plc: &str) -> PathBuf {
+        let path = dir.join("sim.toml");
+        write(
+            &path,
+            &format!(
+                r#"schema_version = 1
+profile = "sim"
+extends = "base.toml"
+[machine]
+name = "Test"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[panel]
+kind = "simulated"
+label = "Sim panel"
+driver = "cnc-panel-sim"
+[panel.link]
+kind = "virtual"
+[simulation]
+enabled = true
+{plc}
+"#
+            ),
+        );
+        path
+    }
+
+    #[test]
+    fn plc_defaults_are_off_with_a_two_millisecond_scan() {
+        let plc: PlcConfig = toml::from_str("").unwrap();
+        assert!(!plc.enabled);
+        assert!(plc.project.is_empty());
+        assert!(plc.socket.is_empty());
+        assert_eq!(plc.scan_us, 2000);
+        assert!(!plc.allow_force);
+
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let profile = Profile::load(&plc_profile(dir.path(), ""), None).unwrap();
+        assert!(!profile.config.plc.enabled);
+        assert!(profile.config.plc.project.is_empty());
+        assert_eq!(profile.config.plc.scan_us, 2000);
+        assert!(profile
+            .summary()
+            .contains(&("PLC".into(), "disabled".into())));
+    }
+
+    #[test]
+    fn plc_enabled_accepts_a_project_and_requires_one() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let path = plc_profile(
+            dir.path(),
+            "[plc]\nenabled = true\nproject = \"plc-sim.json\"",
+        );
+        let profile = Profile::load(&path, None).expect("enabled with a project");
+        assert!(profile.config.plc.enabled);
+        assert_eq!(profile.config.plc.project, "plc-sim.json");
+        assert!(profile
+            .summary()
+            .contains(&("PLC".into(), "enabled (plc-sim.json)".into())));
+
+        plc_profile(dir.path(), "[plc]\nenabled = true");
+        let error = Profile::load(&path, None).unwrap_err();
+        assert!(error.to_string().contains("plc.project"), "{error}");
+    }
+
+    #[test]
+    fn plc_scan_us_is_validated() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let path = plc_profile(dir.path(), "[plc]\nscan_us = 0");
+        let error = Profile::load(&path, None).unwrap_err();
+        assert!(error.to_string().contains("plc.scan_us"), "{error}");
+        let path = plc_profile(dir.path(), "[plc]\nscan_us = 1000001");
+        let error = Profile::load(&path, None).unwrap_err();
+        assert!(error.to_string().contains("plc.scan_us"), "{error}");
     }
 
     #[test]

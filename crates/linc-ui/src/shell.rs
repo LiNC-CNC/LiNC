@@ -300,6 +300,21 @@ impl LincApp {
         self.diag_bus = Some(bus);
     }
 
+    /// Effective PLC service state, decided in `main` from the profile and the
+    /// `LINC_PLC` override. `LincApp::new` keeps its signature, so the page
+    /// starts from its defaults and is told here where the daemon listens.
+    pub fn configure_plc(&mut self, enabled: bool, socket: PathBuf, project: PathBuf) {
+        self.plc.enabled = enabled;
+        if !socket.as_os_str().is_empty() {
+            self.plc.socket_text = socket.display().to_string();
+        }
+        // No project in the profile is not "no file": the page keeps the example
+        // path it starts with so an operator can still edit, validate and save one.
+        if !project.as_os_str().is_empty() {
+            self.plc.path_text = project.display().to_string();
+        }
+    }
+
     pub fn new(profile: Profile, mut backend: Box<dyn UiBackend>, ctx: &egui::Context) -> Self {
         theme::apply(ctx);
         theme::install_font_fallback(ctx);
@@ -4311,14 +4326,8 @@ fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Page, color: C
             painter.line_segment([egui::pos2(left, top), egui::pos2(left, bottom)], s);
             painter.line_segment([egui::pos2(right, top), egui::pos2(right, bottom)], s);
             for y in [c.y - 4.0, c.y + 4.0] {
-                painter.line_segment(
-                    [egui::pos2(left, y), egui::pos2(c.x - 2.0, y)],
-                    s,
-                );
-                painter.line_segment(
-                    [egui::pos2(c.x + 2.0, y), egui::pos2(right, y)],
-                    s,
-                );
+                painter.line_segment([egui::pos2(left, y), egui::pos2(c.x - 2.0, y)], s);
+                painter.line_segment([egui::pos2(c.x + 2.0, y), egui::pos2(right, y)], s);
             }
             painter.rect_stroke(
                 egui::Rect::from_center_size(c, Vec2::new(4.0, 11.0)),
@@ -4790,6 +4799,30 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         let backend = Box::new(LocalBackend::new(profile.clone(), mode));
         let app = LincApp::new(profile, backend, &ctx);
         (dir, app)
+    }
+
+    #[test]
+    fn configure_plc_sets_the_service_fields_and_names_the_disabled_hint() {
+        let (_dir, mut app) = make_app(PanelMode::Auto);
+        assert!(!app.plc.enabled, "the page starts with the PLC off");
+        app.configure_plc(
+            true,
+            PathBuf::from("/run/linc/plc.sock"),
+            PathBuf::from("/profiles/plc-sim.json"),
+        );
+        assert!(app.plc.enabled);
+        assert_eq!(app.plc.socket_text, "/run/linc/plc.sock");
+        assert_eq!(app.plc.path_text, "/profiles/plc-sim.json");
+
+        // The hint is what the status and diagnostics cards show when the
+        // profile leaves the service off, so both parts must be spelled out.
+        let hint = crate::screens::plc::DISABLED_HINT;
+        assert!(hint.contains("[plc] enabled = true"), "{hint}");
+        assert!(hint.contains("start-sim.sh --plc"), "{hint}");
+
+        app.configure_plc(false, PathBuf::from("/run/linc/plc.sock"), PathBuf::new());
+        assert!(!app.plc.enabled);
+        assert_eq!(app.plc.socket_text, "/run/linc/plc.sock");
     }
 
     #[test]
@@ -6617,7 +6650,9 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert!(texts.iter().any(|(text, _)| text.contains("BLOCKS")));
         // An idle strip draws nothing: the issue keys are already on the rail.
         assert!(
-            !texts.iter().any(|(text, _)| text.starts_with("ENTER ISSUES")),
+            !texts
+                .iter()
+                .any(|(text, _)| text.starts_with("ENTER ISSUES")),
             "the idle strip must not repeat the shortcuts rail"
         );
         harness.app.mdi.last_result = Some("G1 X10".into());

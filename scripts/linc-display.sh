@@ -64,4 +64,34 @@ if [ -n "${LINC_CONFIG:-}" ] && [ -f "$LINC_CONFIG" ] && \
 fi
 halcmd -f "$POSTGUI"
 
+# --- ladder PLC -------------------------------------------------------------
+# The PLC is off unless the profile or start-sim.sh turned it on, and then the
+# HMI has already spawned the daemon and written its pid. There is no config
+# parsing here: the pid file is the switch and linc_plc.alive is the proof that
+# the daemon owns its pins. A disabled PLC costs one test and nothing else.
+if [ -n "${LINC_PLC_PID_FILE:-}" ]; then
+    PLC_PID_FILE=$LINC_PLC_PID_FILE
+elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    PLC_PID_FILE="$XDG_RUNTIME_DIR/linc/plc.pid"
+else
+    PLC_PID_FILE=/tmp/linc-plc.pid
+fi
+if [ -f "$PLC_PID_FILE" ]; then
+    PLC_READY=0
+    # The daemon creates its component before hal_ready(), so the pin is there
+    # as soon as it starts scanning; 5 s covers a cold project compile.
+    for _ in $(seq 1 50); do
+        if halcmd show pin linc_plc.alive >/dev/null 2>&1; then
+            PLC_READY=1
+            break
+        fi
+        sleep 0.1
+    done
+    if [ "$PLC_READY" -eq 1 ]; then
+        halcmd -f "$LINC_DIR/hal/linc-plc-postgui.hal"
+    else
+        echo "linc-display: PLC requested ($PLC_PID_FILE) but linc_plc.alive did not appear; skipped hal/linc-plc-postgui.hal, the HMI keeps running" >&2
+    fi
+fi
+
 wait "$LINC_PID"

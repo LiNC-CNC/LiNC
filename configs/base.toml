@@ -280,3 +280,21 @@ panel_link_stats = "optional"
 
 [simulation]
 enabled = false
+
+[plc]
+# Ladder PLC service (linc-plc). OFF by default: with enabled = false the HMI
+# starts no daemon, no linc_plc.* pins exist and no PLC HAL file is loaded.
+# Turn it on here, or for one simulation run with `start-sim.sh --plc`
+# (`--no-plc` forces it off for one run).
+enabled = false
+# Ladder project JSON, resolved relative to this profile's directory.
+# Required when enabled = true.
+project = ""
+# Daemon socket. Empty uses linc_plc_client::default_socket_path()
+# ($XDG_RUNTIME_DIR/linc/plc-<uid>.sock); a relative path resolves against the
+# profile directory.
+socket = ""
+# Scan period in microseconds, 100..=1000000.
+scan_us = 2000
+# Let the PLC page force I/O for diagnostics; the daemon refuses forces without it.
+allow_force = false

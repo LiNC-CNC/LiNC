@@ -22,3 +22,4 @@ linc-diag = { path = "../linc-diag" }
 linc-ui = { path = "../linc-ui" }
 linc-hal = { path = "../linc-hal" }
 linc-linuxcnc = { path = "../linc-linuxcnc" }
+linc-plc-client = { path = "../linc-plc-client" }

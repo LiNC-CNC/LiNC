@@ -41,3 +41,8 @@ estop = "panel-gui"
 panel_window = true
 panel_title = "CNC Control Panel Simulator"
 panel_scale = 1.0
+
+[plc]
+# The simulation ships a ladder project, but the PLC stays off until
+# `start-sim.sh --plc` (LINC_PLC=1) or [plc] enabled = true turns it on.
+project = "plc-sim.json"

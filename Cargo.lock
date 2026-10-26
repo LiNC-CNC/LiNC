@@ -1696,6 +1696,7 @@ dependencies = [
  "linc-diag",
  "linc-hal",
  "linc-linuxcnc",
+ "linc-plc-client",
  "linc-ui",
  "log",
  "serde_json",

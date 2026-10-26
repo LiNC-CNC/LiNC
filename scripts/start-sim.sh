@@ -13,6 +13,13 @@
 #   --load [FILE]     load a program; FILE defaults to the demo mill program
 #   --float           float the HMI window under Hyprland at 1280x720
 #
+# --plc starts the ladder PLC service: it exports LINC_PLC=1 and the HMI then
+# spawns target/release/linc-plc (owning linc_plc.*) and loads
+# hal/linc-plc-postgui.hal. --no-plc forces it off for one run (LINC_PLC=0) even
+# when the profile sets [plc] enabled = true. The PLC is off by default, and
+# neither flag implies any other start-up step; LINC_PLC=1|0|true|false|on|off in
+# the environment does the same as the flag.
+#
 # --no-sim3d starts the same rig without the 3D simulator: it loads
 # configs/sim-no3d.ini (configs/sim.ini minus the linc-sim3d HAL file), and the
 # simulator binary is neither required nor built. An explicit LINC_SIM_INI is a
@@ -42,11 +49,13 @@ INI="${LINC_SIM_INI:-$ROOT/configs/sim.ini}"
 BIN="${LINC_BIN:-$ROOT/target/release/linc}"
 PANEL_BIN="${LINC_PANEL_BIN:-$ROOT/target/release/linc-panel}"
 SIM3D_BIN="${LINC_SIM3D_BIN:-$ROOT/target/release/linc-sim3d}"
+PLC_BIN="${LINC_PLC_BIN:-$ROOT/target/release/linc-plc}"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/linc"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/linc"
 PID_FILE="$RUNTIME_DIR/sim.pid"
 PANEL_PID_FILE="$RUNTIME_DIR/panel-sim.pid"
 LINC_PID_FILE="$RUNTIME_DIR/linc.pid"
+PLC_PID_FILE="$RUNTIME_DIR/plc.pid"
 LOG_FILE="$STATE_DIR/sim.log"
 # `linuxcnc -r` stops the launcher from moving its own stdout/stderr into these
 # files, so the session output goes to the terminal (foreground) or to
@@ -73,6 +82,7 @@ HOME_AXES=0
 LOAD_PROGRAM=""
 FLOAT_WINDOW=0
 NO_SIM3D=0
+PLC_FLAG=""
 READY_TIMEOUT="${LINC_READY_TIMEOUT:-60}"
 ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -92,6 +102,8 @@ while [[ $# -gt 0 ]]; do
         --load=*) LOAD_PROGRAM="${1#--load=}" ;;
         --float) FLOAT_WINDOW=1 ;;
         --no-sim3d) NO_SIM3D=1 ;;
+        --plc) PLC_FLAG=1 ;;
+        --no-plc) PLC_FLAG=0 ;;
         --timeout) READY_TIMEOUT="${2:?--timeout needs seconds}"; shift ;;
         *) ARGS+=("$1") ;;
     esac
@@ -113,12 +125,12 @@ fi
 # builds it.
 NEED_SIM3D=1
 (( NO_SIM3D )) && NEED_SIM3D=0
-if [[ ! -x "$BIN" || ! -x "$PANEL_BIN" || ( $NEED_SIM3D -eq 1 && ! -x "$SIM3D_BIN" ) ]]; then
+if [[ ! -x "$BIN" || ! -x "$PANEL_BIN" || ! -x "$PLC_BIN" || ( $NEED_SIM3D -eq 1 && ! -x "$SIM3D_BIN" ) ]]; then
     echo "building LiNC release binaries..." >&2
     if (( NEED_SIM3D )); then
-        (cd "$ROOT" && cargo build --release -p linc-app -p linc-panel -p linc-sim3d)
+        (cd "$ROOT" && cargo build --release -p linc-app -p linc-panel -p linc-sim3d -p linc-plc)
     else
-        (cd "$ROOT" && cargo build --release -p linc-app -p linc-panel)
+        (cd "$ROOT" && cargo build --release -p linc-app -p linc-panel -p linc-plc)
     fi
 fi
 
@@ -138,6 +150,14 @@ fi
 export LINC_CONFIG="$PROFILE"
 export LINC_PANEL_PID_FILE="$PANEL_PID_FILE"
 export LINC_DISPLAY_PID_FILE="$LINC_PID_FILE"
+# The PLC is off unless the profile or one of these flags turns it on; the HMI
+# reads LINC_PLC first and only then [plc] enabled. The pid file is where both
+# the display wrapper and stop-sim.sh find the daemon.
+if [[ -n "$PLC_FLAG" ]]; then
+    export LINC_PLC="$PLC_FLAG"
+fi
+export LINC_PLC_BIN="$PLC_BIN"
+export LINC_PLC_PID_FILE="$PLC_PID_FILE"
 # Only override the filter when asked; the binaries default to LiNC at info and
 # third-party crates at warn, so an exported `RUST_LOG=info` here would turn the
 # D-Bus stack back on and bury the log.
@@ -150,7 +170,7 @@ if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     echo "LiNC/LinuxCNC sim already running (PID $(cat "$PID_FILE"))"
     exit 0
 fi
-rm -f "$PANEL_PID_FILE" "$LINC_PID_FILE"
+rm -f "$PANEL_PID_FILE" "$LINC_PID_FILE" "$PLC_PID_FILE"
 
 # A session that is killed rather than closed can leave LiNC, halui, milltask and
 # io behind even after linuxcncsvr exits. The survivors keep stale diagnostic
@@ -158,14 +178,14 @@ rm -f "$PANEL_PID_FILE" "$LINC_PID_FILE"
 # clear them when no LinuxCNC server is running. This script is for the
 # simulation; a real machine must not have a leftover panel without LinuxCNC.
 if [[ "${LINC_KEEP_STALE:-0}" != 1 ]] && ! pgrep -x linuxcncsvr >/dev/null 2>&1; then
-    for name in halui milltask io linuxcnc linc linc-panel; do
+    for name in halui milltask io linuxcnc linc linc-panel linc-plc; do
         if pgrep -x "$name" >/dev/null 2>&1; then
             echo "stopping stale $name process from a killed session"
             pkill -TERM -x "$name" >/dev/null 2>&1 || true
         fi
     done
     sleep 1
-    for name in halui milltask io linuxcnc linc linc-panel; do
+    for name in halui milltask io linuxcnc linc linc-panel linc-plc; do
         pkill -KILL -x "$name" >/dev/null 2>&1 || true
     done
 fi

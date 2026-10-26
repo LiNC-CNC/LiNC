@@ -571,6 +571,7 @@ bar.
 | `[preferences]` | `file` |
 | `[diagnostics]` | `event_log_capacity`, `panel_link_stats` |
 | `[simulation]` | `enabled`, optional `panel`, `rio`, `estop`, `panel_window`, `panel_title`, `panel_scale` |
+| `[plc]` | `enabled`, `project`, `socket`, `scan_us`, `allow_force` |
 
 Enums:
 
@@ -590,6 +591,28 @@ Enums:
 - `diagnostics.panel_link_stats`: `none`, `optional`, `required`
 - `files.usb_backend`: `udisks2`, `none`
 - `files.overwrite`: `confirm`
+
+### `[plc]`
+
+The userspace ladder PLC service (`linc-plc`). **Off by default**: with
+`enabled = false` the HMI starts no daemon, no `linc_plc.*` pins exist and
+`scripts/linc-display.sh` does not load `hal/linc-plc-postgui.hal`. The PLC
+page stays reachable and works offline, and its service card says the PLC is
+disabled. `start-sim.sh --plc` / `--no-plc` export `LINC_PLC=1` / `LINC_PLC=0`,
+which overrides this table for one run; see `docs/plc.md`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Start the daemon at HMI start-up. |
+| `project` | `""` | Ladder project JSON, resolved relative to the profile directory. Required when `enabled = true`. |
+| `socket` | `""` | Daemon socket. Empty uses `linc_plc_client::default_socket_path()` (`$XDG_RUNTIME_DIR/linc/plc-<uid>.sock`); a relative path resolves against the profile directory. |
+| `scan_us` | `2000` | Scan period in microseconds, 100..=1000000. |
+| `allow_force` | `false` | Let the PLC page force I/O; the daemon refuses forces without it. |
+
+Validation: `enabled = true` with an empty `project` fails with
+`plc.project must name a ladder project when [plc] enabled = true`; a
+`scan_us` outside 100..=1000000 fails with `plc.scan_us must be between 100 and
+1000000 microseconds`. The table is `deny_unknown_fields` like every other.
 
 ### `[mdi]`
 
@@ -694,6 +717,9 @@ For this design repository:
 - `[hal] write_policy = "declared-outputs-only"` and `allowed_outputs` is
   exactly `hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`;
 - `[pendant] jog_only = true` and non-jog functions are ignored;
+- `[plc] enabled = false` in `base.toml`, so no `linc_plc.*` pin and no PLC
+  HAL file exist unless the profile or `start-sim.sh --plc` asks for them; an
+  enabled PLC names a project and keeps `scan_us` inside 100..=1000000;
 - `base.toml` cannot be loaded as a runnable profile.
 
 ## 12. Remaining hardware verification

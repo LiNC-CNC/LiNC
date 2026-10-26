@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "name": "plc-sim",
+  "description": "Simulation seal-in: the start button seals a run output in, the stop button breaks it and latches an alarm.",
+  "io": [
+    { "name": "start", "direction": "in", "kind": "bit" },
+    { "name": "stop", "direction": "in", "kind": "bit" },
+    { "name": "run", "direction": "out", "kind": "bit" }
+  ],
+  "vars": [
+    { "name": "seal", "kind": "bit", "retain": false },
+    { "name": "alarm", "kind": "bit", "retain": false }
+  ],
+  "sections": [
+    {
+      "name": "main",
+      "rungs": [
+        {
+          "comment": "Seal in: start picks the seal up, stop breaks it.",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "parallel",
+                "items": [
+                  { "op": "contact", "var": "start", "negated": false },
+                  { "op": "contact", "var": "seal", "negated": false }
+                ]
+              },
+              { "op": "contact", "var": "stop", "negated": true }
+            ]
+          },
+          "coil": { "var": "seal", "kind": "normal" }
+        },
+        {
+          "comment": "The seal drives the run output.",
+          "logic": { "op": "contact", "var": "seal", "negated": false },
+          "coil": { "var": "run", "kind": "normal" }
+        },
+        {
+          "comment": "Stopping while running latches the alarm.",
+          "logic": {
+            "op": "series",
+            "items": [
+              { "op": "contact", "var": "stop", "negated": false },
+              { "op": "contact", "var": "run", "negated": false }
+            ]
+          },
+          "coil": { "var": "alarm", "kind": "set" }
+        }
+      ]
+    }
+  ]
+}
