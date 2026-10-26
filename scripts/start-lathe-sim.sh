@@ -43,19 +43,30 @@ if [[ ! -d "$SIBLING" ]]; then
 fi
 
 # The mill script falls back to the demo mill program for a bare --load; the
-# lathe has no such program, so require an explicit file.
-previous=""
-for arg in "$@"; do
-    if [[ "$previous" == "--load" && "${arg:0:1}" == "-" ]]; then
-        echo "--load needs a G-code file for the lathe (there is no demo program)" >&2
-        exit 1
-    fi
-    previous="$arg"
+# lathe has no such program, so require an explicit file. sim-ready resolves the
+# path after chdir-ing into the INI directory, so make it absolute here: a
+# relative path would otherwise become configs/<path> a second time.
+ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --load)
+            if [[ $# -lt 2 || "${2:0:1}" == "-" ]]; then
+                echo "--load needs a G-code file for the lathe (there is no demo program)" >&2
+                exit 1
+            fi
+            ARGS+=(--load "$(realpath "$2")")
+            shift 2
+            ;;
+        --load=*)
+            ARGS+=("--load=$(realpath "${1#--load=}")")
+            shift
+            ;;
+        *)
+            ARGS+=("$1")
+            shift
+            ;;
+    esac
 done
-if [[ "${previous:-}" == "--load" ]]; then
-    echo "--load needs a G-code file for the lathe (there is no demo program)" >&2
-    exit 1
-fi
 
 # A broken profile should fail before LinuxCNC starts, not as an HMI that
 # cannot attach. The binary may not exist yet on a fresh checkout; start-sim.sh
@@ -75,4 +86,4 @@ echo "lathe sim: simulator panel window with the lathe-relevant controls; turret
 
 export LINC_SIM_CONFIG="$PROFILE"
 export LINC_SIM_INI="$INI"
-exec "$ROOT/scripts/start-sim.sh" --no-sim3d "$@"
+exec "$ROOT/scripts/start-sim.sh" --no-sim3d "${ARGS[@]}"
