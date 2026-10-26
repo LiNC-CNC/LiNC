@@ -1,10 +1,10 @@
 # LiNC lathe panel wiring (pre-GUI).
 #
-# The lathe has no physical panel yet, so the simulator panel service stands in
-# for one: it creates cnc_panel.* and (with [simulation] panel_window = true in
-# the profile) shows the panel window. Only the controls a lathe uses are wired;
-# unwired keys stay grey in the window, which is the honest state until the
-# lathe-specific panel (turret, live tool) is built.
+# The lathe has no physical panel, so the simulator panel service stands in for
+# one: it creates cnc_panel.* and, with [simulation] panel_window = true and
+# machine.gui = "lathe" / [panel] driver = "lathe-sim" in the profile, shows the
+# lathe panel face. Only the controls a lathe can drive are wired here; a key
+# with no halui equivalent stays unwired, which greys it in the window.
 #
 # halui.* pins are single pins: one signal each, no second net.
 
@@ -16,8 +16,9 @@ net lathe-estop-reset cnc_panel.estop_reset => halui.estop.reset
 net lathe-power-on cnc_panel.power_on => halui.machine.on
 net lathe-power-off cnc_panel.power_off => halui.machine.off
 
-# Steady one-hot modes. AUTO, MDI and JOG (manual jogging) are wired; INC, MPG
-# and the homing positions stay unwired until the lathe panel exists.
+# Steady one-hot modes. AUTO, MDI and JOG (manual jogging) are wired; INC, MPG,
+# HOME and PROG.HOME stay unwired until the lathe panel's homing sequence is
+# commissioned. halui.mode.manual is a single pin, so only JOG claims it.
 net lathe-mode-auto cnc_panel.mode_auto => halui.mode.auto
 net lathe-mode-mdi cnc_panel.mode_mdi => halui.mode.mdi
 net lathe-mode-jog cnc_panel.mode_jog => halui.mode.manual
@@ -32,10 +33,21 @@ net lathe-jog-xn cnc_panel.jog_xn => halui.joint.0.minus
 net lathe-jog-zp cnc_panel.jog_zp => halui.joint.1.plus
 net lathe-jog-zn cnc_panel.jog_zn => halui.joint.1.minus
 
-# Spindle.
+# Spindle (spindle 0).
 net lathe-spindle-cw cnc_panel.spd_cw => halui.spindle.0.forward
 net lathe-spindle-ccw cnc_panel.spd_ccw => halui.spindle.0.reverse
 net lathe-spindle-stop cnc_panel.spd_sp => halui.spindle.0.stop
+
+# Second spindle: the INI declares SPINDLES = 2, so the SPD.2.* keys drive
+# spindle 1. They have no lamp of their own; the cap lights while pressed.
+net lathe-sp2-cw cnc_panel.spd2_cw => halui.spindle.1.forward
+net lathe-sp2-ccw cnc_panel.spd2_ccw => halui.spindle.1.reverse
+net lathe-sp2-stop cnc_panel.spd2_sp => halui.spindle.1.stop
+
+# FEED BRAKE holds the feed, the way the panel's brake key does.
+# halui.program.pause already carries CYCLE STOP in this file, and a HAL pin
+# takes exactly one signal, so the brake drives motion.feed-hold instead.
+net lathe-feed-brake cnc_panel.feed_brake => motion.feed-hold
 
 # Lamps driven by the controller.
 net lathe-ready halui.machine.is-on => cnc_panel.led_ready
@@ -43,6 +55,29 @@ net lathe-homed-x halui.joint.0.is-homed => cnc_panel.led_x
 net lathe-homed-z halui.joint.1.is-homed => cnc_panel.led_z
 net lathe-running halui.program.is-running => cnc_panel.led_cycle_on cnc_panel.led_run
 net lathe-paused halui.program.is-paused => cnc_panel.led_cycle_off
-net lathe-alarm halui.estop.is-activated => cnc_panel.led_mc_alarm
+net lathe-emg halui.estop.is-activated => cnc_panel.led_emg
 net lathe-spindle-fwd halui.spindle.0.runs-forward => cnc_panel.led_spd_cw
 net lathe-spindle-rev halui.spindle.0.runs-backward => cnc_panel.led_spd_ccw
+
+# Unwired on this machine, so greyed in the panel window:
+#
+#   cnc_panel.spd_jog      halui has no spindle-jog input. Its spindle.0.increase
+#                          / .decrease pins change the commanded speed by 100 rpm
+#                          per press, which is a different action, so SPD. JOG is
+#                          deliberately not linked to them.
+#   cnc_panel.jog_cn/.jog_cp  this INI has two joints (X and Z, trivkins xz), so
+#                          there is no C joint for halui.joint.N.plus/minus. A
+#                          lathe with a C joint wires them there.
+#   cnc_panel.c_s          C-axis / spindle select; the machine's PLC owns it and
+#                          halui has no equivalent.
+#   cnc_panel.tail, .chip, .tool_chg, .worklamp
+#                          machine I/O. The simulation HAL has no tailstock, chip
+#                          conveyor, turret or work-lamp component; the real
+#                          machine wires these to its own pins.
+#   cnc_panel.chuck        no chuck-clamp component in this simulation.
+#   cnc_panel.mst          machine sequence key; the machine's PLC owns it.
+#   cnc_panel.led_nc, .led_plc, .led_mmc
+#                          controller / PLC / MMC alarm lamps; halui exposes no
+#                          such status, and the E-stop island lights led_emg.
+#   cnc_panel.led_y, .led_a, .led_b, .led_c
+#                          the lathe has no Y/A/B/C joints to report as homed.

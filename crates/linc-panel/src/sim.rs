@@ -710,6 +710,27 @@ pub fn status_display_text(value: i32) -> String {
     }
 }
 
+/// Which physical panel the simulator window draws. The machine profile picks
+/// it: `machine.gui = "lathe"` or `panel.driver = "lathe-sim"` draws the lathe
+/// face, anything else the mill face. The pin surface, the window contract and
+/// every test above are shared; only the legends, lamps and captions differ.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PanelFace {
+    #[default]
+    Mill,
+    Lathe,
+}
+
+impl PanelFace {
+    pub fn for_profile(gui: &str, driver: &str) -> Self {
+        if gui.eq_ignore_ascii_case("lathe") || driver.eq_ignore_ascii_case("lathe-sim") {
+            Self::Lathe
+        } else {
+            Self::Mill
+        }
+    }
+}
+
 /// Open the simulator panel window.
 ///
 /// The window is exactly 1280x720 and may not shrink below it: that is the
@@ -721,6 +742,7 @@ pub fn simulator_window(
     scale: f32,
     probe_key: bool,
     hal_available: bool,
+    face: PanelFace,
     shutdown: Arc<AtomicBool>,
 ) -> eframe::Result<()> {
     // Connectivity is only meaningful while this process is inside a HAL.
@@ -743,7 +765,7 @@ pub fn simulator_window(
         options,
         Box::new(move |cc| {
             Ok(Box::new(SimPanelApp::new(
-                cc, handle, scale, probe_key, hal, shutdown,
+                cc, handle, scale, probe_key, hal, face, shutdown,
             )))
         }),
     )
@@ -773,6 +795,8 @@ struct SimPanelApp {
     disconnected: u64,
     hal_checked: Instant,
     last_frame: Instant,
+    /// Which panel this window draws, from the profile.
+    face: PanelFace,
     shutdown: Arc<AtomicBool>,
 }
 
@@ -783,6 +807,7 @@ impl SimPanelApp {
         scale: f32,
         probe_key: bool,
         hal: Option<linc_hal::HalReader>,
+        face: PanelFace,
         shutdown: Arc<AtomicBool>,
     ) -> Self {
         if (scale - 1.0).abs() > f32::EPSILON {
@@ -799,6 +824,7 @@ impl SimPanelApp {
             disconnected: 0,
             hal_checked: Instant::now(),
             last_frame: Instant::now(),
+            face,
             shutdown,
         }
     }
@@ -859,7 +885,7 @@ impl eframe::App for SimPanelApp {
         }
         self.last_frame = Instant::now();
         let state = self.handle.snapshot();
-        let layout = panel_layout(ui);
+        let layout = panel_layout(ui, self.face);
         paint_panel(
             ui,
             &layout,
@@ -951,7 +977,34 @@ const PROBE_KEY_AT: (f32, f32) = (1507.0, 850.0);
 /// `state.buttons` (every real button mask is a single bit).
 const PROBE_HOLD: u64 = u64::MAX;
 
-// Key matrix, matching the machine panel layout.
+/// One legend key of a face: cap legend, arrow glyph, button mask and the lamp
+/// bit the cap lights. None means this face has no lamp pin of its own for the
+/// key, so the cap only lights while it is held.
+type KeySpec = (&'static str, Option<&'static str>, u64, Option<u64>);
+
+/// The three key groups of one face, in painting order.
+struct KeyTables {
+    left: &'static [KeySpec],
+    middle: &'static [KeySpec],
+    right: &'static [KeySpec],
+}
+
+fn key_tables(face: PanelFace) -> KeyTables {
+    match face {
+        PanelFace::Mill => KeyTables {
+            left: &LEFT_KEYS,
+            middle: &MIDDLE_KEYS,
+            right: &RIGHT_KEYS,
+        },
+        PanelFace::Lathe => KeyTables {
+            left: &LATHE_LEFT_KEYS,
+            middle: &LATHE_MIDDLE_KEYS,
+            right: &LATHE_RIGHT_KEYS,
+        },
+    }
+}
+
+// Mill key matrix, matching the machine panel layout.
 // Same layout and arrow directions as svg/sim-panel.svg:
 //   B ▲   SAFE DOOR   B ▼
 //   A ▲   Z ▲   Y ▲
@@ -961,56 +1014,180 @@ const PROBE_HOLD: u64 = u64::MAX;
 // arrows never depend on font glyph coverage. Rows 2 and 4 previously
 // shared one JOG_YN, which left Y+ unreachable, and Z/A had their
 // directions swapped.
-const LEFT_KEYS: [(&str, Option<&str>, u64, u64); 12] = [
-    ("B", Some("^"), buttons::JOG_BP, crate::leds::JOG_BP),
-    ("SAFE DOOR", None, buttons::SAFE_DOOR, crate::leds::SAFE_DOOR),
-    ("B", Some("v"), buttons::JOG_BN, crate::leds::JOG_BN),
-    ("A", Some("^"), buttons::JOG_AP, crate::leds::JOG_AP),
-    ("Z", Some("^"), buttons::JOG_ZP, crate::leds::JOG_ZP),
-    ("Y", Some("^"), buttons::JOG_YP, crate::leds::JOG_YP),
-    ("X", Some("<"), buttons::JOG_XN, crate::leds::JOG_XN),
-    ("RAPID", None, buttons::RAPID, crate::leds::RAPID),
-    ("X", Some(">"), buttons::JOG_XP, crate::leds::JOG_XP),
-    ("Y", Some("v"), buttons::JOG_YN, crate::leds::JOG_YN),
-    ("Z", Some("v"), buttons::JOG_ZN, crate::leds::JOG_ZN),
-    ("A", Some("v"), buttons::JOG_AN, crate::leds::JOG_AN),
+const LEFT_KEYS: [KeySpec; 12] = [
+    ("B", Some("^"), buttons::JOG_BP, Some(crate::leds::JOG_BP)),
+    ("SAFE DOOR", None, buttons::SAFE_DOOR, Some(crate::leds::SAFE_DOOR)),
+    ("B", Some("v"), buttons::JOG_BN, Some(crate::leds::JOG_BN)),
+    ("A", Some("^"), buttons::JOG_AP, Some(crate::leds::JOG_AP)),
+    ("Z", Some("^"), buttons::JOG_ZP, Some(crate::leds::JOG_ZP)),
+    ("Y", Some("^"), buttons::JOG_YP, Some(crate::leds::JOG_YP)),
+    ("X", Some("<"), buttons::JOG_XN, Some(crate::leds::JOG_XN)),
+    ("RAPID", None, buttons::RAPID, Some(crate::leds::RAPID)),
+    ("X", Some(">"), buttons::JOG_XP, Some(crate::leds::JOG_XP)),
+    ("Y", Some("v"), buttons::JOG_YN, Some(crate::leds::JOG_YN)),
+    ("Z", Some("v"), buttons::JOG_ZN, Some(crate::leds::JOG_ZN)),
+    ("A", Some("v"), buttons::JOG_AN, Some(crate::leds::JOG_AN)),
 ];
 
-const MIDDLE_KEYS: [(&str, u64, Option<u64>); 15] = [
-    ("MPG SIM", buttons::MPG_SIM, Some(crate::leds::MPG_SIM)),
-    ("S.B.K.", buttons::SBK, Some(crate::leds::SBK)),
-    ("B.D.T.", buttons::BDT, Some(crate::leds::BDT)),
-    ("M.LK", buttons::MLK, Some(crate::leds::MLK)),
-    ("OPT", buttons::OPT, Some(crate::leds::OPT)),
-    ("D.R.N.", buttons::DRN, Some(crate::leds::DRN)),
-    ("WORKLAMP", buttons::WORKLAMP, Some(crate::leds::WORKLAMP)),
-    ("AIR BLOW", buttons::AIR_BLOW, Some(crate::leds::AIR_BLOW)),
-    ("PT.LA", buttons::PT_LA, Some(crate::leds::PT_LA)),
-    ("COOLANT", buttons::COOLANT, Some(crate::leds::COOLANT)),
-    ("SPD.CTS", buttons::SPD_CTS, Some(crate::leds::SPD_CTS)),
-    ("FLUSH", buttons::FLUSH, Some(crate::leds::FLUSH)),
-    ("LUB", buttons::LUB, Some(crate::leds::LUB)),
-    ("CORRIDOR", buttons::CORRIDOR, Some(crate::leds::CORRIDOR)),
-    ("K1", buttons::K1, Some(crate::leds::K1)),
+const MIDDLE_KEYS: [KeySpec; 15] = [
+    ("MPG SIM", None, buttons::MPG_SIM, Some(crate::leds::MPG_SIM)),
+    ("S.B.K.", None, buttons::SBK, Some(crate::leds::SBK)),
+    ("B.D.T.", None, buttons::BDT, Some(crate::leds::BDT)),
+    ("M.LK", None, buttons::MLK, Some(crate::leds::MLK)),
+    ("OPT", None, buttons::OPT, Some(crate::leds::OPT)),
+    ("D.R.N.", None, buttons::DRN, Some(crate::leds::DRN)),
+    ("WORKLAMP", None, buttons::WORKLAMP, Some(crate::leds::WORKLAMP)),
+    ("AIR BLOW", None, buttons::AIR_BLOW, Some(crate::leds::AIR_BLOW)),
+    ("PT.LA", None, buttons::PT_LA, Some(crate::leds::PT_LA)),
+    ("COOLANT", None, buttons::COOLANT, Some(crate::leds::COOLANT)),
+    ("SPD.CTS", None, buttons::SPD_CTS, Some(crate::leds::SPD_CTS)),
+    ("FLUSH", None, buttons::FLUSH, Some(crate::leds::FLUSH)),
+    ("LUB", None, buttons::LUB, Some(crate::leds::LUB)),
+    ("CORRIDOR", None, buttons::CORRIDOR, Some(crate::leds::CORRIDOR)),
+    ("K1", None, buttons::K1, Some(crate::leds::K1)),
 ];
 
-const RIGHT_KEYS: [(&str, u64, Option<u64>); 15] = [
-    ("SPD.ORT", buttons::SPD_ORI, Some(crate::leds::SPD_ORI)),
-    ("MAG CW", buttons::MAG_CW, Some(crate::leds::MAG_CW)),
-    ("MAG CCW", buttons::MAG_CCW, Some(crate::leds::MAG_CCW)),
-    ("SPD.CW", buttons::SPD_CW, Some(crate::leds::SPD_CW)),
-    ("SPD.SP", buttons::SPD_SP, Some(crate::leds::SPD_SP)),
-    ("SPD.CCW", buttons::SPD_CCW, Some(crate::leds::SPD_CCW)),
-    ("CHIP CW", buttons::CHIP_CW, Some(crate::leds::CHIP_CW)),
-    ("CHIP SP", buttons::CHIP_SP, Some(crate::leds::CHIP_SP)),
-    ("CHIP CCW", buttons::CHIP_CCW, Some(crate::leds::CHIP_CCW)),
-    ("CHUCK", buttons::CHUCK, Some(crate::leds::CHUCK)),
-    ("POT DN", buttons::POT_DN, Some(crate::leds::POT_DN)),
-    ("ARM MAN", buttons::ARM_MAN, Some(crate::leds::ARM_MAN)),
-    ("K2", buttons::K2, Some(crate::leds::K2)),
-    ("K3", buttons::K3, Some(crate::leds::K3)),
-    ("K4", buttons::K4, Some(crate::leds::K4)),
+const RIGHT_KEYS: [KeySpec; 15] = [
+    ("SPD.ORT", None, buttons::SPD_ORI, Some(crate::leds::SPD_ORI)),
+    ("MAG CW", None, buttons::MAG_CW, Some(crate::leds::MAG_CW)),
+    ("MAG CCW", None, buttons::MAG_CCW, Some(crate::leds::MAG_CCW)),
+    ("SPD.CW", None, buttons::SPD_CW, Some(crate::leds::SPD_CW)),
+    ("SPD.SP", None, buttons::SPD_SP, Some(crate::leds::SPD_SP)),
+    ("SPD.CCW", None, buttons::SPD_CCW, Some(crate::leds::SPD_CCW)),
+    ("CHIP CW", None, buttons::CHIP_CW, Some(crate::leds::CHIP_CW)),
+    ("CHIP SP", None, buttons::CHIP_SP, Some(crate::leds::CHIP_SP)),
+    ("CHIP CCW", None, buttons::CHIP_CCW, Some(crate::leds::CHIP_CCW)),
+    ("CHUCK", None, buttons::CHUCK, Some(crate::leds::CHUCK)),
+    ("POT DN", None, buttons::POT_DN, Some(crate::leds::POT_DN)),
+    ("ARM MAN", None, buttons::ARM_MAN, Some(crate::leds::ARM_MAN)),
+    ("K2", None, buttons::K2, Some(crate::leds::K2)),
+    ("K3", None, buttons::K3, Some(crate::leds::K3)),
+    ("K4", None, buttons::K4, Some(crate::leds::K4)),
 ];
+
+// Lathe key matrix, transcribed from the lathe panel photo. It keeps the mill
+// face's three groups and grid pitches, so one set of rects serves both faces;
+// only the legends, masks and row contents differ:
+//   C ◀    C/S   C ▶      MPG SIM   SAFE DOOR   CORRIDOR
+//   Y ▲    X ▲   A ▲      S.B.K     B.D.T       OPT
+//   Z ◀    RAPID   Z ▶    M.LK      MST         D.R.N
+//   A ▼    X ▼   Y ▼      B ◀       K1          K3
+//                          B ▶       K2          K4
+// The B-axis pair sits in the middle group's first column on the real panel,
+// and C/S has no mill counterpart: it is the lathe's C-axis / spindle select.
+const LATHE_LEFT_KEYS: [KeySpec; 12] = [
+    ("C", Some("<"), buttons::JOG_CN, None),
+    ("C/S", None, buttons::C_S, None),
+    ("C", Some(">"), buttons::JOG_CP, None),
+    ("Y", Some("^"), buttons::JOG_YP, Some(crate::leds::JOG_YP)),
+    ("X", Some("^"), buttons::JOG_XP, Some(crate::leds::JOG_XP)),
+    ("A", Some("^"), buttons::JOG_AP, Some(crate::leds::JOG_AP)),
+    ("Z", Some("<"), buttons::JOG_ZN, Some(crate::leds::JOG_ZN)),
+    ("RAPID", None, buttons::RAPID, Some(crate::leds::RAPID)),
+    ("Z", Some(">"), buttons::JOG_ZP, Some(crate::leds::JOG_ZP)),
+    ("A", Some("v"), buttons::JOG_AN, Some(crate::leds::JOG_AN)),
+    ("X", Some("v"), buttons::JOG_XN, Some(crate::leds::JOG_XN)),
+    ("Y", Some("v"), buttons::JOG_YN, Some(crate::leds::JOG_YN)),
+];
+
+const LATHE_MIDDLE_KEYS: [KeySpec; 15] = [
+    ("MPG SIM", None, buttons::MPG_SIM, Some(crate::leds::MPG_SIM)),
+    ("SAFE DOOR", None, buttons::SAFE_DOOR, Some(crate::leds::SAFE_DOOR)),
+    ("CORRIDOR", None, buttons::CORRIDOR, Some(crate::leds::CORRIDOR)),
+    ("S.B.K", None, buttons::SBK, Some(crate::leds::SBK)),
+    ("B.D.T", None, buttons::BDT, Some(crate::leds::BDT)),
+    ("OPT", None, buttons::OPT, Some(crate::leds::OPT)),
+    ("M.LK", None, buttons::MLK, Some(crate::leds::MLK)),
+    ("MST", None, buttons::MST, None),
+    ("D.R.N", None, buttons::DRN, Some(crate::leds::DRN)),
+    ("B", Some("<"), buttons::JOG_BP, Some(crate::leds::JOG_BP)),
+    ("K1", None, buttons::K1, Some(crate::leds::K1)),
+    ("K3", None, buttons::K3, Some(crate::leds::K3)),
+    ("B", Some(">"), buttons::JOG_BN, Some(crate::leds::JOG_BN)),
+    ("K2", None, buttons::K2, Some(crate::leds::K2)),
+    ("K4", None, buttons::K4, Some(crate::leds::K4)),
+];
+
+const LATHE_RIGHT_KEYS: [KeySpec; 15] = [
+    ("SPD.2.CW", None, buttons::SPD2_CW, None),
+    ("SPD.2.SP", None, buttons::SPD2_SP, None),
+    ("SPD.2.CCW", None, buttons::SPD2_CCW, None),
+    ("SPD.CW", None, buttons::SPD_CW, Some(crate::leds::SPD_CW)),
+    ("SPD.SP", None, buttons::SPD_SP, Some(crate::leds::SPD_SP)),
+    ("SPD.CCW", None, buttons::SPD_CCW, Some(crate::leds::SPD_CCW)),
+    ("SPD. JOG", None, buttons::SPD_JOG, None),
+    ("FEED BRAKE", None, buttons::FEED_BRAKE, None),
+    ("LUB", None, buttons::LUB, Some(crate::leds::LUB)),
+    ("CHUCK", None, buttons::CHUCK, Some(crate::leds::CHUCK)),
+    ("TAIL", None, buttons::TAIL, None),
+    ("CHIP", None, buttons::CHIP, None),
+    ("COOLANT", None, buttons::COOLANT, Some(crate::leds::COOLANT)),
+    ("TOOL CHG.", None, buttons::TOOL_CHG, None),
+    ("WORKLAMP", None, buttons::WORKLAMP, Some(crate::leds::WORKLAMP)),
+];
+
+/// One lamp of the machine-status array: lamp bit, caption and lens colour.
+type LampSpec = (u64, &'static str, Color32);
+
+struct LampTables {
+    axes: [LampSpec; 6],
+    alarms: [LampSpec; 6],
+    /// The alarm lamp that also mirrors a latched E-stop, so the panel shows the
+    /// fault even when no controller is driving the lamps.
+    estop_lamp: u64,
+}
+
+/// Both faces number the axis lamps X Y Z A B C, in the same six columns.
+const AXIS_LAMPS: [LampSpec; 6] = [
+    (crate::leds::X, "X", GREEN),
+    (crate::leds::Y, "Y", GREEN),
+    (crate::leds::Z, "Z", GREEN),
+    (crate::leds::A, "A", GREEN),
+    (crate::leds::B, "B", GREEN),
+    (crate::leds::C, "C", GREEN),
+];
+
+fn lamp_tables(face: PanelFace) -> LampTables {
+    let axes = AXIS_LAMPS;
+    match face {
+        PanelFace::Mill => LampTables {
+            axes,
+            alarms: [
+                (crate::leds::MC_ALARM, "MC", RED),
+                (crate::leds::OIL_ALARM, "OIL", RED),
+                (crate::leds::GEAR_ALARM, "GEAR", RED),
+                (crate::leds::AIRBLOW_ALARM, "AIR BLOW", RED),
+                (crate::leds::RUN, "RUN", AMBER),
+                (crate::leds::READY, "READY", GREEN),
+            ],
+            estop_lamp: crate::leds::MC_ALARM,
+        },
+        // The lathe's alarm column is NC / PLC / MMC / EMG, and the E-stop
+        // mushroom shows up on EMG.
+        PanelFace::Lathe => LampTables {
+            axes,
+            alarms: [
+                (crate::leds::NC, "NC", RED),
+                (crate::leds::PLC, "PLC", RED),
+                (crate::leds::MMC, "MMC", RED),
+                (crate::leds::EMG, "EMG", RED),
+                (crate::leds::RUN, "RUN", AMBER),
+                (crate::leds::READY, "READY", GREEN),
+            ],
+            estop_lamp: crate::leds::EMG,
+        },
+    }
+}
+
+/// Display captions, left to right: tool, tool compensation and status. Both
+/// faces drive the same three windows from sseg_tool, sseg_next_tool and
+/// sseg_status; only the captions differ.
+fn display_titles(face: PanelFace) -> [&'static str; 3] {
+    match face {
+        PanelFace::Mill => ["MAG TOOL", "SPD TOOL", "STATUS"],
+        PanelFace::Lathe => ["TOOL.", "TOOL COMP.", "STATUS."],
+    }
+}
 
 /// What is holding a momentary key down: the mouse pointer is a single
 /// source, every active touch id is its own source.
@@ -1119,8 +1296,8 @@ struct Interactives {
     cycle_stop: Rect,
 }
 
-fn left_key_rects(l: &PanelLayout) -> Vec<Rect> {
-    (0..LEFT_KEYS.len())
+fn left_key_rects(l: &PanelLayout, count: usize) -> Vec<Rect> {
+    (0..count)
         .map(|index| {
             let x = LEFT_X[index % 3];
             let y = KEY_TOP + (index / 3) as f32 * KEY_ROW_PITCH;
@@ -1148,19 +1325,23 @@ fn knob_hit_rect(l: &PanelLayout, knob: (f32, f32, f32)) -> Rect {
 }
 
 fn interactives(l: &PanelLayout, probe_key: bool) -> Interactives {
+    let tables = key_tables(l.face);
     let mut momentary: Vec<(u64, Rect)> = Vec::new();
-    for (rect, (_, _, mask, _)) in left_key_rects(l).iter().zip(LEFT_KEYS.iter()) {
-        momentary.push((*mask, *rect));
-    }
-    for (rect, (_, mask, _)) in key_grid_rects(l, MIDDLE_X, 3, MIDDLE_KEYS.len())
+    for (rect, (_, _, mask, _)) in left_key_rects(l, tables.left.len())
         .iter()
-        .zip(MIDDLE_KEYS.iter())
+        .zip(tables.left.iter())
     {
         momentary.push((*mask, *rect));
     }
-    for (rect, (_, mask, _)) in key_grid_rects(l, RIGHT_X, 3, RIGHT_KEYS.len())
+    for (rect, (_, _, mask, _)) in key_grid_rects(l, MIDDLE_X, 3, tables.middle.len())
         .iter()
-        .zip(RIGHT_KEYS.iter())
+        .zip(tables.middle.iter())
+    {
+        momentary.push((*mask, *rect));
+    }
+    for (rect, (_, _, mask, _)) in key_grid_rects(l, RIGHT_X, 3, tables.right.len())
+        .iter()
+        .zip(tables.right.iter())
     {
         momentary.push((*mask, *rect));
     }
@@ -1206,6 +1387,8 @@ fn interactives(l: &PanelLayout, probe_key: bool) -> Interactives {
 struct PanelLayout {
     origin: Pos2,
     k: f32,
+    /// Which face's tables the painters read.
+    face: PanelFace,
 }
 
 impl PanelLayout {
@@ -1220,7 +1403,7 @@ impl PanelLayout {
     }
 }
 
-fn layout_for_rect(avail: Rect) -> PanelLayout {
+fn layout_for_rect(avail: Rect, face: PanelFace) -> PanelLayout {
     let k = (avail.width() / CANVAS_W)
         .min(avail.height() / CANVAS_H)
         .max(0.2);
@@ -1228,11 +1411,12 @@ fn layout_for_rect(avail: Rect) -> PanelLayout {
     PanelLayout {
         origin: avail.center() - size / 2.0,
         k,
+        face,
     }
 }
 
-fn panel_layout(ui: &egui::Ui) -> PanelLayout {
-    layout_for_rect(ui.available_rect_before_wrap())
+fn panel_layout(ui: &egui::Ui, face: PanelFace) -> PanelLayout {
+    layout_for_rect(ui.available_rect_before_wrap(), face)
 }
 
 fn label(
@@ -2407,17 +2591,10 @@ fn paint_panel(
         MUTED,
         Align2::LEFT_CENTER,
     );
-    let axes: [(u64, &str); 6] = [
-        (crate::leds::X, "X"),
-        (crate::leds::Y, "Y"),
-        (crate::leds::Z, "Z"),
-        (crate::leds::A, "A"),
-        (crate::leds::B, "B"),
-        (crate::leds::C, "C"),
-    ];
-    for (index, (bit, name)) in axes.iter().enumerate() {
+    let lamps = lamp_tables(l.face);
+    for (index, (bit, name, color)) in lamps.axes.iter().enumerate() {
         let x = 415.0 + index as f32 * 38.0;
-        lamp(painter, l, x, 321.0, 14.0, state.leds & bit != 0, GREEN);
+        lamp(painter, l, x, 321.0, 14.0, state.leds & bit != 0, *color);
         label(
             painter,
             l,
@@ -2439,19 +2616,11 @@ fn paint_panel(
         MUTED,
         Align2::LEFT_CENTER,
     );
-    let alarms: [(u64, &str, Color32); 6] = [
-        (crate::leds::MC_ALARM, "MC", RED),
-        (crate::leds::OIL_ALARM, "OIL", RED),
-        (crate::leds::GEAR_ALARM, "GEAR", RED),
-        (crate::leds::AIRBLOW_ALARM, "AIR BLOW", RED),
-        (crate::leds::RUN, "RUN", AMBER),
-        (crate::leds::READY, "READY", GREEN),
-    ];
-    for (index, (bit, name, color)) in alarms.iter().enumerate() {
+    for (index, (bit, name, color)) in lamps.alarms.iter().enumerate() {
         let x = 415.0 + index as f32 * 38.0;
-        // The MC alarm lamp also mirrors a latched E-stop, so the panel shows
-        // the fault even when no controller is driving the lamps.
-        let lit = state.leds & bit != 0 || (*bit == crate::leds::MC_ALARM && state.estop);
+        // The face's E-stop-backed alarm lamp also mirrors a latched mushroom,
+        // so the panel shows the fault even when no controller drives the lamps.
+        let lit = state.leds & bit != 0 || (*bit == lamps.estop_lamp && state.estop);
         lamp(painter, l, x, 424.0, 14.0, lit, *color);
         label(painter, l, x, 451.0, 7.5, name, TEXT, Align2::CENTER_CENTER);
     }
@@ -2459,6 +2628,7 @@ fn paint_panel(
     // The MAG TOOL bezel's left edge lines up with the FEEDRATE dial's
     // leftmost point (numerals at r + 27, x = 800 - 80 = 720); the other two
     // displays keep even gaps to it and to the plate's right margin.
+    let titles = display_titles(l.face);
     draw_display(
         painter,
         l,
@@ -2466,7 +2636,7 @@ fn paint_panel(
         336.0,
         250.0,
         105.0,
-        "MAG TOOL",
+        titles[0],
         state.sseg_tool,
         false,
     );
@@ -2477,7 +2647,7 @@ fn paint_panel(
         336.0,
         250.0,
         105.0,
-        "SPD TOOL",
+        titles[1],
         state.sseg_next_tool,
         false,
     );
@@ -2488,13 +2658,18 @@ fn paint_panel(
         336.0,
         250.0,
         105.0,
-        "STATUS",
+        titles[2],
         state.sseg_status,
         true,
     );
 
     // The left group is 3 columns; cycle keys occupy the bottom row.
-    for ((name, sub, mask, led), rect) in LEFT_KEYS.iter().zip(left_key_rects(l).iter()) {
+    let tables = key_tables(l.face);
+    for ((name, sub, mask, led), rect) in tables
+        .left
+        .iter()
+        .zip(left_key_rects(l, tables.left.len()).iter())
+    {
         let fill = if *mask == buttons::RAPID {
             Color32::from_rgb(0x8a, 0x75, 0x18)
         } else {
@@ -2510,7 +2685,7 @@ fn paint_panel(
             name,
             *sub,
             fill,
-            state.leds & led != 0,
+            led.is_some_and(|bit| state.leds & bit != 0),
             down,
             *mask,
             !key_disabled(disconnected, *mask),
@@ -2598,8 +2773,8 @@ fn paint_panel(
         ui,
         l,
         state,
-        &MIDDLE_KEYS,
-        &key_grid_rects(l, MIDDLE_X, 3, MIDDLE_KEYS.len()),
+        tables.middle,
+        &key_grid_rects(l, MIDDLE_X, 3, tables.middle.len()),
         holds,
         handle,
         disconnected,
@@ -2608,8 +2783,8 @@ fn paint_panel(
         ui,
         l,
         state,
-        &RIGHT_KEYS,
-        &key_grid_rects(l, RIGHT_X, 3, RIGHT_KEYS.len()),
+        tables.right,
+        &key_grid_rects(l, RIGHT_X, 3, tables.right.len()),
         holds,
         handle,
         disconnected,
@@ -2713,26 +2888,27 @@ fn paint_key_grid(
     ui: &egui::Ui,
     l: &PanelLayout,
     state: &SimPanelState,
-    keys: &[(&str, u64, Option<u64>)],
+    keys: &[KeySpec],
     rects: &[Rect],
     holds: &HoldTracker,
     handle: &mut SimPanelHandle,
     disconnected: u64,
 ) {
-    for ((name, mask, led), rect) in keys.iter().zip(rects.iter()) {
-        let fill = if *mask == buttons::SPD_SP {
+    for ((name, sub, mask, led), rect) in keys.iter().zip(rects.iter()) {
+        // Red keys: the spindle-stop caps on both faces.
+        let fill = if *mask == buttons::SPD_SP || *mask == buttons::SPD2_SP {
             Color32::from_rgb(0x8d, 0x1c, 0x18)
         } else {
             KEY_BG
         };
         let down = holds.is_held(*mask);
-        let led_on = led.map(|bit| state.leds & bit != 0).unwrap_or(down);
+        let led_on = led.map_or(down, |bit| state.leds & bit != 0);
         panel_key(
             ui,
             l,
             *rect,
             name,
-            None,
+            *sub,
             fill,
             led_on,
             down,
@@ -2758,19 +2934,79 @@ mod tests {
         assert!(!key_disabled(0, buttons::K4));
     }
 
+    /// Every key mask one face draws, in painting order.
+    fn drawn_masks(face: PanelFace) -> Vec<u64> {
+        let tables = key_tables(face);
+        tables
+            .left
+            .iter()
+            .chain(tables.middle.iter())
+            .chain(tables.right.iter())
+            .map(|(_, _, mask, _)| *mask)
+            .collect()
+    }
+
     #[test]
     fn every_drawn_key_has_a_cnc_panel_pin() {
-        let masks = LEFT_KEYS
-            .iter()
-            .map(|(_, _, mask, _)| *mask)
-            .chain(MIDDLE_KEYS.iter().map(|(_, mask, _)| *mask))
-            .chain(RIGHT_KEYS.iter().map(|(_, mask, _)| *mask));
-        for mask in masks {
+        for face in [PanelFace::Mill, PanelFace::Lathe] {
+            for mask in drawn_masks(face) {
+                assert!(
+                    crate::BUTTON_PINS.iter().any(|(_, bit)| *bit == mask),
+                    "{face:?} key mask {mask:#x} has no cnc_panel pin and can never be greyed"
+                );
+            }
+        }
+    }
+
+    /// The lathe face's own requirement: every key it paints is a pin, so
+    /// connectivity greying has something to grey and the HAL can wire it.
+    #[test]
+    fn every_lathe_key_has_a_cnc_panel_pin() {
+        let masks = drawn_masks(PanelFace::Lathe);
+        assert_eq!(masks.len(), 42, "12 jog + 15 middle + 15 right");
+        for mask in &masks {
             assert!(
-                crate::BUTTON_PINS.iter().any(|(_, bit)| *bit == mask),
-                "drawn key mask {mask:#x} has no cnc_panel pin and can never be greyed"
+                crate::BUTTON_PINS.iter().any(|(_, bit)| bit == mask),
+                "lathe key mask {mask:#x} has no cnc_panel pin"
             );
         }
+        for (name, mask) in [
+            ("spd2_cw", buttons::SPD2_CW),
+            ("spd2_sp", buttons::SPD2_SP),
+            ("spd2_ccw", buttons::SPD2_CCW),
+            ("spd_jog", buttons::SPD_JOG),
+            ("feed_brake", buttons::FEED_BRAKE),
+            ("tail", buttons::TAIL),
+            ("chip", buttons::CHIP),
+            ("tool_chg", buttons::TOOL_CHG),
+            ("mst", buttons::MST),
+        ] {
+            assert_eq!(
+                crate::BUTTON_PINS
+                    .iter()
+                    .find(|(pin, _)| *pin == name)
+                    .map(|(_, bit)| *bit),
+                Some(mask),
+                "lathe key {name} is missing its cnc_panel pin"
+            );
+            assert!(masks.contains(&mask), "the lathe face never draws {name}");
+        }
+    }
+
+    #[test]
+    fn the_profile_selects_the_panel_face() {
+        assert_eq!(
+            PanelFace::for_profile("mill", "cnc-panel-sim"),
+            PanelFace::Mill
+        );
+        assert_eq!(
+            PanelFace::for_profile("lathe", "lathe-sim"),
+            PanelFace::Lathe
+        );
+        // Either key alone selects the lathe face.
+        assert_eq!(PanelFace::for_profile("lathe", ""), PanelFace::Lathe);
+        assert_eq!(PanelFace::for_profile("", "lathe-sim"), PanelFace::Lathe);
+        assert_eq!(PanelFace::for_profile("", ""), PanelFace::Mill);
     }
 
     #[test]
@@ -3002,11 +3238,16 @@ mod tests {
         holds: HoldTracker,
         power_pulse: Option<(bool, Instant)>,
         probe_key: bool,
+        face: PanelFace,
         time: f64,
     }
 
     impl PanelFixture {
         fn new(probe_key: bool) -> Self {
+            Self::with_face(PanelFace::Mill, probe_key)
+        }
+
+        fn with_face(face: PanelFace, probe_key: bool) -> Self {
             Self {
                 ctx: egui::Context::default(),
                 handle: SimPanelHandle::new(),
@@ -3014,6 +3255,7 @@ mod tests {
                 holds: HoldTracker::default(),
                 power_pulse: None,
                 probe_key,
+                face,
                 time: 0.0,
             }
         }
@@ -3028,12 +3270,13 @@ mod tests {
                 ..Default::default()
             };
             let probe_key = self.probe_key;
+            let face = self.face;
             let mut output = self.ctx.run_ui(input, |ui| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ui, |ui| {
                         let state = self.handle.snapshot();
-                        let layout = panel_layout(ui);
+                        let layout = panel_layout(ui, face);
                         paint_panel(
                             ui,
                             &layout,
@@ -3052,7 +3295,10 @@ mod tests {
         }
 
         fn layout(&self) -> PanelLayout {
-            layout_for_rect(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 720.0)))
+            layout_for_rect(
+                Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 720.0)),
+                self.face,
+            )
         }
 
         fn momentary_rect(&self, mask: u64, probe_key: bool) -> Rect {
@@ -3266,11 +3512,12 @@ mod tests {
         assert_eq!(fix.handle.snapshot().buttons & buttons::JOG_XP, 0);
     }
 
-    #[test]
-    fn every_interactive_target_is_at_least_44px_at_1280x720() {
-        let fix = PanelFixture::new(true);
-        let it = interactives(&fix.layout(), true);
-        let all: Vec<(&str, Rect)> = vec![
+    /// Check one face's interactive targets at the 1280x720 acceptance size.
+    /// Returns the smallest target (name, width, height) and the target count.
+    fn check_target_sizes(face: PanelFace, probe_key: bool) -> (String, f32, f32, usize) {
+        let fix = PanelFixture::with_face(face, probe_key);
+        let it = interactives(&fix.layout(), probe_key);
+        let fixed: Vec<(&str, Rect)> = vec![
             ("power on", it.power_on),
             ("power off", it.power_off),
             ("e-stop", it.estop),
@@ -3282,7 +3529,7 @@ mod tests {
             ("cycle start", it.cycle_start),
             ("cycle stop", it.cycle_stop),
         ];
-        let mut all: Vec<(String, Rect)> = all
+        let mut all: Vec<(String, Rect)> = fixed
             .into_iter()
             .map(|(name, rect)| (name.to_string(), rect))
             .collect();
@@ -3300,15 +3547,190 @@ mod tests {
             }
             assert!(
                 rect.width() >= 44.0 && rect.height() >= 44.0,
-                "{name} is only {:.1}x{:.1} px at 1280x720",
+                "{face:?}: {name} is only {:.1}x{:.1} px at 1280x720",
                 rect.width(),
                 rect.height()
             );
         }
+        (smallest, min_w, min_h, all.len())
+    }
+
+    #[test]
+    fn every_interactive_target_is_at_least_44px_at_1280x720() {
+        let (smallest, min_w, min_h, count) = check_target_sizes(PanelFace::Mill, true);
         eprintln!(
-            "smallest interactive target at 1280x720: {smallest} at {min_w:.1}x{min_h:.1} px ({} targets)",
-            all.len()
+            "smallest interactive target at 1280x720: {smallest} at {min_w:.1}x{min_h:.1} px ({count} targets)"
         );
+    }
+
+    /// The lathe face draws the same window contract: every target it adds is
+    /// at least 44 px at 1280x720.
+    #[test]
+    fn every_lathe_interactive_target_is_at_least_44px_at_1280x720() {
+        let (smallest, min_w, min_h, count) = check_target_sizes(PanelFace::Lathe, true);
+        eprintln!(
+            "smallest lathe interactive target at 1280x720: {smallest} at {min_w:.1}x{min_h:.1} px ({count} targets)"
+        );
+        // 10 fixed targets (power, e-stop, keyboard, 4 dials, 2 cycle keys),
+        // 42 legend keys and the simulation-only probe key.
+        assert_eq!(count, 10 + 42 + 1);
+    }
+
+    /// Every legend the lathe photo prints, gathered from the same tables the
+    /// painter reads.
+    #[test]
+    fn the_lathe_face_carries_the_photo_legends() {
+        let tables = key_tables(PanelFace::Lathe);
+        let mut legends: Vec<&str> = tables
+            .left
+            .iter()
+            .chain(tables.middle.iter())
+            .chain(tables.right.iter())
+            .map(|(name, _, _, _)| *name)
+            .collect();
+        let lamps = lamp_tables(PanelFace::Lathe);
+        legends.extend(lamps.axes.iter().map(|(_, name, _)| *name));
+        legends.extend(lamps.alarms.iter().map(|(_, name, _)| *name));
+        legends.extend(display_titles(PanelFace::Lathe));
+
+        for legend in [
+            // Left jog group.
+            "RAPID", "C/S", "C", "X", "Y", "Z", "A", "B",
+            // Middle group.
+            "MPG SIM", "SAFE DOOR", "CORRIDOR", "S.B.K", "B.D.T", "OPT", "M.LK", "MST", "D.R.N", "K1",
+            "K3", "K2", "K4",
+            // Right group.
+            "SPD.2.CW", "SPD.2.SP", "SPD.2.CCW", "SPD.CW", "SPD.SP", "SPD.CCW", "SPD. JOG",
+            "FEED BRAKE", "LUB", "CHUCK", "TAIL", "CHIP", "COOLANT", "TOOL CHG.", "WORKLAMP",
+            // Lamp arrays and the three 7-segment windows.
+            "NC", "PLC", "MMC", "EMG", "RUN", "READY", "TOOL.", "TOOL COMP.", "STATUS.",
+        ] {
+            assert!(
+                legends.contains(&legend),
+                "the lathe face never paints the photo legend {legend:?}"
+            );
+        }
+    }
+
+    /// The lathe-only legends must not appear on the mill face: that is what
+    /// makes the two panels different.
+    #[test]
+    fn the_lathe_only_legends_are_absent_from_the_mill_face() {
+        let tables = key_tables(PanelFace::Mill);
+        let mill: Vec<&str> = tables
+            .left
+            .iter()
+            .chain(tables.middle.iter())
+            .chain(tables.right.iter())
+            .map(|(name, _, _, _)| *name)
+            .collect();
+        for legend in [
+            "SPD.2.CW", "SPD.2.SP", "SPD.2.CCW", "SPD. JOG", "FEED BRAKE", "TAIL", "CHIP",
+            "TOOL CHG.", "MST", "C/S",
+        ] {
+            assert!(
+                !mill.contains(&legend),
+                "the mill face must not paint the lathe legend {legend:?}"
+            );
+        }
+    }
+
+    /// Mill legends, masks and captions exactly as they shipped: the lathe face
+    /// may not perturb the mill panel.
+    #[test]
+    fn the_mill_face_is_unchanged() {
+        let tables = key_tables(PanelFace::Mill);
+        let names: Vec<&str> = tables
+            .left
+            .iter()
+            .chain(tables.middle.iter())
+            .chain(tables.right.iter())
+            .map(|(name, _, _, _)| *name)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "B", "SAFE DOOR", "B", "A", "Z", "Y", "X", "RAPID", "X", "Y", "Z", "A", "MPG SIM",
+                "S.B.K.", "B.D.T.", "M.LK", "OPT", "D.R.N.", "WORKLAMP", "AIR BLOW", "PT.LA",
+                "COOLANT", "SPD.CTS", "FLUSH", "LUB", "CORRIDOR", "K1", "SPD.ORT", "MAG CW",
+                "MAG CCW", "SPD.CW", "SPD.SP", "SPD.CCW", "CHIP CW", "CHIP SP", "CHIP CCW",
+                "CHUCK", "POT DN", "ARM MAN", "K2", "K3", "K4",
+            ]
+        );
+        assert_eq!(
+            drawn_masks(PanelFace::Mill),
+            [
+                buttons::JOG_BP,
+                buttons::SAFE_DOOR,
+                buttons::JOG_BN,
+                buttons::JOG_AP,
+                buttons::JOG_ZP,
+                buttons::JOG_YP,
+                buttons::JOG_XN,
+                buttons::RAPID,
+                buttons::JOG_XP,
+                buttons::JOG_YN,
+                buttons::JOG_ZN,
+                buttons::JOG_AN,
+                buttons::MPG_SIM,
+                buttons::SBK,
+                buttons::BDT,
+                buttons::MLK,
+                buttons::OPT,
+                buttons::DRN,
+                buttons::WORKLAMP,
+                buttons::AIR_BLOW,
+                buttons::PT_LA,
+                buttons::COOLANT,
+                buttons::SPD_CTS,
+                buttons::FLUSH,
+                buttons::LUB,
+                buttons::CORRIDOR,
+                buttons::K1,
+                buttons::SPD_ORI,
+                buttons::MAG_CW,
+                buttons::MAG_CCW,
+                buttons::SPD_CW,
+                buttons::SPD_SP,
+                buttons::SPD_CCW,
+                buttons::CHIP_CW,
+                buttons::CHIP_SP,
+                buttons::CHIP_CCW,
+                buttons::CHUCK,
+                buttons::POT_DN,
+                buttons::ARM_MAN,
+                buttons::K2,
+                buttons::K3,
+                buttons::K4,
+            ]
+        );
+        assert_eq!(
+            display_titles(PanelFace::Mill),
+            ["MAG TOOL", "SPD TOOL", "STATUS"]
+        );
+        let mill_lamps = lamp_tables(PanelFace::Mill);
+        let alarms: Vec<&str> = mill_lamps.alarms.iter().map(|(_, name, _)| *name).collect();
+        assert_eq!(alarms, ["MC", "OIL", "GEAR", "AIR BLOW", "RUN", "READY"]);
+        assert_eq!(mill_lamps.estop_lamp, crate::leds::MC_ALARM);
+        let axes: Vec<&str> = mill_lamps.axes.iter().map(|(_, name, _)| *name).collect();
+        assert_eq!(axes, ["X", "Y", "Z", "A", "B", "C"]);
+    }
+
+    /// The lathe tables drive the hold tracker, not just the painter: a touch
+    /// on a lathe-only key asserts its own pin.
+    #[test]
+    fn lathe_touch_press_asserts_a_lathe_only_key() {
+        let mut fix = PanelFixture::with_face(PanelFace::Lathe, false);
+        let mut touch = TouchEmu::new();
+        let tail = fix.momentary_rect(buttons::TAIL, false);
+        fix.frame(vec![]);
+        fix.frame(touch.begin(1, tail.center()));
+        assert!(
+            fix.handle.snapshot().buttons & buttons::TAIL != 0,
+            "touching TAIL asserts cnc_panel.tail"
+        );
+        fix.frame(touch.end(1, tail.center()));
+        assert_eq!(fix.handle.snapshot().buttons & buttons::TAIL, 0);
     }
 
     #[test]

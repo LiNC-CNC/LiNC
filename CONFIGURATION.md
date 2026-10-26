@@ -645,7 +645,10 @@ For this design repository:
   `scripts/start-sim.sh`;
 - the lathe profile declares turret/live-tool capabilities and boots the simulator panel window through
   `configs/lathe-sim.ini` (panel wiring in `hal/linc-lathe.hal`, post-GUI wiring in `hal/linc-lathe-postgui.hal`);
-  keys without a lathe function stay unwired and greyed until the lathe panel is built;
+  `machine.gui = "lathe"` / `[panel] driver = "lathe-sim"` selects the lathe panel face — its own key matrix,
+  NC/PLC/MMC/EMG alarm lamps and TOOL / TOOL COMP. / STATUS windows. Both spindles, the feed brake and the lathe
+  lamps are wired; tailstock, chip conveyor, turret (TOOL CHG.), worklamp, chuck, MST, C/S, the C-axis jog keys and
+  SPD. JOG have no equivalent on this machine and stay unwired and greyed;
 - the real profile contains no simulated panel or `rio_sim.py` path;
 - the simulation profile contains no serial device path;
 - all safety flags match the policy above;

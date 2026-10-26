@@ -268,6 +268,12 @@ fn run_simulated(
             .clone()
             .unwrap_or_else(|| "CNC Control Panel Simulator".into());
         let panel_scale = profile.config.simulation.panel_scale.unwrap_or(1.0) as f32;
+        // The profile chooses the face: gui = "lathe" / panel.driver =
+        // "lathe-sim" draws the lathe panel, everything else the mill panel.
+        let face = linc_panel::sim::PanelFace::for_profile(
+            &profile.config.machine.gui,
+            &profile.config.panel.driver,
+        );
         let loop_handle = handle.clone();
         let loop_shutdown = shutdown.clone();
         let loop_ipc = ipc.clone();
@@ -292,6 +298,7 @@ fn run_simulated(
             panel_scale,
             probe_key,
             !no_hal,
+            face,
             shutdown.clone(),
         );
         shutdown.store(true, Ordering::Relaxed);

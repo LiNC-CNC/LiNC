@@ -15,7 +15,7 @@ use linc_core::model::{
 
 pub use hal::CncPanelHal;
 pub use serial::CncPanelDriver;
-pub use sim::{SimPanelDriver, SimPanelState};
+pub use sim::{PanelFace, SimPanelDriver, SimPanelState};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PanelError {
@@ -29,8 +29,9 @@ pub enum PanelError {
     Io(#[from] std::io::Error),
 }
 
-/// Bit masks for the 46 CNC control panel buttons. Values follow the existing
-/// panel protocol and are active-low on the wire.
+/// Bit masks for the 58 CNC control panel buttons. Values follow the existing
+/// panel protocol and are active-low on the wire. The first 46 are the mill
+/// panel's; the rest are the lathe-only keys of the lathe face.
 pub mod buttons {
     pub const PROGRAM_PROTECT: u64 = 1 << 0;
     pub const ESTOP: u64 = 1 << 7;
@@ -78,9 +79,26 @@ pub mod buttons {
     pub const LUB: u64 = 1 << 31;
     pub const SPD_CCW: u64 = 1 << 24;
     pub const K3: u64 = 1 << 16;
+    // Lathe-only keys. The lathe panel carries a second spindle (SPD.2.*), a
+    // spindle jog and a feed brake, a tailstock, one chip conveyor, one
+    // tool-change key and MST, none of which the mill panel has. The C-axis jog
+    // pair and C/S come from the same panel's jog group; the mill table has no
+    // C axis at all, so they need masks of their own.
+    pub const JOG_CN: u64 = 1 << 11;
+    pub const JOG_CP: u64 = 1 << 12;
+    pub const C_S: u64 = 1 << 18;
+    pub const SPD2_CW: u64 = 1 << 1;
+    pub const SPD2_SP: u64 = 1 << 2;
+    pub const SPD2_CCW: u64 = 1 << 3;
+    pub const SPD_JOG: u64 = 1 << 4;
+    pub const FEED_BRAKE: u64 = 1 << 5;
+    pub const TAIL: u64 = 1 << 6;
+    pub const CHIP: u64 = 1 << 8;
+    pub const TOOL_CHG: u64 = 1 << 9;
+    pub const MST: u64 = 1 << 10;
 }
 
-pub const BUTTON_PINS: [(&str, u64); 46] = [
+pub const BUTTON_PINS: [(&str, u64); 58] = [
     ("program_protect", buttons::PROGRAM_PROTECT),
     ("estop", buttons::ESTOP),
     ("cycle_start", buttons::CYCLE_START),
@@ -127,6 +145,19 @@ pub const BUTTON_PINS: [(&str, u64); 46] = [
     ("lube", buttons::LUB),
     ("spd_ccw", buttons::SPD_CCW),
     ("k3", buttons::K3),
+    // Lathe-only keys, appended so the mill pin order stays stable.
+    ("spd2_cw", buttons::SPD2_CW),
+    ("spd2_sp", buttons::SPD2_SP),
+    ("spd2_ccw", buttons::SPD2_CCW),
+    ("spd_jog", buttons::SPD_JOG),
+    ("feed_brake", buttons::FEED_BRAKE),
+    ("tail", buttons::TAIL),
+    ("chip", buttons::CHIP),
+    ("tool_chg", buttons::TOOL_CHG),
+    ("mst", buttons::MST),
+    ("jog_cn", buttons::JOG_CN),
+    ("jog_cp", buttons::JOG_CP),
+    ("c_s", buttons::C_S),
 ];
 
 pub mod leds {
@@ -186,9 +217,15 @@ pub mod leds {
     pub const SPD_CCW: u64 = 1 << 60;
     pub const K3: u64 = 1 << 61;
     pub const MC_ALARM: u64 = 1 << 62;
+    // Lathe alarm lamps: NC / PLC / MMC / EMG replace the mill's MC / OIL /
+    // GEAR / AIR BLOW column. Free bits, so the mill lamps keep their masks.
+    pub const NC: u64 = 1 << 7;
+    pub const PLC: u64 = 1 << 15;
+    pub const MMC: u64 = 1 << 23;
+    pub const EMG: u64 = 1 << 31;
 }
 
-pub const LED_PINS: [(&str, u64); 56] = [
+pub const LED_PINS: [(&str, u64); 60] = [
     ("led_rapid", leds::RAPID),
     ("led_mlk", leds::MLK),
     ("led_flush", leds::FLUSH),
@@ -245,6 +282,11 @@ pub const LED_PINS: [(&str, u64); 56] = [
     ("led_spd_ccw", leds::SPD_CCW),
     ("led_k3", leds::K3),
     ("led_mc_alarm", leds::MC_ALARM),
+    // Lathe lamps, appended so the mill pin order stays stable.
+    ("led_nc", leds::NC),
+    ("led_plc", leds::PLC),
+    ("led_mmc", leds::MMC),
+    ("led_emg", leds::EMG),
 ];
 
 pub const MODE_PINS: [(&str, PanelMode); 8] = [
@@ -387,7 +429,7 @@ pub fn dec_to_bcd_hex(value: i32) -> u8 {
     (((value / 10) as u8) << 4) | ((value % 10) as u8)
 }
 
-/// Encode 56 LEDs plus two tool displays into the 10-byte panel frame.
+/// Encode the LED bitmap plus two tool displays into the 10-byte panel frame.
 pub fn led_state_to_bytes(leds: u64) -> [u8; 10] {
     let mut led_state: u128 = u64::MAX as u128;
     led_state &= !(leds as u128);
@@ -557,8 +599,8 @@ mod tests {
 
     #[test]
     fn panel_pin_manifest_matches_hal() {
-        assert_eq!(BUTTON_PINS.len(), 46);
-        assert_eq!(LED_PINS.len(), 56);
+        assert_eq!(BUTTON_PINS.len(), 58);
+        assert_eq!(LED_PINS.len(), 60);
         assert_eq!(MODE_PINS.len(), 8);
         assert_eq!(HOME_PINS.len(), 4);
         assert_eq!(PROGHOME_PINS.len(), 4);

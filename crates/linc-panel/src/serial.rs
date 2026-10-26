@@ -373,7 +373,7 @@ mod tests {
         let snapshot = driver.poll().unwrap();
         assert!(!snapshot.connected);
         assert_eq!(snapshot.mode, PanelModeValidity::Unknown);
-        assert_eq!(driver.capabilities().buttons, 46);
+        assert_eq!(driver.capabilities().buttons, crate::BUTTON_PINS.len());
     }
 
     #[test]

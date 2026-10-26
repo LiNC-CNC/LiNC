@@ -134,8 +134,11 @@ LinuxCNC HAL component named `cnc_panel`.
 
 The integrated panel service exposes:
 
-- 46 button pins
-- 56 LED pins
+- 58 button pins: the mill panel's 46 plus the 12 lathe-only keys
+  (`spd2_cw`, `spd2_sp`, `spd2_ccw`, `spd_jog`, `feed_brake`, `tail`, `chip`,
+  `tool_chg`, `mst`, `jog_cn`, `jog_cp`, `c_s`)
+- 60 LED pins: the mill panel's 56 plus the lathe alarm column (`led_nc`,
+  `led_plc`, `led_mmc`, `led_emg`)
 - 2 seven-segment tool displays
 - 1 two-digit status seven-segment display (`sseg_status`)
 - 8 mode pins: `mode_edit`, `mode_auto`, `mode_mdi`, `mode_jog`, `mode_mpg`,
@@ -144,6 +147,12 @@ The integrated panel service exposes:
 - feed, rapid, and spindle override floats
 - `panel_connected` and `communication_error`
 - velocity inputs for jog LEDs
+
+The pin surface is one surface for both panel faces: the lathe-only pins exist
+on a mill too and simply carry no signal. The simulator window draws the face
+the profile asks for — `machine.gui = "lathe"` or `[panel] driver =
+"lathe-sim"` selects the lathe face, whose key legends, NC/PLC/MMC/EMG alarm
+lamps and TOOL / TOOL COMP. / STATUS windows differ from the mill's.
 
 Panel ownership rules:
 
@@ -330,11 +339,17 @@ present in the real-machine build.
 - The HMI reads HAL/status and may issue its explicit MDI/probe/tool commands;
   simulated machine commands otherwise originate in the panel window or
   keyboard. It never fabricates panel feedback.
-- It may live on a second monitor. The calibration/mockup is
+- It may live on a second monitor. The mill face's calibration/mockup is
   `svg/sim-panel.svg`.
-- A lathe-specific panel mockup still needs turret and live-tool controls;
-  until then, the lathe simulation profile uses the mill simulator panel
-  window with only the lathe-relevant controls wired, and the rest greyed.
+- The profile selects the face. `machine.gui = "lathe"` (or `[panel] driver =
+  "lathe-sim"`) draws the lathe panel transcribed from the lathe photo:
+  C/C-S/X/Y/Z/A/B jog keys with RAPID, MPG SIM/SAFE DOOR/CORRIDOR,
+  S.B.K/B.D.T/OPT, M.LK/MST/D.R.N, K1–K4, SPD.2.CW/SP/CCW (second spindle),
+  SPD.CW/SP/CCW, SPD. JOG, FEED BRAKE, LUB, CHUCK, TAIL, CHIP, COOLANT,
+  TOOL CHG. and WORKLAMP, with NC/PLC/MMC/EMG/RUN/READY alarm lamps and
+  TOOL / TOOL COMP. / STATUS windows. The mill face is unchanged. Turret and
+  live-tool drive stay unwired, so those keys grey out until
+  `hal/linc-lathe.hal` wires them.
 
 ### 4.5 HAL wiring
 
@@ -1549,8 +1564,9 @@ For the future implementation:
     driven stations, axial/radial orientation and turret indexing interlocks.
 21. Verify the mill 3/4/5-axis card layout against the actual INI axis mask and
     validate optional-axis hiding at runtime.
-22. Add a lathe-specific simulator panel mockup with turret/live-tool controls;
-    `svg/sim-panel.svg` is the mill CNC control panel.
+22. Add turret/live-tool drive to the lathe simulator panel (the lathe face
+    itself exists, selected by the profile, with those keys greyed) and its
+    `svg/` mockup; `svg/sim-panel.svg` is the mill CNC control panel.
 23. Port the Probe Basic parameter contract (`#3014`–`#3036`) and result contract
     (`#1001`–`#1009`), map every routine to its G-code call, and verify that
     `RUN PROBE` issues the call through `issue_mdi` only after the explicit

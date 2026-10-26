@@ -3,8 +3,10 @@
 # Uses configs/lathe-sim.ini, which boots LiNC as the display against Probe
 # Basic's lathe simulation HAL (a sibling checkout). The lathe has no physical
 # panel, so the simulator panel window stands in for one; it is a separate
-# process, not part of the HMI shell, and hal/linc-lathe.hal wires the lathe
-# controls it can drive. Turret/live-tool controls are still to be built.
+# process, not part of the HMI shell. gui = "lathe" (and [panel] driver =
+# "lathe-sim") selects the lathe face of that window: the lathe key matrix,
+# NC/PLC/MMC/EMG alarm lamps and TOOL / TOOL COMP. / STATUS windows.
+# hal/linc-lathe.hal wires the controls it can drive; the rest stay grey.
 
 schema_version = 1
 profile = "lathe-sim"
@@ -61,7 +63,9 @@ panel_link_stats = "none"
 
 [simulation]
 enabled = true
-# The lathe has no physical panel; the simulator panel window stands in for it.
-# Only the wired controls (power, E-stop, AUTO/MDI/JOG, cycle, X/Z jog,
-# spindle) act; the rest stay grey until the lathe panel is built.
+# The lathe has no physical panel; the simulator panel window stands in for
+# it, drawing the lathe face. Only the wired controls act (power, E-stop,
+# AUTO/MDI/JOG, cycle, X/Z jog, both spindles, feed brake); the remaining
+# machine I/O (tailstock, chip, turret/TOOL CHG., worklamp, chuck, MST, C/S,
+# C-axis jog, SPD. JOG) has no equivalent here and stays grey.
 panel_window = true

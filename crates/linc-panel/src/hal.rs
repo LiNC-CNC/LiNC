@@ -1,8 +1,9 @@
 //! `cnc_panel.*` HAL component for the panel service.
 //!
-//! All 46 button pins, 56 LED pins, mode/home/proghome outputs, overrides,
-//! two tool displays and the status display are created here. The HMI never
-//! touches this component.
+//! Every button pin, every LED pin, the mode/home/proghome outputs, the
+//! overrides, two tool displays and the status display are created here. The
+//! HMI never touches this component. Both panel faces share this one pin
+//! surface: the lathe-only keys are pins the mill face simply never presses.
 
 use linc_core::model::{PanelMode, PanelModeValidity};
 use linc_hal::{HalComponent, HalError, HalPin};
@@ -117,7 +118,11 @@ impl CncPanelHal {
             *panel_connected.bit() = 0;
         }
         component.ready()?;
-        log::info!("created cnc_panel.* HAL surface (46 buttons, 56 LEDs, modes, displays)");
+        log::info!(
+            "created cnc_panel.* HAL surface ({} buttons, {} LEDs, modes, displays)",
+            BUTTON_PINS.len(),
+            LED_PINS.len()
+        );
         Ok(Self {
             component,
             button_pins,
