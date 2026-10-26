@@ -19,8 +19,10 @@ SVG mockups are in this directory; the Rust implementation is in `crates/`.
 Live captures from the simulator at 1600×1000, with the demo mill part loaded.
 Click any image for the full-size PNG.
 
-| Machine | Program |
+| **CNC Control Panel** (separate window) | **MDI** |
 |:---:|:---:|
+| [![Simulator CNC control panel: power, E-stop, mode and override dials, status lamps and 7-segment displays](docs/screenshots/panel.png)](docs/screenshots/panel.png) | [![MDI pane: issued blocks, the block being edited and its toolpath preview](docs/screenshots/mdi.png)](docs/screenshots/mdi.png) |
+| **Machine** | **Program** |
 | [![Machine dashboard: DRO, toolpath and program preview](docs/screenshots/machine.png)](docs/screenshots/machine.png) | [![Program page: G-code and live toolpath preview](docs/screenshots/program.png)](docs/screenshots/program.png) |
 | **Tools** | **Offsets** |
 | [![Tool table](docs/screenshots/tools.png)](docs/screenshots/tools.png) | [![Work offsets](docs/screenshots/offsets.png)](docs/screenshots/offsets.png) |
@@ -28,8 +30,6 @@ Click any image for the full-size PNG.
 | [![Diagnostics overview](docs/screenshots/diagnostics.png)](docs/screenshots/diagnostics.png) | [![G-code help index](docs/screenshots/help.png)](docs/screenshots/help.png) |
 | **Touch Probe** | **Files** |
 | [![Touch probe: illustrated routines, parameters and results](docs/screenshots/probe.png)](docs/screenshots/probe.png) | [![Files: USB media beside NC_FILES](docs/screenshots/files.png)](docs/screenshots/files.png) |
-| **CNC Control Panel** (separate window) | **MDI** |
-| [![Simulator CNC control panel: power, E-stop, mode and override dials, status lamps and 7-segment displays](docs/screenshots/panel.png)](docs/screenshots/panel.png) | [![MDI pane: issued blocks, the block being edited and its toolpath preview](docs/screenshots/mdi.png)](docs/screenshots/mdi.png) |
 
 ## Accepted references
 
