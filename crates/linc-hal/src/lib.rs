@@ -186,6 +186,31 @@ impl HalReader {
         }
     }
 
+    /// Whether the named pin is attached to a HAL signal.
+    ///
+    /// `None` when the pin does not exist or HAL has not initialised its
+    /// shared memory. A pin that exists but carries no signal reports
+    /// `Some(false)`: it is wired to nothing, so writing it changes no
+    /// machine input.
+    pub fn connected(&self, name: &str) -> Option<bool> {
+        let name = CString::new(name).ok()?;
+        let mut ty = 0i32;
+        let mut data: *mut HalData = ptr::null_mut();
+        let mut connected = false;
+        let result = unsafe {
+            (self.get_pin)(
+                name.as_ptr(),
+                &mut ty,
+                &mut data,
+                &mut connected as *mut bool,
+            )
+        };
+        if result != 0 || data.is_null() {
+            return None;
+        }
+        Some(connected)
+    }
+
     pub fn bit(&self, name: &str) -> Option<bool> {
         self.read(name)?.as_bool()
     }
@@ -496,6 +521,7 @@ mod tests {
         if let Ok(reader) = HalReader::new() {
             let _ = reader.read("cnc_panel.panel_connected");
             let _ = reader.bit("cnc_panel.estop");
+            let _ = reader.connected("cnc_panel.estop");
         }
     }
 

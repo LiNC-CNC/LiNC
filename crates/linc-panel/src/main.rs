@@ -291,6 +291,7 @@ fn run_simulated(
             &title,
             panel_scale,
             probe_key,
+            !no_hal,
             shutdown.clone(),
         );
         shutdown.store(true, Ordering::Relaxed);

@@ -720,8 +720,17 @@ pub fn simulator_window(
     title: &str,
     scale: f32,
     probe_key: bool,
+    hal_available: bool,
     shutdown: Arc<AtomicBool>,
 ) -> eframe::Result<()> {
+    // Connectivity is only meaningful while this process is inside a HAL.
+    // Without one (standalone --no-hal simulation) no key is greyed: every
+    // pin is equally unwired, so greying all of them would say nothing.
+    let hal = if hal_available {
+        linc_hal::HalReader::new().ok()
+    } else {
+        None
+    };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 720.0])
@@ -734,7 +743,7 @@ pub fn simulator_window(
         options,
         Box::new(move |cc| {
             Ok(Box::new(SimPanelApp::new(
-                cc, handle, scale, probe_key, shutdown,
+                cc, handle, scale, probe_key, hal, shutdown,
             )))
         }),
     )
@@ -758,6 +767,11 @@ struct SimPanelApp {
     power_pulse: Option<(bool, Instant)>,
     /// Show the simulation-only PROBE CONTACT debug key (--probe-key).
     probe_key: bool,
+    /// Read-only HAL view used to tell which keys are wired to a signal.
+    hal: Option<linc_hal::HalReader>,
+    /// Buttons whose cnc_panel pin carries no HAL signal.
+    disconnected: u64,
+    hal_checked: Instant,
     last_frame: Instant,
     shutdown: Arc<AtomicBool>,
 }
@@ -768,6 +782,7 @@ impl SimPanelApp {
         handle: SimPanelHandle,
         scale: f32,
         probe_key: bool,
+        hal: Option<linc_hal::HalReader>,
         shutdown: Arc<AtomicBool>,
     ) -> Self {
         if (scale - 1.0).abs() > f32::EPSILON {
@@ -780,6 +795,9 @@ impl SimPanelApp {
             holds: HoldTracker::default(),
             power_pulse: None,
             probe_key,
+            hal,
+            disconnected: 0,
+            hal_checked: Instant::now(),
             last_frame: Instant::now(),
             shutdown,
         }
@@ -830,6 +848,15 @@ impl eframe::App for SimPanelApp {
                 self.power_pulse = None;
             }
         }
+        // Connectivity is refreshed once a second: the HAL nets are wired
+        // after this window starts (loadusr blocks net creation), so reading
+        // once at startup would grey nothing or everything at random.
+        if let Some(hal) = &self.hal {
+            if self.hal_checked.elapsed() >= Duration::from_millis(1000) {
+                self.disconnected = disconnected_button_mask(hal);
+                self.hal_checked = Instant::now();
+            }
+        }
         self.last_frame = Instant::now();
         let state = self.handle.snapshot();
         let layout = panel_layout(ui);
@@ -842,6 +869,7 @@ impl eframe::App for SimPanelApp {
             &mut self.holds,
             &mut self.power_pulse,
             self.probe_key,
+            self.disconnected,
         );
         ctx.request_repaint_after(Duration::from_millis(60));
     }
@@ -1349,6 +1377,25 @@ fn paint_key_arrow(
 
 /// The cap of a compact black legend key: face, thin dark border, top edge
 /// highlight and the green LED dot.
+/// True when this key's cnc_panel pin carries no HAL signal.
+fn key_disabled(disconnected: u64, mask: u64) -> bool {
+    disconnected & mask != 0
+}
+
+/// Buttons whose pin exists but is attached to no signal.
+fn disconnected_button_mask(hal: &linc_hal::HalReader) -> u64 {
+    let component = std::env::var("LINC_PANEL_COMPONENT")
+        .unwrap_or_else(|_| "cnc_panel".to_string());
+    let mut mask = 0;
+    for (name, bit) in crate::BUTTON_PINS {
+        let pin = format!("{component}.{name}");
+        if hal.connected(&pin) == Some(false) {
+            mask |= bit;
+        }
+    }
+    mask
+}
+
 fn paint_key_cap(
     ui: &egui::Ui,
     l: &PanelLayout,
@@ -1357,11 +1404,16 @@ fn paint_key_cap(
     fill: Color32,
     led_on: bool,
     down: bool,
+    connected: bool,
 ) {
     // Hover-only sense: the hold state comes from the HoldTracker, the key
     // cap just lights up under the mouse.
     let resp = ui.interact(rect, id, Sense::hover());
-    let fill = if down {
+    // A key whose cnc_panel pin has no signal is greyed: it is a dead control
+    // on this machine, not a key that happens to be idle.
+    let fill = if !connected {
+        fill.gamma_multiply(0.45)
+    } else if down {
         fill.gamma_multiply(1.45)
     } else if resp.hovered() {
         fill.gamma_multiply(1.22)
@@ -1387,13 +1439,13 @@ fn paint_key_cap(
     ui.painter().circle_filled(
         led,
         3.5 * l.k,
-        if led_on {
+        if connected && led_on {
             GREEN
         } else {
             Color32::from_rgb(0x38, 0x3e, 0x41)
         },
     );
-    if led_on {
+    if connected && led_on {
         ui.painter().circle_stroke(
             led,
             5.2 * l.k,
@@ -1416,6 +1468,7 @@ fn panel_key(
     led_on: bool,
     down: bool,
     mask: u64,
+    connected: bool,
 ) {
     paint_key_cap(
         ui,
@@ -1425,7 +1478,14 @@ fn panel_key(
         fill,
         led_on,
         down,
+        connected,
     );
+    // Legend ink dims with the cap so a dead key cannot be read as live.
+    let ink = if connected {
+        TEXT
+    } else {
+        MUTED.gamma_multiply(0.65)
+    };
     let cx = rect.center().x;
     let cy = if sub.is_some() {
         rect.top() + rect.height() * 0.40
@@ -1437,7 +1497,7 @@ fn panel_key(
         Align2::CENTER_CENTER,
         label_text,
         l.font(14.0),
-        TEXT,
+        ink,
     );
     if let Some(sub) = sub {
         paint_key_arrow(
@@ -1445,7 +1505,7 @@ fn panel_key(
             l,
             Pos2::new(cx, rect.top() + rect.height() * 0.72),
             sub,
-            TEXT,
+            ink,
         );
     }
 }
@@ -2032,6 +2092,7 @@ fn paint_panel(
     holds: &mut HoldTracker,
     power_pulse: &mut Option<(bool, Instant)>,
     probe_key: bool,
+    disconnected: u64,
 ) {
     let it = interactives(l, probe_key);
     // Match this frame's input events against the momentary key rects BEFORE
@@ -2442,7 +2503,18 @@ fn paint_panel(
         // Momentary: the HoldTracker latched the press and releases it only
         // when that same pointer or touch lets go.
         let down = holds.is_held(*mask);
-        panel_key(ui, l, *rect, name, *sub, fill, state.leds & led != 0, down, *mask);
+        panel_key(
+            ui,
+            l,
+            *rect,
+            name,
+            *sub,
+            fill,
+            state.leds & led != 0,
+            down,
+            *mask,
+            !key_disabled(disconnected, *mask),
+        );
         handle.set(|s| s.set_button(*mask, down));
     }
     draw_cycle_plate(
@@ -2503,6 +2575,7 @@ fn paint_panel(
             KEY_BG,
             state.probe,
             down,
+            true,
         );
         ui.painter().text(
             Pos2::new(rect.center().x, rect.top() + rect.height() * 0.36),
@@ -2529,6 +2602,7 @@ fn paint_panel(
         &key_grid_rects(l, MIDDLE_X, 3, MIDDLE_KEYS.len()),
         holds,
         handle,
+        disconnected,
     );
     paint_key_grid(
         ui,
@@ -2538,6 +2612,7 @@ fn paint_panel(
         &key_grid_rects(l, RIGHT_X, 3, RIGHT_KEYS.len()),
         holds,
         handle,
+        disconnected,
     );
 
     // Tiny power/estop status strip keeps the simulation state visible.
@@ -2642,6 +2717,7 @@ fn paint_key_grid(
     rects: &[Rect],
     holds: &HoldTracker,
     handle: &mut SimPanelHandle,
+    disconnected: u64,
 ) {
     for ((name, mask, led), rect) in keys.iter().zip(rects.iter()) {
         let fill = if *mask == buttons::SPD_SP {
@@ -2651,7 +2727,18 @@ fn paint_key_grid(
         };
         let down = holds.is_held(*mask);
         let led_on = led.map(|bit| state.leds & bit != 0).unwrap_or(down);
-        panel_key(ui, l, *rect, name, None, fill, led_on, down, *mask);
+        panel_key(
+            ui,
+            l,
+            *rect,
+            name,
+            None,
+            fill,
+            led_on,
+            down,
+            *mask,
+            !key_disabled(disconnected, *mask),
+        );
         handle.set(|s| s.set_button(*mask, down));
     }
 }
@@ -2660,6 +2747,31 @@ fn paint_key_grid(
 mod tests {
     use super::*;
     use linc_diag::SimControl as _;
+
+
+    #[test]
+    fn disconnected_keys_grey_only_their_own_buttons() {
+        let disconnected = buttons::K4 | buttons::CHUCK | buttons::SAFE_DOOR;
+        assert!(key_disabled(disconnected, buttons::K4));
+        assert!(key_disabled(disconnected, buttons::CHUCK));
+        assert!(!key_disabled(disconnected, buttons::CYCLE_START));
+        assert!(!key_disabled(0, buttons::K4));
+    }
+
+    #[test]
+    fn every_drawn_key_has_a_cnc_panel_pin() {
+        let masks = LEFT_KEYS
+            .iter()
+            .map(|(_, _, mask, _)| *mask)
+            .chain(MIDDLE_KEYS.iter().map(|(_, mask, _)| *mask))
+            .chain(RIGHT_KEYS.iter().map(|(_, mask, _)| *mask));
+        for mask in masks {
+            assert!(
+                crate::BUTTON_PINS.iter().any(|(_, bit)| *bit == mask),
+                "drawn key mask {mask:#x} has no cnc_panel pin and can never be greyed"
+            );
+        }
+    }
 
     #[test]
     fn a_ready_sim_raises_the_power_up_one_shots() {
@@ -2931,6 +3043,7 @@ mod tests {
                             &mut self.holds,
                             &mut self.power_pulse,
                             probe_key,
+                            0,
                         );
                     });
             });
