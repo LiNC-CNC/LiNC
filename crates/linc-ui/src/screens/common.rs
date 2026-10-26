@@ -1,5 +1,6 @@
 //! Components shared by more than one screen.
 
+use egui::text::{LayoutJob, TextFormat};
 use egui::{Align, Color32, FontId, Layout, RichText, Sense, Ui, Vec2};
 use linc_core::gcode::{lex_line, Preview, TokenKind};
 use linc_core::model::{format_clock, AxisMap, MachineSnapshot, MachineVariant, PanelMode};
@@ -66,20 +67,24 @@ pub fn token_ui(ui: &mut Ui, text: &str, size: f32) {
     });
 }
 
-fn token_line_ui(ui: &mut Ui, text: &str, size: f32) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 3.0;
-        for token in lex_line(text) {
-            let mut rich = RichText::new(token.display())
-                .monospace()
-                .size(theme::font_size(size))
-                .color(token_color(token.kind));
-            if token.kind == TokenKind::Comment {
-                rich = rich.italics();
-            }
-            ui.label(rich);
-        }
-    });
+/// Syntax-coloured layout job for one G-code line. Unlike the label row this
+/// can wrap to the pane width and reports the height that wrap needs.
+fn token_job(text: &str, size: f32) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    let font = FontId::monospace(theme::font_size(size));
+    for (index, token) in lex_line(text).into_iter().enumerate() {
+        job.append(
+            &token.display(),
+            if index == 0 { 0.0 } else { 3.0 },
+            TextFormat {
+                font_id: font.clone(),
+                color: token_color(token.kind),
+                italics: token.kind == TokenKind::Comment,
+                ..Default::default()
+            },
+        );
+    }
+    job
 }
 
 /// Space under a cell that has a mnemonic: half a mnemonic line, a little more
@@ -650,14 +655,6 @@ pub fn messages_dialog(app: &mut LincApp, ctx: &egui::Context) {
     }
 }
 
-fn truncate(text: &str, max_chars: usize) -> String {
-    let mut out: String = text.chars().take(max_chars).collect();
-    if text.chars().count() > max_chars {
-        out.push_str("...");
-    }
-    out
-}
-
 fn modal_abbreviation(key: &str) -> &'static str {
     let code = key.trim().trim_start_matches('G').trim();
     if let Ok(number) = code.parse::<f32>() {
@@ -860,12 +857,43 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                         (focus.saturating_sub(window_len / 2).max(1) as isize).min(last_first)
                     };
                     let mut lines = content.lines().skip((first.max(1) - 1) as usize);
+                    let number_font = FontId::monospace(theme::font_size(7.5));
+                    let number_width = ui.fonts_mut(|fonts| {
+                        fonts
+                            .layout_no_wrap(
+                                "0000".to_string(),
+                                number_font.clone(),
+                                theme::MUTED,
+                            )
+                            .size()
+                            .x
+                    });
+                    let text_lane =
+                        (ui.available_width() - theme::SELECTION_BAR - number_width - 8.0)
+                            .max(40.0);
+                    // Wrapped rows consume more than row_height, so stop before
+                    // the fixed window would push the modal strip out of the card.
+                    let listing_limit = window_len as f32 * (row_height + 2.0);
+                    let mut used = 0.0f32;
                     for row in 0..window_len {
                         let line_number = first + row as isize;
                         let line = if line_number >= 1 { lines.next() } else { None };
                         let is_current = line_number == focus as isize;
+                        let galley = line.map(|line| {
+                            let mut job = token_job(line, 9.5);
+                            job.wrap.max_width = text_lane;
+                            ui.fonts_mut(|fonts| fonts.layout_job(job))
+                        });
+                        let height = galley
+                            .as_ref()
+                            .map_or(row_height, |galley| galley.size().y.max(row_height))
+                            + 2.0;
+                        if row > 0 && used + height > listing_limit {
+                            break;
+                        }
+                        used += height;
                         let (rect, _) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), row_height),
+                            egui::vec2(ui.available_width(), height),
                             egui::Sense::hover(),
                         );
                         if is_current {
@@ -878,14 +906,14 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                             egui::UiBuilder::new()
                                 .id_salt(("program_row", row))
                                 .max_rect(rect)
-                                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                                .layout(egui::Layout::left_to_right(egui::Align::Min)),
                         );
                         row_ui.set_clip_rect(rect.intersect(ui.clip_rect()));
                         row_ui.spacing_mut().item_spacing.x = 4.0;
                         // Lane for the band's rim bar, so the line numbers start
                         // at the same x on every row.
                         let _ = row_ui.allocate_exact_size(
-                            egui::vec2(theme::SELECTION_BAR, row_height),
+                            egui::vec2(theme::SELECTION_BAR, height),
                             egui::Sense::hover(),
                         );
                         let number = line
@@ -901,13 +929,18 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                                     theme::MUTED
                                 }),
                         );
-                        match line {
-                            Some(line) => token_line_ui(&mut row_ui, &truncate(line, 26), 9.5),
-                            None => {
-                                row_ui.label(
-                                    RichText::new(" ").monospace().size(theme::font_size(9.5)),
-                                );
-                            }
+                        if let Some(galley) = galley {
+                            row_ui.painter().galley(
+                                egui::pos2(
+                                    rect.left()
+                                        + theme::SELECTION_BAR
+                                        + number_width
+                                        + 8.0,
+                                    rect.top() + 1.0,
+                                ),
+                                galley,
+                                theme::FG,
+                            );
                         }
                     }
                 } else {
