@@ -885,10 +885,13 @@ const LEFT_X: [f32; 3] = [28.0, 188.0, 348.0];
 /// Guarded POWER pushbuttons: square, 66 logical units per side (47.5 px at
 /// 1280x720).
 const POWER_KEY_SIDE: f32 = 66.0;
-const POWER_ON_AT: (f32, f32) = (30.0, 74.0);
-const POWER_OFF_AT: (f32, f32) = (108.0, 74.0);
+const POWER_ON_AT: (f32, f32) = (30.0, 122.0);
+const POWER_OFF_AT: (f32, f32) = (108.0, 122.0);
 
-const ESTOP_AT: (f32, f32) = (245.0, 155.0);
+/// E-stop centre. The power keys are centred on the same row (155) and the
+/// OFF key (right edge 174) now leaves 22 logical units to the collar: at 5
+/// the two groups read as one cluster.
+const ESTOP_AT: (f32, f32) = (262.0, 155.0);
 const ESTOP_HIT: f32 = 132.0;
 const MODE_KNOB: (f32, f32, f32) = (510.0, 145.0, 72.0);
 const FEED_KNOB: (f32, f32, f32) = (800.0, 145.0, 48.0);
@@ -898,11 +901,15 @@ const SPINDLE_KNOB: (f32, f32, f32) = (1260.0, 145.0, 48.0);
 const KNOB_HIT_PAD: f32 = 14.0;
 const PROTECT_AT: (f32, f32) = (1530.0, 145.0);
 const PROTECT_HIT: f32 = 110.0;
-const CYCLE_START_AT: (f32, f32) = (95.0, 830.0);
-const CYCLE_STOP_AT: (f32, f32) = (220.0, 830.0);
-const CYCLE_R: f32 = 42.0;
+const CYCLE_START_AT: (f32, f32) = (123.0, 870.0);
+const CYCLE_STOP_AT: (f32, f32) = (235.0, 870.0);
+const CYCLE_R: f32 = 48.0;
 /// Chrome mounting ring around the cycle buttons; part of the hit target.
-const CYCLE_RING: f32 = 7.0;
+const CYCLE_RING: f32 = 8.0;
+/// Illuminated cycle-status plate above each cycle button (the cabinet has a
+/// lamp window there, not an LED in the button).
+const CYCLE_PLATE_SIZE: (f32, f32) = (52.0, 30.0);
+const CYCLE_PLATE_Y: f32 = 794.0;
 const PROBE_KEY_AT: (f32, f32) = (1507.0, 850.0);
 
 /// Sentinel mask for the PROBE CONTACT key in the hold tracker. The probe is
@@ -1502,6 +1509,9 @@ fn power_key(
 }
 
 /// A large round pushbutton with a chrome mounting ring (CYCLE START/STOP).
+/// The state lamp is a separate illuminated plate drawn by
+/// `draw_cycle_plate` above the button, as on the cabinet; the button
+/// carries no LED.
 #[allow(clippy::too_many_arguments)]
 fn round_key(
     ui: &egui::Ui,
@@ -1512,7 +1522,6 @@ fn round_key(
     inner: Color32,
     outer: Color32,
     id: &'static str,
-    led_on: bool,
 ) -> bool {
     let center = l.p(at.0, at.1);
     let resp = ui.interact(rect, ui.scope_id().with(id), Sense::click());
@@ -1542,15 +1551,6 @@ fn round_key(
         CYCLE_R * l.k,
         Stroke::new(2.0 * l.k, Color32::from_rgb(0x0c, 0x0e, 0x0f)),
     );
-    ui.painter().circle_filled(
-        center + Vec2::new(0.0, -CYCLE_R * 0.55 * l.k),
-        4.0 * l.k,
-        if led_on {
-            GREEN
-        } else {
-            Color32::from_rgb(0x38, 0x3e, 0x41)
-        },
-    );
     label(
         ui.painter(),
         l,
@@ -1562,6 +1562,83 @@ fn round_key(
         Align2::CENTER_CENTER,
     );
     resp.clicked()
+}
+
+/// What a cycle-status plate stands for: the start plate carries a vertical
+/// pill in its loop, the stop plate a filled dot, matching the cabinet lamps.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CyclePlate {
+    Start,
+    Stop,
+}
+
+/// Illuminated cycle-status plate above a cycle button: a smoked lamp window
+/// with a loop-and-arrows glyph. Unlit it stays dim grey; lit it glows in its
+/// own colour (white for start, red for stop).
+fn draw_cycle_plate(
+    painter: &egui::Painter,
+    l: &PanelLayout,
+    cx: f32,
+    cy: f32,
+    kind: CyclePlate,
+    lit: bool,
+) {
+    let (w, h) = CYCLE_PLATE_SIZE;
+    let rect = l.r(cx - w * 0.5, cy - h * 0.5, w, h);
+    let (lit_color, dim) = match kind {
+        CyclePlate::Start => (
+            Color32::from_rgb(0xf2, 0xf3, 0xf4),
+            Color32::from_rgb(0x55, 0x59, 0x5c),
+        ),
+        CyclePlate::Stop => (RED, Color32::from_rgb(0x5a, 0x2a, 0x28)),
+    };
+    let ink = if lit { lit_color } else { dim };
+    painter.rect(
+        rect,
+        3.0 * l.k,
+        Color32::from_rgb(0x0b, 0x0c, 0x0d),
+        Stroke::new(1.0 * l.k, Color32::from_rgb(0x24, 0x27, 0x29)),
+        egui::StrokeKind::Inside,
+    );
+    if lit {
+        painter.rect_stroke(
+            rect.expand(1.0 * l.k),
+            4.0 * l.k,
+            Stroke::new(2.0 * l.k, lit_color.gamma_multiply(0.30)),
+            egui::StrokeKind::Outside,
+        );
+    }
+    // Loop glyph: rounded rectangle with arrowheads following it clockwise.
+    let g = rect.shrink2(Vec2::new(9.0 * l.k, 6.0 * l.k));
+    painter.rect_stroke(
+        g,
+        2.0 * l.k,
+        Stroke::new(1.8 * l.k, ink),
+        egui::StrokeKind::Inside,
+    );
+    let s = 3.0 * l.k;
+    let arrow = |tip: Pos2, dir: Vec2| {
+        let back = tip - dir * s;
+        let perp = Vec2::new(-dir.y, dir.x) * s;
+        painter.add(egui::Shape::convex_polygon(
+            vec![tip, back + perp, back - perp],
+            ink,
+            Stroke::NONE,
+        ));
+    };
+    arrow(g.right_top() + Vec2::new(0.0, 1.5 * l.k), Vec2::new(1.0, 0.0));
+    arrow(g.left_bottom() - Vec2::new(0.0, 1.5 * l.k), Vec2::new(-1.0, 0.0));
+    let c = rect.center();
+    match kind {
+        CyclePlate::Start => {
+            let pill = Rect::from_center_size(c, Vec2::new(5.0 * l.k, 15.0 * l.k));
+            painter.rect(pill, 2.5 * l.k, ink, Stroke::NONE, egui::StrokeKind::Inside);
+        }
+        CyclePlate::Stop => {
+            painter.circle_filled(c, 8.0 * l.k, ink);
+            painter.circle_filled(c, 3.0 * l.k, Color32::from_rgb(0x0b, 0x0c, 0x0d));
+        }
+    }
 }
 
 /// A knurled rotary knob: serrated grip ring, domed black cap, metal hub and
@@ -2022,11 +2099,12 @@ fn paint_panel(
         MUTED,
         Align2::CENTER_CENTER,
     );
+    // Same baseline as the override dials' titles (cy - r - 44 = 53).
     label(
         painter,
         l,
         1530.0,
-        34.0,
+        53.0,
         13.0,
         "PROGRAM PROTECT",
         MUTED,
@@ -2073,7 +2151,8 @@ fn paint_panel(
         });
         *power_pulse = Some((false, Instant::now()));
     }
-    lamp(painter, l, 63.0, 56.0, 8.0, power_on, GREEN);
+    lamp(painter, l, 63.0, 104.0, 8.0, power_on, GREEN);
+    lamp(painter, l, 141.0, 104.0, 8.0, !power_on, AMBER);
 
     // E-stop mushroom. This is an operator-owned latching input, so the latched
     // state has to be visible on the panel itself — not only in the HMI.
@@ -2357,6 +2436,22 @@ fn paint_panel(
         panel_key(ui, l, *rect, name, *sub, fill, state.leds & led != 0, down, *mask);
         handle.set(|s| s.set_button(*mask, down));
     }
+    draw_cycle_plate(
+        painter,
+        l,
+        CYCLE_START_AT.0,
+        CYCLE_PLATE_Y,
+        CyclePlate::Start,
+        state.leds & crate::leds::CYCLE_ON != 0,
+    );
+    draw_cycle_plate(
+        painter,
+        l,
+        CYCLE_STOP_AT.0,
+        CYCLE_PLATE_Y,
+        CyclePlate::Stop,
+        state.leds & crate::leds::CYCLE_OFF != 0,
+    );
     if round_key(
         ui,
         l,
@@ -2366,7 +2461,6 @@ fn paint_panel(
         Color32::from_rgb(0xf5, 0xf4, 0xee),
         Color32::from_rgb(0xbd, 0xbb, 0xb3),
         "cycle-start",
-        state.leds & crate::leds::CYCLE_ON != 0,
     ) {
         handle.set(|s| s.set_button(buttons::CYCLE_START, true));
         *pressed |= buttons::CYCLE_START;
@@ -2380,7 +2474,6 @@ fn paint_panel(
         Color32::from_rgb(0x2c, 0x2f, 0x32),
         Color32::from_rgb(0x0e, 0x10, 0x11),
         "cycle-stop",
-        state.leds & crate::leds::CYCLE_OFF != 0,
     ) {
         handle.set(|s| s.set_button(buttons::CYCLE_STOP, true));
         *pressed |= buttons::CYCLE_STOP;
@@ -2544,8 +2637,6 @@ fn paint_key_grid(
     for ((name, mask, led), rect) in keys.iter().zip(rects.iter()) {
         let fill = if *mask == buttons::SPD_SP {
             Color32::from_rgb(0x8d, 0x1c, 0x18)
-        } else if *mask == buttons::CORRIDOR {
-            Color32::from_rgb(0x8a, 0x62, 0x18)
         } else {
             KEY_BG
         };
