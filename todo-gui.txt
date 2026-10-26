@@ -1,0 +1,29 @@
+GRAPH / TOOLPATH:
+    - The program preview is drawn at a different X location than where the
+      G-code actually executes (mill and lathe): the preview origin/offset must
+      match the machine's live X position.
+    - Live trails of rapid moves must be dotted, like the rapid segments in the
+      preview, for mill and lathe. Only cutting moves should draw a solid trail.
+
+FILE screen:
+	- when going into a directory then there the parent directory is displayed as a row, but cannot be selected. But it should be selectable and Enter on it should go into the parent directory. It is correct the NC_FILE shows no parent directory, but that should be possible to enable by a configuration file option.
+    - when the overwrite dialog comes up then the cursor focus is correctly placed at the cancel button. if the user moves two times to the left or to the right from there, the cursor leaves the dialog. But in any way cursor moves should only between the two dialog buttons.
+
+G-CODE HELP:
+    - Do NOT add an embedded HTML engine/webview. The Probe Basic "HTML view" is a Qt
+      QTextBrowser rendering generated gcode_docs.py HTML; LiNC already converts the
+      same source to gcode_help.json (tools/generate_help.py) and renders it natively
+      (crates/linc-ui/src/screens/help.rs). A webview would add WebKitGTK packaging,
+      focus/keyboard and rendering risks for static docs, with no content gain.
+    - Keep the native view and close the real fidelity gaps:
+        1. Preserve inline spans (bold, italic, inline code, link anchors) in
+           paragraphs; make inline links call help.open(anchor) instead of only
+           collecting them at the bottom as RELATED chips.
+        2. Syntax-colour code blocks (G/M words, axis letters, numbers, comments)
+           with a LayoutJob, using Probe Basic's _SYNTAX_REMAP colours.
+        3. Keep admonition types distinct (Warning, Note, Tip, Important, Caution)
+           instead of rendering every note as the one warning banner.
+        4. Style table header rows and column spacing like the generated docs.
+    - Only revisit a webview if the requirement becomes showing the full versioned
+      LinuxCNC HTML/CSS with external navigation AND the target image can ship
+      WebKitGTK; even then prototype it behind a feature flag, not in the default HMI.
