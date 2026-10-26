@@ -27,11 +27,13 @@ net lathe-mode-jog cnc_panel.mode_jog => halui.mode.manual
 net lathe-cycle-start cnc_panel.cycle_start => halui.program.run
 net lathe-cycle-stop cnc_panel.cycle_stop => halui.program.pause
 
-# Jogging: the lathe has X and Z joints only.
-net lathe-jog-xp cnc_panel.jog_xp => halui.joint.0.plus
-net lathe-jog-xn cnc_panel.jog_xn => halui.joint.0.minus
-net lathe-jog-zp cnc_panel.jog_zp => halui.joint.1.plus
-net lathe-jog-zn cnc_panel.jog_zn => halui.joint.1.minus
+# Jogging: the lathe has X and Z axes. Use halui's axis (teleop) jog inputs:
+# the joint-jog inputs do not move this trivkins XZ machine, while the axis
+# inputs do (verified against the running simulator).
+net lathe-jog-xp cnc_panel.jog_xp => halui.axis.x.plus
+net lathe-jog-xn cnc_panel.jog_xn => halui.axis.x.minus
+net lathe-jog-zp cnc_panel.jog_zp => halui.axis.z.plus
+net lathe-jog-zn cnc_panel.jog_zn => halui.axis.z.minus
 
 # Spindle (spindle 0).
 net lathe-spindle-cw cnc_panel.spd_cw => halui.spindle.0.forward

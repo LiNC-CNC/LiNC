@@ -43,6 +43,12 @@ y_axis = false
 # single-spindle lathe: the panel then draws only the SPD.* column.
 sub_spindle = true
 
+[jog]
+# The lathe INI is in inch units (MAX_VELOCITY 3.33 in/s = 200 in/min). Base's
+# mill defaults (3000/6000) would drive the axis into its limit instantly.
+max_speed = 100
+rapid_speed = 200
+
 [ui]
 window_title = "LiNC - Smartlathe SL36 Simulation"
 servo_load = ["X", "Z", "S"]
