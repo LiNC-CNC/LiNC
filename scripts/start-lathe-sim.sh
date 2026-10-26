@@ -86,4 +86,7 @@ echo "lathe sim: simulator panel window with the lathe-relevant controls; turret
 
 export LINC_SIM_CONFIG="$PROFILE"
 export LINC_SIM_INI="$INI"
+# The panel boots in AUTO; halui's steady mode input can miss the boot edge, so
+# have sim-ready put the task in AUTO explicitly (cycle start needs it).
+export LINC_SIM_AUTO=1
 exec "$ROOT/scripts/start-sim.sh" --no-sim3d "${ARGS[@]}"

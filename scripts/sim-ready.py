@@ -62,6 +62,11 @@ def parse(argv):
     parser.add_argument("--home", action="store_true", help="home every axis")
     parser.add_argument("--load", metavar="FILE", help="open a G-code program")
     parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="leave the session in AUTO mode (the panel needs it for cycle start)",
+    )
+    parser.add_argument(
         "--float",
         action="store_true",
         help="float the HMI window under Hyprland at 1280x720",
@@ -278,8 +283,21 @@ def set_mode(linuxcnc, stat, command, mode, what, timeout):
     anyway. Waiting on what the task says it is doing cannot miss and cannot
     block on a channel the panel is also using.
     """
-    command.mode(mode)
-    wait_for(stat, lambda s: s.task_mode == mode, what, timeout)
+    # A mode request can land while the task is still settling and be dropped,
+    # so repeat it until the task reports the mode; the task state cannot miss.
+    deadline = time.monotonic() + timeout
+    sent = 0.0
+    while True:
+        stat.poll()
+        if stat.task_mode == mode:
+            return
+        now = time.monotonic()
+        if now - sent >= 2.0:
+            command.mode(mode)
+            sent = now
+        if now >= deadline:
+            sys.exit(f"sim-ready: timed out after {timeout:g} s waiting for {what}")
+        time.sleep(0.1)
 
 
 def repeat_until(command, stat, predicate, act, what, timeout):
@@ -319,6 +337,8 @@ def bring_up(args):
             home_axes(linuxcnc, stat, command, args)
     if args.load:
         open_program(linuxcnc, stat, command, args)
+    if args.auto:
+        set_mode(linuxcnc, stat, command, linuxcnc.MODE_AUTO, "AUTO mode", args.timeout)
 
 
 def home_axes(linuxcnc, stat, command, args):

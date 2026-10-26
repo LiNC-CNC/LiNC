@@ -20,8 +20,12 @@ G1 X0.7
 O100 ENDSUB
 
 (Rough turn: leave 0.02 on the profile, 0.04 per pass, 0.02 retract.)
-T1 M6 G43
-G96 S350 D2500 M3
+(No M6 in the simulator test: the manual tool-change confirmation blocks)
+(an unattended run. Select the tool and apply these zero offsets instead.)
+T1 G43
+(Constant RPM, not G96 CSS: feed-per-rev waits for spindle-at-speed, and)
+(a CSS setpoint that moves with X never holds it in this simulator.)
+G97 S800 M3
 M8
 G0 X0.66 Z0.1
 G71 Q100 X0.66 Z0.1 D0.02 I0.04 R0.02
@@ -34,7 +38,7 @@ M5
 (Thread 1/2-13: drive line X0.54, peak offset -0.04 gives major 0.5.)
 (K0.094 is full thread depth in diameter mode: 0.5 - 0.094 = 0.406.)
 (E0.05 with L2 tapers the exit so the tool leaves the thread cleanly.)
-T2 M6 G43
+T2 G43
 G97 S400 M3
 G4 P0.5
 M8

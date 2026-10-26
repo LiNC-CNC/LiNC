@@ -203,6 +203,7 @@ sim_ready() {
     (( POWER_ON )) && args+=(--on)
     (( HOME_AXES )) && args+=(--home)
     [[ -n "$LOAD_PROGRAM" ]] && args+=(--load "$LOAD_PROGRAM")
+    [[ "${LINC_SIM_AUTO:-0}" == "1" ]] && args+=(--auto)
     (( FLOAT_WINDOW )) && args+=(--float)
     if (( ${#args[@]} == 2 )); then
         return 0
