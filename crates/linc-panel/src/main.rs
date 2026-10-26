@@ -31,6 +31,9 @@ struct Args {
     /// Never show the simulator panel window.
     #[arg(long)]
     no_window: bool,
+    /// Show the simulation-only PROBE CONTACT debug key in the panel window.
+    #[arg(long)]
+    probe_key: bool,
     /// Do not create the cnc_panel HAL component (development only).
     #[arg(long)]
     no_hal: bool,
@@ -81,6 +84,9 @@ fn main() -> Result<()> {
     let shutdown = Arc::new(AtomicBool::new(false));
     let _ = signal_hook::flag::register(signal_hook::consts::SIGTERM, shutdown.clone());
     let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, shutdown.clone());
+    if args.probe_key && !args.sim && profile.config.panel.kind != "simulated" {
+        log::warn!("--probe-key ignored: this panel is not a simulator");
+    }
     let simulated = args.sim || profile.config.panel.kind == "simulated";
     let cycle = Duration::from_millis(
         profile
@@ -168,6 +174,7 @@ fn main() -> Result<()> {
             cycle,
             args.window,
             args.no_window,
+            args.probe_key,
             args.no_hal,
             args.no_ipc,
             args.once,
@@ -215,6 +222,7 @@ fn run_simulated(
     cycle: Duration,
     window: bool,
     no_window: bool,
+    probe_key: bool,
     no_hal: bool,
     no_ipc: bool,
     once: bool,
@@ -278,8 +286,13 @@ fn run_simulated(
                 log::error!("simulator panel loop stopped: {error:#}");
             }
         });
-        let window_result =
-            linc_panel::sim::simulator_window(handle, &title, panel_scale, shutdown.clone());
+        let window_result = linc_panel::sim::simulator_window(
+            handle,
+            &title,
+            panel_scale,
+            probe_key,
+            shutdown.clone(),
+        );
         shutdown.store(true, Ordering::Relaxed);
         let _ = run_thread.join();
         window_result.map_err(|error| anyhow::anyhow!("simulator window: {error}"))?;

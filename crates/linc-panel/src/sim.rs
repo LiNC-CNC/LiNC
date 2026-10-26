@@ -710,22 +710,33 @@ pub fn status_display_text(value: i32) -> String {
     }
 }
 
+/// Open the simulator panel window.
+///
+/// The window is exactly 1280x720 and may not shrink below it: that is the
+/// acceptance size for the touchscreen layout, where every interactive target
+/// is at least 44 px (covered by a headless geometry test).
 pub fn simulator_window(
     handle: SimPanelHandle,
     title: &str,
     scale: f32,
+    probe_key: bool,
     shutdown: Arc<AtomicBool>,
 ) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1344.0, 800.0])
+            .with_inner_size([1280.0, 720.0])
+            .with_min_inner_size([1280.0, 720.0])
             .with_title(title),
         ..Default::default()
     };
     eframe::run_native(
         title,
         options,
-        Box::new(move |cc| Ok(Box::new(SimPanelApp::new(cc, handle, scale, shutdown)))),
+        Box::new(move |cc| {
+            Ok(Box::new(SimPanelApp::new(
+                cc, handle, scale, probe_key, shutdown,
+            )))
+        }),
     )
 }
 
@@ -735,12 +746,18 @@ struct SimPanelApp {
     /// When the current momentary key was pressed, so it releases after a fixed
     /// hold instead of when a frame happens to take long enough.
     press_at: Option<Instant>,
-    /// Keys currently held with the pointer. Latched on press and cleared only
-    /// on a real pointer-up: per-frame `is_pointer_button_down_on` is not a
-    /// reliable "still held" signal (it dropped after about a second, which
-    /// stopped a continuous jog while the operator was still holding the key).
-    mouse_held: u64,
+    /// Momentary keys currently held, one entry per input source: the mouse,
+    /// or one per active touch id. A hold is latched when a press lands on a
+    /// key rect and cleared only when that same source releases — never by
+    /// per-frame polling (is_pointer_button_down_on dropped after about a
+    /// second, which stopped a continuous jog while the operator was still
+    /// holding the key) and never by another finger's release (the old
+    /// "any release clears mouse_held" rule killed a held jog as soon as a
+    /// second touch ended).
+    holds: HoldTracker,
     power_pulse: Option<(bool, Instant)>,
+    /// Show the simulation-only PROBE CONTACT debug key (--probe-key).
+    probe_key: bool,
     last_frame: Instant,
     shutdown: Arc<AtomicBool>,
 }
@@ -750,6 +767,7 @@ impl SimPanelApp {
         cc: &eframe::CreationContext<'_>,
         handle: SimPanelHandle,
         scale: f32,
+        probe_key: bool,
         shutdown: Arc<AtomicBool>,
     ) -> Self {
         if (scale - 1.0).abs() > f32::EPSILON {
@@ -759,8 +777,9 @@ impl SimPanelApp {
             handle,
             pressed: 0,
             press_at: None,
-            mouse_held: 0,
+            holds: HoldTracker::default(),
             power_pulse: None,
+            probe_key,
             last_frame: Instant::now(),
             shutdown,
         }
@@ -773,16 +792,14 @@ impl eframe::App for SimPanelApp {
         if self.shutdown.load(Ordering::Relaxed) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        // Momentary keys (mouse-held keys are handled by hold state; these are
-        // the keyboard shortcuts and the round buttons) must release after a
-        // fixed hold. Tracking the press instant matters: comparing the *frame
-        // interval* to the hold time never fires at 60 fps, so the key latched
-        // and the machine kept jogging after the operator let go.
-        if ui.input(|input| input.pointer.any_released()) {
-            self.mouse_held = 0;
-        }
-        if self.mouse_held != 0 {
-            // Keep frames coming so the release is observed promptly and the
+        // Momentary keys pressed from the keyboard or a round button must
+        // release after a fixed hold. Tracking the press instant matters:
+        // comparing the *frame interval* to the hold time never fires at
+        // 60 fps, so the key latched and the machine kept jogging after the
+        // operator let go. Pointer/touch-held keys are released by the
+        // HoldTracker from release events, not here.
+        if !self.holds.is_empty() {
+            // Keep frames coming so releases are observed promptly and the
             // held keys stay asserted in the panel state.
             ctx.request_repaint();
         }
@@ -822,16 +839,25 @@ impl eframe::App for SimPanelApp {
             &state,
             &mut self.handle,
             &mut self.pressed,
-            &mut self.mouse_held,
+            &mut self.holds,
             &mut self.power_pulse,
+            self.probe_key,
         );
         ctx.request_repaint_after(Duration::from_millis(60));
     }
 }
 
-const PANEL_BG: Color32 = Color32::from_rgb(0x30, 0x34, 0x36);
-const KEY_BG: Color32 = Color32::from_rgb(0x1d, 0x21, 0x23);
+/// The plate, bezel and control palette, matched to the physical panel
+/// (controller-documentation/img/cover.jpg): a near-black matte charcoal
+/// plate, black legend keys, ivory/black guarded POWER buttons.
+const SURROUND: Color32 = Color32::from_rgb(0x0f, 0x10, 0x11);
+const PLATE: Color32 = Color32::from_rgb(0x19, 0x1b, 0x1d);
+const BEZEL_RIM: Color32 = Color32::from_rgb(0x0c, 0x0d, 0x0e);
+const EDGE_HI: Color32 = Color32::from_rgb(0x38, 0x3c, 0x40);
+const KEY_BG: Color32 = Color32::from_rgb(0x17, 0x19, 0x1c);
 const KEY_BORDER: Color32 = Color32::from_rgb(0x0d, 0x0f, 0x10);
+const KEY_TOP_HI: Color32 = Color32::from_rgb(0x2c, 0x30, 0x33);
+const IVORY: Color32 = Color32::from_rgb(0xe8, 0xe5, 0xdc);
 const TEXT: Color32 = Color32::from_rgb(0xf2, 0xf3, 0xf4);
 const MUTED: Color32 = Color32::from_rgb(0x9b, 0xa1, 0xa4);
 const GREEN: Color32 = Color32::from_rgb(0x41, 0xe6, 0x5f);
@@ -839,6 +865,301 @@ const RED: Color32 = Color32::from_rgb(0xff, 0x3b, 0x30);
 const AMBER: Color32 = Color32::from_rgb(0xff, 0xb0, 0x20);
 const YELLOW: Color32 = Color32::from_rgb(0xff, 0xd6, 0x0a);
 const BLUE: Color32 = Color32::from_rgb(0x4d, 0xa3, 0xff);
+
+/// Logical layout canvas; the panel is scaled by `k` to fit the window.
+const CANVAS_W: f32 = 1680.0;
+const CANVAS_H: f32 = 1000.0;
+
+/// Legend key size. 64 logical units is 46 px at the 1280x720 acceptance
+/// size, above the 44 px touch-target floor.
+const KEY_W: f32 = 145.0;
+const KEY_H: f32 = 64.0;
+const KEY_COL_PITCH: f32 = 150.0;
+const KEY_ROW_PITCH: f32 = 70.0;
+const KEY_TOP: f32 = 500.0;
+const MIDDLE_X: f32 = 540.0;
+const RIGHT_X: f32 = 1050.0;
+/// The left jog cluster uses a wider column pitch than the other grids.
+const LEFT_X: [f32; 3] = [28.0, 188.0, 348.0];
+
+/// Guarded POWER pushbuttons: square, 66 logical units per side (47.5 px at
+/// 1280x720).
+const POWER_KEY_SIDE: f32 = 66.0;
+const POWER_ON_AT: (f32, f32) = (30.0, 74.0);
+const POWER_OFF_AT: (f32, f32) = (108.0, 74.0);
+
+const ESTOP_AT: (f32, f32) = (245.0, 155.0);
+const ESTOP_HIT: f32 = 132.0;
+const MODE_KNOB: (f32, f32, f32) = (510.0, 145.0, 72.0);
+const FEED_KNOB: (f32, f32, f32) = (800.0, 145.0, 48.0);
+const RAPID_KNOB: (f32, f32, f32) = (1030.0, 145.0, 48.0);
+const SPINDLE_KNOB: (f32, f32, f32) = (1260.0, 145.0, 48.0);
+/// Knob interaction padding beyond the radius (override knobs only).
+const KNOB_HIT_PAD: f32 = 14.0;
+const PROTECT_AT: (f32, f32) = (1530.0, 145.0);
+const PROTECT_HIT: f32 = 110.0;
+const CYCLE_START_AT: (f32, f32) = (95.0, 830.0);
+const CYCLE_STOP_AT: (f32, f32) = (220.0, 830.0);
+const CYCLE_R: f32 = 42.0;
+/// Chrome mounting ring around the cycle buttons; part of the hit target.
+const CYCLE_RING: f32 = 7.0;
+const PROBE_KEY_AT: (f32, f32) = (1507.0, 850.0);
+
+/// Sentinel mask for the PROBE CONTACT key in the hold tracker. The probe is
+/// not a `buttons` bit, so this all-ones value never mixes into
+/// `state.buttons` (every real button mask is a single bit).
+const PROBE_HOLD: u64 = u64::MAX;
+
+// Key matrix, matching the machine panel layout.
+// Same layout and arrow directions as svg/sim-panel.svg:
+//   B ▲   SAFE DOOR   B ▼
+//   A ▲   Z ▲   Y ▲
+//   X ◀   RAPID   X ▶
+//   Y ▼   Z ▼   A ▼
+// `<` `>` `^` `v` are painted as triangles (see `paint_key_arrow`), so the
+// arrows never depend on font glyph coverage. Rows 2 and 4 previously
+// shared one JOG_YN, which left Y+ unreachable, and Z/A had their
+// directions swapped.
+const LEFT_KEYS: [(&str, Option<&str>, u64, u64); 12] = [
+    ("B", Some("^"), buttons::JOG_BP, crate::leds::JOG_BP),
+    ("SAFE DOOR", None, buttons::SAFE_DOOR, crate::leds::SAFE_DOOR),
+    ("B", Some("v"), buttons::JOG_BN, crate::leds::JOG_BN),
+    ("A", Some("^"), buttons::JOG_AP, crate::leds::JOG_AP),
+    ("Z", Some("^"), buttons::JOG_ZP, crate::leds::JOG_ZP),
+    ("Y", Some("^"), buttons::JOG_YP, crate::leds::JOG_YP),
+    ("X", Some("<"), buttons::JOG_XN, crate::leds::JOG_XN),
+    ("RAPID", None, buttons::RAPID, crate::leds::RAPID),
+    ("X", Some(">"), buttons::JOG_XP, crate::leds::JOG_XP),
+    ("Y", Some("v"), buttons::JOG_YN, crate::leds::JOG_YN),
+    ("Z", Some("v"), buttons::JOG_ZN, crate::leds::JOG_ZN),
+    ("A", Some("v"), buttons::JOG_AN, crate::leds::JOG_AN),
+];
+
+const MIDDLE_KEYS: [(&str, u64, Option<u64>); 15] = [
+    ("MPG SIM", buttons::MPG_SIM, Some(crate::leds::MPG_SIM)),
+    ("S.B.K.", buttons::SBK, Some(crate::leds::SBK)),
+    ("B.D.T.", buttons::BDT, Some(crate::leds::BDT)),
+    ("M.LK", buttons::MLK, Some(crate::leds::MLK)),
+    ("OPT", buttons::OPT, Some(crate::leds::OPT)),
+    ("D.R.N.", buttons::DRN, Some(crate::leds::DRN)),
+    ("WORKLAMP", buttons::WORKLAMP, Some(crate::leds::WORKLAMP)),
+    ("AIR BLOW", buttons::AIR_BLOW, Some(crate::leds::AIR_BLOW)),
+    ("PT.LA", buttons::PT_LA, Some(crate::leds::PT_LA)),
+    ("COOLANT", buttons::COOLANT, Some(crate::leds::COOLANT)),
+    ("SPD.CTS", buttons::SPD_CTS, Some(crate::leds::SPD_CTS)),
+    ("FLUSH", buttons::FLUSH, Some(crate::leds::FLUSH)),
+    ("LUB", buttons::LUB, Some(crate::leds::LUB)),
+    ("CORRIDOR", buttons::CORRIDOR, Some(crate::leds::CORRIDOR)),
+    ("K1", buttons::K1, Some(crate::leds::K1)),
+];
+
+const RIGHT_KEYS: [(&str, u64, Option<u64>); 15] = [
+    ("SPD.ORT", buttons::SPD_ORI, Some(crate::leds::SPD_ORI)),
+    ("MAG CW", buttons::MAG_CW, Some(crate::leds::MAG_CW)),
+    ("MAG CCW", buttons::MAG_CCW, Some(crate::leds::MAG_CCW)),
+    ("SPD.CW", buttons::SPD_CW, Some(crate::leds::SPD_CW)),
+    ("SPD.SP", buttons::SPD_SP, Some(crate::leds::SPD_SP)),
+    ("SPD.CCW", buttons::SPD_CCW, Some(crate::leds::SPD_CCW)),
+    ("CHIP CW", buttons::CHIP_CW, Some(crate::leds::CHIP_CW)),
+    ("CHIP SP", buttons::CHIP_SP, Some(crate::leds::CHIP_SP)),
+    ("CHIP CCW", buttons::CHIP_CCW, Some(crate::leds::CHIP_CCW)),
+    ("CHUCK", buttons::CHUCK, Some(crate::leds::CHUCK)),
+    ("POT DN", buttons::POT_DN, Some(crate::leds::POT_DN)),
+    ("ARM MAN", buttons::ARM_MAN, Some(crate::leds::ARM_MAN)),
+    ("K2", buttons::K2, Some(crate::leds::K2)),
+    ("K3", buttons::K3, Some(crate::leds::K3)),
+    ("K4", buttons::K4, Some(crate::leds::K4)),
+];
+
+/// What is holding a momentary key down: the mouse pointer is a single
+/// source, every active touch id is its own source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HoldSource {
+    Mouse,
+    Touch(egui::TouchId),
+}
+
+/// Momentary-key hold state, matched from raw input events.
+///
+/// egui-winit only translates the FIRST active touch into pointer events, so
+/// hold tracking cannot rely on the pointer alone: extra fingers arrive as
+/// raw `Event::Touch` and would be invisible here. Matching press and release
+/// events per source against the key rects means a held key survives taps
+/// from other fingers, and a hold still ends exactly when its own press
+/// ends. A finger that slides off its key keeps it, matching egui's pointer
+/// capture for a held mouse drag.
+#[derive(Default)]
+struct HoldTracker {
+    holds: Vec<(HoldSource, u64)>,
+}
+
+impl HoldTracker {
+    fn is_empty(&self) -> bool {
+        self.holds.is_empty()
+    }
+
+    fn is_held(&self, mask: u64) -> bool {
+        self.holds.iter().any(|(_, held)| *held == mask)
+    }
+
+    fn press(&mut self, source: HoldSource, mask: u64) {
+        if !self
+            .holds
+            .iter()
+            .any(|(held_source, held)| *held_source == source && *held == mask)
+        {
+            self.holds.push((source, mask));
+        }
+    }
+
+    fn release(&mut self, source: HoldSource) {
+        self.holds.retain(|(held_source, _)| *held_source != source);
+    }
+
+    /// Fold this frame's input events into the hold state. `rects` are the
+    /// momentary key rects in screen coordinates.
+    fn process(&mut self, ui: &egui::Ui, rects: &[(u64, Rect)]) {
+        let hit = |pos: Pos2| {
+            rects
+                .iter()
+                .find(|(_, rect)| rect.contains(pos))
+                .map(|(mask, _)| *mask)
+        };
+        ui.input(|input| {
+            for event in &input.events {
+                match *event {
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        ..
+                    } => {
+                        if pressed {
+                            if let Some(mask) = hit(pos) {
+                                self.press(HoldSource::Mouse, mask);
+                            }
+                        } else {
+                            self.release(HoldSource::Mouse);
+                        }
+                    }
+                    egui::Event::PointerGone => self.release(HoldSource::Mouse),
+                    egui::Event::Touch { id, phase, pos, .. } => match phase {
+                        egui::TouchPhase::Start => {
+                            if let Some(mask) = hit(pos) {
+                                self.press(HoldSource::Touch(id), mask);
+                            }
+                        }
+                        egui::TouchPhase::Move => {}
+                        egui::TouchPhase::End | egui::TouchPhase::Cancel => {
+                            self.release(HoldSource::Touch(id));
+                        }
+                    },
+                    _ => {}
+                }
+            }
+        });
+    }
+}
+
+/// Every interactive target on the panel, in screen coordinates. Computed in
+/// one place so painting, hold tracking and the touch-target size test all
+/// see the same rects.
+struct Interactives {
+    momentary: Vec<(u64, Rect)>,
+    power_on: Rect,
+    power_off: Rect,
+    estop: Rect,
+    protect: Rect,
+    mode_knob: Rect,
+    feed: Rect,
+    rapid: Rect,
+    spindle: Rect,
+    cycle_start: Rect,
+    cycle_stop: Rect,
+}
+
+fn left_key_rects(l: &PanelLayout) -> Vec<Rect> {
+    (0..LEFT_KEYS.len())
+        .map(|index| {
+            let x = LEFT_X[index % 3];
+            let y = KEY_TOP + (index / 3) as f32 * KEY_ROW_PITCH;
+            l.r(x, y, KEY_W, KEY_H)
+        })
+        .collect()
+}
+
+fn key_grid_rects(l: &PanelLayout, x0: f32, columns: usize, count: usize) -> Vec<Rect> {
+    (0..count)
+        .map(|index| {
+            let x = x0 + (index % columns) as f32 * KEY_COL_PITCH;
+            let y = KEY_TOP + (index / columns) as f32 * KEY_ROW_PITCH;
+            l.r(x, y, KEY_W, KEY_H)
+        })
+        .collect()
+}
+
+fn knob_hit_rect(l: &PanelLayout, knob: (f32, f32, f32)) -> Rect {
+    let (cx, cy, r) = knob;
+    Rect::from_center_size(
+        l.p(cx, cy),
+        Vec2::splat(2.0 * (r + KNOB_HIT_PAD) * l.k),
+    )
+}
+
+fn interactives(l: &PanelLayout, probe_key: bool) -> Interactives {
+    let mut momentary: Vec<(u64, Rect)> = Vec::new();
+    for (rect, (_, _, mask, _)) in left_key_rects(l).iter().zip(LEFT_KEYS.iter()) {
+        momentary.push((*mask, *rect));
+    }
+    for (rect, (_, mask, _)) in key_grid_rects(l, MIDDLE_X, 3, MIDDLE_KEYS.len())
+        .iter()
+        .zip(MIDDLE_KEYS.iter())
+    {
+        momentary.push((*mask, *rect));
+    }
+    for (rect, (_, mask, _)) in key_grid_rects(l, RIGHT_X, 3, RIGHT_KEYS.len())
+        .iter()
+        .zip(RIGHT_KEYS.iter())
+    {
+        momentary.push((*mask, *rect));
+    }
+    if probe_key {
+        momentary.push((
+            PROBE_HOLD,
+            l.r(PROBE_KEY_AT.0, PROBE_KEY_AT.1, KEY_W, KEY_H),
+        ));
+    }
+    Interactives {
+        momentary,
+        power_on: l.r(POWER_ON_AT.0, POWER_ON_AT.1, POWER_KEY_SIDE, POWER_KEY_SIDE),
+        power_off: l.r(
+            POWER_OFF_AT.0,
+            POWER_OFF_AT.1,
+            POWER_KEY_SIDE,
+            POWER_KEY_SIDE,
+        ),
+        estop: Rect::from_center_size(l.p(ESTOP_AT.0, ESTOP_AT.1), Vec2::splat(ESTOP_HIT * l.k)),
+        protect: Rect::from_center_size(
+            l.p(PROTECT_AT.0, PROTECT_AT.1),
+            Vec2::splat(PROTECT_HIT * l.k),
+        ),
+        mode_knob: Rect::from_center_size(
+            l.p(MODE_KNOB.0, MODE_KNOB.1),
+            Vec2::splat(2.0 * MODE_KNOB.2 * l.k),
+        ),
+        feed: knob_hit_rect(l, FEED_KNOB),
+        rapid: knob_hit_rect(l, RAPID_KNOB),
+        spindle: knob_hit_rect(l, SPINDLE_KNOB),
+        cycle_start: Rect::from_center_size(
+            l.p(CYCLE_START_AT.0, CYCLE_START_AT.1),
+            Vec2::splat(2.0 * (CYCLE_R + CYCLE_RING) * l.k),
+        ),
+        cycle_stop: Rect::from_center_size(
+            l.p(CYCLE_STOP_AT.0, CYCLE_STOP_AT.1),
+            Vec2::splat(2.0 * (CYCLE_R + CYCLE_RING) * l.k),
+        ),
+    }
+}
 
 #[derive(Clone, Copy)]
 struct PanelLayout {
@@ -858,16 +1179,19 @@ impl PanelLayout {
     }
 }
 
-fn panel_layout(ui: &egui::Ui) -> PanelLayout {
-    let avail = ui.available_rect_before_wrap();
-    let k = (avail.width() / 1680.0)
-        .min(avail.height() / 1000.0)
+fn layout_for_rect(avail: Rect) -> PanelLayout {
+    let k = (avail.width() / CANVAS_W)
+        .min(avail.height() / CANVAS_H)
         .max(0.2);
-    let size = Vec2::new(1680.0 * k, 1000.0 * k);
+    let size = Vec2::new(CANVAS_W * k, CANVAS_H * k);
     PanelLayout {
         origin: avail.center() - size / 2.0,
         k,
     }
+}
+
+fn panel_layout(ui: &egui::Ui) -> PanelLayout {
+    layout_for_rect(ui.available_rect_before_wrap())
 }
 
 fn label(
@@ -883,6 +1207,51 @@ fn label(
     painter.text(l.p(x, y), align, text, l.font(size), color);
 }
 
+/// A filled circle shaded from `inner` at the center to `outer` at the rim,
+/// so pushbuttons, lamps and knob caps read as domed instead of flat.
+fn paint_dome(
+    painter: &egui::Painter,
+    center: Pos2,
+    radius: f32,
+    inner: Color32,
+    outer: Color32,
+) {
+    const SEGMENTS: u32 = 40;
+    let mut mesh = egui::epaint::Mesh::default();
+    mesh.colored_vertex(center, inner);
+    for i in 0..=SEGMENTS {
+        let a = i as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+        mesh.colored_vertex(center + Vec2::new(a.cos(), a.sin()) * radius, outer);
+    }
+    for i in 0..SEGMENTS {
+        mesh.add_triangle(0, 1 + i, 2 + i);
+    }
+    painter.add(egui::Shape::from(mesh));
+}
+
+/// A filled rect shaded from `top` to `bottom`: a cheap bevel for the
+/// square guarded pushbuttons.
+fn paint_vgrad_rect(painter: &egui::Painter, rect: Rect, top: Color32, bottom: Color32) {
+    let mut mesh = egui::epaint::Mesh::default();
+    mesh.colored_vertex(rect.left_top(), top);
+    mesh.colored_vertex(rect.right_top(), top);
+    mesh.colored_vertex(rect.right_bottom(), bottom);
+    mesh.colored_vertex(rect.left_bottom(), bottom);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    painter.add(egui::Shape::from(mesh));
+}
+
+/// A small specular highlight at ten o'clock, for domed parts.
+fn paint_specular(painter: &egui::Painter, center: Pos2, radius: f32, alpha: u8) {
+    painter.circle_filled(
+        center + Vec2::new(-0.35 * radius, -0.38 * radius),
+        radius * 0.22,
+        Color32::from_white_alpha(alpha),
+    );
+}
+
+/// A panel lamp in a dark metal bezel: raised ring, colored lens when lit.
 fn lamp(
     painter: &egui::Painter,
     l: &PanelLayout,
@@ -894,119 +1263,116 @@ fn lamp(
 ) {
     let center = l.p(x, y);
     let radius = r * l.k;
-    painter.circle_filled(center, radius, Color32::from_rgb(0x12, 0x14, 0x15));
-    painter.circle_stroke(center, radius, Stroke::new(1.0 * l.k, KEY_BORDER));
-    painter.circle_filled(
+    paint_dome(
+        painter,
         center,
-        radius * 0.78,
-        if on {
-            color
-        } else {
-            Color32::from_rgb(0x2b, 0x2f, 0x30)
-        },
+        radius,
+        Color32::from_rgb(0x2e, 0x32, 0x35),
+        Color32::from_rgb(0x0b, 0x0d, 0x0e),
     );
+    painter.circle_stroke(
+        center,
+        radius,
+        Stroke::new(1.0 * l.k, Color32::from_rgb(0x44, 0x49, 0x4d)),
+    );
+    let lens = radius * 0.62;
     if on {
+        paint_dome(painter, center, lens, color, color.gamma_multiply(0.5));
         painter.circle_stroke(
             center,
-            radius * 0.55,
-            Stroke::new(1.0 * l.k, Color32::WHITE.gamma_multiply(0.45)),
+            lens,
+            Stroke::new(1.0 * l.k, color.gamma_multiply(1.4)),
+        );
+        paint_specular(painter, center, lens, 90);
+    } else {
+        paint_dome(
+            painter,
+            center,
+            lens,
+            Color32::from_rgb(0x2b, 0x2f, 0x31),
+            Color32::from_rgb(0x16, 0x18, 0x1a),
         );
     }
 }
 
-/// Draw a direction arrow as a filled triangle. `"<"`, `">"`, `"^"` and
+/// Draw a direction arrow as a filled triangle. `"<`, `">`, `"^"` and
 /// `"v"` are the four directions; anything else is drawn as small text.
 fn paint_key_arrow(
     painter: &egui::Painter,
     l: &PanelLayout,
-    x: f32,
-    y: f32,
+    center: Pos2,
     code: &str,
     color: Color32,
 ) {
-    let c = l.p(x, y);
     let s = 9.0 * l.k;
     let points = match code {
         "^" => vec![
-            c + Vec2::new(0.0, -s),
-            c + Vec2::new(-s * 0.85, s * 0.6),
-            c + Vec2::new(s * 0.85, s * 0.6),
+            center + Vec2::new(0.0, -s),
+            center + Vec2::new(-s * 0.85, s * 0.6),
+            center + Vec2::new(s * 0.85, s * 0.6),
         ],
         "v" => vec![
-            c + Vec2::new(0.0, s),
-            c + Vec2::new(-s * 0.85, -s * 0.6),
-            c + Vec2::new(s * 0.85, -s * 0.6),
+            center + Vec2::new(0.0, s),
+            center + Vec2::new(-s * 0.85, -s * 0.6),
+            center + Vec2::new(s * 0.85, -s * 0.6),
         ],
         "<" => vec![
-            c + Vec2::new(-s, 0.0),
-            c + Vec2::new(s * 0.6, -s * 0.85),
-            c + Vec2::new(s * 0.6, s * 0.85),
+            center + Vec2::new(-s, 0.0),
+            center + Vec2::new(s * 0.6, -s * 0.85),
+            center + Vec2::new(s * 0.6, s * 0.85),
         ],
         ">" => vec![
-            c + Vec2::new(s, 0.0),
-            c + Vec2::new(-s * 0.6, -s * 0.85),
-            c + Vec2::new(-s * 0.6, s * 0.85),
+            center + Vec2::new(s, 0.0),
+            center + Vec2::new(-s * 0.6, -s * 0.85),
+            center + Vec2::new(-s * 0.6, s * 0.85),
         ],
         other => {
-            label(painter, l, x, y, 18.0, other, color, Align2::CENTER_CENTER);
+            painter.text(center, Align2::CENTER_CENTER, other, l.font(9.0), color);
             return;
         }
     };
     painter.add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
 }
 
-fn rounded_button(
+/// The cap of a compact black legend key: face, thin dark border, top edge
+/// highlight and the green LED dot.
+fn paint_key_cap(
     ui: &egui::Ui,
     l: &PanelLayout,
     rect: Rect,
     id: egui::Id,
     fill: Color32,
-    border: Color32,
-) -> egui::Response {
-    let resp = ui.interact(rect, id, Sense::click());
-    let fill = if resp.hovered() {
+    led_on: bool,
+    down: bool,
+) {
+    // Hover-only sense: the hold state comes from the HoldTracker, the key
+    // cap just lights up under the mouse.
+    let resp = ui.interact(rect, id, Sense::hover());
+    let fill = if down {
+        fill.gamma_multiply(1.45)
+    } else if resp.hovered() {
         fill.gamma_multiply(1.22)
     } else {
         fill
     };
     ui.painter().rect(
         rect,
-        4.0 * l.k,
+        3.0 * l.k,
         fill,
-        Stroke::new(1.0 * l.k, if resp.hovered() { BLUE } else { border }),
+        Stroke::new(1.0 * l.k, KEY_BORDER),
         egui::StrokeKind::Inside,
     );
-    resp
-}
-
-fn panel_key(
-    ui: &egui::Ui,
-    l: &PanelLayout,
-    state: &SimPanelState,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    label_text: &str,
-    sub: Option<&str>,
-    mask: u64,
-    fill: Color32,
-    led: Option<u64>,
-) -> (bool, bool) {
-    let rect = l.r(x, y, w, h);
-    let resp = rounded_button(
-        ui,
-        l,
-        rect,
-        ui.scope_id().with(("panel-key", mask, x as i32, y as i32)),
-        fill,
-        KEY_BORDER,
+    // Top inner highlight: the molded edge of the key cap.
+    ui.painter().line_segment(
+        [
+            rect.left_top() + Vec2::new(3.0 * l.k, 1.5 * l.k),
+            rect.right_top() + Vec2::new(-3.0 * l.k, 1.5 * l.k),
+        ],
+        Stroke::new(1.0 * l.k, KEY_TOP_HI),
     );
-    let led_on = led
-        .map(|bit| state.leds & bit != 0)
-        .unwrap_or(state.buttons & mask != 0);
+    let led = rect.left_top() + Vec2::new(12.0 * l.k, 12.0 * l.k);
     ui.painter().circle_filled(
-        rect.left_top() + Vec2::new(12.0 * l.k, 12.0 * l.k),
+        led,
         3.5 * l.k,
         if led_on {
             GREEN
@@ -1016,156 +1382,168 @@ fn panel_key(
     );
     if led_on {
         ui.painter().circle_stroke(
-            rect.left_top() + Vec2::new(12.0 * l.k, 12.0 * l.k),
-            5.2 * l.k,
-            Stroke::new(1.0 * l.k, GREEN.gamma_multiply(0.55)),
-        );
-    }
-    let cy = if sub.is_some() {
-        y + h * 0.40
-    } else {
-        y + h * 0.5
-    };
-    label(
-        ui.painter(),
-        l,
-        x + w * 0.5,
-        cy,
-        14.0,
-        label_text,
-        TEXT,
-        Align2::CENTER_CENTER,
-    );
-    if let Some(sub) = sub {
-        paint_key_arrow(ui.painter(), l, x + w * 0.5, y + h * 0.70, sub, TEXT);
-    }
-    // (clicked, held): the key matrix is momentary, so the caller must know
-    // whether the pointer is still down. A click-only edge left the button bit
-    // latched, and halui kept jogging after the operator let go.
-    (resp.clicked(), resp.is_pointer_button_down_on())
-}
-
-fn momentary_key(
-    ui: &egui::Ui,
-    l: &PanelLayout,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    label_text: &str,
-    sub: &str,
-    fill: Color32,
-    id: &'static str,
-    on: bool,
-) -> (bool, bool) {
-    let rect = l.r(x, y, w, h);
-    let resp = rounded_button(
-        ui,
-        l,
-        rect,
-        ui.scope_id().with(("toggle-key", id)),
-        fill,
-        KEY_BORDER,
-    );
-    let led = rect.left_top() + Vec2::new(12.0 * l.k, 12.0 * l.k);
-    ui.painter().circle_filled(
-        led,
-        3.5 * l.k,
-        if on {
-            GREEN
-        } else {
-            Color32::from_rgb(0x38, 0x3e, 0x41)
-        },
-    );
-    if on {
-        ui.painter().circle_stroke(
             led,
             5.2 * l.k,
             Stroke::new(1.0 * l.k, GREEN.gamma_multiply(0.55)),
         );
     }
-    label(
-        ui.painter(),
-        l,
-        x + w * 0.5,
-        y + h * 0.38,
-        14.0,
-        label_text,
-        TEXT,
-        Align2::CENTER_CENTER,
-    );
-    label(
-        ui.painter(),
-        l,
-        x + w * 0.5,
-        y + h * 0.68,
-        8.5,
-        sub,
-        if on { GREEN } else { MUTED },
-        Align2::CENTER_CENTER,
-    );
-    (resp.clicked(), resp.is_pointer_button_down_on())
 }
 
-fn power_key(
+/// One compact black legend key with a white small-caps legend. `down` comes
+/// from the HoldTracker: the hold state is settled from the raw input events
+/// before painting (see `paint_panel`), so the key itself only paints.
+#[allow(clippy::too_many_arguments)]
+fn panel_key(
     ui: &egui::Ui,
     l: &PanelLayout,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
+    rect: Rect,
     label_text: &str,
+    sub: Option<&str>,
     fill: Color32,
-    id: &'static str,
-) -> bool {
-    let rect = l.r(x, y, w, h);
-    let resp = rounded_button(
+    led_on: bool,
+    down: bool,
+    mask: u64,
+) {
+    paint_key_cap(
         ui,
         l,
         rect,
-        ui.scope_id().with((id, x as i32, y as i32)),
+        ui.scope_id().with(("panel-key", mask)),
         fill,
-        KEY_BORDER,
+        led_on,
+        down,
     );
-    label(
-        ui.painter(),
-        l,
-        x + w * 0.5,
-        y + h * 0.5,
-        13.0,
+    let cx = rect.center().x;
+    let cy = if sub.is_some() {
+        rect.top() + rect.height() * 0.40
+    } else {
+        rect.center().y
+    };
+    ui.painter().text(
+        Pos2::new(cx, cy),
+        Align2::CENTER_CENTER,
         label_text,
-        if fill == GREEN {
-            Color32::from_rgb(0x08, 0x20, 0x0c)
+        l.font(14.0),
+        TEXT,
+    );
+    if let Some(sub) = sub {
+        paint_key_arrow(
+            ui.painter(),
+            l,
+            Pos2::new(cx, rect.top() + rect.height() * 0.72),
+            sub,
+            TEXT,
+        );
+    }
+}
+
+/// A guarded POWER pushbutton: a translucent protective frame around a square
+/// illuminated button, like the clear guards on the physical panel.
+#[allow(clippy::too_many_arguments)]
+fn power_key(
+    ui: &egui::Ui,
+    l: &PanelLayout,
+    rect: Rect,
+    label_text: &str,
+    base: Color32,
+    lit: Option<Color32>,
+    id: &'static str,
+) -> bool {
+    let resp = ui.interact(rect, ui.scope_id().with(id), Sense::click());
+    // The clear guard reads as a slightly lighter translucent frame.
+    let guard = rect.expand(6.0 * l.k);
+    ui.painter().rect(
+        guard,
+        4.0 * l.k,
+        Color32::from_white_alpha(9),
+        Stroke::new(1.5 * l.k, Color32::from_white_alpha(55)),
+        egui::StrokeKind::Inside,
+    );
+    let fill = lit.unwrap_or(base);
+    let fill = if resp.hovered() {
+        fill.gamma_multiply(1.15)
+    } else {
+        fill
+    };
+    paint_vgrad_rect(
+        ui.painter(),
+        rect,
+        fill.gamma_multiply(1.12),
+        fill.gamma_multiply(0.82),
+    );
+    ui.painter().rect_stroke(
+        rect,
+        3.0 * l.k,
+        Stroke::new(1.0 * l.k, KEY_BORDER),
+        egui::StrokeKind::Inside,
+    );
+    if let Some(lit_color) = lit {
+        // Illuminated buttons spill a little light onto the guard.
+        ui.painter().rect_stroke(
+            rect.expand(2.0 * l.k),
+            3.0 * l.k,
+            Stroke::new(2.0 * l.k, lit_color.gamma_multiply(0.6)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let dark_text = lit.is_some() || base == IVORY;
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label_text,
+        l.font(13.0),
+        if dark_text {
+            Color32::from_rgb(0x16, 0x18, 0x1a)
         } else {
             TEXT
         },
-        Align2::CENTER_CENTER,
     );
     resp.clicked()
 }
 
+/// A large round pushbutton with a chrome mounting ring (CYCLE START/STOP).
+#[allow(clippy::too_many_arguments)]
 fn round_key(
     ui: &egui::Ui,
     l: &PanelLayout,
-    x: f32,
-    y: f32,
-    r: f32,
+    at: (f32, f32),
+    rect: Rect,
     label_text: &str,
-    fill: Color32,
+    inner: Color32,
+    outer: Color32,
     id: &'static str,
     led_on: bool,
 ) -> bool {
-    let rect = Rect::from_center_size(l.p(x, y), Vec2::splat(2.0 * r * l.k));
+    let center = l.p(at.0, at.1);
     let resp = ui.interact(rect, ui.scope_id().with(id), Sense::click());
-    let center = l.p(x, y);
-    ui.painter().circle_filled(center, r * l.k, fill);
+    // Chrome ring.
+    paint_dome(
+        ui.painter(),
+        center,
+        (CYCLE_R + CYCLE_RING) * l.k,
+        Color32::from_rgb(0xd4, 0xd8, 0xdc),
+        Color32::from_rgb(0x62, 0x67, 0x6c),
+    );
     ui.painter().circle_stroke(
         center,
-        r * l.k,
+        (CYCLE_R + CYCLE_RING) * l.k,
+        Stroke::new(1.0 * l.k, Color32::from_rgb(0x38, 0x3c, 0x40)),
+    );
+    let brighten = if resp.hovered() { 1.08 } else { 1.0 };
+    paint_dome(
+        ui.painter(),
+        center,
+        CYCLE_R * l.k,
+        inner.gamma_multiply(brighten),
+        outer.gamma_multiply(brighten),
+    );
+    ui.painter().circle_stroke(
+        center,
+        CYCLE_R * l.k,
         Stroke::new(2.0 * l.k, Color32::from_rgb(0x0c, 0x0e, 0x0f)),
     );
     ui.painter().circle_filled(
-        center + Vec2::new(0.0, -r * 0.55 * l.k),
+        center + Vec2::new(0.0, -CYCLE_R * 0.55 * l.k),
         4.0 * l.k,
         if led_on {
             GREEN
@@ -1176,14 +1554,73 @@ fn round_key(
     label(
         ui.painter(),
         l,
-        x,
-        y + r + 22.0,
+        at.0,
+        at.1 + CYCLE_R + 22.0,
         13.0,
         label_text,
         TEXT,
         Align2::CENTER_CENTER,
     );
     resp.clicked()
+}
+
+/// A knurled rotary knob: serrated grip ring, domed black cap, metal hub and
+/// a white pointer line at `angle` (egui convention: 0 = +x, positive is
+/// clockwise because y points down).
+fn paint_knob(painter: &egui::Painter, l: &PanelLayout, center: Pos2, r: f32, angle: f32) {
+    let radius = r * l.k;
+    // Knurled grip: alternating ridges around the rim.
+    const RIDGES: u32 = 48;
+    for i in 0..RIDGES {
+        let a = i as f32 * std::f32::consts::TAU / RIDGES as f32;
+        let dir = Vec2::new(a.cos(), a.sin());
+        let shade = if i % 2 == 0 {
+            Color32::from_rgb(0x3a, 0x3e, 0x42)
+        } else {
+            Color32::from_rgb(0x0d, 0x0f, 0x10)
+        };
+        painter.line_segment(
+            [center + dir * radius * 0.86, center + dir * radius * 0.99],
+            Stroke::new(2.4 * l.k, shade),
+        );
+    }
+    paint_dome(
+        painter,
+        center,
+        radius * 0.88,
+        Color32::from_rgb(0x26, 0x29, 0x2c),
+        Color32::from_rgb(0x0f, 0x11, 0x12),
+    );
+    painter.circle_stroke(
+        center,
+        radius,
+        Stroke::new(2.0 * l.k, Color32::from_rgb(0x08, 0x09, 0x0a)),
+    );
+    // Pointer line from the hub to the rim.
+    let dir = Vec2::new(angle.cos(), angle.sin());
+    painter.line_segment(
+        [center + dir * radius * 0.30, center + dir * radius * 0.80],
+        Stroke::new(4.0 * l.k, Color32::WHITE),
+    );
+    // Metal hub.
+    paint_dome(
+        painter,
+        center,
+        radius * 0.26,
+        Color32::from_rgb(0xc2, 0xc7, 0xcc),
+        Color32::from_rgb(0x58, 0x5d, 0x62),
+    );
+    painter.circle_stroke(
+        center,
+        radius * 0.26,
+        Stroke::new(1.0 * l.k, Color32::from_rgb(0x2c, 0x30, 0x33)),
+    );
+}
+
+/// Value dial sweep: the minimum sits at 7:30, the maximum at 4:30 and the
+/// gap is at the bottom, matching the printed scales on the physical panel.
+fn value_angle(norm: f32) -> f32 {
+    (135.0 + norm.clamp(0.0, 1.0) * 270.0).to_radians()
 }
 
 /// How long a momentary panel key (keyboard shortcut or round button) stays
@@ -1229,37 +1666,37 @@ fn mode_from_angle(degrees: f32) -> PanelMode {
     best.1
 }
 
-fn draw_mode_knob(ui: &egui::Ui, l: &PanelLayout, state: &SimPanelState) {
-    let (cx, cy, r) = (510.0, 145.0, 72.0);
+fn draw_mode_knob(ui: &egui::Ui, l: &PanelLayout, state: &SimPanelState, rect: Rect) {
+    let (cx, cy, r) = MODE_KNOB;
     let center = l.p(cx, cy);
-    let knob_rect = Rect::from_center_size(center, Vec2::splat(r * 2.0 * l.k));
     let knob = ui.interact(
-        knob_rect,
+        rect,
         ui.scope_id().with("mode-knob"),
         Sense::click_and_drag(),
     );
-    ui.painter()
-        .circle_filled(center, r * l.k, Color32::from_rgb(0x20, 0x23, 0x24));
-    ui.painter().circle_stroke(
-        center,
-        r * l.k,
-        Stroke::new(3.0 * l.k, Color32::from_rgb(0x0c, 0x0e, 0x0f)),
-    );
+    // Printed scale: a tick ring on the plate and the eight mode names around
+    // the arc, the active one lit. The names used to be separate click targets
+    // (88x24 logical, 17 px tall at 1280x720 — far under the 44 px touch
+    // floor); the knob itself keeps click-to-step, drag-to-angle and scroll.
     for i in 0..=16 {
         let a = (-135.0 + i as f32 * 270.0 / 16.0).to_radians();
-        let inner = r * 0.86;
-        let outer = r * 0.97;
-        let p0 = center + Vec2::new(a.cos(), a.sin()) * inner * l.k;
-        let p1 = center + Vec2::new(a.cos(), a.sin()) * outer * l.k;
-        ui.painter()
-            .line_segment([p0, p1], Stroke::new(1.0 * l.k, MUTED));
+        let dir = Vec2::new(a.cos(), a.sin());
+        let p0 = center + dir * (r + 8.0) * l.k;
+        let p1 = center + dir * (r + 16.0) * l.k;
+        ui.painter().line_segment([p0, p1], Stroke::new(1.0 * l.k, MUTED));
     }
-    let a = mode_angle(mode_index(state.mode));
-    let tip = center + Vec2::new(a.cos(), a.sin()) * r * 0.72 * l.k;
-    ui.painter()
-        .line_segment([center, tip], Stroke::new(4.0 * l.k, Color32::WHITE));
-    ui.painter()
-        .circle_filled(center, 7.0 * l.k, Color32::from_rgb(0x0c, 0x0e, 0x0f));
+    for mode in PanelMode::ALL {
+        let a = mode_angle(mode_index(mode));
+        let pos = center + Vec2::new(a.cos(), a.sin()) * (r + 28.0) * l.k;
+        ui.painter().text(
+            pos,
+            Align2::CENTER_CENTER,
+            mode.label(),
+            l.font(11.0),
+            if state.mode == mode { BLUE } else { TEXT },
+        );
+    }
+    paint_knob(ui.painter(), l, center, r, mode_angle(mode_index(state.mode)));
 
     if knob.dragged() || knob.clicked() {
         if let Some(pointer) = ui.ctx().pointer_interact_pos() {
@@ -1293,71 +1730,51 @@ fn draw_mode_knob(ui: &egui::Ui, l: &PanelLayout, state: &SimPanelState) {
             ui.ctx().request_repaint();
         }
     }
-
-    let modes = [
-        (PanelMode::Jog, "JOG", 450.0, 64.0),
-        (PanelMode::Mpg, "MPG", 570.0, 64.0),
-        (PanelMode::Mdi, "MDI", 402.0, 145.0),
-        (PanelMode::Inc, "INC", 618.0, 145.0),
-        (PanelMode::Auto, "AUTO", 402.0, 226.0),
-        (PanelMode::Home, "HOME", 618.0, 226.0),
-        (PanelMode::Edit, "EDIT", 450.0, 252.0),
-        (PanelMode::ProgHome, "PROG.HOME", 570.0, 252.0),
-    ];
-    for (mode, name, x, y) in modes {
-        let active = state.mode == mode;
-        label(
-            ui.painter(),
-            l,
-            x,
-            y,
-            12.0,
-            name,
-            if active { BLUE } else { TEXT },
-            Align2::CENTER_CENTER,
-        );
-        let hit = l.r(x - 44.0, y - 12.0, 88.0, 24.0);
-        if ui
-            .interact(
-                hit,
-                ui.scope_id().with(("mode-label", name)),
-                Sense::click(),
-            )
-            .clicked()
-        {
-            // handled by caller through a marker key; the painter has no handle.
-            ui.ctx().data_mut(|data| {
-                data.insert_temp(ui.scope_id().with("linc-panel-mode"), Some(mode))
-            });
-            ui.ctx().request_repaint();
-        }
-    }
-    label(
-        ui.painter(),
-        l,
-        510.0,
-        32.0,
-        13.0,
-        "MODE",
-        MUTED,
-        Align2::CENTER_CENTER,
-    );
 }
 
+/// Feed override scale numerals, as (fraction of the dial sweep, text).
+const FEED_NUMERALS: [(f32, &str); 9] = [
+    (0.0, "0"),
+    (0.13333, "20"),
+    (0.26667, "40"),
+    (0.4, "60"),
+    (0.53333, "80"),
+    (0.66667, "100"),
+    (0.8, "120"),
+    (0.93333, "140"),
+    (1.0, "150"),
+];
+
+/// Rapid override scale: the physical dial marks F0/25/50/100.
+const RAPID_NUMERALS: [(f32, &str); 4] = [(0.0, "F0"), (0.25, "25"), (0.5, "50"), (1.0, "100")];
+
+/// Spindle override scale numerals, as (fraction of the dial sweep, text).
+const SPINDLE_NUMERALS: [(f32, &str); 8] = [
+    (0.0, "50"),
+    (0.14286, "60"),
+    (0.28571, "70"),
+    (0.42857, "80"),
+    (0.57143, "90"),
+    (0.71429, "100"),
+    (0.85714, "110"),
+    (1.0, "120"),
+];
+
+#[allow(clippy::too_many_arguments)]
 fn draw_override_knob(
     ui: &egui::Ui,
     l: &PanelLayout,
-    cx: f32,
-    cy: f32,
-    r: f32,
+    knob: (f32, f32, f32),
+    rect: Rect,
     min: f32,
     max: f32,
     value: f32,
     title: &str,
     id: &'static str,
+    numerals: &[(f32, &str)],
 ) -> Option<f32> {
+    let (cx, cy, r) = knob;
     let center = l.p(cx, cy);
-    let rect = Rect::from_center_size(center, Vec2::splat(2.0 * r * l.k + 28.0 * l.k));
     let resp = ui.interact(rect, ui.scope_id().with(id), Sense::click_and_drag());
     let mut next = value;
     if resp.dragged() {
@@ -1370,32 +1787,27 @@ fn draw_override_knob(
         }
     }
     next = next.clamp(min, max);
-    ui.painter()
-        .circle_filled(center, r * l.k, Color32::from_rgb(0x20, 0x23, 0x24));
-    ui.painter().circle_stroke(
-        center,
-        r * l.k,
-        Stroke::new(3.0 * l.k, Color32::from_rgb(0x0c, 0x0e, 0x0f)),
-    );
+    // Printed scale: tick ring plus numerals on the plate.
     for i in 0..=10 {
-        let a = (-135.0 + i as f32 * 270.0 / 10.0).to_radians();
-        let p0 = center + Vec2::new(a.cos(), a.sin()) * r * 0.84 * l.k;
-        let p1 = center + Vec2::new(a.cos(), a.sin()) * r * 0.98 * l.k;
+        let a = value_angle(i as f32 / 10.0);
+        let dir = Vec2::new(a.cos(), a.sin());
+        let p0 = center + dir * (r + 6.0) * l.k;
+        let p1 = center + dir * (r + 14.0) * l.k;
+        ui.painter().line_segment([p0, p1], Stroke::new(1.0 * l.k, MUTED));
+    }
+    for (norm, text) in numerals {
+        let a = value_angle(*norm);
+        let pos = center + Vec2::new(a.cos(), a.sin()) * (r + 27.0) * l.k;
         ui.painter()
-            .line_segment([p0, p1], Stroke::new(1.0 * l.k, MUTED));
+            .text(pos, Align2::CENTER_CENTER, text, l.font(10.0), MUTED);
     }
     let norm = ((next - min) / (max - min)).clamp(0.0, 1.0);
-    let a = (-135.0 + norm * 270.0).to_radians();
-    let tip = center + Vec2::new(a.cos(), a.sin()) * r * 0.74 * l.k;
-    ui.painter()
-        .line_segment([center, tip], Stroke::new(4.0 * l.k, Color32::WHITE));
-    ui.painter()
-        .circle_filled(center, 7.0 * l.k, Color32::from_rgb(0x0c, 0x0e, 0x0f));
+    paint_knob(ui.painter(), l, center, r, value_angle(norm));
     label(
         ui.painter(),
         l,
         cx,
-        cy - r - 24.0,
+        cy - r - 44.0,
         13.0,
         title,
         MUTED,
@@ -1405,7 +1817,7 @@ fn draw_override_knob(
         ui.painter(),
         l,
         cx,
-        cy + r + 20.0,
+        cy + r + 34.0,
         12.0,
         &format!("{:.0}%", next * 100.0),
         TEXT,
@@ -1424,6 +1836,7 @@ fn draw_7seg_digit(
     rect: Rect,
     ch: char,
     on_color: Color32,
+    off_color: Color32,
 ) {
     const SEGMENTS: [[bool; 7]; 10] = [
         [true, true, true, true, true, true, false],
@@ -1457,15 +1870,15 @@ fn draw_7seg_digit(
         ((0.08, 0.50), (0.92, 0.50)),
     ];
     for (index, (a, b)) in coords.iter().enumerate() {
-        let color = if segs[index] {
-            on_color
-        } else {
-            Color32::from_rgb(0x46, 0x10, 0x10)
-        };
+        let color = if segs[index] { on_color } else { off_color };
         painter.line_segment(seg(*a, *b), Stroke::new(6.0 * l.k, color));
     }
 }
 
+/// A 7-segment display in a smoked near-black bezel. The tool displays are
+/// bright red; the status display is the dimmer gray-red of the physical
+/// panel. Unlit segments stay barely visible.
+#[allow(clippy::too_many_arguments)]
 fn draw_display(
     painter: &egui::Painter,
     l: &PanelLayout,
@@ -1475,6 +1888,7 @@ fn draw_display(
     h: f32,
     title: &str,
     value: i32,
+    dim: bool,
 ) {
     label(
         painter,
@@ -1486,55 +1900,108 @@ fn draw_display(
         MUTED,
         Align2::CENTER_CENTER,
     );
-    let rect = l.r(x, y, w, h);
+    let bezel = l.r(x, y, w, h);
     painter.rect(
-        rect,
-        3.0 * l.k,
-        Color32::from_rgb(0x1a, 0x03, 0x03),
-        Stroke::new(2.0 * l.k, Color32::from_rgb(0x07, 0x08, 0x09)),
+        bezel,
+        5.0 * l.k,
+        Color32::from_rgb(0x0b, 0x0d, 0x0e),
+        Stroke::new(1.5 * l.k, Color32::from_rgb(0x2e, 0x32, 0x35)),
         egui::StrokeKind::Inside,
     );
+    let screen = bezel.shrink(7.0 * l.k);
+    painter.rect_filled(screen, 2.0 * l.k, Color32::from_rgb(0x16, 0x02, 0x02));
+    let (on_color, off_color) = if dim {
+        (
+            Color32::from_rgb(0xc0, 0x4a, 0x42),
+            Color32::from_rgb(0x3a, 0x12, 0x10),
+        )
+    } else {
+        (
+            Color32::from_rgb(0xff, 0x2b, 0x2b),
+            Color32::from_rgb(0x46, 0x10, 0x10),
+        )
+    };
     let text = if (0..=99).contains(&value) {
         format!("{value:02}")
     } else {
         "--".into()
     };
-    let digit_w = h * 0.46 * l.k;
-    let gap = h * 0.12 * l.k;
+    let digit_w = screen.height() * 0.58;
+    let gap = screen.height() * 0.15;
     let total = digit_w * 2.0 + gap;
-    let start = rect.center().x - total * 0.5;
+    let start = screen.center().x - total * 0.5;
     for (index, ch) in text.chars().take(2).enumerate() {
         let digit = Rect::from_min_size(
             Pos2::new(
                 start + index as f32 * (digit_w + gap),
-                rect.top() + h * 0.10 * l.k,
+                screen.top() + screen.height() * 0.10,
             ),
-            Vec2::new(digit_w, h * 0.80 * l.k),
+            Vec2::new(digit_w, screen.height() * 0.80),
         );
-        draw_7seg_digit(painter, l, digit, ch, Color32::from_rgb(0xff, 0x2b, 0x2b));
+        draw_7seg_digit(painter, l, digit, ch, on_color, off_color);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_panel(
     ui: &egui::Ui,
     l: &PanelLayout,
     state: &SimPanelState,
     handle: &mut SimPanelHandle,
     pressed: &mut u64,
-    mouse_held: &mut u64,
+    holds: &mut HoldTracker,
     power_pulse: &mut Option<(bool, Instant)>,
+    probe_key: bool,
 ) {
+    let it = interactives(l, probe_key);
+    // Match this frame's input events against the momentary key rects BEFORE
+    // painting, so the state published and the caps drawn this frame already
+    // include the newest press or release.
+    holds.process(ui, &it.momentary);
+
     let painter = ui.painter();
-    painter.rect_filled(ui.max_rect(), 0.0, PANEL_BG);
-    let panel = l.r(8.0, 8.0, 1664.0, 984.0);
+    painter.rect_filled(ui.max_rect(), 0.0, SURROUND);
+    // Raised outer bezel: a darker rim with a top-edge highlight, the plate
+    // inset inside it, and a corner screw in each corner.
+    let bezel = l.r(8.0, 8.0, 1664.0, 984.0);
     painter.rect(
-        panel,
-        6.0 * l.k,
-        Color32::from_rgb(0x34, 0x38, 0x3a),
-        Stroke::new(2.0 * l.k, KEY_BORDER),
+        bezel,
+        10.0 * l.k,
+        BEZEL_RIM,
+        Stroke::new(2.0 * l.k, EDGE_HI),
         egui::StrokeKind::Inside,
     );
-    // top labels
+    let plate = l.r(20.0, 20.0, 1640.0, 960.0);
+    painter.rect(
+        plate,
+        6.0 * l.k,
+        PLATE,
+        Stroke::new(1.0 * l.k, Color32::from_rgb(0x05, 0x06, 0x06)),
+        egui::StrokeKind::Inside,
+    );
+    painter.line_segment(
+        [
+            plate.left_top() + Vec2::new(8.0 * l.k, 2.0 * l.k),
+            plate.right_top() + Vec2::new(-8.0 * l.k, 2.0 * l.k),
+        ],
+        Stroke::new(1.0 * l.k, Color32::from_rgb(0x2e, 0x32, 0x35)),
+    );
+    for (sx, sy) in [(34.0, 34.0), (1646.0, 34.0), (34.0, 966.0), (1646.0, 966.0)] {
+        let c = l.p(sx, sy);
+        paint_dome(
+            painter,
+            c,
+            7.0 * l.k,
+            Color32::from_rgb(0x3d, 0x41, 0x45),
+            Color32::from_rgb(0x12, 0x14, 0x15),
+        );
+        painter.line_segment(
+            [c + Vec2::new(-4.0, 0.0) * l.k, c + Vec2::new(4.0, 0.0) * l.k],
+            Stroke::new(1.2 * l.k, Color32::from_rgb(0x08, 0x09, 0x0a)),
+        );
+    }
+
+    // Section headers.
     label(
         painter,
         l,
@@ -1566,17 +2033,15 @@ fn paint_panel(
         Align2::CENTER_CENTER,
     );
 
-    // POWER ON/OFF buttons
+    // POWER ON/OFF guarded pushbuttons.
     let power_on = state.power && !state.estop;
     if power_key(
         ui,
         l,
-        35.0,
-        75.0,
-        62.0,
-        56.0,
+        it.power_on,
         "ON",
-        if power_on { GREEN } else { KEY_BG },
+        IVORY,
+        if power_on { Some(GREEN) } else { None },
         "power-on",
     ) {
         handle.set(|state| {
@@ -1595,12 +2060,10 @@ fn paint_panel(
     if power_key(
         ui,
         l,
-        105.0,
-        75.0,
-        62.0,
-        56.0,
+        it.power_off,
         "OFF",
-        if power_on { KEY_BG } else { AMBER },
+        Color32::from_rgb(0x10, 0x12, 0x13),
+        if power_on { None } else { Some(AMBER) },
         "power-off",
     ) {
         handle.set(|state| {
@@ -1610,28 +2073,49 @@ fn paint_panel(
         });
         *power_pulse = Some((false, Instant::now()));
     }
-    lamp(painter, l, 27.0, 48.0, 7.0, power_on, GREEN);
+    lamp(painter, l, 63.0, 56.0, 8.0, power_on, GREEN);
 
     // E-stop mushroom. This is an operator-owned latching input, so the latched
     // state has to be visible on the panel itself — not only in the HMI.
-    let estop_center = l.p(245.0, 155.0);
+    let estop_center = l.p(ESTOP_AT.0, ESTOP_AT.1);
     let latched = state.estop;
-    painter.circle_filled(estop_center, 66.0 * l.k, YELLOW);
-    // A latched mushroom sits lower and darker, like a real pressed button.
-    let inner = if latched { 46.0 } else { 55.0 };
-    painter.circle_filled(
+    // The wide yellow collar ring the mushroom sits on.
+    paint_dome(
+        painter,
         estop_center,
-        inner * l.k,
-        if latched {
-            Color32::from_rgb(0x8e, 0x1c, 0x16)
-        } else {
-            RED
-        },
+        66.0 * l.k,
+        YELLOW,
+        Color32::from_rgb(0xc4, 0x9c, 0x00),
     );
     painter.circle_stroke(
         estop_center,
+        66.0 * l.k,
+        Stroke::new(1.5 * l.k, Color32::from_rgb(0x8f, 0x71, 0x00)),
+    );
+    // A latched mushroom sits lower and darker, like a real pressed button.
+    let inner = if latched { 46.0 } else { 55.0 };
+    if latched {
+        paint_dome(
+            painter,
+            estop_center,
+            inner * l.k,
+            Color32::from_rgb(0xa8, 0x26, 0x1f),
+            Color32::from_rgb(0x60, 0x0f, 0x0b),
+        );
+    } else {
+        paint_dome(
+            painter,
+            estop_center,
+            inner * l.k,
+            Color32::from_rgb(0xff, 0x5f, 0x55),
+            Color32::from_rgb(0xb0, 0x21, 0x19),
+        );
+        paint_specular(painter, estop_center, inner * l.k, 70);
+    }
+    painter.circle_stroke(
+        estop_center,
         inner * l.k,
-        Stroke::new(3.0 * l.k, Color32::from_rgb(0x9b, 0x1f, 0x18)),
+        Stroke::new(3.0 * l.k, Color32::from_rgb(0x7c, 0x18, 0x13)),
     );
     if latched {
         // Concentric ring marks the latched (twist-to-release) state.
@@ -1640,7 +2124,7 @@ fn paint_panel(
     label(
         painter,
         l,
-        245.0,
+        ESTOP_AT.0,
         236.0,
         11.0,
         if latched {
@@ -1651,8 +2135,7 @@ fn paint_panel(
         if latched { RED } else { MUTED },
         Align2::CENTER_CENTER,
     );
-    let estop_rect = Rect::from_center_size(estop_center, Vec2::splat(132.0 * l.k));
-    let estop_response = ui.interact(estop_rect, ui.scope_id().with("estop"), Sense::click());
+    let estop_response = ui.interact(it.estop, ui.scope_id().with("estop"), Sense::click());
     if estop_response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -1671,68 +2154,79 @@ fn paint_panel(
         });
     }
 
-    draw_mode_knob(ui, l, state);
+    draw_mode_knob(ui, l, state, it.mode_knob);
 
     if let Some(value) = draw_override_knob(
         ui,
         l,
-        800.0,
-        145.0,
-        48.0,
+        FEED_KNOB,
+        it.feed,
         0.0,
         1.5,
         state.feed_override as f32,
         "FEEDRATE OVERRIDE %",
         "feed",
+        &FEED_NUMERALS,
     ) {
         handle.set(|state| state.feed_override = value.clamp(0.0, 1.5) as f64);
     }
     if let Some(value) = draw_override_knob(
         ui,
         l,
-        1030.0,
-        145.0,
-        48.0,
+        RAPID_KNOB,
+        it.rapid,
         0.0,
         1.0,
         state.rapid_override as f32,
         "RAPID OVERRIDE %",
         "rapid",
+        &RAPID_NUMERALS,
     ) {
         handle.set(|state| state.rapid_override = value.clamp(0.0, 1.0) as f64);
     }
     if let Some(value) = draw_override_knob(
         ui,
         l,
-        1260.0,
-        145.0,
-        48.0,
+        SPINDLE_KNOB,
+        it.spindle,
         0.5,
         1.2,
         state.spindle_override as f32,
         "SPINDLE OVERRIDE %",
         "spindle",
+        &SPINDLE_NUMERALS,
     ) {
         handle.set(|state| state.spindle_override = value.clamp(0.5, 1.2) as f64);
     }
 
-    // Program protect key
-    let protect_center = l.p(1530.0, 145.0);
+    // Program protect keyswitch: a metal bezel, a dark face and the position
+    // pointer. The toggle logic is unchanged.
+    let protect_center = l.p(PROTECT_AT.0, PROTECT_AT.1);
+    paint_dome(
+        painter,
+        protect_center,
+        50.0 * l.k,
+        Color32::from_rgb(0x9a, 0xa0, 0xa5),
+        Color32::from_rgb(0x48, 0x4d, 0x51),
+    );
     painter.circle_filled(
         protect_center,
-        48.0 * l.k,
+        40.0 * l.k,
         Color32::from_rgb(0x1b, 0x1e, 0x20),
     );
     painter.circle_stroke(
         protect_center,
-        48.0 * l.k,
+        40.0 * l.k,
         Stroke::new(2.0 * l.k, KEY_BORDER),
     );
     let a = if state.program_protect { -1.0 } else { 1.0 };
-    let tip = protect_center + Vec2::new(0.55 * a, 0.8) * 34.0 * l.k;
+    let tip = protect_center + Vec2::new(0.55 * a, 0.8) * 30.0 * l.k;
     painter.line_segment(
         [protect_center, tip],
-        Stroke::new(6.0 * l.k, if state.program_protect { GREEN } else { AMBER }),
+        Stroke::new(
+            6.0 * l.k,
+            if state.program_protect { GREEN } else { AMBER },
+        ),
     );
     painter.circle_filled(
         protect_center,
@@ -1742,22 +2236,21 @@ fn paint_panel(
     label(
         painter,
         l,
-        1530.0,
+        PROTECT_AT.0,
         210.0,
         12.0,
         if state.program_protect { "ON" } else { "OFF" },
         if state.program_protect { GREEN } else { MUTED },
         Align2::CENTER_CENTER,
     );
-    let protect_rect = Rect::from_center_size(protect_center, Vec2::splat(110.0 * l.k));
     if ui
-        .interact(protect_rect, ui.scope_id().with("protect"), Sense::click())
+        .interact(it.protect, ui.scope_id().with("protect"), Sense::click())
         .clicked()
     {
         handle.set(|state| state.program_protect = !state.program_protect);
     }
 
-    // Axis and alarm lamps
+    // Axis and alarm lamps.
     label(
         painter,
         l,
@@ -1826,6 +2319,7 @@ fn paint_panel(
         105.0,
         "MAG TOOL",
         state.sseg_tool,
+        false,
     );
     draw_display(
         painter,
@@ -1836,6 +2330,7 @@ fn paint_panel(
         105.0,
         "SPD TOOL",
         state.sseg_next_tool,
+        false,
     );
     draw_display(
         painter,
@@ -1846,87 +2341,30 @@ fn paint_panel(
         105.0,
         "STATUS",
         state.sseg_status,
+        true,
     );
 
-    // Key matrix, matching the machine panel layout.
-    // Same layout and arrow directions as svg/sim-panel.svg:
-    //   B ▲   SAFE DOOR   B ▼
-    //   A ▲   Z ▲   Y ▲
-    //   X ◀   RAPID   X ▶
-    //   Y ▼   Z ▼   A ▼
-    // `<` `>` `^` `v` are painted as triangles (see `paint_key_arrow`), so the
-    // arrows never depend on font glyph coverage. Rows 2 and 4 previously
-    // shared one JOG_YN, which left Y+ unreachable, and Z/A had their
-    // directions swapped.
-    let left = [
-        ("B", Some("^"), buttons::JOG_BP, crate::leds::JOG_BP),
-        (
-            "SAFE DOOR",
-            None,
-            buttons::SAFE_DOOR,
-            crate::leds::SAFE_DOOR,
-        ),
-        ("B", Some("v"), buttons::JOG_BN, crate::leds::JOG_BN),
-        ("A", Some("^"), buttons::JOG_AP, crate::leds::JOG_AP),
-        ("Z", Some("^"), buttons::JOG_ZP, crate::leds::JOG_ZP),
-        ("Y", Some("^"), buttons::JOG_YP, crate::leds::JOG_YP),
-        ("X", Some("<"), buttons::JOG_XN, crate::leds::JOG_XN),
-        ("RAPID", None, buttons::RAPID, crate::leds::RAPID),
-        ("X", Some(">"), buttons::JOG_XP, crate::leds::JOG_XP),
-        ("Y", Some("v"), buttons::JOG_YN, crate::leds::JOG_YN),
-        ("Z", Some("v"), buttons::JOG_ZN, crate::leds::JOG_ZN),
-        ("A", Some("v"), buttons::JOG_AN, crate::leds::JOG_AN),
-    ];
     // The left group is 3 columns; cycle keys occupy the bottom row.
-    let left_rects = [
-        (28.0, 500.0),
-        (188.0, 500.0),
-        (348.0, 500.0),
-        (28.0, 570.0),
-        (188.0, 570.0),
-        (348.0, 570.0),
-        (28.0, 640.0),
-        (188.0, 640.0),
-        (348.0, 640.0),
-        (28.0, 710.0),
-        (188.0, 710.0),
-        (348.0, 710.0),
-    ];
-    for ((name, sub, mask, led), (x, y)) in left.iter().zip(left_rects.iter()) {
+    for ((name, sub, mask, led), rect) in LEFT_KEYS.iter().zip(left_key_rects(l).iter()) {
         let fill = if *mask == buttons::RAPID {
             Color32::from_rgb(0x8a, 0x75, 0x18)
         } else {
             KEY_BG
         };
-        let (_, held) = panel_key(
-            ui,
-            l,
-            state,
-            *x,
-            *y,
-            145.0,
-            60.0,
-            name,
-            *sub,
-            *mask,
-            fill,
-            Some(*led),
-        );
-        // Momentary: latch on press, release only on a pointer-up.
-        if held {
-            *mouse_held |= *mask;
-        }
-        let down = *mouse_held & *mask != 0;
+        // Momentary: the HoldTracker latched the press and releases it only
+        // when that same pointer or touch lets go.
+        let down = holds.is_held(*mask);
+        panel_key(ui, l, *rect, name, *sub, fill, state.leds & led != 0, down, *mask);
         handle.set(|s| s.set_button(*mask, down));
     }
     if round_key(
         ui,
         l,
-        95.0,
-        830.0,
-        42.0,
+        CYCLE_START_AT,
+        it.cycle_start,
         "CYCLE START",
-        Color32::from_rgb(0xf0, 0xf0, 0xeb),
+        Color32::from_rgb(0xf5, 0xf4, 0xee),
+        Color32::from_rgb(0xbd, 0xbb, 0xb3),
         "cycle-start",
         state.leds & crate::leds::CYCLE_ON != 0,
     ) {
@@ -1936,11 +2374,11 @@ fn paint_panel(
     if round_key(
         ui,
         l,
-        220.0,
-        830.0,
-        42.0,
+        CYCLE_STOP_AT,
+        it.cycle_stop,
         "CYCLE STOP",
-        Color32::from_rgb(0x10, 0x12, 0x13),
+        Color32::from_rgb(0x2c, 0x2f, 0x32),
+        Color32::from_rgb(0x0e, 0x10, 0x11),
         "cycle-stop",
         state.leds & crate::leds::CYCLE_OFF != 0,
     ) {
@@ -1948,62 +2386,57 @@ fn paint_panel(
         *pressed |= buttons::CYCLE_STOP;
     }
 
-    // Simulation-only probe contact, in the bottom-right corner and styled
-    // like the other square panel keys. Momentary: the contact is closed while
-    // the operator holds the key, matching how the probe input is asserted on
-    // contact and released on retract.
-    let (_, probe_held) = momentary_key(
+    // Simulation-only probe contact, gated behind `--probe-key`: a debug aid
+    // that must not crowd the panel by default. Momentary, like the other
+    // matrix keys: the contact is closed while the key is held, matching how
+    // the probe input is asserted on contact and released on retract.
+    if probe_key {
+        let down = holds.is_held(PROBE_HOLD);
+        let rect = l.r(PROBE_KEY_AT.0, PROBE_KEY_AT.1, KEY_W, KEY_H);
+        paint_key_cap(
+            ui,
+            l,
+            rect,
+            ui.scope_id().with(("toggle-key", "probe-contact")),
+            KEY_BG,
+            state.probe,
+            down,
+        );
+        ui.painter().text(
+            Pos2::new(rect.center().x, rect.top() + rect.height() * 0.36),
+            Align2::CENTER_CENTER,
+            "PROBE",
+            l.font(14.0),
+            TEXT,
+        );
+        ui.painter().text(
+            Pos2::new(rect.center().x, rect.top() + rect.height() * 0.70),
+            Align2::CENTER_CENTER,
+            "CONTACT",
+            l.font(8.5),
+            if state.probe { GREEN } else { MUTED },
+        );
+        handle.set(|state| state.probe = down);
+    }
+
+    paint_key_grid(
         ui,
         l,
-        1507.0,
-        850.0,
-        145.0,
-        60.0,
-        "PROBE",
-        "CONTACT",
-        KEY_BG,
-        "probe-contact",
-        state.probe,
+        state,
+        &MIDDLE_KEYS,
+        &key_grid_rects(l, MIDDLE_X, 3, MIDDLE_KEYS.len()),
+        holds,
+        handle,
     );
-    handle.set(|state| state.probe = probe_held);
-
-    let middle = [
-        ("MPG SIM", buttons::MPG_SIM, Some(crate::leds::MPG_SIM)),
-        ("S.B.K.", buttons::SBK, Some(crate::leds::SBK)),
-        ("B.D.T.", buttons::BDT, Some(crate::leds::BDT)),
-        ("M.LK", buttons::MLK, Some(crate::leds::MLK)),
-        ("OPT", buttons::OPT, Some(crate::leds::OPT)),
-        ("D.R.N.", buttons::DRN, Some(crate::leds::DRN)),
-        ("WORKLAMP", buttons::WORKLAMP, Some(crate::leds::WORKLAMP)),
-        ("AIR BLOW", buttons::AIR_BLOW, Some(crate::leds::AIR_BLOW)),
-        ("PT.LA", buttons::PT_LA, Some(crate::leds::PT_LA)),
-        ("COOLANT", buttons::COOLANT, Some(crate::leds::COOLANT)),
-        ("SPD.CTS", buttons::SPD_CTS, Some(crate::leds::SPD_CTS)),
-        ("FLUSH", buttons::FLUSH, Some(crate::leds::FLUSH)),
-        ("LUB", buttons::LUB, Some(crate::leds::LUB)),
-        ("CORRIDOR", buttons::CORRIDOR, Some(crate::leds::CORRIDOR)),
-        ("K1", buttons::K1, Some(crate::leds::K1)),
-    ];
-    draw_key_grid(ui, l, state, &middle, 540.0, 500.0, 3, handle, mouse_held);
-
-    let right = [
-        ("SPD.ORT", buttons::SPD_ORI, Some(crate::leds::SPD_ORI)),
-        ("MAG CW", buttons::MAG_CW, Some(crate::leds::MAG_CW)),
-        ("MAG CCW", buttons::MAG_CCW, Some(crate::leds::MAG_CCW)),
-        ("SPD.CW", buttons::SPD_CW, Some(crate::leds::SPD_CW)),
-        ("SPD.SP", buttons::SPD_SP, Some(crate::leds::SPD_SP)),
-        ("SPD.CCW", buttons::SPD_CCW, Some(crate::leds::SPD_CCW)),
-        ("CHIP CW", buttons::CHIP_CW, Some(crate::leds::CHIP_CW)),
-        ("CHIP SP", buttons::CHIP_SP, Some(crate::leds::CHIP_SP)),
-        ("CHIP CCW", buttons::CHIP_CCW, Some(crate::leds::CHIP_CCW)),
-        ("CHUCK", buttons::CHUCK, Some(crate::leds::CHUCK)),
-        ("POT DN", buttons::POT_DN, Some(crate::leds::POT_DN)),
-        ("ARM MAN", buttons::ARM_MAN, Some(crate::leds::ARM_MAN)),
-        ("K2", buttons::K2, Some(crate::leds::K2)),
-        ("K3", buttons::K3, Some(crate::leds::K3)),
-        ("K4", buttons::K4, Some(crate::leds::K4)),
-    ];
-    draw_key_grid(ui, l, state, &right, 1050.0, 500.0, 3, handle, mouse_held);
+    paint_key_grid(
+        ui,
+        l,
+        state,
+        &RIGHT_KEYS,
+        &key_grid_rects(l, RIGHT_X, 3, RIGHT_KEYS.len()),
+        holds,
+        handle,
+    );
 
     // Tiny power/estop status strip keeps the simulation state visible.
     label(
@@ -2097,22 +2530,18 @@ fn paint_panel(
     }
 }
 
-fn draw_key_grid(
+/// Paint one grid of legend keys. Hold state comes from the HoldTracker (see
+/// `paint_panel`); the grid only paints and publishes.
+fn paint_key_grid(
     ui: &egui::Ui,
     l: &PanelLayout,
     state: &SimPanelState,
     keys: &[(&str, u64, Option<u64>)],
-    x0: f32,
-    y0: f32,
-    columns: usize,
+    rects: &[Rect],
+    holds: &HoldTracker,
     handle: &mut SimPanelHandle,
-    mouse_held: &mut u64,
 ) {
-    for (index, (name, mask, led)) in keys.iter().enumerate() {
-        let col = index % columns;
-        let row = index / columns;
-        let x = x0 + col as f32 * 150.0;
-        let y = y0 + row as f32 * 70.0;
+    for ((name, mask, led), rect) in keys.iter().zip(rects.iter()) {
         let fill = if *mask == buttons::SPD_SP {
             Color32::from_rgb(0x8d, 0x1c, 0x18)
         } else if *mask == buttons::CORRIDOR {
@@ -2120,13 +2549,9 @@ fn draw_key_grid(
         } else {
             KEY_BG
         };
-        let (_, held) = panel_key(
-            ui, l, state, x, y, 145.0, 60.0, name, None, *mask, fill, *led,
-        );
-        if held {
-            *mouse_held |= *mask;
-        }
-        let down = *mouse_held & *mask != 0;
+        let down = holds.is_held(*mask);
+        let led_on = led.map(|bit| state.leds & bit != 0).unwrap_or(down);
+        panel_key(ui, l, *rect, name, None, fill, led_on, down, *mask);
         handle.set(|s| s.set_button(*mask, down));
     }
 }
@@ -2349,6 +2774,373 @@ mod tests {
         assert!(!state.power);
         assert!(!state.program_protect);
         assert!(state.faults.labels().is_empty());
+    }
+
+    // ---- Headless touch and geometry tests ----
+    //
+    // paint_panel is driven through egui::Context::run with a 1280x720
+    // screen_rect, the acceptance size. The CentralPanel gets no frame so its
+    // rect matches the root ui eframe hands to SimPanelApp.
+
+    /// A paint_panel harness mirroring SimPanelApp's per-frame call.
+    struct PanelFixture {
+        ctx: egui::Context,
+        handle: SimPanelHandle,
+        pressed: u64,
+        holds: HoldTracker,
+        power_pulse: Option<(bool, Instant)>,
+        probe_key: bool,
+        time: f64,
+    }
+
+    impl PanelFixture {
+        fn new(probe_key: bool) -> Self {
+            Self {
+                ctx: egui::Context::default(),
+                handle: SimPanelHandle::new(),
+                pressed: 0,
+                holds: HoldTracker::default(),
+                power_pulse: None,
+                probe_key,
+                time: 0.0,
+            }
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>) {
+            self.time += 0.05;
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 720.0))),
+                events,
+                time: Some(self.time),
+                focused: true,
+                ..Default::default()
+            };
+            let probe_key = self.probe_key;
+            let mut output = self.ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
+                        let state = self.handle.snapshot();
+                        let layout = panel_layout(ui);
+                        paint_panel(
+                            ui,
+                            &layout,
+                            &state,
+                            &mut self.handle,
+                            &mut self.pressed,
+                            &mut self.holds,
+                            &mut self.power_pulse,
+                            probe_key,
+                        );
+                    });
+            });
+            // Headless: no renderer consumes the font atlas upload.
+            output.textures_delta.clear();
+        }
+
+        fn layout(&self) -> PanelLayout {
+            layout_for_rect(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 720.0)))
+        }
+
+        fn momentary_rect(&self, mask: u64, probe_key: bool) -> Rect {
+            interactives(&self.layout(), probe_key)
+                .momentary
+                .into_iter()
+                .find(|(m, _)| *m == mask)
+                .map(|(_, rect)| rect)
+                .expect("momentary key rect")
+        }
+    }
+
+    fn touch_event(phase: egui::TouchPhase, id: u64, pos: Pos2) -> egui::Event {
+        egui::Event::Touch {
+            device_id: egui::TouchDeviceId(0),
+            id: egui::TouchId(id),
+            phase,
+            pos,
+            force: None,
+        }
+    }
+
+    /// Mirrors egui-winit's touch translation: only the FIRST active touch is
+    /// also turned into pointer events; further touches stay raw Touch events.
+    struct TouchEmu {
+        pointer_touch: Option<egui::TouchId>,
+    }
+
+    impl TouchEmu {
+        fn new() -> Self {
+            Self {
+                pointer_touch: None,
+            }
+        }
+
+        fn begin(&mut self, id: u64, pos: Pos2) -> Vec<egui::Event> {
+            let mut events = vec![touch_event(egui::TouchPhase::Start, id, pos)];
+            if self.pointer_touch.is_none() {
+                self.pointer_touch = Some(egui::TouchId(id));
+                events.push(egui::Event::PointerMoved(pos));
+                events.push(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                });
+            }
+            events
+        }
+
+        fn move_to(&mut self, id: u64, pos: Pos2) -> Vec<egui::Event> {
+            let mut events = vec![touch_event(egui::TouchPhase::Move, id, pos)];
+            if self.pointer_touch == Some(egui::TouchId(id)) {
+                events.push(egui::Event::PointerMoved(pos));
+            }
+            events
+        }
+
+        fn end(&mut self, id: u64, pos: Pos2) -> Vec<egui::Event> {
+            let mut events = vec![touch_event(egui::TouchPhase::End, id, pos)];
+            if self.pointer_touch == Some(egui::TouchId(id)) {
+                self.pointer_touch = None;
+                events.push(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::default(),
+                });
+                events.push(egui::Event::PointerGone);
+            }
+            events
+        }
+
+        fn tap(&mut self, fix: &mut PanelFixture, id: u64, pos: Pos2) {
+            let press = self.begin(id, pos);
+            fix.frame(press);
+            let release = self.end(id, pos);
+            fix.frame(release);
+        }
+    }
+
+    #[test]
+    fn touch_press_holds_a_jog_key_until_touch_end() {
+        let mut fix = PanelFixture::new(false);
+        let mut touch = TouchEmu::new();
+        let jog = fix.momentary_rect(buttons::JOG_XP, false);
+        fix.frame(vec![]);
+        fix.frame(touch.begin(1, jog.center()));
+        assert!(
+            fix.handle.snapshot().buttons & buttons::JOG_XP != 0,
+            "touching the key asserts its button bit"
+        );
+        fix.frame(vec![]);
+        assert!(
+            fix.handle.snapshot().buttons & buttons::JOG_XP != 0,
+            "the hold survives frames without input events"
+        );
+        fix.frame(touch.end(1, jog.center()));
+        assert_eq!(
+            fix.handle.snapshot().buttons & buttons::JOG_XP,
+            0,
+            "touch end releases the key"
+        );
+    }
+
+    #[test]
+    fn touch_tap_toggles_program_protect_and_estop() {
+        let mut fix = PanelFixture::new(false);
+        let mut touch = TouchEmu::new();
+        let it = interactives(&fix.layout(), false);
+        fix.frame(vec![]);
+
+        touch.tap(&mut fix, 1, it.protect.center());
+        assert!(fix.handle.snapshot().program_protect, "tap toggles protect on");
+        touch.tap(&mut fix, 2, it.protect.center());
+        assert!(
+            !fix.handle.snapshot().program_protect,
+            "tap toggles protect back off"
+        );
+
+        // Cold boot: E-stop latched, power off. A tap releases the mushroom
+        // and raises the reset one-shot without powering up.
+        assert!(fix.handle.snapshot().estop);
+        touch.tap(&mut fix, 3, it.estop.center());
+        let state = fix.handle.snapshot();
+        assert!(!state.estop, "tap releases the latched E-stop");
+        assert!(state.estop_reset_pulse);
+        assert!(!state.power);
+
+        touch.tap(&mut fix, 4, it.power_on.center());
+        assert!(fix.handle.snapshot().power, "POWER ON tap powers up");
+        touch.tap(&mut fix, 5, it.estop.center());
+        let state = fix.handle.snapshot();
+        assert!(state.estop, "tap latches the E-stop again");
+        assert!(!state.power, "latching the E-stop drops machine power");
+    }
+
+    #[test]
+    fn touch_drag_turns_the_feed_override_knob() {
+        let mut fix = PanelFixture::new(false);
+        let mut touch = TouchEmu::new();
+        let it = interactives(&fix.layout(), false);
+        fix.frame(vec![]);
+        assert_eq!(fix.handle.snapshot().feed_override, 1.0);
+
+        let mut pos = it.feed.center();
+        fix.frame(touch.begin(1, pos));
+        for _ in 0..4 {
+            pos += Vec2::new(0.0, -12.0);
+            fix.frame(touch.move_to(1, pos));
+        }
+        let after_up = fix.handle.snapshot().feed_override;
+        assert!(
+            after_up > 1.0,
+            "dragging up raises the feed override, got {after_up}"
+        );
+        for _ in 0..8 {
+            pos += Vec2::new(0.0, 12.0);
+            fix.frame(touch.move_to(1, pos));
+        }
+        let after_down = fix.handle.snapshot().feed_override;
+        assert!(
+            after_down < after_up,
+            "dragging back down lowers it: {after_down} < {after_up}"
+        );
+        assert!((0.0..=1.5).contains(&after_down));
+        fix.frame(touch.end(1, pos));
+    }
+
+    #[test]
+    fn touch_tap_on_the_mode_knob_steps_the_detent() {
+        let mut fix = PanelFixture::new(false);
+        let mut touch = TouchEmu::new();
+        let it = interactives(&fix.layout(), false);
+        fix.frame(vec![]);
+        assert_eq!(fix.handle.snapshot().mode, PanelMode::Auto);
+        touch.tap(&mut fix, 1, it.mode_knob.center());
+        assert_eq!(
+            fix.handle.snapshot().mode,
+            PanelMode::Mdi,
+            "a tap steps one detent"
+        );
+        touch.tap(&mut fix, 2, it.mode_knob.center());
+        assert_eq!(fix.handle.snapshot().mode, PanelMode::Jog);
+    }
+
+    #[test]
+    fn a_second_touch_tap_does_not_release_a_held_jog_key() {
+        let mut fix = PanelFixture::new(false);
+        let mut touch = TouchEmu::new();
+        let jog = fix.momentary_rect(buttons::JOG_XP, false);
+        let coolant = fix.momentary_rect(buttons::COOLANT, false);
+        fix.frame(vec![]);
+        // Finger 1 holds the jog key; finger 2 taps another matrix key.
+        fix.frame(touch.begin(1, jog.center()));
+        fix.frame(touch.begin(2, coolant.center()));
+        let pressed_bits = fix.handle.snapshot().buttons;
+        assert!(pressed_bits & buttons::JOG_XP != 0);
+        assert!(pressed_bits & buttons::COOLANT != 0);
+        // Finger 2 lifts. The old any_released rule cleared every held key
+        // here; the jog must survive.
+        fix.frame(touch.end(2, coolant.center()));
+        let pressed_bits = fix.handle.snapshot().buttons;
+        assert!(
+            pressed_bits & buttons::JOG_XP != 0,
+            "the held jog survives another finger's release"
+        );
+        assert_eq!(pressed_bits & buttons::COOLANT, 0);
+        // Finger 1 lifts: the jog ends.
+        fix.frame(touch.end(1, jog.center()));
+        assert_eq!(fix.handle.snapshot().buttons & buttons::JOG_XP, 0);
+    }
+
+    #[test]
+    fn every_interactive_target_is_at_least_44px_at_1280x720() {
+        let fix = PanelFixture::new(true);
+        let it = interactives(&fix.layout(), true);
+        let all: Vec<(&str, Rect)> = vec![
+            ("power on", it.power_on),
+            ("power off", it.power_off),
+            ("e-stop", it.estop),
+            ("program protect", it.protect),
+            ("mode knob", it.mode_knob),
+            ("feed knob", it.feed),
+            ("rapid knob", it.rapid),
+            ("spindle knob", it.spindle),
+            ("cycle start", it.cycle_start),
+            ("cycle stop", it.cycle_stop),
+        ];
+        let mut all: Vec<(String, Rect)> = all
+            .into_iter()
+            .map(|(name, rect)| (name.to_string(), rect))
+            .collect();
+        for (mask, rect) in &it.momentary {
+            all.push((format!("momentary key mask {mask:#x}"), *rect));
+        }
+        let mut min_w = f32::INFINITY;
+        let mut min_h = f32::INFINITY;
+        let mut smallest = String::new();
+        for (name, rect) in &all {
+            if rect.width() * rect.height() < min_w * min_h {
+                min_w = rect.width();
+                min_h = rect.height();
+                smallest = name.clone();
+            }
+            assert!(
+                rect.width() >= 44.0 && rect.height() >= 44.0,
+                "{name} is only {:.1}x{:.1} px at 1280x720",
+                rect.width(),
+                rect.height()
+            );
+        }
+        eprintln!(
+            "smallest interactive target at 1280x720: {smallest} at {min_w:.1}x{min_h:.1} px ({} targets)",
+            all.len()
+        );
+    }
+
+    #[test]
+    fn probe_contact_key_is_hidden_without_the_flag() {
+        let mut fix = PanelFixture::new(false);
+        let mut touch = TouchEmu::new();
+        // The spot the key occupies with --probe-key holds nothing now.
+        let probe_spot = fix
+            .layout()
+            .r(PROBE_KEY_AT.0, PROBE_KEY_AT.1, KEY_W, KEY_H);
+        let it = interactives(&fix.layout(), false);
+        assert!(
+            it.momentary
+                .iter()
+                .all(|(_, rect)| !rect.contains(probe_spot.center())),
+            "no interactive target where the probe key would be"
+        );
+        fix.frame(vec![]);
+        fix.frame(touch.begin(1, probe_spot.center()));
+        fix.frame(vec![]);
+        assert!(
+            !fix.handle.snapshot().probe,
+            "touching that area does not assert the probe without --probe-key"
+        );
+        fix.frame(touch.end(1, probe_spot.center()));
+    }
+
+    #[test]
+    fn probe_contact_key_is_momentary_with_the_flag() {
+        let mut fix = PanelFixture::new(true);
+        let mut touch = TouchEmu::new();
+        let probe = fix.momentary_rect(PROBE_HOLD, true);
+        fix.frame(vec![]);
+        fix.frame(touch.begin(1, probe.center()));
+        assert!(
+            fix.handle.snapshot().probe,
+            "holding the probe key closes the contact"
+        );
+        fix.frame(vec![]);
+        assert!(fix.handle.snapshot().probe, "the contact stays closed");
+        fix.frame(touch.end(1, probe.center()));
+        assert!(
+            !fix.handle.snapshot().probe,
+            "releasing the key opens the contact"
+        );
     }
 }
 
