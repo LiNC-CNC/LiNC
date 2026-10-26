@@ -1067,15 +1067,23 @@ fn feed_rows(feed: &linc_core::model::FeedState) -> [(String, String, String); 2
     } else {
         feed.feed
     };
+    // G95 is feed per spindle revolution and G93 is inverse time; both are
+    // fractional, and the lathe's usual 0.008 in/rev rounded to "0" when shown
+    // as whole units per minute.
+    let (unit, digits) = match feed.feed_mode.as_str() {
+        "G95" => (format!("{units}/rev"), 3),
+        "G93" => ("1/min".to_string(), 3),
+        _ => (format!("{units}/min"), 0),
+    };
     [
         (
-            format!("{:.0}", feed.feed),
-            format!("{units}/min"),
+            format!("{:.*}", digits, feed.feed),
+            unit.clone(),
             format!("{:.0}%", feed.feed_override * 100.0),
         ),
         (
-            format!("{effective:.0}"),
-            format!("{units}/min"),
+            format!("{:.*}", digits, effective),
+            unit,
             format!("({})", yes_no(feed.feed_override_enabled)),
         ),
     ]
@@ -1949,6 +1957,24 @@ mod tests {
         // A disabled override means the programmed rate is what runs.
         feed.feed_override_enabled = false;
         assert_eq!(feed_rows(&feed)[1].0, "700");
+
+        // A lathe's G95 feed is per revolution, not per minute: 0.008 must
+        // neither round to "0" nor claim in/min.
+        let mut lathe = FeedState::default();
+        lathe.feed = 0.008;
+        lathe.feed_override = 0.5;
+        lathe.feed_override_enabled = true;
+        lathe.feed_mode = "G95".into();
+        lathe.units = "in".into();
+        let rows = feed_rows(&lathe);
+        assert_eq!(rows[0], ("0.008".into(), "in/rev".into(), "50%".into()));
+        assert_eq!(rows[1].0, "0.004");
+        assert_eq!(rows[1].1, "in/rev");
+
+        // G93 is inverse time, in 1/min.
+        lathe.feed_mode = "G93".into();
+        lathe.feed = 1.5;
+        assert_eq!(feed_rows(&lathe)[0].1, "1/min");
     }
 
     #[test]
