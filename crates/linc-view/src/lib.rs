@@ -382,6 +382,48 @@ fn draw_dotted(painter: &Painter, start: Pos2, end: Pos2, stroke: Stroke) {
     draw_dashed(painter, start, end, stroke, 1.6, 3.4);
 }
 
+/// One dotted rhythm across a whole polyline, so the gap phase carries over
+/// from each sampled hop to the next.
+fn draw_dotted_path(painter: &Painter, points: &[Pos2], stroke: Stroke) {
+    draw_dashed_path(painter, points, stroke, 1.6, 3.4);
+}
+
+fn draw_dashed_path(painter: &Painter, points: &[Pos2], stroke: Stroke, dash: f32, gap: f32) {
+    // Dash/gap state carried across hops. A modulo phase is tempting but f32
+    // rounding turns a boundary dash into a ~1e-7 px step that cannot advance,
+    // which stalls the walk and drops every dot after it.
+    let mut drawing = true;
+    let mut remaining = dash;
+    for pair in points.windows(2) {
+        let (start, end) = (pair[0], pair[1]);
+        let delta = end - start;
+        let length = delta.length();
+        if length < 0.5 {
+            continue;
+        }
+        let direction = delta / length;
+        let mut walked = 0.0f32;
+        while walked < length {
+            let run = remaining.min(length - walked);
+            if drawing && run > 0.0 {
+                painter.line_segment(
+                    [
+                        start + direction * walked,
+                        start + direction * (walked + run),
+                    ],
+                    stroke,
+                );
+            }
+            walked += run;
+            remaining -= run;
+            if remaining <= 0.001 {
+                drawing = !drawing;
+                remaining = if drawing { dash } else { gap };
+            }
+        }
+    }
+}
+
 fn draw_dashed(painter: &Painter, start: Pos2, end: Pos2, stroke: Stroke, dash: f32, gap: f32) {
     let delta = end - start;
     let length = delta.length();
@@ -399,7 +441,11 @@ fn draw_dashed(painter: &Painter, start: Pos2, end: Pos2, stroke: Stroke, dash: 
             ],
             stroke,
         );
-        position += dash + gap;
+        let next = position + dash + gap;
+        if next <= position {
+            break;
+        }
+        position = next;
     }
 }
 
@@ -994,15 +1040,25 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     if view.show_live_trail && view.live_trail.len() >= 2 {
         let cut = Stroke::new(2.0, theme::SUCCESS);
         let rapid = Stroke::new(1.4, theme::SUCCESS);
-        for pair in view.live_trail.windows(2) {
-            let (from, to) = (pair[0], pair[1]);
-            Projection::draw_line(
-                &painter,
-                projection.project(from.position),
-                projection.project(to.position),
-                if to.rapid { rapid } else { cut },
-                to.rapid,
-            );
+        // A sampled trail can move only a couple of pixels per point. Dotted
+        // per hop would restart the pattern on every point, and a hop shorter
+        // than the dash paints solid, so a whole rapid run is one continuous
+        // dotted path instead.
+        let mut index = 1;
+        while index < view.live_trail.len() {
+            let from = projection.project(view.live_trail[index - 1].position);
+            if view.live_trail[index].rapid {
+                let mut points = vec![from];
+                while index < view.live_trail.len() && view.live_trail[index].rapid {
+                    points.push(projection.project(view.live_trail[index].position));
+                    index += 1;
+                }
+                draw_dotted_path(&painter, &points, rapid);
+            } else {
+                let to = projection.project(view.live_trail[index].position);
+                painter.line_segment([from, to], cut);
+                index += 1;
+            }
         }
     }
     // Live tool position. Amber, matching the accepted mockup, so the toolhead
@@ -2321,6 +2377,26 @@ mod tests {
                 .iter()
                 .any(|segment| (segment[1] - segment[0]).length() > 40.0),
             "the cut half is still drawn as one segment"
+        );
+    }
+
+    #[test]
+    fn short_rapid_samples_keep_one_dotted_rhythm() {
+        // 1.6 px hops: shorter than a dash. Per-hop dots would paint every hop
+        // solid; the continuous rhythm leaves gaps.
+        let trail: Vec<TrailPoint> = (0..40)
+            .map(|i| hop([-4.0 + i as f64 * 0.2, 0.0, 0.0], true))
+            .collect();
+        let shapes = trail_shapes(&trail, MachineVariant::Mill, ViewMode::TopXy);
+        assert!(shapes.len() > 5, "the run is dotted: {}", shapes.len());
+        let covered: f32 = shapes
+            .iter()
+            .map(|segment| (segment[1] - segment[0]).length())
+            .sum();
+        let span = (shapes.last().unwrap()[1] - shapes[0][0]).length();
+        assert!(
+            covered < span * 0.6,
+            "short hops keep gaps instead of painting solid: {covered} of {span}"
         );
     }
 

@@ -607,7 +607,7 @@ impl SnapshotBuilder {
             .unwrap_or(false)
             || self.live_trail.is_empty()
         {
-            let rapid = trail_hop_is_rapid(&status.active_gcodes);
+            let rapid = trail_hop_is_rapid(status.motion.motion_type);
             self.live_trail.push(TrailPoint::new(tip, rapid));
             let max = self
                 .profile
@@ -1346,12 +1346,15 @@ fn modal_lines(gcodes: &[i32], mcodes: &[i32]) -> Vec<(String, String)> {
 /// Whether the move that just reached a new tool-tip sample is a rapid.
 ///
 /// The trail keeps one point per poll, so the hop that reached the point is the
-/// move the interpreter is in: the first active G-code is the motion mode, where
-/// G0 is 0, G1 is 10, G2 is 20 and G3 is 30. Rapid is the dotted layer of the
-/// graph, so only G0 counts. A jog in MANUAL leaves the last motion mode in
-/// place, and a jog is not a rapid: it draws solid, like a cut.
-fn trail_hop_is_rapid(active_gcodes: &[i32]) -> bool {
-    active_gcodes.first() == Some(&0)
+/// motion the controller is executing. The status carries that directly as the
+/// motion type: LinuxCNC's EMC_MOTION_TYPE_TRAVERSE (1) is G0, while feed,
+/// arc, probing and rotary indexing are cuts. Reading active_gcodes instead is
+/// wrong here: that array is not ordered with the motion mode first, and most
+/// hops were classified as cuts.
+const MOTION_TYPE_TRAVERSE: i32 = 1;
+
+fn trail_hop_is_rapid(motion_type: i32) -> bool {
+    motion_type == MOTION_TYPE_TRAVERSE
 }
 
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -1389,14 +1392,14 @@ mod tests {
     }
 
     #[test]
-    fn only_g0_trail_hops_are_rapids() {
-        // The motion mode is the first entry: G0, G1, G2 or G3.
-        assert!(trail_hop_is_rapid(&[0, 210, 900, 540]));
-        assert!(!trail_hop_is_rapid(&[10, 210, 900, 540]), "G1 cuts");
-        assert!(!trail_hop_is_rapid(&[20, 170, 900]), "G2 cuts");
-        assert!(!trail_hop_is_rapid(&[30, 170, 900]), "G3 cuts");
-        // No modal state yet (first poll): not a rapid, so the hop is solid.
-        assert!(!trail_hop_is_rapid(&[]));
+    fn only_traverse_trail_hops_are_rapids() {
+        // EMC_MOTION_TYPE_TRAVERSE is G0; every other motion type is a cut.
+        assert!(trail_hop_is_rapid(1), "G0 traverses");
+        assert!(!trail_hop_is_rapid(2), "G1 feeds");
+        assert!(!trail_hop_is_rapid(3), "G2/G3 arc");
+        assert!(!trail_hop_is_rapid(4), "tool change");
+        assert!(!trail_hop_is_rapid(5), "probing");
+        assert!(!trail_hop_is_rapid(0), "no motion");
     }
 
     #[test]
