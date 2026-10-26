@@ -4,6 +4,8 @@ GRAPH / TOOLPATH:
       match the machine's live X position.
     - Live trails of rapid moves must be dotted, like the rapid segments in the
       preview, for mill and lathe. Only cutting moves should draw a solid trail.
+    - The Z axis labels are upside down in lathe mode; lathe Z needs its own
+      label orientation instead of inheriting the mill's.
 
 FILE screen:
 	- when going into a directory then there the parent directory is displayed as a row, but cannot be selected. But it should be selectable and Enter on it should go into the parent directory. It is correct the NC_FILE shows no parent directory, but that should be possible to enable by a configuration file option.
