@@ -542,9 +542,25 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
 
 /// One load bar: the ruler runs green (0-80 %), yellow (80-100 %) and red
 /// (100-120 %) behind an accent progress fill, with the percentage on the right.
+/// One meter row: the label, the bar and the percentage on a single line.
+pub const SERVO_METER_HEIGHT: f32 = 16.0;
+
+/// Where the block of meters starts inside the card's free space.
+///
+/// The SERVO LOAD card is as tall as the feed block beside it, so a three-axis
+/// machine has slack left over. Half of it above the meters and half below
+/// centres them; stacked under the title they read as a gap at the card's
+/// bottom instead of as a margin.
+fn servo_centred_lead(free: f32, rows: usize) -> f32 {
+    ((free - rows as f32 * SERVO_METER_HEIGHT) / 2.0).max(0.0)
+}
+
 fn servo_meter(ui: &mut Ui, label: &str, load: f64) {
     const SCALE: f32 = 120.0;
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 16.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), SERVO_METER_HEIGHT),
+        Sense::hover(),
+    );
     let painter = ui.painter_at(rect);
     let font = FontId::monospace(theme::font_size(10.0));
     painter.text(
@@ -606,18 +622,23 @@ fn servo_meter(ui: &mut Ui, label: &str, load: f64) {
     );
 }
 
-pub fn servo_load_card(app: &LincApp, ui: &mut Ui, height: f32) {
+pub fn servo_load_card(rows: &[(String, f64)], ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
         // The same content offset as the feed card, so both card frames end on
         // the same bottom line.
         ui.set_min_height((height - 24.0).max(0.0));
         ui.set_max_height((height - 24.0).max(0.0));
         ui.set_min_width(ui.available_width());
-        ui.spacing_mut().interact_size.y = 16.0;
+        ui.spacing_mut().interact_size.y = SERVO_METER_HEIGHT;
         ui.spacing_mut().item_spacing.y = 0.0;
         theme::section_header(ui, "SERVO LOAD");
-        for (label, load) in app.servo_load_rows() {
-            servo_meter(ui, &label, load);
+        // Centre the block between the title and the card's bottom edge. The
+        // card is as tall as the feed block beside it, so on a three-axis
+        // machine the difference used to collect as one gap under the meters.
+        let free = ui.max_rect().bottom() - ui.cursor().top();
+        ui.add_space(servo_centred_lead(free, rows.len()));
+        for (label, load) in rows {
+            servo_meter(ui, label, *load);
         }
     });
 }
@@ -2258,6 +2279,92 @@ mod tests {
         // One row of cells is 25 px, not 41: a fifth code wraps to a second row.
         assert!((modal_strip_height(7, 6) - modal_strip_height(6, 6) - 25.0).abs() < 1e-6);
         assert_eq!(modal_strip_height(0, 6), modal_strip_height(1, 6));
+    }
+
+    /// The meter block sits in the middle of the SERVO LOAD card's free space:
+    /// as much margin above it as below it. A three-axis machine in a card as
+    /// tall as the feed block beside it left all the slack at the bottom.
+    #[test]
+    fn the_servo_meters_are_centred_in_their_card() {
+        // 76 px of free space under the title, three 16 px rows: 14 px above
+        // them and the same 14 px below.
+        let lead = super::servo_centred_lead(76.0, 3);
+        assert!((lead - 14.0).abs() < 1e-6, "lead {lead}");
+        assert!(
+            (2.0 * lead + 3.0 * super::SERVO_METER_HEIGHT - 76.0).abs() < 1e-6,
+            "the margin is split evenly"
+        );
+        // Exactly enough room, or less than the rows need: no lead at all, and
+        // never a negative one.
+        assert_eq!(super::servo_centred_lead(48.0, 3), 0.0);
+        assert_eq!(super::servo_centred_lead(20.0, 3), 0.0);
+    }
+
+    /// The meters sit in the middle of the card's body: as much room above the
+    /// block as below it, between the title and the body's bottom edge. Drawn
+    /// into a slot of known size, so the two margins are measured and not
+    /// inferred from the code that was meant to produce them.
+    #[test]
+    fn the_servo_card_centres_its_meters() {
+        let rows: Vec<(String, f64)> = ["X", "Y", "Z"]
+            .iter()
+            .map(|axis| (axis.to_string(), 20.0))
+            .collect();
+        let ctx = egui::Context::default();
+        let slot = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(300.0, 100.0));
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(400.0, 300.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(slot)
+                    .layout(egui::Layout::top_down(egui::Align::Min)),
+            );
+            super::servo_load_card(&rows, &mut child, slot.height());
+        });
+        output.textures_delta.clear();
+
+        let mut title_bottom = None;
+        let mut block: Option<(f32, f32)> = None;
+        let mut card = egui::Rect::NOTHING;
+        for clipped in &output.shapes {
+            match &clipped.shape {
+                egui::Shape::Text(text) => {
+                    let source = text.galley.job.text.as_str();
+                    let top = text.pos.y;
+                    let bottom = top + text.galley.size().y;
+                    if source.starts_with("SERVO LOAD") {
+                        title_bottom = Some(bottom);
+                    } else if matches!(source, "X" | "Y" | "Z") {
+                        block = Some(match block {
+                            Some((first, _)) => (first.min(top), bottom),
+                            None => (top, bottom),
+                        });
+                    }
+                }
+                egui::Shape::Rect(rect) if rect.rect.height() > 40.0 => {
+                    if rect.rect.height() > card.height() {
+                        card = rect.rect;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let (block_top, block_bottom) = block.expect("three meter labels");
+        // The card's 12 px inner margin is part of the frame, not of the body
+        // the block is centred in.
+        let body_bottom = card.bottom() - 12.0;
+        let above = block_top - title_bottom.expect("the title");
+        let below = body_bottom - block_bottom;
+        assert!(
+            (above - below).abs() <= 2.0,
+            "above {above}, below {below}: the block is not centred in {card:?}"
+        );
     }
 
     /// PAC-MAN eats only when the operator asked for it: the interpreter's

@@ -64,7 +64,7 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
                             card_width,
                             bottom_height,
                             "servo",
-                            |app, ui, _h| common::servo_load_card(app, ui, bottom_height),
+                            |app, ui, _h| common::servo_load_card(&app.servo_load_rows(), ui, bottom_height),
                         );
                     }
                 });
@@ -94,14 +94,15 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
 }
 
 /// Height that just holds the bottom row: the feed/spindle block needs a fixed
-/// body, and every servo row adds 16 px above the card's title and margins.
+/// body, and every servo row adds its meter height above the card's title and
+/// margins.
 fn bottom_cards_height(app: &LincApp) -> f32 {
     const FEED: f32 = 100.0;
     let rows = app.servo_load_rows().len();
     let servo = if rows == 0 {
         0.0
     } else {
-        44.0 + rows as f32 * 16.0
+        44.0 + rows as f32 * common::SERVO_METER_HEIGHT
     };
     FEED.max(servo)
 }
@@ -320,7 +321,7 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                             card_width,
                             bottom_height,
                             "servo",
-                            |app, ui, _h| common::servo_load_card(app, ui, bottom_height),
+                            |app, ui, _h| common::servo_load_card(&app.servo_load_rows(), ui, bottom_height),
                         );
                     }
                 });
