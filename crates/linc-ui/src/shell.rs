@@ -3267,6 +3267,21 @@ impl LincApp {
                         theme::MUTED
                     },
                 );
+            } else if !keycap.is_empty() {
+                // A one-line row carries its chord at the pill's right edge, so
+                // label and hint share the row instead of stacking: the labels
+                // are short enough (DIAG, G-CODE) for both to fit.
+                painter.text(
+                    egui::pos2(rect.right() - 12.0, rect.center().y),
+                    Align2::RIGHT_CENTER,
+                    *keycap,
+                    FontId::monospace(theme::font_size(8.5)),
+                    if selected {
+                        Color32::from_rgb(0x0b, 0x17, 0x22)
+                    } else {
+                        theme::MUTED
+                    },
+                );
             }
             if response.clicked() {
                 ui.memory_mut(|memory| memory.stop_text_input());
@@ -4530,8 +4545,8 @@ pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
     (Page::Program, "PROGRAM", "FILE"),
     (Page::Tools, "TOOLS", "TOOL"),
     (Page::Offsets, "OFFSETS", "PROBE"),
-    (Page::Diagnostics, "DIAGNOSTICS", "Ctrl+D"),
-    (Page::Help, "G-CODE HELP", "Ctrl+H"),
+    (Page::Diagnostics, "DIAG", "Ctrl+D"),
+    (Page::Help, "G-CODE", "Ctrl+H"),
     (Page::Settings, "SETTINGS", ""),
 ];
 
@@ -5139,8 +5154,8 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             "PROGRAM",
             "TOOLS",
             "OFFSETS",
-            "DIAGNOSTICS",
-            "G-CODE HELP",
+            "DIAG",
+            "G-CODE",
         ] {
             in_nav(label);
         }
@@ -5150,13 +5165,18 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 .any(|(text, rect)| text == "SETTINGS" && rect.left() < theme::NAV_WIDTH),
             "SETTINGS has no navigation row"
         );
-        // A one-line row paints its label and nothing under it.
-        for keycap in ["Ctrl+D", "Ctrl+H"] {
+        // A one-line row keeps its chord on the label's own line, at the pill's
+        // right edge, instead of stacking it underneath.
+        for (label, keycap) in [("DIAG", "Ctrl+D"), ("G-CODE", "Ctrl+H")] {
+            let label_rect = in_nav(label);
+            let keycap_rect = in_nav(keycap);
             assert!(
-                !texts
-                    .iter()
-                    .any(|(text, rect)| text == keycap && rect.left() < theme::NAV_WIDTH),
-                "{keycap} must not sit under the label of a one-line row"
+                (keycap_rect.center().y - label_rect.center().y).abs() < 1.5,
+                "{keycap} shares the {label} row: {keycap_rect:?} vs {label_rect:?}"
+            );
+            assert!(
+                keycap_rect.left() > label_rect.right(),
+                "{keycap} sits to the right of {label}"
             );
         }
         // Six pills: four that carry an icon and a keycap, two one-liners.
@@ -5193,9 +5213,9 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         );
         // A one-line row starts at the pill's inset: no icon column to clear.
         assert!(
-            in_nav("DIAGNOSTICS").left() < in_nav("MACHINE").left() - 15.0,
-            "DIAGNOSTICS is a one-line row: {} vs {}",
-            in_nav("DIAGNOSTICS").left(),
+            in_nav("DIAG").left() < in_nav("MACHINE").left() - 15.0,
+            "DIAG is a one-line row: {} vs {}",
+            in_nav("DIAG").left(),
             in_nav("MACHINE").left()
         );
         // The list ends a few pixels above the SHORTCUTS frame, not a band of air.
@@ -5204,7 +5224,7 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         // margin: the two NAV_BOTTOM_GAPs and the separator's lines, not a band
         // of air. It was 35 px before the list was compacted.
         let last_target_bottom =
-            in_nav("G-CODE HELP").center().y + nav_row_geometry(Page::Help).height * 0.5;
+            in_nav("G-CODE").center().y + nav_row_geometry(Page::Help).height * 0.5;
         assert!(
             shortcuts - last_target_bottom < 20.0,
             "bottom padding {}",
