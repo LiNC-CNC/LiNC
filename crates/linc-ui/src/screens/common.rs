@@ -876,14 +876,20 @@ fn field_label(ui: &mut Ui, text: &str) {
 /// off its bottom. The MODAL band is pinned directly above it.
 const PROGRESS_HEIGHT: f32 = 46.0;
 
-/// Rows of G-code that fit above the MODAL band.
+/// Rows of G-code that fit in `available` px.
 ///
 /// The listing is the card's flexible part: the band and the progress line own
 /// their heights, and the listing takes every whole row between the header and
 /// the band. Whole rows only, so the remainder is a single row's worth at most
-/// and never enough to open a gap under the band.
-fn listing_rows(available: f32, row_height: f32) -> usize {
-    (available / (row_height + 2.0)).floor().max(6.0) as usize
+/// and never enough to open a gap under the band. No floor: a card whose band
+/// and progress line take all of it lists nothing rather than painting under
+/// them.
+///
+/// `pitch` is one row's height plus the gap the card's layout adds after
+/// it; counting rows by the row's height alone is what let the last rows run
+/// past the band.
+fn listing_rows(available: f32, pitch: f32) -> usize {
+    (available / pitch.max(1.0)).floor().max(0.0) as usize
 }
 
 pub fn program_card(app: &LincApp, ui: &mut Ui) {
@@ -917,10 +923,13 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                     .count();
                 // The card's bottom block is placed by rect, not by what the
                 // listing happened to leave: the progress line owns the last
-                // `PROGRESS_HEIGHT` pixels and the MODAL band its own derived
+                // PROGRESS_HEIGHT pixels and the MODAL band its own derived
                 // height directly above, so the band ends on the progress rule
                 // and no dead space can open between them. The listing takes
-                // every whole row between the header and the band.
+                // every whole row between the header and the band, and paints
+                // inside that rect: a taller band (a second row of codes, a
+                // narrower card) takes rows off the listing instead of being
+                // painted over.
                 let area = ui.max_rect();
                 let band = egui::Rect::from_min_max(
                     egui::pos2(
@@ -929,8 +938,20 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                     ),
                     egui::pos2(area.right(), area.max.y - PROGRESS_HEIGHT),
                 );
-                let window_len =
-                    listing_rows((band.top() - ui.cursor().min.y).max(0.0), row_height);
+                let listing = egui::Rect::from_min_max(
+                    egui::pos2(area.left(), ui.cursor().min.y),
+                    egui::pos2(area.right(), band.top().max(ui.cursor().min.y)),
+                );
+                let pitch = row_height + ui.spacing().item_spacing.y;
+                let window_len = listing_rows(listing.height(), pitch);
+                let mut list_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(listing)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                // Whatever the rows turn out to measure, and whatever the
+                // program carries, nothing of the listing reaches the band.
+                list_ui.set_clip_rect(listing.intersect(ui.clip_rect()));
                 if let Some(content) = content {
                     // Follow the line motion is cutting, not the interpreter's
                     // read-ahead, which reaches the end of the program first.
@@ -965,12 +986,8 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                             .x
                     });
                     let text_lane =
-                        (ui.available_width() - theme::SELECTION_BAR - number_width - 8.0)
+                        (list_ui.available_width() - theme::SELECTION_BAR - number_width - 8.0)
                             .max(40.0);
-                    // Wrapped rows consume more than row_height, so stop before
-                    // the fixed window would push the modal strip out of the card.
-                    let listing_limit = window_len as f32 * (row_height + 2.0);
-                    let mut used = 0.0f32;
                     for row in 0..window_len {
                         let line_number = first + row as isize;
                         let line = if line_number >= 1 { lines.next() } else { None };
@@ -983,28 +1000,30 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                         let height = galley
                             .as_ref()
                             .map_or(row_height, |galley| galley.size().y.max(row_height))
-                            + 2.0;
-                        if row > 0 && used + height > listing_limit {
+                            + ui.spacing().item_spacing.y;
+                        // Whole rows inside the listing only: a row that would
+                        // cross the band's top stays unpainted, so wrapped
+                        // lines cost rows instead of reaching the band.
+                        if list_ui.cursor().min.y + height > listing.max.y + 0.5 {
                             break;
                         }
-                        used += height;
-                        let (rect, _) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), height),
+                        let (rect, _) = list_ui.allocate_exact_size(
+                            egui::vec2(list_ui.available_width(), height),
                             egui::Sense::hover(),
                         );
                         if is_current {
                             // The band goes down before the row's text, so the
                             // tokens are painted over it rather than tinted by
                             // it.
-                            selection_band(ui, rect);
+                            selection_band(&list_ui, rect);
                         }
-                        let mut row_ui = ui.new_child(
+                        let mut row_ui = list_ui.new_child(
                             egui::UiBuilder::new()
                                 .id_salt(("program_row", row))
                                 .max_rect(rect)
                                 .layout(egui::Layout::left_to_right(egui::Align::Min)),
                         );
-                        row_ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+                        row_ui.set_clip_rect(rect.intersect(list_ui.clip_rect()));
                         row_ui.spacing_mut().item_spacing.x = 4.0;
                         // Lane for the band's rim bar, so the line numbers start
                         // at the same x on every row.
@@ -1041,8 +1060,11 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                     }
                 } else {
                     for _ in 0..window_len {
-                        let _ = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), row_height),
+                        if list_ui.cursor().min.y + row_height > listing.max.y + 0.5 {
+                            break;
+                        }
+                        let _ = list_ui.allocate_exact_size(
+                            egui::vec2(list_ui.available_width(), row_height),
                             egui::Sense::hover(),
                         );
                     }
@@ -1498,6 +1520,9 @@ pub fn trajectory(
     if response.clicked() || response.double_clicked() || response.drag_started() {
         response.request_focus();
     }
+    if preview.incomplete {
+        preview_incomplete_marker(ui, response.rect, preview.incomplete_reason.as_deref());
+    }
     *zoom = view.zoom;
     *pan = view.pan;
     *yaw = view.yaw;
@@ -1505,6 +1530,34 @@ pub fn trajectory(
     *fit = view.fit;
     *auto_fit = view.auto_fit;
     response
+}
+
+/// Say so when the preview cannot be trusted.
+///
+/// The parser is not the interpreter: a construct it cannot evaluate, a
+/// subroutine call it cannot resolve or a budget it hit leaves a path that is
+/// shorter than the program. Painting that silently is what made a missing unit
+/// conversion look like a rendering bug, so the card carries the warning and the
+/// reason on hover.
+fn preview_incomplete_marker(ui: &Ui, rect: egui::Rect, reason: Option<&str>) {
+    let text = "PREVIEW INCOMPLETE";
+    let font = FontId::proportional(theme::font_size(9.0));
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font, theme::WARNING);
+    let pos = egui::pos2(
+        rect.right() - 12.0 - galley.size().x,
+        rect.bottom() - 8.0 - galley.size().y,
+    );
+    ui.painter().galley(pos, galley.clone(), theme::WARNING);
+    if let Some(reason) = reason {
+        ui.interact(
+            egui::Rect::from_min_size(pos, galley.size()),
+            ui.id().with("preview-incomplete"),
+            Sense::hover(),
+        )
+        .on_hover_text(reason);
+    }
 }
 
 pub fn clear_trail_button(app: &mut LincApp, ui: &mut Ui) {
@@ -2150,23 +2203,26 @@ mod tests {
     fn the_listing_takes_every_row_the_band_leaves() {
         // The band and the progress line own their pixels; the listing takes
         // the whole rows between the card's header and the band, so what it
-        // cannot use is under one row and never a gap under the band.
-        let row_height = 18.0;
+        // cannot use is under one row and never a gap under the band. The pitch
+        // is one row plus the gap the layout adds under it.
+        let pitch = 20.0;
         for available in [130.0, 361.0, 380.0, 500.0] {
-            let rows = listing_rows(available, row_height);
-            let used = rows as f32 * (row_height + 2.0);
+            let rows = listing_rows(available, pitch);
+            let used = rows as f32 * pitch;
             assert!(
                 used <= available + 1e-3,
                 "{available} fits {rows} rows, which need {used}"
             );
             assert!(
-                used + row_height + 2.0 > available,
+                used + pitch > available,
                 "another row would have fitted in {available}"
             );
         }
-        // A card too short for even one row still lists six: the band and the
-        // progress line are what give way, not the program.
-        assert_eq!(listing_rows(0.0, row_height), 6);
+        // A card whose band and progress line take everything lists nothing:
+        // rows reserved there are the ones the band used to be painted over.
+        assert_eq!(listing_rows(0.0, pitch), 0);
+        assert_eq!(listing_rows(19.0, pitch), 0);
+        assert_eq!(listing_rows(20.0, pitch), 1);
     }
 
     #[test]
@@ -2181,5 +2237,229 @@ mod tests {
         // One row of cells is 25 px, not 41: a fifth code wraps to a second row.
         assert!((modal_strip_height(7, 6) - modal_strip_height(6, 6) - 25.0).abs() < 1e-6);
         assert_eq!(modal_strip_height(0, 6), modal_strip_height(1, 6));
+    }
+
+    /// A profile the card can be drawn against, with its preferences kept in
+    /// the temp dir so no test reads another's remembered page.
+    fn program_fixture() -> (tempfile::TempDir, linc_core::config::Profile) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("base.toml"),
+            include_str!("../../../../configs/base.toml"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("gcode")).unwrap();
+        std::fs::write(root.join("tool.tbl"), "T1 P0 Z-56 D6 ; end mill\n").unwrap();
+        std::fs::write(
+            root.join("probe_basic.ini"),
+            "[EMC]\nMACHINE = Test\n[DISPLAY]\nPROGRAM_PREFIX = gcode\nTOOL_TABLE_COLUMNS = TZDR\n[KINS]\nJOINTS = 3\nKINEMATICS = trivkins coordinates=XYZ\n[TRAJ]\nCOORDINATES = XYZ\nLINEAR_UNITS = mm\nSPINDLES = 1\n[EMCIO]\nTOOL_TABLE = tool.tbl\n[AXIS_X]\nMIN_LIMIT = -372\nMAX_LIMIT = 5\n[AXIS_Y]\nMIN_LIMIT = -346\nMAX_LIMIT = 4\n[AXIS_Z]\nMIN_LIMIT = -253\nMAX_LIMIT = 19\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("sim.toml"),
+            r#"schema_version = 1
+profile = "sim"
+extends = "base.toml"
+[machine]
+name = "Test"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[panel]
+kind = "simulated"
+driver = "cnc-panel-sim"
+[panel.link]
+kind = "virtual"
+[simulation]
+enabled = true
+panel_window = false
+[preferences]
+file = "{root}/prefs/{{profile}}.preferences.toml"
+"#
+            .replace("{root}", &root.to_string_lossy()),
+        )
+        .unwrap();
+        let profile = linc_core::config::Profile::load(&root.join("sim.toml"), None).unwrap();
+        (dir, profile)
+    }
+
+    /// What one frame of the MAIN program card painted, split by owner. The
+    /// band is the clip its own label painted under, which is the rect the card
+    /// placed it in; a listing row is found by the text the fixture program
+    /// carries, so the assertions do not reuse the arithmetic they test.
+    #[derive(Default)]
+    struct CardPaint {
+        band: Option<egui::Rect>,
+        listing: Vec<(egui::Rect, egui::Rect)>,
+        progress: Option<egui::Rect>,
+        card: Option<egui::Rect>,
+    }
+
+    fn walk_card_paint(shape: &egui::Shape, clip: egui::Rect, paint: &mut CardPaint) {
+        match shape {
+            egui::Shape::Text(text) => {
+                let painted = egui::Rect::from_min_size(text.pos, text.galley.size());
+                let string = text.galley.text().to_string();
+                if string.contains("LISTROW") {
+                    paint.listing.push((painted, clip));
+                } else if string == "MODAL" {
+                    paint.band = Some(clip);
+                } else if string == "PROGRESS" {
+                    paint.progress = Some(painted);
+                }
+            }
+            egui::Shape::Rect(rect) => {
+                let frame =
+                    rect.stroke.color == crate::theme::BORDER && rect.corner_radius.nw == 6;
+                let bigger = paint.card.map_or(true, |card| rect.rect.area() > card.area());
+                if frame && bigger {
+                    paint.card = Some(rect.rect);
+                }
+            }
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk_card_paint(shape, clip, paint);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Draw the program card in a 360 px slot with `codes` modal G codes
+    /// and report what it painted.
+    fn paint_program_card(codes: usize, height: f32) -> CardPaint {
+        let (_dir, profile) = program_fixture();
+        let ctx = egui::Context::default();
+        let raw = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 720.0),
+            )),
+            ..Default::default()
+        };
+        let mut app = None;
+        let mut output = ctx.run_ui(raw(), |ui| {
+            let backend = Box::new(crate::state::LocalBackend::new(
+                profile.clone(),
+                linc_core::model::PanelMode::Auto,
+            ));
+            app = Some(crate::shell::LincApp::new(profile.clone(), backend, ui.ctx()));
+        });
+        output.textures_delta.clear();
+        let mut app = app.unwrap();
+        let text: String = (1..=400).map(|index| format!("LISTROW{index:04}\n")).collect();
+        app.snapshot.program.content = Some(std::sync::Arc::new(text));
+        app.snapshot.program.line_count = 400;
+        app.snapshot.program.current_line = 1;
+        app.snapshot.program.modal = (0..codes)
+            .map(|index| (format!("G{}", index + 1), "1.0".to_string()))
+            .collect();
+        let slot = egui::Rect::from_min_size(
+            egui::Pos2::new(400.0, 20.0),
+            egui::vec2(360.0, height),
+        );
+        let mut out = ctx.run_ui(raw(), |ui| {
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(slot)
+                    .layout(egui::Layout::top_down(egui::Align::Min)),
+            );
+            super::program_card_sized(&app, &mut child, height);
+        });
+        out.textures_delta.clear();
+        let mut paint = CardPaint::default();
+        for clipped in &out.shapes {
+            walk_card_paint(&clipped.shape, clipped.clip_rect, &mut paint);
+        }
+        paint
+    }
+
+    fn band_top(paint: &CardPaint) -> f32 {
+        paint.band.expect("the band always paints").top()
+    }
+
+    /// The defect: a band taller than the space the listing had left (a second
+    /// row of codes, a narrower card) let the listing paint inside the band.
+    #[test]
+    fn the_listing_never_paints_inside_the_modal_band() {
+        for codes in [0usize, 3, 7, 13] {
+            for height in [200.0f32, 260.0, 340.0, 420.0, 600.0] {
+                let paint = paint_program_card(codes, height);
+                let band = paint.band.expect("the band always paints");
+                for (row, clip) in &paint.listing {
+                    assert!(
+                        !row.intersects(band),
+                        "codes {codes} height {height}: row {row:?} is painted in the band {band:?}"
+                    );
+                    assert!(
+                        clip.max.y <= band.top() + 0.5,
+                        "codes {codes} height {height}: row clip {clip:?} crosses the band top {}",
+                        band.top()
+                    );
+                }
+            }
+        }
+    }
+
+    /// A taller band costs the listing whole rows, and a roomy card still gives
+    /// it every row above the band.
+    #[test]
+    fn a_taller_band_takes_whole_rows_off_the_listing() {
+        let small = paint_program_card(3, 420.0);
+        let tall = paint_program_card(13, 420.0);
+        assert!(!small.listing.is_empty(), "the roomy card lists rows");
+        assert!(
+            band_top(&tall) < band_top(&small),
+            "13 codes need three rows of cells, 3 codes need one"
+        );
+        assert!(
+            tall.listing.len() < small.listing.len(),
+            "the taller band kept {} rows against {}",
+            tall.listing.len(),
+            small.listing.len()
+        );
+        let top = small
+            .listing
+            .iter()
+            .map(|(row, _)| row.min.y)
+            .fold(f32::INFINITY, f32::min);
+        let bottom = small
+            .listing
+            .iter()
+            .map(|(row, _)| row.max.y)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let pitch = (bottom - top) / (small.listing.len() - 1) as f32;
+        assert!(
+            band_top(&small) - bottom < pitch,
+            "another row would have fitted in {:.1} px",
+            band_top(&small) - bottom
+        );
+    }
+
+    /// Nothing else on the page moves: the progress line keeps the card's bottom
+    /// edge, stays under the band, and the card's own rect does not follow the
+    /// band's height.
+    #[test]
+    fn the_progress_line_keeps_the_cards_bottom_edge() {
+        let mut cards = Vec::new();
+        for codes in [3usize, 13] {
+            let paint = paint_program_card(codes, 600.0);
+            let card = paint.card.expect("the card frame paints");
+            // The slot ends on the page's bottom edge at 620; the frame's stroke
+            // sits on it.
+            assert!((card.max.y - 620.0).abs() <= 2.5, "the card ends at {card:?}");
+            let progress = paint.progress.expect("the progress line paints");
+            assert!(
+                progress.min.y > band_top(&paint),
+                "the progress line stays under the band"
+            );
+            assert!(progress.max.y < card.max.y - 1.0, "and inside the card");
+            cards.push(card);
+        }
+        assert!(
+            (cards[0].max.y - cards[1].max.y).abs() < 0.5,
+            "the taller band moved the card: {cards:?}"
+        );
     }
 }

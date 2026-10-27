@@ -1,8 +1,11 @@
 //! LinuxCNC G-code lexer and bounded preview parser.
 //!
 //! The preview parser is intentionally small: it understands the words needed
-//! to draw a toolpath and mark obvious syntax errors. It never imports
-//! remaps, never runs subroutines and never talks to the machine interpreter.
+//! to draw a toolpath and mark obvious syntax errors. It never imports remaps
+//! and never talks to the machine interpreter. It does follow the common o-word
+//! subset (sub/call, if/elseif/else/endif, while, repeat, goto, parameter
+//! assignment and expressions) under a hard step and call-depth limit, and it
+//! says so on the result when it had to stop short.
 
 use std::collections::BTreeMap;
 
@@ -459,6 +462,12 @@ pub struct Preview {
     pub uses_live_tool: bool,
     pub arcs: usize,
     pub rapids: usize,
+    /// The drawn path is not the whole program: a construct was skipped, a
+    /// limit stopped the run, or a block could not be evaluated. The UI shows a
+    /// partial path only when it knows this is set.
+    pub incomplete: bool,
+    /// Why `incomplete` is set, for the operator and for tests.
+    pub incomplete_reason: Option<String>,
 }
 
 impl Preview {
@@ -482,6 +491,8 @@ impl Preview {
             uses_live_tool: false,
             arcs: 0,
             rapids: 0,
+            incomplete: false,
+            incomplete_reason: None,
         }
     }
 
@@ -748,6 +759,1057 @@ fn push_cycle_segment(
     });
 }
 
+
+/// Hard limits on the preview interpreter. A runaway program -- a "while [1]"
+/// or a subroutine that calls itself without a base case -- must stop the
+/// preview, not hang the HMI. Hitting a limit marks the preview incomplete
+/// instead of drawing a partial path as if it were the whole program.
+pub const PREVIEW_STEP_LIMIT: usize = 200_000;
+
+/// Nested subroutine calls the preview follows before it gives up.
+pub const PREVIEW_DEPTH_LIMIT: usize = 64;
+
+/// Interpreter parameters, keyed as written: "#<level>" is "level", "#1" is
+/// "1". An unset parameter reads as 0, as in the interpreter.
+type Params = BTreeMap<String, f64>;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CompareOp {
+    Eq,
+    Ne,
+    Gt,
+    Ge,
+    Lt,
+    Le,
+}
+
+/// Recursive-descent evaluator for the RS274 expression subset the preview
+/// needs: numbers, parameters, brackets, arithmetic, the comparison operators,
+/// AND/OR/XOR and the common single-argument functions.
+///
+/// Precedence follows the LinuxCNC operator table: power, then multiply and
+/// divide, then add and subtract, then the comparisons, then the booleans. The
+/// trigonometric functions take and return degrees, as the interpreter does.
+struct Expression<'t, 'p> {
+    raw: &'t [u8],
+    pos: usize,
+    params: &'p Params,
+}
+
+impl<'t, 'p> Expression<'t, 'p> {
+    fn evaluate(text: &'t str, params: &'p Params) -> Result<f64, String> {
+        let mut parser = Self {
+            raw: text.as_bytes(),
+            pos: 0,
+            params,
+        };
+        let value = parser.expression()?;
+        parser.skip_whitespace();
+        if parser.pos < parser.raw.len() {
+            return Err(format!(
+                "unexpected text '{}'",
+                String::from_utf8_lossy(&parser.raw[parser.pos..]).trim()
+            ));
+        }
+        Ok(value)
+    }
+
+    fn skip_whitespace(&mut self) {
+        while self.pos < self.raw.len() && (self.raw[self.pos] as char).is_whitespace() {
+            self.pos += 1;
+        }
+    }
+
+    fn starts_with(&self, text: &str) -> bool {
+        self.pos <= self.raw.len() && self.raw[self.pos..].starts_with(text.as_bytes())
+    }
+
+    /// A symbolic operator, longest match first.
+    fn take_symbol(&mut self, symbols: &[&str]) -> Option<String> {
+        self.skip_whitespace();
+        for symbol in symbols {
+            if self.starts_with(symbol) {
+                self.pos += symbol.len();
+                return Some((*symbol).to_string());
+            }
+        }
+        None
+    }
+
+    /// A word operator, only when it stands alone.
+    fn take_keyword(&mut self, words: &[&str]) -> Option<String> {
+        self.skip_whitespace();
+        for word in words {
+            if !self.starts_with(word) {
+                continue;
+            }
+            let after = self.raw.get(self.pos + word.len()).copied();
+            if after.is_some_and(|byte| (byte as char).is_ascii_alphanumeric() || byte == b'_') {
+                continue;
+            }
+            self.pos += word.len();
+            return Some((*word).to_string());
+        }
+        None
+    }
+
+    fn expression(&mut self) -> Result<f64, String> {
+        self.or_level()
+    }
+
+    fn or_level(&mut self) -> Result<f64, String> {
+        let mut value = self.and_level()?;
+        while let Some(op) = self.take_keyword(&["OR", "XOR"]) {
+            let rhs = self.and_level()?;
+            let left = value != 0.0;
+            let right = rhs != 0.0;
+            value = if op == "OR" {
+                if left || right { 1.0 } else { 0.0 }
+            } else if left != right {
+                1.0
+            } else {
+                0.0
+            };
+        }
+        Ok(value)
+    }
+
+    fn and_level(&mut self) -> Result<f64, String> {
+        let mut value = self.compare_level()?;
+        while self.take_keyword(&["AND"]).is_some() {
+            let rhs = self.compare_level()?;
+            value = if value != 0.0 && rhs != 0.0 { 1.0 } else { 0.0 };
+        }
+        Ok(value)
+    }
+
+    fn compare_level(&mut self) -> Result<f64, String> {
+        let mut value = self.add_level()?;
+        loop {
+            let named = self.take_keyword(&["EQ", "NE", "GT", "GE", "LT", "LE"]);
+            let op = match named.as_deref() {
+                Some("EQ") => Some(CompareOp::Eq),
+                Some("NE") => Some(CompareOp::Ne),
+                Some("GT") => Some(CompareOp::Gt),
+                Some("GE") => Some(CompareOp::Ge),
+                Some("LT") => Some(CompareOp::Lt),
+                Some("LE") => Some(CompareOp::Le),
+                _ => match self.take_symbol(&["==", "!=", "<=", ">=", "<", ">"]).as_deref() {
+                    Some("==") => Some(CompareOp::Eq),
+                    Some("!=") => Some(CompareOp::Ne),
+                    Some("<=") => Some(CompareOp::Le),
+                    Some(">=") => Some(CompareOp::Ge),
+                    Some("<") => Some(CompareOp::Lt),
+                    Some(">") => Some(CompareOp::Gt),
+                    _ => None,
+                },
+            };
+            let Some(op) = op else { break };
+            let rhs = self.add_level()?;
+            let holds = match op {
+                CompareOp::Eq => (value - rhs).abs() <= 1e-9,
+                CompareOp::Ne => (value - rhs).abs() > 1e-9,
+                CompareOp::Gt => value > rhs,
+                CompareOp::Ge => value >= rhs,
+                CompareOp::Lt => value < rhs,
+                CompareOp::Le => value <= rhs,
+            };
+            value = if holds { 1.0 } else { 0.0 };
+        }
+        Ok(value)
+    }
+
+    fn add_level(&mut self) -> Result<f64, String> {
+        let mut value = self.multiply_level()?;
+        while let Some(op) = self.take_symbol(&["+", "-"]) {
+            let rhs = self.multiply_level()?;
+            value = if op == "+" { value + rhs } else { value - rhs };
+        }
+        Ok(value)
+    }
+
+    fn multiply_level(&mut self) -> Result<f64, String> {
+        let mut value = self.unary()?;
+        loop {
+            if let Some(op) = self.take_symbol(&["*", "/"]) {
+                let rhs = self.unary()?;
+                if op == "*" {
+                    value *= rhs;
+                } else if rhs == 0.0 {
+                    return Err("division by zero".to_string());
+                } else {
+                    value /= rhs;
+                }
+                continue;
+            }
+            if self.take_keyword(&["MOD"]).is_some() {
+                let rhs = self.unary()?;
+                if rhs == 0.0 {
+                    return Err("division by zero".to_string());
+                }
+                value %= rhs;
+                continue;
+            }
+            break;
+        }
+        Ok(value)
+    }
+
+    fn unary(&mut self) -> Result<f64, String> {
+        if self.take_symbol(&["-"]).is_some() {
+            return Ok(-self.unary()?);
+        }
+        if self.take_symbol(&["+"]).is_some() {
+            return self.unary();
+        }
+        self.power()
+    }
+
+    fn power(&mut self) -> Result<f64, String> {
+        let base = self.primary()?;
+        if self.take_symbol(&["**"]).is_some() {
+            let exponent = self.unary()?;
+            return Ok(base.powf(exponent));
+        }
+        Ok(base)
+    }
+
+    fn number(&mut self) -> Result<f64, String> {
+        let start = self.pos;
+        while self.pos < self.raw.len()
+            && ((self.raw[self.pos] as char).is_ascii_digit() || self.raw[self.pos] == b'.')
+        {
+            self.pos += 1;
+        }
+        if matches!(self.raw.get(self.pos).copied(), Some(b'e') | Some(b'E')) {
+            self.pos += 1;
+            while self.pos < self.raw.len()
+                && ((self.raw[self.pos] as char).is_ascii_digit()
+                    || self.raw[self.pos] == b'+'
+                    || self.raw[self.pos] == b'-')
+            {
+                self.pos += 1;
+            }
+        }
+        let text = String::from_utf8_lossy(&self.raw[start..self.pos]).into_owned();
+        text.parse::<f64>()
+            .map_err(|_| format!("'{}' is not a number", text))
+    }
+
+    fn parameter(&mut self) -> Result<f64, String> {
+        self.pos += 1;
+        match self.raw.get(self.pos).copied() {
+            Some(b'<') => {
+                self.pos += 1;
+                let start = self.pos;
+                while self.pos < self.raw.len() && self.raw[self.pos] != b'>' {
+                    self.pos += 1;
+                }
+                let name = String::from_utf8_lossy(&self.raw[start..self.pos])
+                    .trim()
+                    .to_string();
+                if self.raw.get(self.pos).copied() == Some(b'>') {
+                    self.pos += 1;
+                }
+                Ok(self.params.get(&name).copied().unwrap_or(0.0))
+            }
+            Some(b'[') => {
+                self.pos += 1;
+                let index = self.expression()?;
+                self.skip_whitespace();
+                if self.raw.get(self.pos).copied() == Some(b']') {
+                    self.pos += 1;
+                }
+                Ok(self.params.get(&label_key(index)).copied().unwrap_or(0.0))
+            }
+            Some(byte) if (byte as char).is_ascii_digit() => {
+                let start = self.pos;
+                while self.pos < self.raw.len() && (self.raw[self.pos] as char).is_ascii_digit() {
+                    self.pos += 1;
+                }
+                let name = String::from_utf8_lossy(&self.raw[start..self.pos]).into_owned();
+                Ok(self.params.get(&name).copied().unwrap_or(0.0))
+            }
+            _ => Err("# without a parameter".to_string()),
+        }
+    }
+
+    fn function(&mut self, name: &str) -> Result<f64, String> {
+        let argument = self.primary()?;
+        let value = match name {
+            "SQRT" => argument.sqrt(),
+            "ABS" => argument.abs(),
+            "SIN" => argument.to_radians().sin(),
+            "COS" => argument.to_radians().cos(),
+            "TAN" => argument.to_radians().tan(),
+            "ASIN" => argument.asin().to_degrees(),
+            "ACOS" => argument.acos().to_degrees(),
+            "ATAN" => argument.atan().to_degrees(),
+            "FIX" => argument.trunc(),
+            "FUP" => argument.ceil(),
+            "ROUND" => argument.round(),
+            "LN" => argument.ln(),
+            "EXP" => argument.exp(),
+            other => return Err(format!("unsupported function {}", other)),
+        };
+        Ok(value)
+    }
+
+    fn primary(&mut self) -> Result<f64, String> {
+        self.skip_whitespace();
+        let Some(byte) = self.raw.get(self.pos).copied() else {
+            return Err("the expression is empty".to_string());
+        };
+        if byte == b'[' || byte == b'(' {
+            let close = if byte == b'[' { b']' } else { b')' };
+            self.pos += 1;
+            let value = self.expression()?;
+            self.skip_whitespace();
+            if self.raw.get(self.pos).copied() != Some(close) {
+                return Err("unbalanced brackets".to_string());
+            }
+            self.pos += 1;
+            return Ok(value);
+        }
+        if byte == b'#' {
+            return self.parameter();
+        }
+        if (byte as char).is_ascii_digit() || byte == b'.' {
+            return self.number();
+        }
+        if (byte as char).is_ascii_alphabetic() {
+            let start = self.pos;
+            while self.pos < self.raw.len()
+                && ((self.raw[self.pos] as char).is_ascii_alphabetic()
+                    || self.raw[self.pos] == b'_')
+            {
+                self.pos += 1;
+            }
+            let name = String::from_utf8_lossy(&self.raw[start..self.pos]).to_ascii_uppercase();
+            return self.function(&name);
+        }
+        Err(format!("unexpected character '{}'", byte as char))
+    }
+}
+
+/// Key a computed parameter number the way "#101" and "#[100+1]" name it.
+fn label_key(value: f64) -> String {
+    if (value - value.round()).abs() < 1e-9 {
+        format!("{}", value as i64)
+    } else {
+        format!("{}", value)
+    }
+}
+
+/// A word whose value is not a literal number.
+struct WordFailure {
+    message: String,
+    /// A syntax error stops the preview; an evaluation failure only marks it
+    /// incomplete and drops the block.
+    syntax: bool,
+}
+
+/// Replace every parameterised word value with its number, so the drawing code
+/// below reads blocks exactly as it reads literal G-code.
+fn resolve_words(tokens: &[Token], raw: &str, params: &Params) -> Result<Vec<Token>, WordFailure> {
+    let mut words = Vec::with_capacity(tokens.len());
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = &tokens[index];
+        index += 1;
+        if token.kind == TokenKind::Comment {
+            words.push(token.clone());
+            continue;
+        }
+        if !matches!(
+            token.kind,
+            TokenKind::Axis | TokenKind::Parameter | TokenKind::FeedSpeed | TokenKind::Tool
+        ) {
+            words.push(token.clone());
+            continue;
+        }
+        let letter = token.text.chars().next().unwrap_or(' ');
+        let rest: String = token.text.chars().skip(1).collect();
+        if parse_number(&rest).is_some() {
+            words.push(token.clone());
+            continue;
+        }
+        let Some((end, expression)) = expression_at(raw, token.end) else {
+            return Err(WordFailure {
+                message: format!("missing value after {}", letter.to_ascii_uppercase()),
+                syntax: true,
+            });
+        };
+        let value = Expression::evaluate(&expression, params).map_err(|message| WordFailure {
+            message: format!(
+                "could not evaluate the value of {}: {}",
+                letter.to_ascii_uppercase(),
+                message
+            ),
+            syntax: false,
+        })?;
+        words.push(Token {
+            kind: token.kind,
+            start: token.start,
+            end,
+            text: format!("{}{}", letter.to_ascii_uppercase(), value),
+        });
+        while index < tokens.len() && tokens[index].start < end {
+            index += 1;
+        }
+    }
+    Ok(words)
+}
+
+/// The text of the value that follows a word letter when the value is not a
+/// literal number: a parameter reference or a bracketed expression.
+fn expression_at(raw: &str, from: usize) -> Option<(usize, String)> {
+    let bytes = raw.as_bytes();
+    let mut index = from;
+    while index < bytes.len() && (bytes[index] as char).is_whitespace() {
+        index += 1;
+    }
+    let start = index;
+    if !matches!(bytes.get(index).copied(), Some(b'#') | Some(b'[')) {
+        return None;
+    }
+    let mut depth = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'[' => {
+                depth += 1;
+                index += 1;
+            }
+            b']' if depth > 0 => {
+                depth -= 1;
+                index += 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            b'<' => {
+                index += 1;
+                while index < bytes.len() && bytes[index] != b'>' {
+                    index += 1;
+                }
+                if index < bytes.len() {
+                    index += 1;
+                }
+            }
+            b'#' => {
+                index += 1;
+                while index < bytes.len()
+                    && ((bytes[index] as char).is_ascii_alphanumeric() || bytes[index] == b'_')
+                {
+                    index += 1;
+                }
+            }
+            _ if depth > 0 => index += 1,
+            _ => break,
+        }
+    }
+    let end = index.min(bytes.len());
+    Some((end, raw[start..end].trim().to_string()))
+}
+
+/// Strip comments from a line while keeping offsets: each comment character
+/// becomes a space, so an expression found by offset still lines up.
+fn strip_comments(line: &str) -> String {
+    let mut out = Vec::with_capacity(line.len());
+    let mut depth = 0usize;
+    for &byte in line.as_bytes() {
+        match byte {
+            b';' if depth == 0 => break,
+            b'(' => {
+                depth += 1;
+                out.push(b' ');
+            }
+            b')' => {
+                depth = depth.saturating_sub(1);
+                out.push(b' ');
+            }
+            _ if depth > 0 => out.push(b' '),
+            _ => out.push(byte),
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// One statement of the preview interpreter.
+enum Stmt {
+    Block {
+        line: usize,
+        raw: String,
+        tokens: Vec<Token>,
+    },
+    Assign {
+        line: usize,
+        name: String,
+        expr: String,
+    },
+    SubStart,
+    SubEnd {
+        line: usize,
+    },
+    Call {
+        line: usize,
+        label: String,
+        args: Vec<String>,
+    },
+    If {
+        line: usize,
+        condition: String,
+    },
+    ElseIf {
+        line: usize,
+        condition: String,
+    },
+    Else,
+    EndIf,
+    While {
+        line: usize,
+        condition: String,
+    },
+    EndWhile,
+    Repeat {
+        line: usize,
+        count: String,
+    },
+    EndRepeat,
+    Goto {
+        line: usize,
+        target: String,
+    },
+    Return {
+        line: usize,
+    },
+    /// An o-word with no keyword: a program label such as the "O1001" after a
+    /// percent line. It names a place, it does nothing.
+    Label,
+    Unsupported {
+        line: usize,
+        what: String,
+    },
+}
+
+/// One block the interpreter decided to run, in execution order.
+struct PlannedBlock {
+    line: usize,
+    tokens: Vec<Token>,
+}
+
+struct PlannedPreview {
+    blocks: Vec<PlannedBlock>,
+    error: Option<SyntaxIssue>,
+    incomplete: Option<String>,
+}
+
+/// Split an o-word line into its label and the rest, as the interpreter reads
+/// it: "o1000 sub", "o<probe_z_minus_wco> call [...]".
+fn o_word(line: &str) -> Option<(String, String)> {
+    let rest = line.strip_prefix('o').or_else(|| line.strip_prefix('O'))?;
+    if let Some(rest) = rest.strip_prefix('<') {
+        let end = rest.find('>')?;
+        Some((
+            rest[..end].trim().to_string(),
+            rest[end + 1..].trim().to_string(),
+        ))
+    } else {
+        let end = rest
+            .find(|ch: char| !ch.is_ascii_digit())
+            .unwrap_or(rest.len());
+        if end == 0 {
+            return None;
+        }
+        Some((rest[..end].to_string(), rest[end..].trim().to_string()))
+    }
+}
+
+/// The keyword of an o-word block, lowercased, and the rest of the line.
+fn keyword_and_payload(rest: &str) -> (String, String) {
+    let rest = rest.trim();
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    (
+        rest[..end].to_ascii_lowercase(),
+        rest[end..].trim().to_string(),
+    )
+}
+
+/// The bracketed arguments of a call, one expression each.
+fn bracket_arguments(payload: &str) -> Vec<String> {
+    let bytes = payload.as_bytes();
+    let mut args = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if (bytes[index] as char).is_whitespace() {
+            index += 1;
+            continue;
+        }
+        if bytes[index] == b'[' {
+            let start = index + 1;
+            let mut depth = 0usize;
+            while index < bytes.len() {
+                match bytes[index] {
+                    b'[' => {
+                        depth += 1;
+                        index += 1;
+                    }
+                    b']' => {
+                        depth = depth.saturating_sub(1);
+                        index += 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => index += 1,
+                }
+            }
+            let end = index.saturating_sub(1).max(start);
+            args.push(payload[start.min(end)..end].trim().to_string());
+            continue;
+        }
+        let start = index;
+        while index < bytes.len() && !(bytes[index] as char).is_whitespace() {
+            index += 1;
+        }
+        args.push(payload[start..index].trim().to_string());
+    }
+    args
+}
+
+/// The parameter a "left hand side" names: "#<level>" or "#1".
+fn parameter_key(text: &str) -> Option<String> {
+    let rest = text.trim().strip_prefix('#')?;
+    if let Some(rest) = rest.strip_prefix('<') {
+        let end = rest.find('>')?;
+        return Some(rest[..end].trim().to_string());
+    }
+    let end = rest
+        .find(|ch: char| !ch.is_ascii_digit())
+        .unwrap_or(rest.len());
+    if end == 0 {
+        return None;
+    }
+    Some(rest[..end].to_string())
+}
+
+/// The assignment equals sign: not inside brackets, not part of a comparison.
+fn top_level_equals(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    for (index, &byte) in bytes.iter().enumerate() {
+        match byte {
+            b'[' => depth += 1,
+            b']' => depth = depth.saturating_sub(1),
+            b'=' if depth == 0 => {
+                let before = if index > 0 { bytes[index - 1] } else { b' ' };
+                let after = bytes.get(index + 1).copied().unwrap_or(b' ');
+                if !matches!(before, b'<' | b'>' | b'!' | b'=') && after != b'=' {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn o_word_statement(line: usize, label: &str, rest: &str) -> Stmt {
+    let (keyword, payload) = keyword_and_payload(rest);
+    match keyword.as_str() {
+        "sub" => Stmt::SubStart,
+        "endsub" => Stmt::SubEnd { line },
+        "call" => Stmt::Call {
+            line,
+            label: label.to_string(),
+            args: bracket_arguments(&payload),
+        },
+        "if" => Stmt::If {
+            line,
+            condition: payload,
+        },
+        "elseif" => Stmt::ElseIf {
+            line,
+            condition: payload,
+        },
+        "else" => Stmt::Else,
+        "endif" => Stmt::EndIf,
+        "while" => Stmt::While {
+            line,
+            condition: payload,
+        },
+        "endwhile" => Stmt::EndWhile,
+        "repeat" => Stmt::Repeat {
+            line,
+            count: payload,
+        },
+        "endrepeat" => Stmt::EndRepeat,
+        "goto" => Stmt::Goto {
+            line,
+            target: payload,
+        },
+        "return" => Stmt::Return { line },
+        "" => Stmt::Label,
+        other => Stmt::Unsupported {
+            line,
+            what: other.to_string(),
+        },
+    }
+}
+
+fn assignment_statement(line: usize, trimmed: &str) -> Stmt {
+    let Some(equals) = top_level_equals(trimmed) else {
+        return Stmt::Unsupported {
+            line,
+            what: trimmed.to_string(),
+        };
+    };
+    let left = trimmed[..equals].trim();
+    let right = trimmed[equals + 1..].trim();
+    match parameter_key(left) {
+        Some(name) => Stmt::Assign {
+            line,
+            name,
+            expr: right.to_string(),
+        },
+        None => Stmt::Unsupported {
+            line,
+            what: trimmed.to_string(),
+        },
+    }
+}
+
+fn goto_label(payload: &str) -> String {
+    let text = payload.trim();
+    let text = text
+        .strip_prefix('o')
+        .or_else(|| text.strip_prefix('O'))
+        .unwrap_or(text);
+    if let Some(rest) = text.strip_prefix('<') {
+        if let Some(end) = rest.find('>') {
+            return rest[..end].trim().to_string();
+        }
+    }
+    text.trim().to_string()
+}
+
+/// Read the file into the statements the interpreter runs. The file is read
+/// once; a block is only turned into numbers when the interpreter reaches it,
+/// because a parameter can change between two visits to the same line.
+fn plan_preview(text: &str) -> PlannedPreview {
+    let mut statements: Vec<Stmt> = Vec::new();
+    let mut labels: Vec<Option<String>> = Vec::new();
+    let mut error: Option<SyntaxIssue> = None;
+
+    for (index, raw) in text.lines().enumerate() {
+        let line = index + 1;
+        if raw.matches('(').count() != raw.matches(')').count() {
+            error = Some(SyntaxIssue {
+                line,
+                message: "unmatched comment parenthesis".into(),
+            });
+            break;
+        }
+        let code = strip_comments(raw);
+        let trimmed = code.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some((label, rest)) = o_word(trimmed) {
+            statements.push(o_word_statement(line, &label, &rest));
+            labels.push(Some(label));
+            continue;
+        }
+        if trimmed.starts_with('#') {
+            statements.push(assignment_statement(line, trimmed));
+            labels.push(None);
+            continue;
+        }
+        statements.push(Stmt::Block {
+            line,
+            raw: raw.to_string(),
+            tokens: lex_line(raw),
+        });
+        labels.push(None);
+    }
+
+    let mut targets: BTreeMap<String, usize> = BTreeMap::new();
+    let mut subroutines: BTreeMap<String, usize> = BTreeMap::new();
+    for (index, label) in labels.iter().enumerate() {
+        let Some(label) = label else { continue };
+        targets.entry(label.clone()).or_insert(index);
+        // A call names the same label as its sub: "o1000 call" runs the body
+        // that "o1000 sub" opens, wherever that body sits in the file.
+        if matches!(statements[index], Stmt::SubStart) {
+            subroutines.entry(label.clone()).or_insert(index);
+        }
+    }
+
+    // Branch and loop exits, resolved once with a stack per construct: after
+    // skips the rest of an if chain, enter is where a false condition lands
+    // (the next branch to test, or the body of an else).
+    let mut after: Vec<usize> = vec![statements.len(); statements.len()];
+    let mut enter: Vec<usize> = vec![statements.len(); statements.len()];
+    let mut back: Vec<usize> = vec![usize::MAX; statements.len()];
+    let mut sub_stack: Vec<usize> = Vec::new();
+    let mut if_stack: Vec<usize> = Vec::new();
+    let mut loop_stack: Vec<usize> = Vec::new();
+    for (index, statement) in statements.iter().enumerate() {
+        match statement {
+            Stmt::SubStart => sub_stack.push(index),
+            Stmt::SubEnd { .. } => {
+                if let Some(start) = sub_stack.pop() {
+                    after[start] = index + 1;
+                }
+            }
+            Stmt::If { .. } => if_stack.push(index),
+            Stmt::ElseIf { .. } | Stmt::Else => {
+                if let Some(previous) = if_stack.last_mut() {
+                    after[*previous] = index;
+                    enter[*previous] = if matches!(statement, Stmt::Else) {
+                        index + 1
+                    } else {
+                        index
+                    };
+                    *previous = index;
+                }
+            }
+            Stmt::EndIf => {
+                if let Some(previous) = if_stack.pop() {
+                    after[previous] = index + 1;
+                    enter[previous] = index + 1;
+                }
+            }
+            Stmt::While { .. } | Stmt::Repeat { .. } => loop_stack.push(index),
+            Stmt::EndWhile | Stmt::EndRepeat => {
+                if let Some(start) = loop_stack.pop() {
+                    after[start] = index + 1;
+                    back[index] = start;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut params = Params::new();
+    let mut blocks: Vec<PlannedBlock> = Vec::new();
+    let mut incomplete: Option<String> = None;
+    let mut calls: Vec<(usize, Params)> = Vec::new();
+    let mut repeats: Vec<(usize, i64)> = Vec::new();
+    let mut pc = 0usize;
+    let mut steps = 0usize;
+
+    while pc < statements.len() {
+        steps += 1;
+        if steps > PREVIEW_STEP_LIMIT {
+            incomplete = Some(format!(
+                "stopped at the {} executed block limit",
+                PREVIEW_STEP_LIMIT
+            ));
+            break;
+        }
+        match &statements[pc] {
+            Stmt::Block { line, raw, tokens } => {
+                match resolve_words(tokens, raw, &params) {
+                    Ok(words) => blocks.push(PlannedBlock {
+                        line: *line,
+                        tokens: words,
+                    }),
+                    Err(failure) if failure.syntax => {
+                        error = Some(SyntaxIssue {
+                            line: *line,
+                            message: failure.message,
+                        });
+                        break;
+                    }
+                    Err(failure) => {
+                        if incomplete.is_none() {
+                            incomplete = Some(format!("line {}: {}", line, failure.message));
+                        }
+                    }
+                }
+                pc += 1;
+            }
+            Stmt::Assign { line, name, expr } => {
+                match Expression::evaluate(expr, &params) {
+                    Ok(value) => {
+                        params.insert(name.clone(), value);
+                    }
+                    Err(_) => {
+                        if incomplete.is_none() {
+                            incomplete = Some(format!(
+                                "line {}: could not evaluate the assignment to #<{}>",
+                                line, name
+                            ));
+                        }
+                    }
+                }
+                pc += 1;
+            }
+            Stmt::SubStart => pc = after[pc],
+            Stmt::SubEnd { line } | Stmt::Return { line } => match calls.pop() {
+                Some((return_to, saved)) => {
+                    params = saved;
+                    pc = return_to + 1;
+                }
+                None => {
+                    if incomplete.is_none() {
+                        incomplete = Some(format!(
+                            "line {}: end of a subroutine that was not called",
+                            line
+                        ));
+                    }
+                    break;
+                }
+            },
+            Stmt::Call { line, label, args } => {
+                let Some(start) = subroutines.get(label).copied() else {
+                    if incomplete.is_none() {
+                        incomplete = Some(format!("line {}: no subroutine named {}", line, label));
+                    }
+                    pc += 1;
+                    continue;
+                };
+                if calls.len() >= PREVIEW_DEPTH_LIMIT {
+                    incomplete = Some(format!(
+                        "subroutine call depth limit {} reached at line {}",
+                        PREVIEW_DEPTH_LIMIT, line
+                    ));
+                    break;
+                }
+                let mut values = Vec::with_capacity(args.len());
+                let mut failed = false;
+                for argument in args {
+                    match Expression::evaluate(argument, &params) {
+                        Ok(value) => values.push(value),
+                        Err(_) => failed = true,
+                    }
+                }
+                if failed {
+                    if incomplete.is_none() {
+                        incomplete = Some(format!(
+                            "line {}: could not evaluate an argument of the call to {}",
+                            line, label
+                        ));
+                    }
+                    pc += 1;
+                    continue;
+                }
+                let mut frame = params.clone();
+                for (index, value) in values.iter().enumerate() {
+                    frame.insert((index + 1).to_string(), *value);
+                }
+                calls.push((pc, std::mem::replace(&mut params, frame)));
+                pc = start + 1;
+            }
+            Stmt::If { line, condition } => match Expression::evaluate(condition, &params) {
+                Ok(value) if value != 0.0 => pc += 1,
+                Ok(_) => pc = enter[pc],
+                Err(_) => {
+                    // An unreadable condition cannot pick a branch: skip the
+                    // whole if and say the preview is incomplete.
+                    if incomplete.is_none() {
+                        incomplete =
+                            Some(format!("line {}: could not evaluate {}", line, condition));
+                    }
+                    pc = after[pc];
+                }
+            },
+            Stmt::ElseIf { line, condition } => match Expression::evaluate(condition, &params) {
+                Ok(value) if value != 0.0 => pc += 1,
+                Ok(_) => pc = enter[pc],
+                Err(_) => {
+                    if incomplete.is_none() {
+                        incomplete =
+                            Some(format!("line {}: could not evaluate {}", line, condition));
+                    }
+                    pc = after[pc];
+                }
+            },
+            Stmt::Else => pc = after[pc],
+            Stmt::EndIf => pc += 1,
+            Stmt::Label => pc += 1,
+            Stmt::While { line, condition } => match Expression::evaluate(condition, &params) {
+                Ok(value) if value != 0.0 => pc += 1,
+                Ok(_) => pc = after[pc],
+                Err(_) => {
+                    if incomplete.is_none() {
+                        incomplete =
+                            Some(format!("line {}: could not evaluate {}", line, condition));
+                    }
+                    pc = after[pc];
+                }
+            },
+            Stmt::EndWhile => {
+                let start = back[pc];
+                pc = if start == usize::MAX { pc + 1 } else { start };
+            }
+            Stmt::Repeat { line, count } => match Expression::evaluate(count, &params) {
+                Ok(value) if value >= 1.0 => {
+                    repeats.push((pc, value.trunc() as i64));
+                    pc += 1;
+                }
+                Ok(_) => pc = after[pc],
+                Err(_) => {
+                    if incomplete.is_none() {
+                        incomplete = Some(format!("line {}: could not evaluate {}", line, count));
+                    }
+                    pc = after[pc];
+                }
+            },
+            Stmt::EndRepeat => {
+                let start = back[pc];
+                if start == usize::MAX {
+                    pc += 1;
+                } else {
+                    let mut remaining = 0;
+                    if let Some(entry) = repeats.iter_mut().rev().find(|(at, _)| *at == start) {
+                        entry.1 -= 1;
+                        remaining = entry.1;
+                    }
+                    if remaining > 0 {
+                        pc = start + 1;
+                    } else {
+                        pc += 1;
+                    }
+                }
+            }
+            Stmt::Goto { line, target } => {
+                let name = goto_label(target);
+                let destination = targets.get(&name).copied().or_else(|| {
+                    Expression::evaluate(target, &params)
+                        .ok()
+                        .and_then(|value| targets.get(&label_key(value)).copied())
+                });
+                match destination {
+                    Some(destination) => pc = destination,
+                    None => {
+                        if incomplete.is_none() {
+                            incomplete = Some(format!("line {}: no label {}", line, target));
+                        }
+                        pc += 1;
+                    }
+                }
+            }
+            Stmt::Unsupported { line, what } => {
+                if incomplete.is_none() {
+                    incomplete = Some(format!(
+                        "line {}: unsupported o-word statement {}",
+                        line, what
+                    ));
+                }
+                pc += 1;
+            }
+        }
+    }
+
+    PlannedPreview {
+        blocks,
+        error,
+        incomplete,
+    }
+}
+
 /// Bounded preview parser. `axis_names` selects which coordinate words matter;
 /// `offset` is the active WCS offset in machine coordinates.
 pub fn parse_preview(
@@ -783,96 +1845,28 @@ pub fn parse_preview(
     // default) leaves the words alone.
     let mut lathe_diameter = false;
     let mut saw_motion = false;
-    let mut line_count = 0;
     // Drilling canned cycle: modal, one hole per block with X/Y.
     let mut drill_cycle: Option<DrillCycle> = None;
     let mut cycle_request: Option<u16> = None;
     // G98 (initial Z) is the default retract mode; G99 retracts to R.
     let mut retract_to_r = false;
 
-    for (line_index, raw_line) in text.lines().enumerate() {
-        let line_no = line_index + 1;
-        line_count = line_no;
-        let tokens = lex_line(raw_line);
+    // Execution order, not file order: an o-word program calls, loops and
+    // branches, so the drawn path is what the blocks do when they run.
+    let PlannedPreview {
+        blocks,
+        error,
+        incomplete,
+    } = plan_preview(text);
+    let total_lines = text.lines().count();
+
+    for block in blocks {
+        let line_no = block.line;
+        let tokens = block.tokens;
         if tokens.is_empty() {
             continue;
         }
-        let has_unmatched = raw_line.matches('(').count() != raw_line.matches(')').count();
-        if has_unmatched {
-            preview.error = Some(SyntaxIssue {
-                line: line_no,
-                message: "unmatched comment parenthesis".into(),
-            });
-            break;
-        }
         let line_start_segment = preview.segments.len();
-
-        // O-words are structured blocks. The preview neither executes nor
-        // syntax-checks them: a call such as `o<probe_z_minus_wco> call`
-        // contains words like `call` that are not G-code words, and rejecting
-        // them blocked every probe routine before it reached the interpreter.
-        if tokens.iter().any(|token| token.kind == TokenKind::OWord)
-            || raw_line.trim_start().starts_with("o<")
-            || raw_line.trim_start().starts_with("O<")
-        {
-            continue;
-        }
-
-        // Validate obvious malformed axis words and words without values.
-        for token in &tokens {
-            if token.kind == TokenKind::Axis || token.kind == TokenKind::Parameter {
-                let letter = token.text.chars().next().unwrap_or(' ');
-                if !matches!(
-                    letter.to_ascii_uppercase(),
-                    'X' | 'Y'
-                        | 'Z'
-                        | 'A'
-                        | 'B'
-                        | 'C'
-                        | 'U'
-                        | 'V'
-                        | 'W'
-                        | 'I'
-                        | 'J'
-                        | 'K'
-                        | 'R'
-                        | 'P'
-                        | 'Q'
-                        | 'L'
-                        | 'D'
-                        | 'H'
-                        | 'E'
-                ) {
-                    continue;
-                }
-                let rest: String = token.text.chars().skip(1).collect();
-                if rest.is_empty() || parse_number(&rest).is_none() {
-                    // A bare axis letter is invalid unless an expression
-                    // follows in brackets; keep the last valid graph.
-                    if !raw_line.contains('[') {
-                        preview.error = Some(SyntaxIssue {
-                            line: line_no,
-                            message: format!("missing value after {}", letter),
-                        });
-                    }
-                }
-            }
-            if token.kind == TokenKind::FeedSpeed || token.kind == TokenKind::Tool {
-                let rest: String = token.text.chars().skip(1).collect();
-                if parse_number(&rest).is_none() {
-                    preview.error = Some(SyntaxIssue {
-                        line: line_no,
-                        message: format!(
-                            "missing value after {}",
-                            token.text.chars().next().unwrap_or(' ')
-                        ),
-                    });
-                }
-            }
-        }
-        if preview.error.is_some() {
-            break;
-        }
 
         // Modal words.
         for token in &tokens {
@@ -926,6 +1920,12 @@ pub fn parse_preview(
                 }
             }
         }
+
+        // G20 words are inches; every other length in this function is a
+        // machine-unit (mm) position, so each word is converted where it is
+        // read. A G20 block applies from itself, as the interpreter does.
+        let unit_scale = if units == "G20" { 25.4 } else { 1.0 };
+        let mm = move |value: f64| value * unit_scale;
 
         // One X word, in machine units. Only X is a diameter; the work offset
         // an absolute word is drawn against is already in machine units.
@@ -985,16 +1985,16 @@ pub fn parse_preview(
             // R first: in incremental mode the Z depth is measured from R.
             if let Some(value) = word_value(&tokens, 'r') {
                 cycle.r = if absolute {
-                    value + offset_values("Z")
+                    mm(value) + offset_values("Z")
                 } else {
-                    position[2] + value
+                    position[2] + mm(value)
                 };
             }
             if let Some(value) = word_value(&tokens, 'z') {
                 cycle.depth = if absolute {
-                    value + offset_values("Z")
+                    mm(value) + offset_values("Z")
                 } else {
-                    cycle.r + value
+                    cycle.r + mm(value)
                 };
             }
             let mut hole = position;
@@ -1002,7 +2002,7 @@ pub fn parse_preview(
             for (letter, axis) in [('x', 0usize), ('y', 1)] {
                 if let Some(value) = word_value(&tokens, letter) {
                     has_hole_axis = true;
-                    let value = if axis == 0 { dia(value) } else { value };
+                    let value = if axis == 0 { dia(mm(value)) } else { mm(value) };
                     hole[axis] = if absolute {
                         value + offset_values(&letter.to_ascii_uppercase().to_string())
                     } else {
@@ -1108,7 +2108,7 @@ pub fn parse_preview(
             let Some(value) = word_value(&tokens, name.chars().next().unwrap_or('X')) else {
                 continue;
             };
-            let value = if axis == 0 { dia(value) } else { value };
+            let value = if axis == 0 { dia(mm(value)) } else { mm(value) };
             let base = if absolute {
                 value + offset_values(name)
             } else {
@@ -1120,7 +2120,7 @@ pub fn parse_preview(
         // Handle XYZ even when axis_names is unexpected.
         for (letter, axis) in [('x', 0usize), ('y', 1), ('z', 2)] {
             if let Some(value) = word_value(&tokens, letter) {
-                let value = if axis == 0 { dia(value) } else { value };
+                let value = if axis == 0 { dia(mm(value)) } else { mm(value) };
                 target[axis] = if absolute {
                     value + offset_values(&letter.to_ascii_uppercase().to_string())
                 } else {
@@ -1152,10 +2152,10 @@ pub fn parse_preview(
                 target,
                 plane,
                 motion == 2.0,
-                word_value(&tokens, 'i'),
-                word_value(&tokens, 'j'),
-                word_value(&tokens, 'k'),
-                word_value(&tokens, 'r'),
+                word_value(&tokens, 'i').map(mm),
+                word_value(&tokens, 'j').map(mm),
+                word_value(&tokens, 'k').map(mm),
+                word_value(&tokens, 'r').map(mm),
             );
             if arc.is_none() {
                 preview.error = Some(SyntaxIssue {
@@ -1176,7 +2176,20 @@ pub fn parse_preview(
         position = target;
     }
 
-    preview.line_count = line_count;
+    preview.line_count = total_lines;
+    if preview.error.is_none() {
+        preview.error = error;
+    }
+    // A flag the UI can show instead of drawing a partial path as if it were
+    // the whole program: a skipped construct, a limit, or a block that could
+    // not be evaluated.
+    preview.incomplete = incomplete.is_some() || preview.error.is_some();
+    preview.incomplete_reason = incomplete.or_else(|| {
+        preview
+            .error
+            .as_ref()
+            .map(|issue| format!("line {}: {}", issue.line, issue.message))
+    });
     // Destination points only: the first segment starts at the tool's position
     // when the program was parsed, and including it made the program bounds (and
     // the stock) stretch out to wherever the tool happened to be, then shrink as
@@ -1607,5 +2620,250 @@ mod tests {
         let mut preview = parse_preview(rapid, &preview_axes(), None, [0.0; 3]);
         assert!(!preview.trim_approach([99.0, 0.0, 0.0]));
         assert_eq!(preview.segments.len(), 1);
+    }
+
+    // -- operator-reported preview defects ---------------------------------
+
+    /// arcspiral.ngc: a G20 inch program whose continuation blocks carry only
+    /// R and X/Y. 1008 lines, 999 arcs. Copy of /home/jack/CNC/tmp/gcode/.
+    const ARCSPIRAL: &str = include_str!("../assets/arcspiral.ngc");
+    /// flowsnake.ngc: a parameterised G21 program, 12 o-words, recursive subs.
+    const FLOWSNAKE: &str = include_str!("../assets/flowsnake.ngc");
+
+    fn expression(text: &str) -> Result<f64, String> {
+        let params = Params::new();
+        Expression::evaluate(text, &params)
+    }
+
+    #[test]
+    fn expressions_follow_the_interpreter_operator_table() {
+        assert_eq!(expression("[1 + 2 * 3]").unwrap(), 7.0);
+        assert_eq!(expression("[2 ** 3 ** 2]").unwrap(), 512.0);
+        assert_eq!(expression("[7 MOD 4]").unwrap(), 3.0);
+        assert_eq!(expression("[3 GT 2]").unwrap(), 1.0);
+        assert_eq!(expression("[3 LT 2]").unwrap(), 0.0);
+        assert_eq!(expression("[1 AND 0 OR 1]").unwrap(), 1.0);
+        assert_eq!(expression("[1 XOR 1]").unwrap(), 0.0);
+        assert_eq!(expression("[SQRT[16] + ABS[-2]]").unwrap(), 6.0);
+        assert_eq!(expression("[2 > 1]").unwrap(), 1.0);
+        assert_eq!(expression("[10 / 4]").unwrap(), 2.5);
+        assert_eq!(expression("[-[1 + 1]]").unwrap(), -2.0);
+        assert!(expression("[1 / 0]").is_err(), "division by zero");
+        assert!(expression("[NOPE[1]]").is_err(), "unknown function");
+        assert!(expression("[1 +]").is_err(), "truncated expression");
+    }
+
+    /// A block without a G word continues the last G0/G1/G2/G3. The current
+    /// parser already did this; the test pins it so a rewrite cannot lose it.
+    #[test]
+    fn a_block_without_a_g_word_continues_the_last_motion() {
+        let text = "G21 G90\nG0 X0 Y0\nG2 X10 Y0 R6\nX10 Y10 R6\nX0 Y10 R6\nG1 X20 Y20\nY30\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert_eq!(preview.arcs, 3, "each continuation block is an arc");
+        assert_eq!(preview.rapids, 1);
+        for line in 3..=5 {
+            let segments: Vec<_> = preview.segments_for_line(line).collect();
+            assert_eq!(segments.len(), 1, "line {line}");
+            assert_eq!(segments[0].kind, SegmentKind::Arc, "line {line}");
+            assert!(segments[0].arc.is_some(), "line {line}");
+        }
+        assert_eq!(
+            preview.segments_for_line(6).next().unwrap().kind,
+            SegmentKind::Feed,
+            "G1 cancels the arc mode"
+        );
+        let last = preview.segments.last().unwrap();
+        assert_eq!(last.kind, SegmentKind::Feed);
+        assert!((last.end[1] - 30.0).abs() < 1e-9, "{last:?}");
+        assert!(!preview.incomplete);
+    }
+
+    /// G20 words are inches and the preview is in machine units: 1.0 inch is
+    /// 25.4 mm. Before the fix the parser stored the words as written, so the
+    /// whole drawing came out 25.4 times too small.
+    #[test]
+    fn g20_words_reach_the_preview_in_machine_units() {
+        let preview = parse_preview("G20 G90\nG0 X0 Y0\nG1 X1 Y1\n", &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let end = preview.segments.last().unwrap().end;
+        assert!((end[0] - 25.4).abs() < 1e-9, "X {}", end[0]);
+        assert!((end[1] - 25.4).abs() < 1e-9, "Y {}", end[1]);
+
+        // Z too, and an incremental word is an increment in inches.
+        let preview = parse_preview("G20 G90\nG0 Z1\nG91 G1 Z-0.5\n", &preview_axes(), None, [0.0; 3]);
+        assert!((preview.segments[0].end[2] - 25.4).abs() < 1e-9);
+        assert!((preview.segments[1].end[2] - 12.7).abs() < 1e-9);
+
+        // An R arc keeps its radius and its endpoint in machine units.
+        let preview = parse_preview("G20 G90\nG0 X0 Y0\nG2 X1 Y0 R0.5\n", &preview_axes(), None, [0.0; 3]);
+        let last = preview.segments.last().unwrap();
+        assert!((last.end[0] - 25.4).abs() < 1e-9);
+        let arc = last.arc.as_ref().expect("arc");
+        assert!((arc.radius - 12.7).abs() < 1e-9, "R {}", arc.radius);
+
+        // G21 leaves the words alone, and a G20 block applies from itself.
+        let preview = parse_preview("G21 G90\nG1 X1\nG20\nG1 X2\n", &preview_axes(), None, [0.0; 3]);
+        assert!((preview.segments[0].end[0] - 1.0).abs() < 1e-9);
+        assert!((preview.segments[1].end[0] - 50.8).abs() < 1e-9);
+    }
+
+    /// The whole spiral, not its first arc. Extreme words: X-1.94789 and
+    /// X1.883429 inches, Y-1.97843 and Y1.915669; times 25.4 that is the extent
+    /// asserted below. The extent was read out of the file by a script that
+    /// shares no code with this parser.
+    #[test]
+    fn arcspiral_preview_spans_the_whole_spiral_in_machine_units() {
+        let preview = parse_preview(ARCSPIRAL, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        assert_eq!(preview.arcs, 999);
+        assert_eq!(preview.rapids, 4);
+        assert_eq!(preview.segments.len(), 1005);
+        let bounds = preview.bounds.expect("bounds");
+        assert!((bounds.min[0] - -49.476406).abs() < 1e-4, "{bounds:?}");
+        assert!((bounds.max[0] - 47.8390966).abs() < 1e-4, "{bounds:?}");
+        assert!((bounds.min[1] - -50.252122).abs() < 1e-4, "{bounds:?}");
+        assert!((bounds.max[1] - 48.6579926).abs() < 1e-4, "{bounds:?}");
+        assert!((bounds.min[2] - -2.54).abs() < 1e-9, "{bounds:?}");
+        assert!((bounds.max[2] - 25.4).abs() < 1e-9, "{bounds:?}");
+        assert!(bounds.size()[0] > 90.0, "{bounds:?}");
+        assert!(bounds.size()[1] > 90.0, "{bounds:?}");
+        // Only the last arc of the spiral comes back to the middle.
+        let last = preview.segments.last().expect("segments");
+        assert!(last.end[0].abs() < 0.1 && last.end[1].abs() < 0.1, "{last:?}");
+    }
+
+    /// No error, a complete preview, and the path reaches the program's final
+    /// point. Reference: the same recursion evaluated independently in Python.
+    /// Level 5 expands to 4^5 = 1024 leaf moves, the three top-level calls make
+    /// 3072, plus two G0, the G1 Z and the closing G0 = 3076 segments. The last
+    /// leaf of the last call is (0.25, 1.0); the far corner is (3.75, 3.95).
+    #[test]
+    fn a_parameterised_program_parses_completely_and_reaches_its_final_point() {
+        let preview = parse_preview(FLOWSNAKE, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        assert_eq!(preview.arcs, 0);
+        assert_eq!(preview.segments.len(), 3076);
+
+        let last = preview.segments.last().unwrap();
+        assert!((last.end[0] - 0.25).abs() < 1e-12, "{last:?}");
+        assert!((last.end[1] - 1.0).abs() < 1e-12, "{last:?}");
+
+        let bounds = preview.bounds.expect("bounds");
+        assert!((bounds.max[0] - 3.75).abs() < 1e-9, "{bounds:?}");
+        assert!((bounds.max[1] - 3.95).abs() < 1e-9, "{bounds:?}");
+        assert!((bounds.min[1] - -0.01036297108184514).abs() < 1e-9, "{bounds:?}");
+
+        // Segments 0..2 are the preamble. The first leaf is five nested first
+        // thirds from (.25, 1.0): each level calls its first sub with the same
+        // start and the one-third point as its own end.
+        assert_eq!(preview.segments[0].kind, SegmentKind::Rapid);
+        assert_eq!(preview.segments[1].kind, SegmentKind::Rapid);
+        assert_eq!(preview.segments[2].kind, SegmentKind::Feed);
+        assert_eq!(preview.segments[3].kind, SegmentKind::Feed);
+        let mut expected = 3.75;
+        for _ in 0..5 {
+            expected = (0.25 * 2.0 + expected) / 3.0;
+        }
+        let first_leaf = preview.segments[3].end;
+        assert!((first_leaf[0] - expected).abs() < 1e-12, "{first_leaf:?} {expected}");
+        assert!((first_leaf[1] - 1.0).abs() < 1e-12, "{first_leaf:?}");
+    }
+
+    #[test]
+    fn the_common_o_word_subset_runs_in_the_preview() {
+        let text = "G21 G90\n#<count> = 0\no10 while [#<count> LT 3]\n  o20 call [#<count>]\n  #<count> = [#<count> + 1]\no10 endwhile\no30 repeat [2]\n  G1 X10 F100\no30 endrepeat\no10 if [#<count> EQ 3]\n  G1 X20\no10 else\n  G1 X99\no10 endif\no40 if [#<count> EQ 0]\n  G1 X88\no40 elseif [#<count> NE 3]\n  G1 X77\no40 else\n  G1 X[60 + 6 MOD 4]\no40 endif\nM2\no20 sub\nG1 X[[#1 + 1] * 10]\no20 endsub\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        let ends: Vec<f64> = preview.segments.iter().map(|segment| segment.end[0]).collect();
+        assert_eq!(ends, vec![10.0, 20.0, 30.0, 10.0, 10.0, 20.0, 62.0]);
+    }
+
+    #[test]
+    fn goto_jumps_back_to_its_label() {
+        let text = "G21 G90\n#<n> = 0\no100 if [#<n> LT 2]\n  #<n> = [#<n> + 1]\n  G1 X[#<n> * 5] F100\n  o100 goto 100\no100 endif\nG1 X99\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        let ends: Vec<f64> = preview.segments.iter().map(|segment| segment.end[0]).collect();
+        assert_eq!(ends, vec![5.0, 10.0, 99.0]);
+    }
+
+    #[test]
+    fn a_runaway_while_stops_at_the_step_limit() {
+        let text = "G21 G90\no100 while [1]\n  #<n> = [#<n> + 1]\no100 endwhile\nG1 X1\n";
+        let started = std::time::Instant::now();
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        let elapsed = started.elapsed();
+        assert!(preview.incomplete, "a limit must be reported");
+        let reason = preview.incomplete_reason.clone().unwrap_or_default();
+        assert!(reason.contains("limit"), "{reason}");
+        // The exact budget, so the loop cannot run shorter or longer than it.
+        assert!(reason.contains(&PREVIEW_STEP_LIMIT.to_string()), "{reason}");
+        assert!(
+            elapsed < std::time::Duration::from_secs(30),
+            "the step limit must bound the work, took {elapsed:?}"
+        );
+        // The block after the loop is never reached and nothing is drawn.
+        assert!(preview.segments.is_empty());
+    }
+
+    #[test]
+    fn a_sub_that_calls_itself_stops_at_the_depth_limit() {
+        let text = "G21 G90\no200 sub\n  G1 X[#<depth>] F100\n  #<depth> = [#<depth> + 1]\n  o200 call\no200 endsub\no200 call\nG1 X99\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.incomplete, "a limit must be reported");
+        let reason = preview.incomplete_reason.clone().unwrap_or_default();
+        assert!(reason.contains("depth"), "{reason}");
+        assert!(reason.contains(&PREVIEW_DEPTH_LIMIT.to_string()), "{reason}");
+        assert!(
+            preview.segments.len() <= PREVIEW_DEPTH_LIMIT + 1,
+            "the depth limit bounds the work: {}",
+            preview.segments.len()
+        );
+        assert!(!preview.segments.iter().any(|segment| (segment.end[0] - 99.0).abs() < 1e-9));
+    }
+
+    /// An unsupported construct, an unreadable expression or a call with no
+    /// subroutine must say the preview is incomplete rather than draw a path
+    /// that looks whole.
+    #[test]
+    fn a_skipped_construct_is_reported_instead_of_drawn_silently() {
+        for text in [
+            // do/loop is not implemented.
+            "G21\no1 do\nG1 X1\no1 loop\n",
+            // A condition the evaluator cannot read.
+            "G21\no1 while [FOO[1]]\nG1 X1\no1 endwhile\n",
+            // A word value the evaluator cannot read.
+            "G21\nG1 X[FOO[1]]\n",
+            // A call to a subroutine the file does not define.
+            "G21\no5 call\nG1 X1\n",
+        ] {
+            let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+            assert!(preview.incomplete, "{text:?}");
+            assert!(preview.incomplete_reason.is_some(), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn an_ordinary_program_is_not_marked_incomplete() {
+        let preview = parse_preview(
+            "G21 G90\nG0 X0 Y0 Z5\nG1 Z-1 F300\nG1 X10\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(!preview.incomplete);
+        assert!(preview.incomplete_reason.is_none());
+
+        let preview = parse_preview(
+            include_str!("../assets/demo_mill.ngc"),
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
     }
 }
