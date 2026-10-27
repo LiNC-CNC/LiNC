@@ -888,6 +888,29 @@ const PROGRESS_HEIGHT: f32 = 46.0;
 /// `pitch` is one row's height plus the gap the card's layout adds after
 /// it; counting rows by the row's height alone is what let the last rows run
 /// past the band.
+/// First line of the listing window.
+///
+/// While a program runs, the line being cut sits a third of the way down: the
+/// third above it is what has just gone, the two thirds below are what is
+/// coming, which is the part the operator is reading ahead in. Centring it put
+/// half the window behind the tool and left the running line out of the window
+/// altogether once a few long lines wrapped above it.
+///
+/// Idle, the window follows the operator's selection instead, clamped so the
+/// last page of the program still fills the window.
+fn listing_first_line(focus: usize, window_len: usize, running: bool, total: usize) -> isize {
+    let window_len = window_len.max(1);
+    if running {
+        // Negative is fine and intended: before the program has cut a full
+        // third, the window pads above line 1 so the running line stays put
+        // instead of jumping down the card as the first lines execute.
+        focus as isize - (window_len / 3) as isize
+    } else {
+        let last_first = (total.saturating_sub(window_len) + 1).max(1) as isize;
+        (focus.saturating_sub(window_len / 2).max(1) as isize).min(last_first)
+    }
+}
+
 fn listing_rows(available: f32, pitch: f32) -> usize {
     (available / pitch.max(1.0)).floor().max(0.0) as usize
 }
@@ -966,13 +989,7 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                     } else {
                         app.program.selected_line.clamp(1, total)
                     };
-                    let half_window = (window_len / 2) as isize;
-                    let first = if is_running {
-                        focus as isize - half_window
-                    } else {
-                        let last_first = (total.saturating_sub(window_len) + 1).max(1) as isize;
-                        (focus.saturating_sub(window_len / 2).max(1) as isize).min(last_first)
-                    };
+                    let first = listing_first_line(focus, window_len, is_running, total);
                     let mut lines = content.lines().skip((first.max(1) - 1) as usize);
                     let number_font = FontId::monospace(theme::font_size(7.5));
                     let number_width = ui.fonts_mut(|fonts| {
@@ -1004,7 +1021,11 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                         // Whole rows inside the listing only: a row that would
                         // cross the band's top stays unpainted, so wrapped
                         // lines cost rows instead of reaching the band.
-                        if list_ui.cursor().min.y + height > listing.max.y + 0.5 {
+                        // A row that would cross the band stays unpainted, so
+                        // wrapped lines cost rows instead of reaching the band -
+                        // except the line being cut: that one is the reason the
+                        // operator is looking, so it is painted and clipped.
+                        if list_ui.cursor().min.y + height > listing.max.y + 0.5 && !is_current {
                             break;
                         }
                         let (rect, _) = list_ui.allocate_exact_size(
@@ -2045,6 +2066,40 @@ pub fn live_coordinates_card(ui: &mut Ui, header: &str, units_label: &str, rows:
 
 #[cfg(test)]
 mod tests {
+    /// The running line sits a third of the way down the listing: a third of
+    /// past lines above it, two thirds of upcoming ones below.
+    #[test]
+    fn the_running_line_keeps_its_place_a_third_down_the_listing() {
+        for (focus, window) in [(1usize, 9usize), (2, 9), (5, 9), (40, 12), (1, 3), (7, 3)] {
+            let first = super::listing_first_line(focus, window, true, 100);
+            let slot = focus as isize - first;
+            assert!(
+                slot >= 0 && slot < window as isize,
+                "focus {focus} in a {window}-row window lands at slot {slot} (first {first})"
+            );
+            assert_eq!(
+                slot,
+                (window / 3) as isize,
+                "focus {focus} sits a third down a {window}-row window"
+            );
+        }
+    }
+
+    /// At the very start the window pads above line 1 instead of letting the
+    /// running line slide to the top of the card, and the padding never grows
+    /// past the third.
+    #[test]
+    fn the_first_lines_of_a_program_pad_above_instead_of_climbing() {
+        assert_eq!(super::listing_first_line(1, 9, true, 100), -2);
+        assert_eq!(super::listing_first_line(4, 9, true, 100), 1);
+        // Idle, the window follows the selection and fills at the end.
+        assert_eq!(super::listing_first_line(1, 9, false, 100), 1);
+        assert_eq!(super::listing_first_line(100, 9, false, 100), 92);
+    }
+
+    /// At the very start the window pads above line 1 instead of letting the
+    /// running line slide to the top of the card, and the padding never grows
+    /// past the third.
     use super::{
         dro_axis_label, dro_value, feed_rows, listing_rows, modal_height, modal_mnemonic,
         modal_strip_height,
