@@ -28,7 +28,6 @@ pub enum Page {
     Probe,
     Homing,
     Manual,
-    Settings,
 }
 
 impl Page {
@@ -53,7 +52,6 @@ impl Page {
             Page::Probe => "TOUCH PROBE",
             Page::Homing => "HOMING",
             Page::Manual => "MANUAL",
-            Page::Settings => "SETTINGS",
         }
     }
 
@@ -1303,25 +1301,12 @@ impl Default for ManualUi {
     }
 }
 
-pub struct SettingsUi {
-    pub density: f32,
-    pub show_keyboard: bool,
-    pub page: usize,
-}
-
-impl Default for SettingsUi {
-    fn default() -> Self {
-        Self {
-            density: 1.0,
-            show_keyboard: true,
-            page: 0,
-        }
-    }
-}
-
 pub struct GraphStyle {
     pub show_grid: bool,
     pub show_live_trail: bool,
+    /// PAC-MAN progress: no trail, and the completed part of the path is
+    /// eaten. Remembered in the preferences file, not in the profile.
+    pub pac_man: bool,
     /// `Ctrl+B` cycle: 0 dimensions only, 1 + machine box, 2 + program box, 3 off.
     pub bounds_mode: u8,
     pub show_stock: bool,
@@ -1340,9 +1325,14 @@ impl GraphStyle {
         view: &mut TrajectoryView<'a>,
         selected_line: Option<usize>,
         current_line: Option<usize>,
+        eaten_through: Option<usize>,
     ) {
         view.show_grid = self.show_grid;
-        view.show_live_trail = self.show_live_trail;
+        // PAC-MAN draws no trail at all: where the machine has been is the hole
+        // it ate, and a green line over that hole would put the trail back.
+        view.show_live_trail = self.show_live_trail && !self.pac_man;
+        view.pac_man = self.pac_man;
+        view.eaten_through = eaten_through;
         let (dims, machine, box_at) = bounds_visibility(self.bounds_mode);
         view.show_program_bounds = dims;
         view.show_machine_bounds = machine;
@@ -1374,7 +1364,6 @@ pub fn page_accent(page: Page) -> egui::Color32 {
         Page::Files => theme::C4,
         Page::Probe => theme::C6,
         Page::Homing | Page::Manual => theme::C3,
-        Page::Settings => theme::MUTED,
     }
 }
 
@@ -1393,6 +1382,7 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
     GraphStyle {
         show_grid: profile.config.toolpath.show_grid,
         show_live_trail: profile.config.toolpath.show_live_trail,
+        pac_man: false,
         bounds_mode: bounds_mode_from_config(
             profile.config.toolpath.show_program_bounds,
             profile.config.toolpath.show_machine_bounds,
@@ -1718,6 +1708,10 @@ pub struct Keymap {
     pub view_cycle: Binding,
     /// Pages with a toolpath: show or hide the program bounding box.
     pub toggle_bounds: Binding,
+    /// Pages with a toolpath: PAC-MAN progress. The live trail is not drawn and
+    /// the program path is eaten block by completed block, so the card shows
+    /// what is still to come instead of where the machine has been.
+    pub pac_man: Binding,
     /// Lathe only: mirror X about the Z centreline of the XZ/TURN view. The
     /// projection flips, so the part, the trail, the tool and the MDI overlay
     /// move together; no coordinate changes.
@@ -1742,8 +1736,6 @@ pub struct Keymap {
     pub files_delete: Binding,
     pub tools: Binding,
     pub offsets: Binding,
-    /// SETTINGS has no navigation row; this is the way in.
-    pub settings: Binding,
     /// Toggle the limit-switch override. The jog screens carry no button for it.
     pub limits_override: Binding,
     pub diagnostics: Binding,
@@ -1773,7 +1765,8 @@ pub struct Keymap {
     /// Page-local to the MDI pane: drop the selected buffer line.
     pub mdi_buffer_delete: Binding,
     pub help_search: Binding,
-    /// Bindings from the profile that could not be parsed, reported in Settings.
+    /// Bindings from the profile that could not be parsed. The default holds for
+    /// each of them and `from_config` logs it; the list is what the tests read.
     pub rejected: Vec<String>,
 }
 
@@ -1792,7 +1785,7 @@ fn binding(value: &str, default: Binding, rejected: &mut Vec<String>) -> Binding
 /// `Up`/`Down` already recall a buffer line and the shell navigates with the
 /// bare arrows, so a profile that rebinds the move onto one of them would
 /// shadow recall with no sign of it. The chord is rejected the way an
-/// unparsable one is: Settings names it and the default holds.
+/// unparsable one is: the default holds and the log names it.
 fn line_move_binding(value: &str, default: Binding, rejected: &mut Vec<String>) -> Binding {
     let binding = binding(value, default, rejected);
     if binding.modifiers.is_none()
@@ -1823,6 +1816,7 @@ impl Keymap {
                 Binding::new(Key::B, ctrl),
                 &mut rejected,
             ),
+            pac_man: binding(&keys.pac_man, Binding::new(Key::P, ctrl), &mut rejected),
             toggle_lathe_mirror: binding(
                 &keys.toggle_lathe_mirror,
                 Binding::new(Key::M, ctrl),
@@ -1887,7 +1881,6 @@ impl Keymap {
             ),
             tools: binding(&keys.tools, Binding::new(Key::F7, none), &mut rejected),
             offsets: binding(&keys.offsets, Binding::new(Key::F8, none), &mut rejected),
-            settings: binding(&keys.settings, Binding::new(Key::P, ctrl), &mut rejected),
             limits_override: binding(
                 &keys.limits_override,
                 Binding::new(
@@ -1954,6 +1947,13 @@ impl Keymap {
             ),
             rejected,
         };
+        // Nothing on screen shows these any more (SETTINGS is gone), and a key
+        // that silently does not work is a mystery at the machine: say it.
+        for chord in &keymap.rejected {
+            log::warn!(
+                "[keys] {chord:?} is not a chord this shell understands; its default holds"
+            );
+        }
         keymap
     }
 

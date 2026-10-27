@@ -1,0 +1,37 @@
+schema_version = 1
+profile = "sim"
+extends = "base.toml"
+
+[machine]
+name = "BaierMill Simulation"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe-review-20261024.ini"
+
+[mill]
+max_axes = 5
+
+[ui]
+window_title = "LiNC - BaierMill Simulation"
+scale = "1.0"
+servo_load = ["X", "Y", "Z", "S"]
+
+[panel]
+kind = "simulated"
+label = "Simulated CNC control panel"
+owner = "linc-panel"
+driver = "cnc-panel-sim"
+
+[panel.link]
+kind = "virtual"
+
+[diagnostics]
+panel_link_stats = "none"
+
+[simulation]
+enabled = true
+rio = "../hal/rio_sim.py"
+estop = "panel-gui"
+panel_window = false
+panel_title = "CNC Control Panel Simulator"
+panel_scale = 1.0

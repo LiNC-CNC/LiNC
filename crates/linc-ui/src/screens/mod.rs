@@ -10,5 +10,4 @@ pub mod offsets;
 pub mod probe;
 pub mod probe_view;
 pub mod program;
-pub mod settings;
 pub mod tools;

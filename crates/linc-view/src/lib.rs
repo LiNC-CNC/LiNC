@@ -132,6 +132,14 @@ pub struct TrajectoryView<'a> {
     pub pitch: f32,
     pub show_grid: bool,
     pub show_live_trail: bool,
+    /// PAC-MAN progress. The live trail is not drawn at all, and the part of
+    /// the program path the machine has already run is eaten away, so the card
+    /// shows what is still to come rather than where it has been.
+    pub pac_man: bool,
+    /// Highest program line whose motion is complete; every segment at or
+    /// before it is dropped. `None` eats nothing — a program that has not
+    /// started keeps its whole path on screen.
+    pub eaten_through: Option<usize>,
     /// Draw the technical drawing on the program bounds: dimension lines and
     /// their values.
     pub show_program_bounds: bool,
@@ -201,6 +209,8 @@ impl<'a> TrajectoryView<'a> {
             pitch: DEFAULT_PITCH,
             show_grid: true,
             show_live_trail: true,
+            pac_man: false,
+            eaten_through: None,
             show_program_bounds: true,
             show_program_box: false,
             show_machine_bounds: false,
@@ -224,6 +234,15 @@ impl<'a> TrajectoryView<'a> {
     ///
     /// One transformation for both: the marker sits on the trail's last point,
     /// so shifting one and not the other would tear them apart.
+    /// Whether PAC-MAN has eaten this segment.
+    ///
+    /// A canned cycle contributes several segments to one line, so the unit is
+    /// the block, not the move: they disappear together, when the interpreter
+    /// has moved on to the next line.
+    pub fn eaten(&self, line: usize) -> bool {
+        self.pac_man && self.eaten_through.is_some_and(|through| line <= through)
+    }
+
     fn trail_point(&self, position: [f64; 3]) -> [f64; 3] {
         [
             position[0] + self.live_trail_shift[0],
@@ -1233,6 +1252,9 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         // red out-of-travel marking is state, not an optional overlay.
         let travel_limits = view.machine_bounds;
         for segment in &view.preview.segments {
+            if view.eaten(segment.line) {
+                continue;
+            }
             let is_selected = view.show_selected_line && view.selected_line == Some(segment.line);
             let stroke = if is_selected {
                 Stroke::new(2.6, view.selected_line_color)
@@ -1423,7 +1445,13 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         painter.text(
             legend_rect.left_top() + Vec2::new(40.0, 25.0),
             Align2::LEFT_TOP,
-            "LIVE TOOLPATH",
+            // Green is where the machine has been either way. With the trail
+            // gone that region is a hole in the path, so the key names it.
+            if view.pac_man {
+                "EATEN PATH"
+            } else {
+                "LIVE TOOLPATH"
+            },
             FontId::monospace(10.0 * FONT_SCALE),
             theme::FG,
         );
@@ -3242,6 +3270,70 @@ mod tests {
         );
         assert!((zoom - 1.0).abs() < 1e-4, "zoom {zoom}");
         assert!(pan.length() < 1e-3, "pan {pan:?}");
+    }
+
+    /// The cuts the card paints, counted by the stroke the program path uses:
+    /// rapids are dotted and MUTED, so every 1.8 px ACCENT line is a cut.
+    fn painted_cuts(preview: &Preview, pac_man: bool, eaten_through: Option<usize>) -> usize {
+        let mut view = TrajectoryView::new(preview, &[], MachineVariant::Mill);
+        view.show_grid = false;
+        view.show_legend = false;
+        view.show_program_bounds = false;
+        view.show_stock = false;
+        view.show_selected_line = false;
+        view.pac_man = pac_man;
+        view.eaten_through = eaten_through;
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            draw_trajectory(ui, &mut view);
+        });
+        output.textures_delta.clear();
+        output
+            .shapes
+            .iter()
+            .filter(|clipped| match &clipped.shape {
+                egui::Shape::LineSegment { stroke, .. } => {
+                    stroke.color == theme::ACCENT && (stroke.width - 1.8).abs() < 1e-6
+                }
+                _ => false,
+            })
+            .count()
+    }
+
+    /// PAC-MAN drops the blocks the interpreter has already run and keeps the
+    /// one it is cutting, so what is drawn is what is still to come. The mode is
+    /// what eats: a line number without it changes nothing.
+    #[test]
+    fn pac_man_eats_the_blocks_that_are_already_cut() {
+        let axes = vec!["X".to_string(), "Y".to_string(), "Z".to_string()];
+        let text = "G21 G0 X0 Y0 Z5\nG1 X10\nG1 Y10\nG1 X0\n";
+        let preview = linc_core::gcode::parse_preview(text, &axes, None, [0.0; 3]);
+        assert_eq!(preview.segments.len(), 4, "one segment per block");
+        assert_eq!(painted_cuts(&preview, false, None), 3, "three cuts");
+
+        // Lines 1 and 2 are behind the tool: the rapid and the first cut.
+        assert_eq!(
+            painted_cuts(&preview, true, Some(2)),
+            2,
+            "the first two blocks are eaten"
+        );
+        assert_eq!(
+            painted_cuts(&preview, true, Some(usize::MAX)),
+            0,
+            "a finished program has eaten its whole path"
+        );
+        assert_eq!(
+            painted_cuts(&preview, false, Some(2)),
+            3,
+            "the eaten line only counts in PAC-MAN mode"
+        );
     }
 
     #[test]

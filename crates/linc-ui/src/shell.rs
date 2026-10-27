@@ -90,7 +90,6 @@ pub struct LincApp {
     pub files: FilesUi,
     pub homing_return_page: Page,
     pub manual: ManualUi,
-    pub settings: SettingsUi,
     pub diagnostics_tab: DiagnosticsTab,
     pub diagnostics_search: String,
     pub diagnostics_severity: Option<AlarmSeverity>,
@@ -374,6 +373,8 @@ impl LincApp {
         // A lathe-only view toggle; a mill profile never sees it and a file
         // written before the key existed reads as off.
         graph_style.lathe_mirror = preferences.lathe_mirror.unwrap_or(false);
+        // The same for the PAC-MAN progress view.
+        graph_style.pac_man = preferences.pac_man.unwrap_or(false);
         let remembered_page = preferences
             .last_page
             .as_deref()
@@ -444,10 +445,6 @@ impl LincApp {
                 } else {
                     linc_view::ViewMode::Iso3d
                 },
-                ..Default::default()
-            },
-            settings: SettingsUi {
-                density: configured_scale,
                 ..Default::default()
             },
             diagnostics_tab: DiagnosticsTab::Overview,
@@ -1425,7 +1422,6 @@ impl LincApp {
         match self.page {
             Page::Files => self.set_page(self.files_return_page),
             Page::Probe => self.set_page(Page::Offsets),
-            Page::Settings => self.set_page(self.last_non_mode_page),
             Page::Program => {
                 if self.program.focus_editor {
                     self.program.focus_editor = false;
@@ -1894,6 +1890,25 @@ impl LincApp {
         );
     }
 
+    /// `Ctrl+P`: PAC-MAN progress. The live trail goes away and the part of the
+    /// program path the machine has already run is eaten away, block by
+    /// completed block. A view mode: no coordinate, offset or controller state
+    /// changes, and the eaten blocks come back with the mode.
+    pub fn cycle_pac_man(&mut self) {
+        let on = !self.graph_style.pac_man;
+        self.graph_style.pac_man = on;
+        self.preferences.pac_man = Some(on);
+        self.preferences_dirty = true;
+        self.toast(
+            if on {
+                "pac-man: path eaten behind the tool"
+            } else {
+                "pac-man: off, full path"
+            },
+            theme::MUTED,
+        );
+    }
+
     /// `Ctrl+E`: read the lathe's X as a radius or a diameter. Presentation
     /// only: the X position the controller reports is a radius, and every
     /// command still carries that number.
@@ -2113,6 +2128,7 @@ impl LincApp {
         let mut cycle_view = false;
         let mut graph_fit = false;
         let mut graph_clear = false;
+        let mut pac_man = false;
         let mut run_from_line = false;
         let mut mdi_issue = false;
         let mut help_search = false;
@@ -2316,6 +2332,11 @@ impl LincApp {
                 if zoom_out {
                     view_zoom /= VIEW_ZOOM_STEP;
                 }
+                // Page-scoped like the zoom: Ctrl+P is no text field's chord and
+                // no navigation key, so it works wherever a toolpath is drawn.
+                if input.consume_key(k.pac_man.modifiers, k.pac_man.key) {
+                    pac_man = true;
+                }
             }
             let view_hovered = view_page && toolpath_hovered;
             let view_pan_keys = view_hovered && !text_focused;
@@ -2336,10 +2357,6 @@ impl LincApp {
             }
             if input.consume_key(self.keymap.tools.modifiers, self.keymap.tools.key) {
                 nav_page = Some(Page::Tools);
-            }
-            // SETTINGS has no navigation row: this chord is the only way in.
-            if input.consume_key(self.keymap.settings.modifiers, self.keymap.settings.key) {
-                nav_page = Some(Page::Settings);
             }
             // The jog screens carry no button for the limit override, so the
             // chord is the only way to free a joint parked on a switch.
@@ -2667,6 +2684,9 @@ impl LincApp {
         if graph_clear {
             self.clear_trail();
         }
+        if pac_man {
+            self.cycle_pac_man();
+        }
         if cycle_view {
             self.cycle_program_view();
             let view = self.program.view;
@@ -2921,7 +2941,6 @@ impl LincApp {
                         Page::Probe => screens::probe::show(self, ui),
                         Page::Homing => screens::homing::show(self, ui),
                         Page::Manual => screens::manual::show(self, ui),
-                        Page::Settings => screens::settings::show(self, ui),
                     },
                 );
             });
@@ -3514,6 +3533,7 @@ impl LincApp {
                             (k.graph_fit.label(), "FIT"),
                             (k.graph_clear.label(), "CLEAR TRAIL"),
                             (k.toggle_bounds.label(), "BOUNDS"),
+                            (k.pac_man.label(), "PAC-MAN"),
                             (k.view_pan_hint(), "PAN"),
                             (k.view_zoom_hint(), "ZOOM"),
                         ],
@@ -3546,6 +3566,7 @@ impl LincApp {
                             (k.graph_fit.label(), "FIT"),
                             (k.graph_clear.label(), "CLEAR TRAIL"),
                             (k.toggle_bounds.label(), "BOUNDS"),
+                            (k.pac_man.label(), "PAC-MAN"),
                             (k.view_pan_hint(), "PAN"),
                             (k.view_zoom_hint(), "ZOOM"),
                         ],
@@ -3641,6 +3662,7 @@ impl LincApp {
                 hints.push((format!("Ctrl+{square}"), "VIEW"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
+                hints.push((k.pac_man.label(), "PAC-MAN"));
                 hints.push((k.view_pan_hint(), "PAN"));
                 hints.push((k.view_zoom_hint(), "ZOOM"));
                 hints.extend(lathe_hints.clone());
@@ -3654,6 +3676,7 @@ impl LincApp {
                 hints.push(("X/Y/Z".into(), "EDIT DRO"));
                 hints.push(("OFFSET".into(), "PROBE"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
+                hints.push((k.pac_man.label(), "PAC-MAN"));
                 hints.push((k.view_pan_hint(), "PAN"));
                 hints.push((k.view_zoom_hint(), "ZOOM"));
                 hints.extend(lathe_hints.clone());
@@ -3722,7 +3745,6 @@ impl LincApp {
                 hints.push(("Enter".into(), "EDIT"));
                 hints.push(("T".into(), "LOAD + G43"));
             }
-            _ => {}
         }
         if !hints.is_empty() {
             groups.push(ShortcutGroup {
@@ -4538,7 +4560,7 @@ fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Page, color: C
                 painter.line_segment([pair[0], pair[1]], s);
             }
         }
-        Page::Diagnostics | Page::Settings => {
+        Page::Diagnostics => {
             painter.circle_stroke(c, 7.0, s);
             painter.circle_filled(c, 2.0, color);
         }
@@ -4608,7 +4630,6 @@ pub fn page_from_name(name: &str) -> Option<Page> {
         Page::Probe,
         Page::Homing,
         Page::Manual,
-        Page::Settings,
     ] {
         let label = page.label().to_ascii_uppercase().replace(['-', '_'], " ");
         if label == wanted || format!("{page:?}").to_ascii_uppercase() == wanted {
@@ -4681,22 +4702,21 @@ pub fn override_readout(feed: f64, rapid: f64, spindle: f64) -> String {
 /// seven, so the operator can reach the diagnostics and help pages with the
 /// arrows and Enter as well as with their `[keys]` chords (Ctrl+D, Ctrl+H).
 /// They draw as one-line rows without an icon (see [`NAV_PRIMARY`]).
-pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
+pub const NAV_ITEMS: [(Page, &str, &str); 6] = [
     (Page::Machine, "MACHINE", "MAIN"),
     (Page::Program, "PROGRAM", "FILE"),
     (Page::Tools, "TOOLS", "TOOL"),
     (Page::Offsets, "OFFSETS", "PROBE"),
     (Page::Diagnostics, "DIAG", "Ctrl+D"),
     (Page::Help, "G-CODE", "Ctrl+H"),
-    (Page::Settings, "SETTINGS", ""),
 ];
 
 /// The navigation rows that carry an icon and a two-line label.
 ///
 /// The four entries with a function key do: they are what the operator's hand
-/// finds on the panel. DIAGNOSTICS, G-CODE HELP and SETTINGS are reached by a
-/// chord or by the arrows, so they draw as one-line rows without an icon — a
-/// third of the attention, and in a seven-row list the vertical space.
+/// finds on the panel. DIAGNOSTICS and G-CODE HELP are reached by a chord or by
+/// the arrows, so they draw as one-line rows without an icon — a third of the
+/// attention, and in a six-row list the vertical space.
 const NAV_PRIMARY: [Page; 4] = [Page::Machine, Page::Program, Page::Tools, Page::Offsets];
 
 /// Geometry of one navigation row: the target the operator gets and the pill
@@ -4749,7 +4769,6 @@ fn page_key(page: Page) -> &'static str {
         Page::Help => "help",
         Page::Files => "files",
         Page::Probe => "probe",
-        Page::Settings => "settings",
         Page::Homing => "homing",
         Page::Manual => "manual",
     }
@@ -4764,7 +4783,6 @@ fn page_from_config(value: &str) -> Page {
         "help" => Page::Help,
         "files" => Page::Files,
         "probe" => Page::Probe,
-        "settings" => Page::Settings,
         _ => Page::Machine,
     }
 }
@@ -5400,7 +5418,7 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             assert!(nav_row_geometry(page).icon, "{page:?} keeps its icon");
             assert_eq!(nav_row_geometry(page).pill, theme::NAV_PILL_PRIMARY);
         }
-        for page in [Page::Diagnostics, Page::Help, Page::Settings] {
+        for page in [Page::Diagnostics, Page::Help] {
             assert!(!nav_row_geometry(page).icon, "{page:?} is a one-line row");
             assert_eq!(nav_row_geometry(page).pill, theme::NAV_PILL_SECONDARY);
         }
@@ -5508,17 +5526,37 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             "bottom padding {}",
             shortcuts - last_target_bottom
         );
-        // The pages behind the rows still answer their own chords.
+        // Ctrl+P is PAC-MAN now, not a page: the view changes, the page does not.
+        let page = harness.app.page;
         harness.frame_with(&[(egui::Key::P, ctrl())]);
-        assert_eq!(
-            harness.app.page,
-            Page::Settings,
-            "Ctrl+P is the only way into SETTINGS now that it has no row"
-        );
+        assert!(harness.app.graph_style.pac_man, "Ctrl+P turns PAC-MAN on");
+        assert_eq!(harness.app.page, page, "a view mode, not a page");
+        // The pages behind the rows still answer their own chords.
         harness.frame_with(&[(egui::Key::D, ctrl())]);
         assert_eq!(harness.app.page, Page::Diagnostics);
         harness.frame_with(&[(egui::Key::H, ctrl())]);
         assert_eq!(harness.app.page, Page::Help);
+    }
+
+    /// The style, not the page: PAC-MAN is what stops the trail being drawn,
+    /// and the eaten line reaches the view as it is.
+    #[test]
+    fn pac_man_takes_the_live_trail_out_of_the_style() {
+        let (_dir, profile) = fixture();
+        let mut style = crate::state::graph_style(&profile);
+        style.show_live_trail = true;
+        style.pac_man = true;
+        let preview = linc_core::gcode::Preview::empty();
+        let mut view = linc_view::TrajectoryView::new(&preview, &[], profile.variant);
+        style.apply(&mut view, None, None, Some(2));
+        assert!(!view.show_live_trail, "PAC-MAN draws no trail");
+        assert!(view.pac_man, "the mode reaches the view");
+        assert_eq!(view.eaten_through, Some(2), "and so does the eaten line");
+
+        style.pac_man = false;
+        style.apply(&mut view, None, None, None);
+        assert!(view.show_live_trail, "the trail comes back with the mode off");
+        assert_eq!(view.eaten_through, None);
     }
 
     fn in_nav_top(texts: &[(String, egui::Rect)], label: &str) -> f32 {
@@ -5592,10 +5630,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             "a short list keeps the pane at its content height: {pane:?} in {nav:?}"
         );
 
-        // A profile that lists every page has one row more than the default, and
-        // after the rows were compacted the Program page's list still fits at
-        // 1280x720: the pane stays content-sized instead of running to the
-        // footer. It must never pass the navigation column's content edge.
+        // A profile that lists every navigation page still fits at 1280x720:
+        // after the rows were compacted the Program page's list stays
+        // content-sized instead of running to the footer. It must never pass
+        // the navigation column's content edge.
         let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
         harness.app.nav = nav_pages(
             &[
@@ -5605,7 +5643,6 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 "offsets",
                 "diagnostics",
                 "help",
-                "settings",
             ]
             .map(str::to_string),
         );

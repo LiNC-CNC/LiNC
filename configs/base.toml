@@ -16,11 +16,10 @@ window_title = "LiNC"
 # "auto" follows the desktop scale; otherwise 0.5..3.0 or a percentage.
 scale = "auto"
 axis_order = ["X", "Y", "Z"]
-# Order matches the keyboard: MAIN, FILE, TOOL, OFFSET, WIN. DIAGNOSTICS,
-# G-CODE HELP and SETTINGS follow as one-line rows without an icon: the first
-# two are also reachable through the [keys] chords below (Ctrl+D, Ctrl+H), and
-# this list never unbinds a key. Drop an entry to hide its row; the page and its
-# key stay.
+# Order matches the keyboard: MAIN, FILE, TOOL, OFFSET, WIN. DIAGNOSTICS and
+# G-CODE HELP follow as one-line rows without an icon: both are also reachable
+# through the [keys] chords below (Ctrl+D, Ctrl+H), and this list never unbinds
+# a key. Drop an entry to hide its row; the page and its key stay.
 pages = ["machine", "program", "tools", "offsets", "diagnostics", "help"]
 # Load bars on the Machine page: machine axes plus "S" for the spindle. An
 # empty list removes the SERVO LOAD pane.
@@ -133,6 +132,10 @@ program_cycle_view = "F10"
 view_cycle = "Ctrl+F10"
 # Show the program bounding box with its dimension lines.
 toggle_bounds = "Ctrl+B"
+# PAC-MAN progress: the live trail goes away and each completed block is eaten
+# out of the program path, so the card shows what is still to come. A view
+# toggle; the program, the offsets and the controller are untouched.
+pac_man = "Ctrl+P"
 # Lathe only: mirror X about the Z centreline in the XZ/TURN toolpath. The
 # projection flips on screen; no coordinate and no machine value changes.
 toggle_lathe_mirror = "Ctrl+M"
@@ -164,8 +167,6 @@ offsets = "F8"
 # with no [ui] pages entry, so the keys are the way in.
 diagnostics = "Ctrl+D"
 help = "Ctrl+H"
-# SETTINGS has no navigation row: this chord is the only way in.
-settings = "Ctrl+P"
 # Frees a joint parked on a limit switch. No button on the jog screens.
 limits_override = "Ctrl+Shift+O"
 # Full-screen messages dialog.

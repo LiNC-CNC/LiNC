@@ -679,6 +679,20 @@ impl ProgramState {
     pub fn highlight_line(&self) -> Option<usize> {
         (self.running || self.paused).then(|| self.executing_line())
     }
+
+    /// The last line whose motion is complete: PAC-MAN mode drops every
+    /// segment at or before it.
+    ///
+    /// Strictly before the executing line, not at it: the block the tool is
+    /// cutting stays drawn until the next one starts, which is what "the
+    /// completed command disappears" means. A program that ran to its last
+    /// line has eaten the whole path; a reset or a new program brings it back.
+    pub fn consumed_through(&self) -> Option<usize> {
+        if let Some(line) = self.highlight_line() {
+            return Some(line.saturating_sub(1));
+        }
+        (self.line_count > 0 && self.current_line >= self.line_count).then_some(usize::MAX)
+    }
 }
 
 impl Default for ProgramState {
@@ -1649,6 +1663,54 @@ mod tests {
         program.running = false;
         program.paused = true;
         assert_eq!(program.highlight_line(), Some(22));
+    }
+
+    /// PAC-MAN eats the path behind the tool. The unit is the block: every line
+    /// before the one being cut is gone, the one being cut stays drawn until the
+    /// next one starts, and a program that ran out eats the rest of the path.
+    #[test]
+    fn pac_man_consumes_every_block_the_interpreter_has_left_behind() {
+        let mut program = ProgramState::default();
+        assert_eq!(
+            program.consumed_through(),
+            None,
+            "no program, nothing eaten"
+        );
+
+        program.line_count = 4;
+        program.current_line = 1;
+        assert_eq!(
+            program.consumed_through(),
+            None,
+            "a loaded program that has not run keeps its path"
+        );
+
+        program.running = true;
+        program.current_line = 4;
+        program.motion_line = 3;
+        assert_eq!(
+            program.consumed_through(),
+            Some(2),
+            "the block being cut is still drawn, the two before it are gone"
+        );
+
+        program.paused = true;
+        assert_eq!(
+            program.consumed_through(),
+            Some(2),
+            "a pause eats nothing further"
+        );
+
+        // Ran to the end: the whole path is behind the tool.
+        program.running = false;
+        program.paused = false;
+        program.motion_line = 0;
+        program.current_line = 4;
+        assert_eq!(program.consumed_through(), Some(usize::MAX));
+
+        // Esc rewinds the interpreter to the top, and the path comes back.
+        program.current_line = 0;
+        assert_eq!(program.consumed_through(), None);
     }
 
     #[test]

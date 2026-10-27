@@ -1521,8 +1521,12 @@ pub fn trajectory(
     view.current_line = current_line;
     view.axis_labels = app.axes();
     view.tool_tip = Some(app.tool_tip());
-    app.graph_style
-        .apply(&mut view, selected_line, current_line);
+    app.graph_style.apply(
+        &mut view,
+        selected_line,
+        current_line,
+        eaten_through(&app.graph_style, &app.snapshot.program),
+    );
     // Derived from the live positions, so it absorbs the G43 tool length (which
     // LinuxCNC folds into the machine position but the program path does not) and
     // any G92 or WCS mismatch. Recomputed here rather than by the Program page,
@@ -1551,6 +1555,21 @@ pub fn trajectory(
     *fit = view.fit;
     *auto_fit = view.auto_fit;
     response
+}
+
+/// The last block PAC-MAN may eat: the interpreter's, and only in that mode.
+///
+/// The mode is the switch, not the line: a card that draws a program the machine
+/// ran shows the whole path until the operator asks for the progress view.
+fn eaten_through(
+    style: &crate::state::GraphStyle,
+    program: &linc_core::model::ProgramState,
+) -> Option<usize> {
+    if style.pac_man {
+        program.consumed_through()
+    } else {
+        None
+    }
 }
 
 /// Say so when the preview cannot be trusted.
@@ -2239,6 +2258,40 @@ mod tests {
         // One row of cells is 25 px, not 41: a fifth code wraps to a second row.
         assert!((modal_strip_height(7, 6) - modal_strip_height(6, 6) - 25.0).abs() < 1e-6);
         assert_eq!(modal_strip_height(0, 6), modal_strip_height(1, 6));
+    }
+
+    /// PAC-MAN eats only when the operator asked for it: the interpreter's
+    /// completed line is the progress, the mode is the switch. A card that drew
+    /// the running program kept its whole path until the mode was turned on.
+    #[test]
+    fn pac_man_gates_what_the_interpreter_has_finished() {
+        let (_dir, profile) = program_fixture();
+        let mut style = crate::state::graph_style(&profile);
+        let mut program = linc_core::model::ProgramState::default();
+        program.line_count = 9;
+        program.running = true;
+        program.motion_line = 5;
+
+        style.pac_man = false;
+        assert_eq!(
+            super::eaten_through(&style, &program),
+            None,
+            "the mode is off, so nothing is eaten"
+        );
+
+        style.pac_man = true;
+        assert_eq!(
+            super::eaten_through(&style, &program),
+            Some(4),
+            "the four blocks before the one being cut"
+        );
+
+        // Idle: the interpreter is not cutting anything, so there is no mouth
+        // to eat with, however the mode is set.
+        program.running = false;
+        program.motion_line = 0;
+        program.current_line = 0;
+        assert_eq!(super::eaten_through(&style, &program), None);
     }
 
     /// A profile the card can be drawn against, with its preferences kept in

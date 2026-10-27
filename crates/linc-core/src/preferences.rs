@@ -66,6 +66,11 @@ pub struct Preferences {
     /// (`Ctrl+E`). A display factor; the controller still works in radius.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lathe_diameter: Option<bool>,
+    /// PAC-MAN progress (`Ctrl+P`): no live trail, and the program path is
+    /// eaten block by completed block. A view mode, remembered per operator;
+    /// absent from a file written before it existed, which reads as off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pac_man: Option<bool>,
     /// Page keys the operator has chosen to show.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub visible_panels: Vec<String>,

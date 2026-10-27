@@ -266,6 +266,9 @@ pub struct KeysConfig {
     pub view_cycle: String,
     /// Show or hide the program bounding box and its dimensions.
     pub toggle_bounds: String,
+    /// PAC-MAN progress: drop the live trail and eat the program path block by
+    /// completed block, so what is drawn is what is still to come.
+    pub pac_man: String,
     /// Lathe only: mirror X about the Z centreline in the XZ/TURN toolpath.
     pub toggle_lathe_mirror: String,
     /// Lathe only: read the X position as a radius (`X`) or a diameter (`2X`).
@@ -288,8 +291,6 @@ pub struct KeysConfig {
     pub files_delete: String,
     pub tools: String,
     pub offsets: String,
-    /// No navigation row: SETTINGS is reached with this chord.
-    pub settings: String,
     /// Toggles the limit-switch override; it has no button on the jog screens.
     pub limits_override: String,
     pub diagnostics: String,
@@ -337,6 +338,7 @@ impl KeysConfig {
             toggle_bounds: "Ctrl+B".into(),
             toggle_lathe_mirror: "Ctrl+M".into(),
             toggle_lathe_diameter: "Ctrl+E".into(),
+            pac_man: "Ctrl+P".into(),
             graph_fit: "Ctrl+0".into(),
             graph_clear: "Ctrl+L".into(),
             view_pan_left: "Ctrl+Left".into(),
@@ -350,7 +352,6 @@ impl KeysConfig {
             files_delete: "Delete".into(),
             tools: "F7".into(),
             offsets: "F8".into(),
-            settings: "Ctrl+P".into(),
             limits_override: "Ctrl+Shift+O".into(),
             diagnostics: "Ctrl+D".into(),
             help: "Ctrl+H".into(),
@@ -897,14 +898,13 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
     }
     // `[ui] pages` selects which entries the navigation shows. Unknown keys
     // would silently disappear from the sidebar, so reject them.
-    const KNOWN_PAGES: [&str; 8] = [
+    const KNOWN_PAGES: [&str; 7] = [
         "machine",
         "program",
         "offsets",
         "tools",
         "diagnostics",
         "help",
-        "settings",
         "probe",
     ];
     for page in &config.ui.pages {
