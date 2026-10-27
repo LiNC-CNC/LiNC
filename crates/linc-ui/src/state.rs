@@ -1744,6 +1744,8 @@ pub struct Keymap {
     pub offsets: Binding,
     /// SETTINGS has no navigation row; this is the way in.
     pub settings: Binding,
+    /// Toggle the limit-switch override. The jog screens carry no button for it.
+    pub limits_override: Binding,
     pub diagnostics: Binding,
     pub help: Binding,
     /// Any page: open the full-screen messages dialog.
@@ -1886,6 +1888,14 @@ impl Keymap {
             tools: binding(&keys.tools, Binding::new(Key::F7, none), &mut rejected),
             offsets: binding(&keys.offsets, Binding::new(Key::F8, none), &mut rejected),
             settings: binding(&keys.settings, Binding::new(Key::P, ctrl), &mut rejected),
+            limits_override: binding(
+                &keys.limits_override,
+                Binding::new(
+                    Key::O,
+                    Modifiers::CTRL | Modifiers::COMMAND | Modifiers::SHIFT,
+                ),
+                &mut rejected,
+            ),
             diagnostics: binding(&keys.diagnostics, Binding::new(Key::D, ctrl), &mut rejected),
             help: binding(&keys.help, Binding::new(Key::H, ctrl), &mut rejected),
             messages: binding(&keys.messages, Binding::new(Key::M, none), &mut rejected),

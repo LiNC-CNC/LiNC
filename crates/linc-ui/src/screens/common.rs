@@ -1865,59 +1865,6 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
     });
 }
 
-/// Large work/machine/DTG readout, shared by the Manual and Homing screens.
-/// Limits override, on one compact row above the touch-off card.
-///
-/// The controller refuses motion while a joint sits on a limit switch, and the
-/// override is the only way to accept it — so it has to be reachable: it lives
-/// next to the other machine actions rather than at the bottom of the page.
-pub fn limits_override_row(app: &mut crate::shell::LincApp, ui: &mut Ui) {
-    let overridden = app.snapshot.limits_overridden;
-    // Blinking red while active: the state means the limit switches are being
-    // ignored, so it must not be possible to miss. Repaints are requested for as
-    // long as it is on, because egui only animates when asked.
-    let blink_on = ((ui.input(|input| input.time) * 2.0) as i64) % 2 == 0;
-    if overridden {
-        ui.ctx().request_repaint();
-    }
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("LIMITS")
-                .monospace()
-                .size(theme::font_size(10.0))
-                .color(theme::MUTED),
-        );
-        let label = if overridden {
-            "OVERRIDE ON"
-        } else {
-            "OVERRIDE"
-        };
-        let clicked = if overridden && blink_on {
-            theme::danger_button(ui, label, true).clicked()
-        } else if overridden {
-            theme::action_button(ui, label, true).clicked()
-        } else {
-            theme::action_button(ui, label, true).clicked()
-        };
-        if clicked {
-            app.send(linc_core::command::MachineCommand::ToggleLimitsOverride);
-        }
-        ui.label(
-            RichText::new("O")
-                .monospace()
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-        );
-        if overridden {
-            ui.label(
-                RichText::new("SWITCHES IGNORED")
-                    .monospace()
-                    .size(theme::font_size(9.0))
-                    .color(theme::ERROR),
-            );
-        }
-    });
-}
 
 /// Touch-off card shared by every live mode.
 ///

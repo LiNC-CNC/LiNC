@@ -290,6 +290,8 @@ pub struct KeysConfig {
     pub offsets: String,
     /// No navigation row: SETTINGS is reached with this chord.
     pub settings: String,
+    /// Toggles the limit-switch override; it has no button on the jog screens.
+    pub limits_override: String,
     pub diagnostics: String,
     /// Open the offline G-code reference from any page.
     pub help: String,
@@ -349,6 +351,7 @@ impl KeysConfig {
             tools: "F7".into(),
             offsets: "F8".into(),
             settings: "Ctrl+P".into(),
+            limits_override: "Ctrl+Shift+O".into(),
             diagnostics: "Ctrl+D".into(),
             help: "Ctrl+H".into(),
             messages: "M".into(),

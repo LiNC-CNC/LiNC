@@ -166,6 +166,8 @@ diagnostics = "Ctrl+D"
 help = "Ctrl+H"
 # SETTINGS has no navigation row: this chord is the only way in.
 settings = "Ctrl+P"
+# Frees a joint parked on a limit switch. No button on the jog screens.
+limits_override = "Ctrl+Shift+O"
 # Full-screen messages dialog.
 messages = "M"
 back = "Escape"

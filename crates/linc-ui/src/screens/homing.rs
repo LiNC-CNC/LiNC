@@ -31,10 +31,6 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     }
     // No mode banner here either: the mode key shows the mode.
 
-    // A machine that could not power up because a joint is on a limit switch
-    // can only be freed from here or the jog page, so the override is offered
-    // wherever the operator might be looking.
-    common::limits_override_row(app, ui);
     let rows = axis_rows(&app.snapshot, &app.profile.machine_ini.axes);
     let readout = homing_readout(app, &rows);
 
@@ -54,7 +50,6 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                 &format!("{} / MACHINE", app.snapshot.positions.units),
                 &readout,
             );
-            homing_context_card(app, ui, &rows);
             if program_zero {
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "PROGRAM ZERO");
@@ -109,70 +104,3 @@ fn status_color(status: AxisHomeStatus) -> egui::Color32 {
     }
 }
 
-/// Mode context: what the panel is doing right now, plus the INI sequence.
-fn homing_context_card(app: &LincApp, ui: &mut Ui, rows: &[linc_core::homing::HomeAxisRow]) {
-    theme::card(ui, |ui| {
-        theme::section_header(ui, "MODE CONTEXT");
-        let mode = app.snapshot.panel.mode.mode();
-        let homed = rows
-            .iter()
-            .filter(|row| row.status == AxisHomeStatus::Homed)
-            .count();
-        let homing = rows.iter().any(|row| row.status == AxisHomeStatus::Homing);
-        theme::kv_row(
-            ui,
-            "PANEL MODE",
-            match mode {
-                Some(PanelMode::Home) => "HOME",
-                Some(PanelMode::ProgHome) => "PROG.HOME",
-                _ => "UNKNOWN",
-            },
-        );
-        theme::kv_row(ui, "AXES HOMED", format!("{homed}/{}", rows.len()));
-        theme::kv_row(
-            ui,
-            "SEQUENCE",
-            if homing {
-                "RUNNING".to_string()
-            } else if homed == rows.len() && !rows.is_empty() {
-                "COMPLETE".to_string()
-            } else {
-                "INCOMPLETE".to_string()
-            },
-        );
-        theme::kv_row(
-            ui,
-            "HOME ORDER",
-            app.profile
-                .machine_ini
-                .home_order()
-                .iter()
-                .map(|axis| format!("{}", axis.name))
-                .collect::<Vec<_>>()
-                .join(" → "),
-        );
-        theme::kv_row(
-            ui,
-            "NO_FORCE_HOMING",
-            if app.snapshot.machine.force_homing {
-                "PROGRAMS BLOCKED UNTIL HOMED"
-            } else {
-                "PROGRAMS MAY RUN UNHOMED"
-            },
-        );
-        theme::kv_row(
-            ui,
-            "LIMITS",
-            if app.snapshot.machine.limits.is_empty() {
-                "OK".to_string()
-            } else {
-                format!("ACTIVE: {}", app.snapshot.machine.limits.join(", "))
-            },
-        );
-        ui.label(
-            RichText::new("HOME_SEQUENCE, search/latch/index and limits come from the INI. Optional axes are shown only when configured.")
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-        );
-    });
-}

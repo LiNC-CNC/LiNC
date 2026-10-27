@@ -2302,6 +2302,14 @@ impl LincApp {
             if input.consume_key(self.keymap.settings.modifiers, self.keymap.settings.key) {
                 nav_page = Some(Page::Settings);
             }
+            // The jog screens carry no button for the limit override, so the
+            // chord is the only way to free a joint parked on a switch.
+            if input.consume_key(
+                self.keymap.limits_override.modifiers,
+                self.keymap.limits_override.key,
+            ) {
+                self.send(linc_core::command::MachineCommand::ToggleLimitsOverride);
+            }
             if input.consume_key(self.keymap.offsets.modifiers, self.keymap.offsets.key) {
                 if self.page == Page::Probe {
                     if linc_core::probe::ProbeCategory::ALL.last().copied()
@@ -3804,6 +3812,10 @@ impl LincApp {
                     ),
                     theme::MUTED,
                 );
+                if self.snapshot.limits_overridden {
+                    ui.add_space(16.0);
+                    limits_override_indicator(ui);
+                }
                 ui.add_space(16.0);
                 field(
                     ui,
@@ -4515,6 +4527,29 @@ pub fn page_from_name(name: &str) -> Option<Page> {
     None
 }
 
+/// Blinking red in the status line: the limit switches are being ignored.
+///
+/// The jog screens have no override button any more, so this is the only sign
+/// that the machine is free to drive through a switch. The text is painted on
+/// both halves of the blink - only the colour alternates - so a capture or a
+/// test always finds it.
+pub fn limits_override_indicator(ui: &mut egui::Ui) {
+    let bright = ((ui.input(|input| input.time) * 2.0) as i64).rem_euclid(2) == 0;
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(250));
+    let colour = if bright {
+        theme::ERROR
+    } else {
+        theme::ERROR.gamma_multiply(0.45)
+    };
+    ui.label(
+        RichText::new("LIMITS OVERRIDE ON")
+            .monospace()
+            .size(theme::font_size(11.0))
+            .color(colour),
+    );
+}
+
 /// Bottom-bar override readout.
 ///
 /// The order is the physical panel's — FEED, RAPID, SPINDLE — so the numbers
@@ -5077,6 +5112,53 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     /// The bottom bar reads the overrides in the physical panel's order:
     /// FEED, RAPID, SPINDLE. The old format printed the spindle value in the
     /// RAPID slot and the rapid value in the SPINDLE slot.
+    /// The override has no button on the jog screens: the chord toggles it and
+    /// the status line says so, blinking, in the same breath.
+    #[test]
+    fn ctrl_shift_o_toggles_the_limit_override_and_the_status_line_says_so() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.frame(&[]);
+        let before = painted_text(&harness.frame_full(Vec::new()));
+        assert!(
+            !before.iter().any(|(text, _)| text == "LIMITS OVERRIDE ON"),
+            "the indicator is hidden while the switches are live"
+        );
+
+        // Ctrl in a binding also sets egui Command, as a parsed Ctrl+ does.
+        let chord = egui::Modifiers::CTRL | egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+        harness.frame_with(&[(egui::Key::O, chord)]);
+        harness.frame(&[]);
+        assert!(
+            harness.app.snapshot.limits_overridden,
+            "Ctrl+Shift+O turns the override on"
+        );
+        let after = painted_text(&harness.frame_full(Vec::new()));
+        assert!(
+            after.iter().any(|(text, _)| text == "LIMITS OVERRIDE ON"),
+            "the bottom bar paints the override, got {:?}",
+            after.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>()
+        );
+
+        harness.frame_with(&[(egui::Key::O, chord)]);
+        harness.frame(&[]);
+        assert!(!harness.app.snapshot.limits_overridden, "and off again");
+    }
+
+    /// The jog and homing screens no longer carry a MODE CONTEXT pane.
+    #[test]
+    fn the_jog_screens_have_no_mode_context_pane() {
+        for page in [Page::Manual, Page::Homing] {
+            let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+            harness.app.set_page(page);
+            harness.frame(&[]);
+            let texts = painted_text(&harness.frame_full(Vec::new()));
+            assert!(
+                !texts.iter().any(|(text, _)| text == "MODE CONTEXT"),
+                "{page:?} still paints a mode context pane"
+            );
+        }
+    }
+
     #[test]
     fn the_override_readout_follows_the_panel_order() {
         assert_eq!(override_readout(1.0, 0.5, 0.25), "OVR F100 R50 S25");
