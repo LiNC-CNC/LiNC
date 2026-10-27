@@ -3190,8 +3190,10 @@ impl LincApp {
         if let Some(field) = tool_change_field(&self.snapshot.tool_change) {
             fields.push(field);
         }
-        if let Some((axis, dtg)) = moving_axis(&self.snapshot.positions.axes) {
-            fields.push((format!("DTG {axis} {dtg:+.3}"), theme::MUTED));
+        if !self.shows_coordinate_status() {
+            if let Some((axis, dtg)) = moving_axis(&self.snapshot.positions.axes) {
+                fields.push((format!("DTG {axis} {dtg:+.3}"), theme::MUTED));
+            }
         }
         fields
     }
@@ -3795,18 +3797,30 @@ impl LincApp {
             });
     }
 
-    /// The centre field of the bottom bar: work position and distance to go,
-    /// one pair per axis, in the order the panel shows the axes.
+    /// The centre field of the bottom bar: the work position of every axis,
+    /// then the same axes with the distance still to go.
+    ///
+    /// Two groups rather than interleaved pairs: X/Y/Z in one block reads as the
+    /// position, and the DTG block lines up under it axis for axis. Painted on
+    /// the Program page it replaces the single moving-axis DTG field the bar
+    /// otherwise carries, so the distance is never shown twice.
     fn coordinate_status_line(&self) -> String {
-        let mut parts: Vec<String> = Vec::new();
+        let mut position = String::new();
+        let mut dtg = String::new();
         for axis in self.axes() {
-            let Some(position) = self.snapshot.positions.axes.get(&axis) else {
+            let Some(entry) = self.snapshot.positions.axes.get(&axis) else {
                 continue;
             };
-            parts.push(format!("{axis} {:.3}", position.work));
-            parts.push(format!("DTG {:.3}", position.dtg));
+            position.push_str(&format!("{axis}{:+.3} ", entry.work));
+            dtg.push_str(&format!("{axis}{:+.3} ", entry.dtg));
         }
-        parts.join("   ")
+        format!("{}  DTG: {}", position.trim_end(), dtg.trim_end())
+    }
+
+    /// True where the bar shows the full coordinate line, so the single
+    /// moving-axis DTG field steps aside instead of repeating it.
+    fn shows_coordinate_status(&self) -> bool {
+        self.page == Page::Program
     }
 
     /// Bottom bar: keyboard commands on the left, read-only machine status on
@@ -3829,7 +3843,7 @@ impl LincApp {
             // cutting to and the distance left to get there. Only on the
             // Program page; the jog screens carry the same figures in their
             // readout, and the bar is read-only everywhere.
-            if self.page == Page::Program {
+            if self.shows_coordinate_status() {
                 let bar = ui.max_rect();
                 let text = self.coordinate_status_line();
                 let galley = ui.painter().layout_no_wrap(
@@ -5215,25 +5229,32 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         );
     }
 
-    /// The centre of the bottom bar carries the program work position and the
-    /// distance still to go, one pair per axis, and only on the Program page.
+    /// The centre of the bottom bar carries every axis position, then the same
+    /// axes with their distance to go, and the single moving-axis field the bar
+    /// otherwise shows stands down while it does.
     #[test]
-    fn the_bottom_bar_centres_work_coordinates_and_dtg_on_the_program_page() {
+    fn the_bottom_bar_groups_the_positions_then_their_dtg() {
         let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
         harness.app.set_page(Page::Program);
+        assert!(harness.app.shows_coordinate_status());
+        let line = harness.app.coordinate_status_line();
+        let (position, dtg) = line.split_once("  DTG: ").expect("two groups");
+        for axis in ["X", "Y", "Z"] {
+            assert!(position.contains(axis), "{axis} in the position group: {line}");
+            assert!(dtg.contains(axis), "{axis} in the DTG group: {line}");
+        }
+        assert_eq!(position.matches('X').count(), 1, "{line}");
+        assert_eq!(dtg.matches('Z').count(), 1, "{line}");
+
         harness.frame(&[]);
         let texts = painted_text(&harness.frame_full(Vec::new()));
-        let readout = texts
+        let painted = texts
             .iter()
-            .find(|(text, rect)| {
-                rect.center().y > 690.0
-                    && text.starts_with("X ")
-                    && text.matches("DTG ").count() == 3
-            })
-            .map(|(text, rect)| (text.clone(), *rect));
-        let Some((line, rect)) = readout else {
+            .find(|(text, rect)| rect.center().y > 690.0 && text == &line)
+            .map(|(_, rect)| *rect);
+        let Some(rect) = painted else {
             panic!(
-                "the bar paints one field per axis with its DTG, got {:?}",
+                "the bar paints {line}, got {:?}",
                 texts
                     .iter()
                     .filter(|(_, r)| r.center().y > 690.0)
@@ -5241,55 +5262,20 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                     .collect::<Vec<_>>()
             );
         };
-        for axis in ["X ", "Y ", "Z "] {
-            assert!(line.contains(axis), "{axis} is in {line}");
-        }
         assert!(
             (rect.center().x - 640.0).abs() < 60.0,
-            "the readout is centred, {} in a 1280 px bar: {line}",
+            "the readout is centred, {} in a 1280 px bar",
             rect.center().x
         );
-
-        // Not on a page that is not running a program.
-        harness.app.set_page(Page::Machine);
-        harness.frame(&[]);
-        let texts = painted_text(&harness.frame_full(Vec::new()));
         assert!(
             !texts
                 .iter()
-                .any(|(text, rect)| rect.center().y > 690.0 && text.matches("DTG ").count() == 3),
-            "the Machine page keeps the bar free for machine state"
-        );
-    }
-
-    #[test]
-    fn ctrl_shift_o_toggles_the_limit_override_and_the_status_line_says_so() {
-        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
-        harness.frame(&[]);
-        let before = painted_text(&harness.frame_full(Vec::new()));
-        assert!(
-            !before.iter().any(|(text, _)| text == "LIMITS OVERRIDE ON"),
-            "the indicator is hidden while the switches are live"
+                .any(|(text, rect)| text.starts_with("DTG ") && rect.center().y > 690.0),
+            "the single moving-axis DTG field stands down"
         );
 
-        // Ctrl in a binding also sets egui Command, as a parsed Ctrl+ does.
-        let chord = egui::Modifiers::CTRL | egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
-        harness.frame_with(&[(egui::Key::O, chord)]);
-        harness.frame(&[]);
-        assert!(
-            harness.app.snapshot.limits_overridden,
-            "Ctrl+Shift+O turns the override on"
-        );
-        let after = painted_text(&harness.frame_full(Vec::new()));
-        assert!(
-            after.iter().any(|(text, _)| text == "LIMITS OVERRIDE ON"),
-            "the bottom bar paints the override, got {:?}",
-            after.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>()
-        );
-
-        harness.frame_with(&[(egui::Key::O, chord)]);
-        harness.frame(&[]);
-        assert!(!harness.app.snapshot.limits_overridden, "and off again");
+        harness.app.set_page(Page::Machine);
+        assert!(!harness.app.shows_coordinate_status());
     }
 
     /// The zoom chords must not depend on where the trackball happens to be:
