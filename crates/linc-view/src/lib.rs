@@ -701,19 +701,26 @@ fn follow_state(ui: &Ui) -> egui::Id {
     ui.scope_id().with("toolpath-follow-latch")
 }
 
-/// Clearance kept between the tool marker and the card's edge when the view
-/// follows a moving tool. The operator asked for a wider trigger band than the
-/// original 30 px: 75 px pans before the marker looks like it is leaving.
+/// Widest clearance kept between the tool marker and the card's edge when the
+/// view follows a moving tool: 75 px, reached at the main toolpath card's size.
 const TOOL_MARGIN: f32 = 75.0;
+
+/// Share of the card's shorter side the band takes below that size. A thumbnail
+/// at a fifth of the main card's height gets a fifth of the band, so the band
+/// stays a band instead of eating the picture.
+const TOOL_MARGIN_FRACTION: f32 = 0.20;
 
 /// The rectangle a latched follow keeps the tool marker inside.
 ///
-/// The margin is clamped so it cannot swallow a small card: a band inset wider
-/// than half the shorter side would invert the trigger rectangle and pan on
-/// every frame.
+/// Proportional: 20 % of the shorter side, capped at 75 px so the main card gets
+/// exactly what the operator asked for and a full-screen view does not get a
+/// wider one. The clamp at half the shorter side keeps a tiny card from inverting
+/// the trigger rectangle, which would pan on every frame.
 fn follow_band(drawn: Rect) -> Rect {
-    let margin = TOOL_MARGIN
-        .min(drawn.width().min(drawn.height()) * 0.5 - 1.0)
+    let shortest = drawn.width().min(drawn.height());
+    let margin = (shortest * TOOL_MARGIN_FRACTION)
+        .min(TOOL_MARGIN)
+        .min(shortest * 0.5 - 1.0)
         .max(0.0);
     drawn.shrink(margin)
 }
@@ -801,14 +808,22 @@ mod follow_tests {
     use egui::{pos2, Rect};
 
     #[test]
-    fn the_band_leaves_room_for_the_marker_at_the_operator_requested_distance() {
-        // 75 px of clearance on every side: the marker pans before it looks
-        // like it is leaving the card, which is what the operator asked for.
-        let band = super::follow_band(Rect::from_min_max(pos2(0.0, 0.0), pos2(640.0, 360.0)));
-        assert_eq!(band.min, pos2(75.0, 75.0));
-        assert_eq!(band.max, pos2(565.0, 285.0));
+    fn the_band_is_75_px_on_the_main_card_and_scales_down_with_a_smaller_one() {
+        // The main toolpath card at 1280x720 is about 745x380: the full 75 px.
+        let main = super::follow_band(Rect::from_min_max(pos2(0.0, 0.0), pos2(745.0, 380.0)));
+        assert_eq!(main.min, pos2(75.0, 75.0));
+        assert_eq!(main.max, pos2(670.0, 305.0));
 
-        // A card too small for that margin keeps a usable (non-inverted) band.
+        // Half the card, half the band: a thumbnail keeps a proportional trigger
+        // area instead of losing most of its picture to the margin.
+        let half = super::follow_band(Rect::from_min_max(pos2(0.0, 0.0), pos2(372.0, 190.0)));
+        assert_eq!(half.min, pos2(38.0, 38.0));
+
+        // A view larger than the main card does not get a wider band than 75 px.
+        let full = super::follow_band(Rect::from_min_max(pos2(0.0, 0.0), pos2(1600.0, 900.0)));
+        assert_eq!(full.min, pos2(75.0, 75.0));
+
+        // A card too small for any margin keeps a usable (non-inverted) band.
         let small = super::follow_band(Rect::from_min_max(pos2(0.0, 0.0), pos2(60.0, 40.0)));
         assert!(small.width() > 0.0 && small.height() > 0.0, "{small:?}");
     }
