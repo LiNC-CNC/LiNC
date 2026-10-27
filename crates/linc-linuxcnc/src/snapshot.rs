@@ -403,8 +403,12 @@ impl SnapshotBuilder {
         snapshot.task.motion_active = motion_active(status);
 
         snapshot.machine.on = status.motion.enabled;
-        snapshot.machine.estop = status.io.estop || panel.estop;
-        snapshot.machine.fault = status.io.fault || panel.estop;
+        // A hardwired mushroom reaches the task status through the machine HAL;
+        // a panel that reports its own bit adds to that unless the profile says
+        // the bit is not evidence (see `panel.estop_from_panel`).
+        let panel_estop = panel.estop && self.profile.config.panel.estop_from_panel;
+        snapshot.machine.estop = status.io.estop || panel_estop;
+        snapshot.machine.fault = status.io.fault || panel_estop;
         snapshot.machine.force_homing = self.profile.machine_ini.no_force_homing;
         snapshot.machine.coolant_flood = status.io.flood;
         snapshot.machine.coolant_mist = status.io.mist;

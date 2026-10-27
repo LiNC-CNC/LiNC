@@ -468,6 +468,15 @@ pub struct PanelConfig {
     pub read_only: bool,
     #[serde(default)]
     pub label: Option<String>,
+    /// Whether the panel link's own E-stop bit counts as an E-stop.
+    ///
+    /// On a machine whose mushroom is hardwired into the safety chain, LinuxCNC
+    /// already reports it through the task status, and the panel's status bit
+    /// may be inverted or meaningless — displaying it then shows E-STOP on a
+    /// machine that is running. Such a machine sets this to `false`; the
+    /// simulation relies on the panel owning the latch and keeps the default.
+    #[serde(default = "default_true")]
+    pub estop_from_panel: bool,
     pub status: PanelStatusConfig,
     pub link: PanelLinkConfig,
 }

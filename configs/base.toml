@@ -258,6 +258,11 @@ driver = "cnc-panel"
 mode_encoding = "one_hot_steady"
 override_encoding = "analog_steady"
 read_only = true
+# Whether the panel link's E-stop bit counts as an E-stop. Machines whose
+# mushroom is hardwired into the safety chain get it from the task status
+# anyway, and a panel bit that is inverted or meaningless would then show
+# E-STOP on a running machine: those set this to false.
+estop_from_panel = true
 
 [panel.status]
 # Two-digit status display driven by linc.status-display:
