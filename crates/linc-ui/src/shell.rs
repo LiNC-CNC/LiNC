@@ -4113,7 +4113,7 @@ impl LincApp {
         // A real modal, not a Window: the backdrop and modal layer stop the
         // page behind from receiving Enter/clicks while a dialog owns the
         // keyboard.
-        egui::Modal::new(egui::Id::new("linc-modal"))
+        egui::Modal::new(egui::Id::unique("linc-modal"))
             .frame(
                 Frame::new()
                     .fill(theme::PANEL_RAISED)

@@ -1593,7 +1593,7 @@ fn preview_incomplete_marker(ui: &Ui, rect: egui::Rect, reason: Option<&str>) {
     if let Some(reason) = reason {
         ui.interact(
             egui::Rect::from_min_size(pos, galley.size()),
-            ui.id().with("preview-incomplete"),
+            ui.scope_id().with("preview-incomplete"),
             Sense::hover(),
         )
         .on_hover_text(reason);

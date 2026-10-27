@@ -1445,6 +1445,7 @@ fn normalize_lexically(path: &Path) -> PathBuf {
     out
 }
 
+#[cfg(test)]
 mod nc_containment_tests {
     use super::{contained_nc_file, normalize_lexically};
     use std::path::PathBuf;
