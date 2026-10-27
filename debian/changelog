@@ -1,3 +1,15 @@
+linc (0.1.0-1) unstable; urgency=medium
+
+  * Ship the machine-facing half only: the three binaries, the shared
+    base.toml defaults the profile extends, the reference HAL snippets and the
+    reviewed probe bundle. No simulation profile and no desktop entry - those
+    belong to a development checkout.
+  * A machine profile lives in the integrator's config directory and points
+    its [DISPLAY] entry at linc-display.sh, which loads POSTGUI_HALFILE itself:
+    LinuxCNC does not.
+
+ -- Hans Baier <foss@hans-baier.de>  Thu, 27 Oct 2026 11:20:00 +0200
+
 linc (0.1.0) unstable; urgency=medium
 
   * Initial packaging: linc, linc-panel and linc-mcp with the example sim
