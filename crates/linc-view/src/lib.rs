@@ -354,7 +354,7 @@ impl Projection {
             max: expanded.max,
             rect,
             scale,
-            zoom: zoom.clamp(0.05, 40.0),
+            zoom: zoom.clamp(MIN_ZOOM, MAX_ZOOM),
             pan,
             mode,
             yaw,
@@ -601,7 +601,7 @@ fn fit_zoom_pan(
         Projection::new(target, rect, mode, yaw, pitch, 1.0, Vec2::ZERO).mirrored(mirror_x);
     let base =
         Projection::new(reference, rect, mode, yaw, pitch, 1.0, Vec2::ZERO).mirrored(mirror_x);
-    let zoom = (target_projection.scale / base.scale).clamp(0.05, 40.0);
+    let zoom = (target_projection.scale / base.scale).clamp(MIN_ZOOM, MAX_ZOOM);
     let centre = base.project(target.center());
     (zoom, (rect.center() - centre) * zoom)
 }
@@ -700,6 +700,11 @@ fn tool_moved(ui: &Ui, tip: [f64; 3]) -> bool {
 fn follow_state(ui: &Ui) -> egui::Id {
     ui.scope_id().with("toolpath-follow-latch")
 }
+
+/// Shallowest and deepest magnification the toolpath can reach. 80 shows a
+/// single #6 hole in the card; the operator asked for it over the old 40.
+const MIN_ZOOM: f32 = 0.05;
+const MAX_ZOOM: f32 = 80.0;
 
 /// Widest clearance kept between the tool marker and the card's edge when the
 /// view follows a moving tool: 75 px, reached at the main toolpath card's size.
@@ -806,6 +811,30 @@ mod follow_tests {
 
     use super::ToolFollow;
     use egui::{pos2, Rect};
+
+    #[test]
+    fn the_deepest_zoom_is_80_not_40() {
+        let bounds = super::Bounds3 {
+            min: [0.0, 0.0, 0.0],
+            max: [10.0, 10.0, 1.0],
+        };
+        let rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(400.0, 300.0));
+        for (asked, expected) in [(20.0, 20.0), (40.0, 40.0), (80.0, 80.0), (200.0, 80.0)] {
+            let projection = super::Projection::new(
+                bounds,
+                rect,
+                super::ViewMode::TopXy,
+                0.0,
+                0.0,
+                asked,
+                egui::Vec2::ZERO,
+            );
+            assert_eq!(
+                projection.zoom, expected,
+                "a request for {asked} lands on {expected}"
+            );
+        }
+    }
 
     #[test]
     fn the_band_is_75_px_on_the_main_card_and_scales_down_with_a_smaller_one() {
@@ -952,7 +981,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     if response.hovered() {
         let scroll = ui.input(|input| input.smooth_scroll_delta.y);
         if scroll.abs() > 0.0 {
-            view.zoom = (view.zoom * (1.0 + scroll * 0.002)).clamp(0.05, 40.0);
+            view.zoom = (view.zoom * (1.0 + scroll * 0.002)).clamp(MIN_ZOOM, MAX_ZOOM);
             view.auto_fit = false;
         }
     }

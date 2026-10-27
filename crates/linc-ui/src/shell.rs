@@ -3756,6 +3756,20 @@ impl LincApp {
             });
     }
 
+    /// The centre field of the bottom bar: work position and distance to go,
+    /// one pair per axis, in the order the panel shows the axes.
+    fn coordinate_status_line(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        for axis in self.axes() {
+            let Some(position) = self.snapshot.positions.axes.get(&axis) else {
+                continue;
+            };
+            parts.push(format!("{axis} {:.3}", position.work));
+            parts.push(format!("DTG {:.3}", position.dtg));
+        }
+        parts.join("   ")
+    }
+
     /// Bottom bar: keyboard commands on the left, read-only machine status on
     /// the right. It carries no buttons.
     fn bottom_bar(&mut self, ui: &mut egui::Ui) {
@@ -3770,6 +3784,26 @@ impl LincApp {
             for (text, color) in self.status_fields() {
                 field(ui, text, color);
                 ui.add_space(16.0);
+            }
+
+            // Centre: the program's own numbers - the work position it is
+            // cutting to and the distance left to get there. Only on the
+            // Program page; the jog screens carry the same figures in their
+            // readout, and the bar is read-only everywhere.
+            if self.page == Page::Program {
+                let bar = ui.max_rect();
+                let text = self.coordinate_status_line();
+                let galley = ui.painter().layout_no_wrap(
+                    text,
+                    FontId::monospace(size),
+                    theme::FG,
+                );
+                // Never let it run into the left or the right block: the bar is
+                // 1280 px wide at the minimum and those two need about 600.
+                if galley.size().x + 24.0 < bar.width() * 0.5 {
+                    let pos = bar.center() - galley.size() / 2.0;
+                    ui.painter().galley(pos, galley, theme::FG);
+                }
             }
 
             // Right: the read-only machine state.
@@ -5112,8 +5146,53 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     /// The bottom bar reads the overrides in the physical panel's order:
     /// FEED, RAPID, SPINDLE. The old format printed the spindle value in the
     /// RAPID slot and the rapid value in the SPINDLE slot.
-    /// The override has no button on the jog screens: the chord toggles it and
-    /// the status line says so, blinking, in the same breath.
+    /// The centre of the bottom bar carries the program work position and the
+    /// distance still to go, one pair per axis, and only on the Program page.
+    #[test]
+    fn the_bottom_bar_centres_work_coordinates_and_dtg_on_the_program_page() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.app.set_page(Page::Program);
+        harness.frame(&[]);
+        let texts = painted_text(&harness.frame_full(Vec::new()));
+        let readout = texts
+            .iter()
+            .find(|(text, rect)| {
+                rect.center().y > 690.0
+                    && text.starts_with("X ")
+                    && text.matches("DTG ").count() == 3
+            })
+            .map(|(text, rect)| (text.clone(), *rect));
+        let Some((line, rect)) = readout else {
+            panic!(
+                "the bar paints one field per axis with its DTG, got {:?}",
+                texts
+                    .iter()
+                    .filter(|(_, r)| r.center().y > 690.0)
+                    .map(|(t, _)| t.as_str())
+                    .collect::<Vec<_>>()
+            );
+        };
+        for axis in ["X ", "Y ", "Z "] {
+            assert!(line.contains(axis), "{axis} is in {line}");
+        }
+        assert!(
+            (rect.center().x - 640.0).abs() < 60.0,
+            "the readout is centred, {} in a 1280 px bar: {line}",
+            rect.center().x
+        );
+
+        // Not on a page that is not running a program.
+        harness.app.set_page(Page::Machine);
+        harness.frame(&[]);
+        let texts = painted_text(&harness.frame_full(Vec::new()));
+        assert!(
+            !texts
+                .iter()
+                .any(|(text, rect)| rect.center().y > 690.0 && text.matches("DTG ").count() == 3),
+            "the Machine page keeps the bar free for machine state"
+        );
+    }
+
     #[test]
     fn ctrl_shift_o_toggles_the_limit_override_and_the_status_line_says_so() {
         let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
