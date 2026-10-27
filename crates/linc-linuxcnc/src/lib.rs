@@ -74,6 +74,9 @@ pub struct NmlBackend {
     offset_sync_attempts: u32,
     offset_sync_next: Instant,
     offset_sync_protect_logged: bool,
+    /// Said once per session: the active row is unpublished, so the stored one
+    /// is kept instead of being replaced by zeros.
+    offset_unpublished_logged: bool,
     confirm_seq: u64,
     tool_table: ToolTable,
 }
@@ -136,6 +139,7 @@ impl NmlBackend {
             offset_sync_attempts: 0,
             offset_sync_next: Instant::now(),
             offset_sync_protect_logged: false,
+            offset_unpublished_logged: false,
             confirm_seq: 0,
             tool_table,
         })
@@ -423,6 +427,12 @@ impl NmlBackend {
                         wcs_name(index),
                         self.offset_sync_attempts
                     );
+                    if self.offset_sync_attempts >= MAX_OFFSET_SYNCS {
+                        log::warn!(
+                            "giving up on publishing the stored {} row; the table shows the controller's row, and the stored one is kept in the parameter file",
+                            wcs_name(index)
+                        );
+                    }
                 }
             }
         }
@@ -566,6 +576,29 @@ impl NmlBackend {
                     axis_pose_index(axis).unwrap_or(axis_index),
                 ),
             );
+        }
+        let stored = self.parameters.work_offset(index, &axes);
+        let stored_rotation = self.parameters.rotation(index);
+        if unpublished_live_row(&values, status.offsets.rotation_xy, &stored, stored_rotation) {
+            if !self.offset_unpublished_logged {
+                log::warn!(
+                    "{} is not published by the interpreter; keeping the stored row ({}) instead of mirroring zeros",
+                    wcs_name(index),
+                    stored
+                        .iter()
+                        .map(|(axis, value)| format!("{axis}{value:.4}"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                );
+                self.offset_unpublished_logged = true;
+            }
+            // Not a capture: ask the startup path to publish the stored row
+            // again, as it does on a fresh controller. It converges on the next
+            // poll where the machine is idle, ready and unprotected.
+            self.offsets_synced = false;
+            self.offset_sync_attempts = 0;
+            self.offset_sync_next = Instant::now();
+            return;
         }
         self.parameters.record_offset_axes(index, &values, &axes);
         self.parameters
@@ -1174,6 +1207,31 @@ impl MachineBackend for NmlBackend {
 /// Number of startup attempts at publishing the stored work offsets.
 const MAX_OFFSET_SYNCS: u32 = 5;
 
+/// Is this live row the interpreter's *unpublished* row rather than an offset
+/// of zero?
+///
+/// After a reset, after a blank `OPEN_FILE` start and after an aborted
+/// program, the interpreter leaves the active `G5X` row at zero while the
+/// parameter file still holds the operator's numbers. The two are numerically
+/// identical, so the only evidence is the file: all-zero live over a stored row
+/// that is set means the row has not been published yet.
+///
+/// Mirroring that zero into the file is what lost the active system's offset:
+/// `LoadProgram` captures the live row just before it opens a file, so opening
+/// a program after such a reset replaced the stored row with zeros.
+fn unpublished_live_row(
+    live: &AxisMap<f64>,
+    live_rotation: f64,
+    stored: &AxisMap<f64>,
+    stored_rotation: f64,
+) -> bool {
+    let live_is_zero =
+        live.iter().all(|(_, value)| value.abs() < 1e-9) && live_rotation.abs() < 1e-9;
+    let stored_is_set =
+        stored.iter().any(|(_, value)| value.abs() >= 1e-9) || stored_rotation.abs() >= 1e-9;
+    live_is_zero && stored_is_set
+}
+
 /// What startup offset publication needs from one status poll.
 pub(crate) struct OffsetSyncInputs {
     pub program_open: bool,
@@ -1749,6 +1807,45 @@ mod tests {
             OffsetSync::Publish { index, block, .. } => (*index, block.as_str()),
             other => panic!("expected a publication, got {other:?}"),
         }
+    }
+
+    fn row(values: &[(&str, f64)]) -> AxisMap<f64> {
+        AxisMap::from_entries(values.iter().map(|(axis, value)| (axis.to_string(), *value)))
+    }
+
+    /// An unpublished live row is zeros, and zeros are also a legitimate
+    /// offset, so the file is the only evidence: all-zero live over a stored
+    /// row that is set is an unpublished row, not an offset that became zero.
+    /// Mirroring it is what replaced the active system's offset with zeros.
+    #[test]
+    fn an_unpublished_live_row_is_not_mirrored_over_the_stored_one() {
+        let stored = row(&[("X", -10.0), ("Y", -20.0), ("Z", -30.0)]);
+        let live_zero = row(&[("X", 0.0), ("Y", 0.0), ("Z", 0.0)]);
+        assert!(
+            unpublished_live_row(&live_zero, 0.0, &stored, 0.0),
+            "the interpreter has not published the row"
+        );
+
+        // The published row mirrors as before: this is the probe path, where
+        // the interpreter itself moved the offset.
+        let live_set = row(&[("X", -10.0), ("Y", -20.0), ("Z", -30.0)]);
+        assert!(!unpublished_live_row(&live_set, 0.0, &stored, 0.0));
+
+        // A published row with a zero axis is an offset, not an unpublished
+        // row: one non-zero axis is enough.
+        let partly_zero = row(&[("X", 0.0), ("Y", -20.0), ("Z", 0.0)]);
+        assert!(!unpublished_live_row(&partly_zero, 0.0, &stored, 0.0));
+
+        // Nothing stored: writing zeros over zeros loses nothing.
+        let stored_zero = row(&[("X", 0.0), ("Y", 0.0), ("Z", 0.0)]);
+        assert!(!unpublished_live_row(&live_zero, 0.0, &stored_zero, 0.0));
+
+        // A rotation-only offset is the same hazard as an axis one.
+        assert!(
+            unpublished_live_row(&live_zero, 0.0, &stored_zero, 30.0),
+            "the stored rotation would be replaced by zero"
+        );
+        assert!(!unpublished_live_row(&live_zero, 30.0, &stored_zero, 30.0));
     }
 
     #[test]
