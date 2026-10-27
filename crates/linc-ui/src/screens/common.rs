@@ -1413,6 +1413,12 @@ pub fn trajectory(
     view.tool_tip = Some(app.tool_tip());
     app.graph_style
         .apply(&mut view, selected_line, current_line);
+    // Derived from the live positions, so it absorbs the G43 tool length (which
+    // LinuxCNC folds into the machine position but the program path does not) and
+    // any G92 or WCS mismatch. Recomputed here rather than by the Program page,
+    // so every card that draws a trail is correct in the frame it is drawn.
+    view.live_trail_shift =
+        crate::state::live_trail_shift(&app.snapshot, app.program.preview_offset.as_ref());
     view.show_legend = view.show_legend && show_legend;
     let response = draw_trajectory(ui, &mut view);
     *zoom = view.zoom;

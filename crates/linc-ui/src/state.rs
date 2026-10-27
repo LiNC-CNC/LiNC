@@ -1322,10 +1322,6 @@ impl Default for SettingsUi {
 pub struct GraphStyle {
     pub show_grid: bool,
     pub show_live_trail: bool,
-    /// How far the live trail is drawn from the frame of the program path,
-    /// from [`live_trail_shift`]. The Program page recomputes it every frame
-    /// from the snapshot; a card drawn on another page keeps the last value.
-    pub live_trail_shift: [f64; 3],
     /// `Ctrl+B` cycle: 0 dimensions only, 1 + machine box, 2 + program box, 3 off.
     pub bounds_mode: u8,
     pub show_stock: bool,
@@ -1347,7 +1343,6 @@ impl GraphStyle {
     ) {
         view.show_grid = self.show_grid;
         view.show_live_trail = self.show_live_trail;
-        view.live_trail_shift = self.live_trail_shift;
         let (dims, machine, box_at) = bounds_visibility(self.bounds_mode);
         view.show_program_bounds = dims;
         view.show_machine_bounds = machine;
@@ -1398,7 +1393,6 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
     GraphStyle {
         show_grid: profile.config.toolpath.show_grid,
         show_live_trail: profile.config.toolpath.show_live_trail,
-        live_trail_shift: [0.0; 3],
         bounds_mode: bounds_mode_from_config(
             profile.config.toolpath.show_program_bounds,
             profile.config.toolpath.show_machine_bounds,
@@ -1427,17 +1421,13 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
 /// differ by `preview offset + work - machine`, which is zero on a machine with
 /// no tool length and no G92 in play.
 ///
-/// The simulator is excluded: its motion model carries no work offsets at all
-/// (it stamps the work coordinate into both position fields), so
-/// `positions.work` equals `positions.machine` and this arithmetic cannot
-/// recover the frame its trail is in.
+/// The simulator tracks both frames (its motion and jog paths apply the active
+/// work system), so the same arithmetic holds there and resolves to zero unless
+/// a tool length is in play.
 pub fn live_trail_shift(
     snapshot: &MachineSnapshot,
     preview_offset: Option<&linc_core::model::AxisMap<f64>>,
 ) -> [f64; 3] {
-    if snapshot.simulated {
-        return [0.0; 3];
-    }
     ["X", "Y", "Z"].map(|axis| {
         let machine = snapshot
             .positions
@@ -2430,10 +2420,10 @@ mod trail_frame_tests {
         let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
         snapshot.simulated = true;
         for axis in AXES {
-            // The simulator's motion model stamps the work value into both
-            // position fields, so there is no frame for this arithmetic to
-            // recover. Its trail needs its own fix.
-            place(&mut snapshot, axis, 1.0, 1.0);
+            // The simulator applies the work system to both fields, so its trail
+            // and the preview already share a frame and no correction is due.
+            let (offset, work_value) = (work.get(axis).copied().unwrap_or(0.0), 1.0);
+            place(&mut snapshot, axis, work_value, offset + work_value);
         }
         assert_eq!(live_trail_shift(&snapshot, Some(&work)), [0.0; 3]);
     }

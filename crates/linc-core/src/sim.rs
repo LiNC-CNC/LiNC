@@ -793,14 +793,33 @@ impl SimBackend {
             .keys()
             .map(str::to_string)
             .collect();
-        let preview = parse_preview(line, &axis_names, None, self.current_tool_tip());
+        // The active work system applies here as well: parse_preview returns
+        // machine coordinates (program words + the WCS row), which is the frame
+        // the seeded trail is already in. Stamping the program value into both
+        // position fields left a trail mixing two frames whenever a WCS was set.
+        let active_offset = self.snapshot.offsets.active_index.and_then(|index| {
+            self.snapshot
+                .offsets
+                .offsets
+                .iter()
+                .find(|o| o.index == index)
+        });
+        let preview = parse_preview(
+            line,
+            &axis_names,
+            active_offset.map(|offset| &offset.values),
+            self.current_tool_tip(),
+        );
         if let Some(segment) = preview.segments.last() {
             let start = segment.start;
             let end = segment.end;
             for (axis, index) in [("X", 0usize), ("Y", 1), ("Z", 2)] {
+                let offset = active_offset
+                    .and_then(|offset| offset.values.get(axis).copied())
+                    .unwrap_or(0.0);
                 if let Some(position) = self.snapshot.positions.axes.get_mut(axis) {
-                    position.work = end[index];
                     position.machine = end[index];
+                    position.work = end[index] - offset;
                     position.dtg = 0.0;
                 }
                 if let Some(commanded) = self.snapshot.machine.commanded.get_mut(axis) {
@@ -1737,6 +1756,50 @@ enabled = true
                 origin: MdiOrigin::Mdi,
             })
             .unwrap();
+    }
+
+    #[test]
+    fn a_work_offset_moves_the_machine_position_but_not_the_work_one() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+
+        // G54 is active by default; give it a non-zero origin.
+        let g54 = backend
+            .snapshot
+            .offsets
+            .offsets
+            .iter_mut()
+            .find(|offset| offset.index == 1)
+            .expect("G54 exists");
+        g54.values.insert(String::from("X"), -50.0);
+        g54.values.insert(String::from("Y"), -20.0);
+        g54.values.insert(String::from("Z"), -10.0);
+
+        backend
+            .send(MachineCommand::IssueMdi {
+                block: "G54 G0 X10 Y5 Z1".into(),
+                origin: MdiOrigin::Mdi,
+            })
+            .unwrap();
+
+        let position = |axis: &str| backend.snapshot.positions.axes.get(axis).cloned().unwrap();
+        // Program words are the work position; the machine moves by the origin.
+        assert_eq!(position("X").work, 10.0);
+        assert_eq!(position("X").machine, -40.0);
+        assert_eq!(position("Y").work, 5.0);
+        assert_eq!(position("Y").machine, -15.0);
+        assert_eq!(position("Z").work, 1.0);
+        assert_eq!(position("Z").machine, -9.0);
+
+        // The trail and the preview share the machine frame; a trail in work
+        // coordinates would sit 50/20/10 mm away from the path it is cutting.
+        let tip = backend
+            .snapshot
+            .live_trail
+            .last()
+            .map(|point| point.position)
+            .expect("the trail has a tip");
+        assert_eq!(tip, [-40.0, -15.0, -9.0]);
     }
 
     #[test]

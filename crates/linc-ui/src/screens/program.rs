@@ -143,8 +143,6 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
     // is parsed at `program words + the work offset the program selects`. The
     // two frames differ by the tool length `G43` applies; draw the trail in the
     // path's frame so the two layers show the same cut.
-    app.graph_style.live_trail_shift =
-        crate::state::live_trail_shift(&app.snapshot, app.program.preview_offset.as_ref());
     common::shell_card(ui, rect, |ui| {
         let top = ui.cursor().top();
         match kind {
