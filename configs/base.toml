@@ -16,8 +16,11 @@ window_title = "LiNC"
 # "auto" follows the desktop scale; otherwise 0.5..3.0 or a percentage.
 scale = "auto"
 axis_order = ["X", "Y", "Z"]
-# Order matches the keyboard: MAIN, FILE, TOOL, OFFSET, WIN.
-pages = ["machine", "program", "tools", "offsets", "diagnostics", "help"]
+# Order matches the keyboard: MAIN, FILE, TOOL, OFFSET, WIN. DIAGNOSTICS and
+# G-CODE HELP have no nav entry; their pages stay reachable through the [keys]
+# diagnostics/help bindings below (Ctrl+D, Ctrl+H), which this list does not
+# unbind. Name either one here again to put its nav entry back.
+pages = ["machine", "program", "tools", "offsets"]
 # Load bars on the Machine page: machine axes plus "S" for the spindle. An
 # empty list removes the SERVO LOAD pane.
 servo_load = ["X", "Y", "Z"]
@@ -156,7 +159,8 @@ files_delete = "Delete"
 tools = "F7"
 offsets = "F8"
 # There is no F9 on the panel: DIAGNOSTICS takes Ctrl+D and G-CODE HELP Ctrl+H;
-# F10 carries CODE/SPLIT and Esc is back/cancel.
+# F10 carries CODE/SPLIT and Esc is back/cancel. Both pages stay bound here
+# with no [ui] pages entry, so the keys are the way in.
 diagnostics = "Ctrl+D"
 help = "Ctrl+H"
 # Full-screen messages dialog.

@@ -125,6 +125,12 @@ pub fn apply(ctx: &egui::Context) {
     // with no focus stop and no ring until Tab was pressed.
     ctx.options_mut(|options| {
         options.input_options.surrender_focus_on = egui::SurrenderFocusOn::Never;
+        // The shell's scale comes from `[ui] scale` alone (apply_design_zoom).
+        // egui's own Ctrl+Plus / Ctrl+Minus / Ctrl+0 chord rescales the whole
+        // GUI at the end of the pass, which would fight the profile scale every
+        // frame; the toolpath keeps its zoom keys, scoped to the card under the
+        // pointer.
+        options.zoom_with_keyboard = false;
     });
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = SURFACE;

@@ -275,8 +275,6 @@ pub fn modal_pane_in(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str, 
     });
 }
 
-/// MODAL pane with an exact height, so the column that holds it ends where the
-
 /// Height a MODAL pane needs for `codes` G-code cells at `columns` wide.
 ///
 /// Measured from the card: 26 px of chrome (margins plus title) and 41 px per
@@ -287,6 +285,23 @@ pub fn modal_height(codes: usize, columns: usize) -> f32 {
     let rows = codes.max(1).div_ceil(columns.max(1));
     // 8 px frame, an 18 px title row, and 41 px per row of cells.
     26.0 + rows as f32 * 41.0
+}
+
+/// Height of the two-line MODAL band the dashboard draws inside its own program
+/// card: the rule and label above the grid, then one 25 px row of two-line
+/// cells per `columns` codes.
+///
+/// `modal_height` sizes a card of its own — its frame, its title and
+/// three-line cells — and is much taller. Reserving that here left the band's
+/// excess as dead space under it instead of giving it to the listing.
+pub fn modal_strip_height(codes: usize, columns: usize) -> f32 {
+    let rows = codes.max(1).div_ceil(columns.max(1));
+    // The 1 px rule, the 9 pt MODAL label (13 px) and the two 2 px gaps between
+    // them: 18 px, measured off the card at the theme's ramp.
+    const CHROME: f32 = 18.0;
+    // A two-line cell: the group label and the code.
+    const ROW: f32 = 25.0;
+    CHROME + rows as f32 * ROW
 }
 
 pub fn modal_text(key: &str, value: &str) -> String {
@@ -790,22 +805,18 @@ fn field_label(ui: &mut Ui, text: &str) {
     );
 }
 
-/// Rows of G-code the PROGRAM card shows at `height`.
+/// Height the card's progress line (rule, label, bar and status row) takes
+/// off its bottom. The MODAL band is pinned directly above it.
+const PROGRESS_HEIGHT: f32 = 46.0;
+
+/// Rows of G-code that fit above the MODAL band.
 ///
-/// The card is a fixed height, so the listing takes what the rest of the card
-/// leaves: the header and rule above it, the MODAL label, the strip (26 px per
-/// row of two-line cells) and the progress line below it. Nothing is held back
-/// for the strip beyond what it needs, so the surplus goes to the listing.
-fn program_window_rows(height: f32, codes: usize, row_height: f32) -> usize {
-    const HEADER: f32 = 26.0;
-    const MODAL_LABEL: f32 = 12.0;
-    const PROGRESS: f32 = 46.0;
-    // Reserve the modal grid's real height, not one short line per row: its
-    // cells are 41 px tall, and underestimating grew the strip down into the
-    // progress line instead of taking rows from the listing above it.
-    let strip = modal_height(codes, 6);
-    let budget = (height - 24.0) - HEADER - MODAL_LABEL - strip - PROGRESS;
-    (budget / (row_height + 2.0)).floor().max(6.0) as usize
+/// The listing is the card's flexible part: the band and the progress line own
+/// their heights, and the listing takes every whole row between the header and
+/// the band. Whole rows only, so the remainder is a single row's worth at most
+/// and never enough to open a gap under the band.
+fn listing_rows(available: f32, row_height: f32) -> usize {
+    (available / (row_height + 2.0)).floor().max(6.0) as usize
 }
 
 pub fn program_card(app: &LincApp, ui: &mut Ui) {
@@ -837,7 +848,22 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                     .iter()
                     .filter(|(key, _)| key.starts_with('G'))
                     .count();
-                let window_len = program_window_rows(height, codes, row_height);
+                // The card's bottom block is placed by rect, not by what the
+                // listing happened to leave: the progress line owns the last
+                // `PROGRESS_HEIGHT` pixels and the MODAL band its own derived
+                // height directly above, so the band ends on the progress rule
+                // and no dead space can open between them. The listing takes
+                // every whole row between the header and the band.
+                let area = ui.max_rect();
+                let band = egui::Rect::from_min_max(
+                    egui::pos2(
+                        area.left(),
+                        area.max.y - PROGRESS_HEIGHT - modal_strip_height(codes, 6),
+                    ),
+                    egui::pos2(area.right(), area.max.y - PROGRESS_HEIGHT),
+                );
+                let window_len =
+                    listing_rows((band.top() - ui.cursor().min.y).max(0.0), row_height);
                 if let Some(content) = content {
                     // Follow the line motion is cutting, not the interpreter's
                     // read-ahead, which reaches the end of the program first.
@@ -954,9 +980,16 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                         );
                     }
                 }
-                theme::separator(ui);
-                field_label(ui, "MODAL");
-                modal_grid(app, ui, 6, false, "program_modal_fields");
+                // The band, pinned to its rect above the progress line.
+                let mut band_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(band)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                band_ui.set_clip_rect(band.intersect(ui.clip_rect()));
+                theme::separator(&mut band_ui);
+                field_label(&mut band_ui, "MODAL");
+                modal_grid(app, &mut band_ui, 6, false, "program_modal_fields");
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                     ui.horizontal(|ui| {
@@ -1927,7 +1960,8 @@ pub fn live_coordinates_card(ui: &mut Ui, header: &str, units_label: &str, rows:
 #[cfg(test)]
 mod tests {
     use super::{
-        dro_axis_label, dro_value, feed_rows, modal_height, modal_mnemonic, program_window_rows,
+        dro_axis_label, dro_value, feed_rows, listing_rows, modal_height, modal_mnemonic,
+        modal_strip_height,
     };
     use linc_core::model::FeedState;
 
@@ -2027,22 +2061,39 @@ mod tests {
     }
 
     #[test]
-    fn the_program_window_gives_its_surplus_to_the_listing() {
-        // The MAIN card at a 720-high window.
-        let height = 486.0;
+    fn the_listing_takes_every_row_the_band_leaves() {
+        // The band and the progress line own their pixels; the listing takes
+        // the whole rows between the card's header and the band, so what it
+        // cannot use is under one row and never a gap under the band.
         let row_height = 18.0;
-        let rows = program_window_rows(height, 5, row_height);
-        // The listing fills the card down to the progress line rather than
-        // stopping at a round number of rows.
-        let used = 26.0 + rows as f32 * (row_height + 2.0) + 12.0 + modal_height(5, 6) + 46.0;
-        let inner = height - 24.0;
-        assert!(used <= inner, "{used} > {inner}");
-        assert!(
-            used + row_height + 2.0 > inner,
-            "another row would have fitted"
-        );
+        for available in [130.0, 361.0, 380.0, 500.0] {
+            let rows = listing_rows(available, row_height);
+            let used = rows as f32 * (row_height + 2.0);
+            assert!(
+                used <= available + 1e-3,
+                "{available} fits {rows} rows, which need {used}"
+            );
+            assert!(
+                used + row_height + 2.0 > available,
+                "another row would have fitted in {available}"
+            );
+        }
+        // A card too short for even one row still lists six: the band and the
+        // progress line are what give way, not the program.
+        assert_eq!(listing_rows(0.0, row_height), 6);
+    }
 
-        // A strip that wraps to two 41 px rows takes two listing rows back.
-        assert_eq!(program_window_rows(height, 7, row_height), rows - 2);
+    #[test]
+    fn the_in_card_band_is_shorter_than_a_modal_card() {
+        // The dashboard's cells are two lines; `modal_height` sizes a card with
+        // a title and three-line cells. Reserving the card's height for the band
+        // is what left the dead space under it.
+        for codes in [0, 5, 6, 7, 13] {
+            let band = modal_strip_height(codes, 6);
+            assert!(band < modal_height(codes, 6), "{codes}");
+        }
+        // One row of cells is 25 px, not 41: a fifth code wraps to a second row.
+        assert!((modal_strip_height(7, 6) - modal_strip_height(6, 6) - 25.0).abs() < 1e-6);
+        assert_eq!(modal_strip_height(0, 6), modal_strip_height(1, 6));
     }
 }

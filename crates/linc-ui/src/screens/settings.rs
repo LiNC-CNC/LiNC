@@ -55,18 +55,12 @@ fn display(app: &mut LincApp, ui: &mut Ui) {
                     ui.add_space(6.0);
                     theme::kv_row(ui, "CONFIG SCALE", app.profile.config.ui.scale.clone());
                     ui.label(
-                        RichText::new("UI SCALE (runtime override)")
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
+                        RichText::new(
+                            "The shell scales from [ui] scale alone: no runtime override.",
+                        )
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
                     );
-                    let mut scale = app.design_scale;
-                    if ui
-                        .add(egui::Slider::new(&mut scale, 0.8..=1.5).text("scale"))
-                        .changed()
-                    {
-                        app.design_scale = scale;
-                        app.settings.density = scale;
-                    }
                     theme::kv_row(ui, "WINDOW", app.profile.config.ui.window_title.clone());
                     theme::kv_row(ui, "START PAGE", app.profile.config.ui.start_page.clone());
                     theme::kv_row(

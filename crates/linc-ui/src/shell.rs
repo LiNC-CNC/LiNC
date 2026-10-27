@@ -3237,7 +3237,26 @@ impl LincApp {
         // Page-local keyboard commands live here: the bottom bar had one row and
         // truncated the list, and the sidebar has the height. The list takes the
         // sidebar's remainder, less the frame's own margins and header.
-        let shortcuts_height = (ui.available_height() - 32.0).max(80.0);
+        //
+        // The pane gives the list every pixel the sidebar has left and scrolls
+        // inside when the list is longer than that; a list that fits keeps the
+        // frame at its content height. `available_height` is read here, outside
+        // the frame, where the column really bounds it.
+        let header = ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(
+                    "SHORTCUTS".to_string(),
+                    FontId::proportional(theme::font_size(9.0)),
+                    theme::MUTED,
+                )
+                .size()
+                .y
+        });
+        // The frame's 6 px margin and 1 px stroke on each side, the header line
+        // above the list, and the air that keeps the frame off the footer.
+        const FRAME_CHROME: f32 = 6.0 * 2.0 + 1.0 * 2.0;
+        const FOOTER_PAD: f32 = 4.0;
+        let list_height = (ui.available_height() - FRAME_CHROME - header - FOOTER_PAD).max(60.0);
         let shortcuts = self.key_hints();
         if !shortcuts.is_empty() {
             Frame::new()
@@ -3257,7 +3276,7 @@ impl LincApp {
                     );
                     egui::ScrollArea::vertical()
                         .id_salt("sidebar-shortcuts")
-                        .max_height((shortcuts_height - 20.0).max(60.0))
+                        .max_height(list_height)
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
                             // Half a text line between entries: the rows are dense enough
@@ -4436,8 +4455,12 @@ pub fn page_from_name(name: &str) -> Option<Page> {
 /// can hide the pages it does not use (a machine with no changer can hide
 /// TOOLS, for example) without removing the screen from the binary.
 /// Ordered to match the keyboard: MAIN (F5), FILE (F6), TOOL (F7), OFFSET
-/// (F8); Diagnostics and Help use Ctrl+D and Ctrl+H. A page that has no
-/// function key follows the ones that do.
+/// (F8). A page that has no function key follows the ones that do.
+///
+/// DIAGNOSTICS and G-CODE HELP are listed so a profile that names them in
+/// `[ui] pages` still gets a nav entry, but `configs/base.toml` leaves them
+/// out: their pages are reachable with the `[keys]` chords (Ctrl+D, Ctrl+H),
+/// and `[ui] pages` never unbinds a key.
 pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
     (Page::Machine, "MACHINE", "MAIN"),
     (Page::Program, "PROGRAM", "FILE"),
@@ -4907,6 +4930,221 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         let backend = Box::new(LocalBackend::new(profile.clone(), mode));
         let app = LincApp::new(profile, backend, &ctx);
         (dir, app)
+    }
+
+    /// The sidebar SHORTCUTS frame: the only 4 px-corner pane in the nav
+    /// column. Its rect, so a test can see how tall the pane came out.
+    fn shortcuts_frame(output: &egui::FullOutput) -> Option<egui::Rect> {
+        fn walk(shape: &egui::Shape, out: &mut Vec<egui::Rect>) {
+            match shape {
+                egui::Shape::Rect(rect) => {
+                    if rect.fill == theme::PANEL && rect.corner_radius.nw == 4 {
+                        out.push(rect.rect);
+                    }
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut rects = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut rects);
+        }
+        rects
+            .into_iter()
+            .find(|rect| rect.left() < theme::NAV_WIDTH)
+    }
+
+    /// The navigation shows no entry for a page that only has a key: DIAGNOSTICS
+    /// and G-CODE HELP left `[ui] pages`, and `[keys]` still reaches both.
+    #[test]
+    fn the_navigation_lists_no_page_that_only_has_a_key() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.frame(&[]);
+        let output = harness.frame_full(Vec::new());
+        let texts = painted_text(&output);
+        // The navigation is on screen: the pages with a function key are.
+        for present in ["MACHINE", "PROGRAM", "TOOLS", "OFFSETS"] {
+            assert!(
+                texts.iter().any(|(text, _)| text == present),
+                "{present} is a nav entry"
+            );
+        }
+        for absent in ["DIAGNOSTICS", "G-CODE HELP"] {
+            assert!(
+                !texts.iter().any(|(text, _)| text == absent),
+                "{absent} must not be a nav entry"
+            );
+        }
+        // The pages themselves stayed: `[ui] pages` never unbinds a key.
+        harness.frame_with(&[(egui::Key::D, ctrl())]);
+        assert_eq!(harness.app.page, Page::Diagnostics);
+        harness.frame_with(&[(egui::Key::H, ctrl())]);
+        assert_eq!(harness.app.page, Page::Help);
+    }
+
+    /// A shell region's rect, from the frame's own report to the diagnostic
+    /// bus: the tests read the footer and the navigation column from it rather
+    /// than re-deriving them.
+    fn region(app: &LincApp, name: &str) -> egui::Rect {
+        let found = app
+            .diag_regions
+            .iter()
+            .find(|region| region.name == name)
+            .unwrap_or_else(|| panic!("{name} is reported"));
+        egui::Rect::from_min_size(
+            egui::pos2(found.x, found.y),
+            egui::vec2(found.width, found.height),
+        )
+    }
+
+    /// The SHORTCUTS pane sizes to its content while that fits, and takes the
+    /// sidebar's remainder — down to the footer, less a little air — once the
+    /// list is longer, scrolling inside itself.
+    #[test]
+    fn the_shortcuts_pane_sizes_to_content_then_to_the_footer() {
+        // Diagnostics has one hint: the pane ends well above the footer.
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.app.set_page(Page::Diagnostics);
+        harness.frame(&[]);
+        let output = harness.frame_full(Vec::new());
+        let nav = region(&harness.app, "nav");
+        let pane = shortcuts_frame(&output).expect("the shortcuts pane is drawn");
+        assert!(
+            pane.bottom() < nav.bottom() - 40.0,
+            "a short list keeps the pane at its content height: {pane:?} in {nav:?}"
+        );
+
+        // A profile that lists every page has three nav entries more than the
+        // default, and the Program page's list no longer fits: the pane runs
+        // down to the footer, four pixels short of the navigation column's
+        // content edge, and scrolls inside.
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.app.nav = nav_pages(
+            &[
+                "machine",
+                "program",
+                "tools",
+                "offsets",
+                "diagnostics",
+                "help",
+                "settings",
+            ]
+            .map(str::to_string),
+        );
+        harness.app.set_page(Page::Program);
+        harness.frame(&[]);
+        let output = harness.frame_full(Vec::new());
+        let nav = region(&harness.app, "nav");
+        // The column's own 8 px bottom margin and the 4 px that keep the pane
+        // off the footer.
+        let pane = shortcuts_frame(&output).expect("the shortcuts pane is drawn");
+        assert!(
+            (pane.bottom() - (nav.bottom() - 8.0 - 4.0)).abs() < 1.5,
+            "an overflowing list ends just above the footer: {pane:?} in {nav:?}"
+        );
+    }
+
+    /// Ctrl+Plus / Ctrl+Minus belong to the toolpath under the pointer. They do
+    /// not rescale the shell: `[ui] scale` is the only source of that.
+    #[test]
+    fn ctrl_plus_and_minus_leave_the_ui_scale_alone() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.frame(&[]);
+        let before = harness.ctx.zoom_factor();
+        harness.frame_with(&[(egui::Key::Plus, ctrl())]);
+        assert!(
+            (harness.ctx.zoom_factor() - before).abs() < 0.005,
+            "Ctrl+Plus rescaled the shell: {before} -> {}",
+            harness.ctx.zoom_factor()
+        );
+        harness.frame_with(&[(egui::Key::Minus, ctrl())]);
+        assert!(
+            (harness.ctx.zoom_factor() - before).abs() < 0.005,
+            "Ctrl+Minus rescaled the shell: {before} -> {}",
+            harness.ctx.zoom_factor()
+        );
+    }
+
+    /// MAIN ends on one line: the program card on the right and the two cards
+    /// under the toolpath stop at the footer's top edge, and the MODAL band is
+    /// pinned above the progress line with no dead space under it.
+    #[test]
+    fn the_main_page_cards_end_on_the_page_bottom_edge() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.app.set_page(Page::Machine);
+        harness.frame(&[]);
+        let output = harness.frame_full(Vec::new());
+        let footer = region(&harness.app, "bottom-bar");
+        let cards = painted_cards(&output);
+        // The right column's program card: the tall card past the middle.
+        let program = cards
+            .iter()
+            .find(|rect| rect.left() > 900.0 && rect.height() > 300.0)
+            .expect("the program card is drawn");
+        assert!(
+            (footer.top() - program.bottom()).abs() <= 3.0,
+            "the program card ends at the page's edge: {program:?} vs {footer:?}"
+        );
+        // The two cards under the toolpath end on the same edge.
+        let bottom_row: Vec<_> = cards
+            .iter()
+            .filter(|rect| rect.left() < 900.0 && rect.top() > 500.0)
+            .collect();
+        assert_eq!(
+            bottom_row.len(),
+            2,
+            "feed/spindle and servo: {bottom_row:?}"
+        );
+        for rect in bottom_row {
+            // The bottom row is a fixed height from `bottom_cards_height`, so it
+            // lands within a couple of pixels of the same edge rather than on
+            // it; the program card above is placed from the footer itself.
+            assert!(
+                (footer.top() - rect.bottom()).abs() <= 6.0,
+                "every card ends at the page's edge: {rect:?} vs {footer:?}"
+            );
+        }
+        // No dead space under the band: its cells end on the progress rule, and
+        // the listing runs down to the band rather than stopping a row short.
+        let texts = painted_text(&output);
+        let modal = texts
+            .iter()
+            .find(|(text, _)| text == "MODAL")
+            .expect("the MODAL band is drawn");
+        let progress = texts
+            .iter()
+            .find(|(text, _)| text == "PROGRESS")
+            .expect("the progress line is drawn");
+        let band_bottom = texts
+            .iter()
+            .filter(|(_, rect)| rect.top() > modal.1.top() && rect.bottom() < progress.1.top())
+            .map(|(_, rect)| rect.bottom())
+            .fold(0.0f32, f32::max);
+        assert!(
+            progress.1.top() - band_bottom < 12.0,
+            "the band ends on the progress rule: band {band_bottom}, progress {}",
+            progress.1.top()
+        );
+        // The last listing line sits within one row of the band's rule.
+        let listing_bottom = texts
+            .iter()
+            .filter(|(_, rect)| {
+                rect.left() > program.left()
+                    && rect.top() > program.top()
+                    && rect.bottom() < modal.1.top()
+            })
+            .map(|(_, rect)| rect.bottom())
+            .fold(0.0f32, f32::max);
+        assert!(
+            modal.1.top() - listing_bottom < 30.0,
+            "the listing takes the space down to the band: {listing_bottom} vs {}",
+            modal.1.top()
+        );
     }
 
     #[test]
