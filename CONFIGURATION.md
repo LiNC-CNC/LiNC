@@ -541,6 +541,26 @@ the INI has no spindle, and any duplicate. A profile that names an axis the
 machine does not have therefore fails at startup instead of silently dropping a
 bar.
 
+### Window state
+
+`[ui] window_mode` decides how the window appears: `"auto"` (the default) takes
+the whole screen on a `kind = "real"` machine and opens a normal window in
+simulation, `"windowed"` and `"fullscreen"` force one or the other, and
+`"maximized"` fills the screen while staying an ordinary window. `[ui]
+decorations` (default `true`) controls the window-manager title bar and border;
+fullscreen ignores it. A control panel that wants a borderless panel window
+therefore sets:
+
+```toml
+[ui]
+window_mode = "maximized"
+decorations = false
+```
+
+`--fullscreen` on the command line still forces fullscreen regardless of the
+profile, which is the escape hatch for a one-off run. `--check-config` rejects
+any value other than the four names above.
+
 ## 10. Schema reference
 
 | Table | Keys |

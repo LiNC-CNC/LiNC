@@ -123,6 +123,22 @@ pub struct UiConfig {
     /// for the spindle. An empty list removes the SERVO LOAD pane.
     #[serde(default)]
     pub servo_load: Vec<String>,
+    /// Startup window state: `"auto"` takes the whole screen on a real machine
+    /// and opens a window in simulation. A control-panel machine that wants a
+    /// borderless panel window sets `"maximized"` and `decorations = false`.
+    #[serde(default = "default_window_mode")]
+    pub window_mode: String,
+    /// Window-manager decorations (title bar, resize border).
+    #[serde(default = "default_true")]
+    pub decorations: bool,
+}
+
+fn default_window_mode() -> String {
+    "auto".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -806,6 +822,15 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
     }
     if config.profile.trim().is_empty() {
         return Err(ConfigError::Invalid("profile must not be empty".into()));
+    }
+    if !matches!(
+        config.ui.window_mode.as_str(),
+        "auto" | "windowed" | "maximized" | "fullscreen"
+    ) {
+        return Err(ConfigError::Invalid(format!(
+            "ui.window_mode must be auto, windowed, maximized or fullscreen (got {:?})",
+            config.ui.window_mode
+        )));
     }
     if config.machine.name.trim().is_empty() {
         return Err(ConfigError::Invalid(

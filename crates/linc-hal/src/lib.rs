@@ -140,13 +140,25 @@ unsafe impl Send for HalReader {}
 
 impl HalReader {
     pub fn new() -> Result<Self, HalError> {
+        Self::new_with_role("")
+    }
+
+    /// A reader whose HAL component name carries `role`, so two readers can
+    /// live in one process: the native backend owns `linc_reader_<pid>`, and
+    /// `linc` itself needs one to poll the `linc.machine-on` input.
+    pub fn new_with_role(role: &str) -> Result<Self, HalError> {
         let library = open_hal_library()?;
         let get_pin: HalGetPinValueFn = unsafe {
             *library
                 .get(b"hal_get_pin_value_by_name\0")
                 .map_err(|error| HalError::Library(error.to_string()))?
         };
-        let component = HalComponent::new(&format!("linc_reader_{}", std::process::id()))?;
+        let pid = std::process::id();
+        let component = HalComponent::new(&if role.is_empty() {
+            format!("linc_reader_{pid}")
+        } else {
+            format!("linc_reader_{role}_{pid}")
+        })?;
         component.ready()?;
         Ok(Self {
             _library: library,
@@ -385,6 +397,9 @@ pub struct LincHal {
     status_display: HalPin,
     jog_increment: HalPin,
     jog_speed: HalPin,
+    /// Cabinet machine-on switch, wired through the post-GUI HAL. A falling
+    /// edge means the machine is being switched off and ends the session.
+    machine_on: HalPin,
     last_confirm: bool,
 }
 
@@ -403,6 +418,9 @@ impl LincHal {
         let status_display = component.s32_out("status-display")?;
         let jog_increment = component.float_out("jog-increment")?;
         let jog_speed = component.float_out("jog-speed")?;
+        // Input pin: HAL owns the value. Nothing nets it in a simulation, where
+        // it stays low and no edge is ever seen.
+        let machine_on = component.bit_in("machine-on")?;
         unsafe {
             *hmi_alive.bit() = 0;
             *tool_change_confirm.bit() = 0;
@@ -412,7 +430,7 @@ impl LincHal {
         }
         component.ready()?;
         log::info!(
-            "created linc.* HAL outputs (hmi-alive, tool-change-confirm, status-display, jog-increment, jog-speed)"
+            "created linc.* HAL pins (hmi-alive, tool-change-confirm, status-display, jog-increment, jog-speed outputs; machine-on input)"
         );
         Ok(Self {
             component,
@@ -421,6 +439,7 @@ impl LincHal {
             status_display,
             jog_increment,
             jog_speed,
+            machine_on,
             last_confirm: false,
         })
     }
@@ -433,6 +452,13 @@ impl LincHal {
             Ok(hal) => (Some(hal), None),
             Err(error) => (None, Some(error)),
         }
+    }
+
+    /// Level of the `linc.machine-on` input pin. The cabinet's machine-on
+    /// switch drives it through the post-GUI net; the value is owned by HAL and
+    /// is only ever read here.
+    pub fn machine_on(&self) -> bool {
+        unsafe { *self.machine_on.bit() != 0 }
     }
 
     pub fn output_names(&self) -> [&'static str; 5] {

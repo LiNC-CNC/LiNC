@@ -1302,6 +1302,16 @@ impl LincApp {
         }
     }
 
+    /// End the session because the cabinet was switched off, not because the
+    /// operator asked. Deliberately skips the idle guard, the discard prompt and
+    /// the confirm dialog: the machine power is going away regardless, and a
+    /// modal here would leave the HMI running while LinuxCNC is being shut down.
+    /// This is the only path that may quit while a program runs.
+    pub fn request_machine_off(&mut self) {
+        log::info!("machine-on input dropped; ending the session");
+        self.quit_requested = true;
+    }
+
     pub fn request_quit(&mut self) {
         if self.snapshot.task.running || self.snapshot.task.motion_active {
             self.toast(

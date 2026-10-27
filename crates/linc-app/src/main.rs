@@ -8,7 +8,7 @@ use clap::{Parser, ValueEnum};
 use linc_core::backend::{BackendHandle, HalWriter, MachineBackend};
 use linc_core::config::Profile;
 use linc_core::model::PanelMode;
-use linc_hal::LincHal;
+use linc_hal::{HalPinValue, HalReader, LincHal};
 use linc_linuxcnc::NmlBackend;
 use linc_ui::{LincApp, UiBackend};
 
@@ -204,24 +204,150 @@ fn main() -> Result<()> {
     if let Some(icon) = window_icon() {
         viewport = viewport.with_icon(icon);
     }
-    if args.fullscreen || profile.config.machine.kind == "real" {
-        viewport = viewport.with_fullscreen(args.fullscreen);
+    let window_mode = if args.fullscreen {
+        WindowMode::Fullscreen
+    } else {
+        resolve_window_mode(
+            &profile.config.ui.window_mode,
+            &profile.config.machine.kind,
+        )
+    };
+    // Fullscreen has no frame to decorate either way.
+    let decorated = window_mode != WindowMode::Fullscreen && profile.config.ui.decorations;
+    viewport = viewport.with_decorations(decorated);
+    match window_mode {
+        WindowMode::Windowed => {}
+        WindowMode::Maximized => viewport = viewport.with_maximized(true),
+        WindowMode::Fullscreen => viewport = viewport.with_fullscreen(true),
     }
     let options = eframe::NativeOptions {
         viewport,
         ..Default::default()
     };
+    let hal_enabled = !args.no_hal;
     let result = eframe::run_native(
         &title,
         options,
         Box::new(move |cc| {
             let mut app = LincApp::new(profile.clone(), handle, &cc.egui_ctx);
             app.set_diag_bus(diag_bus.clone());
-            Ok(Box::new(app))
+            Ok(Box::new(MachineOffGuard::new(app, hal_enabled)))
         }),
     );
     result.map_err(|error| anyhow::anyhow!("UI error: {error}"))?;
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowMode {
+    Windowed,
+    Maximized,
+    Fullscreen,
+}
+
+/// Resolve `[ui] window_mode`. `"auto"` keeps the historical behaviour: a real
+/// machine takes the whole screen, a simulation opens a window. A control panel
+/// that must leave the window manager's decorations off sets `"maximized"` and
+/// `decorations = false` in its profile.
+fn resolve_window_mode(mode: &str, machine_kind: &str) -> WindowMode {
+    match mode {
+        "windowed" => WindowMode::Windowed,
+        "maximized" => WindowMode::Maximized,
+        "fullscreen" => WindowMode::Fullscreen,
+        _ if machine_kind == "real" => WindowMode::Fullscreen,
+        _ => WindowMode::Windowed,
+    }
+}
+
+/// HAL pin the cabinet's machine-on switch drives; see the machine's post-GUI
+/// file, which extends `sig_rio_machine-on-switch_bit` into it.
+const MACHINE_ON_PIN: &str = "linc.machine-on";
+
+/// Ends the session when the cabinet is switched off.
+///
+/// The read lives here rather than in `linc-ui`, which must never touch HAL;
+/// `linc-ui` only exposes the forced-quit entry point. A session that never
+/// ends is also a Pi that never powers off, which is why this exists at all.
+struct MachineOffGuard {
+    inner: LincApp,
+    reader: Option<HalReader>,
+    last: Option<bool>,
+}
+
+impl MachineOffGuard {
+    fn new(inner: LincApp, hal_enabled: bool) -> Self {
+        let reader = if hal_enabled {
+            match HalReader::new_with_role("ui") {
+                Ok(reader) => Some(reader),
+                Err(error) => {
+                    log::warn!("machine-on input unavailable: {error}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        Self {
+            inner,
+            reader,
+            last: None,
+        }
+    }
+
+    fn poll_machine_on(&mut self) {
+        let Some(reader) = &self.reader else { return };
+        let Some(HalPinValue::Bit(now)) = reader.read(MACHINE_ON_PIN) else {
+            return;
+        };
+        if machine_off_edge(self.last, now) {
+            self.inner.request_machine_off();
+        }
+        self.last = Some(now);
+    }
+}
+
+/// True only on a genuine high-to-low transition. `previous` stays `None` until
+/// the first successful read, so a pin that is low from the start — an
+/// unwired input in simulation — never quits the session.
+fn machine_off_edge(previous: Option<bool>, now: bool) -> bool {
+    previous == Some(true) && !now
+}
+
+impl eframe::App for MachineOffGuard {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.poll_machine_on();
+        eframe::App::ui(&mut self.inner, ui, frame);
+    }
+}
+
+#[cfg(test)]
+mod machine_off_tests {
+    use super::{machine_off_edge, resolve_window_mode, WindowMode};
+
+    #[test]
+    fn window_mode_resolves_auto_by_machine_kind() {
+        assert_eq!(resolve_window_mode("auto", "real"), WindowMode::Fullscreen);
+        assert_eq!(resolve_window_mode("auto", "sim"), WindowMode::Windowed);
+        assert_eq!(resolve_window_mode("maximized", "real"), WindowMode::Maximized);
+        assert_eq!(resolve_window_mode("windowed", "real"), WindowMode::Windowed);
+        assert_eq!(resolve_window_mode("fullscreen", "sim"), WindowMode::Fullscreen);
+    }
+
+    #[test]
+    fn quits_only_on_a_falling_edge() {
+        assert!(machine_off_edge(Some(true), false));
+        assert!(!machine_off_edge(Some(false), false));
+        assert!(!machine_off_edge(Some(false), true));
+        assert!(!machine_off_edge(Some(true), true));
+    }
+
+    #[test]
+    fn an_unwired_pin_never_quits() {
+        // Low from the very first read: no edge, no quit.
+        assert!(!machine_off_edge(None, false));
+        // High on the first read only records the baseline.
+        assert!(!machine_off_edge(None, true));
+    }
 }
 
 fn parse_args() -> Args {

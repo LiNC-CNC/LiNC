@@ -21,6 +21,12 @@ pages = ["machine", "program", "tools", "offsets", "diagnostics", "help"]
 # Load bars on the Machine page: machine axes plus "S" for the spindle. An
 # empty list removes the SERVO LOAD pane.
 servo_load = ["X", "Y", "Z"]
+# How the window appears at startup: "auto" takes the whole screen on a real
+# machine and opens a normal window in simulation.
+window_mode = "auto"
+# Window-manager decorations. The control-panel setup is a borderless maximised
+# window: window_mode = "maximized" with decorations = false.
+decorations = true
 
 [program]
 default_view = "split"
