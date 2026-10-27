@@ -1742,6 +1742,8 @@ pub struct Keymap {
     pub files_delete: Binding,
     pub tools: Binding,
     pub offsets: Binding,
+    /// SETTINGS has no navigation row; this is the way in.
+    pub settings: Binding,
     pub diagnostics: Binding,
     pub help: Binding,
     /// Any page: open the full-screen messages dialog.
@@ -1883,6 +1885,7 @@ impl Keymap {
             ),
             tools: binding(&keys.tools, Binding::new(Key::F7, none), &mut rejected),
             offsets: binding(&keys.offsets, Binding::new(Key::F8, none), &mut rejected),
+            settings: binding(&keys.settings, Binding::new(Key::P, ctrl), &mut rejected),
             diagnostics: binding(&keys.diagnostics, Binding::new(Key::D, ctrl), &mut rejected),
             help: binding(&keys.help, Binding::new(Key::H, ctrl), &mut rejected),
             messages: binding(&keys.messages, Binding::new(Key::M, none), &mut rejected),

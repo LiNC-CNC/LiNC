@@ -21,7 +21,7 @@ axis_order = ["X", "Y", "Z"]
 # two are also reachable through the [keys] chords below (Ctrl+D, Ctrl+H), and
 # this list never unbinds a key. Drop an entry to hide its row; the page and its
 # key stay.
-pages = ["machine", "program", "tools", "offsets", "diagnostics", "help", "settings"]
+pages = ["machine", "program", "tools", "offsets", "diagnostics", "help"]
 # Load bars on the Machine page: machine axes plus "S" for the spindle. An
 # empty list removes the SERVO LOAD pane.
 servo_load = ["X", "Y", "Z"]
@@ -164,6 +164,8 @@ offsets = "F8"
 # with no [ui] pages entry, so the keys are the way in.
 diagnostics = "Ctrl+D"
 help = "Ctrl+H"
+# SETTINGS has no navigation row: this chord is the only way in.
+settings = "Ctrl+P"
 # Full-screen messages dialog.
 messages = "M"
 back = "Escape"

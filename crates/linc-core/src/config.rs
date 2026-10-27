@@ -288,6 +288,8 @@ pub struct KeysConfig {
     pub files_delete: String,
     pub tools: String,
     pub offsets: String,
+    /// No navigation row: SETTINGS is reached with this chord.
+    pub settings: String,
     pub diagnostics: String,
     /// Open the offline G-code reference from any page.
     pub help: String,
@@ -346,6 +348,7 @@ impl KeysConfig {
             files_delete: "Delete".into(),
             tools: "F7".into(),
             offsets: "F8".into(),
+            settings: "Ctrl+P".into(),
             diagnostics: "Ctrl+D".into(),
             help: "Ctrl+H".into(),
             messages: "M".into(),

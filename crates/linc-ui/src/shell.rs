@@ -2298,6 +2298,10 @@ impl LincApp {
             if input.consume_key(self.keymap.tools.modifiers, self.keymap.tools.key) {
                 nav_page = Some(Page::Tools);
             }
+            // SETTINGS has no navigation row: this chord is the only way in.
+            if input.consume_key(self.keymap.settings.modifiers, self.keymap.settings.key) {
+                nav_page = Some(Page::Settings);
+            }
             if input.consume_key(self.keymap.offsets.modifiers, self.keymap.offsets.key) {
                 if self.page == Page::Probe {
                     if linc_core::probe::ProbeCategory::ALL.last().copied()
@@ -3231,10 +3235,14 @@ impl LincApp {
             // it; a one-line row starts at the pill's own inset, with no icon
             // to clear.
             let label_x = rect.left() + if geometry.icon { 34.0 } else { 12.0 };
-            let label_y = if keycap.is_empty() {
-                rect.center().y
+            // Only a row with an icon is a two-line row. The secondary rows
+            // carry a [keys] hint too, and painting it under the label is what
+            // kept DIAGNOSTICS and G-CODE HELP two lines tall.
+            let two_line = geometry.icon && !keycap.is_empty();
+            let label_y = if two_line {
+                rect.center().y - 6.0
             } else {
-                rect.center().y - 7.0
+                rect.center().y
             };
             painter.text(
                 egui::pos2(label_x, label_y),
@@ -3247,9 +3255,9 @@ impl LincApp {
                     theme::FG
                 },
             );
-            if !keycap.is_empty() {
+            if two_line {
                 painter.text(
-                    egui::pos2(label_x, rect.center().y + 8.0),
+                    egui::pos2(label_x, rect.center().y + 7.0),
                     Align2::LEFT_CENTER,
                     *keycap,
                     FontId::monospace(theme::font_size(8.5)),
@@ -4550,13 +4558,13 @@ pub struct NavRowGeometry {
 pub fn nav_row_geometry(page: Page) -> NavRowGeometry {
     if NAV_PRIMARY.contains(&page) {
         NavRowGeometry {
-            height: theme::MIN_TARGET,
+            height: theme::NAV_ROW_HEIGHT,
             pill: theme::NAV_PILL_PRIMARY,
             icon: true,
         }
     } else {
         NavRowGeometry {
-            height: theme::MIN_TARGET,
+            height: theme::NAV_ROW_HEIGHT,
             pill: theme::NAV_PILL_SECONDARY,
             icon: false,
         }
@@ -5076,21 +5084,21 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         );
     }
 
-    /// Every navigation row keeps a full 44 px target; what shrank is the pill
-    /// painted inside it. The four entries with a function key keep the icon and
-    /// the two-line label, the other three are one-line rows without one.
+    /// The rows are as tight as a legible label allows. A short pill inside a
+    /// tall row is what read as padding before, so the row is now only as tall
+    /// as the pill plus a hair, and the operator asked for that space back.
     #[test]
-    fn the_navigation_rows_keep_a_full_target_with_a_compact_pill() {
+    fn the_navigation_rows_are_tight_and_the_pill_fills_them() {
         for (page, _, _) in NAV_ITEMS {
             let geometry = nav_row_geometry(page);
-            assert!(
-                geometry.height >= theme::MIN_TARGET,
-                "{page:?} keeps a 44 px target, got {}",
-                geometry.height
+            assert_eq!(
+                geometry.height,
+                theme::NAV_ROW_HEIGHT,
+                "{page:?} keeps the tight row height"
             );
             assert!(
-                geometry.pill < geometry.height,
-                "{page:?} paints a pill inside its target, {} of {}",
+                geometry.height - geometry.pill <= 2.0,
+                "{page:?} leaves at most one pixel above and below the pill: {} of {}",
                 geometry.pill,
                 geometry.height
             );
@@ -5103,20 +5111,17 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             assert!(!nav_row_geometry(page).icon, "{page:?} is a one-line row");
             assert_eq!(nav_row_geometry(page).pill, theme::NAV_PILL_SECONDARY);
         }
-        // The gap between rows is a third of the 8 px list spacing it replaced.
-        assert!(
-            (theme::NAV_ROW_GAP - 8.0 / 3.0).abs() < 0.5,
-            "{}",
-            theme::NAV_ROW_GAP
-        );
+        assert_eq!(theme::NAV_ROW_GAP, 2.0);
+        // Seven rows now cost less than seven 44 px targets did.
+        assert!(theme::NAV_ROW_HEIGHT < theme::MIN_TARGET);
     }
 
-    /// Measured at 1280x720, from the frame's own shapes: seven rows, 44 px
-    /// targets, 32/22 px pills and a 47 px pitch (was 38 px rows with an 8 px
-    /// gap, 46 px pitch). DIAGNOSTICS and G-CODE HELP are one-line rows whose
-    /// labels start where the pill does, with no icon column in front of them.
+    /// Measured at 1280x720, from the frame's own shapes: six rows of 28 px with
+    /// a 2 px gap, 26/24 px pills. DIAGNOSTICS and G-CODE HELP are one-line rows
+    /// whose labels start where the pill does, with no icon and no keycap under
+    /// them; SETTINGS has no row at all and is reached with its chord.
     #[test]
-    fn the_navigation_is_compact_and_lists_all_seven_pages() {
+    fn the_navigation_is_compact_and_lists_six_pages() {
         let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
         harness.frame(&[]);
         let output = harness.frame_full(Vec::new());
@@ -5136,11 +5141,25 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             "OFFSETS",
             "DIAGNOSTICS",
             "G-CODE HELP",
-            "SETTINGS",
         ] {
             in_nav(label);
         }
-        // Seven pills: four that carry an icon and a keycap, three one-liners.
+        assert!(
+            !texts
+                .iter()
+                .any(|(text, rect)| text == "SETTINGS" && rect.left() < theme::NAV_WIDTH),
+            "SETTINGS has no navigation row"
+        );
+        // A one-line row paints its label and nothing under it.
+        for keycap in ["Ctrl+D", "Ctrl+H"] {
+            assert!(
+                !texts
+                    .iter()
+                    .any(|(text, rect)| text == keycap && rect.left() < theme::NAV_WIDTH),
+                "{keycap} must not sit under the label of a one-line row"
+            );
+        }
+        // Six pills: four that carry an icon and a keycap, two one-liners.
         let mut heights: Vec<f32> = painted_rects(&output)
             .into_iter()
             .filter(|rect| {
@@ -5150,22 +5169,21 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             .filter(|height| *height > 10.0 && *height < 40.0)
             .collect();
         heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(heights.len(), 7, "seven painted rows, got {heights:?}");
+        assert_eq!(heights.len(), 6, "six painted rows, got {heights:?}");
+        // One list: every row paints the same pill height, so the list reads as a
+        // stack instead of alternating tall and short blocks. What differs between
+        // the kinds is the icon and whether a keycap is drawn beside the label.
         assert_eq!(
             heights
                 .iter()
                 .filter(|height| (**height - theme::NAV_PILL_PRIMARY).abs() < 0.5)
                 .count(),
-            4,
+            6,
             "{heights:?}"
         );
         assert_eq!(
-            heights
-                .iter()
-                .filter(|height| (**height - theme::NAV_PILL_SECONDARY).abs() < 0.5)
-                .count(),
-            3,
-            "{heights:?}"
+            theme::NAV_PILL_SECONDARY, theme::NAV_PILL_PRIMARY,
+            "a one-line row paints the same pill as the others"
         );
         // Pitch: the target plus the gap, from the labels that sit in them.
         let pitch = in_nav("PROGRAM").center().y - in_nav("MACHINE").center().y;
@@ -5186,13 +5204,19 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         // margin: the two NAV_BOTTOM_GAPs and the separator's lines, not a band
         // of air. It was 35 px before the list was compacted.
         let last_target_bottom =
-            in_nav("SETTINGS").center().y + nav_row_geometry(Page::Settings).height * 0.5;
+            in_nav("G-CODE HELP").center().y + nav_row_geometry(Page::Help).height * 0.5;
         assert!(
             shortcuts - last_target_bottom < 20.0,
             "bottom padding {}",
             shortcuts - last_target_bottom
         );
         // The pages behind the rows still answer their own chords.
+        harness.frame_with(&[(egui::Key::P, ctrl())]);
+        assert_eq!(
+            harness.app.page,
+            Page::Settings,
+            "Ctrl+P is the only way into SETTINGS now that it has no row"
+        );
         harness.frame_with(&[(egui::Key::D, ctrl())]);
         assert_eq!(harness.app.page, Page::Diagnostics);
         harness.frame_with(&[(egui::Key::H, ctrl())]);
@@ -5207,17 +5231,17 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             .unwrap_or_else(|| panic!("{label} is painted in the sidebar"))
     }
 
-    /// The arrows walk the navigation over all seven rows, and Enter opens the
+    /// The arrows walk the navigation over all six rows, and Enter opens the
     /// page the highlighted row names.
     #[test]
-    fn the_arrow_keys_walk_all_seven_navigation_rows() {
+    fn the_arrow_keys_walk_all_six_navigation_rows() {
         let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
         harness.app.set_page(Page::Machine);
         harness.app.focus_nav();
         harness.frame(&[]);
-        assert_eq!(harness.app.nav.len(), 7, "seven rows to walk");
+        assert_eq!(harness.app.nav.len(), 6, "six rows to walk");
         assert_eq!(harness.app.nav_focus, 0);
-        for expected in 1..7 {
+        for expected in 1..6 {
             harness.frame(&[egui::Key::ArrowDown]);
             assert_eq!(
                 harness.app.nav_focus, expected,
@@ -5227,7 +5251,7 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         }
         harness.frame(&[egui::Key::ArrowDown]);
         assert_eq!(
-            harness.app.nav_focus, 6,
+            harness.app.nav_focus, 5,
             "the last row is the end of the list"
         );
         harness.app.nav_focus = 5;
@@ -5270,10 +5294,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             "a short list keeps the pane at its content height: {pane:?} in {nav:?}"
         );
 
-        // A profile that lists every page has three nav entries more than the
-        // default, and the Program page's list no longer fits: the pane runs
-        // down to the footer, four pixels short of the navigation column's
-        // content edge, and scrolls inside.
+        // A profile that lists every page has one row more than the default, and
+        // after the rows were compacted the Program page's list still fits at
+        // 1280x720: the pane stays content-sized instead of running to the
+        // footer. It must never pass the navigation column's content edge.
         let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
         harness.app.nav = nav_pages(
             &[
@@ -5295,8 +5319,8 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         // off the footer.
         let pane = shortcuts_frame(&output).expect("the shortcuts pane is drawn");
         assert!(
-            (pane.bottom() - (nav.bottom() - 8.0 - 4.0)).abs() < 1.5,
-            "an overflowing list ends just above the footer: {pane:?} in {nav:?}"
+            pane.bottom() <= nav.bottom() - 8.0 - 4.0 + 1.5,
+            "the pane never passes the navigation column: {pane:?} in {nav:?}"
         );
     }
 

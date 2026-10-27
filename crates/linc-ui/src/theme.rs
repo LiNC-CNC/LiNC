@@ -50,13 +50,17 @@ pub const MIN_TARGET: f32 = 44.0;
 /// The sidebar used to take the 8 px list spacing for this, which read as a
 /// band of dead space around every entry. A third of it is enough to separate
 /// two pills.
-pub const NAV_ROW_GAP: f32 = 3.0;
-/// Painted pill of a row that carries an icon and a two-line label. The hit
-/// rectangle around it stays a full 44 px target, so the visual padding is
-/// what shrank, not the target.
-pub const NAV_PILL_PRIMARY: f32 = 32.0;
+pub const NAV_ROW_GAP: f32 = 2.0;
+/// Painted pill of a row that carries an icon and a two-line label. It nearly
+/// fills the row, because a small pill inside a tall target reads as padding
+/// even when the target is not padding.
+pub const NAV_PILL_PRIMARY: f32 = 26.0;
 /// Painted pill of a one-line row: a label, no icon, no keycap.
-pub const NAV_PILL_SECONDARY: f32 = 22.0;
+pub const NAV_PILL_SECONDARY: f32 = 26.0;
+/// Row height of the navigation list. Deliberately below the 44 px touch
+/// target the other controls keep: this is a mouse/trackball list driven by the
+/// keyboard, and the operator asked twice for the vertical space back.
+pub const NAV_ROW_HEIGHT: f32 = 28.0;
 /// Air between the last row and the SHORTCUTS pane below it.
 pub const NAV_BOTTOM_GAP: f32 = 2.0;
 /// Axis readout: one line carrying the axis name and the work coordinate,
