@@ -137,6 +137,9 @@ pub struct SnapshotBuilder {
     program_loaded_at_ms: u64,
     live_trail: Vec<TrailPoint>,
     last_tool_tip: Option<[f64; 3]>,
+    /// Homed state per axis as of the last build, so a joint that has just been
+    /// homed can drop the trail drawn in the frame the machine did not have.
+    homed_last: std::collections::BTreeMap<String, bool>,
     next_alarm_id: u64,
     last_alarm_texts: VecDeque<String>,
     pub(crate) alarms: VecDeque<Alarm>,
@@ -167,6 +170,7 @@ impl SnapshotBuilder {
             program_loaded_at_ms: now_ms(),
             live_trail: Vec::new(),
             last_tool_tip: None,
+            homed_last: std::collections::BTreeMap::new(),
             next_alarm_id: 1,
             last_alarm_texts: VecDeque::new(),
             alarms: VecDeque::new(),
@@ -402,6 +406,8 @@ impl SnapshotBuilder {
         snapshot.task.program_started = snapshot.task.running;
         snapshot.task.motion_active = motion_active(status);
 
+        // Set while this build sees a joint homed that was not homed before.
+        let mut newly_homed = false;
         snapshot.machine.on = status.motion.enabled;
         // A hardwired mushroom reaches the task status through the machine HAL;
         // a panel that reports its own bit adds to that unless the profile says
@@ -428,10 +434,15 @@ impl SnapshotBuilder {
             // at 0 while the joint moved.
             let pose_index = axis_pose_index(&axis.name).unwrap_or(index);
             let joint = status.joints.get(index);
-            snapshot.machine.homed.insert(
-                axis.name.clone(),
-                joint.map(|joint| joint.homed).unwrap_or(false),
-            );
+            let is_homed = joint.map(|joint| joint.homed).unwrap_or(false);
+            if is_homed && !self.homed_last.get(&axis.name).copied().unwrap_or(false) {
+                // The trail drawn before this joint was homed is in a frame the
+                // machine did not have yet: machine zero moves when a joint
+                // homes, so those points are not just stale, they are wrong.
+                newly_homed = true;
+            }
+            self.homed_last.insert(axis.name.clone(), is_homed);
+            snapshot.machine.homed.insert(axis.name.clone(), is_homed);
             snapshot.machine.homing.insert(
                 axis.name.clone(),
                 joint.map(|joint| joint.homing).unwrap_or(false),
@@ -597,6 +608,10 @@ impl SnapshotBuilder {
         snapshot.alarms = self.alarms.clone();
         snapshot.probe_trip = self.probe_trip.fault().cloned();
 
+        if newly_homed {
+            self.live_trail.clear();
+            self.last_tool_tip = None;
+        }
         let tip = ["X", "Y", "Z"].map(|axis| {
             snapshot
                 .positions
@@ -1530,6 +1545,35 @@ mod tests {
         status
     }
 
+    /// A joint that has just been homed, for the trajectory tests.
+    fn homed_joint(homed: bool) -> linuxcnc_nml::JointStatus {
+        linuxcnc_nml::JointStatus {
+            joint: 0,
+            joint_type: 0,
+            units: 1.0,
+            backlash: 0.0,
+            min_position_limit: 0.0,
+            max_position_limit: 0.0,
+            max_ferror: 0.0,
+            min_ferror: 0.0,
+            ferror_current: 0.0,
+            ferror_high_mark: 0.0,
+            output: 0.0,
+            input: 0.0,
+            velocity: 0.0,
+            inpos: true,
+            homing: false,
+            homed,
+            fault: false,
+            enabled: true,
+            min_soft_limit: false,
+            max_soft_limit: false,
+            min_hard_limit: false,
+            max_hard_limit: false,
+            override_limits: false,
+        }
+    }
+
     fn make_idle(status: &mut Status) {
         status.task.exec_state = ExecState::Done;
         status.task.interp_state = linuxcnc_nml::InterpState::Idle;
@@ -1738,6 +1782,43 @@ mod tests {
         assert!(result.applied);
         assert_eq!(result.wcs, "G56");
         assert_eq!(result.source_offsets.get("X"), Some(&-5.0));
+    }
+
+    /// Machine zero moves when a joint homes, so every point the trail collected
+    /// while the machine was unhomed is in a frame that no longer exists.
+    #[test]
+    fn homing_drops_the_trail_drawn_before_it() {
+        let mut builder = probe_builder();
+        let mut status = idle_status();
+        // The default status carries every joint, none of them homed yet.
+        assert!(status.joints.iter().all(|joint| !joint.homed));
+
+        // Unhomed, the axis moves: the trail collects the points.
+        for x in [0.0, 10.0, 20.0] {
+            status.positions.actual.x = x;
+            let _ = poll_probe(&mut builder, &status);
+        }
+        assert!(
+            builder.live_trail.len() >= 3,
+            "the unhomed trail collects points: {}",
+            builder.live_trail.len()
+        );
+
+        // Homing re-references the machine: the trail starts again at the tip.
+        status.joints = vec![homed_joint(true); 3];
+        let homed = poll_probe(&mut builder, &status);
+        assert_eq!(
+            homed.live_trail.len(),
+            1,
+            "homing leaves one point, the current tip: {:?}",
+            homed.live_trail
+        );
+        assert_eq!(homed.live_trail[0].position[0], 20.0);
+
+        // Homing already done: moving after it draws normally again.
+        status.positions.actual.x = 30.0;
+        let moving = poll_probe(&mut builder, &status);
+        assert_eq!(moving.live_trail.len(), 2, "the trail resumes after homing");
     }
 
     #[test]
