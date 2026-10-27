@@ -3839,10 +3839,11 @@ impl LincApp {
                 ui.add_space(16.0);
             }
 
-            // Centre: the program's own numbers - the work position it is
-            // cutting to and the distance left to get there. Only on the
-            // Program page; the jog screens carry the same figures in their
-            // readout, and the bar is read-only everywhere.
+            // The program's own numbers - the work position it is cutting to
+            // and the distance left to get there - in the left-hand flow, after
+            // the machine fields. Only on the Program page; the jog screens
+            // carry the same figures in their own readout, and the bar is
+            // read-only everywhere.
             if self.shows_coordinate_status() {
                 let bar = ui.max_rect();
                 let text = self.coordinate_status_line();
@@ -3854,7 +3855,13 @@ impl LincApp {
                 // Never let it run into the left or the right block: the bar is
                 // 1280 px wide at the minimum and those two need about 600.
                 if galley.size().x + 24.0 < bar.width() * 0.5 {
-                    let pos = bar.center() - galley.size() / 2.0;
+                    // Left-aligned in the flow, right after the machine fields:
+                    // the operator reads the bar left to right, and a centred
+                    // block floats away from the line it belongs to.
+                    let pos = egui::pos2(
+                        ui.cursor().min.x,
+                        bar.center().y - galley.size().y / 2.0,
+                    );
                     ui.painter().galley(pos, galley, theme::FG);
                 }
             }
@@ -5262,11 +5269,23 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                     .collect::<Vec<_>>()
             );
         };
+        // Left-aligned in the flow: it starts after the machine fields (LN, HOMED)
+        // rather than floating in the middle of the bar.
         assert!(
-            (rect.center().x - 640.0).abs() < 60.0,
-            "the readout is centred, {} in a 1280 px bar",
-            rect.center().x
+            rect.left() > 60.0 && rect.left() < 320.0,
+            "the readout starts after the left-hand fields, at {} of a 1280 px bar",
+            rect.left()
         );
+        for (text, field) in &texts {
+            if (text.starts_with("LN ") || text == "HOMED") && field.center().y > 690.0 {
+                assert!(
+                    field.right() < rect.left(),
+                    "{text} ends before the readout begins: {} vs {}",
+                    field.right(),
+                    rect.left()
+                );
+            }
+        }
         assert!(
             !texts
                 .iter()
