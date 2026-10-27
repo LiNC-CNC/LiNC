@@ -34,7 +34,7 @@ const BUTTON_PINS: [(&str, u32); 46] = [
     ("mlk", 55),
     ("flush", 47),
     ("spd_sp", 39),
-    ("k2", 34),
+    ("k2", 31),
     ("jog_xn", 62),
     ("bdt", 54),
     ("spd_cts", 46),

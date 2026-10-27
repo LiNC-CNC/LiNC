@@ -41,7 +41,7 @@ pub mod buttons {
     pub const MLK: u64 = 1 << 55;
     pub const FLUSH: u64 = 1 << 47;
     pub const SPD_SP: u64 = 1 << 39;
-    pub const K2: u64 = 1 << 34;
+    pub const K2: u64 = 1 << 31;
     pub const JOG_XN: u64 = 1 << 62;
     pub const BDT: u64 = 1 << 54;
     pub const SPD_CTS: u64 = 1 << 46;
@@ -65,9 +65,9 @@ pub mod buttons {
     pub const JOG_BP: u64 = 1 << 58;
     pub const JOG_ZN: u64 = 1 << 50;
     pub const WORKLAMP: u64 = 1 << 42;
-    /// Hardware-verified on the machine: the panel reports K1 and K2 on the
-    /// same bit, so pressing either raises both pins. Bit 32 belongs to LUB.
-    /// This must stay in step with `linc-linuxcnc/src/panel.rs`.
+    /// Hardware-verified on the machine. This table must stay in step with
+    /// `linc-linuxcnc/src/panel.rs`: K1 sits on bit 34, K2 on bit 31 and LUB on
+    /// bit 32. K2 was on bit 34 in the first port, aliasing K1.
     pub const K1: u64 = 1 << 34;
     pub const CHIP_SP: u64 = 1 << 26;
     pub const SAFE_DOOR: u64 = 1 << 57;
@@ -557,30 +557,26 @@ mod tests {
     /// driver decodes the panel's bitfield into pins, and the reader encodes
     /// those pins back into a bitfield for the UI.
     ///
-    /// Two names share a bit in the panel's own table: `POT_DN`/`CHUCK` on bit 29
-    /// and `K2`/`K1` on bit 34. `CHUCK` moves to the free bit 28, which hardware
-    /// verification confirmed. `K1`/`K2` stay on bit 34 because the panel really
-    /// does report both keys there; the pins alias instead of one of them being
-    /// invented.
+    /// Two names share a bit in the panel's own table: `POT_DN`/`CHUCK` on bit 29.
+    /// `CHUCK` moves to the free bit 28, which hardware verification confirmed.
+    /// `K2` was on bit 34 in the first port, aliasing `K1`; the machine verified
+    /// it on bit 31, so every button has its own bit again.
     #[test]
     fn button_table_matches_the_verified_panel() {
-        // Hardware-verified on the SZGH-1080 panel.
+        // Hardware-verified on the machine's panel.
         assert_eq!(buttons::LUB, 1 << 32);
         assert_eq!(buttons::K1, 1 << 34);
-        assert_eq!(buttons::K2, 1 << 34);
+        assert_eq!(buttons::K2, 1 << 31);
         assert_eq!(buttons::CHUCK, 1 << 28);
         assert_eq!(buttons::POT_DN, 1 << 29);
 
-        // Every other button keeps its own bit; only K1/K2 may alias.
-        let mut seen: std::collections::HashMap<u32, &str> = std::collections::HashMap::new();
+        let mut seen = std::collections::HashSet::new();
         for (name, mask) in BUTTON_PINS {
-            let bit = mask.trailing_zeros();
-            if let Some(previous) = seen.insert(bit, name) {
-                assert!(
-                    bit == 34 && (previous == "k1" || previous == "k2"),
-                    "button {name} reuses bit {bit} of {previous}; only K1/K2 alias on this panel"
-                );
-            }
+            assert!(
+                seen.insert(mask),
+                "button {name} reuses bit {} — panel bits must stay distinct",
+                mask.trailing_zeros()
+            );
         }
     }
 
@@ -618,18 +614,16 @@ mod tests {
             assert!(seen.insert(name));
         }
         // Names alone are not enough: two names sharing one bit make the pins
-        // indistinguishable on the wire. K1 and K2 do share bit 34 on this panel
-        // (hardware-verified), so that one alias is expected; any other
-        // collision is a bug.
-        let mut bits: std::collections::HashMap<u64, &str> = std::collections::HashMap::new();
+        // indistinguishable on the wire. No aliases remain now that K2 has its
+        // own bit.
+        let mut bits = std::collections::HashSet::new();
         for (name, mask) in BUTTON_PINS {
-            if let Some(previous) = bits.insert(mask, name) {
-                assert!(
-                    mask.trailing_zeros() == 34 && (previous == "k1" || previous == "k2"),
-                    "button {name} reuses a bit mask already assigned to {previous}"
-                );
-            }
+            assert!(
+                bits.insert(mask),
+                "button {name} reuses a bit mask already assigned to another button"
+            );
         }
+        assert_eq!(bits.len(), BUTTON_PINS.len());
     }
 
     #[test]
