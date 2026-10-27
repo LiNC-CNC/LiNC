@@ -95,7 +95,7 @@ else, so it cannot shadow another page's command.
 |---|---|
 | `F5` `F6` `F7` `F8` `Ctrl+D` `Ctrl+H` | Go to Machine / Program / Tools / Offsets / Diagnostics / G-code Help |
 | `M` | Open the full-screen messages dialog (`Enter`/`Esc`/`CLOSE` closes it) |
-| `Esc` | Back, cancel, close detail; while a probe-trip fault is latched it resets and clears it; while a program is active it stops and resets it, the same as the panel's K4 |
+| `Esc` | Back, cancel, close detail; while a probe-trip fault is latched it resets and clears it; on a page that is only a view (Help, Diagnostics) it returns to the page it came from first; while a program is active it stops and resets it, the same as the panel's K4 |
 | `Ctrl+Q` | Guarded quit |
 | Arrows, `PageUp`/`PageDown`, `Home`/`End` | Focus, page, first/last item |
 | `Enter` | Select / apply / issue the MDI block |

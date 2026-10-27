@@ -73,6 +73,9 @@ pub struct LincApp {
     pub last_non_mode_page: Page,
     pub files_return_page: Page,
     pub help_return_page: Page,
+    /// Where Esc on the Diagnostics page goes back to: the page the operator
+    /// left to look at it, not the program reset.
+    pub diagnostics_return_page: Page,
     pub nav_focus: usize,
     pub focus_region: FocusRegion,
     pub last_mode: Option<PanelModeValidity>,
@@ -404,6 +407,7 @@ impl LincApp {
             },
             files_return_page: Page::Machine,
             help_return_page: Page::Machine,
+            diagnostics_return_page: Page::Machine,
             nav_focus: 0,
             focus_region: FocusRegion::Page,
             last_mode: Some(mode),
@@ -1057,6 +1061,13 @@ impl LincApp {
                 self.page
             };
         }
+        if page == Page::Diagnostics && self.page != Page::Diagnostics {
+            self.diagnostics_return_page = if self.page.is_mode_driven() {
+                self.last_non_mode_page
+            } else {
+                self.page
+            };
+        }
         if page == Page::Files {
             self.files_return_page = if self.page == Page::Files {
                 Page::Program
@@ -1382,6 +1393,14 @@ impl LincApp {
         // the next Esc, on that page, is the one that stops a running program.
         if self.page == Page::Help {
             self.set_page(self.help_return_page);
+            return;
+        }
+        // The Diagnostics page is a view too: Esc leaves it for the page it came
+        // from, so an operator who opened it to look at a log does not stop the
+        // program that is cutting behind it. The next Esc, on that page, is the
+        // one that resets.
+        if self.page == Page::Diagnostics {
+            self.set_page(self.diagnostics_return_page);
             return;
         }
         // A latched probe trip is cleared by the controller reset alone. Esc
@@ -3822,13 +3841,10 @@ impl LincApp {
                 // Machine on/off sits immediately left of the E-stop state.
                 // `halui.machine.is-on` is the authority; a stale snapshot
                 // reports `?` rather than guessing.
-                let (machine_text, machine_color) = if self.snapshot.meta.stale {
-                    ("MACHINE ?".to_string(), theme::WARNING)
-                } else if self.snapshot.machine.on {
-                    ("MACHINE ON".to_string(), theme::SUCCESS)
-                } else {
-                    ("MACHINE OFF".to_string(), theme::MUTED)
-                };
+                let (machine_text, machine_color) = machine_status_field(
+                    self.snapshot.machine.on,
+                    self.snapshot.meta.stale,
+                );
                 field(ui, machine_text, machine_color);
                 ui.add_space(16.0);
                 // Protect is only worth a field when it is engaged: the off
@@ -4561,6 +4577,21 @@ pub fn page_from_name(name: &str) -> Option<Page> {
     None
 }
 
+/// The bottom bar's machine field.
+///
+/// A machine that is off is a fault, not a quiet state: it is painted in the
+/// error colour, so a bar full of green does not hide it. Stale data claims
+/// neither, and asks.
+fn machine_status_field(on: bool, stale: bool) -> (String, egui::Color32) {
+    if stale {
+        ("MACHINE ?".to_string(), theme::WARNING)
+    } else if on {
+        ("MACHINE ON".to_string(), theme::SUCCESS)
+    } else {
+        ("MACHINE OFF".to_string(), theme::ERROR)
+    }
+}
+
 /// Blinking red in the status line: the limit switches are being ignored.
 ///
 /// The jog screens have no override button any more, so this is the only sign
@@ -5146,6 +5177,24 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     /// The bottom bar reads the overrides in the physical panel's order:
     /// FEED, RAPID, SPINDLE. The old format printed the spindle value in the
     /// RAPID slot and the rapid value in the SPINDLE slot.
+    /// MACHINE OFF is a fault, not a quiet state: the bar paints it in the error
+    /// colour, and stale data asks instead of guessing.
+    #[test]
+    fn the_machine_field_is_red_when_the_machine_is_off() {
+        assert_eq!(
+            machine_status_field(false, false),
+            ("MACHINE OFF".to_string(), theme::ERROR)
+        );
+        assert_eq!(
+            machine_status_field(true, false),
+            ("MACHINE ON".to_string(), theme::SUCCESS)
+        );
+        assert_eq!(
+            machine_status_field(false, true),
+            ("MACHINE ?".to_string(), theme::WARNING)
+        );
+    }
+
     /// The centre of the bottom bar carries the program work position and the
     /// distance still to go, one pair per axis, and only on the Program page.
     #[test]
@@ -6014,6 +6063,32 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert!(
             !app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
             "the running program behind the Help viewer must not be reset"
+        );
+    }
+
+    #[test]
+    fn escape_leaves_the_diagnostics_page_before_it_resets_a_running_program() {
+        let (_dir, mut app) = make_app(PanelMode::Auto);
+        app.poll_backend();
+        app.set_page(Page::Program);
+        app.snapshot.task.running = true;
+        app.snapshot.task.interp = linc_core::model::InterpState::Reading;
+        app.set_page(Page::Diagnostics);
+        app.escape();
+        assert_eq!(
+            app.page,
+            Page::Program,
+            "Esc leaves DIAGNOSTICS for the page it came from"
+        );
+        assert!(
+            !app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
+            "looking at a log must not stop the program"
+        );
+        // The next Esc, on that page, is the one that resets it.
+        app.escape();
+        assert!(
+            app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
+            "Esc still resets once the operator is back on the page"
         );
     }
 
