@@ -231,7 +231,7 @@ fn main() -> Result<()> {
         Box::new(move |cc| {
             let mut app = LincApp::new(profile.clone(), handle, &cc.egui_ctx);
             app.set_diag_bus(diag_bus.clone());
-            Ok(Box::new(MachineOffGuard::new(app, hal_enabled)))
+            Ok(Box::new(MachineOffGuard::new(app, hal_enabled, window_mode)))
         }),
     );
     result.map_err(|error| anyhow::anyhow!("UI error: {error}"))?;
@@ -272,10 +272,15 @@ struct MachineOffGuard {
     inner: LincApp,
     reader: Option<HalReader>,
     last: Option<bool>,
+    /// How the window should sit, re-asserted after creation.
+    window: WindowMode,
+    /// Frames spent re-asserting the window state; bounded so a compositor that
+    /// disagrees does not get a command every frame forever.
+    window_attempts: u8,
 }
 
 impl MachineOffGuard {
-    fn new(inner: LincApp, hal_enabled: bool) -> Self {
+    fn new(inner: LincApp, hal_enabled: bool, window: WindowMode) -> Self {
         let reader = if hal_enabled {
             match HalReader::new_with_role("ui") {
                 Ok(reader) => Some(reader),
@@ -291,6 +296,33 @@ impl MachineOffGuard {
             inner,
             reader,
             last: None,
+            window,
+            window_attempts: 0,
+        }
+    }
+
+    /// with_maximized / with_fullscreen are applied at window creation, which
+    /// xfwm4 (this machine's window manager) ignores for an undecorated window:
+    /// the panel came up 1280x720 inside a borderless frame. Ask again once the
+    /// window exists, and size it to the monitor as a fallback that does not
+    /// depend on the window manager at all.
+    fn reassert_window_state(&mut self, ctx: &egui::Context) {
+        if self.window == WindowMode::Windowed || self.window_attempts >= 30 {
+            return;
+        }
+        self.window_attempts += 1;
+        if let Some(size) = ctx.input(|input| input.viewport().monitor_size) {
+            if self.window == WindowMode::Maximized {
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::Pos2::ZERO));
+            }
+        }
+        match self.window {
+            WindowMode::Maximized => ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true)),
+            WindowMode::Fullscreen => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true))
+            }
+            WindowMode::Windowed => {}
         }
     }
 
@@ -316,6 +348,7 @@ fn machine_off_edge(previous: Option<bool>, now: bool) -> bool {
 impl eframe::App for MachineOffGuard {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.poll_machine_on();
+        self.reassert_window_state(ui.ctx());
         eframe::App::ui(&mut self.inner, ui, frame);
     }
 }
