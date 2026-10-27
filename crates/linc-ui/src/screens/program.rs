@@ -448,7 +448,11 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             // logical line's first visual row. A separate multiline label would
             // keep one row per line and drift away from wrapped text.
             ui.add_space(gutter_width);
-            ui.separator();
+            // The rule is the gutter's right edge: the numbers are painted
+            // against its rect, not against the text galley, so the last digit
+            // cannot land under the line when the item spacing changes.
+            let rule = ui.separator();
+            let number_right = rule.rect.left() - 6.0;
             let available = (ui.available_width() - 12.0).max(240.0);
             // Lexing and laying out the whole buffer every frame is the most
             // expensive thing the UI does. Cache the galley on the editor
@@ -570,7 +574,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     continue;
                 }
                 painter.text(
-                    egui::pos2(output.galley_pos.x - 6.0, y),
+                    egui::pos2(number_right, y),
                     egui::Align2::RIGHT_TOP,
                     (line + 1).to_string(),
                     gutter_font.clone(),
