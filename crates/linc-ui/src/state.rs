@@ -1322,6 +1322,10 @@ impl Default for SettingsUi {
 pub struct GraphStyle {
     pub show_grid: bool,
     pub show_live_trail: bool,
+    /// How far the live trail is drawn from the frame of the program path,
+    /// from [`live_trail_shift`]. The Program page recomputes it every frame
+    /// from the snapshot; a card drawn on another page keeps the last value.
+    pub live_trail_shift: [f64; 3],
     /// `Ctrl+B` cycle: 0 dimensions only, 1 + machine box, 2 + program box, 3 off.
     pub bounds_mode: u8,
     pub show_stock: bool,
@@ -1343,6 +1347,7 @@ impl GraphStyle {
     ) {
         view.show_grid = self.show_grid;
         view.show_live_trail = self.show_live_trail;
+        view.live_trail_shift = self.live_trail_shift;
         let (dims, machine, box_at) = bounds_visibility(self.bounds_mode);
         view.show_program_bounds = dims;
         view.show_machine_bounds = machine;
@@ -1393,6 +1398,7 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
     GraphStyle {
         show_grid: profile.config.toolpath.show_grid,
         show_live_trail: profile.config.toolpath.show_live_trail,
+        live_trail_shift: [0.0; 3],
         bounds_mode: bounds_mode_from_config(
             profile.config.toolpath.show_program_bounds,
             profile.config.toolpath.show_machine_bounds,
@@ -1409,6 +1415,47 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
         trail_max_points: profile.config.toolpath.trail_max_points,
         perspective: profile.config.toolpath.perspective,
     }
+}
+/// How far the live trail must move to be drawn in the frame of the loaded
+/// program's path.
+///
+/// The path is parsed at `program words + the work offset the program selects`,
+/// so it is machine space. The live trail is the machine's own tool-tip
+/// position, which the interpreter computes as
+/// `work + work offset + G92 + tool length` — and the tool length `G43` applies
+/// is the one term the preview has no way to know. The two frames therefore
+/// differ by `preview offset + work - machine`, which is zero on a machine with
+/// no tool length and no G92 in play.
+///
+/// The simulator is excluded: its motion model carries no work offsets at all
+/// (it stamps the work coordinate into both position fields), so
+/// `positions.work` equals `positions.machine` and this arithmetic cannot
+/// recover the frame its trail is in.
+pub fn live_trail_shift(
+    snapshot: &MachineSnapshot,
+    preview_offset: Option<&linc_core::model::AxisMap<f64>>,
+) -> [f64; 3] {
+    if snapshot.simulated {
+        return [0.0; 3];
+    }
+    ["X", "Y", "Z"].map(|axis| {
+        let machine = snapshot
+            .positions
+            .axes
+            .get(axis)
+            .map(|position| position.machine)
+            .unwrap_or(0.0);
+        let work = snapshot
+            .positions
+            .axes
+            .get(axis)
+            .map(|position| position.work)
+            .unwrap_or(0.0);
+        let offset = preview_offset
+            .and_then(|map| map.get(axis).copied())
+            .unwrap_or(0.0);
+        offset + work - machine
+    })
 }
 
 /// What the `Ctrl+B` cycle shows: `(dimensions, machine box, program box)`.
@@ -2297,5 +2344,97 @@ mod page_key_tests {
         assert!(keymap.diagnostics.modifiers.ctrl);
         assert_eq!(keymap.help.key, egui::Key::H);
         assert!(keymap.help.modifiers.ctrl);
+    }
+}
+
+#[cfg(test)]
+mod trail_frame_tests {
+    use super::live_trail_shift;
+    use linc_core::model::{AxisMap, MachineSnapshot, MachineVariant, PositionSet};
+
+    const AXES: [&str; 3] = ["X", "Y", "Z"];
+
+    fn place(snapshot: &mut MachineSnapshot, axis: &str, work: f64, machine: f64) {
+        snapshot.positions.axes.insert(
+            axis.to_string(),
+            PositionSet {
+                work,
+                machine,
+                dtg: 0.0,
+                velocity: 0.0,
+            },
+        );
+    }
+
+    /// The work offset of the G54 fixture: where the work zero sits on the
+    /// machine.
+    fn g54() -> AxisMap<f64> {
+        AxisMap::from_entries([
+            ("X".to_string(), -120.0),
+            ("Y".to_string(), -80.0),
+            ("Z".to_string(), 45.0),
+        ])
+    }
+
+    #[test]
+    fn the_tool_length_g43_applies_is_taken_back_out_of_the_trail() {
+        // T5 of the machine tool table, which Engraving.nc selects with G43 H5.
+        let tool = [0.0, 0.0, -67.128];
+        // The cut is at program X16.864 Y3.422 Z-0.1. The machine's tool-tip
+        // position carries the work offset and the tool length; the DRO's work
+        // value, which the program path is parsed against, does not.
+        let program = [16.864, 3.422, -0.1];
+        let work = g54();
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        for (index, axis) in AXES.iter().enumerate() {
+            let offset = work.get(axis).copied().unwrap_or(0.0);
+            place(
+                &mut snapshot,
+                axis,
+                program[index],
+                program[index] + offset + tool[index],
+            );
+        }
+        let shift = live_trail_shift(&snapshot, Some(&work));
+        for index in 0..3 {
+            assert!(
+                (shift[index] + tool[index]).abs() < 1e-9,
+                "axis {index}: shift {shift:?} must undo the tool length {tool:?}"
+            );
+            // The shifted trail lands on the machine point the program path is
+            // drawn at: `program + the offset the preview was parsed with`.
+            let drawn = snapshot.positions.axes.get(AXES[index]).unwrap().machine + shift[index];
+            let path = program[index] + work.get(AXES[index]).copied().unwrap();
+            assert!(
+                (drawn - path).abs() < 1e-9,
+                "axis {index}: {drawn} vs {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_machine_without_tool_length_or_g92_is_not_shifted() {
+        let work = g54();
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        for axis in AXES {
+            let offset = work.get(axis).copied().unwrap_or(0.0);
+            // work = machine - offset, with no tool length and no G92.
+            place(&mut snapshot, axis, -offset, 0.0);
+        }
+        assert_eq!(live_trail_shift(&snapshot, Some(&work)), [0.0; 3]);
+    }
+
+    #[test]
+    fn the_simulator_is_left_as_it_is() {
+        let work = g54();
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.simulated = true;
+        for axis in AXES {
+            // The simulator's motion model stamps the work value into both
+            // position fields, so there is no frame for this arithmetic to
+            // recover. Its trail needs its own fix.
+            place(&mut snapshot, axis, 1.0, 1.0);
+        }
+        assert_eq!(live_trail_shift(&snapshot, Some(&work)), [0.0; 3]);
     }
 }

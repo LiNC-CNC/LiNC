@@ -98,6 +98,15 @@ pub struct TrajectoryView<'a> {
     /// The live trail with the kind of move that reached each point, so a
     /// rapid is dotted here exactly as it is in the preview.
     pub live_trail: &'a [TrailPoint],
+    /// How far the live trail is drawn from the frame the program path uses.
+    ///
+    /// The path is parsed at `program words + the work offset the machine
+    /// applies`, which is also the frame of the work-origin cross and of the
+    /// dimension values. The trail is the machine's own tool-tip position, and
+    /// that frame differs from it by the tool length `G43` adds, so without this
+    /// shift the trail sits a tool length away from the path it is cutting. The
+    /// caller owns the arithmetic because only it holds the machine's offsets.
+    pub live_trail_shift: [f64; 3],
     pub tool_tip: Option<[f64; 3]>,
     pub machine_bounds: Option<Bounds3>,
     /// Where the work-zero cross is drawn, in the frame the view uses. The
@@ -175,6 +184,7 @@ impl<'a> TrajectoryView<'a> {
             work_offset: None,
             preview,
             live_trail,
+            live_trail_shift: [0.0; 3],
             tool_tip: None,
             machine_bounds: None,
             selected_line: None,
@@ -208,6 +218,18 @@ impl<'a> TrajectoryView<'a> {
             auto_fit: false,
             axis_labels: vec!["X".into(), "Y".into(), "Z".into()],
         }
+    }
+
+    /// Where a live-trail point and the tool marker are drawn.
+    ///
+    /// One transformation for both: the marker sits on the trail's last point,
+    /// so shifting one and not the other would tear them apart.
+    fn trail_point(&self, position: [f64; 3]) -> [f64; 3] {
+        [
+            position[0] + self.live_trail_shift[0],
+            position[1] + self.live_trail_shift[1],
+            position[2] + self.live_trail_shift[2],
+        ]
     }
 }
 
@@ -597,10 +619,10 @@ fn fit_target(view: &TrajectoryView<'_>, reference: Bounds3) -> Bounds3 {
         return target;
     }
     for point in view.live_trail {
-        target.include(point.position);
+        target.include(view.trail_point(point.position));
     }
     if let Some(tip) = view.tool_tip {
-        target.include(tip);
+        target.include(view.trail_point(tip));
     }
     target.include(view.origin);
     if view.origin_tether {
@@ -671,9 +693,78 @@ fn tool_moved(ui: &Ui, tip: [f64; 3]) -> bool {
     })
 }
 
+/// Where this card keeps its follow latch, so each toolpath view follows on
+/// its own instead of moving every card on the page.
+fn follow_state(ui: &Ui) -> egui::Id {
+    ui.scope_id().with("toolpath-follow-latch")
+}
+
 /// Clearance kept between the tool marker and the card's edge when the view
 /// follows a moving tool.
 const TOOL_MARGIN: f32 = 30.0;
+
+/// The card edge a latched follow is holding the tool marker against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FollowEdge {
+    Low,
+    High,
+}
+
+/// Latching auto-follow state for one toolpath card.
+///
+/// The follow is a state machine, not a pure function of the marker position:
+/// `ToolFollow::follow` returns the pan that brings a marker outside the band
+/// back to it and latches that edge. While the marker is still at the edge the
+/// pan continues, so a cut that keeps running off the card stays visible; as
+/// soon as the marker is clear of the edge the latch is released and the next
+/// approach engages again. Nothing is ever panned the other way, so a tool that
+/// retreats from an edge leaves the picture where the operator has put it: the
+/// view only moves when the tool reaches an edge again.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ToolFollow {
+    latched: [Option<FollowEdge>; 2],
+}
+
+impl ToolFollow {
+    /// The pan for a marker drawn at `at`, given the band it must stay inside.
+    pub fn follow(&mut self, at: Pos2, safe: Rect) -> Vec2 {
+        let mut shift = Vec2::ZERO;
+        for axis in 0..2 {
+            let (value, low, high) = if axis == 0 {
+                (at.x, safe.left(), safe.right())
+            } else {
+                (at.y, safe.top(), safe.bottom())
+            };
+            let edge = if value < low {
+                Some(FollowEdge::Low)
+            } else if value > high {
+                Some(FollowEdge::High)
+            } else {
+                None
+            };
+            match edge {
+                // Clear of the edge: release the latch and leave the view
+                // alone. This is the retreat the follow must not answer.
+                None => self.latched[axis] = None,
+                Some(edge) => {
+                    self.latched[axis] = Some(edge);
+                    let delta = edge_shift(value, low, high);
+                    if axis == 0 {
+                        shift.x += delta;
+                    } else {
+                        shift.y += delta;
+                    }
+                }
+            }
+        }
+        shift
+    }
+
+    /// Whether the follow is holding the marker at an edge.
+    pub fn engaged(&self) -> bool {
+        self.latched.iter().any(Option::is_some)
+    }
+}
 
 #[cfg(test)]
 mod follow_tests {
@@ -689,6 +780,88 @@ mod follow_tests {
         assert_eq!(edge_shift(260.0, 10.0, 200.0), -60.0);
         assert_eq!(edge_shift(10.0, 10.0, 200.0), 0.0);
         assert_eq!(edge_shift(200.0, 10.0, 200.0), 0.0);
+    }
+
+    use super::ToolFollow;
+    use egui::{pos2, Rect};
+
+    /// The band the follow keeps the marker inside: [100, 300] x [100, 300].
+    fn band() -> Rect {
+        Rect::from_min_max(pos2(100.0, 100.0), pos2(300.0, 300.0))
+    }
+
+    #[test]
+    fn a_marker_inside_the_band_is_left_alone() {
+        let mut follow = ToolFollow::default();
+        assert_eq!(follow.follow(pos2(200.0, 200.0), band()), egui::Vec2::ZERO);
+        assert!(
+            !follow.engaged(),
+            "nothing to follow while the tool is clear"
+        );
+        // On the band's boundary is still inside: the marker is visible.
+        assert_eq!(follow.follow(pos2(100.0, 300.0), band()), egui::Vec2::ZERO);
+        assert!(!follow.engaged());
+    }
+
+    #[test]
+    fn reaching_an_edge_pans_the_marker_back_onto_the_band() {
+        let mut follow = ToolFollow::default();
+        // Past the low edge: pan right by the least amount, not to the middle.
+        assert_eq!(
+            follow.follow(pos2(80.0, 200.0), band()),
+            egui::Vec2::new(20.0, 0.0)
+        );
+        assert!(follow.engaged());
+        // Past the high edge on the other axis: pan up by the least amount.
+        let mut follow = ToolFollow::default();
+        assert_eq!(
+            follow.follow(pos2(200.0, 340.0), band()),
+            egui::Vec2::new(0.0, -40.0)
+        );
+        assert!(follow.engaged());
+    }
+
+    #[test]
+    fn a_tool_that_retreats_from_the_edge_does_not_pan_the_view_back() {
+        let mut follow = ToolFollow::default();
+        let out = follow.follow(pos2(80.0, 200.0), band());
+        assert_eq!(out, egui::Vec2::new(20.0, 0.0), "the approach pans");
+        // The tool comes back inside: no pan, and no pan back the other way.
+        assert_eq!(follow.follow(pos2(140.0, 200.0), band()), egui::Vec2::ZERO);
+        assert!(!follow.engaged(), "the retreat releases the latch");
+        assert_eq!(follow.follow(pos2(250.0, 200.0), band()), egui::Vec2::ZERO);
+    }
+
+    #[test]
+    fn the_follow_re_engages_on_the_next_edge_it_reaches() {
+        let mut follow = ToolFollow::default();
+        // Approach the low edge, retreat, then reach the high edge.
+        let _ = follow.follow(pos2(90.0, 200.0), band());
+        assert_eq!(follow.follow(pos2(150.0, 200.0), band()), egui::Vec2::ZERO);
+        assert_eq!(
+            follow.follow(pos2(310.0, 200.0), band()),
+            egui::Vec2::new(-10.0, 0.0)
+        );
+        assert!(follow.engaged());
+        // And the same edge again after another retreat.
+        assert_eq!(follow.follow(pos2(200.0, 200.0), band()), egui::Vec2::ZERO);
+        assert_eq!(
+            follow.follow(pos2(90.0, 200.0), band()),
+            egui::Vec2::new(10.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn a_cut_that_keeps_running_off_the_card_stays_visible() {
+        let mut follow = ToolFollow::default();
+        // Each sample is further out, so the marker keeps its place on the
+        // band instead of walking off the picture.
+        assert_eq!(follow.follow(pos2(80.0, 200.0), band()).x, 20.0);
+        assert_eq!(follow.follow(pos2(40.0, 200.0), band()).x, 60.0);
+        assert_eq!(follow.follow(pos2(-30.0, 200.0), band()).x, 130.0);
+        // The shift only ever pushes the marker back inside; it never pulls it
+        // through the band to the other side.
+        assert!(follow.follow(pos2(-30.0, 200.0), band()).x > 0.0);
     }
 }
 
@@ -775,11 +948,11 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     });
     let mut has_data = view.preview.bounds.is_some();
     for point in view.live_trail {
-        bounds.include(point.position);
+        bounds.include(view.trail_point(point.position));
         has_data = true;
     }
     if let Some(tip) = view.tool_tip {
-        bounds.include(tip);
+        bounds.include(view.trail_point(tip));
         has_data = true;
     }
     // The markers are actors too: they are what the operator is looking at on
@@ -823,27 +996,39 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     }
     // Keep the tool on the card while it moves. At a zoomed or panned view a jog
     // otherwise walks the head off the picture with nothing to show where it
-    // went. The pan shifts by the least amount that brings the marker back, and
-    // only on a frame where the tool actually moved: panning away to look at
-    // another part of the program is left alone.
-    if let Some(tip) = view.tool_tip {
+    // went. Only a frame where the tool actually moved is considered: panning
+    // away to look at another part of the program is left alone.
+    //
+    // A view that is still auto-fitting is left alone as a whole. The fit
+    // frames the program every frame, so following the tool here would either
+    // be undone on the next frame or drag the card away from the part to a
+    // parked head. The fit is what the operator asked for until they pan or
+    // zoom, and that is the moment the follow becomes the useful thing.
+    //
+    // The band is measured on the same projection that draws the card, so the
+    // pan lands the marker where the operator sees it. The latch in
+    // `ToolFollow` is what makes it a follow rather than a chase: the picture
+    // moves when the tool reaches an edge and then stays put, so a tool that
+    // retreats from that edge does not drag the view back.
+    if view.auto_fit {
+        // The fit owns the pan; nothing to follow yet.
+    } else if let Some(tip) = view.tool_tip {
+        let tip = view.trail_point(tip);
         if tool_moved(ui, tip) {
-            let inner = rect.shrink(TOOL_MARGIN);
+            let drawn = rect.shrink(12.0);
+            let band = drawn.shrink(TOOL_MARGIN);
             let at = Projection::new(
-                reference,
-                rect.shrink(12.0),
-                view.view,
-                view.yaw,
-                view.pitch,
-                view.zoom,
-                view.pan,
+                reference, drawn, view.view, view.yaw, view.pitch, view.zoom, view.pan,
             )
             .mirrored(view.mirror_x)
             .project(tip);
-            let shift = Vec2::new(
-                edge_shift(at.x, inner.left(), inner.right()),
-                edge_shift(at.y, inner.top(), inner.bottom()),
-            );
+            let id = follow_state(ui);
+            let mut follow = ui
+                .ctx()
+                .data(|data| data.get_temp::<ToolFollow>(id))
+                .unwrap_or_default();
+            let shift = follow.follow(at, band);
+            ui.ctx().data_mut(|data| data.insert_temp(id, follow));
             view.pan += shift;
         }
     }
@@ -1070,16 +1255,18 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         // dotted path instead.
         let mut index = 1;
         while index < view.live_trail.len() {
-            let from = projection.project(view.live_trail[index - 1].position);
+            let from = projection.project(view.trail_point(view.live_trail[index - 1].position));
             if view.live_trail[index].rapid {
                 let mut points = vec![from];
                 while index < view.live_trail.len() && view.live_trail[index].rapid {
-                    points.push(projection.project(view.live_trail[index].position));
+                    points.push(
+                        projection.project(view.trail_point(view.live_trail[index].position)),
+                    );
                     index += 1;
                 }
                 draw_dotted_path(&painter, &points, rapid);
             } else {
-                let to = projection.project(view.live_trail[index].position);
+                let to = projection.project(view.trail_point(view.live_trail[index].position));
                 painter.line_segment([from, to], cut);
                 index += 1;
             }
@@ -1090,6 +1277,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     if let Some(tip) = view
         .tool_tip
         .or_else(|| view.live_trail.last().map(|point| point.position))
+        .map(|tip| view.trail_point(tip))
     {
         let pos = projection.project(tip);
         // An inverted triangle whose point sits exactly on the tool position:
@@ -2341,6 +2529,81 @@ mod tests {
 
     fn hop(pos: [f64; 3], rapid: bool) -> TrailPoint {
         TrailPoint::new(pos, rapid)
+    }
+
+    /// The live trail is the machine's tool-tip path, while the program path is
+    /// parsed at `program words + the work offset the machine applies`. A tool
+    /// length offset (`G43`) is applied by the interpreter on top of that, so a
+    /// machine sample carries it but the parsed path does not. That is the
+    /// Engraving.nc report: the file selects `G43 H5` and T5 sits at Z-67.128, so
+    /// the live trail was drawn a tool length below the part it was cutting.
+    #[test]
+    fn the_live_trail_is_drawn_on_the_program_path_it_is_cutting() {
+        // G54 offsets from a fixture, not from the live machine.
+        let mut work = linc_core::model::AxisMap::new();
+        work.insert("X", -120.0);
+        work.insert("Y", -80.0);
+        work.insert("Z", 45.0);
+        let tool = [0.0, 0.0, -67.128];
+        let axes = vec!["X".to_string(), "Y".to_string(), "Z".to_string()];
+        let text = "G21 G54 G0 X-17.272 Y-3.578 Z5.0\nG1 X16.864 Y3.422 Z-0.1\n";
+        let preview = linc_core::gcode::parse_preview(text, &axes, Some(&work), [0.0; 3]);
+        let path = preview.segments.last().expect("a cut").end;
+        assert!(
+            (path[0] - (16.864 - 120.0)).abs() < 1e-6,
+            "the preview is machine space: {path:?}"
+        );
+        // The machine reports the tool-tip position, so every sample carries the
+        // tool length on top of the path.
+        let trail: Vec<TrailPoint> = preview
+            .segments
+            .iter()
+            .flat_map(|segment| [segment.start, segment.end])
+            .map(|point| {
+                TrailPoint::new(
+                    [point[0] + tool[0], point[1] + tool[1], point[2] + tool[2]],
+                    false,
+                )
+            })
+            .collect();
+
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
+        let bounds = preview.bounds.expect("program bounds");
+        let mut view = TrajectoryView::new(&preview, &trail, MachineVariant::Mill);
+        view.machine_bounds = Some(bounds);
+        view.tool_tip = trail.last().map(|point| point.position);
+        let projection = |view: &TrajectoryView<'_>| {
+            Projection::new(
+                bounds,
+                rect.shrink(12.0),
+                view.view,
+                view.yaw,
+                view.pitch,
+                view.zoom,
+                view.pan,
+            )
+            .mirrored(view.mirror_x)
+        };
+        let on_path = projection(&view).project(path);
+        let drawn = projection(&view).project(trail.last().expect("a sample").position);
+        assert!(
+            (drawn - on_path).length() > 20.0,
+            "the fixture must reproduce the offset: trail {drawn:?}, path {on_path:?}"
+        );
+
+        // The correction the card applies: the trail is drawn in the frame of
+        // the path it is cutting, so the two layers lie on top of each other.
+        view.live_trail_shift = [-tool[0], -tool[1], -tool[2]];
+        let drawn = projection(&view).project(view.trail_point(trail.last().unwrap().position));
+        assert!(
+            (drawn - on_path).length() < 0.5,
+            "trail {drawn:?} must sit on the path {on_path:?}"
+        );
+        let marker = projection(&view).project(view.trail_point(view.tool_tip.unwrap()));
+        assert!(
+            (marker - on_path).length() < 0.5,
+            "the tool marker follows the trail: {marker:?}"
+        );
     }
 
     #[test]
