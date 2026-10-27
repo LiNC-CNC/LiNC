@@ -1974,7 +1974,7 @@ impl LincApp {
         // what keeps the part where the operator sees it instead of walking it
         // off the card. The arrow pan is a screen distance and comes after.
         let before = *zoom_out;
-        let after = (before * zoom).clamp(0.05, 40.0);
+        let after = (before * zoom).clamp(linc_view::MIN_ZOOM, linc_view::MAX_ZOOM);
         *pan_out *= after / before;
         *zoom_out = after;
         *pan_out += pan;
@@ -2285,19 +2285,39 @@ impl LincApp {
             // word move and Ctrl+Up/Down its line move (and the MDI buffer's
             // block move). Clicking the toolpath itself hands it the keyboard,
             // so the pan is one click away instead of unreachable.
-            let view_hovered = matches!(
+            let view_page = matches!(
                 self.page,
                 Page::Machine | Page::Program | Page::Manual | Page::Homing | Page::Offsets
-            ) && toolpath_hovered;
-            if view_hovered {
+            );
+            // Zoom is page-scoped, not hover-scoped: it collides with nothing a
+            // text field uses, and requiring the pointer over the card made the
+            // chord work only when the trackball happened to be there - the
+            // reported sometimes. Ctrl+0 was always page-scoped, so the two agree
+            // now.
+            if view_page {
                 let k = &self.keymap;
-                if input.consume_key(k.view_zoom_in.modifiers, k.view_zoom_in.key) {
+                // Ctrl+Plus is the numpad key; on a normal keyboard the plus is
+                // Shift+equals, which egui reports as Equals. Accept both, or the
+                // chord depends on which key the operator reaches for.
+                let zoom_in = input.consume_key(k.view_zoom_in.modifiers, k.view_zoom_in.key)
+                    || (k.view_zoom_in.key == egui::Key::Plus
+                        && (input.consume_key(k.view_zoom_in.modifiers, egui::Key::Equals)
+                            || input.consume_key(
+                                k.view_zoom_in.modifiers | egui::Modifiers::SHIFT,
+                                egui::Key::Equals,
+                            )));
+                if zoom_in {
                     view_zoom *= VIEW_ZOOM_STEP;
                 }
-                if input.consume_key(k.view_zoom_out.modifiers, k.view_zoom_out.key) {
+                // egui reports the numpad key and the main-row key as Minus alike,
+                // so unlike the plus there is nothing to alias here.
+                let zoom_out =
+                    input.consume_key(k.view_zoom_out.modifiers, k.view_zoom_out.key);
+                if zoom_out {
                     view_zoom /= VIEW_ZOOM_STEP;
                 }
             }
+            let view_hovered = view_page && toolpath_hovered;
             let view_pan_keys = view_hovered && !text_focused;
             if view_pan_keys {
                 let k = &self.keymap;
@@ -5270,6 +5290,49 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         harness.frame_with(&[(egui::Key::O, chord)]);
         harness.frame(&[]);
         assert!(!harness.app.snapshot.limits_overridden, "and off again");
+    }
+
+    /// The zoom chords must not depend on where the trackball happens to be:
+    /// Ctrl+0 was always page-scoped while Ctrl+Plus/Minus were hover-scoped,
+    /// which is why they worked only sometimes.
+    #[test]
+    fn the_zoom_chords_work_wherever_the_pointer_is_and_either_plus_key() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.app.set_page(Page::Program);
+        harness.app.program.graph_auto_fit = false;
+        harness.frame(&[]);
+
+        // Pointer nowhere near the toolpath: the chord still zooms.
+        let before = harness.app.program.graph_zoom;
+        harness.frame_with(&[(egui::Key::Plus, ctrl())]);
+        assert!(
+            harness.app.program.graph_zoom > before,
+            "Ctrl+Plus zooms without hovering the card: {} -> {}",
+            before,
+            harness.app.program.graph_zoom
+        );
+
+        // The main-row plus is Shift+equals, which egui reports as Equals.
+        let before = harness.app.program.graph_zoom;
+        harness.frame_with(&[(
+            egui::Key::Equals,
+            egui::Modifiers::CTRL | egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        )]);
+        assert!(
+            harness.app.program.graph_zoom > before,
+            "Shift+equals zooms in too: {} -> {}",
+            before,
+            harness.app.program.graph_zoom
+        );
+
+        // And it reaches past the old 40 ceiling the view used to stop at.
+        harness.app.program.graph_zoom = 70.0;
+        harness.frame_with(&[(egui::Key::Plus, ctrl())]);
+        assert!(
+            harness.app.program.graph_zoom > 70.0 && harness.app.program.graph_zoom <= 80.0,
+            "70 zooms on to {} and stops at 80",
+            harness.app.program.graph_zoom
+        );
     }
 
     /// The jog and homing screens no longer carry a MODE CONTEXT pane.

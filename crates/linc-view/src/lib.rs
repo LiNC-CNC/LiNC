@@ -703,8 +703,8 @@ fn follow_state(ui: &Ui) -> egui::Id {
 
 /// Shallowest and deepest magnification the toolpath can reach. 80 shows a
 /// single #6 hole in the card; the operator asked for it over the old 40.
-const MIN_ZOOM: f32 = 0.05;
-const MAX_ZOOM: f32 = 80.0;
+pub const MIN_ZOOM: f32 = 0.05;
+pub const MAX_ZOOM: f32 = 80.0;
 
 /// Widest clearance kept between the tool marker and the card's edge when the
 /// view follows a moving tool: 75 px, reached at the main toolpath card's size.

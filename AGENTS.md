@@ -164,8 +164,10 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
 - Everything else is page-local and consumed only on that page: `Ctrl+S`, `Ctrl+Z/Y`, editor keys, `Ctrl+R` run-from-line, `Ctrl+0` fit, `Ctrl+L`
   clear trail, Files copy/delete, MDI buffer recall, line move and issue. A page-local key consumed elsewhere shadows another page's command.
   The pane's line move is `Ctrl+Up`/`Ctrl+Down` because the panel keyboard has no Shift key.
-- The toolpath view pans with `Ctrl+arrows` and zooms with `Ctrl++`/`Ctrl+-` only while the pointer is over the card: the same chords are region focus
-  (`Ctrl+Left`/`Ctrl+Right`) and the editor/MDI line move (`Ctrl+Up`/`Ctrl+Down`) everywhere else, so the hover is what keeps both.
+- The toolpath view zooms with `Ctrl++`/`Ctrl+-` on any page that draws one — page-scoped like `Ctrl+0`, because those chords collide with nothing a
+  text field uses. `Ctrl++` also accepts Shift+`=` (what a normal keyboard sends for `+`), and stop at `MAX_ZOOM` (80). **Panning** with
+  `Ctrl+arrows` stays hover-scoped: the same chords are region focus (`Ctrl+Left`/`Ctrl+Right`) and the editor/MDI line move
+  (`Ctrl+Up`/`Ctrl+Down`) everywhere else, so the hover is what keeps both.
 - The sidebar SHORTCUTS pane lists page-local commands only; navigation keys are never listed, except the Program page's FILE key, which is shown because it opens the file browser. While a program is active it also shows Esc → RESET: Esc stops and resets the program like the panel's K4. The bottom bar carries live machine state only.
 - `Ctrl+F` focuses the Help search (`[keys].find`); it is not an editor find. Do not add a find UI without changing SPEC §6.2.
 - `[ui] pages` selects and orders nav entries but does not unbind keys. If you hide a page, decide what its `[keys]` binding does. `[keys]` is authoritative.
