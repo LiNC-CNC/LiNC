@@ -43,13 +43,20 @@ trap 'kill "$LINC_PID" 2>/dev/null || true; [ -z "${LINC_DISPLAY_PID_FILE:-}" ] 
 
 # The HMI creates linc.* during startup. Wait for status-display before wiring
 # the post-GUI nets. A stale session without LinuxCNC is reported by linc.
+#
+# halcmd exits 0 even for a pin that does not exist, so test the output: a
+# status test returns immediately and loads the post-GUI file too early, which
+# HAL rejects with "Pin 'linc.tool-change-confirm' does not exist".
+linc_pins_up() {
+    halcmd show pin linc.status-display 2>/dev/null | grep -q 'linc\.status-display'
+}
 for _ in $(seq 1 100); do
-    if halcmd show pin linc.status-display >/dev/null 2>&1; then
+    if linc_pins_up; then
         break
     fi
     sleep 0.1
 done
-if ! halcmd show pin linc.status-display >/dev/null 2>&1; then
+if ! linc_pins_up; then
     echo "linc-display: linc.* HAL pins did not appear" >&2
     exit 1
 fi
