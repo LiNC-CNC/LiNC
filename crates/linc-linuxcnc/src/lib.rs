@@ -14,7 +14,7 @@ mod parameters;
 mod probe_messages;
 mod snapshot;
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use linuxcnc_nml::{
@@ -479,16 +479,7 @@ impl NmlBackend {
     }
 
     fn canonical_nc_file(&self, path: &Path) -> Result<PathBuf, MachineError> {
-        let root = self
-            .profile
-            .nc_files_root()
-            .canonicalize()
-            .map_err(|_| MachineError::UnsafePath)?;
-        let candidate = path.canonicalize().map_err(|_| MachineError::UnsafePath)?;
-        if !candidate.starts_with(&root) || !candidate.is_file() {
-            return Err(MachineError::UnsafePath);
-        }
-        Ok(candidate)
+        contained_nc_file(self.profile.nc_files_root(), path).ok_or(MachineError::UnsafePath)
     }
 
     fn validate_ready(&mut self) -> Result<MachineSnapshot, MachineError> {
@@ -1414,6 +1405,98 @@ pub(crate) fn load_tool_table(profile: &Profile) -> (ToolTableState, ToolTable) 
                 },
             )
         }
+    }
+}
+
+/// A file inside `NC_FILES`, without resolving symbolic links.
+///
+/// Canonicalising the request was wrong: a standard LinuxCNC nc_files tree is
+/// full of symlinks (examples, ngcgui_lib, remap_lib -> /usr/share/linuxcnc/
+/// ncfiles), so every path reached through one resolved outside the root and
+/// was rejected as unsafe - and LinuxCNC itself loads those paths happily.
+/// Containment is decided lexically instead: `.` and `..` are folded without
+/// touching the filesystem, so a path cannot escape the root by spelling, while
+/// a symlinked directory inside it is allowed.
+fn contained_nc_file(root: &Path, requested: &Path) -> Option<PathBuf> {
+    let root = normalize_lexically(root);
+    let candidate = normalize_lexically(requested);
+    if !candidate.starts_with(&root) || !candidate.is_file() {
+        return None;
+    }
+    Some(candidate)
+}
+
+/// Fold `.` and `..` segments without resolving symlinks or touching the disk.
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                // Only pop a normal segment; `..` above `/` stays put.
+                if out.components().next_back().is_some_and(|last| matches!(last, Component::Normal(_)))
+                {
+                    out.pop();
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+mod nc_containment_tests {
+    use super::{contained_nc_file, normalize_lexically};
+    use std::path::PathBuf;
+
+    fn temp_root() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("linc-nc-{}", std::process::id()));
+        let root = dir.join("nc_files");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub").join("part.ngc"), "G0 X0
+").unwrap();
+        std::fs::write(root.join("top.ngc"), "G0 X0
+").unwrap();
+        root
+    }
+
+    #[test]
+    fn a_file_in_a_subdirectory_is_allowed() {
+        let root = temp_root();
+        let found = contained_nc_file(&root, &root.join("sub").join("part.ngc"));
+        assert!(found.is_some(), "files in a subdirectory must load");
+    }
+
+    #[test]
+    fn a_symlinked_directory_inside_the_root_is_allowed() {
+        let root = temp_root();
+        // A standard nc_files tree has these: examples -> /usr/share/linuxcnc/ncfiles
+        let outside = root.parent().unwrap().join("shared");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("demo.ngc"), "G0 X0
+").unwrap();
+        let link = root.join("examples");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        let found = contained_nc_file(&root, &link.join("demo.ngc"));
+        assert!(found.is_some(), "paths reached through a symlink inside NC_FILES must load");
+    }
+
+    #[test]
+    fn a_path_that_escapes_the_root_is_rejected() {
+        let root = temp_root();
+        let outside = root.parent().unwrap().join("elsewhere.ngc");
+        std::fs::write(&outside, "G0 X0
+").unwrap();
+        assert!(contained_nc_file(&root, &outside).is_none());
+        let dotted = root.join("sub").join("..").join("..").join("elsewhere.ngc");
+        assert!(contained_nc_file(&root, &dotted).is_none(), ".. must not escape the root");
+    }
+
+    #[test]
+    fn lexical_folding_keeps_the_path_spelling() {
+        assert_eq!(normalize_lexically(&PathBuf::from("/a/b/../c")), PathBuf::from("/a/c"));
+        assert_eq!(normalize_lexically(&PathBuf::from("/a/./b")), PathBuf::from("/a/b"));
     }
 }
 
