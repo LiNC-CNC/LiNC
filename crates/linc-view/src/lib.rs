@@ -700,8 +700,21 @@ fn follow_state(ui: &Ui) -> egui::Id {
 }
 
 /// Clearance kept between the tool marker and the card's edge when the view
-/// follows a moving tool.
-const TOOL_MARGIN: f32 = 30.0;
+/// follows a moving tool. The operator asked for a wider trigger band than the
+/// original 30 px: 75 px pans before the marker looks like it is leaving.
+const TOOL_MARGIN: f32 = 75.0;
+
+/// The rectangle a latched follow keeps the tool marker inside.
+///
+/// The margin is clamped so it cannot swallow a small card: a band inset wider
+/// than half the shorter side would invert the trigger rectangle and pan on
+/// every frame.
+fn follow_band(drawn: Rect) -> Rect {
+    let margin = TOOL_MARGIN
+        .min(drawn.width().min(drawn.height()) * 0.5 - 1.0)
+        .max(0.0);
+    drawn.shrink(margin)
+}
 
 /// The card edge a latched follow is holding the tool marker against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -784,6 +797,19 @@ mod follow_tests {
 
     use super::ToolFollow;
     use egui::{pos2, Rect};
+
+    #[test]
+    fn the_band_leaves_room_for_the_marker_at_the_operator_requested_distance() {
+        // 75 px of clearance on every side: the marker pans before it looks
+        // like it is leaving the card, which is what the operator asked for.
+        let band = super::follow_band(Rect::from_min_max(pos2(0.0, 0.0), pos2(640.0, 360.0)));
+        assert_eq!(band.min, pos2(75.0, 75.0));
+        assert_eq!(band.max, pos2(565.0, 285.0));
+
+        // A card too small for that margin keeps a usable (non-inverted) band.
+        let small = super::follow_band(Rect::from_min_max(pos2(0.0, 0.0), pos2(60.0, 40.0)));
+        assert!(small.width() > 0.0 && small.height() > 0.0, "{small:?}");
+    }
 
     /// The band the follow keeps the marker inside: [100, 300] x [100, 300].
     fn band() -> Rect {
@@ -1016,7 +1042,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         let tip = view.trail_point(tip);
         if tool_moved(ui, tip) {
             let drawn = rect.shrink(12.0);
-            let band = drawn.shrink(TOOL_MARGIN);
+            let band = follow_band(drawn);
             let at = Projection::new(
                 reference, drawn, view.view, view.yaw, view.pitch, view.zoom, view.pan,
             )
