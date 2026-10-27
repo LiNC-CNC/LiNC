@@ -388,8 +388,11 @@ Fixed shell, no right-hand status column:
   Each page keeps an invisible focus anchor at the top so arrow-key navigation
   has a starting point. Banners stay: they carry live state (E-stop, panel
   offline, program protect), not page descriptions.
-- **Left navigation**: Machine, Program, Tools, Offsets, Diagnostics, G-code
-  Help. Keyboard-focusable; `MAIN`/`FILE`/`OFFSET`/`TOOL`/`WIN` jump directly.
+- **Left navigation**: Machine, Program, Tools, Offsets. Keyboard-focusable;
+  `MAIN`/`FILE`/`OFFSET`/`TOOL`/`WIN` jump directly. Diagnostics and G-code Help
+  have no nav entry by default — the panel keyboard has no F9 and the freed rows
+  go to the shortcuts pane — but both stay bound (`Ctrl+D`, `Ctrl+H`), and a
+  profile that names them in `[ui] pages` gets the entries back.
 - **Central page**: active screen.
 - **Bottom action bar**: real keycaps (`MAIN`, `FILE`, `OFFSET`, `TOOL`, `WIN`,
   `ESC`), context actions including `HELP`, and a compact read-only machine
@@ -1539,6 +1542,13 @@ For the future implementation:
 - Physical E-stop remains independent.
 
 ## 13. Open issues
+
+0. The shell's page arithmetic and egui's real bottom panel disagree by 17 px:
+   `BOTTOM_BAR_HEIGHT` puts the page bottom at `viewport.bottom() - 36 = 684` in a
+   720 window, while `Panel::bottom(..).exact_size(36)` lands at 701..737. The
+   MAIN page compensates with an explicit `+15 / -2` in `screens/machine.rs`;
+   every other page and every card bottom still derive from the nominal 684.
+   Reconciling them is a `page_bottom` change plus a re-tune of that page.
 
 1. Port the existing panel driver into the LiNC `linc-panel` crate. The current crate
    does not build with HAL enabled:
