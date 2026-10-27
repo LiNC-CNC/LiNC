@@ -16,11 +16,12 @@ window_title = "LiNC"
 # "auto" follows the desktop scale; otherwise 0.5..3.0 or a percentage.
 scale = "auto"
 axis_order = ["X", "Y", "Z"]
-# Order matches the keyboard: MAIN, FILE, TOOL, OFFSET, WIN. DIAGNOSTICS and
-# G-CODE HELP have no nav entry; their pages stay reachable through the [keys]
-# diagnostics/help bindings below (Ctrl+D, Ctrl+H), which this list does not
-# unbind. Name either one here again to put its nav entry back.
-pages = ["machine", "program", "tools", "offsets"]
+# Order matches the keyboard: MAIN, FILE, TOOL, OFFSET, WIN. DIAGNOSTICS,
+# G-CODE HELP and SETTINGS follow as one-line rows without an icon: the first
+# two are also reachable through the [keys] chords below (Ctrl+D, Ctrl+H), and
+# this list never unbinds a key. Drop an entry to hide its row; the page and its
+# key stay.
+pages = ["machine", "program", "tools", "offsets", "diagnostics", "help", "settings"]
 # Load bars on the Machine page: machine axes plus "S" for the spindle. An
 # empty list removes the SERVO LOAD pane.
 servo_load = ["X", "Y", "Z"]

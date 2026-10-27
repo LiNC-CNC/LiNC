@@ -685,7 +685,9 @@ fn tool_moved(ui: &Ui, tip: [f64; 3]) -> bool {
     let id = ui.scope_id().with("toolpath-follow-tool");
     let previous: Option<[f64; 3]> = ui.ctx().data(|data| data.get_temp(id));
     ui.ctx().data_mut(|data| data.insert_temp(id, tip));
-    previous.map_or(true, |previous| {
+    // The first sample of a card's life is not a move: there is nothing to
+    // compare against, and calling it one pans a view nobody touched.
+    previous.is_some_and(|previous| {
         previous
             .iter()
             .zip(tip.iter())
@@ -1036,11 +1038,16 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     // `ToolFollow` is what makes it a follow rather than a chase: the picture
     // moves when the tool reaches an edge and then stays put, so a tool that
     // retreats from that edge does not drag the view back.
+    // The sample is taken on every frame, not only on frames that follow: a card
+    // that auto-fitted for a while would otherwise compare against the last tip
+    // it saw before the fit took over, read the whole stretch of motion as one
+    // jump, and pan the moment the operator dropped the fit.
+    let moved = view.tool_tip.map(|tip| tool_moved(ui, view.trail_point(tip)));
     if view.auto_fit {
         // The fit owns the pan; nothing to follow yet.
     } else if let Some(tip) = view.tool_tip {
         let tip = view.trail_point(tip);
-        if tool_moved(ui, tip) {
+        if moved.unwrap_or(false) {
             let drawn = rect.shrink(12.0);
             let band = follow_band(drawn);
             let at = Projection::new(

@@ -137,6 +137,23 @@ enum ViewKind {
     MiniXy,
 }
 
+/// Whether the thumbnail card's rect changed since it last drew.
+///
+/// The CODE layout's card is a rectangle that moves whenever the editor column
+/// does, and `linc_view` only fits on request: a fit computed for the old rect
+/// leaves the part hanging out of the new one. The full card is deliberately
+/// not measured here — it shares the layout's rect with nothing else, and a
+/// pixel of jitter refitting it would undo the operator's own zoom every frame.
+fn mini_card_resized(ui: &Ui, kind: ViewKind, size: Vec2) -> bool {
+    if !matches!(kind, ViewKind::MiniXy) {
+        return false;
+    }
+    let id = egui::Id::unique("linc-program-mini-card-size").with(ui.scope_id());
+    let previous: Option<Vec2> = ui.ctx().data(|data| data.get_temp(id));
+    ui.ctx().data_mut(|data| data.insert_temp(id, size));
+    previous.is_some_and(|previous| (previous - size).length() > 0.5)
+}
+
 fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) {
     let preview = app.program.last_valid_preview.clone();
     // The live trail is the machine's own tool-tip path, while the program path
@@ -157,15 +174,17 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
         // the shell set, so it would report the whole card as the header and
         // shrink the graph to nothing.
         let header_height = ui.cursor().top() - top;
-        let view = match kind {
-            ViewKind::MiniXy => linc_view::ViewMode::TopXy,
-            ViewKind::Full => app.program.graph_view,
-        };
+        // The thumbnail is not a different view, only a smaller rect. Forcing it
+        // to TOP took the operator's perspective away — an oversized editor
+        // shrank the card, the view jumped to plan, and nothing but the view
+        // cycle brought it back. Yaw and pitch are the operator's: the card
+        // draws them as they are and only re-frames.
+        let view = app.program.graph_view;
         let mut zoom = app.program.graph_zoom;
         let mut pan = app.program.graph_pan;
         let mut yaw = app.program.graph_yaw;
         let mut pitch = app.program.graph_pitch;
-        let mut fit = app.program.fit_requested;
+        let mut fit = app.program.fit_requested || mini_card_resized(ui, kind, rect.size());
         let mut auto_fit = app.program.graph_auto_fit;
         common::trajectory(
             app,

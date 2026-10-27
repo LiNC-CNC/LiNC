@@ -388,11 +388,16 @@ Fixed shell, no right-hand status column:
   Each page keeps an invisible focus anchor at the top so arrow-key navigation
   has a starting point. Banners stay: they carry live state (E-stop, panel
   offline, program protect), not page descriptions.
-- **Left navigation**: Machine, Program, Tools, Offsets. Keyboard-focusable;
-  `MAIN`/`FILE`/`OFFSET`/`TOOL`/`WIN` jump directly. Diagnostics and G-code Help
-  have no nav entry by default — the panel keyboard has no F9 and the freed rows
-  go to the shortcuts pane — but both stay bound (`Ctrl+D`, `Ctrl+H`), and a
-  profile that names them in `[ui] pages` gets the entries back.
+- **Left navigation**: seven rows in one list — Machine, Program, Tools, Offsets
+  with an icon and a two-line label, then Diagnostics, G-code Help and Settings as
+  single-line rows without an icon. Rows keep a 44 px target while the painted pill
+  is 32 px (22 px for a single-line row), separated by 3 px, so the list costs the
+  vertical space the shortcuts pane needs. Keyboard-focusable; `MAIN`/`FILE`/
+  `OFFSET`/`TOOL`/`WIN` jump directly, `Ctrl+D`/`Ctrl+H` reach the two key-only
+  pages. `[ui] pages` still selects and orders which rows appear.
+- **DRO readout**: one line — axis name at the coordinate's own size, the value,
+  and a dimmed `M …` machine value that is dropped whole when it would touch the
+  value. The card carries the DTG line and move bar underneath, nothing above.
 - **Central page**: active screen.
 - **Bottom action bar**: real keycaps (`MAIN`, `FILE`, `OFFSET`, `TOOL`, `WIN`,
   `ESC`), context actions including `HELP`, and a compact read-only machine

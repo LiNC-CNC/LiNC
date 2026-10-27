@@ -93,7 +93,7 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     let width =
         ((ui.available_width() - gap * (axes.len() as f32 - 1.0)) / axes.len() as f32).max(120.0);
     // The Machine page's readout without the DTG line and move bar.
-    const HEIGHT: f32 = 64.0;
+    let height = theme::DRO_CARD_HEIGHT_OFFSETS;
 
     handle_axis_keys(app, ui);
     handle_dro_keys(app, ui);
@@ -103,7 +103,7 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
         ui.spacing_mut().item_spacing.x = gap;
         for axis in &axes {
             let (rect, response) =
-                ui.allocate_exact_size(egui::vec2(width, HEIGHT), egui::Sense::click());
+                ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
             let editing = app
                 .offsets
                 .dro_edit
@@ -128,9 +128,10 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
             if editing {
                 // Below the axis label, on the value line. The edit field covers
                 // the machine coordinate while it is open; it returns on commit.
+                // Over the readout line the field replaces.
                 let field = egui::Rect::from_min_max(
-                    egui::pos2(rect.left() + 10.0, rect.top() + 28.0),
-                    egui::pos2(rect.right() - 10.0, rect.top() + 56.0),
+                    egui::pos2(rect.left() + 10.0, rect.top() + 8.0),
+                    egui::pos2(rect.right() - 10.0, rect.top() + 36.0),
                 );
                 let mut child = ui.new_child(
                     egui::UiBuilder::new()

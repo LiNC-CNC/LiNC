@@ -134,6 +134,16 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
 - Test the page before `consume_key`. It swallows the key even when the rest of the condition is false; `consume_key(mdi_issue) && page == Mdi` ate
   plain Enter everywhere and broke opening a file from NC_FILES. The MDI pane is keyed to the panel mode, so its keys are guarded by that mode, not by a page.
 - A focused editor keeps Home/End/PgUp/PgDn. Check `memory.has_focus(egui::Id::unique("linc-program-editor"))` first, and keep that id stable.
+- egui 0.37 has no click-to-focus, and the panel keyboard has no Tab. So the only ways out of the G-code
+  editor's keyboard are the ones the shell provides: a click on the toolpath card requests focus for it
+  (`common::trajectory`), and a click on a nav row calls `stop_text_input()`. Without those the editor
+  keeps the keyboard for the rest of the session and every `!text_focused` gate stays shut.
+- The toolpath zoom chords (`view_zoom_in/out`, `fit`) are hover-scoped only, so they work while a text
+  field holds the keyboard; the pan chords also need no text focus, because Ctrl+Left/Right is region
+  focus and Ctrl+Up/Down is the editor's line move.
+- The DRO readout is one line: axis name at the coordinate's own size, the value, and a dimmed `M …`
+  dropped whole when it would touch the value. Card heights are `theme::DRO_CARD_*`; the freed row goes
+  to the toolpath, not to page slack.
 - Use `theme` constants and the `SPEC.md §7` palette, not literals.
 - The program editor soft-wraps long lines at the editor width. The gutter paints
   one number at each logical line's first galley row, and the selection band covers

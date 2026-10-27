@@ -45,6 +45,41 @@ pub const BOTTOM_BAR_HEIGHT: f32 = 36.0;
 pub const STATUS_LINE_HEIGHT: f32 = 20.0;
 pub const NAV_WIDTH: f32 = 172.0;
 pub const MIN_TARGET: f32 = 44.0;
+/// Gap between two navigation rows.
+///
+/// The sidebar used to take the 8 px list spacing for this, which read as a
+/// band of dead space around every entry. A third of it is enough to separate
+/// two pills.
+pub const NAV_ROW_GAP: f32 = 3.0;
+/// Painted pill of a row that carries an icon and a two-line label. The hit
+/// rectangle around it stays a full 44 px target, so the visual padding is
+/// what shrank, not the target.
+pub const NAV_PILL_PRIMARY: f32 = 32.0;
+/// Painted pill of a one-line row: a label, no icon, no keycap.
+pub const NAV_PILL_SECONDARY: f32 = 22.0;
+/// Air between the last row and the SHORTCUTS pane below it.
+pub const NAV_BOTTOM_GAP: f32 = 2.0;
+/// Axis readout: one line carrying the axis name and the work coordinate,
+/// the dimmed machine coordinate at the right end of it, and (on the jog and
+/// MAIN cards) the DTG line and move bar under it.
+///
+/// The name sits at the coordinate's own size, so the readout is one line and
+/// the cards are a third shorter than the two-row version.
+pub const DRO_FONT: f32 = 23.0;
+pub const DRO_FONT_COMPACT: f32 = 19.0;
+/// Inset from the card's edge to the readout's text.
+pub const DRO_INSET: f32 = 14.0;
+/// Centre of the label/value line, measured from the card's top edge.
+pub const DRO_LINE_Y: f32 = 24.0;
+/// Gap between the axis name and the coordinate beside it.
+pub const DRO_LABEL_GAP: f32 = 8.0;
+/// The DTG line reads at the small end of the ramp.
+pub const DRO_SMALL_FONT: f32 = 9.0;
+/// Jog/MAIN axis card: one readout line, then the DTG line and the move bar.
+pub const DRO_CARD_HEIGHT: f32 = 66.0;
+pub const DRO_CARD_HEIGHT_COMPACT: f32 = 64.0;
+/// The Offsets page draws the same readout without the DTG line.
+pub const DRO_CARD_HEIGHT_OFFSETS: f32 = 44.0;
 /// Baseline layout is 1280x720. Text is enlarged slightly relative to the
 /// 1000x640 SVG so it remains proportional when the shell is scaled.
 pub const FONT_SCALE: f32 = 1.25;

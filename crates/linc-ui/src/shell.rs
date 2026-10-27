@@ -1917,8 +1917,11 @@ impl LincApp {
             self.manual.pan = Vec2::ZERO;
             self.manual.fit = true;
         } else {
-            self.program.graph_zoom = 1.0;
-            self.program.graph_pan = Vec2::ZERO;
+            // No placeholder zoom or pan here: the fit recomputes both from the
+            // card's rect, and writing the old defaults first only painted a
+            // bogus "ZOOM 1.0x" in the card's readout for the frame before the
+            // fit ran. That one-frame value was the whole visible effect of
+            // Ctrl+0 on a view that was already fitted.
             self.program.fit_requested = true;
         }
     }
@@ -2250,16 +2253,34 @@ impl LincApp {
                     run_from_line = true;
                 }
             }
-            // Hover-scoped like the wheel: the view takes the pan/zoom chords
-            // only where it is the thing under the pointer. Ctrl+Left/Right
-            // stays region focus everywhere else, and the G-code editor and
-            // MDI buffer keep Ctrl+Up/Down for their line moves.
-            let view_keys = matches!(
+            // Hover-scoped like the wheel: the view takes the pan and zoom
+            // chords only where it is the thing under the pointer. Ctrl+Left/
+            // Right stays region focus everywhere else, and the G-code editor
+            // and MDI buffer keep Ctrl+Up/Down for their line moves.
+            //
+            // The two groups are gated separately. Ctrl+Plus/Minus collide with
+            // nothing a text field uses, so the zoom works while the editor
+            // holds the keyboard — that is where the operator is when they want
+            // a closer look at the path. The pan chords can only be the view's
+            // where no text field needs them: Ctrl+Left/Right is the editor's
+            // word move and Ctrl+Up/Down its line move (and the MDI buffer's
+            // block move). Clicking the toolpath itself hands it the keyboard,
+            // so the pan is one click away instead of unreachable.
+            let view_hovered = matches!(
                 self.page,
                 Page::Machine | Page::Program | Page::Manual | Page::Homing | Page::Offsets
-            ) && !text_focused
-                && toolpath_hovered;
-            if view_keys {
+            ) && toolpath_hovered;
+            if view_hovered {
+                let k = &self.keymap;
+                if input.consume_key(k.view_zoom_in.modifiers, k.view_zoom_in.key) {
+                    view_zoom *= VIEW_ZOOM_STEP;
+                }
+                if input.consume_key(k.view_zoom_out.modifiers, k.view_zoom_out.key) {
+                    view_zoom /= VIEW_ZOOM_STEP;
+                }
+            }
+            let view_pan_keys = view_hovered && !text_focused;
+            if view_pan_keys {
                 let k = &self.keymap;
                 if input.consume_key(k.view_pan_left.modifiers, k.view_pan_left.key) {
                     view_pan.x -= VIEW_PAN_STEP;
@@ -2272,12 +2293,6 @@ impl LincApp {
                 }
                 if input.consume_key(k.view_pan_down.modifiers, k.view_pan_down.key) {
                     view_pan.y += VIEW_PAN_STEP;
-                }
-                if input.consume_key(k.view_zoom_in.modifiers, k.view_zoom_in.key) {
-                    view_zoom *= VIEW_ZOOM_STEP;
-                }
-                if input.consume_key(k.view_zoom_out.modifiers, k.view_zoom_out.key) {
-                    view_zoom /= VIEW_ZOOM_STEP;
                 }
             }
             if input.consume_key(self.keymap.tools.modifiers, self.keymap.tools.key) {
@@ -2487,13 +2502,13 @@ impl LincApp {
             // A hovered toolpath has taken these for panning above: the view
             // under the pointer wins over moving the focus ring.
             if !text_focused
-                && !view_keys
+                && !view_pan_keys
                 && input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowLeft)
             {
                 focus_left = true;
             }
             if !text_focused
-                && !view_keys
+                && !view_pan_keys
                 && input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowRight)
             {
                 focus_right = true;
@@ -3155,6 +3170,9 @@ impl LincApp {
         ui.add_space(4.0);
         // Copied out: the loop body navigates, which borrows `self` mutably.
         let nav = self.nav.clone();
+        // The rows carry their own gap: the list spacing the sidebar inherits
+        // is 8 px a row, which put a band of dead space around every entry.
+        ui.spacing_mut().item_spacing.y = theme::NAV_ROW_GAP;
         for (index, page) in nav.iter().enumerate() {
             let Some((_, label, keycap)) = NAV_ITEMS.iter().find(|(entry, _, _)| entry == page)
             else {
@@ -3165,11 +3183,17 @@ impl LincApp {
             let selected =
                 *page == self.page || (*page == Page::Offsets && self.page == Page::Probe);
             let focused = self.focus_region == FocusRegion::Nav && self.nav_focus == index;
-            let (rect, response) =
-                ui.allocate_exact_size(Vec2::new(theme::NAV_WIDTH - 20.0, 38.0), Sense::click());
+            let geometry = nav_row_geometry(*page);
+            // The target every row keeps, whatever it paints inside it.
+            let (rect, response) = ui.allocate_exact_size(
+                Vec2::new(theme::NAV_WIDTH - 20.0, geometry.height),
+                Sense::click(),
+            );
+            let pill =
+                egui::Rect::from_center_size(rect.center(), Vec2::new(rect.width(), geometry.pill));
             let painter = ui.painter();
             painter.rect_filled(
-                rect,
+                pill,
                 4,
                 if selected {
                     theme::ACCENT
@@ -3181,7 +3205,7 @@ impl LincApp {
             );
             if focused {
                 painter.rect_stroke(
-                    rect.expand(1.0),
+                    pill.expand(1.0),
                     5,
                     Stroke::new(2.0, theme::ACCENT),
                     StrokeKind::Outside,
@@ -3192,17 +3216,28 @@ impl LincApp {
             } else {
                 theme::MUTED
             };
-            draw_nav_icon(
-                painter,
-                egui::Rect::from_min_size(
-                    egui::pos2(rect.left() + 8.0, rect.center().y - 9.0),
-                    Vec2::splat(18.0),
-                ),
-                *page,
-                icon_color,
-            );
+            if geometry.icon {
+                draw_nav_icon(
+                    painter,
+                    egui::Rect::from_min_size(
+                        egui::pos2(rect.left() + 8.0, rect.center().y - 9.0),
+                        Vec2::splat(18.0),
+                    ),
+                    *page,
+                    icon_color,
+                );
+            }
+            // A row with an icon holds its label and keycap on two lines beside
+            // it; a one-line row starts at the pill's own inset, with no icon
+            // to clear.
+            let label_x = rect.left() + if geometry.icon { 34.0 } else { 12.0 };
+            let label_y = if keycap.is_empty() {
+                rect.center().y
+            } else {
+                rect.center().y - 7.0
+            };
             painter.text(
-                egui::pos2(rect.left() + 34.0, rect.center().y - 7.0),
+                egui::pos2(label_x, label_y),
                 Align2::LEFT_CENTER,
                 *label,
                 FontId::proportional(theme::font_size(11.0)),
@@ -3214,7 +3249,7 @@ impl LincApp {
             );
             if !keycap.is_empty() {
                 painter.text(
-                    egui::pos2(rect.left() + 34.0, rect.center().y + 8.0),
+                    egui::pos2(label_x, rect.center().y + 8.0),
                     Align2::LEFT_CENTER,
                     *keycap,
                     FontId::monospace(theme::font_size(8.5)),
@@ -3226,14 +3261,23 @@ impl LincApp {
                 );
             }
             if response.clicked() {
+                ui.memory_mut(|memory| memory.stop_text_input());
+                // A nav click is the operator leaving whichever text field had
+                // the keyboard. Without this the G-code editor kept focus (the
+                // panel keyboard has no Tab), so the toolpath's pan chords and
+                // the page keys stayed dead after navigating, while the nav row
+                // drew its focus border and looked ready for the arrows.
                 self.nav_focus = index;
                 self.focus_region = FocusRegion::Nav;
                 self.request_page(*page);
             }
         }
-        ui.add_space(10.0);
+        // Minimal: the list ends where the rows do, and the SHORTCUTS frame
+        // takes the rest of the column.
+        ui.spacing_mut().item_spacing.y = theme::NAV_ROW_GAP;
+        ui.add_space(theme::NAV_BOTTOM_GAP);
         theme::separator(ui);
-        ui.add_space(8.0);
+        ui.add_space(theme::NAV_BOTTOM_GAP);
         // Page-local keyboard commands live here: the bottom bar had one row and
         // truncated the list, and the sidebar has the height. The list takes the
         // sidebar's remainder, less the frame's own margins and header.
@@ -3730,11 +3774,10 @@ impl LincApp {
                 }
                 field(
                     ui,
-                    format!(
-                        "OVR F{:.0} S{:.0} R{:.0}",
-                        self.snapshot.feed.feed_override * 100.0,
-                        self.snapshot.feed.spindle_override * 100.0,
-                        self.snapshot.feed.rapid_override * 100.0
+                    override_readout(
+                        self.snapshot.feed.feed_override,
+                        self.snapshot.feed.rapid_override,
+                        self.snapshot.feed.spindle_override,
                     ),
                     theme::MUTED,
                 );
@@ -4449,6 +4492,19 @@ pub fn page_from_name(name: &str) -> Option<Page> {
     None
 }
 
+/// Bottom-bar override readout.
+///
+/// The order is the physical panel's — FEED, RAPID, SPINDLE — so the numbers
+/// under the F, R and S keys read in the order the operator's hand finds them.
+pub fn override_readout(feed: f64, rapid: f64, spindle: f64) -> String {
+    format!(
+        "OVR F{:.0} R{:.0} S{:.0}",
+        feed * 100.0,
+        rapid * 100.0,
+        spindle * 100.0
+    )
+}
+
 /// Navigation entries in display order, with their label and keycap hint.
 ///
 /// Which of these actually appear is `[ui] pages` in the profile, so a machine
@@ -4457,10 +4513,10 @@ pub fn page_from_name(name: &str) -> Option<Page> {
 /// Ordered to match the keyboard: MAIN (F5), FILE (F6), TOOL (F7), OFFSET
 /// (F8). A page that has no function key follows the ones that do.
 ///
-/// DIAGNOSTICS and G-CODE HELP are listed so a profile that names them in
-/// `[ui] pages` still gets a nav entry, but `configs/base.toml` leaves them
-/// out: their pages are reachable with the `[keys]` chords (Ctrl+D, Ctrl+H),
-/// and `[ui] pages` never unbinds a key.
+/// DIAGNOSTICS and G-CODE HELP are listed too: `configs/base.toml` names all
+/// seven, so the operator can reach the diagnostics and help pages with the
+/// arrows and Enter as well as with their `[keys]` chords (Ctrl+D, Ctrl+H).
+/// They draw as one-line rows without an icon (see [`NAV_PRIMARY`]).
 pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
     (Page::Machine, "MACHINE", "MAIN"),
     (Page::Program, "PROGRAM", "FILE"),
@@ -4470,6 +4526,42 @@ pub const NAV_ITEMS: [(Page, &str, &str); 7] = [
     (Page::Help, "G-CODE HELP", "Ctrl+H"),
     (Page::Settings, "SETTINGS", ""),
 ];
+
+/// The navigation rows that carry an icon and a two-line label.
+///
+/// The four entries with a function key do: they are what the operator's hand
+/// finds on the panel. DIAGNOSTICS, G-CODE HELP and SETTINGS are reached by a
+/// chord or by the arrows, so they draw as one-line rows without an icon — a
+/// third of the attention, and in a seven-row list the vertical space.
+const NAV_PRIMARY: [Page; 4] = [Page::Machine, Page::Program, Page::Tools, Page::Offsets];
+
+/// Geometry of one navigation row: the target the operator gets and the pill
+/// painted inside it.
+pub struct NavRowGeometry {
+    /// Interaction height. Never below [`theme::MIN_TARGET`].
+    pub height: f32,
+    /// Painted pill. Shorter than `height`: what shrank is the padding, not
+    /// the target.
+    pub pill: f32,
+    /// An icon beside a two-line label.
+    pub icon: bool,
+}
+
+pub fn nav_row_geometry(page: Page) -> NavRowGeometry {
+    if NAV_PRIMARY.contains(&page) {
+        NavRowGeometry {
+            height: theme::MIN_TARGET,
+            pill: theme::NAV_PILL_PRIMARY,
+            icon: true,
+        }
+    } else {
+        NavRowGeometry {
+            height: theme::MIN_TARGET,
+            pill: theme::NAV_PILL_SECONDARY,
+            icon: false,
+        }
+    }
+}
 
 /// Navigation entries to show, from `[ui] pages`.
 ///
@@ -4959,32 +5051,191 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             .find(|rect| rect.left() < theme::NAV_WIDTH)
     }
 
-    /// The navigation shows no entry for a page that only has a key: DIAGNOSTICS
-    /// and G-CODE HELP left `[ui] pages`, and `[keys]` still reaches both.
+    /// The bottom bar reads the overrides in the physical panel's order:
+    /// FEED, RAPID, SPINDLE. The old format printed the spindle value in the
+    /// RAPID slot and the rapid value in the SPINDLE slot.
     #[test]
-    fn the_navigation_lists_no_page_that_only_has_a_key() {
+    fn the_override_readout_follows_the_panel_order() {
+        assert_eq!(override_readout(1.0, 0.5, 0.25), "OVR F100 R50 S25");
+        assert_eq!(override_readout(0.0, 2.0, 1.0), "OVR F0 R200 S100");
         let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
         harness.frame(&[]);
         let output = harness.frame_full(Vec::new());
         let texts = painted_text(&output);
-        // The navigation is on screen: the pages with a function key are.
-        for present in ["MACHINE", "PROGRAM", "TOOLS", "OFFSETS"] {
+        assert!(
+            texts.iter().any(|(text, _)| text == "OVR F100 R100 S100"),
+            "the bar paints the panel order, got {:?}",
+            texts
+                .iter()
+                .map(|(text, _)| text.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !texts.iter().any(|(text, _)| text == "OVR F100 S100 R100"),
+            "the old FEED, SPINDLE, RAPID order is gone"
+        );
+    }
+
+    /// Every navigation row keeps a full 44 px target; what shrank is the pill
+    /// painted inside it. The four entries with a function key keep the icon and
+    /// the two-line label, the other three are one-line rows without one.
+    #[test]
+    fn the_navigation_rows_keep_a_full_target_with_a_compact_pill() {
+        for (page, _, _) in NAV_ITEMS {
+            let geometry = nav_row_geometry(page);
             assert!(
-                texts.iter().any(|(text, _)| text == present),
-                "{present} is a nav entry"
+                geometry.height >= theme::MIN_TARGET,
+                "{page:?} keeps a 44 px target, got {}",
+                geometry.height
+            );
+            assert!(
+                geometry.pill < geometry.height,
+                "{page:?} paints a pill inside its target, {} of {}",
+                geometry.pill,
+                geometry.height
             );
         }
-        for absent in ["DIAGNOSTICS", "G-CODE HELP"] {
-            assert!(
-                !texts.iter().any(|(text, _)| text == absent),
-                "{absent} must not be a nav entry"
-            );
+        for page in [Page::Machine, Page::Program, Page::Tools, Page::Offsets] {
+            assert!(nav_row_geometry(page).icon, "{page:?} keeps its icon");
+            assert_eq!(nav_row_geometry(page).pill, theme::NAV_PILL_PRIMARY);
         }
-        // The pages themselves stayed: `[ui] pages` never unbinds a key.
+        for page in [Page::Diagnostics, Page::Help, Page::Settings] {
+            assert!(!nav_row_geometry(page).icon, "{page:?} is a one-line row");
+            assert_eq!(nav_row_geometry(page).pill, theme::NAV_PILL_SECONDARY);
+        }
+        // The gap between rows is a third of the 8 px list spacing it replaced.
+        assert!(
+            (theme::NAV_ROW_GAP - 8.0 / 3.0).abs() < 0.5,
+            "{}",
+            theme::NAV_ROW_GAP
+        );
+    }
+
+    /// Measured at 1280x720, from the frame's own shapes: seven rows, 44 px
+    /// targets, 32/22 px pills and a 47 px pitch (was 38 px rows with an 8 px
+    /// gap, 46 px pitch). DIAGNOSTICS and G-CODE HELP are one-line rows whose
+    /// labels start where the pill does, with no icon column in front of them.
+    #[test]
+    fn the_navigation_is_compact_and_lists_all_seven_pages() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.frame(&[]);
+        let output = harness.frame_full(Vec::new());
+        let texts = painted_text(&output);
+        let nav = region(&harness.app, "nav");
+        let in_nav = |text: &str| {
+            texts
+                .iter()
+                .find(|(painted, rect)| painted == text && rect.left() < theme::NAV_WIDTH)
+                .map(|(_, rect)| *rect)
+                .unwrap_or_else(|| panic!("{text} is a navigation row"))
+        };
+        for label in [
+            "MACHINE",
+            "PROGRAM",
+            "TOOLS",
+            "OFFSETS",
+            "DIAGNOSTICS",
+            "G-CODE HELP",
+            "SETTINGS",
+        ] {
+            in_nav(label);
+        }
+        // Seven pills: four that carry an icon and a keycap, three one-liners.
+        let mut heights: Vec<f32> = painted_rects(&output)
+            .into_iter()
+            .filter(|rect| {
+                rect.left() >= nav.left() && rect.right() <= nav.right() && rect.width() > 100.0
+            })
+            .map(|rect| rect.height())
+            .filter(|height| *height > 10.0 && *height < 40.0)
+            .collect();
+        heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(heights.len(), 7, "seven painted rows, got {heights:?}");
+        assert_eq!(
+            heights
+                .iter()
+                .filter(|height| (**height - theme::NAV_PILL_PRIMARY).abs() < 0.5)
+                .count(),
+            4,
+            "{heights:?}"
+        );
+        assert_eq!(
+            heights
+                .iter()
+                .filter(|height| (**height - theme::NAV_PILL_SECONDARY).abs() < 0.5)
+                .count(),
+            3,
+            "{heights:?}"
+        );
+        // Pitch: the target plus the gap, from the labels that sit in them.
+        let pitch = in_nav("PROGRAM").center().y - in_nav("MACHINE").center().y;
+        assert!(
+            (pitch - (nav_row_geometry(Page::Machine).height + theme::NAV_ROW_GAP)).abs() < 0.6,
+            "row pitch {pitch}"
+        );
+        // A one-line row starts at the pill's inset: no icon column to clear.
+        assert!(
+            in_nav("DIAGNOSTICS").left() < in_nav("MACHINE").left() - 15.0,
+            "DIAGNOSTICS is a one-line row: {} vs {}",
+            in_nav("DIAGNOSTICS").left(),
+            in_nav("MACHINE").left()
+        );
+        // The list ends a few pixels above the SHORTCUTS frame, not a band of air.
+        let shortcuts = in_nav_top(&texts, "SHORTCUTS");
+        // From the end of the last row's target to the SHORTCUTS frame's own
+        // margin: the two NAV_BOTTOM_GAPs and the separator's lines, not a band
+        // of air. It was 35 px before the list was compacted.
+        let last_target_bottom =
+            in_nav("SETTINGS").center().y + nav_row_geometry(Page::Settings).height * 0.5;
+        assert!(
+            shortcuts - last_target_bottom < 20.0,
+            "bottom padding {}",
+            shortcuts - last_target_bottom
+        );
+        // The pages behind the rows still answer their own chords.
         harness.frame_with(&[(egui::Key::D, ctrl())]);
         assert_eq!(harness.app.page, Page::Diagnostics);
         harness.frame_with(&[(egui::Key::H, ctrl())]);
         assert_eq!(harness.app.page, Page::Help);
+    }
+
+    fn in_nav_top(texts: &[(String, egui::Rect)], label: &str) -> f32 {
+        texts
+            .iter()
+            .find(|(text, rect)| text == label && rect.left() < theme::NAV_WIDTH)
+            .map(|(_, rect)| rect.top())
+            .unwrap_or_else(|| panic!("{label} is painted in the sidebar"))
+    }
+
+    /// The arrows walk the navigation over all seven rows, and Enter opens the
+    /// page the highlighted row names.
+    #[test]
+    fn the_arrow_keys_walk_all_seven_navigation_rows() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.app.set_page(Page::Machine);
+        harness.app.focus_nav();
+        harness.frame(&[]);
+        assert_eq!(harness.app.nav.len(), 7, "seven rows to walk");
+        assert_eq!(harness.app.nav_focus, 0);
+        for expected in 1..7 {
+            harness.frame(&[egui::Key::ArrowDown]);
+            assert_eq!(
+                harness.app.nav_focus, expected,
+                "ArrowDown reaches row {expected}"
+            );
+            assert_eq!(harness.app.focus_region, FocusRegion::Nav);
+        }
+        harness.frame(&[egui::Key::ArrowDown]);
+        assert_eq!(
+            harness.app.nav_focus, 6,
+            "the last row is the end of the list"
+        );
+        harness.app.nav_focus = 5;
+        harness.frame(&[egui::Key::Enter]);
+        assert_eq!(harness.app.page, Page::Help, "Enter opens G-CODE HELP");
+        harness.app.focus_nav();
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert_eq!(harness.app.nav_focus, 4, "ArrowUp walks back");
     }
 
     /// A shell region's rect, from the frame's own report to the diagnostic
@@ -5941,8 +6192,14 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         /// Paint one frame and keep the whole output: a test that checks what
         /// reached the screen reads the shapes.
         fn frame_full(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+            self.frame_input(probe_raw_input(events))
+        }
+
+        /// Paint one frame from a raw input, so a test can change the window
+        /// size between frames the way a resize does.
+        fn frame_input(&mut self, input: egui::RawInput) -> egui::FullOutput {
             let app = &mut self.app;
-            let mut output = self.ctx.run_ui(probe_raw_input(events), |ui| {
+            let mut output = self.ctx.run_ui(input, |ui| {
                 // The same prologue as \`eframe::App::ui\`, minus the frame.
                 theme::apply_design_zoom(ui.ctx(), app.design_scale);
                 app.handle_keyboard(ui);
@@ -6404,6 +6661,515 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 < 1e-3,
             "the pan carries the zoom so the card centre stays put, {:?} -> {:?}",
             pan_before,
+            harness.app.program.graph_pan
+        );
+    }
+
+    /// The CODE layout's card is a thumbnail, not a different view: it used to
+    /// force TOP, so an oversized editor took the operator's perspective away
+    /// and nothing but the view cycle brought it back.
+    #[test]
+    fn the_code_thumbnail_draws_the_operator_view_and_keeps_its_angles() {
+        let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+        harness
+            .app
+            .program
+            .editor
+            .replace_text("G0 X0 Y0 Z0\nG1 X20 Y10 Z-40\n".into());
+        harness.app.refresh_preview();
+        harness.app.set_page(Page::Program);
+        harness.app.program.view = ProgramView::Code;
+        harness.app.program.graph_view = linc_view::ViewMode::Iso3d;
+        harness.app.program.graph_yaw = 0.7;
+        harness.app.program.graph_pitch = 0.42;
+        harness.app.program.fit_requested = true;
+        harness.frame(&[]);
+        let iso_zoom = harness.app.program.graph_zoom;
+        assert!(
+            (harness.app.program.graph_yaw - 0.7).abs() < 1e-6
+                && (harness.app.program.graph_pitch - 0.42).abs() < 1e-6,
+            "drawing the thumbnail kept the operator's angles, got {} / {}",
+            harness.app.program.graph_yaw,
+            harness.app.program.graph_pitch
+        );
+        assert_eq!(harness.app.program.graph_view, linc_view::ViewMode::Iso3d);
+
+        // The view the card is given is the view it fits for: the same part
+        // fitted in TOP takes a different zoom, because the Z extent has no
+        // screen length there.
+        harness.app.program.graph_view = linc_view::ViewMode::TopXy;
+        harness.app.program.fit_requested = true;
+        harness.frame(&[]);
+        let top_zoom = harness.app.program.graph_zoom;
+        assert!(
+            (iso_zoom - top_zoom).abs() > 1e-3,
+            "the card fits for the view it is given, ISO {iso_zoom} vs TOP {top_zoom}"
+        );
+    }
+
+    /// A card whose rect changes re-fits: the fit belongs to the rect it was
+    /// computed for.
+    #[test]
+    fn the_code_thumbnail_refits_when_the_card_changes_size() {
+        let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+        harness
+            .app
+            .program
+            .editor
+            .replace_text("G0 X0 Y0 Z0\nG1 X20 Y10 Z-40\n".into());
+        harness.app.refresh_preview();
+        harness.app.set_page(Page::Program);
+        harness.app.program.view = ProgramView::Code;
+        harness.app.program.graph_view = linc_view::ViewMode::Iso3d;
+        harness.frame(&[]);
+        // The operator's own zoom: nothing will re-frame it until the card
+        // changes size.
+        harness.app.program.graph_auto_fit = false;
+        harness.app.program.graph_zoom = 6.0;
+        harness.frame(&[]);
+        assert!(
+            (harness.app.program.graph_zoom - 6.0).abs() < 1e-6,
+            "an untouched card keeps the operator's zoom"
+        );
+
+        let mut input = probe_raw_input(Vec::new());
+        input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1024.0, 640.0),
+        ));
+        harness.frame_input(input);
+        assert!(
+            (harness.app.program.graph_zoom - 6.0).abs() > 0.1,
+            "a resized card re-fits its contents, got {}",
+            harness.app.program.graph_zoom
+        );
+    }
+
+    /// The readout is one line: the axis name at the coordinate's own size, the
+    /// coordinate beside it, the dimmed machine value at the right end. The name
+    /// used to sit on a row of its own above the number.
+    #[test]
+    fn the_dro_puts_the_axis_name_on_the_coordinate_line() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.app.set_page(Page::Machine);
+        harness.frame(&[]);
+        let output = harness.frame_full(Vec::new());
+        let texts = painted_text(&output);
+        let same_line = |from: egui::Rect, prefix: &str, right_of: f32| {
+            texts
+                .iter()
+                .filter(|(text, rect)| {
+                    text.starts_with(prefix)
+                        && rect.left() >= right_of
+                        && (rect.center().y - from.center().y).abs() < 2.0
+                })
+                .map(|(_, rect)| *rect)
+                .min_by(|a, b| a.left().partial_cmp(&b.left()).unwrap())
+        };
+        for axis in ["X", "Y", "Z"] {
+            // The axis names are painted in more than one place on MAIN; the
+            // readout line is the one with the coordinate beside it.
+            let (label, value) = texts
+                .iter()
+                .filter(|(text, _)| text == axis)
+                .find_map(|(_, rect)| {
+                    same_line(*rect, "+", rect.right()).map(|value| (*rect, value))
+                })
+                .unwrap_or_else(|| panic!("{axis} paints its coordinate beside its name"));
+            assert!(
+                (label.height() - value.height()).abs() < 0.6,
+                "{axis}: the name is set at the coordinate's size, {} vs {}",
+                label.height(),
+                value.height()
+            );
+            assert!(
+                value.left() >= label.right() - 0.5,
+                "{axis}: the name and the coordinate do not overlap"
+            );
+            let machine = same_line(label, "M ", value.right())
+                .unwrap_or_else(|| panic!("{axis} keeps its machine coordinate"));
+            assert!(
+                machine.left() >= value.right() - 0.5,
+                "{axis}: the machine coordinate clears the value, {} vs {}",
+                machine.left(),
+                value.right()
+            );
+        }
+    }
+
+    /// A long coordinate on a narrow card drops the machine value whole rather
+    /// than letting the two touch; the name and the value always have room.
+    #[test]
+    fn a_long_coordinate_drops_the_machine_value_instead_of_overlapping() {
+        let ctx = egui::Context::default();
+        let mut layouts = None;
+        let mut output = ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+            layouts = Some((
+                crate::screens::common::dro_line_layout(
+                    ui, 400.0, "X", -1234.567, -12.5, false, false,
+                ),
+                crate::screens::common::dro_line_layout(
+                    ui, 180.0, "X", -1234.567, -12.5, true, true,
+                ),
+            ));
+        });
+        output.textures_delta.clear();
+        let (wide, narrow) = layouts.expect("one pass");
+        assert!(
+            wide.machine.is_some(),
+            "a wide card keeps the machine coordinate"
+        );
+        assert!(
+            wide.value_x > theme::DRO_INSET,
+            "the value starts after the name"
+        );
+        assert!(
+            narrow.machine.is_none(),
+            "a narrow card drops the machine coordinate, got {:?}",
+            narrow.machine
+        );
+        assert_eq!(wide.value, "-1234.567");
+        assert_eq!(narrow.value, "-1234.567");
+        assert_eq!(
+            narrow.label, "X DIA",
+            "the diameter mark keeps its full label"
+        );
+        assert_eq!(wide.font_size, theme::font_size(theme::DRO_FONT));
+        assert_eq!(narrow.font_size, theme::font_size(theme::DRO_FONT_COMPACT));
+    }
+
+    /// The readout is a third shorter, and the space goes to the toolpath: the
+    /// graph card starts where the DRO row ends, so the page does not keep an
+    /// empty gap.
+    #[test]
+    fn the_dro_cards_lost_the_second_row_and_the_toolpath_grew() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.app.set_page(Page::Machine);
+        harness.frame(&[]);
+        let output = harness.frame_full(Vec::new());
+        let rects = painted_rects(&output);
+        // Each card paints its fill and its border as two rects at one place.
+        let mut dro: Vec<egui::Rect> = rects
+            .iter()
+            .copied()
+            .filter(|rect| {
+                (rect.height() - theme::DRO_CARD_HEIGHT).abs() < 0.5 && rect.width() > 150.0
+            })
+            .collect();
+        dro.dedup();
+        assert_eq!(dro.len(), 3, "one card per mill axis, got {dro:?}");
+        let dro_bottom = dro
+            .iter()
+            .fold(f32::MIN, |low, rect| low.max(rect.bottom()));
+        // The toolpath card is the wide frame under the readout row.
+        let graph = rects
+            .iter()
+            .copied()
+            .filter(|rect| rect.width() > 400.0 && rect.top() >= dro_bottom)
+            .min_by(|a, b| a.top().partial_cmp(&b.top()).unwrap())
+            .expect("the toolpath card is under the readout");
+        assert!(
+            graph.top() > dro_bottom && graph.top() < dro_bottom + 16.0,
+            "the toolpath starts right under the readout row, not below a gap: {} vs {}",
+            graph.top(),
+            dro_bottom
+        );
+        assert!(
+            graph.height() > 200.0,
+            "the toolpath took the space the readout gave up, got {}",
+            graph.height()
+        );
+    }
+
+    /// The centre of a nav row, from the label the sidebar paints for it.
+    fn nav_row_center(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+        painted_text(output)
+            .into_iter()
+            .find(|(text, rect)| text == label && rect.left() < theme::NAV_WIDTH)
+            .map(|(_, rect)| rect.center())
+            .unwrap_or_else(|| panic!("{label} is painted in the navigation"))
+    }
+
+    /// A point inside the toolpath card, below the line that titles it.
+    fn toolpath_card_point(output: &egui::FullOutput) -> egui::Pos2 {
+        let (_, rect) = painted_text(output)
+            .into_iter()
+            .find(|(text, _)| text == "TOOLPATH" || text == "PATH")
+            .expect("the toolpath card paints its title");
+        rect.center() + egui::vec2(0.0, 40.0)
+    }
+
+    fn press_at(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// The card's ZOOM readout, as painted in one frame.
+    fn zoom_readout(output: &egui::FullOutput) -> Option<String> {
+        painted_text(output)
+            .into_iter()
+            .map(|(text, _)| text)
+            .find(|text| text.starts_with("ZOOM "))
+    }
+
+    /// Ctrl+Plus and Ctrl+Minus are the view's even while the G-code editor
+    /// holds the keyboard: the editor binds neither chord, and that is where the
+    /// operator is when they want a closer look at the path. Before this, the
+    /// whole pan/zoom block sat behind "no text field has focus", and the
+    /// editor takes focus as soon as the Program page opens, so both chords did
+    /// nothing at all.
+    #[test]
+    fn the_zoom_chords_work_while_the_gcode_editor_holds_the_keyboard() {
+        let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+        harness
+            .app
+            .program
+            .editor
+            .replace_text("G0 X1\nG1 X2\nG1 X3\n".into());
+        harness.app.set_page(Page::Program);
+        harness.app.program.view = ProgramView::Split;
+        let output = harness.frame_full(Vec::new());
+        let card = toolpath_card_point(&output);
+        harness.frame_events(vec![egui::Event::PointerMoved(card)]);
+        let id = egui::Id::unique("linc-program-editor");
+        harness.ctx.memory_mut(|memory| memory.request_focus(id));
+        harness.frame_events(Vec::new());
+        assert!(
+            harness.ctx.memory(|memory| memory.has_focus(id)),
+            "the G-code editor holds the keyboard"
+        );
+        assert!(
+            linc_view::toolpath_hovered(&harness.ctx),
+            "the pointer is over the toolpath card"
+        );
+
+        let before = harness.app.program.graph_zoom;
+        harness.frame_with(&[(egui::Key::Plus, ctrl())]);
+        assert!(
+            (harness.app.program.graph_zoom - before * VIEW_ZOOM_STEP).abs() < 1e-4,
+            "Ctrl+Plus zooms one step while the editor has the keyboard, {} -> {}",
+            before,
+            harness.app.program.graph_zoom
+        );
+        let before = harness.app.program.graph_zoom;
+        harness.frame_with(&[(egui::Key::Minus, ctrl())]);
+        assert!(
+            (harness.app.program.graph_zoom - before / VIEW_ZOOM_STEP).abs() < 1e-4,
+            "Ctrl+Minus zooms one step out, {} -> {}",
+            before,
+            harness.app.program.graph_zoom
+        );
+        assert!(
+            !harness.app.program.graph_auto_fit,
+            "a zoomed view stops refitting, so the step stays on screen"
+        );
+    }
+
+    /// Ctrl+0 refits, and the card's readout shows the zoom the card is drawn
+    /// at. It used to show a placeholder 1.0x for the frame the fit request was
+    /// made in — the whole visible effect of the key on an already-fitted view.
+    #[test]
+    fn ctrl_zero_refits_the_toolpath_and_the_zoom_readout_never_shows_a_placeholder() {
+        let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+        harness
+            .app
+            .program
+            .editor
+            .replace_text("G0 X1\nG1 X2\nG1 X3\n".into());
+        harness.app.set_page(Page::Program);
+        harness.app.program.view = ProgramView::Split;
+        let output = harness.frame_full(Vec::new());
+        let card = toolpath_card_point(&output);
+        harness.frame_events(vec![egui::Event::PointerMoved(card)]);
+        // A view the operator has moved: the fit has something to do.
+        harness.app.program.graph_auto_fit = false;
+        harness.app.program.graph_zoom = 4.0;
+        let output = harness.frame_full(Vec::new());
+        assert_eq!(
+            zoom_readout(&output).as_deref(),
+            Some("ZOOM 4.0x"),
+            "the readout shows the zoom the card is drawn at"
+        );
+
+        let output = harness.frame_full(vec![egui::Event::Key {
+            key: egui::Key::Num0,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: ctrl(),
+        }]);
+        let fitted = harness.app.program.graph_zoom;
+        assert!(
+            (fitted - 4.0).abs() > 0.1,
+            "Ctrl+0 refits the card instead of leaving it at the operator's zoom"
+        );
+        assert!(
+            harness.app.program.graph_auto_fit,
+            "the fit re-arms the follow-the-program framing"
+        );
+        assert_eq!(
+            zoom_readout(&output).as_deref(),
+            Some("ZOOM 4.0x"),
+            "the fit frame still reports the zoom that was on screen; the old code wrote 1.0 here"
+        );
+        let expected = format!("ZOOM {fitted:.1}x");
+        for _ in 0..2 {
+            let output = harness.frame_full(Vec::new());
+            assert_eq!(
+                zoom_readout(&output).as_deref(),
+                Some(expected.as_str()),
+                "the fitted zoom is what the readout shows from then on"
+            );
+        }
+    }
+
+    /// The panel keyboard has no Tab key, so a click is how the keyboard leaves
+    /// the G-code editor. Clicking the toolpath hands it the card, and the pan
+    /// chords work from there.
+    #[test]
+    fn clicking_the_toolpath_hands_it_the_keyboard_and_the_pan_chords_work() {
+        let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+        harness
+            .app
+            .program
+            .editor
+            .replace_text("G0 X1\nG1 X2\nG1 X3\n".into());
+        harness.app.set_page(Page::Program);
+        harness.app.program.view = ProgramView::Split;
+        let output = harness.frame_full(Vec::new());
+        let card = toolpath_card_point(&output);
+        let id = egui::Id::unique("linc-program-editor");
+        harness.ctx.memory_mut(|memory| memory.request_focus(id));
+        harness.frame_events(vec![egui::Event::PointerMoved(card)]);
+        assert!(
+            harness.ctx.memory(|memory| memory.has_focus(id)),
+            "the editor starts with the keyboard"
+        );
+
+        harness.frame_events(vec![press_at(card, true)]);
+        harness.frame_events(vec![press_at(card, false)]);
+        assert!(
+            !harness.ctx.memory(|memory| memory.has_focus(id)),
+            "the click took the keyboard away from the editor"
+        );
+
+        let before = harness.app.program.graph_pan;
+        harness.frame_with(&[(egui::Key::ArrowLeft, ctrl())]);
+        assert!(
+            (harness.app.program.graph_pan.x - (before.x - VIEW_PAN_STEP)).abs() < 1e-3,
+            "Ctrl+Left pans the toolpath once the card holds the keyboard, {:?} -> {:?}",
+            before,
+            harness.app.program.graph_pan
+        );
+    }
+
+    /// The line move keeps every chord it had: with the editor focused,
+    /// Ctrl+Up/Down moves the selected block and Ctrl+Left/Right moves the
+    /// caret's word — none of them may pan the toolpath.
+    #[test]
+    fn a_focused_editor_keeps_ctrl_up_down_and_ctrl_left_right() {
+        let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+        harness
+            .app
+            .program
+            .editor
+            .replace_text("G0 X1\nG1 X2\nG1 X3\n".into());
+        harness.app.set_page(Page::Program);
+        harness.app.program.view = ProgramView::Split;
+        let output = harness.frame_full(Vec::new());
+        let card = toolpath_card_point(&output);
+        harness.frame_events(vec![egui::Event::PointerMoved(card)]);
+        let id = egui::Id::unique("linc-program-editor");
+        harness.ctx.memory_mut(|memory| memory.request_focus(id));
+        harness.frame_events(Vec::new());
+        assert!(
+            linc_view::toolpath_hovered(&harness.ctx),
+            "pointer on the card"
+        );
+
+        let pan = harness.app.program.graph_pan;
+        harness.frame_with(&[(egui::Key::ArrowLeft, ctrl())]);
+        assert_eq!(
+            harness.app.program.graph_pan, pan,
+            "Ctrl+Left belongs to the editor while it holds the keyboard"
+        );
+        assert_eq!(
+            harness.app.focus_region,
+            FocusRegion::Page,
+            "and it does not move the focus ring either"
+        );
+
+        // A read-only pane has no line move, so use an editable one: the shell
+        // only takes the chord when the page allows an edit.
+        // Line 2 moves up past line 1: the line move answers Ctrl+Up only for a
+        // line that has one above it.
+        harness.app.program.selected_line = 2;
+        harness.frame_with(&[(egui::Key::ArrowUp, ctrl())]);
+        assert_eq!(
+            harness.app.program.graph_pan, pan,
+            "Ctrl+Up moves the selected line, not the view"
+        );
+        assert_eq!(
+            harness.app.program.editor.text(),
+            "G1 X2\nG0 X1\nG1 X3\n",
+            "the selected block moved up, so the chord reached the editor"
+        );
+    }
+
+    /// A nav click is the operator leaving the text field behind, so the row
+    /// that draws its focus border also takes the keyboard back.
+    ///
+    /// The row of the page already in front is the case that matters: it
+    /// navigates nowhere, so nothing else would have released the editor, and
+    /// the pan chords stayed dead while the row drew its focus border. The
+    /// panel keyboard has no Tab key to move focus with.
+    #[test]
+    fn a_navigation_click_releases_the_keyboard_from_the_gcode_editor() {
+        let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+        harness
+            .app
+            .program
+            .editor
+            .replace_text("G0 X1\nG1 X2\nG1 X3\n".into());
+        harness.app.set_page(Page::Program);
+        harness.app.program.view = ProgramView::Split;
+        let output = harness.frame_full(Vec::new());
+        let card = toolpath_card_point(&output);
+        let id = egui::Id::unique("linc-program-editor");
+        harness.ctx.memory_mut(|memory| memory.request_focus(id));
+        harness.frame_events(vec![egui::Event::PointerMoved(card)]);
+        assert!(harness.ctx.memory(|memory| memory.has_focus(id)));
+
+        let row = nav_row_center(&output, "PROGRAM");
+        harness.frame_events(vec![egui::Event::PointerMoved(row)]);
+        harness.frame_events(vec![press_at(row, true)]);
+        harness.frame_events(vec![press_at(row, false)]);
+        assert_eq!(
+            harness.app.page,
+            Page::Program,
+            "the same page, so nothing navigated"
+        );
+        assert!(
+            !harness.ctx.memory(|memory| memory.has_focus(id)),
+            "the nav click left the editor holding the keyboard"
+        );
+        assert_eq!(harness.app.focus_region, FocusRegion::Nav);
+
+        // Back over the toolpath — the row cycled SPLIT to CODE, so it is the
+        // thumbnail beside the editor now — the pan chord is live again.
+        let output = harness.frame_full(Vec::new());
+        let card = toolpath_card_point(&output);
+        harness.frame_events(vec![egui::Event::PointerMoved(card)]);
+        let before = harness.app.program.graph_pan;
+        harness.frame_with(&[(egui::Key::ArrowLeft, ctrl())]);
+        assert!(
+            (harness.app.program.graph_pan.x - (before.x - VIEW_PAN_STEP)).abs() < 1e-3,
+            "Ctrl+Left pans after the nav click, {:?} -> {:?}",
+            before,
             harness.app.program.graph_pan
         );
     }
@@ -7010,6 +7776,26 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                         out.push(rect.rect);
                     }
                 }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut rects = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut rects);
+        }
+        rects
+    }
+
+    /// Every rect the frame painted, for measuring what a card or a row is.
+    fn painted_rects(output: &egui::FullOutput) -> Vec<egui::Rect> {
+        fn walk(shape: &egui::Shape, out: &mut Vec<egui::Rect>) {
+            match shape {
+                egui::Shape::Rect(rect) => out.push(rect.rect),
                 egui::Shape::Vec(shapes) => {
                     for shape in shapes {
                         walk(shape, out);

@@ -319,7 +319,11 @@ pub fn axis_cards(app: &LincApp, ui: &mut Ui) {
     let gap = 8.0;
     let width =
         ((ui.available_width() - gap * (count.saturating_sub(1)) as f32) / count as f32).max(120.0);
-    let height = if compact { 72.0 } else { 92.0 };
+    let height = if compact {
+        theme::DRO_CARD_HEIGHT_COMPACT
+    } else {
+        theme::DRO_CARD_HEIGHT
+    };
     let mut rects = Vec::new();
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = gap;
@@ -390,32 +394,95 @@ pub fn paint_dro_readout(
     let painter = ui.painter_at(rect);
     let work = dro_value(axis, work, diameter);
     let machine = dro_value(axis, machine, diameter);
+    let layout = dro_line_layout(ui, rect.width(), axis, work, machine, compact, diameter);
+    // One line: the axis name, the coordinate beside it and, when it still
+    // fits, the machine coordinate at the right end. The name used to hold a
+    // row of its own above the number — a whole text row spent on one
+    // character, and the reason the cards were a third taller than they needed.
+    let line_y = rect.top() + theme::DRO_LINE_Y;
+    let font = FontId::monospace(layout.font_size);
     painter.text(
-        rect.left_top() + Vec2::new(14.0, 10.0),
-        egui::Align2::LEFT_TOP,
-        dro_axis_label(axis, diameter),
-        FontId::proportional(theme::font_size(13.0)),
+        egui::pos2(rect.left() + theme::DRO_INSET, line_y),
+        egui::Align2::LEFT_CENTER,
+        &layout.label,
+        font.clone(),
         theme::C3,
     );
     if show_work {
         painter.text(
-            rect.left_top() + Vec2::new(14.0, 35.0),
+            egui::pos2(rect.left() + layout.value_x, line_y),
             egui::Align2::LEFT_CENTER,
-            crate::theme::format_position(work, 3),
-            FontId::monospace(if compact { 19.0 } else { 23.0 }),
+            &layout.value,
+            font,
             theme::FG,
         );
     }
     // The machine coordinate sits beside the work value: the operator reads the
     // work position first, and the controller's own coordinate is the reference
-    // for offsets and limits, so it stays visible but dimmed.
-    painter.text(
-        rect.right_top() + Vec2::new(-14.0, 35.0),
-        egui::Align2::RIGHT_CENTER,
-        format!("M {}", crate::theme::format_position(machine, 3)),
-        FontId::monospace(theme::font_size(9.0)),
-        theme::MUTED,
-    );
+    // for offsets and limits, so it stays visible but dimmed — and it goes when
+    // a long coordinate would otherwise run into it.
+    if let Some(text) = &layout.machine {
+        painter.text(
+            egui::pos2(rect.right() - theme::DRO_INSET, line_y),
+            egui::Align2::RIGHT_CENTER,
+            text,
+            FontId::monospace(theme::font_size(theme::DRO_SMALL_FONT)),
+            theme::MUTED,
+        );
+    }
+}
+
+/// Where the pieces of one readout line land, and whether the machine
+/// coordinate still fits beside them.
+pub struct DroLineLayout {
+    pub label: String,
+    pub value: String,
+    pub machine: Option<String>,
+    /// Left edge of the work value, measured from the card's left edge: after
+    /// the label, so the two never overlap.
+    pub value_x: f32,
+    /// The axis name is set at the coordinate's own size.
+    pub font_size: f32,
+}
+
+/// Lay out one readout line from measured text.
+///
+/// The machine coordinate is the field that goes first: the axis name and the
+/// work value are what the operator is reading, and the controller's own
+/// coordinate is a reference. It is dropped whole — a truncated number is
+/// worse than no number — as soon as it would touch the value.
+#[allow(clippy::too_many_arguments)]
+pub fn dro_line_layout(
+    ui: &Ui,
+    width: f32,
+    axis: &str,
+    work: f64,
+    machine: f64,
+    compact: bool,
+    diameter: bool,
+) -> DroLineLayout {
+    let base = if compact {
+        theme::DRO_FONT_COMPACT
+    } else {
+        theme::DRO_FONT
+    };
+    let label = dro_axis_label(axis, diameter);
+    let value = theme::format_position(work, 3);
+    let machine_text = format!("M {}", theme::format_position(machine, 3));
+    let label_width = theme::measure(ui, &label, base);
+    let value_width = theme::measure(ui, &value, base);
+    let machine_width = theme::measure(ui, &machine_text, theme::DRO_SMALL_FONT);
+    // Between the two insets, with a gap either side of the machine value.
+    let available =
+        width - theme::DRO_INSET * 2.0 - label_width - theme::DRO_LABEL_GAP - value_width;
+    let value_x = theme::DRO_INSET + label_width + theme::DRO_LABEL_GAP;
+    DroLineLayout {
+        label,
+        value,
+        machine: (available >= machine_width + theme::DRO_LABEL_GAP).then_some(machine_text),
+        value_x,
+        font_size: theme::font_size(base),
+    }
 }
 
 /// The bottom band of a jog-screen readout: distance to go and the move bar.
@@ -1421,6 +1488,16 @@ pub fn trajectory(
         crate::state::live_trail_shift(&app.snapshot, app.program.preview_offset.as_ref());
     view.show_legend = view.show_legend && show_legend;
     let response = draw_trajectory(ui, &mut view);
+    // A click on the card hands it the keyboard. The shell's pan chords are
+    // hover-scoped *and* behind "no text field is focused" — Ctrl+Left/Right is
+    // the G-code editor's word move, Ctrl+Up/Down its line move — and the panel
+    // keyboard has no Tab key to move focus with. An editor that took focus on
+    // page entry therefore held the keyboard for the rest of the session and
+    // the chords were dead with no way back short of a dialog. Clicking the
+    // toolpath is the operator saying "look here instead", so it takes focus.
+    if response.clicked() || response.double_clicked() || response.drag_started() {
+        response.request_focus();
+    }
     *zoom = view.zoom;
     *pan = view.pan;
     *yaw = view.yaw;
@@ -1891,10 +1968,13 @@ pub fn live_coordinates_card(ui: &mut Ui, header: &str, units_label: &str, rows:
                 .inner_margin(egui::Margin::symmetric(8, 4));
             frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    // The axis name is set at the coordinate's own size and
+                    // on its line: one character does not need a row of its
+                    // own, and the pair reads as one number.
                     ui.label(
                         RichText::new(&row.name)
                             .monospace()
-                            .size(theme::font_size(13.0))
+                            .size(theme::font_size(22.0))
                             .strong()
                             .color(theme::C3),
                     );
