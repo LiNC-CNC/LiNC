@@ -1814,6 +1814,16 @@ impl LincApp {
 
     pub fn refresh_preview(&mut self) {
         let text = self.program.editor.text();
+        // The frame is the controller's offset, program or not. A jog screen that
+        // has never loaded a program still has to place the tool at its machine
+        // position: with preview_offset left at None, live_trail_shift collapses
+        // to work - machine, and the marker is drawn on the tool's work
+        // coordinate - machine home once the operator goes to WCS zero, and off
+        // by the whole offset before that.
+        let offset = self.preview_offset(&text);
+        self.program.preview_offset = offset.clone();
+        self.program.preview_offsets_seen = self.snapshot.offsets.revision;
+        self.program.preview_offsets_rows = offsets_signature(&self.snapshot.offsets.offsets);
         if text.is_empty() {
             self.program.preview = Preview::empty();
             self.program.last_valid_preview = Preview::empty();
@@ -1825,7 +1835,6 @@ impl LincApp {
         // the program selects (a `G54`/`G55` in its preamble is where it will
         // cut), falling back to the controller's active system for a program that
         // selects none.
-        let offset = self.preview_offset(&text);
         let mut preview = parse_preview(&text, &axes, offset.as_ref(), self.tool_tip());
         // The first rapid is the approach from the live tool position to the
         // program start. Keep the program geometry; do not draw that connector.
@@ -1835,9 +1844,6 @@ impl LincApp {
             self.program.last_valid_preview = preview.clone();
         }
         self.program.preview = preview;
-        self.program.preview_offset = offset;
-        self.program.preview_offsets_seen = self.snapshot.offsets.revision;
-        self.program.preview_offsets_rows = offsets_signature(&self.snapshot.offsets.offsets);
     }
 
     /// The work offset the preview is drawn with, in machine coordinates: the
@@ -5322,6 +5328,48 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             machine_status_field(false, true),
             ("MACHINE ?".to_string(), theme::WARNING)
         );
+    }
+
+    /// The graph's frame is the controller's offset even when no program is
+    /// loaded. The empty-text branch used to return before setting it, so a jog
+    /// screen that had never opened a program kept `preview_offset = None`, the
+    /// marker shift collapsed to `work - machine`, and the toolhead was drawn on
+    /// its work coordinate: machine home at WCS zero, off by the whole offset
+    /// before that.
+    #[test]
+    fn a_jog_screen_without_a_program_still_frames_the_offset() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.app.program.editor.replace_text(String::new());
+        harness.app.snapshot.offsets.active_index = Some(1);
+        if let Some(row) = harness
+            .app
+            .snapshot
+            .offsets
+            .offsets
+            .iter_mut()
+            .find(|row| row.index == 1)
+        {
+            row.values.insert("X", -156.381);
+            row.values.insert("Y", -67.696);
+            row.values.insert("Z", -89.944);
+        }
+        if let Some(position) = harness.app.snapshot.positions.axes.get_mut("X") {
+            position.machine = -156.381;
+            position.work = 0.0;
+        }
+        harness.app.refresh_preview();
+        let offset = harness
+            .app
+            .program
+            .preview_offset
+            .clone()
+            .expect("the controller's offset is the frame, program or not");
+        assert_eq!(offset.get("X").copied(), Some(-156.381));
+        assert!(harness.app.program.preview.segments.is_empty(), "no program");
+        // The marker lands where the work reading already is: its shift is zero,
+        // not the whole offset.
+        let shift = crate::state::live_trail_shift(&harness.app.snapshot, Some(&offset));
+        assert!(shift[0].abs() < 1e-9, "marker shift {shift:?}");
     }
 
     /// The signature is the numbers the frame depends on, in a stable order:
