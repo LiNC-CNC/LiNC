@@ -1022,7 +1022,12 @@ fn key_tables(face: PanelFace) -> KeyTables {
 // directions swapped.
 const LEFT_KEYS: [KeySpec; 12] = [
     ("B", Some("^"), buttons::JOG_BP, Some(crate::leds::JOG_BP)),
-    ("SAFE DOOR", None, buttons::SAFE_DOOR, Some(crate::leds::SAFE_DOOR)),
+    (
+        "SAFE DOOR",
+        None,
+        buttons::SAFE_DOOR,
+        Some(crate::leds::SAFE_DOOR),
+    ),
     ("B", Some("v"), buttons::JOG_BN, Some(crate::leds::JOG_BN)),
     ("A", Some("^"), buttons::JOG_AP, Some(crate::leds::JOG_AP)),
     ("Z", Some("^"), buttons::JOG_ZP, Some(crate::leds::JOG_ZP)),
@@ -1036,36 +1041,101 @@ const LEFT_KEYS: [KeySpec; 12] = [
 ];
 
 const MIDDLE_KEYS: [KeySpec; 15] = [
-    ("MPG SIM", None, buttons::MPG_SIM, Some(crate::leds::MPG_SIM)),
+    (
+        "MPG SIM",
+        None,
+        buttons::MPG_SIM,
+        Some(crate::leds::MPG_SIM),
+    ),
     ("S.B.K.", None, buttons::SBK, Some(crate::leds::SBK)),
     ("B.D.T.", None, buttons::BDT, Some(crate::leds::BDT)),
     ("M.LK", None, buttons::MLK, Some(crate::leds::MLK)),
     ("OPT", None, buttons::OPT, Some(crate::leds::OPT)),
     ("D.R.N.", None, buttons::DRN, Some(crate::leds::DRN)),
-    ("WORKLAMP", None, buttons::WORKLAMP, Some(crate::leds::WORKLAMP)),
-    ("AIR BLOW", None, buttons::AIR_BLOW, Some(crate::leds::AIR_BLOW)),
+    (
+        "WORKLAMP",
+        None,
+        buttons::WORKLAMP,
+        Some(crate::leds::WORKLAMP),
+    ),
+    (
+        "AIR BLOW",
+        None,
+        buttons::AIR_BLOW,
+        Some(crate::leds::AIR_BLOW),
+    ),
     ("PT.LA", None, buttons::PT_LA, Some(crate::leds::PT_LA)),
-    ("COOLANT", None, buttons::COOLANT, Some(crate::leds::COOLANT)),
-    ("SPD.CTS", None, buttons::SPD_CTS, Some(crate::leds::SPD_CTS)),
+    (
+        "COOLANT",
+        None,
+        buttons::COOLANT,
+        Some(crate::leds::COOLANT),
+    ),
+    (
+        "SPD.CTS",
+        None,
+        buttons::SPD_CTS,
+        Some(crate::leds::SPD_CTS),
+    ),
     ("FLUSH", None, buttons::FLUSH, Some(crate::leds::FLUSH)),
     ("LUB", None, buttons::LUB, Some(crate::leds::LUB)),
-    ("CORRIDOR", None, buttons::CORRIDOR, Some(crate::leds::CORRIDOR)),
+    (
+        "CORRIDOR",
+        None,
+        buttons::CORRIDOR,
+        Some(crate::leds::CORRIDOR),
+    ),
     ("K1", None, buttons::K1, Some(crate::leds::K1)),
 ];
 
 const RIGHT_KEYS: [KeySpec; 15] = [
-    ("SPD.ORT", None, buttons::SPD_ORI, Some(crate::leds::SPD_ORI)),
+    (
+        "SPD.ORT",
+        None,
+        buttons::SPD_ORI,
+        Some(crate::leds::SPD_ORI),
+    ),
     ("MAG CW", None, buttons::MAG_CW, Some(crate::leds::MAG_CW)),
-    ("MAG CCW", None, buttons::MAG_CCW, Some(crate::leds::MAG_CCW)),
+    (
+        "MAG CCW",
+        None,
+        buttons::MAG_CCW,
+        Some(crate::leds::MAG_CCW),
+    ),
     ("SPD.CW", None, buttons::SPD_CW, Some(crate::leds::SPD_CW)),
     ("SPD.SP", None, buttons::SPD_SP, Some(crate::leds::SPD_SP)),
-    ("SPD.CCW", None, buttons::SPD_CCW, Some(crate::leds::SPD_CCW)),
-    ("CHIP CW", None, buttons::CHIP_CW, Some(crate::leds::CHIP_CW)),
-    ("CHIP SP", None, buttons::CHIP_SP, Some(crate::leds::CHIP_SP)),
-    ("CHIP CCW", None, buttons::CHIP_CCW, Some(crate::leds::CHIP_CCW)),
+    (
+        "SPD.CCW",
+        None,
+        buttons::SPD_CCW,
+        Some(crate::leds::SPD_CCW),
+    ),
+    (
+        "CHIP CW",
+        None,
+        buttons::CHIP_CW,
+        Some(crate::leds::CHIP_CW),
+    ),
+    (
+        "CHIP SP",
+        None,
+        buttons::CHIP_SP,
+        Some(crate::leds::CHIP_SP),
+    ),
+    (
+        "CHIP CCW",
+        None,
+        buttons::CHIP_CCW,
+        Some(crate::leds::CHIP_CCW),
+    ),
     ("CHUCK", None, buttons::CHUCK, Some(crate::leds::CHUCK)),
     ("POT DN", None, buttons::POT_DN, Some(crate::leds::POT_DN)),
-    ("ARM MAN", None, buttons::ARM_MAN, Some(crate::leds::ARM_MAN)),
+    (
+        "ARM MAN",
+        None,
+        buttons::ARM_MAN,
+        Some(crate::leds::ARM_MAN),
+    ),
     ("K2", None, buttons::K2, Some(crate::leds::K2)),
     ("K3", None, buttons::K3, Some(crate::leds::K3)),
     ("K4", None, buttons::K4, Some(crate::leds::K4)),
@@ -1097,9 +1167,24 @@ const LATHE_LEFT_KEYS: [KeySpec; 12] = [
 ];
 
 const LATHE_MIDDLE_KEYS: [KeySpec; 15] = [
-    ("MPG SIM", None, buttons::MPG_SIM, Some(crate::leds::MPG_SIM)),
-    ("SAFE DOOR", None, buttons::SAFE_DOOR, Some(crate::leds::SAFE_DOOR)),
-    ("CORRIDOR", None, buttons::CORRIDOR, Some(crate::leds::CORRIDOR)),
+    (
+        "MPG SIM",
+        None,
+        buttons::MPG_SIM,
+        Some(crate::leds::MPG_SIM),
+    ),
+    (
+        "SAFE DOOR",
+        None,
+        buttons::SAFE_DOOR,
+        Some(crate::leds::SAFE_DOOR),
+    ),
+    (
+        "CORRIDOR",
+        None,
+        buttons::CORRIDOR,
+        Some(crate::leds::CORRIDOR),
+    ),
     ("S.B.K", None, buttons::SBK, Some(crate::leds::SBK)),
     ("B.D.T", None, buttons::BDT, Some(crate::leds::BDT)),
     ("OPT", None, buttons::OPT, Some(crate::leds::OPT)),
@@ -1122,16 +1207,31 @@ const LATHE_RIGHT_KEYS: [KeySpec; 15] = [
     ("SPD.2.CCW", None, buttons::SPD2_CCW, None),
     ("SPD.CW", None, buttons::SPD_CW, Some(crate::leds::SPD_CW)),
     ("SPD.SP", None, buttons::SPD_SP, Some(crate::leds::SPD_SP)),
-    ("SPD.CCW", None, buttons::SPD_CCW, Some(crate::leds::SPD_CCW)),
+    (
+        "SPD.CCW",
+        None,
+        buttons::SPD_CCW,
+        Some(crate::leds::SPD_CCW),
+    ),
     ("SPD. JOG", None, buttons::SPD_JOG, None),
     ("FEED BRAKE", None, buttons::FEED_BRAKE, None),
     ("LUB", None, buttons::LUB, Some(crate::leds::LUB)),
     ("CHUCK", None, buttons::CHUCK, Some(crate::leds::CHUCK)),
     ("TAIL", None, buttons::TAIL, None),
     ("CHIP", None, buttons::CHIP, None),
-    ("COOLANT", None, buttons::COOLANT, Some(crate::leds::COOLANT)),
+    (
+        "COOLANT",
+        None,
+        buttons::COOLANT,
+        Some(crate::leds::COOLANT),
+    ),
     ("TOOL CHG.", None, buttons::TOOL_CHG, None),
-    ("WORKLAMP", None, buttons::WORKLAMP, Some(crate::leds::WORKLAMP)),
+    (
+        "WORKLAMP",
+        None,
+        buttons::WORKLAMP,
+        Some(crate::leds::WORKLAMP),
+    ),
 ];
 
 /// Lathe right column for a single-spindle machine: same controls, without the
@@ -1139,16 +1239,31 @@ const LATHE_RIGHT_KEYS: [KeySpec; 15] = [
 const LATHE_RIGHT_KEYS_SINGLE: [KeySpec; 12] = [
     ("SPD.CW", None, buttons::SPD_CW, Some(crate::leds::SPD_CW)),
     ("SPD.SP", None, buttons::SPD_SP, Some(crate::leds::SPD_SP)),
-    ("SPD.CCW", None, buttons::SPD_CCW, Some(crate::leds::SPD_CCW)),
+    (
+        "SPD.CCW",
+        None,
+        buttons::SPD_CCW,
+        Some(crate::leds::SPD_CCW),
+    ),
     ("SPD. JOG", None, buttons::SPD_JOG, None),
     ("FEED BRAKE", None, buttons::FEED_BRAKE, None),
     ("LUB", None, buttons::LUB, Some(crate::leds::LUB)),
     ("CHUCK", None, buttons::CHUCK, Some(crate::leds::CHUCK)),
     ("TAIL", None, buttons::TAIL, None),
     ("CHIP", None, buttons::CHIP, None),
-    ("COOLANT", None, buttons::COOLANT, Some(crate::leds::COOLANT)),
+    (
+        "COOLANT",
+        None,
+        buttons::COOLANT,
+        Some(crate::leds::COOLANT),
+    ),
     ("TOOL CHG.", None, buttons::TOOL_CHG, None),
-    ("WORKLAMP", None, buttons::WORKLAMP, Some(crate::leds::WORKLAMP)),
+    (
+        "WORKLAMP",
+        None,
+        buttons::WORKLAMP,
+        Some(crate::leds::WORKLAMP),
+    ),
 ];
 
 /// One lamp of the machine-status array: lamp bit, caption and lens colour.
@@ -1343,10 +1458,7 @@ fn key_grid_rects(l: &PanelLayout, x0: f32, columns: usize, count: usize) -> Vec
 
 fn knob_hit_rect(l: &PanelLayout, knob: (f32, f32, f32)) -> Rect {
     let (cx, cy, r) = knob;
-    Rect::from_center_size(
-        l.p(cx, cy),
-        Vec2::splat(2.0 * (r + KNOB_HIT_PAD) * l.k),
-    )
+    Rect::from_center_size(l.p(cx, cy), Vec2::splat(2.0 * (r + KNOB_HIT_PAD) * l.k))
 }
 
 fn interactives(l: &PanelLayout, probe_key: bool) -> Interactives {
@@ -1459,13 +1571,7 @@ fn label(
 
 /// A filled circle shaded from `inner` at the center to `outer` at the rim,
 /// so pushbuttons, lamps and knob caps read as domed instead of flat.
-fn paint_dome(
-    painter: &egui::Painter,
-    center: Pos2,
-    radius: f32,
-    inner: Color32,
-    outer: Color32,
-) {
+fn paint_dome(painter: &egui::Painter, center: Pos2, radius: f32, inner: Color32, outer: Color32) {
     const SEGMENTS: u32 = 40;
     let mut mesh = egui::epaint::Mesh::default();
     mesh.colored_vertex(center, inner);
@@ -1593,8 +1699,8 @@ fn key_disabled(disconnected: u64, mask: u64) -> bool {
 
 /// Buttons whose pin exists but is attached to no signal.
 fn disconnected_button_mask(hal: &linc_hal::HalReader) -> u64 {
-    let component = std::env::var("LINC_PANEL_COMPONENT")
-        .unwrap_or_else(|_| "cnc_panel".to_string());
+    let component =
+        std::env::var("LINC_PANEL_COMPONENT").unwrap_or_else(|_| "cnc_panel".to_string());
     let mut mask = 0;
     for (name, bit) in crate::BUTTON_PINS {
         let pin = format!("{component}.{name}");
@@ -1696,6 +1802,31 @@ fn panel_key(
         MUTED.gamma_multiply(0.65)
     };
     let cx = rect.center().x;
+    if let Some(icon) = crate::icons::for_key(mask, sub) {
+        if matches!(icon, crate::icons::PanelIcon::Jog { .. }) {
+            let icon_rect = Rect::from_center_size(
+                rect.center(),
+                Vec2::new(rect.width() * 0.70, rect.height() * 0.76),
+            );
+            crate::icons::paint(ui.painter(), icon, icon_rect, ink);
+            return;
+        }
+
+        let icon_rect = Rect::from_center_size(
+            Pos2::new(cx, rect.top() + rect.height() * 0.34),
+            Vec2::new(rect.width() * 0.60, rect.height() * 0.46),
+        );
+        crate::icons::paint(ui.painter(), icon, icon_rect, ink);
+        ui.painter().text(
+            Pos2::new(cx, rect.top() + rect.height() * 0.78),
+            Align2::CENTER_CENTER,
+            label_text,
+            l.font(12.5),
+            ink,
+        );
+        return;
+    }
+
     let cy = if sub.is_some() {
         rect.top() + rect.height() * 0.40
     } else {
@@ -1898,8 +2029,14 @@ fn draw_cycle_plate(
             Stroke::NONE,
         ));
     };
-    arrow(g.right_top() + Vec2::new(0.0, 1.5 * l.k), Vec2::new(1.0, 0.0));
-    arrow(g.left_bottom() - Vec2::new(0.0, 1.5 * l.k), Vec2::new(-1.0, 0.0));
+    arrow(
+        g.right_top() + Vec2::new(0.0, 1.5 * l.k),
+        Vec2::new(1.0, 0.0),
+    );
+    arrow(
+        g.left_bottom() - Vec2::new(0.0, 1.5 * l.k),
+        Vec2::new(-1.0, 0.0),
+    );
     let c = rect.center();
     match kind {
         CyclePlate::Start => {
@@ -2032,7 +2169,8 @@ fn draw_mode_knob(ui: &egui::Ui, l: &PanelLayout, state: &SimPanelState, rect: R
         let dir = Vec2::new(a.cos(), a.sin());
         let p0 = center + dir * (r + 8.0) * l.k;
         let p1 = center + dir * (r + 16.0) * l.k;
-        ui.painter().line_segment([p0, p1], Stroke::new(1.0 * l.k, MUTED));
+        ui.painter()
+            .line_segment([p0, p1], Stroke::new(1.0 * l.k, MUTED));
     }
     for mode in PanelMode::ALL {
         let a = mode_angle(mode_index(mode));
@@ -2045,7 +2183,13 @@ fn draw_mode_knob(ui: &egui::Ui, l: &PanelLayout, state: &SimPanelState, rect: R
             if state.mode == mode { BLUE } else { TEXT },
         );
     }
-    paint_knob(ui.painter(), l, center, r, mode_angle(mode_index(state.mode)));
+    paint_knob(
+        ui.painter(),
+        l,
+        center,
+        r,
+        mode_angle(mode_index(state.mode)),
+    );
 
     if knob.dragged() || knob.clicked() {
         if let Some(pointer) = ui.ctx().pointer_interact_pos() {
@@ -2142,7 +2286,8 @@ fn draw_override_knob(
         let dir = Vec2::new(a.cos(), a.sin());
         let p0 = center + dir * (r + 6.0) * l.k;
         let p1 = center + dir * (r + 14.0) * l.k;
-        ui.painter().line_segment([p0, p1], Stroke::new(1.0 * l.k, MUTED));
+        ui.painter()
+            .line_segment([p0, p1], Stroke::new(1.0 * l.k, MUTED));
     }
     for (norm, text) in numerals {
         let a = value_angle(*norm);
@@ -2346,7 +2491,10 @@ fn paint_panel(
             Color32::from_rgb(0x12, 0x14, 0x15),
         );
         painter.line_segment(
-            [c + Vec2::new(-4.0, 0.0) * l.k, c + Vec2::new(4.0, 0.0) * l.k],
+            [
+                c + Vec2::new(-4.0, 0.0) * l.k,
+                c + Vec2::new(4.0, 0.0) * l.k,
+            ],
             Stroke::new(1.2 * l.k, Color32::from_rgb(0x08, 0x09, 0x0a)),
         );
     }
@@ -2575,10 +2723,7 @@ fn paint_panel(
     let tip = protect_center + Vec2::new(0.55 * a, 0.8) * 30.0 * l.k;
     painter.line_segment(
         [protect_center, tip],
-        Stroke::new(
-            6.0 * l.k,
-            if state.program_protect { GREEN } else { AMBER },
-        ),
+        Stroke::new(6.0 * l.k, if state.program_protect { GREEN } else { AMBER }),
     );
     painter.circle_filled(
         protect_center,
@@ -2949,7 +3094,6 @@ mod tests {
     use super::*;
     use linc_diag::SimControl as _;
 
-
     #[test]
     fn disconnected_keys_grey_only_their_own_buttons() {
         let disconnected = buttons::K4 | buttons::CHUCK | buttons::SAFE_DOOR;
@@ -2973,7 +3117,11 @@ mod tests {
 
     #[test]
     fn every_drawn_key_has_a_cnc_panel_pin() {
-        for face in [PanelFace::Mill, PanelFace::Lathe(false), PanelFace::Lathe(true)] {
+        for face in [
+            PanelFace::Mill,
+            PanelFace::Lathe(false),
+            PanelFace::Lathe(true),
+        ] {
             for mask in drawn_masks(face) {
                 assert!(
                     crate::BUTTON_PINS.iter().any(|(_, bit)| *bit == mask),
@@ -3035,8 +3183,14 @@ mod tests {
             PanelFace::Lathe(true)
         );
         // Either key alone selects the lathe face; the capability rides with it.
-        assert_eq!(PanelFace::for_profile("lathe", "", false), PanelFace::Lathe(false));
-        assert_eq!(PanelFace::for_profile("", "lathe-sim", true), PanelFace::Lathe(true));
+        assert_eq!(
+            PanelFace::for_profile("lathe", "", false),
+            PanelFace::Lathe(false)
+        );
+        assert_eq!(
+            PanelFace::for_profile("", "lathe-sim", true),
+            PanelFace::Lathe(true)
+        );
         assert_eq!(PanelFace::for_profile("", "", false), PanelFace::Mill);
         // A mill ignores the sub-spindle flag.
         assert_eq!(PanelFace::for_profile("mill", "", true), PanelFace::Mill);
@@ -3445,7 +3599,10 @@ mod tests {
         fix.frame(vec![]);
 
         touch.tap(&mut fix, 1, it.protect.center());
-        assert!(fix.handle.snapshot().program_protect, "tap toggles protect on");
+        assert!(
+            fix.handle.snapshot().program_protect,
+            "tap toggles protect on"
+        );
         touch.tap(&mut fix, 2, it.protect.center());
         assert!(
             !fix.handle.snapshot().program_protect,
@@ -3628,15 +3785,54 @@ mod tests {
 
         for legend in [
             // Left jog group.
-            "RAPID", "C/S", "C", "X", "Y", "Z", "A", "B",
+            "RAPID",
+            "C/S",
+            "C",
+            "X",
+            "Y",
+            "Z",
+            "A",
+            "B",
             // Middle group.
-            "MPG SIM", "SAFE DOOR", "CORRIDOR", "S.B.K", "B.D.T", "OPT", "M.LK", "MST", "D.R.N", "K1",
-            "K3", "K2", "K4",
+            "MPG SIM",
+            "SAFE DOOR",
+            "CORRIDOR",
+            "S.B.K",
+            "B.D.T",
+            "OPT",
+            "M.LK",
+            "MST",
+            "D.R.N",
+            "K1",
+            "K3",
+            "K2",
+            "K4",
             // Right group.
-            "SPD.2.CW", "SPD.2.SP", "SPD.2.CCW", "SPD.CW", "SPD.SP", "SPD.CCW", "SPD. JOG",
-            "FEED BRAKE", "LUB", "CHUCK", "TAIL", "CHIP", "COOLANT", "TOOL CHG.", "WORKLAMP",
+            "SPD.2.CW",
+            "SPD.2.SP",
+            "SPD.2.CCW",
+            "SPD.CW",
+            "SPD.SP",
+            "SPD.CCW",
+            "SPD. JOG",
+            "FEED BRAKE",
+            "LUB",
+            "CHUCK",
+            "TAIL",
+            "CHIP",
+            "COOLANT",
+            "TOOL CHG.",
+            "WORKLAMP",
             // Lamp arrays and the three 7-segment windows.
-            "NC", "PLC", "MMC", "EMG", "RUN", "READY", "TOOL.", "TOOL COMP.", "STATUS.",
+            "NC",
+            "PLC",
+            "MMC",
+            "EMG",
+            "RUN",
+            "READY",
+            "TOOL.",
+            "TOOL COMP.",
+            "STATUS.",
         ] {
             assert!(
                 legends.contains(&legend),
@@ -3658,8 +3854,16 @@ mod tests {
             .map(|(name, _, _, _)| *name)
             .collect();
         for legend in [
-            "SPD.2.CW", "SPD.2.SP", "SPD.2.CCW", "SPD. JOG", "FEED BRAKE", "TAIL", "CHIP",
-            "TOOL CHG.", "MST", "C/S",
+            "SPD.2.CW",
+            "SPD.2.SP",
+            "SPD.2.CCW",
+            "SPD. JOG",
+            "FEED BRAKE",
+            "TAIL",
+            "CHIP",
+            "TOOL CHG.",
+            "MST",
+            "C/S",
         ] {
             assert!(
                 !mill.contains(&legend),
@@ -3683,11 +3887,48 @@ mod tests {
         assert_eq!(
             names,
             [
-                "B", "SAFE DOOR", "B", "A", "Z", "Y", "X", "RAPID", "X", "Y", "Z", "A", "MPG SIM",
-                "S.B.K.", "B.D.T.", "M.LK", "OPT", "D.R.N.", "WORKLAMP", "AIR BLOW", "PT.LA",
-                "COOLANT", "SPD.CTS", "FLUSH", "LUB", "CORRIDOR", "K1", "SPD.ORT", "MAG CW",
-                "MAG CCW", "SPD.CW", "SPD.SP", "SPD.CCW", "CHIP CW", "CHIP SP", "CHIP CCW",
-                "CHUCK", "POT DN", "ARM MAN", "K2", "K3", "K4",
+                "B",
+                "SAFE DOOR",
+                "B",
+                "A",
+                "Z",
+                "Y",
+                "X",
+                "RAPID",
+                "X",
+                "Y",
+                "Z",
+                "A",
+                "MPG SIM",
+                "S.B.K.",
+                "B.D.T.",
+                "M.LK",
+                "OPT",
+                "D.R.N.",
+                "WORKLAMP",
+                "AIR BLOW",
+                "PT.LA",
+                "COOLANT",
+                "SPD.CTS",
+                "FLUSH",
+                "LUB",
+                "CORRIDOR",
+                "K1",
+                "SPD.ORT",
+                "MAG CW",
+                "MAG CCW",
+                "SPD.CW",
+                "SPD.SP",
+                "SPD.CCW",
+                "CHIP CW",
+                "CHIP SP",
+                "CHIP CCW",
+                "CHUCK",
+                "POT DN",
+                "ARM MAN",
+                "K2",
+                "K3",
+                "K4",
             ]
         );
         assert_eq!(
@@ -3771,9 +4012,7 @@ mod tests {
         let mut fix = PanelFixture::new(false);
         let mut touch = TouchEmu::new();
         // The spot the key occupies with --probe-key holds nothing now.
-        let probe_spot = fix
-            .layout()
-            .r(PROBE_KEY_AT.0, PROBE_KEY_AT.1, KEY_W, KEY_H);
+        let probe_spot = fix.layout().r(PROBE_KEY_AT.0, PROBE_KEY_AT.1, KEY_W, KEY_H);
         let it = interactives(&fix.layout(), false);
         assert!(
             it.momentary

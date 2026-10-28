@@ -5,6 +5,7 @@
 //! HMI never opens the serial port and never writes these pins.
 
 pub mod hal;
+pub mod icons;
 pub mod serial;
 pub mod sim;
 

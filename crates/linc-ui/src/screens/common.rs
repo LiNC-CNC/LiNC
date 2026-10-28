@@ -932,6 +932,35 @@ fn listing_first_line(focus: usize, window_len: usize, running: bool, total: usi
     }
 }
 
+/// Top row for an *idle* listing: keep the highlighted line where it is and
+/// scroll one line when it leaves the window.
+///
+/// Re-centring on every move made the list jump under the operator's eyes while
+/// they walked a selection down a long program; a jump larger than the window
+/// still centres, because scrolling to put the new line at the very edge is
+/// what makes it hard to find.
+fn listing_follow(previous: isize, focus: usize, window_len: usize, total: usize) -> isize {
+    let window_len = window_len.max(1) as isize;
+    let focus = focus.max(1) as isize;
+    let last_first = (total as isize - window_len + 1).max(1);
+    let mut first = previous.clamp(1, last_first);
+    if focus < first || focus >= first + window_len {
+        let distance = if focus < first {
+            first - focus
+        } else {
+            focus - (first + window_len - 1)
+        };
+        first = if distance > window_len {
+            (focus - window_len / 2).max(1)
+        } else if focus < first {
+            focus
+        } else {
+            focus - window_len + 1
+        };
+    }
+    first.clamp(1, last_first)
+}
+
 fn listing_rows(available: f32, pitch: f32) -> usize {
     (available / pitch.max(1.0)).floor().max(0.0) as usize
 }
@@ -1010,7 +1039,19 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                     } else {
                         app.program.selected_line.clamp(1, total)
                     };
-                    let first = listing_first_line(focus, window_len, is_running, total);
+                    let first = if is_running {
+                        listing_first_line(focus, window_len, true, total)
+                    } else {
+                        listing_follow(
+                            app.program.listing_first.get(),
+                            focus,
+                            window_len,
+                            total,
+                        )
+                    };
+                    // Remembered either way, so the handover when a run ends
+                    // does not throw the window back to where it was idle.
+                    app.program.listing_first.set(first);
                     let mut lines = content.lines().skip((first.max(1) - 1) as usize);
                     let number_font = FontId::monospace(theme::font_size(7.5));
                     let number_width = ui.fonts_mut(|fonts| {
@@ -1997,6 +2038,9 @@ pub fn zero_axes(app: &mut crate::shell::LincApp, axes: Vec<String>) {
     app.send(linc_core::command::MachineCommand::ZeroWorkOffset { index, axes });
 }
 
+/// Room above each chip for its digit: the disc is 14 px across, plus air.
+const INCREMENT_DISC_ROW: f32 = 20.0;
+
 /// The jog increment the operator picked from `[DISPLAY] INCREMENTS`.
 ///
 /// The panel has one keypad and no spare keys, so a step is picked by its
@@ -2008,6 +2052,13 @@ pub fn increment_row(app: &mut LincApp, ui: &mut Ui) {
         return;
     }
     let selected = app.jog_increment_index();
+    // One width for every chip and every disc: the operator aims at a column,
+    // and a row of buttons sized by their text reads as a ragged sentence.
+    let chip_width = steps
+        .iter()
+        .map(|(label, _)| theme::measure(ui, label, 10.0))
+        .fold(0.0_f32, f32::max)
+        + 28.0;
     let mut pick = None;
     theme::card(ui, |ui| {
         ui.horizontal(|ui| {
@@ -2023,23 +2074,36 @@ pub fn increment_row(app: &mut LincApp, ui: &mut Ui) {
         });
         ui.horizontal_wrapped(|ui| {
             for (index, (label, _)) in steps.iter().enumerate() {
-                // The digit is the key, so it is on screen with its step, but
-                // outside the chip: the button carries the value, the number
-                // above it is the keyboard shortcut.
+                // The digit is the key, so it sits above its chip in a disc,
+                // centred on the column: the button carries the value alone.
                 ui.vertical(|ui| {
-                    ui.add_space(2.0);
-                    ui.label(
-                        RichText::new(format!("{}", index + 1))
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
+                    let (disc, _) = ui.allocate_exact_size(
+                        Vec2::new(chip_width, INCREMENT_DISC_ROW),
+                        Sense::hover(),
+                    );
+                    let centre = disc.center();
+                    let ink = if index == selected {
+                        theme::ACCENT
+                    } else {
+                        theme::MUTED
+                    };
+                    ui.painter()
+                        .circle_stroke(centre, 7.0, egui::Stroke::new(1.0, ink));
+                    ui.painter().text(
+                        centre,
+                        egui::Align2::CENTER_CENTER,
+                        format!("{}", index + 1),
+                        FontId::monospace(theme::font_size(9.0)),
+                        ink,
                     );
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    if theme::chip(ui, label.clone(), index == selected).clicked() {
+                    if theme::chip_sized(ui, label.clone(), index == selected, chip_width)
+                        .clicked()
+                    {
                         pick = Some(index);
                     }
                 });
-                ui.add_space(4.0);
+                ui.add_space(6.0);
             }
         });
     });
@@ -2159,6 +2223,26 @@ pub fn live_coordinates_card(ui: &mut Ui, header: &str, units_label: &str, rows:
 mod tests {
     /// The running line sits a third of the way down the listing: a third of
     /// past lines above it, two thirds of upcoming ones below.
+    /// An idle listing scrolls only when the highlighted line leaves it: one
+    /// line at a time, and a jump bigger than the window still centres.
+    #[test]
+    fn the_idle_listing_follows_the_highlighted_line_when_it_leaves() {
+        // Inside the window: nothing moves, even at the edges.
+        assert_eq!(super::listing_follow(1, 5, 18, 37), 1);
+        assert_eq!(super::listing_follow(1, 18, 18, 37), 1);
+        // One past the bottom: one line of scroll.
+        assert_eq!(super::listing_follow(1, 19, 18, 37), 2);
+        // Above the window: the window moves up to it.
+        assert_eq!(super::listing_follow(20, 10, 18, 37), 10);
+        // A jump larger than the window centres instead of pinning the line to
+        // the edge...
+        assert_eq!(super::listing_follow(1, 60, 18, 100), 51);
+        // ...and never past the last full window, nor above line 1.
+        assert_eq!(super::listing_follow(1, 37, 18, 37), 20);
+        assert_eq!(super::listing_follow(40, 37, 18, 37), 20);
+        assert_eq!(super::listing_follow(0, 1, 18, 37), 1);
+    }
+
     #[test]
     fn the_running_line_keeps_its_place_a_third_down_the_listing() {
         for (focus, window) in [(1usize, 9usize), (2, 9), (5, 9), (40, 12), (1, 3), (7, 3)] {

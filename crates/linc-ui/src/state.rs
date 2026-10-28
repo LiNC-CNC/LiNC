@@ -647,6 +647,10 @@ pub struct ProgramUi {
     /// coordinates without guessing the active system.
     pub preview_offset: Option<linc_core::model::AxisMap<f64>>,
     pub follow_current: bool,
+    /// Top row the program listing was drawn at. Kept so an idle listing can
+    /// scroll one line at a time when the highlighted line leaves the window,
+    /// instead of re-centring on every move.
+    pub listing_first: std::cell::Cell<isize>,
     pub focus_editor: bool,
     pub code_scroll_to_line: Option<usize>,
     /// `snapshot.offsets.revision` the preview was drawn against, so a touch-off
@@ -680,6 +684,7 @@ impl Default for ProgramUi {
             graph_auto_fit: true,
             preview_offset: None,
             follow_current: true,
+            listing_first: std::cell::Cell::new(1),
             focus_editor: false,
             code_scroll_to_line: None,
             preview_offsets_seen: 0,
@@ -1119,9 +1124,23 @@ impl Default for MdiUi {
 }
 
 impl MdiUi {
+    /// The buffer restored from the preferences file, newest last, clamped to
+    /// the profile's limit. The timestamps are not shown, so a restored block
+    /// carries 0.
+    pub fn restored(blocks: &[String], limit: usize) -> Self {
+        let mut ui = Self::new();
+        let keep = blocks.len().saturating_sub(limit.max(1));
+        ui.blocks = blocks[keep..]
+            .iter()
+            .map(|block| (block.clone(), 0))
+            .collect();
+        ui
+    }
+
     pub fn new() -> Self {
         Self {
             input: String::new(),
+            // (restored above fills the buffer from the preferences file)
             // The pane asks for the keyboard the first time it appears.
             focus: true,
             caret_to_end: true,
@@ -2254,6 +2273,27 @@ mod keymap_tests {
         assert!(!mdi.move_selected(false));
         assert_eq!(mdi.selection, Some(2));
         assert_eq!(mdi.len(), 3);
+    }
+}
+
+#[cfg(test)]
+mod mdi_ui_tests {
+    use super::MdiUi;
+
+    /// The buffer comes back in the order it was issued, oldest first, and the
+    /// profile's limit still applies to a restored one.
+    #[test]
+    fn the_buffer_is_restored_in_order_and_clamped() {
+        assert!(MdiUi::restored(&[], 20).blocks.is_empty());
+        let blocks: Vec<String> = ["G0 X0".to_string(), "M19 R0".to_string()]
+            .into_iter()
+            .collect::<Vec<_>>();
+        let ui = MdiUi::restored(&blocks, 20);
+        assert_eq!(ui.block_texts(), blocks);
+
+        let long: Vec<String> = (0..5).map(|index| format!("G0 X{index}")).collect();
+        let ui = MdiUi::restored(&long, 2);
+        assert_eq!(ui.block_texts(), vec!["G0 X3".to_string(), "G0 X4".to_string()]);
     }
 }
 

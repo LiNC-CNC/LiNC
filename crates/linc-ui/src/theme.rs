@@ -271,6 +271,12 @@ pub fn label_value(ui: &mut Ui, label: &str, value: impl Into<String>, size: f32
 }
 
 pub fn chip(ui: &mut Ui, text: impl Into<String>, active: bool) -> Response {
+    chip_sized(ui, text, active, 0.0)
+}
+
+/// A chip with a fixed width, so a row of them reads as columns rather than as
+/// words of different lengths. Width 0 leaves the sizing to the text.
+pub fn chip_sized(ui: &mut Ui, text: impl Into<String>, active: bool, width: f32) -> Response {
     let text = text.into();
     let button = egui::Button::new(RichText::new(text).size(font_size(10.0)).strong().color(
         if active {
@@ -282,7 +288,7 @@ pub fn chip(ui: &mut Ui, text: impl Into<String>, active: bool) -> Response {
     .fill(if active { ACCENT } else { PANEL_RAISED })
     .stroke(Stroke::new(1.0, if active { ACCENT } else { BORDER }))
     .corner_radius(CornerRadius::same(14))
-    .min_size(Vec2::new(0.0, 32.0));
+    .min_size(Vec2::new(width, 32.0));
     ui.add(button)
 }
 

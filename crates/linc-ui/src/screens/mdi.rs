@@ -596,6 +596,7 @@ pub fn issue(app: &mut LincApp) {
     }
     send(app, &block);
     app.mdi.commit(app.profile.config.mdi.history_limit, block);
+    app.remember_mdi_history();
 }
 
 /// `Ctrl+R`: issue the selected buffer line directly, with no dialog.

@@ -71,6 +71,13 @@ pub struct Preferences {
     /// absent from a file written before it existed, which reads as off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pac_man: Option<bool>,
+    /// The MDI buffer, oldest first.
+    ///
+    /// The blocks are the operator's own machine commands ("G10 L20 P1 Z0",
+    /// "M19 R0"), and recalling one is the point of the buffer: it used to die
+    /// with the session, so every restart meant retyping it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mdi_history: Vec<String>,
     /// Page keys the operator has chosen to show.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub visible_panels: Vec<String>,

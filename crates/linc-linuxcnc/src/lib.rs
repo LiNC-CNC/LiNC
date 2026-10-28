@@ -1280,7 +1280,6 @@ fn unpublished_live_row(
 
 /// What startup offset publication needs from one status poll.
 pub(crate) struct OffsetSyncInputs {
-    pub program_open: bool,
     pub estop: bool,
     pub task_on: bool,
     pub idle: bool,
@@ -1295,7 +1294,6 @@ pub(crate) struct OffsetSyncInputs {
 impl OffsetSyncInputs {
     pub(crate) fn from_status(status: &NmlStatus, axis_count: usize, protect: bool) -> Self {
         Self {
-            program_open: !status.task.file.trim().is_empty(),
             estop: status.io.estop,
             task_on: status.task.state == NmlTaskState::On,
             idle: status.task.interp_state == linuxcnc_nml::InterpState::Idle,
@@ -1341,11 +1339,6 @@ pub(crate) fn plan_offset_sync(
     parameters: &ParameterFile,
     axes: &[String],
 ) -> OffsetSync {
-    // The program-open path restores the parameter file and publishes its G5X
-    // offsets itself. Never touch a session that has a file open.
-    if inputs.program_open {
-        return OffsetSync::Done("a program is open");
-    }
     if inputs.estop || !inputs.task_on {
         return OffsetSync::Wait("the machine is not ON");
     }
@@ -1817,7 +1810,6 @@ mod tests {
 
     fn offset_inputs() -> OffsetSyncInputs {
         OffsetSyncInputs {
-            program_open: false,
             estop: false,
             task_on: true,
             idle: true,
@@ -2010,14 +2002,24 @@ mod tests {
         ));
     }
 
+    /// A *loaded* program is not a reason to leave the active row unpublished.
+    ///
+    /// It used to end the startup path outright ("the open path restores it
+    /// itself"), so until the program ran, the interpreter still had G54 at
+    /// zero: in manual mode a `G0 X0 Y0` then went to machine zero instead of
+    /// work zero, and the graph drew the work origin on top of machine home.
+    /// The OPEN_FILE transient is excluded by the idle check, not by a file.
     #[test]
-    fn an_open_program_keeps_the_startup_path_out_of_the_session() {
+    fn a_loaded_program_does_not_block_the_publication() {
         let parameters = parameters_with(&g54_row());
         let mut inputs = offset_inputs();
-        inputs.program_open = true;
+        inputs.idle = true;
+        let sync = plan_offset_sync(&inputs, &parameters, &axes3());
+        let (index, block) = published(&sync);
+        assert_eq!(index, 1);
         assert_eq!(
-            plan_offset_sync(&inputs, &parameters, &axes3()),
-            OffsetSync::Done("a program is open")
+            block,
+            "G10 L2 P1 X-10.000000 Y-20.000000 Z-30.000000 R0.000000"
         );
     }
 

@@ -432,7 +432,10 @@ impl LincApp {
             offsets: OffsetsUi::default(),
             tools: ToolsUi::default(),
             probe: ProbeUi::new(probe_params, active_probe_wcs),
-            mdi: MdiUi::new(),
+            mdi: MdiUi::restored(
+                &preferences.mdi_history,
+                profile.config.mdi.history_limit,
+            ),
             help: HelpUi::default(),
             files: FilesUi::new(
                 profile.machine_ini.program_prefix.clone(),
@@ -1198,6 +1201,13 @@ impl LincApp {
             self.preferences.last_page = Some(key.to_string());
             self.preferences_dirty = true;
         }
+    }
+
+    /// Keep the MDI buffer across restarts: the blocks are the operator's own
+    /// machine commands, and recalling one is why the buffer exists.
+    pub fn remember_mdi_history(&mut self) {
+        self.preferences.mdi_history = self.mdi.block_texts();
+        self.preferences_dirty = true;
     }
 
     fn remember_program_view(&mut self, view: ProgramView) {
@@ -3838,16 +3848,41 @@ impl LincApp {
     /// the Program page it replaces the single moving-axis DTG field the bar
     /// otherwise carries, so the distance is never shown twice.
     fn coordinate_status_line(&self) -> String {
+        let width = self.coordinate_field_width();
         let mut position = String::new();
         let mut dtg = String::new();
         for axis in self.axes() {
             let Some(entry) = self.snapshot.positions.axes.get(&axis) else {
                 continue;
             };
-            position.push_str(&format!("{axis}{:+.3} ", entry.work));
-            dtg.push_str(&format!("{axis}{:+.3} ", entry.dtg));
+            position.push_str(&format!("{axis}{:+width$.3} ", entry.work, width = width));
+            dtg.push_str(&format!("{axis}{:+width$.3} ", entry.dtg, width = width));
         }
         format!("{}  DTG: {}", position.trim_end(), dtg.trim_end())
+    }
+
+    /// Characters in one coordinate field, sign and decimals included.
+    ///
+    /// Sized by the largest number that can appear - the machine envelope and
+    /// the loaded program's extents - never by what is on screen: a field that
+    /// widened when an axis crossed 10.000 made the whole line shuffle while the
+    /// machine moved and the distance-to-go counted down.
+    fn coordinate_field_width(&self) -> usize {
+        const DECIMALS: usize = 3;
+        let mut extent: f64 = 0.0;
+        for bounds in [
+            self.machine_bounds(),
+            self.program.last_valid_preview.bounds,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            for axis in 0..3 {
+                extent = extent.max(bounds.min[axis].abs()).max(bounds.max[axis].abs());
+            }
+        }
+        // Sign, the integer digits of the extent, the point, the decimals.
+        1 + format!("{:.*}", DECIMALS, extent).len()
     }
 
     /// True where the bar shows the full coordinate line, so the single
@@ -5262,6 +5297,37 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert_eq!(
             machine_status_field(false, true),
             ("MACHINE ?".to_string(), theme::WARNING)
+        );
+    }
+
+    /// The coordinate line keeps its columns while the numbers move. A field
+    /// sized by the value on screen widened the moment an axis crossed 10.000,
+    /// which shuffled every field to its right - and the machine moves while the
+    /// operator is reading them.
+    #[test]
+    fn the_coordinate_line_keeps_its_columns_as_the_numbers_move() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.app.set_page(Page::Program);
+        let line_with = |harness: &mut ProbeHarness, work: f64, dtg: f64| {
+            for axis in ["X", "Y", "Z"] {
+                if let Some(entry) = harness.app.snapshot.positions.axes.get_mut(axis) {
+                    entry.work = if axis == "X" { work } else { 0.0 };
+                    entry.dtg = if axis == "X" { dtg } else { 0.0 };
+                }
+            }
+            harness.app.coordinate_status_line()
+        };
+        let small = line_with(&mut harness, 1.0, 0.5);
+        let large = line_with(&mut harness, -123.456, -300.0);
+        assert_eq!(
+            small.len(),
+            large.len(),
+            "same columns for both: {small:?} vs {large:?}"
+        );
+        assert!(large.contains("-123.456"), "{large}");
+        assert!(
+            small.contains("+1.000"),
+            "the small value is padded, not left ragged: {small}"
         );
     }
 
