@@ -1775,6 +1775,9 @@ impl LincApp {
             .iter()
             .map(|(axis, value)| (axis.to_string(), *value))
             .collect();
+        // A rapid's following error is the machine catching up with itself, not
+        // the cut's accuracy: the numbers are the run's cutting error.
+        let cutting = self.snapshot.motion_kind.is_cutting();
         for (axis, value) in values {
             if self.following_history.get(&axis).is_none() {
                 self.following_history
@@ -1785,6 +1788,9 @@ impl LincApp {
                 while trace.len() > SAMPLES {
                     trace.pop_front();
                 }
+            }
+            if !cutting {
+                continue;
             }
             let worst = self.following_run_max.get(&axis).copied().unwrap_or(0.0);
             self.following_run_max.insert(axis.clone(), worst.max(value.abs()));
@@ -5460,6 +5466,8 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     fn the_following_error_summary_belongs_to_the_run() {
         let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
         let feed = |harness: &mut ProbeHarness, value: f64| {
+            // Cutting, so the sample counts towards the run's numbers.
+            harness.app.snapshot.motion_kind = linc_core::model::MotionKind::Feed;
             harness
                 .app
                 .snapshot
@@ -5507,6 +5515,43 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert!((mean - 0.001).abs() < 1e-12, "mean {mean}");
     }
 
+    /// A rapid's following error is the machine catching up with itself, so the
+    /// run's worst and mean only take cutting samples; the trace keeps every
+    /// sample, because the shape of a rapid is still worth seeing.
+    #[test]
+    fn the_following_error_numbers_ignore_rapids() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.app.following_run_max = linc_core::model::AxisMap::new();
+        harness.app.following_run_abs_sum = linc_core::model::AxisMap::new();
+        harness.app.following_run_samples = linc_core::model::AxisMap::new();
+        harness.app.following_history = linc_core::model::AxisMap::new();
+        let feed = |harness: &mut ProbeHarness, kind, value: f64| {
+            harness.app.snapshot.motion_kind = kind;
+            harness
+                .app
+                .snapshot
+                .machine
+                .following_error
+                .insert("X", value);
+            harness.app.sample_following_error();
+        };
+
+        feed(&mut harness, linc_core::model::MotionKind::Traverse, 0.500);
+        let (worst, mean) = harness.app.following_error_summary("X");
+        assert_eq!((worst, mean), (0.0, 0.0), "a rapid is not counted");
+        assert_eq!(harness.app.following_history.get("X").map(|t| t.len()), Some(1));
+
+        feed(&mut harness, linc_core::model::MotionKind::Feed, 0.010);
+        feed(&mut harness, linc_core::model::MotionKind::ArcFeed, 0.020);
+        let (worst, mean) = harness.app.following_error_summary("X");
+        assert!((worst - 0.020).abs() < 1e-12, "worst {worst}");
+        assert!((mean - 0.015).abs() < 1e-12, "mean {mean}");
+
+        // A rapid in the middle does not enter the numbers.
+        feed(&mut harness, linc_core::model::MotionKind::Traverse, 0.900);
+        let (worst, _) = harness.app.following_error_summary("X");
+        assert!((worst - 0.020).abs() < 1e-12, "worst {worst}");
+    }
     /// The square key on MAIN swaps the feed/servo cards for the following-error
     /// traces, and swaps them back.
     #[test]

@@ -428,6 +428,7 @@ impl SnapshotBuilder {
             && (status.task.exec_state != ExecState::Done || interp_active);
         snapshot.task.program_started = snapshot.task.running;
         snapshot.task.motion_active = motion_active(status);
+        snapshot.motion_kind = MotionKind::from_linuxcnc(status.motion.motion_type);
 
         // Set while this build sees a joint homed that was not homed before.
         let mut newly_homed = false;

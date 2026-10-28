@@ -152,6 +152,10 @@ pub struct TrajectoryView<'a> {
     /// Stock fill opacity, 0-255. Zero draws no stock at all.
     pub stock_alpha: u8,
     pub show_selected_line: bool,
+    /// Multiply the whole picture by this, header excluded. The shell sets it
+    /// while a rapid runs: nothing is being cut, so the drawing steps back and
+    /// the machine's own motion is what the operator watches.
+    pub opacity: f32,
     pub show_legend: bool,
     /// Frame everything that is drawn, not just the program: the live trail,
     /// the tool tip and the work-zero markers. The Offsets preview uses this so
@@ -217,6 +221,7 @@ impl<'a> TrajectoryView<'a> {
             show_stock: true,
             stock_alpha: 0,
             show_selected_line: true,
+            opacity: 1.0,
             show_legend: true,
             fit_all: false,
             origin_tether: false,
@@ -1012,6 +1017,10 @@ pub fn toolpath_hovered(ctx: &egui::Context) -> bool {
 /// Draw the toolpath graph. `TrajectoryView::fit` requests a one-shot fit;
 /// zoom/pan are mutated in place so the caller can persist them.
 pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
+    // Everything this function paints is the picture; the card's header is drawn
+    // by the page before it, so the status line stays crisp while the graph
+    // steps back for a rapid.
+    ui.set_opacity(view.opacity);
     // The first frame of a page can report an unbounded card, and a fit computed
     // for that rect leaves a pan that puts the part outside the real one. Clamp
     // to the viewport so a fit is always computed for a size the screen can hold.

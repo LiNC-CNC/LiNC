@@ -259,6 +259,51 @@ impl MachinePower {
     }
 }
 
+
+/// What kind of move the machine is executing right now.
+///
+/// LinuxCNC distinguishes six; the display needs two questions answered: is it
+/// cutting (following error is a meaningful number) and is it a rapid (the
+/// picture should say so).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MotionKind {
+    #[default]
+    None,
+    Traverse,
+    Feed,
+    ArcFeed,
+    ToolChange,
+    Probing,
+    IndexRotary,
+}
+
+impl MotionKind {
+    /// A move that removes material: the ones whose following error means
+    /// something. A rapid's error is the machine catching up with itself.
+    pub fn is_cutting(self) -> bool {
+        matches!(self, Self::Feed | Self::ArcFeed)
+    }
+
+    /// A rapid: no cut, so the graphs step back and let the machine be watched.
+    pub fn is_rapid(self) -> bool {
+        matches!(self, Self::Traverse)
+    }
+
+    /// From LinuxCNC's `EMC_MOTION_TYPE_*` codes `motion_types.h`.
+    pub fn from_linuxcnc(code: i32) -> Self {
+        match code {
+            1 => Self::Traverse,
+            2 => Self::Feed,
+            3 => Self::ArcFeed,
+            4 => Self::ToolChange,
+            5 => Self::Probing,
+            6 => Self::IndexRotary,
+            _ => Self::None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TaskState {
     pub power: MachinePower,
@@ -1304,6 +1349,10 @@ pub struct MachineSnapshot {
     pub machine_name: String,
     pub simulated: bool,
     pub task: TaskState,
+    /// The move being executed, for the two questions the display asks of it:
+    /// whether the following error means anything, and whether to step back.
+    #[serde(default)]
+    pub motion_kind: MotionKind,
     pub machine: MachineState,
     /// The controller's limits override is active: jogging is allowed off a
     /// limit switch, which is the only way out once a machine is sitting on one.
@@ -1345,6 +1394,7 @@ impl MachineSnapshot {
             machine_name: String::new(),
             simulated: false,
             task: TaskState::default(),
+            motion_kind: MotionKind::None,
             machine: MachineState::default(),
             positions: Positions::default(),
             offsets: WorkOffsetSet::default(),
@@ -1542,6 +1592,28 @@ pub fn format_elapsed(ms: u64) -> String {
         format!("{:.1} s", ms as f64 / 1000.0)
     } else {
         format!("{}m {:02}s", ms / 60_000, (ms / 1000) % 60)
+    }
+}
+
+#[cfg(test)]
+mod motion_kind_tests {
+    use super::*;
+
+    /// The motion kind decides both behaviours: which samples the numbers keep,
+    /// and whether the picture steps back.
+    #[test]
+    fn the_motion_kind_says_which_moves_cut_and_which_are_rapids() {
+        assert!(MotionKind::Feed.is_cutting() && MotionKind::ArcFeed.is_cutting());
+        assert!(!MotionKind::Traverse.is_cutting());
+        assert!(!MotionKind::Probing.is_cutting());
+        assert!(MotionKind::Traverse.is_rapid());
+        assert!(!MotionKind::Feed.is_rapid());
+        // LinuxCNC's codes: motion_types.h.
+        assert_eq!(MotionKind::from_linuxcnc(0), MotionKind::None);
+        assert_eq!(MotionKind::from_linuxcnc(1), MotionKind::Traverse);
+        assert_eq!(MotionKind::from_linuxcnc(2), MotionKind::Feed);
+        assert_eq!(MotionKind::from_linuxcnc(3), MotionKind::ArcFeed);
+        assert_eq!(MotionKind::from_linuxcnc(99), MotionKind::None);
     }
 }
 
