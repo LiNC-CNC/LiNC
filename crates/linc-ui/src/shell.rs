@@ -5538,10 +5538,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         );
         // Three labelled groups - value, worst, mean - one number per axis in
         // each of them.
-        // The mean's label is a drawn diameter mark, not a glyph, so only the
-        // two typed labels can be asserted here; the per-axis count below
-        // covers all three groups.
-        for label in ["VALUE", "🗖"] {
+        // The live values have no label and the mean's is a drawn diameter mark,
+        // so the square glyph is the one typed label here; the per-axis count
+        // below covers all three groups.
+        for label in ["🗖"] {
             assert!(
                 cards.iter().any(|text| text == label),
                 "{label} is labelled once: {cards:?}"

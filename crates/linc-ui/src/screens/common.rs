@@ -2101,11 +2101,19 @@ pub fn following_error_card(app: &LincApp, ui: &mut Ui, height: f32) {
                 .collect();
             let header_top = ui.cursor().top();
             ui.horizontal(|ui| {
-                theme::section_header(ui, "FOLLOWING ERROR");
+                // Same size as the numbers beside it: the header is one line,
+                // and a 12 pt title would set the row's height for it.
+                ui.label(
+                    RichText::new("FOLLOWING ERROR")
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .strong()
+                        .color(theme::MUTED),
+                );
                 ui.add_space(10.0);
                 // One label per group, the axes inside it in their own colours:
-                // those colours are the lane's key.
-                group_label(ui, "VALUE");
+                // those colours are the lane's key. The live values need no
+                // label - they sit right beside the title.
                 for (index, axis) in axes.iter().enumerate() {
                     let now = app
                         .snapshot
@@ -2128,14 +2136,7 @@ pub fn following_error_card(app: &LincApp, ui: &mut Ui, height: f32) {
                     let (_, mean) = app.following_error_summary(axis);
                     axis_number(ui, axis, format!("{mean:.3}"), trace_color(index));
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(&app.snapshot.positions.units)
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
-                    );
-                });
+
             });
             // The lane takes everything the header leaves: one lane, maximised,
             // not a stack of rows.

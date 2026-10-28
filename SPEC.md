@@ -486,6 +486,15 @@ Default page. The layout is selected by `machine.gui`.
   empty list hides the servo card. Controller messages are not a pane: `M`
   opens them full screen, so the log is readable without crowding the MAIN
   layout.
+- The square (`F10`) replaces those two cards with a `FOLLOWING ERROR` pane:
+  one lane with a trace per axis, each in its own colour, on a scale they share
+  (a per-series scale would draw a quiet axis as busy as a struggling one).
+  The header carries three unlabelled-then-labelled groups per axis: the live
+  value, the largest absolute error since the program started, and the mean
+  absolute error over the same run. The worst and the mean start again with
+  each program, so a fresh run is never judged against the last one; jogging
+  and MDI between programs count towards them. The lane draws the last 240
+  samples, so it shows the shape while the numbers show the total.
 - ATC state in Tools/Diagnostics; mill tool table uses orientation and, only
   when ATC is enabled, the standard `P` pocket column.
 
