@@ -234,6 +234,37 @@ impl<'a> TrajectoryView<'a> {
     ///
     /// One transformation for both: the marker sits on the trail's last point,
     /// so shifting one and not the other would tear them apart.
+    /// Where the highlighted block sits, for the idle follow.
+    ///
+    /// The middle of the block's own points, so a canned cycle that contributes
+    /// several moves is framed as a whole rather than by its last hole. Blocks
+    /// PAC-MAN has eaten are gone from the picture and are not followed.
+    fn selected_line_point(&self) -> Option<[f64; 3]> {
+        let line = self.selected_line?;
+        let mut sum = [0.0f64; 3];
+        let mut count = 0usize;
+        for segment in self
+            .preview
+            .segments
+            .iter()
+            .filter(|segment| segment.line == line && !self.eaten(segment.line))
+        {
+            for point in [segment.start, segment.end] {
+                for axis in 0..3 {
+                    sum[axis] += point[axis];
+                }
+                count += 1;
+            }
+        }
+        (count > 0).then(|| {
+            [
+                sum[0] / count as f64,
+                sum[1] / count as f64,
+                sum[2] / count as f64,
+            ]
+        })
+    }
+
     /// Whether PAC-MAN has eaten this segment.
     ///
     /// A canned cycle contributes several segments to one line, so the unit is
@@ -720,6 +751,12 @@ fn follow_state(ui: &Ui) -> egui::Id {
     ui.scope_id().with("toolpath-follow-latch")
 }
 
+/// The idle block's latch, kept apart from the tool's: both follow the card, and
+/// a shared latch would release one while the other still holds an edge.
+fn selected_follow_state(ui: &Ui) -> egui::Id {
+    ui.scope_id().with("toolpath-block-follow-latch")
+}
+
 /// Shallowest and deepest magnification the toolpath can reach. 80 shows a
 /// single #6 hole in the card; the operator asked for it over the old 40.
 pub const MIN_ZOOM: f32 = 0.05;
@@ -1106,9 +1143,15 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     // it saw before the fit took over, read the whole stretch of motion as one
     // jump, and pan the moment the operator dropped the fit.
     let moved = view.tool_tip.map(|tip| tool_moved(ui, view.trail_point(tip)));
+    // Idle: follow the highlighted block instead of the tool. Walking a long
+    // program with the cursor moves the highlight down the code, and the card
+    // has to keep up or the operator is looking somewhere else entirely. While a
+    // program runs the playhead already holds the card (the tool follow below),
+    // so this only acts when no line is executing.
+    let following_block = view.current_line.is_none();
     if view.auto_fit {
         // The fit owns the pan; nothing to follow yet.
-    } else if let Some(tip) = view.tool_tip {
+    } else if let Some(tip) = view.tool_tip.filter(|_| !following_block) {
         let tip = view.trail_point(tip);
         if moved.unwrap_or(false) {
             let drawn = rect.shrink(12.0);
@@ -1119,6 +1162,26 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             .mirrored(view.mirror_x)
             .project(tip);
             let id = follow_state(ui);
+            let mut follow = ui
+                .ctx()
+                .data(|data| data.get_temp::<ToolFollow>(id))
+                .unwrap_or_default();
+            let shift = follow.follow(at, band);
+            ui.ctx().data_mut(|data| data.insert_temp(id, follow));
+            view.pan += shift;
+        }
+    } else if following_block {
+        if let Some(point) = view.selected_line_point() {
+            let drawn = rect.shrink(12.0);
+            let band = follow_band(drawn);
+            let at = Projection::new(
+                reference, drawn, view.view, view.yaw, view.pitch, view.zoom, view.pan,
+            )
+            .mirrored(view.mirror_x)
+            .project(point);
+            // Its own latch: the tool and the block are two different things to
+            // keep on the card, and one must not steal the other's edge.
+            let id = selected_follow_state(ui);
             let mut follow = ui
                 .ctx()
                 .data(|data| data.get_temp::<ToolFollow>(id))
@@ -3333,6 +3396,62 @@ mod tests {
             painted_cuts(&preview, false, Some(2)),
             3,
             "the eaten line only counts in PAC-MAN mode"
+        );
+    }
+
+    /// With no program running the card follows the *highlighted block*: walking
+    /// a long program with the cursor must not leave the highlight somewhere the
+    /// operator cannot see. The latch makes it a follow (move to the edge, stay
+    /// there) rather than a chase.
+    #[test]
+    fn an_idle_card_follows_the_highlighted_block() {
+        let axes = vec!["X".to_string(), "Y".to_string(), "Z".to_string()];
+        let text = "G21 G0 X0 Y0\nG1 X10\nG1 X300\n";
+        let preview = linc_core::gcode::parse_preview(text, &axes, None, [0.0; 3]);
+        let mut view = TrajectoryView::new(&preview, &[], MachineVariant::Mill);
+        view.show_grid = false;
+        view.show_legend = false;
+        view.show_program_bounds = false;
+        view.show_stock = false;
+        view.show_selected_line = false;
+        view.auto_fit = false;
+        view.fit = false;
+        view.zoom = 1.0;
+        // The reference is a small box around the first move, so line 3 (X300)
+        // is far outside the card.
+        view.machine_bounds = Some(Bounds3 {
+            min: [-20.0, -20.0, -20.0],
+            max: [20.0, 20.0, 20.0],
+        });
+        view.selected_line = Some(3);
+
+        let ctx = egui::Context::default();
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input(), |ui| {
+            draw_trajectory(ui, &mut view);
+        });
+        output.textures_delta.clear();
+        let followed = view.pan;
+        assert!(
+            followed != Vec2::ZERO,
+            "the highlighted block is off the card, so the view moves to it"
+        );
+
+        let mut output = ctx.run_ui(input(), |ui| {
+            draw_trajectory(ui, &mut view);
+        });
+        output.textures_delta.clear();
+        assert!(
+            (view.pan - followed).length() < 1e-3,
+            "the latch holds: {:?} then {:?}",
+            followed,
+            view.pan
         );
     }
 
