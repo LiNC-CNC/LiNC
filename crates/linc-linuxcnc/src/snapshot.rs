@@ -413,8 +413,19 @@ impl SnapshotBuilder {
             linuxcnc_nml::InterpState::Unknown(_) => InterpState::Unknown,
         };
         snapshot.task.paused = status.task.paused;
-        snapshot.task.running =
-            status.task.mode == NmlTaskMode::Auto && status.task.exec_state != ExecState::Done;
+        // A program runs while the interpreter is inside one - not while the
+        // task happens to hold a command.
+        //
+        // `exec_state` is DONE between commands, and with a deep motion queue
+        // (G64 blending, or the interp chaining collinear moves) the task can sit
+        // in DONE for seconds while motion still cuts the queue: the mill showed
+        // `running=false` through a whole contour, which froze the program view's
+        // follow and every check that asks whether a program is active. The
+        // interpreter's own state is the durable answer: it stays READING (or
+        // PAUSED) until the program ends.
+        let interp_active = status.task.interp_state != linuxcnc_nml::InterpState::Idle;
+        snapshot.task.running = status.task.mode == NmlTaskMode::Auto
+            && (status.task.exec_state != ExecState::Done || interp_active);
         snapshot.task.program_started = snapshot.task.running;
         snapshot.task.motion_active = motion_active(status);
 
@@ -1601,6 +1612,53 @@ mod tests {
         status.motion.probing = false;
     }
 
+    /// A program runs while the interpreter is inside one: `exec_state` is DONE
+    /// between commands, so a deep motion queue left `running` false through a
+    /// whole contour and the program view stopped following.
+    #[test]
+    fn a_program_runs_while_the_interpreter_is_inside_it() {
+        let mut builder = probe_builder();
+        let panel = PanelState::offline(&builder.profile);
+        let mut status = idle_status();
+        status.task.mode = NmlTaskMode::Auto;
+        status.task.exec_state = ExecState::Done;
+        status.task.interp_state = linuxcnc_nml::InterpState::Reading;
+        let snapshot = builder.build(
+            &status,
+            &panel,
+            Vec::new(),
+            &ParameterFile::default(),
+            None,
+        );
+        assert!(
+            snapshot.task.running,
+            "the queue is cutting even though the task has no command in hand"
+        );
+        assert!(snapshot.program.running);
+        assert!(snapshot.program.highlight_line().is_some());
+
+        // Idle interpreter, done task: nothing runs.
+        status.task.interp_state = linuxcnc_nml::InterpState::Idle;
+        let snapshot = builder.build(
+            &status,
+            &panel,
+            Vec::new(),
+            &ParameterFile::default(),
+            None,
+        );
+        assert!(!snapshot.task.running);
+
+        // Paused mid-program still counts as running.
+        status.task.interp_state = linuxcnc_nml::InterpState::Paused;
+        let snapshot = builder.build(
+            &status,
+            &panel,
+            Vec::new(),
+            &ParameterFile::default(),
+            None,
+        );
+        assert!(snapshot.task.running);
+    }
     /// The line being cut comes from the trajectory planner's id when the
     /// backend can read it: NML's `task.motion_line` is 0 for ordinary moves and
     /// `task.current_line` is the last *issued* command, ahead of the cut.

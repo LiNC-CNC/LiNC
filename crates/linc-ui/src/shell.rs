@@ -124,8 +124,6 @@ pub struct LincApp {
     /// system for a poll, and the cross would snap to the machine origin and
     /// back.
     pub graph_origin: [f64; 3],
-    /// TRACE: last logged line-follow state, so the log carries changes only.
-    pub line_trace: Option<(usize, usize, usize, usize, bool, bool)>,
     /// MAIN's bottom row shows the following-error traces instead of the feed
     /// and servo cards. Toggled with the square key there.
     pub machine_following: bool,
@@ -497,7 +495,6 @@ impl LincApp {
             jog_speed_published: None,
             graph_origin: [0.0; 3],
             machine_following: false,
-            line_trace: None,
             following_history: linc_core::model::AxisMap::new(),
             following_run_max: linc_core::model::AxisMap::new(),
             following_run_abs_sum: linc_core::model::AxisMap::new(),
@@ -1658,27 +1655,6 @@ impl LincApp {
         // read-ahead and would drag the pane to the end of the program while the
         // machine is still cutting the first move.
         let executed = self.snapshot.program.executing_line();
-        // TRACE: the UI side of the follow, on every change while a program runs.
-        let trace = (
-            executed,
-            self.snapshot.program.current_line,
-            self.snapshot.program.motion_line,
-            self.program.selected_line,
-            self.program.follow_current,
-            self.snapshot.task.running,
-        );
-        if self.line_trace != Some(trace) {
-            self.line_trace = Some(trace);
-            log::info!(
-                "TRACE ui executed={} current={} motion={} selected={} follow={} running={}",
-                trace.0,
-                trace.1,
-                trace.2,
-                trace.3,
-                trace.4,
-                trace.5
-            );
-        }
         if self.program.follow_current
             && self.snapshot.task.running
             && executed > 0
