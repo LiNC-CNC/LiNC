@@ -34,6 +34,9 @@ scripts/build-deb.sh                        # Debian packages, amd64 + arm64
   travel as `LINC_SIM_READY` to the panel (the HAL `loadusr` line cannot take the flag), and `scripts/sim-ready.py` does the rest
   (queue the E-stop reset on the command channel, power on, home, open the program, float the window under Hyprland). Give the
   reset the command channel, not only the panel's HAL pulse: a pulse raised at boot can land before the task accepts it.
+  The simulated panel's PROBE CONTACT key is on by default there: it travels as `LINC_PROBE_KEY=1` for the same reason
+  (`--no-probe-key` hides it, an explicit value wins). It asserts `motion.probe-input`, which is how the probe wiring is
+  checked by hand before a probe program runs.
 - Standalone, no LinuxCNC or HAL. Panel and HMI must share `LINC_SIM_IPC`; the
   panel script uses `$XDG_RUNTIME_DIR/linc/panel-sim` by default, so give the
   HMI the same value (do not hardcode `/tmp` on a desktop session):

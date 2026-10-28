@@ -67,9 +67,36 @@ fn init_logging() {
     builder.init();
 }
 
+/// `--probe-key` also arrives from the environment.
+///
+/// The simulation starts this service from HAL (loadusr -Wn cnc_panel
+/// linc-panel --no-ipc), and a loadusr line cannot pass a flag, so the
+/// launcher exports LINC_PROBE_KEY instead (scripts/start-sim.sh does).
+/// The flag still wins when both are given.
+fn probe_key_requested(flag: bool) -> bool {
+    resolve_probe_key(flag, std::env::var("LINC_PROBE_KEY").ok().as_deref())
+}
+
+/// The flag wins; the environment can only ask for the key, never take it
+/// away. Split out from the process environment so both halves are testable.
+fn resolve_probe_key(flag: bool, env: Option<&str>) -> bool {
+    flag || truthy(env)
+}
+
+/// A launcher's boolean environment value. Anything but an explicit yes reads
+/// as no, so a typo leaves the debug key hidden rather than in the way.
+fn truthy(value: Option<&str>) -> bool {
+    value.map(str::trim).is_some_and(|value| {
+        ["1", "true", "yes", "on"]
+            .iter()
+            .any(|word| word.eq_ignore_ascii_case(value))
+    })
+}
+
 fn main() -> Result<()> {
     init_logging();
-    let args = Args::parse();
+    let mut args = Args::parse();
+    args.probe_key = probe_key_requested(args.probe_key);
     let config_path = args
         .config
         .or_else(|| Profile::load_path().ok())
@@ -85,7 +112,7 @@ fn main() -> Result<()> {
     let _ = signal_hook::flag::register(signal_hook::consts::SIGTERM, shutdown.clone());
     let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, shutdown.clone());
     if args.probe_key && !args.sim && profile.config.panel.kind != "simulated" {
-        log::warn!("--probe-key ignored: this panel is not a simulator");
+        log::warn!("the PROBE CONTACT key is ignored: this panel is not a simulator");
     }
     let simulated = args.sim || profile.config.panel.kind == "simulated";
     let cycle = Duration::from_millis(
@@ -430,4 +457,32 @@ fn run_loop(
         last_snapshot.connected
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A launcher reads as yes only when it says so: an unset or misspelled
+    /// value leaves the debug key hidden rather than in the way.
+    #[test]
+    fn the_probe_key_environment_value_is_read_conservatively() {
+        for yes in ["1", "true", "yes", "on", " TRUE ", "Yes"] {
+            assert!(truthy(Some(yes)), "{yes:?}");
+        }
+        for no in ["", "0", "false", "off", "no", "probe", "2"] {
+            assert!(!truthy(Some(no)), "{no:?}");
+        }
+        assert!(!truthy(None), "unset");
+    }
+
+    /// The flag alone still works, the environment can ask for the key, and
+    /// neither can take it away from the other.
+    #[test]
+    fn the_flag_and_the_environment_both_ask_for_the_probe_key() {
+        assert!(resolve_probe_key(true, None), "flag only");
+        assert!(resolve_probe_key(true, Some("0")), "flag beats a zero");
+        assert!(resolve_probe_key(false, Some("1")), "environment only");
+        assert!(!resolve_probe_key(false, None), "neither");
+    }
 }

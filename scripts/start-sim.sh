@@ -12,6 +12,12 @@
 #   --home            home every axis
 #   --load [FILE]     load a program; FILE defaults to the demo mill program
 #   --float           float the HMI window under Hyprland at 1280x720
+#   --no-probe-key    hide the panel's PROBE CONTACT test key (see below)
+#
+# The simulated panel shows its PROBE CONTACT key by default: it asserts
+# motion.probe-input, which is how the probe wiring is checked by hand before
+# running a probe program. `--no-probe-key` hides it, and an explicit
+# LINC_PROBE_KEY in the environment wins over both.
 #
 # --no-sim3d starts the same rig without the 3D simulator: it loads
 # configs/sim-no3d.ini (configs/sim.ini minus the linc-sim3d HAL file), and the
@@ -33,6 +39,8 @@
 #   LINC_SIM3D_BIN    3D simulator HAL binary (default: target/release/linc-sim3d)
 #   LINC_LOG_LEVEL    RUST_LOG for linc/linc-panel (default: the binaries' own
 #                     filter — LiNC crates at info, everything else at warn)
+#   LINC_PROBE_KEY    show the panel's PROBE CONTACT key (default: 1 here;
+#                     --no-probe-key sets it to 0 before the panel starts)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -73,6 +81,7 @@ HOME_AXES=0
 LOAD_PROGRAM=""
 FLOAT_WINDOW=0
 NO_SIM3D=0
+PROBE_KEY=1
 READY_TIMEOUT="${LINC_READY_TIMEOUT:-60}"
 ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -92,11 +101,20 @@ while [[ $# -gt 0 ]]; do
         --load=*) LOAD_PROGRAM="${1#--load=}" ;;
         --float) FLOAT_WINDOW=1 ;;
         --no-sim3d) NO_SIM3D=1 ;;
+        --no-probe-key) PROBE_KEY=0 ;;
         --timeout) READY_TIMEOUT="${2:?--timeout needs seconds}"; shift ;;
         *) ARGS+=("$1") ;;
     esac
     shift
 done
+
+# The panel service is started from HAL (loadusr), which cannot pass a flag,
+# so the PROBE CONTACT key travels as LINC_PROBE_KEY. It is on by default
+# here so the probe input can be tested by hand; an explicit value in the
+# environment wins over the flag.
+if (( PROBE_KEY )) && [[ -z "${LINC_PROBE_KEY:-}" ]]; then
+    export LINC_PROBE_KEY=1
+fi
 
 # --no-sim3d runs the same rig without the 3D simulator. An explicit
 # LINC_SIM_INI is a deliberate choice, so it wins over the flag's default.
