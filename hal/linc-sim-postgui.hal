@@ -8,6 +8,13 @@
 net linc-status linc.status-display => cnc_panel.sseg_status
 net tool-changed linc.tool-change-confirm
 net linc-hmi-heartbeat linc.hmi-alive
+
+# A latched probe trip switches the machine off: halui refuses a jog unless the
+# task state is ON, and the panel jogs straight into halui. The level is ORed
+# with the POWER OFF key onto the single halui.machine.off pin. It is held until
+# the trip is reset, so halui's rising edge switches the machine off once and a
+# re-power is not undone.
+net linc-machine-off linc.machine-off => or2.machine_off.in1
 # Jog speed, scaled in the HMI from [DISPLAY] DEFAULT_LINEAR_VELOCITY.
 net jog-speed linc.jog-speed => halui.axis.jog-speed halui.joint.jog-speed
 

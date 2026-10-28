@@ -16,7 +16,8 @@ safety validation without connecting to LinuxCNC or HAL.
 4. **Panel I/O is split from the UI.** The LiNC-owned `linc-panel` service owns
    the serial port and `cnc_panel.*` pins. The egui HMI never opens the serial
    device. LiNC may write only its declared `linc.*` HAL outputs
-   (`hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`).
+   (`hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`,
+   `jog-speed`, `machine-off`).
 5. **Safety policy is not a preference.** A profile cannot enable software
    E-stop, cycle control, jog, spindle, coolant or overrides; MDI issue is an
    explicit operator action, not a cycle-start substitute; pendant is jog-only.
@@ -114,8 +115,20 @@ DISPLAY = linc --config /home/jack/CNC/LiNC/configs/baiermill-pb.toml
 `linc.hal` loads the `linc-panel` service and wires `cnc_panel.*` to
 `halui`, jog, spindle, coolant, homing and overrides. `linc-postgui.hal` runs
 after the GUI has created the `linc.*` component and wires
-`linc.status-display`, `linc.tool-change-confirm` and `linc.hmi-alive`.
+`linc.status-display`, `linc.tool-change-confirm` and `linc.hmi-alive`, and
+`linc.machine-off` into the machine's machine-off request.
 `linc-pendant.hal` is real-machine only and wires jog/handwheel inputs.
+
+`allowed_outputs` is the whole writable surface: the sixth key, `machine-off`,
+is the `linc.machine-off` bit. It is true for as long as a probe trip is
+latched and false once it is reset, and it must reach `halui.machine.off`.
+That pin takes one signal, so the simulation ORs it with the panel's POWER OFF
+key through `or2.machine_off` (`hal/linc-sim.hal` keeps the POWER OFF half,
+`hal/linc-sim-postgui.hal` the `linc.machine-off` half, and the instance is
+created in `hal/linc.hal` where `or2` is loaded once). Re-powering after a trip
+needs a rising edge on `halui.machine.on`; on the mill the cabinet machine-on
+switch is the only writer, so recovery is toggling that switch, which ends the
+LiNC session.
 
 `LINC_CONFIG` must select the same profile as `--config`:
 
@@ -462,7 +475,8 @@ The backend rechecks the input for every write; unsaved editor content is
 preserved read-only, never discarded.
 
 LiNC writes only `linc.hmi-alive`, `linc.tool-change-confirm`,
-`linc.status-display`, `linc.jog-increment` and `linc.jog-speed`. No generic HAL write path exists. The loader hard-codes
+`linc.status-display`, `linc.jog-increment`, `linc.jog-speed` and
+`linc.machine-off`. No generic HAL write path exists. The loader hard-codes
 USB mount flags to include `nosuid,nodev,noexec`; a profile may add flags but
 never remove them.
 
@@ -748,7 +762,8 @@ For this design repository:
   tool table file; an ATC/turret profile requires `P` in
   `TOOL_TABLE_COLUMNS`;
 - `[hal] write_policy = "declared-outputs-only"` and `allowed_outputs` is
-  exactly `hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`;
+  exactly `hmi-alive`, `tool-change-confirm`, `status-display`,
+  `jog-increment`, `jog-speed`, `machine-off`;
 - `[pendant] jog_only = true` and non-jog functions are ignored;
 - `base.toml` cannot be loaded as a runnable profile.
 

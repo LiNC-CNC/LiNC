@@ -31,7 +31,7 @@ It is in the HMI process and has three collaborators:
 - Ordinary `std::fs` handles the parameter file (`G54`–`G59.3`, `G92`, probe
   parameters) and program text.
 
-The HMI still writes only the five declared `linc.*` outputs through
+The HMI still writes only the six declared `linc.*` outputs through
 [`LincHal`](../crates/linc-hal/src/lib.rs). The panel service remains separate:
 it owns `/dev/ttyUSB0` and the `cnc_panel.*` HAL surface, so an HMI crash does
 not remove physical panel control.

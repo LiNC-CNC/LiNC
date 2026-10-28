@@ -26,6 +26,20 @@ use crate::theme;
 
 pub const APP_TITLE: &str = "LiNC";
 
+/// The probe-trip banner's action button. The panel keyboard has no pointer, so
+/// the button names the key that does the same thing: Esc resets the trip.
+pub const PROBE_TRIP_ACTION: &str = "RESET (ESC)";
+
+/// The probe-trip banner: what the probe hit and what the HMI did about it.
+/// The machine is switched off for as long as the trip is latched, so the
+/// banner says so rather than promising only that motion is blocked.
+pub fn probe_trip_banner_text(fault: &linc_core::faults::ProbeTripFault) -> String {
+    format!(
+        "PROBE TRIPPED — {} — MACHINE SWITCHED OFF. MOTION AND MDI BLOCKED. RESET (ESC) TO CLEAR.",
+        fault.message
+    )
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FocusRegion {
     Nav,
@@ -1424,6 +1438,18 @@ impl LincApp {
             self.help.close_dialog();
             return;
         }
+        // A latched probe trip is cleared by the controller reset alone, and the
+        // machine is switched off until it is. Esc is that reset here, the same
+        // key that resets a running program, so it takes the key before the page
+        // branches: the trip banner is on every page, and an operator who opened
+        // HELP or DIAGNOSTICS to see what tripped the probe must be able to
+        // reset the fault from there instead of navigating away first. A dialog,
+        // the messages viewer and the manual tool-change prompt already took
+        // Esc above, or held it in the shell's overlay branch.
+        if self.snapshot.probe_trip_active() {
+            self.clear_probe_trip();
+            return;
+        }
         // The top-level Help page is a view, not the machine: Esc leaves it for
         // the page it came from. It must not fall through to the program reset;
         // the next Esc, on that page, is the one that stops a running program.
@@ -1437,12 +1463,6 @@ impl LincApp {
         // one that resets.
         if self.page == Page::Diagnostics {
             self.set_page(self.diagnostics_return_page);
-            return;
-        }
-        // A latched probe trip is cleared by the controller reset alone. Esc
-        // is that reset here, the same key that resets a running program.
-        if self.snapshot.probe_trip_active() {
-            self.clear_probe_trip();
             return;
         }
         // K4's program reset on the keyboard: Esc stops the running program
@@ -4161,11 +4181,8 @@ impl LincApp {
             ui.add_space(4.0);
         }
         if let Some(fault) = self.snapshot.probe_trip.clone() {
-            let text = format!(
-                "PROBE TRIPPED — {} — MOTION AND MDI BLOCKED. RESET TO CLEAR.",
-                fault.message
-            );
-            if theme::banner_action(ui, theme::ERROR, &text, "RESET") {
+            let text = probe_trip_banner_text(&fault);
+            if theme::banner_action(ui, theme::ERROR, &text, PROBE_TRIP_ACTION) {
                 self.clear_probe_trip();
             }
             ui.add_space(4.0);
@@ -6783,6 +6800,46 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert!(
             app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
             "Esc still resets once the operator is back on the page"
+        );
+    }
+
+    #[test]
+    fn escape_resets_a_latched_probe_trip_from_the_diagnostics_page() {
+        use linc_core::faults::{ProbeTripFault, ProbeTripKind};
+        let (_dir, mut app) = make_app(PanelMode::Auto);
+        app.poll_backend();
+        let fault =
+            ProbeTripFault::new(ProbeTripKind::JointJog, ProbeTripKind::JointJog.message(), 1);
+        // The banner's button has to name the key that does the same thing: the
+        // panel keyboard is the operator's only input.
+        assert!(
+            PROBE_TRIP_ACTION.contains("ESC"),
+            "the action button names Esc: {PROBE_TRIP_ACTION}"
+        );
+        assert!(
+            probe_trip_banner_text(&fault).contains("ESC"),
+            "the banner names Esc too"
+        );
+        app.snapshot.probe_trip = Some(fault);
+        app.set_page(Page::Program);
+        app.set_page(Page::Diagnostics);
+        app.escape();
+        app.poll_backend();
+        assert_eq!(
+            app.page,
+            Page::Diagnostics,
+            "the fault reset must not navigate away from the page the operator is reading"
+        );
+        assert!(
+            !app.snapshot.probe_trip_active(),
+            "Esc resets the latched trip from DIAGNOSTICS"
+        );
+        assert!(
+            app.toasts
+                .iter()
+                .any(|toast| toast.text == "PROBE TRIP RESET"),
+            "the reset is acknowledged: {:?}",
+            app.toasts.iter().map(|toast| &toast.text).collect::<Vec<_>>()
         );
     }
 

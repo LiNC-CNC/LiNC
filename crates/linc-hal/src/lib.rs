@@ -397,6 +397,9 @@ pub struct LincHal {
     status_display: HalPin,
     jog_increment: HalPin,
     jog_speed: HalPin,
+    /// Latched-probe-trip response: a level that holds `halui.machine.off` high
+    /// while the trip stands.
+    machine_off: HalPin,
     /// Cabinet machine-on switch, wired through the post-GUI HAL. A falling
     /// edge means the machine is being switched off and ends the session.
     machine_on: HalPin,
@@ -418,6 +421,7 @@ impl LincHal {
         let status_display = component.s32_out("status-display")?;
         let jog_increment = component.float_out("jog-increment")?;
         let jog_speed = component.float_out("jog-speed")?;
+        let machine_off = component.bit_out("machine-off")?;
         // Input pin: HAL owns the value. Nothing nets it in a simulation, where
         // it stays low and no edge is ever seen.
         let machine_on = component.bit_in("machine-on")?;
@@ -427,10 +431,11 @@ impl LincHal {
             *status_display.s32() = -1;
             *jog_increment.float() = 0.0;
             *jog_speed.float() = 0.0;
+            *machine_off.bit() = 0;
         }
         component.ready()?;
         log::info!(
-            "created linc.* HAL pins (hmi-alive, tool-change-confirm, status-display, jog-increment, jog-speed outputs; machine-on input)"
+            "created linc.* HAL pins (hmi-alive, tool-change-confirm, status-display, jog-increment, jog-speed, machine-off outputs; machine-on input)"
         );
         Ok(Self {
             component,
@@ -439,6 +444,7 @@ impl LincHal {
             status_display,
             jog_increment,
             jog_speed,
+            machine_off,
             machine_on,
             last_confirm: false,
         })
@@ -461,13 +467,14 @@ impl LincHal {
         unsafe { *self.machine_on.bit() != 0 }
     }
 
-    pub fn output_names(&self) -> [&'static str; 5] {
+    pub fn output_names(&self) -> [&'static str; 6] {
         [
             LincOutput::HmiAlive.pin_name(),
             LincOutput::ToolChangeConfirm.pin_name(),
             LincOutput::StatusDisplay.pin_name(),
             LincOutput::JogIncrement.pin_name(),
             LincOutput::JogSpeed.pin_name(),
+            LincOutput::MachineOff.pin_name(),
         ]
     }
 
@@ -506,6 +513,11 @@ impl HalWriter for LincHal {
                 }
                 (LincOutput::JogSpeed, HalValue::Float(value)) => {
                     *self.jog_speed.float() = value;
+                }
+                (LincOutput::MachineOff, HalValue::Bit(value)) => {
+                    // A level, not a pulse: the trip's machine-off response
+                    // stands for as long as the fault does.
+                    *self.machine_off.bit() = value as u8;
                 }
                 _ => {
                     return Err(MachineError::Hal("wrong HAL value type".into()));

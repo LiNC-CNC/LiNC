@@ -1210,6 +1210,9 @@ pub struct HalOutputs {
     pub jog_increment: Option<f64>,
     pub jog_speed: Option<f64>,
     pub heartbeat_seq: u64,
+    /// `linc.machine-off`: the level the backend last published for a latched
+    /// probe trip. True while the trip stands, false once it is reset.
+    pub machine_off: bool,
 }
 
 impl Default for HalOutputs {
@@ -1222,6 +1225,7 @@ impl Default for HalOutputs {
             jog_increment: None,
             jog_speed: None,
             heartbeat_seq: 0,
+            machine_off: false,
         }
     }
 }

@@ -30,6 +30,10 @@ pub struct SimBackend {
     last_probe: Option<ProbeResult>,
     panel_ipc: Option<crate::sim_ipc::SimPanelIpc>,
     panel_seen: Instant,
+    /// `linc.machine-off` as published by the backend: a level that holds the
+    /// simulated machine off until the probe trip is reset, the way a held
+    /// `halui.machine.off` does on the real machine.
+    machine_off: bool,
 }
 
 impl SimBackend {
@@ -300,6 +304,7 @@ impl SimBackend {
             last_probe: None,
             panel_ipc,
             panel_seen: Instant::now(),
+            machine_off: false,
         };
         backend.trail_limit = backend.profile.config.toolpath.trail_max_points;
         backend.initialize_program();
@@ -625,6 +630,14 @@ impl SimBackend {
         self.snapshot.machine.estop = estop;
         self.snapshot.task.power = if estop {
             MachinePower::Estop
+        } else if self.machine_off {
+            // A latched probe trip switched the machine off, and the
+            // simulation keeps it off while the level stands. That is stricter
+            // than the machine: there halui.machine.off fires on its rising
+            // edge only, so a POWER ON edge is still accepted with the trip
+            // latched. The simulation has no halui to ask, so it shows the
+            // switched-off machine for as long as the trip lasts.
+            MachinePower::Off
         } else {
             match power_on {
                 Some(true) => MachinePower::On,
@@ -1573,6 +1586,18 @@ impl MachineBackend for SimBackend {
                             self.snapshot.hal.jog_speed = Some(value);
                         }
                     }
+                    LincOutput::MachineOff => {
+                        // The simulation has no halui to switch off, so the
+                        // machine state itself moves: the DRO and the top bar
+                        // show MACHINE OFF and the banner explains why.
+                        if let HalValue::Bit(value) = value {
+                            self.machine_off = value;
+                            if value {
+                                self.snapshot.task.power = MachinePower::Off;
+                                self.snapshot.machine.on = false;
+                            }
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -1736,6 +1761,54 @@ enabled = true
         let snapshot = backend.snapshot();
         assert_eq!(snapshot.hal.jog_speed, Some(42.0));
         assert_eq!(snapshot.hal.jog_increment, Some(0.5));
+    }
+
+    #[test]
+    fn the_machine_off_output_switches_the_simulated_machine_off() {
+        // There is no halui in the simulation, so the machine state itself
+        // moves: the DRO, the top bar and the banner all have to agree that the
+        // probe trip switched the machine off.
+        use crate::command::{HalValue, LincOutput, MachineCommand};
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        backend.snapshot.task.power = MachinePower::On;
+        backend.snapshot.machine.on = true;
+
+        backend
+            .send(MachineCommand::SetHalOutput {
+                output: LincOutput::MachineOff,
+                value: HalValue::Bit(true),
+            })
+            .unwrap();
+        let snapshot = backend.snapshot();
+        assert_eq!(snapshot.task.power, MachinePower::Off);
+        assert!(!snapshot.machine.on, "the top bar must not claim ON");
+
+        // The simulation keeps the machine off while the level stands, so the
+        // panel's POWER ON does not show it back on until the trip is reset.
+        // This is a simulation simplification, not halui behaviour: on the
+        // machine halui.machine.off fires on its rising edge only and a POWER
+        // ON edge is still accepted with the trip latched.
+        let mut panel = crate::model::PanelSnapshot::default();
+        panel.connected = true;
+        panel.power_on = Some(true);
+        backend.apply_panel_state(panel.clone());
+        assert_eq!(
+            backend.snapshot.task.power,
+            MachinePower::Off,
+            "the simulation keeps the machine off while the level stands; that is stricter than \
+             halui, which fires on the rising edge only and still accepts a POWER ON edge"
+        );
+
+        // The trip's reset drops the level and the panel's POWER ON takes over.
+        backend
+            .send(MachineCommand::SetHalOutput {
+                output: LincOutput::MachineOff,
+                value: HalValue::Bit(false),
+            })
+            .unwrap();
+        backend.apply_panel_state(panel);
+        assert_eq!(backend.snapshot.task.power, MachinePower::On);
     }
 
     #[test]

@@ -197,8 +197,9 @@ performance and limitations - is in [docs/sim3d.md](docs/sim3d.md).
   mode; pendant mode, cycle, spindle, coolant, override, program and macro
   controls are ignored.
 - **LiNC writes only declared HAL outputs.** `linc.hmi-alive`,
-  `linc.tool-change-confirm` and `linc.status-display`; there is no generic
-  arbitrary-pin write API.
+  `linc.tool-change-confirm`, `linc.status-display`, `linc.jog-increment`,
+  `linc.jog-speed` and `linc.machine-off`; there is no generic arbitrary-pin
+  write API.
 - **The QMK keyboard is the only text/navigation device.** There are no
   F1–F8 softkeys. `MAIN`, `FILE`, `OFFSET`, `TOOL`, `WIN`, `ESC`, arrows,
   PageUp/PageDown, Home/End, and Enter drive the UI. Standard Ctrl editing

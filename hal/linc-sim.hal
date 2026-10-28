@@ -25,4 +25,11 @@ net estop-reset-request or2.estop_reset.out => halui.estop.reset
 # `halui.machine.off` is not linked by the machine HAL (only `.on` is, from the
 # machine switch), so POWER OFF drops the task state here as the reference
 # simulation does.
-net sim-power-off cnc_panel.power_off => rio.sim-power-off halui.machine.off
+#
+# `halui.machine.off` is a single pin, so the POWER OFF key and LiNC's
+# machine-off response for a latched probe trip are ORed through
+# or2.machine_off (created in linc.hal). `linc.machine-off` exists only after
+# the GUI starts, so its half of the net is in linc-sim-postgui.hal.
+addf or2.machine_off servo-thread
+net sim-power-off cnc_panel.power_off => rio.sim-power-off or2.machine_off.in0
+net sim-machine-off or2.machine_off.out => halui.machine.off

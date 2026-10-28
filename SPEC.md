@@ -175,8 +175,9 @@ Panel ownership rules:
   port. The HMI **must not** duplicate panel controls as on-screen buttons.
 - LiNC **may write declared HAL outputs** through its `linc` HAL component.
   The allowlist is `linc.hmi-alive`, `linc.tool-change-confirm`,
-  `linc.status-display`, `linc.jog-increment` and `linc.jog-speed`. It never
-  writes arbitrary `cnc_panel.*` or machine-motion pins.
+  `linc.status-display`, `linc.jog-increment`, `linc.jog-speed` and
+  `linc.machine-off`. It never writes arbitrary `cnc_panel.*` or
+  machine-motion pins.
 - The panel driver is modular: a `PanelDriver` trait plus a capabilities
   descriptor (buttons, LEDs, displays, mode encoding, override encoding,
   pendant support) lets future panel types and transports replace the panel
@@ -277,7 +278,7 @@ cnc_panel.* HAL pins <--------------------------> linc-panel
 - `linc`: Rust `egui` application and machine backend. Owns no motion hardware.
   Loads the `linc` HAL component and writes only its declared outputs:
   `linc.hmi-alive`, `linc.tool-change-confirm`, `linc.status-display`,
-  `linc.jog-increment` and `linc.jog-speed`.
+  `linc.jog-increment`, `linc.jog-speed` and `linc.machine-off`.
 - `linuxcnc`: task/motion/IO. Authoritative machine state.
 - HAL glue: standard `halui`, the `linc` component, and `linc-panel`.
 
@@ -1318,11 +1319,16 @@ etc.
   machine fault, not as a transient toast: the exact controller text goes to
   the Messages page and a persistent `PROBE TRIPPED` banner carries it on every
   page. While it is latched, MDI, probe, tool-change, jog-parameter and
-  offset/tool writes fail closed and no command is sent. The banner does not
-  time out; it clears only when the operator performs the controller reset
-  (`Esc` or the banner's `RESET`), which sends `EMC_TASK_ABORT` — the same
-  action that clears LinuxCNC's motion error. LiNC never powers the machine off
-  for this fault and does not add a software E-stop.
+  offset/tool writes fail closed and no command is sent, and LiNC switches the
+  machine off through `linc.machine-off` so the panel cannot jog into the probe
+  either. The banner does not time out; it clears only when the operator
+  performs the controller reset (`Esc`, which works from any page including
+  DIAGNOSTICS, or the banner's `RESET (ESC)` button), which sends
+  `EMC_TASK_ABORT` — the same action that clears LinuxCNC's motion error.
+  Re-powering afterwards needs a rising edge on `halui.machine.on`: on the mill
+  the cabinet machine-on switch is the only writer, and toggling it ends the
+  LiNC session. That is the recovery path; there is no software E-stop and no
+  jog lockout.
 - Program start is physical CYCLE START only. The HMI never starts AUTO.
 - The WHB pendant contributes jog/handwheel input only in JOG mode; all other
   pendant controls are ignored.
@@ -1454,7 +1460,8 @@ HAL pins is still open.
 - No continuous 60 fps repaint when idle.
 - No blocking file/serial/NML I/O on the UI thread.
 - HAL outputs: `hmi-alive` 2 Hz heartbeat, `status-display` on WCS change or
-  5 Hz, `tool-change-confirm` edge-driven only.
+  5 Hz, `tool-change-confirm` edge-driven only, `machine-off` on the rising and
+  falling edge of a latched probe trip.
 - Cache text layout and visible-line tokens.
 - Event log in a ring buffer; persist asynchronously, not on every event.
 
@@ -1463,8 +1470,9 @@ HAL pins is still open.
 - The hardware E-stop chain is the only safety-rated stop.
 - A software E-stop button is forbidden.
 - LiNC may write only the declared `linc.*` HAL outputs
-  (`hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`). It never writes
-  arbitrary HAL pins or machine motion/spindle/coolant/cycle pins.
+  (`hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`,
+  `jog-speed`, `machine-off`). It never writes arbitrary HAL pins or machine
+  motion/spindle/coolant/cycle pins.
 - Validate machine ON, homed, idle, program protect and no active program
   before MDI, probe, tool-change and program/offset/tool writes.
 - MDI, probe and tool-change commands use Probe Basic `issue_mdi` semantics:
@@ -1488,7 +1496,21 @@ HAL pins is still open.
 - A probe trip reported by LinuxCNC latches a persistent banner and blocks
   motion/MDI/probe/tool/offset commands until the operator's reset clears it.
   The banner has no timeout. The clear action is the controller's
-  `EMC_TASK_ABORT`, never a software power-off.
+  `EMC_TASK_ABORT`.
+- The trip also switches the machine off. The panel jogs straight into `halui`,
+  which accepts a jog only while the task state is ON, so the HMI cannot block
+  a jog by refusing it — it switches the machine off instead. The response is
+  the `linc.machine-off` level, ORed onto the single `halui.machine.off` pin:
+  true for as long as the trip is latched, false once it is reset. halui acts on
+  the rising edge, so the held level switches the machine off once and a re-power
+  while the trip stands is not undone. The response is wired for the mill and the
+  mill simulation; the lathe profile creates the pin but has no consumer yet, so
+  a lathe probe trip is not switched off.
+- Re-powering after a trip needs a rising edge on `halui.machine.on`. On the
+  mill the only writer is the cabinet machine-on switch, and toggling it ends
+  the LiNC session. That is the designed recovery path; LiNC does not work
+  around it and adds no jog lockout, no `motion.jog-inhibit` and no software
+  E-stop.
 - Do not hide alarms behind tabs; persistent banner plus Diagnostics.
 - HMI crash must not stop the machine or remove panel control. The panel
   service is separate; `linc.hmi-alive` exposes UI health to HAL.
@@ -1693,7 +1715,8 @@ For the future implementation:
     the panel driver and map `g5x_index` to `54`–`59`, with `--` on
     unknown/stale or extended offsets.
 34. Implement the `linc` HAL component and typed output allowlist:
-    `hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`. Verify ownership,
+    `hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`,
+    `jog-speed`, `machine-off`. Verify ownership,
     startup/shutdown, heartbeat expiry and that no arbitrary pin writes exist.
 35. Rename or alias the existing branded panel HAL component/pins to
     `cnc_panel` and update the machine HAL, or provide compatibility nets.

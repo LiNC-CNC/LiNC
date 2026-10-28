@@ -55,15 +55,22 @@ pub enum LincOutput {
     /// The HMI scales the INI's default linear velocity by the operator's
     /// percentage, so the machine HAL does not need a multiplier component.
     JogSpeed,
+    /// Switch the machine off for a latched probe trip, for
+    /// `halui.machine.off`. A level: true for as long as the trip is latched,
+    /// false once it is reset. halui acts on the rising edge, so the held level
+    /// is the whole response and the operator can power back on without being
+    /// switched off again.
+    MachineOff,
 }
 
 impl LincOutput {
-    pub const ALLOWED: [LincOutput; 5] = [
+    pub const ALLOWED: [LincOutput; 6] = [
         LincOutput::HmiAlive,
         LincOutput::ToolChangeConfirm,
         LincOutput::StatusDisplay,
         LincOutput::JogIncrement,
         LincOutput::JogSpeed,
+        LincOutput::MachineOff,
     ];
 
     pub fn pin_name(self) -> &'static str {
@@ -73,6 +80,7 @@ impl LincOutput {
             Self::StatusDisplay => "linc.status-display",
             Self::JogIncrement => "linc.jog-increment",
             Self::JogSpeed => "linc.jog-speed",
+            Self::MachineOff => "linc.machine-off",
         }
     }
 
@@ -83,6 +91,7 @@ impl LincOutput {
             Self::StatusDisplay => "status-display",
             Self::JogIncrement => "jog-increment",
             Self::JogSpeed => "jog-speed",
+            Self::MachineOff => "machine-off",
         }
     }
 
@@ -93,6 +102,7 @@ impl LincOutput {
             "status-display" | "linc.status-display" => Some(Self::StatusDisplay),
             "jog-increment" | "linc.jog-increment" => Some(Self::JogIncrement),
             "jog-speed" | "linc.jog-speed" => Some(Self::JogSpeed),
+            "machine-off" | "linc.machine-off" => Some(Self::MachineOff),
             _ => None,
         }
     }
@@ -114,6 +124,7 @@ impl HalValue {
                 | (HalValue::S32(_), LincOutput::StatusDisplay)
                 | (HalValue::Float(_), LincOutput::JogIncrement)
                 | (HalValue::Float(_), LincOutput::JogSpeed)
+                | (HalValue::Bit(_), LincOutput::MachineOff)
         )
     }
 }
@@ -331,12 +342,16 @@ mod tests {
 
     #[test]
     fn only_declared_hal_outputs_are_representable() {
-        assert_eq!(LincOutput::ALLOWED.len(), 5);
+        assert_eq!(LincOutput::ALLOWED.len(), 6);
         assert!(LincOutput::from_name("linc.hmi-alive").is_some());
         assert!(LincOutput::from_name("linc.status-display").is_some());
         assert!(LincOutput::from_name("linc.tool-change-confirm").is_some());
         assert!(LincOutput::from_name("linc.jog-increment").is_some());
         assert!(LincOutput::from_name("linc.jog-speed").is_some());
+        assert_eq!(
+            LincOutput::from_name("linc.machine-off"),
+            Some(LincOutput::MachineOff)
+        );
         assert!(LincOutput::from_name("motion.spindle-on").is_none());
         assert!(LincOutput::from_name("cnc_panel.cycle_start").is_none());
     }
@@ -347,5 +362,20 @@ mod tests {
         assert!(HalValue::Bit(true).matches(LincOutput::ToolChangeConfirm));
         assert!(HalValue::S32(54).matches(LincOutput::StatusDisplay));
         assert!(!HalValue::Float(1.0).matches(LincOutput::StatusDisplay));
+    }
+
+    /// The probe trip's machine-off response is a HAL bit under its own name.
+    #[test]
+    fn machine_off_round_trips_through_every_name_and_takes_a_bit() {
+        let output = LincOutput::MachineOff;
+        assert_eq!(output.pin_name(), "linc.machine-off");
+        assert_eq!(output.short_name(), "machine-off");
+        assert_eq!(LincOutput::from_name(output.pin_name()), Some(output));
+        assert_eq!(LincOutput::from_name(output.short_name()), Some(output));
+        assert!(HalValue::Bit(true).matches(output));
+        assert!(HalValue::Bit(false).matches(output));
+        assert!(!HalValue::S32(1).matches(output));
+        assert!(!HalValue::Float(1.0).matches(output));
+        assert!(LincOutput::ALLOWED.contains(&output));
     }
 }

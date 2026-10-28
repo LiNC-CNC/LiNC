@@ -1269,7 +1269,11 @@ impl NmlBackend {
                             }
                         }
                     }
-                    LincOutput::HmiAlive | LincOutput::StatusDisplay => {}
+                    // The worker owns these: it publishes them from its own
+                    // snapshot and nothing here has state to mirror.
+                    LincOutput::HmiAlive
+                    | LincOutput::StatusDisplay
+                    | LincOutput::MachineOff => {}
                 }
                 Ok(())
             }

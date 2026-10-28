@@ -567,6 +567,9 @@ fn hal_nml(app: &mut LincApp, ui: &mut Ui) {
                                 .jog_speed
                                 .map(|value| format!("{value:.1}"))
                                 .unwrap_or_else(|| "0".into()),
+                            linc_core::command::LincOutput::MachineOff => {
+                                app.snapshot.hal.machine_off.to_string()
+                            }
                         };
                         theme::kv_row(ui, output.pin_name(), value);
                     }

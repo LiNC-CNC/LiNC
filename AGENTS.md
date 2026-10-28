@@ -73,8 +73,9 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
 - `CONFIGURATION.md` — every profile key, merge rules, enums, validation.
 - `configs/base.toml` — live defaults for keys, pages, allowed outputs, safety.
 - The machine INI — authoritative for axes, travel, units, velocities, tool table, ATC and `PROGRAM_PREFIX`. Never duplicate those in TOML.
-- Code and tests decide current behaviour when prose drifts. `LincOutput::ALLOWED` and `configs/base.toml` list five outputs (`hmi-alive`,
-  `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`), while SPEC §11, CONFIGURATION §8 and README still say three. Follow the code; fix the docs.
+- Code and tests decide current behaviour when prose drifts. `LincOutput::ALLOWED` and `configs/base.toml` list six outputs (`hmi-alive`,
+  `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`, `machine-off`); SPEC §5/§11, CONFIGURATION §1/§8 keep the same list. Follow
+  the code; fix the docs.
 
 ## Hard invariants
 

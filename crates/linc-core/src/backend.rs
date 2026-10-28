@@ -184,6 +184,7 @@ fn run_worker(
     // NaN so the first pass always publishes the initial selection.
     let mut last_jog_increment = f64::NAN;
     let mut last_jog_speed = f64::NAN;
+    let mut last_machine_off = false;
 
     while !shared.shutdown.load(Ordering::Relaxed) {
         let request = rx.recv_timeout(Duration::from_millis(10));
@@ -295,6 +296,26 @@ fn run_worker(
                 }
             }
 
+            // A latched probe trip switches the machine off. halui accepts a
+            // jog only while the task state is ON, and the panel jogs straight
+            // into halui, so this is the one response the HMI can enforce.
+            // The output is a level: high while the trip stands, low once it is
+            // reset. halui acts on the rising edge, so the held level never
+            // switches the machine off a second time after the operator powers
+            // back on; nothing here retries it.
+            let machine_off = snapshot.probe_trip_active();
+            snapshot.hal.machine_off = machine_off;
+            if machine_off != last_machine_off {
+                last_machine_off = machine_off;
+                if let Some(writer) = hal.as_mut() {
+                    if let Err(error) =
+                        writer.write(LincOutput::MachineOff, HalValue::Bit(machine_off))
+                    {
+                        log::warn!("HAL machine-off write failed: {error}");
+                    }
+                }
+            }
+
             *shared
                 .snapshot
                 .lock()
@@ -311,6 +332,9 @@ fn run_worker(
     if let Some(writer) = hal.as_mut() {
         let _ = writer.write(LincOutput::ToolChangeConfirm, HalValue::Bit(false));
         let _ = writer.write(LincOutput::HmiAlive, HalValue::Bit(false));
+        // Leaving the machine off behind a dead HMI would strand a powered
+        // machine with no UI left to reset the trip from.
+        let _ = writer.write(LincOutput::MachineOff, HalValue::Bit(false));
     }
 }
 
@@ -488,6 +512,98 @@ mod tests {
             confirms(&recording),
             vec![true, false],
             "confirmation must drop when the request does"
+        );
+        drop(handle);
+    }
+
+    /// A latched probe trip switches the machine off through HAL: a level, so
+    /// one write on the rising edge, none while it holds, and one on the falling
+    /// edge when the fault is reset.
+    #[test]
+    fn a_probe_trip_is_published_as_a_machine_off_level() {
+        use std::sync::{Arc, Mutex};
+        use crate::faults::{ProbeTripFault, ProbeTripKind};
+        struct RecordingHal(Arc<Mutex<Vec<(LincOutput, HalValue)>>>);
+        impl HalWriter for RecordingHal {
+            fn write(&mut self, output: LincOutput, value: HalValue) -> Result<(), MachineError> {
+                self.0.lock().unwrap().push((output, value));
+                Ok(())
+            }
+        }
+        /// A backend whose latched trip the test raises and clears.
+        struct Trippable {
+            snapshot: Arc<Mutex<MachineSnapshot>>,
+        }
+        impl MachineBackend for Trippable {
+            fn snapshot(&mut self) -> MachineSnapshot {
+                self.snapshot.lock().unwrap().clone()
+            }
+            fn send(&mut self, _command: MachineCommand) -> Result<(), MachineError> {
+                Ok(())
+            }
+        }
+        fn levels(recording: &Arc<Mutex<Vec<(LincOutput, HalValue)>>>) -> Vec<bool> {
+            recording
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|(output, value)| match (output, value) {
+                    (LincOutput::MachineOff, HalValue::Bit(value)) => Some(*value),
+                    _ => None,
+                })
+                .collect()
+        }
+        fn trip() -> ProbeTripFault {
+            ProbeTripFault::new(ProbeTripKind::JointJog, ProbeTripKind::JointJog.message(), 1)
+        }
+
+        let recording = Arc::new(Mutex::new(Vec::new()));
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.task.power = crate::model::MachinePower::On;
+        let shared = Arc::new(Mutex::new(snapshot));
+        let handle = BackendHandle::spawn(
+            Box::new(Trippable {
+                snapshot: shared.clone(),
+            }),
+            Some(Box::new(RecordingHal(recording.clone()))),
+            50,
+            StatusSource::Wcs,
+        );
+
+        thread::sleep(Duration::from_millis(120));
+        assert!(
+            levels(&recording).is_empty(),
+            "no trip, no machine-off write: {:?}",
+            levels(&recording)
+        );
+
+        shared.lock().unwrap().probe_trip = Some(trip());
+        thread::sleep(Duration::from_millis(250));
+        assert_eq!(
+            levels(&recording),
+            vec![true],
+            "the trip's rising edge must switch the machine off"
+        );
+        assert!(
+            handle.snapshot().hal.machine_off,
+            "the published snapshot carries the level for the Diagnostics page"
+        );
+
+        // Held for as long as the trip stands: no repeat, so powering back on
+        // while it is latched is not switched off again.
+        thread::sleep(Duration::from_millis(250));
+        assert_eq!(
+            levels(&recording),
+            vec![true],
+            "a held level is not re-asserted every poll"
+        );
+
+        shared.lock().unwrap().probe_trip = None;
+        thread::sleep(Duration::from_millis(250));
+        assert_eq!(
+            levels(&recording),
+            vec![true, false],
+            "the reset must drop the level"
         );
         drop(handle);
     }
