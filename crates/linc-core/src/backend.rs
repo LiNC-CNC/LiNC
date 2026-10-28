@@ -619,10 +619,11 @@ mod tests {
         drop(handle);
     }
 
-    /// A trip raised while the program was paused leaves the machine on: that
-    /// is the case the operator provokes on purpose, to prove the probe input is
-    /// wired, and nothing was aborted that had to be stopped. A normal trip on
-    /// the same backend still switches the machine off.
+    /// A trip raised with the program paused and nothing moving leaves the
+    /// machine on: that is the case the operator provokes on purpose, to prove
+    /// the probe input is wired, and nothing was aborted that had to be stopped.
+    /// Every other combination on the same backend still switches the machine
+    /// off, including a paused program being jogged into the probe.
     #[test]
     fn a_paused_probe_trip_leaves_the_machine_on() {
         use std::sync::{Arc, Mutex};
@@ -656,12 +657,13 @@ mod tests {
                 })
                 .collect()
         }
-        fn trip(paused: bool) -> ProbeTripFault {
-            ProbeTripFault::new_paused(
+        fn trip(paused: bool, moving: bool) -> ProbeTripFault {
+            ProbeTripFault::new_with_state(
                 ProbeTripKind::NonProbeMove,
                 ProbeTripKind::NonProbeMove.message(),
                 1,
                 paused,
+                moving,
             )
         }
 
@@ -676,11 +678,12 @@ mod tests {
             StatusSource::Wcs,
         );
 
-        shared.lock().unwrap().probe_trip = Some(trip(true));
+        // Paused and still: the finger test that proves the input is wired.
+        shared.lock().unwrap().probe_trip = Some(trip(true, false));
         thread::sleep(Duration::from_millis(250));
         assert!(
             levels(&recording).is_empty(),
-            "a trip raised with the program paused must not switch the machine off: {:?}",
+            "a trip raised with the program paused and nothing moving must not switch the machine off: {:?}",
             levels(&recording)
         );
         assert!(
@@ -697,13 +700,31 @@ mod tests {
             levels(&recording)
         );
 
-        // A trip raised while the program ran is still a machine-off.
-        shared.lock().unwrap().probe_trip = Some(trip(false));
+        // A paused program being jogged into the probe is not that case: the
+        // controller reports the jog as a non-probe move and the pause is still
+        // set, so the machine has to go off.
+        shared.lock().unwrap().probe_trip = Some(trip(true, true));
         thread::sleep(Duration::from_millis(250));
         assert_eq!(
             levels(&recording),
             vec![true],
-            "a normal trip switches the machine off"
+            "a jog from a paused program switches the machine off"
+        );
+
+        // And a trip raised while the program ran, after a reset.
+        shared.lock().unwrap().probe_trip = None;
+        thread::sleep(Duration::from_millis(150));
+        assert_eq!(
+            levels(&recording),
+            vec![true, false],
+            "the reset drops the level"
+        );
+        shared.lock().unwrap().probe_trip = Some(trip(false, false));
+        thread::sleep(Duration::from_millis(250));
+        assert_eq!(
+            levels(&recording),
+            vec![true, false, true],
+            "a trip raised while the program ran switches the machine off"
         );
         drop(handle);
     }
