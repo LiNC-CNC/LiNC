@@ -1084,23 +1084,31 @@ to the live graph or the coordinate readout applies to both.
   - `Z+`/`Z-` -> `home-z`.
   - Individual home outputs are disabled while any axis is homing; the panel
     driver/postgui performs the gating.
-- PROG.HOME mode mapping. The keys are not jogs: each drives one
-  `halui.mdi-command-NN` pin, and the INI's `[HALUI] MDI_COMMAND` list is the
-  command, in order, so the index is a machine-config fact:
-  - `RAPID` -> `proghome-all` -> `o<whome> call` (index 03): machine `Z0`
-    first, then work `X0 Y0`. A single `G0 X0Y0Z0` would plunge X and Y at
-    whatever Z the tool is at;
-  - `X+`/`X-` -> `proghome-x` -> `G0 X0` (index 07);
-  - `Y+`/`Y-` -> `proghome-y` -> `G0 Y0` (index 08);
-  - `Z+`/`Z-` -> `proghome-z` -> `G0 Z0` (index 09).
-  - `halui` runs a command once per rising edge, so one press is one block.
+- PROG.HOME mode mapping. The keys are not jogs: each is one MDI block, and
+  the HMI issues it. The pins and blocks are one table
+  (`linc_core::homing::proghome_keys`), which is also what the page documents:
+  - `RAPID` -> `proghome-all` -> `o<whome> call`: machine `Z0` first, then work
+    `X0 Y0`. A single `G0 X0Y0Z0` would plunge X and Y at whatever Z the tool
+    is at;
+  - `X+`/`X-` -> `proghome-x` -> `G0 X0`;
+  - `Y+`/`Y-` -> `proghome-y` -> `G0 Y0`;
+  - `Z+`/`Z-` -> `proghome-z` -> `G0 Z0`.
+  - One block per press: the backend watches the four pins on the poll it
+    already makes and acts on the rising edge only, so a held key does not
+    repeat the move.
+  - The block goes through the HMI's ordinary MDI write path, which switches to
+    MDI and puts the panel's mode back (`issue_blocks`). It is refused, and
+    logged, while the machine is off, unhomed, protected or running a program.
+  - **The dial position must not request a task mode.** Asking for MDI here
+    (one build did, because `halui.mdi-command` needs it) left the task in MDI
+    and halui then ignored every jog and home request, which is the manual
+    keys dead in all other modes.
   - This is program zero in the current WCS, not machine home and not `G53`.
   - X/Y/Z only; optional A/C axes are not moved by these panel actions,
     matching the current Probe Basic handlers.
-  - The panel-owned path issues MDI immediately through the existing
-    `issue_mdi` action; the HMI must not intercept it or add a cycle-start
-    gate. It still requires machine ON, all axes homed and interpreter
-    idle, or the action is refused.
+  - The key is the trigger, not a cycle start: one block, no cycle-start gate.
+    It still requires machine ON, all axes homed and the interpreter idle, or
+    the press is refused and logged.
 - Homing order comes from the INI; the current machine is Z first, then X/Y.
   `NO_FORCE_HOMING = 0` means programs/MDI are blocked until homed.
 - The page shows machine position, limits, homed count and sequence completion.
@@ -1257,8 +1265,9 @@ etc.
   MDI and restores the prior mode.
 - HOME/PROG.HOME open the Homing screen; all homing/program-zero motion
   originates in the panel's home/proghome pins and keys. The HMI never homes an
-  axis and never intercepts the panel's existing direct `issue_mdi` PROG.HOME
-  path.
+  axis: the home keys drive halui directly. The PROG.HOME keys are MDI blocks
+  and the HMI issues them itself (§6.10), one per press, because the halui
+  alternative needed a task mode the dial must not ask for.
 - JOG/INC/MPG open the Manual screen with the large graph and coordinate
   readout. Jog, increment and handwheel motion remain panel/pendant input only.
   **Increment selection**: `INC` steps come from the machine INI's
@@ -1500,7 +1509,8 @@ For this design repository:
   home controls.
 - PROG.HOME retains the current machine's `issue_mdi` behavior: RAPID calls
   `o<whome>` (machine `Z0`, then work `X0 Y0`), axis keys send `G0 X0/Y0/Z0` in
-  the current WCS, X/Y/Z only. The blocks come from `[HALUI] MDI_COMMAND`.
+  the current WCS, X/Y/Z only. The HMI issues them itself, one block per press,
+  through the same MDI path as its other writes.
 - The Tools screen represents the standard LinuxCNC tool table, current/next
   tool, explicit `Tn M6` issue, manual confirmation and optional ATC/turret
   state; the pocket column appears only when a changer uses it.

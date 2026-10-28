@@ -54,7 +54,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "PROGRAM ZERO");
                     ui.label(
-                        RichText::new("RAPID calls o<whome> (machine Z0 first, then X0 Y0); X±/Y±/Z± send G0 X0 / Y0 / Z0 in the current WCS. The keys run as MDI blocks, so PROG.HOME holds the task in MDI. The HMI does not intercept these panel actions.")
+                        RichText::new("RAPID calls o<whome> (machine Z0 first, then X0 Y0); X±/Y±/Z± send G0 X0 / Y0 / Z0 in the current WCS. Each key is one block, issued once per press and then the panel's mode is put back.")
                             .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );

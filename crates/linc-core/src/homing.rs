@@ -1,7 +1,11 @@
 //! Panel-only homing and PROG.HOME mapping.
 //!
-//! The HMI displays state and documents the mapping. It never issues home
-//! commands and never intercepts the panel's PROG.HOME MDI path.
+//! The HMI displays state and documents the mapping. It never homes an axis:
+//! homing runs from the panel's own `home-*` pins through halui. The PROG.HOME
+//! keys are different - they are MDI blocks, and the HMI issues them itself as
+//! one-shots (`proghome_keys` here is the list the backend watches), because
+//! halui's `mdi-command` pins would need the task in MDI and a dial position
+//! must not be able to disable the manual keys.
 
 use crate::ini::AxisIni;
 use crate::model::{AxisMap, MachineSnapshot};
@@ -94,6 +98,22 @@ pub const MAPPINGS: [HomeMapping; 7] = [
     },
 ];
 
+/// The four PROG.HOME keys, one entry per panel pin and the block it asks for.
+///
+/// Seven panel keys land on four pins (X+ and X− are both `proghome-x`), so
+/// this is the deduplicated list the backend watches. Keeping it here makes the
+/// table the one description of what the keys do: the page documents it and the
+/// backend issues it.
+pub fn proghome_keys() -> Vec<(&'static str, &'static str)> {
+    let mut keys: Vec<(&'static str, &'static str)> = Vec::new();
+    for mapping in MAPPINGS {
+        if !keys.iter().any(|(pin, _)| *pin == mapping.proghome_pin) {
+            keys.push((mapping.proghome_pin, mapping.proghome_mdi));
+        }
+    }
+    keys
+}
+
 pub fn mapping(key: HomingKey) -> HomeMapping {
     MAPPINGS
         .iter()
@@ -185,6 +205,22 @@ mod tests {
         assert_eq!(mapping(HomingKey::XPlus).proghome_mdi, "G0 X0");
         assert_eq!(mapping(HomingKey::YMinus).proghome_mdi, "G0 Y0");
         assert_eq!(mapping(HomingKey::ZPlus).home_pin, "cnc_panel.home-z");
+    }
+
+    /// One block per panel pin, in the order the keys are laid out: the four
+    /// keys are all/x/y/z, and X+ and X- must not issue the move twice.
+    #[test]
+    fn proghome_keys_are_one_per_panel_pin() {
+        let keys = proghome_keys();
+        assert_eq!(
+            keys,
+            vec![
+                ("cnc_panel.proghome-all", "o<whome> call"),
+                ("cnc_panel.proghome-x", "G0 X0"),
+                ("cnc_panel.proghome-y", "G0 Y0"),
+                ("cnc_panel.proghome-z", "G0 Z0"),
+            ]
+        );
     }
 
     #[test]

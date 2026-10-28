@@ -77,6 +77,9 @@ pub struct NmlBackend {
     /// Said once per session: the active row is unpublished, so the stored one
     /// is kept instead of being replaced by zeros.
     offset_unpublished_logged: bool,
+    /// Last state of the PROG.HOME keys, for the rising edge that issues the
+    /// block. One bool per entry of `linc_core::homing::proghome_keys`.
+    proghome_prev: Vec<bool>,
     confirm_seq: u64,
     tool_table: ToolTable,
 }
@@ -140,6 +143,7 @@ impl NmlBackend {
             offset_sync_next: Instant::now(),
             offset_sync_protect_logged: false,
             offset_unpublished_logged: false,
+            proghome_prev: Vec::new(),
             confirm_seq: 0,
             tool_table,
         })
@@ -603,6 +607,45 @@ impl NmlBackend {
         self.parameters.record_offset_axes(index, &values, &axes);
         self.parameters
             .record_rotation(index, status.offsets.rotation_xy);
+    }
+
+    /// One block per PROG.HOME key press.
+    ///
+    /// The keys are not jogs: each asks for the block the homing table names for
+    /// its pin. halui's `mdi-command` pins would run them, but they need the task
+    /// in MDI, and asking for MDI from the dial position stranded jogging and
+    /// homing in every other mode. So the HMI issues the block itself, on the
+    /// key's rising edge, through the same path as its other MDI writes:
+    /// `issue_blocks` switches to MDI and puts the panel's mode back.
+    ///
+    /// A refused press is logged and dropped, never queued: a key pressed with
+    /// the machine off or a program running must not fire later.
+    fn service_proghome_keys(&mut self) {
+        let keys = linc_core::homing::proghome_keys();
+        if self.proghome_prev.len() != keys.len() {
+            self.proghome_prev = vec![false; keys.len()];
+        }
+        let pressed: Vec<bool> = {
+            let Some(hal) = self.hal.as_ref() else {
+                return;
+            };
+            keys.iter()
+                .map(|(pin, _)| hal.bit(pin).unwrap_or(false))
+                .collect()
+        };
+        let rising = rising_edges(&self.proghome_prev, &pressed);
+        self.proghome_prev = pressed;
+        for index in rising {
+            let (pin, block) = keys[index];
+            if let Err(error) = self.validate_ready() {
+                log::warn!("{pin} ignored: {error}");
+                continue;
+            }
+            log::info!("{pin}: {block}");
+            if let Err(error) = self.issue_blocks(&[block.to_string()]) {
+                log::warn!("{pin} could not start: {error}");
+            }
+        }
     }
 
     fn save_parameters(&mut self) -> Result<(), MachineError> {
@@ -1175,6 +1218,9 @@ impl Drop for NmlBackend {
 
 impl MachineBackend for NmlBackend {
     fn snapshot(&mut self) -> MachineSnapshot {
+        // The PROG.HOME keys ride on the same poll the HMI already makes: one
+        // block per press, no HAL pin and no mode request.
+        self.service_proghome_keys();
         self.refresh()
     }
 
@@ -1352,6 +1398,18 @@ pub(crate) fn plan_offset_sync(
 }
 
 /// Does the live row carry every stored value for `index`?
+/// Which keys went from released to pressed since the last poll.
+///
+/// A press is the edge, not the level: a held PROG.HOME key must issue its block
+/// once, not on every poll.
+fn rising_edges(previous: &[bool], now: &[bool]) -> Vec<usize> {
+    now.iter()
+        .enumerate()
+        .filter(|(index, pressed)| **pressed && !previous.get(*index).copied().unwrap_or(false))
+        .map(|(index, _)| index)
+        .collect()
+}
+
 pub(crate) fn row_matches(
     live: &linuxcnc_nml::Pose,
     live_rotation: f64,
@@ -1846,6 +1904,24 @@ mod tests {
             "the stored rotation would be replaced by zero"
         );
         assert!(!unpublished_live_row(&live_zero, 30.0, &stored_zero, 30.0));
+    }
+
+    /// A PROG.HOME key issues one block per press: holding it must not walk the
+    /// axis to zero one block per poll.
+    #[test]
+    fn a_proghome_key_issues_once_per_press() {
+        assert!(rising_edges(&[false, false], &[false, false]).is_empty());
+        assert_eq!(rising_edges(&[false, false], &[true, false]), vec![0]);
+        assert!(
+            rising_edges(&[true, false], &[true, false]).is_empty(),
+            "a held key does not repeat"
+        );
+        assert!(rising_edges(&[true, true], &[false, false]).is_empty());
+        assert_eq!(
+            rising_edges(&[true, false], &[true, true]),
+            vec![1],
+            "the other key rising is its own press"
+        );
     }
 
     #[test]
