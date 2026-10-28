@@ -1073,8 +1073,10 @@ to the live graph or the coordinate readout applies to both.
   nothing unless the operator happens to be in MANUAL already. Probe Basic
   reaches the same result through its `home-mode` QtPyVCP signal; LiNC has no
   QtPyVCP layer, so the mode request is wired directly in HAL.
-  `PROG.HOME` must **not** assert MANUAL: it issues its `G0` through the
-  `issue_mdi` path, which selects MDI itself.
+  `PROG.HOME` must **not** assert MANUAL: its keys run `[HALUI] MDI_COMMAND`
+  blocks through `halui.mdi-command-NN`, which needs the MDI task mode, so the
+  dial position requests `halui.mode.mdi` (ORed with the MDI key's request,
+  because `halui.mode.mdi` takes one signal).
 - HOME mode mapping, exactly as `baiermill_pb`:
   - `RAPID` -> `home-all`;
   - `X+`/`X-` -> `home-x`;
@@ -1082,11 +1084,16 @@ to the live graph or the coordinate readout applies to both.
   - `Z+`/`Z-` -> `home-z`.
   - Individual home outputs are disabled while any axis is homing; the panel
     driver/postgui performs the gating.
-- PROG.HOME mode mapping, exactly as `baiermill_pb`:
-  - `RAPID` -> `proghome-all` -> `issue_mdi("G0 X0Y0Z0")`;
-  - `X+`/`X-` -> `proghome-x` -> `G0 X0`;
-  - `Y+`/`Y-` -> `proghome-y` -> `G0 Y0`;
-  - `Z+`/`Z-` -> `proghome-z` -> `G0 Z0`.
+- PROG.HOME mode mapping. The keys are not jogs: each drives one
+  `halui.mdi-command-NN` pin, and the INI's `[HALUI] MDI_COMMAND` list is the
+  command, in order, so the index is a machine-config fact:
+  - `RAPID` -> `proghome-all` -> `o<whome> call` (index 03): machine `Z0`
+    first, then work `X0 Y0`. A single `G0 X0Y0Z0` would plunge X and Y at
+    whatever Z the tool is at;
+  - `X+`/`X-` -> `proghome-x` -> `G0 X0` (index 07);
+  - `Y+`/`Y-` -> `proghome-y` -> `G0 Y0` (index 08);
+  - `Z+`/`Z-` -> `proghome-z` -> `G0 Z0` (index 09).
+  - `halui` runs a command once per rising edge, so one press is one block.
   - This is program zero in the current WCS, not machine home and not `G53`.
   - X/Y/Z only; optional A/C axes are not moved by these panel actions,
     matching the current Probe Basic handlers.
@@ -1099,15 +1106,7 @@ to the live graph or the coordinate readout applies to both.
 - The page shows machine position, limits, homed count and sequence completion.
   It provides no on-screen home, unhome, jog or override buttons.
 
-### 6.11 Settings
-
-- Theme/units/display density.
-- Keyboard reference.
-- Machine profile/read-only INI summary.
-- Panel link information.
-- About/support.
-
-### 6.12 Manual modes: JOG / INC / MPG
+### 6.11 Manual modes: JOG / INC / MPG
 
 Mode-driven screen shared by the panel's `JOG`, `INC` and `MPG` positions.
 Entering any of those positions opens it; leaving them closes it. No left-nav
@@ -1499,11 +1498,16 @@ For this design repository:
 - The Homing/Program Zero screen opens at HOME/PROG.HOME, shows per-axis/sequence
   state and documents the exact physical-panel key mapping without providing
   home controls.
-- PROG.HOME retains the current machine's `issue_mdi` behavior: RAPID sends
-  `G0 X0Y0Z0`, axis keys send `G0 X0/Y0/Z0`, in the current WCS, X/Y/Z only.
+- PROG.HOME retains the current machine's `issue_mdi` behavior: RAPID calls
+  `o<whome>` (machine `Z0`, then work `X0 Y0`), axis keys send `G0 X0/Y0/Z0` in
+  the current WCS, X/Y/Z only. The blocks come from `[HALUI] MDI_COMMAND`.
 - The Tools screen represents the standard LinuxCNC tool table, current/next
   tool, explicit `Tn M6` issue, manual confirmation and optional ATC/turret
   state; the pocket column appears only when a changer uses it.
+- INC and MPG show the `[DISPLAY] INCREMENTS` steps as one row of numbered
+  chips, the selected one filled; `1`..`n` pick that step and the row highlights
+  it. Continuous JOG shows no row and takes no digits, because it ignores the
+  step.
 - The Manual screen opens at JOG/INC/MPG, shows a large graph plus large work
   coordinates, machine coordinates and DTG, and provides no on-screen jog or
   mode control.

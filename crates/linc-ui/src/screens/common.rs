@@ -1997,6 +1997,48 @@ pub fn zero_axes(app: &mut crate::shell::LincApp, axes: Vec<String>) {
     app.send(linc_core::command::MachineCommand::ZeroWorkOffset { index, axes });
 }
 
+/// The jog increment the operator picked from `[DISPLAY] INCREMENTS`.
+///
+/// The panel has one keypad and no spare keys, so a step is picked by its
+/// number: the chips carry the same numbers the keyboard takes, and the
+/// selected one is the fill the rest of the HMI uses for "this is the value".
+pub fn increment_row(app: &mut LincApp, ui: &mut Ui) {
+    let steps = app.increments().to_vec();
+    if steps.is_empty() {
+        return;
+    }
+    let selected = app.jog_increment_index();
+    let mut pick = None;
+    theme::card(ui, |ui| {
+        ui.horizontal(|ui| {
+            theme::section_header(ui, "INCREMENT");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    RichText::new(format!("1-{}", steps.len()))
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+            });
+        });
+        ui.horizontal_wrapped(|ui| {
+            for (index, (label, _)) in steps.iter().enumerate() {
+                // The digit is the key, so the chip carries it: the operator
+                // reads the step off the screen and presses its number.
+                let active = index == selected;
+                let response = theme::chip(ui, format!("{} {label}", index + 1), active);
+                if response.clicked() {
+                    pick = Some(index);
+                }
+                ui.add_space(2.0);
+            }
+        });
+    });
+    if let Some(index) = pick {
+        app.set_jog_increment_index(index);
+    }
+}
+
 pub fn live_coordinates_card(ui: &mut Ui, header: &str, units_label: &str, rows: &[LiveAxisRow]) {
     theme::card(ui, |ui| {
         ui.horizontal(|ui| {

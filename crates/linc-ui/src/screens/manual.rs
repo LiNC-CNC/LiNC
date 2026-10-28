@@ -14,6 +14,7 @@ use crate::shell::LincApp;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
     handle_zero_keys(app, ui);
+    handle_increment_keys(app, ui);
     // No mode banner: the panel's mode key and the navigation already say which
     // mode this is, and the row cost vertical space on a 720-line screen. The
     // mode itself still drives the context card below.
@@ -28,6 +29,12 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             common::live_graph_card(app, ui, ui.available_height() - 6.0);
         },
         |app, ui| {
+            // INC and MPG are the modes that use a step; JOG is continuous, so
+            // the row would be a value the machine is not reading.
+            if increment_keys_active(app.snapshot.panel.mode.mode()) {
+                common::increment_row(app, ui);
+                ui.add_space(8.0);
+            }
             common::live_coordinates_card(
                 ui,
                 "WORK COORDINATES",
@@ -70,6 +77,54 @@ fn coordinates_readout(app: &LincApp) -> Vec<LiveAxisRow> {
             }
         })
         .collect()
+}
+
+/// Modes whose page shows the jog increment row and takes its numbers.
+///
+/// JOG runs continuously and ignores the step; AUTO, EDIT and MDI are not the
+/// manual family at all. An unknown panel mode fails closed like the zero keys.
+fn increment_keys_active(mode: Option<PanelMode>) -> bool {
+    matches!(mode, Some(PanelMode::Inc | PanelMode::Mpg))
+}
+
+/// `1`..`9` pick the `[DISPLAY] INCREMENTS` step of that number.
+///
+/// The panel keyboard has one keypad and no spare chords, so the number is the
+/// selection: the same digits the row paints next to each step. Overflow keys
+/// are ignored, so a profile with four steps leaves 5-9 inert.
+pub(crate) fn handle_increment_keys(app: &mut LincApp, ui: &mut Ui) {
+    if app.overlay_open() || !increment_keys_active(app.snapshot.panel.mode.mode()) {
+        return;
+    }
+    let text_focused = ui.memory(|memory| {
+        memory.has_focus(egui::Id::unique("linc-program-editor"))
+            || memory.has_focus(egui::Id::unique("linc-tool-cell"))
+    });
+    if text_focused || ui.ctx().text_edit_focused() {
+        return;
+    }
+    let steps = app.increments().len();
+    let mut pick = None;
+    ui.input_mut(|input| {
+        for (digit, key) in [
+            (1, egui::Key::Num1),
+            (2, egui::Key::Num2),
+            (3, egui::Key::Num3),
+            (4, egui::Key::Num4),
+            (5, egui::Key::Num5),
+            (6, egui::Key::Num6),
+            (7, egui::Key::Num7),
+            (8, egui::Key::Num8),
+            (9, egui::Key::Num9),
+        ] {
+            if input.consume_key(egui::Modifiers::NONE, key) && digit <= steps {
+                pick = Some(digit - 1);
+            }
+        }
+    });
+    if let Some(index) = pick {
+        app.set_jog_increment_index(index);
+    }
 }
 
 /// `X`, `Y`, `Z` zero that axis and `A` zeroes all of them.
@@ -149,6 +204,20 @@ pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The numbers are the selection, and only the modes that use a step take
+    /// them: a continuous JOG has no increment to pick, and the other pages
+    /// keep their digits for themselves.
+    #[test]
+    fn increment_keys_belong_to_the_step_modes() {
+        for mode in [PanelMode::Inc, PanelMode::Mpg] {
+            assert!(increment_keys_active(Some(mode)), "{mode:?}");
+        }
+        for mode in [PanelMode::Jog, PanelMode::Auto, PanelMode::Edit, PanelMode::Mdi] {
+            assert!(!increment_keys_active(Some(mode)), "{mode:?}");
+        }
+        assert!(!increment_keys_active(None));
+    }
 
     #[test]
     fn touch_off_keys_are_live_in_manual_and_homing_modes() {

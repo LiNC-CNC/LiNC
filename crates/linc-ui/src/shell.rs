@@ -3667,6 +3667,17 @@ impl LincApp {
                 hints.push((k.view_zoom_hint(), "ZOOM"));
                 hints.extend(lathe_hints.clone());
                 hints.push(("Arrows".into(), "SELECT"));
+                // Only the step modes take the digits: a continuous JOG has no
+                // increment to pick, and HOME/PROG.HOME share this page family.
+                if self.page == Page::Manual
+                    && matches!(
+                        self.snapshot.panel.mode.mode(),
+                        Some(PanelMode::Inc | PanelMode::Mpg)
+                    )
+                    && !self.increments().is_empty()
+                {
+                    hints.push((format!("1-{}", self.increments().len()), "INCREMENT"));
+                }
                 hints.push(("X/Y/Z".into(), "ZERO AXIS"));
                 hints.push(("A".into(), "ZERO ALL"));
             }
@@ -5541,6 +5552,61 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     /// The style, not the page: PAC-MAN is what stops the trail being drawn,
     /// and the eaten line reaches the view as it is.
     #[test]
+    /// INC and MPG show the steps and take their numbers; JOG is continuous and
+    /// gets neither, so its digits stay free and no wrong value is on screen.
+    #[test]
+    fn the_increment_row_and_its_numbers_belong_to_the_step_modes() {
+        let steps = || {
+            vec![
+                ("10mm".to_string(), 10.0),
+                ("1mm".to_string(), 1.0),
+                (".1mm".to_string(), 0.1),
+                (".01mm".to_string(), 0.01),
+            ]
+        };
+
+        let mut harness = ProbeHarness::new(PanelMode::Inc, false, true);
+        harness.app.jog_increments = steps();
+        harness.app.jog_increment_index = 0;
+        harness.app.set_page(Page::Manual);
+        harness.frame(&[]);
+        let output = harness.frame_full(Vec::new());
+        let texts: Vec<String> = painted_text(&output).into_iter().map(|(text, _)| text).collect();
+        assert!(
+            texts.iter().any(|text| text == "1 10mm"),
+            "the steps are on screen with their numbers: {texts:?}"
+        );
+        assert!(texts.iter().any(|text| text == "4 .01mm"), "every step is offered");
+        assert!(
+            texts.iter().any(|text| text == "1-4"),
+            "the row says which numbers it takes: {texts:?}"
+        );
+
+        harness.frame_with(&[(egui::Key::Num3, egui::Modifiers::NONE)]);
+        assert_eq!(harness.app.jog_increment_index, 2, "3 picks the third step");
+        assert_eq!(harness.app.jog_increment_value(), 0.1);
+        harness.frame_with(&[(egui::Key::Num9, egui::Modifiers::NONE)]);
+        assert_eq!(
+            harness.app.jog_increment_index, 2,
+            "a digit past the last step is inert"
+        );
+
+        // JOG: no row, and the digits do nothing.
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.app.jog_increments = steps();
+        harness.app.jog_increment_index = 0;
+        harness.app.set_page(Page::Manual);
+        harness.frame(&[]);
+        let output = harness.frame_full(Vec::new());
+        let texts: Vec<String> = painted_text(&output).into_iter().map(|(text, _)| text).collect();
+        assert!(
+            !texts.iter().any(|text| text == "1 10mm"),
+            "a continuous jog shows no increment: {texts:?}"
+        );
+        harness.frame_with(&[(egui::Key::Num3, egui::Modifiers::NONE)]);
+        assert_eq!(harness.app.jog_increment_index, 0, "and takes no digits");
+    }
+
     fn pac_man_takes_the_live_trail_out_of_the_style() {
         let (_dir, profile) = fixture();
         let mut style = crate::state::graph_style(&profile);

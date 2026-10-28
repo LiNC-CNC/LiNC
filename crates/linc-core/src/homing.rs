@@ -46,7 +46,9 @@ pub const MAPPINGS: [HomeMapping; 7] = [
         home_pin: "cnc_panel.home-all",
         home_action: "HOME ALL",
         proghome_pin: "cnc_panel.proghome-all",
-        proghome_mdi: "G0 X0Y0Z0",
+        // The machine's own routine: G53 G0 Z0 first, then work X0 Y0. A single
+        // G0 X0Y0Z0 would plunge X and Y at whatever Z the tool is at.
+        proghome_mdi: "o<whome> call",
     },
     HomeMapping {
         key: HomingKey::XPlus,
@@ -179,7 +181,7 @@ mod tests {
 
     #[test]
     fn mappings_match_the_machine_contract() {
-        assert_eq!(mapping(HomingKey::Rapid).proghome_mdi, "G0 X0Y0Z0");
+        assert_eq!(mapping(HomingKey::Rapid).proghome_mdi, "o<whome> call");
         assert_eq!(mapping(HomingKey::XPlus).proghome_mdi, "G0 X0");
         assert_eq!(mapping(HomingKey::YMinus).proghome_mdi, "G0 Y0");
         assert_eq!(mapping(HomingKey::ZPlus).home_pin, "cnc_panel.home-z");
