@@ -82,6 +82,12 @@ pub struct NmlBackend {
     proghome_prev: Vec<bool>,
     confirm_seq: u64,
     tool_table: ToolTable,
+    /// The last nonzero `motion.program-line`: the line the trajectory planner
+    /// is cutting. The pin reads 0 for a cycle whenever the queue drains, so the
+    /// last value is kept until the cut moves on - and dropped when a different
+    /// program is loaded, whose first move has a line of its own.
+    program_line: usize,
+    program_line_revision: u64,
 }
 
 impl NmlBackend {
@@ -145,6 +151,8 @@ impl NmlBackend {
             offset_unpublished_logged: false,
             proghome_prev: Vec::new(),
             confirm_seq: 0,
+            program_line: 0,
+            program_line_revision: 0,
             tool_table,
         })
     }
@@ -170,9 +178,29 @@ impl NmlBackend {
         self.poll_height_comp(&panel);
         self.sync_work_offsets(&status, &panel);
 
+        // The trajectory planner's executing id, published by motion as a HAL
+        // pin: the one exact answer to "which line is being cut". Measured on
+        // the mill, `task.motion_line` is 0 through a whole program, and
+        // `task.current_line` runs ahead of the cut by the motion queue's depth,
+        // so a long program sat at its own end instead of following the tool.
+        let revision = self.builder.program_revision();
+        if self.program_line_revision != revision {
+            self.program_line = 0;
+            self.program_line_revision = revision;
+        }
+        if let Some(line) = self
+            .hal
+            .as_ref()
+            .and_then(|hal| hal.s32("motion.program-line"))
+        {
+            if line > 0 {
+                self.program_line = line as usize;
+            }
+        }
+        let executing_line = (self.program_line > 0).then_some(self.program_line);
         let mut snapshot = self
             .builder
-            .build(&status, &panel, spindles, &self.parameters);
+            .build(&status, &panel, spindles, &self.parameters, executing_line);
         if let Some(stored) = self.last_snapshot.as_mut() {
             carry_hal_selections(&mut snapshot, stored);
         }

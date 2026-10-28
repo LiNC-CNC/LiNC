@@ -135,6 +135,9 @@ pub struct SnapshotBuilder {
     program_mtime: Option<std::time::SystemTime>,
     program_revision: u64,
     program_loaded_at_ms: u64,
+    /// The line the trajectory planner is executing this build, when the
+    /// backend can read `motion.program-line`.
+    executing_line: Option<usize>,
     live_trail: Vec<TrailPoint>,
     last_tool_tip: Option<[f64; 3]>,
     /// Homed state per axis as of the last build, so a joint that has just been
@@ -168,6 +171,7 @@ impl SnapshotBuilder {
             program_mtime: None,
             program_revision: 1,
             program_loaded_at_ms: now_ms(),
+            executing_line: None,
             live_trail: Vec::new(),
             last_tool_tip: None,
             homed_last: std::collections::BTreeMap::new(),
@@ -367,13 +371,21 @@ impl SnapshotBuilder {
         }
     }
 
+    /// The revision of the program text this builder holds, so a caller can tell
+    /// when a different program was loaded.
+    pub fn program_revision(&self) -> u64 {
+        self.program_revision
+    }
+
     pub fn build(
         &mut self,
         status: &Status,
         panel: &PanelState,
         spindles: Vec<SpindleState>,
         parameters: &ParameterFile,
+        executing_line: Option<usize>,
     ) -> MachineSnapshot {
+        self.executing_line = executing_line;
         self.refresh_tool_table();
         let mut snapshot = initial_snapshot(&self.profile);
         snapshot.meta.captured_at_ms = now_ms();
@@ -689,7 +701,14 @@ impl SnapshotBuilder {
         }
 
         let current_line = status.task.current_line.max(0) as usize;
-        let motion_line = status.task.motion_line.max(0) as usize;
+        // The line being cut, when the caller can see it (`motion.program-line`).
+        // NML's `task.motion_line` is filled from `motion.traj.id`, which LinuxCNC
+        // leaves at 0 for ordinary moves, and `task.current_line` is the line of
+        // the command the task last issued - ahead of the cut by the depth of the
+        // motion queue.
+        let motion_line = self.executing_line
+            .filter(|line| *line > 0)
+            .unwrap_or(status.task.motion_line.max(0) as usize);
         let executed = if motion_line > 0 {
             motion_line
         } else {
@@ -1582,9 +1601,58 @@ mod tests {
         status.motion.probing = false;
     }
 
+    /// The line being cut comes from the trajectory planner's id when the
+    /// backend can read it: NML's `task.motion_line` is 0 for ordinary moves and
+    /// `task.current_line` is the last *issued* command, ahead of the cut.
+    #[test]
+    fn the_executing_line_prefers_the_planners_id() {
+        let mut builder = probe_builder();
+        let panel = PanelState::offline(&builder.profile);
+        let mut status = idle_status();
+        make_idle(&mut status);
+        status.task.current_line = 5000;
+        status.task.motion_line = 0;
+
+        // With the pin: the planner's line, not the issued one.
+        status.task.exec_state = ExecState::WaitingForMotion;
+        let snapshot = builder.build(
+            &status,
+            &panel,
+            Vec::new(),
+            &ParameterFile::default(),
+            Some(42),
+        );
+        assert_eq!(snapshot.program.motion_line, 42);
+        assert_eq!(snapshot.program.current_line, 5000);
+        assert_eq!(
+            snapshot.program.executing_line(),
+            42,
+            "the display follows the cut, not the queue"
+        );
+
+        // Without it (no HAL), the NML motion line, then the issued line.
+        let snapshot = builder.build(
+            &status,
+            &panel,
+            Vec::new(),
+            &ParameterFile::default(),
+            None,
+        );
+        assert_eq!(snapshot.program.executing_line(), 5000);
+
+        // A pin that reads 0 (queue empty for a cycle) does not blank the line.
+        let snapshot = builder.build(
+            &status,
+            &panel,
+            Vec::new(),
+            &ParameterFile::default(),
+            Some(0),
+        );
+        assert_eq!(snapshot.program.executing_line(), 5000);
+    }
     fn poll_probe(builder: &mut SnapshotBuilder, status: &Status) -> MachineSnapshot {
         let panel = PanelState::offline(&builder.profile);
-        builder.build(status, &panel, Vec::new(), &ParameterFile::default())
+        builder.build(status, &panel, Vec::new(), &ParameterFile::default(), None)
     }
 
     /// The active row as the dispatch path records it, before the block runs.
