@@ -656,6 +656,10 @@ pub struct ProgramUi {
     /// `snapshot.offsets.revision` the preview was drawn against, so a touch-off
     /// or DRO entry rebuilds it.
     pub preview_offsets_seen: u64,
+    /// The offset rows the preview was parsed against. The controller changes
+    /// them without an HMI write (startup publication, a program's own `G10`),
+    /// and a stale frame shifts the tool marker by the whole offset.
+    pub preview_offsets_rows: Vec<f64>,
     pub external_change: bool,
 }
 
@@ -688,6 +692,7 @@ impl Default for ProgramUi {
             focus_editor: false,
             code_scroll_to_line: None,
             preview_offsets_seen: 0,
+            preview_offsets_rows: Vec::new(),
             external_change: false,
         }
     }

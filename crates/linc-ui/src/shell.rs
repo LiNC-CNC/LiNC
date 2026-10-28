@@ -635,7 +635,16 @@ impl LincApp {
         // against. The backends bump `offsets.revision` on a write, but the
         // first snapshots arrive before the offset rows do and carry revision 0,
         // so a preview parsed with no offset is rebuilt once rows appear.
-        let offsets_changed = self.snapshot.offsets.revision != self.program.preview_offsets_seen;
+        //
+        // The rows themselves are compared as well, because the controller moves
+        // them without any HMI write: the startup publication issues its own
+        // `G10 L2`, and a program may too. A preview left parsed against the
+        // zero row it saw before the publication does not just draw the part in
+        // the wrong place - `live_trail_shift` then shifts the tool marker by the
+        // whole offset, which is the "toolhead sits at machine home" report.
+        let rows = offsets_signature(&self.snapshot.offsets.offsets);
+        let offsets_changed = self.snapshot.offsets.revision != self.program.preview_offsets_seen
+            || rows != self.program.preview_offsets_rows;
         let offset_now_available =
             self.program.preview_offset.is_none() && !self.snapshot.offsets.offsets.is_empty();
         if offsets_changed || offset_now_available {
@@ -1828,6 +1837,7 @@ impl LincApp {
         self.program.preview = preview;
         self.program.preview_offset = offset;
         self.program.preview_offsets_seen = self.snapshot.offsets.revision;
+        self.program.preview_offsets_rows = offsets_signature(&self.snapshot.offsets.offsets);
     }
 
     /// The work offset the preview is drawn with, in machine coordinates: the
@@ -4896,6 +4906,20 @@ pub fn active_offset(snapshot: &MachineSnapshot) -> Option<&linc_core::model::Ax
         .map(|offset| &offset.values)
 }
 
+/// The numbers the preview's frame depends on, flattened in a stable order.
+///
+/// An offset row is a handful of floats; comparing them per poll is cheaper than
+/// re-parsing the program to find out whether it needs re-parsing.
+fn offsets_signature(rows: &[linc_core::model::WorkOffset]) -> Vec<f64> {
+    let mut out = Vec::with_capacity(rows.len() * 3);
+    for row in rows {
+        for axis in ["X", "Y", "Z"] {
+            out.push(row.values.get(axis).copied().unwrap_or(0.0));
+        }
+    }
+    out
+}
+
 pub fn machine_bounds(profile: &Profile) -> Option<Bounds3> {
     let mut bounds = Bounds3 {
         min: [f64::INFINITY; 3],
@@ -5297,6 +5321,36 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert_eq!(
             machine_status_field(false, true),
             ("MACHINE ?".to_string(), theme::WARNING)
+        );
+    }
+
+    /// The signature is the numbers the frame depends on, in a stable order:
+    /// the same rows must compare equal however the map was built, and a single
+    /// moved value must compare different.
+    #[test]
+    fn the_offset_signature_sees_every_row_and_axis() {
+        let rows = |x: f64| {
+            (1..=9u8)
+                .map(|index| linc_core::model::WorkOffset {
+                    index,
+                    values: linc_core::model::AxisMap::from_entries([
+                        ("X".to_string(), x + index as f64),
+                        ("Y".to_string(), -(index as f64)),
+                        ("Z".to_string(), 0.0),
+                    ]),
+                    rotation: None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let base = super::offsets_signature(&rows(0.0));
+        assert_eq!(base.len(), 27, "nine rows of three axes");
+        assert_eq!(base, super::offsets_signature(&rows(0.0)));
+        let mut moved = rows(0.0);
+        moved[0].values.insert("X", -156.381);
+        assert_ne!(
+            base,
+            super::offsets_signature(&moved),
+            "a published G54 must rebuild the preview"
         );
     }
 
