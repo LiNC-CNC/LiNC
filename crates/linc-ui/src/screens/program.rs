@@ -167,7 +167,7 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
                 common::card_title(ui, "PATH");
             }
             ViewKind::Full => {
-                common::toolpath_header(ui, app.program.graph_view.label(), app.program.graph_zoom, app.graph_style.pac_man)
+                common::toolpath_header(ui, app.program.graph_view.label(), app.program.graph_zoom, app.graph_style.remaining)
             }
         }
         // Measured from the cursor: `min_rect` already holds the minimum size

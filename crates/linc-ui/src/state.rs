@@ -1334,9 +1334,9 @@ impl Default for ManualUi {
 pub struct GraphStyle {
     pub show_grid: bool,
     pub show_live_trail: bool,
-    /// PAC-MAN progress: no trail, and the completed part of the path is
+    /// REMAINING: no trail, and the completed part of the path is
     /// eaten. Remembered in the preferences file, not in the profile.
-    pub pac_man: bool,
+    pub remaining: bool,
     /// `Ctrl+B` cycle: 0 dimensions only, 1 + machine box, 2 + program box, 3 off.
     pub bounds_mode: u8,
     pub show_stock: bool,
@@ -1358,10 +1358,10 @@ impl GraphStyle {
         eaten_through: Option<usize>,
     ) {
         view.show_grid = self.show_grid;
-        // PAC-MAN draws no trail at all: where the machine has been is the hole
+        // REMAINING draws no trail at all: where the machine has been is the hole
         // it ate, and a green line over that hole would put the trail back.
-        view.show_live_trail = self.show_live_trail && !self.pac_man;
-        view.pac_man = self.pac_man;
+        view.show_live_trail = self.show_live_trail && !self.remaining;
+        view.remaining = self.remaining;
         view.eaten_through = eaten_through;
         let (dims, machine, box_at) = bounds_visibility(self.bounds_mode);
         view.show_program_bounds = dims;
@@ -1412,7 +1412,7 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
     GraphStyle {
         show_grid: profile.config.toolpath.show_grid,
         show_live_trail: profile.config.toolpath.show_live_trail,
-        pac_man: false,
+        remaining: false,
         bounds_mode: bounds_mode_from_config(
             profile.config.toolpath.show_program_bounds,
             profile.config.toolpath.show_machine_bounds,
@@ -1738,10 +1738,10 @@ pub struct Keymap {
     pub view_cycle: Binding,
     /// Pages with a toolpath: show or hide the program bounding box.
     pub toggle_bounds: Binding,
-    /// Pages with a toolpath: PAC-MAN progress. The live trail is not drawn and
+    /// Pages with a toolpath: REMAINING. The live trail is not drawn and
     /// the program path is eaten block by completed block, so the card shows
     /// what is still to come instead of where the machine has been.
-    pub pac_man: Binding,
+    pub remaining: Binding,
     /// Lathe only: mirror X about the Z centreline of the XZ/TURN view. The
     /// projection flips, so the part, the trail, the tool and the MDI overlay
     /// move together; no coordinate changes.
@@ -1846,7 +1846,7 @@ impl Keymap {
                 Binding::new(Key::B, ctrl),
                 &mut rejected,
             ),
-            pac_man: binding(&keys.pac_man, Binding::new(Key::P, ctrl), &mut rejected),
+            remaining: binding(&keys.remaining, Binding::new(Key::P, ctrl), &mut rejected),
             toggle_lathe_mirror: binding(
                 &keys.toggle_lathe_mirror,
                 Binding::new(Key::M, ctrl),

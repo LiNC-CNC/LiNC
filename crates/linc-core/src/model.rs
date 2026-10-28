@@ -680,7 +680,7 @@ impl ProgramState {
         (self.running || self.paused).then(|| self.executing_line())
     }
 
-    /// The last line whose motion is complete: PAC-MAN mode drops every
+    /// The last line whose motion is complete: the REMAINING view drops every
     /// segment at or before it.
     ///
     /// Strictly before the executing line, not at it: the block the tool is
@@ -1665,11 +1665,12 @@ mod tests {
         assert_eq!(program.highlight_line(), Some(22));
     }
 
-    /// PAC-MAN eats the path behind the tool. The unit is the block: every line
+    /// The REMAINING view eats the path behind the tool. The unit is the block:
+    /// every line
     /// before the one being cut is gone, the one being cut stays drawn until the
     /// next one starts, and a program that ran out eats the rest of the path.
     #[test]
-    fn pac_man_consumes_every_block_the_interpreter_has_left_behind() {
+    fn remaining_consumes_every_block_the_interpreter_has_left_behind() {
         let mut program = ProgramState::default();
         assert_eq!(
             program.consumed_through(),

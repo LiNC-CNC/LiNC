@@ -66,11 +66,12 @@ pub struct Preferences {
     /// (`Ctrl+E`). A display factor; the controller still works in radius.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lathe_diameter: Option<bool>,
-    /// PAC-MAN progress (`Ctrl+P`): no live trail, and the program path is
-    /// eaten block by completed block. A view mode, remembered per operator;
-    /// absent from a file written before it existed, which reads as off.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pac_man: Option<bool>,
+    /// REMAINING (`Ctrl+P`): no live trail, and the program path is eaten block
+    /// by completed block, so the card shows what is still to come. A view mode,
+    /// remembered per operator; absent from a file written before it existed,
+    /// which reads as off. `pac_man` was its first name.
+    #[serde(default, alias = "pac_man", skip_serializing_if = "Option::is_none")]
+    pub remaining: Option<bool>,
     /// The MDI buffer, oldest first.
     ///
     /// The blocks are the operator's own machine commands ("G10 L20 P1 Z0",

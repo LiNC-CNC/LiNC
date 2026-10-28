@@ -171,7 +171,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
             // One legend implementation for every toolpath card: the
             // main window had its own copy, which is why its tool key was a
             // circle while the others were already a triangle.
-            common::toolpath_header(ui, view.label(), app.program.graph_zoom, app.graph_style.pac_man);
+            common::toolpath_header(ui, view.label(), app.program.graph_zoom, app.graph_style.remaining);
             let mut zoom = app.program.graph_zoom;
             let mut pan = app.program.graph_pan;
             let mut yaw = app.program.graph_yaw;

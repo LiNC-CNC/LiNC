@@ -204,7 +204,7 @@ pub fn card_title(ui: &mut Ui, text: &str) {
 
 /// Toolpath status line: keys on the left, view and zoom on the right. Every
 /// toolpath card draws it, so no card needs a legend over the drawing.
-pub fn toolpath_header(ui: &mut Ui, view: &str, zoom: f32, pac_man: bool) {
+pub fn toolpath_header(ui: &mut Ui, view: &str, zoom: f32, remaining: bool) {
     ui.horizontal(|ui| {
         card_title(ui, "TOOLPATH");
         ui.add_space(8.0);
@@ -245,12 +245,12 @@ pub fn toolpath_header(ui: &mut Ui, view: &str, zoom: f32, pac_man: bool) {
                 .size(theme::font_size(9.0))
                 .color(theme::FG),
         );
-        // PAC-MAN has no trail and eats the path behind the tool, so the two
-        // keys above do not describe the card: say which mode is in force.
-        if pac_man {
+        // The REMAINING view has no trail and eats the path behind the tool, so
+        // the two keys above do not describe the card: say which mode is in force.
+        if remaining {
             ui.add_space(8.0);
             ui.label(
-                RichText::new("PAC-MAN")
+                RichText::new("REMAINING")
                     .monospace()
                     .size(theme::font_size(9.0))
                     .strong()
@@ -1631,7 +1631,8 @@ pub fn trajectory(
     response
 }
 
-/// The last block PAC-MAN may eat: the interpreter's, and only in that mode.
+/// The last block the REMAINING view may eat: the interpreter's, and only in that
+/// mode.
 ///
 /// The mode is the switch, not the line: a card that draws a program the machine
 /// ran shows the whole path until the operator asks for the progress view.
@@ -1639,7 +1640,7 @@ fn eaten_through(
     style: &crate::state::GraphStyle,
     program: &linc_core::model::ProgramState,
 ) -> Option<usize> {
-    if style.pac_man {
+    if style.remaining {
         program.consumed_through()
     } else {
         None
@@ -1938,7 +1939,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
     );
     shell_card(ui, rect, |ui| {
         let body_top = ui.cursor().top();
-        toolpath_header(ui, app.manual.view.label(), app.manual.zoom, app.graph_style.pac_man);
+        toolpath_header(ui, app.manual.view.label(), app.manual.zoom, app.graph_style.remaining);
         let header_height = ui.cursor().top() - body_top;
         let graph_height = (rect.height() - 8.0 - header_height - 2.0).max(60.0);
         let preview = app.program.last_valid_preview.clone();
@@ -2591,11 +2592,11 @@ mod tests {
         );
     }
 
-    /// PAC-MAN eats only when the operator asked for it: the interpreter's
+    /// The view eats only when the operator asked for it: the interpreter's
     /// completed line is the progress, the mode is the switch. A card that drew
     /// the running program kept its whole path until the mode was turned on.
     #[test]
-    fn pac_man_gates_what_the_interpreter_has_finished() {
+    fn remaining_gates_what_the_interpreter_has_finished() {
         let (_dir, profile) = program_fixture();
         let mut style = crate::state::graph_style(&profile);
         let mut program = linc_core::model::ProgramState::default();
@@ -2603,14 +2604,14 @@ mod tests {
         program.running = true;
         program.motion_line = 5;
 
-        style.pac_man = false;
+        style.remaining = false;
         assert_eq!(
             super::eaten_through(&style, &program),
             None,
             "the mode is off, so nothing is eaten"
         );
 
-        style.pac_man = true;
+        style.remaining = true;
         assert_eq!(
             super::eaten_through(&style, &program),
             Some(4),

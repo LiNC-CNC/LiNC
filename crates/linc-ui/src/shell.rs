@@ -378,8 +378,8 @@ impl LincApp {
         // A lathe-only view toggle; a mill profile never sees it and a file
         // written before the key existed reads as off.
         graph_style.lathe_mirror = preferences.lathe_mirror.unwrap_or(false);
-        // The same for the PAC-MAN progress view.
-        graph_style.pac_man = preferences.pac_man.unwrap_or(false);
+        // The same for the REMAINING view.
+        graph_style.remaining = preferences.remaining.unwrap_or(false);
         let remembered_page = preferences
             .last_page
             .as_deref()
@@ -1952,20 +1952,20 @@ impl LincApp {
         );
     }
 
-    /// `Ctrl+P`: PAC-MAN progress. The live trail goes away and the part of the
+    /// `Ctrl+P`: REMAINING. The live trail goes away and the part of the
     /// program path the machine has already run is eaten away, block by
     /// completed block. A view mode: no coordinate, offset or controller state
     /// changes, and the eaten blocks come back with the mode.
-    pub fn cycle_pac_man(&mut self) {
-        let on = !self.graph_style.pac_man;
-        self.graph_style.pac_man = on;
-        self.preferences.pac_man = Some(on);
+    pub fn cycle_remaining(&mut self) {
+        let on = !self.graph_style.remaining;
+        self.graph_style.remaining = on;
+        self.preferences.remaining = Some(on);
         self.preferences_dirty = true;
         self.toast(
             if on {
-                "pac-man: path eaten behind the tool"
+                "remaining: path eaten behind the tool"
             } else {
-                "pac-man: off, full path"
+                "remaining: off, full path"
             },
             theme::MUTED,
         );
@@ -2190,7 +2190,7 @@ impl LincApp {
         let mut cycle_view = false;
         let mut graph_fit = false;
         let mut graph_clear = false;
-        let mut pac_man = false;
+        let mut remaining = false;
         let mut machine_following = false;
         let mut run_from_line = false;
         let mut mdi_issue = false;
@@ -2402,8 +2402,8 @@ impl LincApp {
                 }
                 // Page-scoped like the zoom: Ctrl+P is no text field's chord and
                 // no navigation key, so it works wherever a toolpath is drawn.
-                if input.consume_key(k.pac_man.modifiers, k.pac_man.key) {
-                    pac_man = true;
+                if input.consume_key(k.remaining.modifiers, k.remaining.key) {
+                    remaining = true;
                 }
             }
             let view_hovered = view_page && toolpath_hovered;
@@ -2752,8 +2752,8 @@ impl LincApp {
         if graph_clear {
             self.clear_trail();
         }
-        if pac_man {
-            self.cycle_pac_man();
+        if remaining {
+            self.cycle_remaining();
         }
         if machine_following {
             self.machine_following = !self.machine_following;
@@ -3604,7 +3604,7 @@ impl LincApp {
                             (k.graph_fit.label(), "FIT"),
                             (k.graph_clear.label(), "CLEAR TRAIL"),
                             (k.toggle_bounds.label(), "BOUNDS"),
-                            (k.pac_man.label(), "PAC-MAN"),
+                            (k.remaining.label(), "REMAINING"),
                             (k.view_pan_hint(), "PAN"),
                             (k.view_zoom_hint(), "ZOOM"),
                         ],
@@ -3637,7 +3637,7 @@ impl LincApp {
                             (k.graph_fit.label(), "FIT"),
                             (k.graph_clear.label(), "CLEAR TRAIL"),
                             (k.toggle_bounds.label(), "BOUNDS"),
-                            (k.pac_man.label(), "PAC-MAN"),
+                            (k.remaining.label(), "REMAINING"),
                             // The square swaps the feed/servo pair below the
                             // graph for the following-error traces, and names
                             // what the next press brings back.
@@ -3764,7 +3764,7 @@ impl LincApp {
                 hints.push((format!("Ctrl+{square}"), "VIEW"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
-                hints.push((k.pac_man.label(), "PAC-MAN"));
+                hints.push((k.remaining.label(), "REMAINING"));
                 hints.push((k.view_pan_hint(), "PAN"));
                 hints.push((k.view_zoom_hint(), "ZOOM"));
                 hints.extend(lathe_hints.clone());
@@ -3789,7 +3789,7 @@ impl LincApp {
                 hints.push(("X/Y/Z".into(), "EDIT DRO"));
                 hints.push(("OFFSET".into(), "PROBE"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
-                hints.push((k.pac_man.label(), "PAC-MAN"));
+                hints.push((k.remaining.label(), "REMAINING"));
                 hints.push((k.view_pan_hint(), "PAN"));
                 hints.push((k.view_zoom_hint(), "ZOOM"));
                 hints.extend(lathe_hints.clone());
@@ -5448,11 +5448,11 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert!(!harness.app.machine_following, "and back to the cards");
     }
 
-    /// PAC-MAN changes what the card means - no trail, and the path eaten behind
+    /// REMAINING changes what the card means - no trail, and the path eaten behind
     /// the tool - so the card says so in its own header, not only in the
     /// shortcut list.
     #[test]
-    fn pac_man_is_announced_in_the_toolpath_header() {
+    fn remaining_is_announced_in_the_toolpath_header() {
         let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
         harness.app.set_page(Page::Machine);
         let header = |harness: &mut ProbeHarness| -> Vec<(String, egui::Rect)> {
@@ -5462,13 +5462,13 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 .collect()
         };
         assert!(
-            !header(&mut harness).iter().any(|(text, _)| text == "PAC-MAN"),
+            !header(&mut harness).iter().any(|(text, _)| text == "REMAINING"),
             "no indicator with the mode off"
         );
-        harness.app.graph_style.pac_man = true;
+        harness.app.graph_style.remaining = true;
         assert!(
-            header(&mut harness).iter().any(|(text, _)| text == "PAC-MAN"),
-            "the card header says PAC-MAN while it is on"
+            header(&mut harness).iter().any(|(text, _)| text == "REMAINING"),
+            "the card header says REMAINING while it is on"
         );
     }
 
@@ -5894,10 +5894,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             "bottom padding {}",
             shortcuts - last_target_bottom
         );
-        // Ctrl+P is PAC-MAN now, not a page: the view changes, the page does not.
+        // Ctrl+P is REMAINING now, not a page: the view changes, the page does not.
         let page = harness.app.page;
         harness.frame_with(&[(egui::Key::P, ctrl())]);
-        assert!(harness.app.graph_style.pac_man, "Ctrl+P turns PAC-MAN on");
+        assert!(harness.app.graph_style.remaining, "Ctrl+P turns REMAINING on");
         assert_eq!(harness.app.page, page, "a view mode, not a page");
         // The pages behind the rows still answer their own chords.
         harness.frame_with(&[(egui::Key::D, ctrl())]);
@@ -5906,7 +5906,7 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert_eq!(harness.app.page, Page::Help);
     }
 
-    /// The style, not the page: PAC-MAN is what stops the trail being drawn,
+    /// The style, not the page: REMAINING is what stops the trail being drawn,
     /// and the eaten line reaches the view as it is.
     #[test]
     /// INC and MPG show the steps and take their numbers; JOG is continuous and
@@ -5971,19 +5971,19 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert_eq!(harness.app.jog_increment_index, 0, "and takes no digits");
     }
 
-    fn pac_man_takes_the_live_trail_out_of_the_style() {
+    fn remaining_takes_the_live_trail_out_of_the_style() {
         let (_dir, profile) = fixture();
         let mut style = crate::state::graph_style(&profile);
         style.show_live_trail = true;
-        style.pac_man = true;
+        style.remaining = true;
         let preview = linc_core::gcode::Preview::empty();
         let mut view = linc_view::TrajectoryView::new(&preview, &[], profile.variant);
         style.apply(&mut view, None, None, Some(2));
-        assert!(!view.show_live_trail, "PAC-MAN draws no trail");
-        assert!(view.pac_man, "the mode reaches the view");
+        assert!(!view.show_live_trail, "REMAINING draws no trail");
+        assert!(view.remaining, "the mode reaches the view");
         assert_eq!(view.eaten_through, Some(2), "and so does the eaten line");
 
-        style.pac_man = false;
+        style.remaining = false;
         style.apply(&mut view, None, None, None);
         assert!(view.show_live_trail, "the trail comes back with the mode off");
         assert_eq!(view.eaten_through, None);

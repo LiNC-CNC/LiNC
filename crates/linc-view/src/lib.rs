@@ -132,10 +132,10 @@ pub struct TrajectoryView<'a> {
     pub pitch: f32,
     pub show_grid: bool,
     pub show_live_trail: bool,
-    /// PAC-MAN progress. The live trail is not drawn at all, and the part of
+    /// REMAINING. The live trail is not drawn at all, and the part of
     /// the program path the machine has already run is eaten away, so the card
     /// shows what is still to come rather than where it has been.
-    pub pac_man: bool,
+    pub remaining: bool,
     /// Highest program line whose motion is complete; every segment at or
     /// before it is dropped. `None` eats nothing — a program that has not
     /// started keeps its whole path on screen.
@@ -209,7 +209,7 @@ impl<'a> TrajectoryView<'a> {
             pitch: DEFAULT_PITCH,
             show_grid: true,
             show_live_trail: true,
-            pac_man: false,
+            remaining: false,
             eaten_through: None,
             show_program_bounds: true,
             show_program_box: false,
@@ -238,7 +238,8 @@ impl<'a> TrajectoryView<'a> {
     ///
     /// The middle of the block's own points, so a canned cycle that contributes
     /// several moves is framed as a whole rather than by its last hole. Blocks
-    /// PAC-MAN has eaten are gone from the picture and are not followed.
+    /// the REMAINING view has eaten are gone from the picture and are not
+    /// followed.
     fn selected_line_point(&self) -> Option<[f64; 3]> {
         let line = self.selected_line?;
         let mut sum = [0.0f64; 3];
@@ -265,13 +266,13 @@ impl<'a> TrajectoryView<'a> {
         })
     }
 
-    /// Whether PAC-MAN has eaten this segment.
+    /// Whether the REMAINING view has eaten this segment.
     ///
     /// A canned cycle contributes several segments to one line, so the unit is
     /// the block, not the move: they disappear together, when the interpreter
     /// has moved on to the next line.
     pub fn eaten(&self, line: usize) -> bool {
-        self.pac_man && self.eaten_through.is_some_and(|through| line <= through)
+        self.remaining && self.eaten_through.is_some_and(|through| line <= through)
     }
 
     fn trail_point(&self, position: [f64; 3]) -> [f64; 3] {
@@ -1510,7 +1511,7 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             Align2::LEFT_TOP,
             // Green is where the machine has been either way. With the trail
             // gone that region is a hole in the path, so the key names it.
-            if view.pac_man {
+            if view.remaining {
                 "EATEN PATH"
             } else {
                 "LIVE TOOLPATH"
@@ -3364,14 +3365,14 @@ mod tests {
 
     /// The cuts the card paints, counted by the stroke the program path uses:
     /// rapids are dotted and MUTED, so every 1.8 px ACCENT line is a cut.
-    fn painted_cuts(preview: &Preview, pac_man: bool, eaten_through: Option<usize>) -> usize {
+    fn painted_cuts(preview: &Preview, remaining: bool, eaten_through: Option<usize>) -> usize {
         let mut view = TrajectoryView::new(preview, &[], MachineVariant::Mill);
         view.show_grid = false;
         view.show_legend = false;
         view.show_program_bounds = false;
         view.show_stock = false;
         view.show_selected_line = false;
-        view.pac_man = pac_man;
+        view.remaining = remaining;
         view.eaten_through = eaten_through;
         let ctx = egui::Context::default();
         let input = egui::RawInput {
@@ -3397,11 +3398,11 @@ mod tests {
             .count()
     }
 
-    /// PAC-MAN drops the blocks the interpreter has already run and keeps the
+    /// REMAINING drops the blocks the interpreter has already run and keeps the
     /// one it is cutting, so what is drawn is what is still to come. The mode is
     /// what eats: a line number without it changes nothing.
     #[test]
-    fn pac_man_eats_the_blocks_that_are_already_cut() {
+    fn remaining_eats_the_blocks_that_are_already_cut() {
         let axes = vec!["X".to_string(), "Y".to_string(), "Z".to_string()];
         let text = "G21 G0 X0 Y0 Z5\nG1 X10\nG1 Y10\nG1 X0\n";
         let preview = linc_core::gcode::parse_preview(text, &axes, None, [0.0; 3]);
@@ -3422,7 +3423,7 @@ mod tests {
         assert_eq!(
             painted_cuts(&preview, false, Some(2)),
             3,
-            "the eaten line only counts in PAC-MAN mode"
+            "the eaten line only counts in REMAINING mode"
         );
     }
 

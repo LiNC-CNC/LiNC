@@ -132,10 +132,10 @@ program_cycle_view = "F10"
 view_cycle = "Ctrl+F10"
 # Show the program bounding box with its dimension lines.
 toggle_bounds = "Ctrl+B"
-# PAC-MAN progress: the live trail goes away and each completed block is eaten
-# out of the program path, so the card shows what is still to come. A view
-# toggle; the program, the offsets and the controller are untouched.
-pac_man = "Ctrl+P"
+# REMAINING: the live trail goes away and each completed block is eaten out of
+# the program path, so the card shows what is still to come. A view toggle; the
+# program, the offsets and the controller are untouched.
+remaining = "Ctrl+P"
 # Lathe only: mirror X about the Z centreline in the XZ/TURN toolpath. The
 # projection flips on screen; no coordinate and no machine value changes.
 toggle_lathe_mirror = "Ctrl+M"

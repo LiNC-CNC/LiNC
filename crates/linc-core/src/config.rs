@@ -266,9 +266,9 @@ pub struct KeysConfig {
     pub view_cycle: String,
     /// Show or hide the program bounding box and its dimensions.
     pub toggle_bounds: String,
-    /// PAC-MAN progress: drop the live trail and eat the program path block by
+    /// REMAINING: drop the live trail and eat the program path block by
     /// completed block, so what is drawn is what is still to come.
-    pub pac_man: String,
+    pub remaining: String,
     /// Lathe only: mirror X about the Z centreline in the XZ/TURN toolpath.
     pub toggle_lathe_mirror: String,
     /// Lathe only: read the X position as a radius (`X`) or a diameter (`2X`).
@@ -338,7 +338,7 @@ impl KeysConfig {
             toggle_bounds: "Ctrl+B".into(),
             toggle_lathe_mirror: "Ctrl+M".into(),
             toggle_lathe_diameter: "Ctrl+E".into(),
-            pac_man: "Ctrl+P".into(),
+            remaining: "Ctrl+P".into(),
             graph_fit: "Ctrl+0".into(),
             graph_clear: "Ctrl+L".into(),
             view_pan_left: "Ctrl+Left".into(),
