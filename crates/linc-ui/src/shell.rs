@@ -5572,11 +5572,18 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         harness.frame(&[]);
         let output = harness.frame_full(Vec::new());
         let texts: Vec<String> = painted_text(&output).into_iter().map(|(text, _)| text).collect();
+        for label in ["10mm", "1mm", ".1mm", ".01mm"] {
+            assert!(
+                texts.iter().any(|text| text == label),
+                "every step is offered: {label} missing from {texts:?}"
+            );
+        }
+        // The number is the key and sits outside the chip, so the button keeps
+        // the value alone.
         assert!(
-            texts.iter().any(|text| text == "1 10mm"),
-            "the steps are on screen with their numbers: {texts:?}"
+            texts.iter().filter(|text| ("1"..="4").contains(&text.as_str())).count() >= 4,
+            "the four digits are painted next to their steps: {texts:?}"
         );
-        assert!(texts.iter().any(|text| text == "4 .01mm"), "every step is offered");
         assert!(
             texts.iter().any(|text| text == "1-4"),
             "the row says which numbers it takes: {texts:?}"
@@ -5600,7 +5607,7 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         let output = harness.frame_full(Vec::new());
         let texts: Vec<String> = painted_text(&output).into_iter().map(|(text, _)| text).collect();
         assert!(
-            !texts.iter().any(|text| text == "1 10mm"),
+            !texts.iter().any(|text| text == "10mm") && !texts.iter().any(|text| text == "INCREMENT"),
             "a continuous jog shows no increment: {texts:?}"
         );
         harness.frame_with(&[(egui::Key::Num3, egui::Modifiers::NONE)]);

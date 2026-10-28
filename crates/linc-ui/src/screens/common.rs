@@ -2023,14 +2023,23 @@ pub fn increment_row(app: &mut LincApp, ui: &mut Ui) {
         });
         ui.horizontal_wrapped(|ui| {
             for (index, (label, _)) in steps.iter().enumerate() {
-                // The digit is the key, so the chip carries it: the operator
-                // reads the step off the screen and presses its number.
-                let active = index == selected;
-                let response = theme::chip(ui, format!("{} {label}", index + 1), active);
-                if response.clicked() {
-                    pick = Some(index);
-                }
-                ui.add_space(2.0);
+                // The digit is the key, so it is on screen with its step, but
+                // outside the chip: the button carries the value, the number
+                // above it is the keyboard shortcut.
+                ui.vertical(|ui| {
+                    ui.add_space(2.0);
+                    ui.label(
+                        RichText::new(format!("{}", index + 1))
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    if theme::chip(ui, label.clone(), index == selected).clicked() {
+                        pick = Some(index);
+                    }
+                });
+                ui.add_space(4.0);
             }
         });
     });

@@ -29,12 +29,6 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             common::live_graph_card(app, ui, ui.available_height() - 6.0);
         },
         |app, ui| {
-            // INC and MPG are the modes that use a step; JOG is continuous, so
-            // the row would be a value the machine is not reading.
-            if increment_keys_active(app.snapshot.panel.mode.mode()) {
-                common::increment_row(app, ui);
-                ui.add_space(8.0);
-            }
             common::live_coordinates_card(
                 ui,
                 "WORK COORDINATES",
@@ -50,6 +44,14 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                 ),
                 &readout,
             );
+            // The step is a jog setting, so it sits under the coordinates it
+            // moves, not above them: the DRO is what the operator reads first.
+            // INC and MPG are the modes that use a step; JOG is continuous, so
+            // the row would be a value the machine is not reading.
+            if increment_keys_active(app.snapshot.panel.mode.mode()) {
+                ui.add_space(8.0);
+                common::increment_row(app, ui);
+            }
         },
     );
 }
