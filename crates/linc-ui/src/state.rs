@@ -980,6 +980,34 @@ pub struct ToolsUi {
     pub kind_popup_pending: bool,
     /// Highlighted choice in the open TYPE selector.
     pub kind_popup_index: usize,
+    /// The typed tool number, while the dialog is open. Part of
+    /// `LincApp::overlay_open`, so the table, the shell's global keys and the
+    /// cell editor all stand down behind it.
+    pub number: Option<ToolNumberEntry>,
+}
+
+/// The TOOLS page's tool-number dialog: one line of digits, prefilled with the
+/// tool in the spindle.
+pub struct ToolNumberEntry {
+    pub text: String,
+    /// Why the last confirm was refused, shown inside the dialog. A refused
+    /// entry keeps the dialog open with its text.
+    pub error: Option<String>,
+    /// Opened this frame: the field takes focus and selects the whole value, so
+    /// Enter re-loads what is there and the first digit replaces it. There is no
+    /// click-to-focus on the panel, and no Tab.
+    pub fresh: bool,
+}
+
+impl ToolNumberEntry {
+    /// The dialog as it opens: the current in-spindle tool, selected.
+    pub fn new(current_tool: u16) -> Self {
+        Self {
+            text: current_tool.to_string(),
+            error: None,
+            fresh: true,
+        }
+    }
 }
 
 impl Default for ToolsUi {
@@ -999,6 +1027,7 @@ impl Default for ToolsUi {
             kind_popup: None,
             kind_popup_pending: false,
             kind_popup_index: 0,
+            number: None,
         }
     }
 }
@@ -1766,6 +1795,9 @@ pub struct Keymap {
     pub files_delete: Binding,
     pub tools: Binding,
     pub offsets: Binding,
+    /// Page-local to Tools: type a tool number and load it, as bare `T` loads
+    /// the selected row.
+    pub tool_number: Binding,
     /// Toggle the limit-switch override. The jog screens carry no button for it.
     pub limits_override: Binding,
     pub diagnostics: Binding,
@@ -1911,6 +1943,7 @@ impl Keymap {
             ),
             tools: binding(&keys.tools, Binding::new(Key::F7, none), &mut rejected),
             offsets: binding(&keys.offsets, Binding::new(Key::F8, none), &mut rejected),
+            tool_number: binding(&keys.tool_number, Binding::new(Key::T, ctrl), &mut rejected),
             limits_override: binding(
                 &keys.limits_override,
                 Binding::new(
@@ -2353,7 +2386,62 @@ mod probe_ui_tests {
 
 #[cfg(test)]
 mod page_key_tests {
-    use super::Keymap;
+    use super::{Binding, Keymap};
+
+    /// Ctrl+T is the Tools page's typed tool number. It is a [keys] binding
+    /// like every other chord, so it must default to Ctrl+T, keep bare `T`
+    /// free, ship in `base.toml`, and be remappable per profile.
+    #[test]
+    fn the_tool_number_dialog_opens_on_ctrl_t_and_a_profile_can_move_it() {
+        let keymap = Keymap::from_config(&linc_core::config::KeysConfig::spec_default());
+        assert!(keymap.rejected.is_empty(), "{:?}", keymap.rejected);
+        assert_eq!(keymap.tool_number.key, egui::Key::T);
+        assert!(keymap.tool_number.modifiers.ctrl);
+        assert_eq!(keymap.tool_number.label(), "Ctrl+T");
+        // Bare T belongs to the table's row load. consume_key matches the
+        // modifiers exactly, so the two must stay two chords.
+        assert_ne!(
+            keymap.tool_number,
+            Binding::new(egui::Key::T, egui::Modifiers::NONE),
+            "Ctrl+T must not collapse onto the bare T row load"
+        );
+        for (label, other) in [
+            ("tools", keymap.tools),
+            ("offsets", keymap.offsets),
+            ("table", keymap.toggle_bounds),
+            ("view", keymap.view_cycle),
+        ] {
+            assert_ne!(keymap.tool_number, other, "Ctrl+T is also {label}'s chord");
+        }
+
+        // The shipped default is the one in base.toml: a profile that extends
+        // it gets the binding without repeating the line.
+        let base = include_str!("../../../configs/base.toml");
+        assert!(
+            base.contains("tool_number = \"Ctrl+T\""),
+            "configs/base.toml must carry the tool_number default"
+        );
+
+        // A profile can remap it like any other key.
+        let mut keys = linc_core::config::KeysConfig::spec_default();
+        keys.tool_number = "Ctrl+N".to_string();
+        let keymap = Keymap::from_config(&keys);
+        assert_eq!(keymap.tool_number.key, egui::Key::N);
+        assert!(keymap.tool_number.modifiers.ctrl);
+        assert!(keymap.rejected.is_empty(), "{:?}", keymap.rejected);
+    }
+
+    #[test]
+    fn the_tool_number_dialog_opens_on_the_tool_in_the_spindle_selected() {
+        let entry = super::ToolNumberEntry::new(7);
+        assert_eq!(entry.text, "7");
+        assert!(entry.error.is_none());
+        assert!(
+            entry.fresh,
+            "the field takes focus and selects on the first frame"
+        );
+        assert_eq!(super::ToolNumberEntry::new(0).text, "0");
+    }
 
     #[test]
     fn the_lathe_display_toggles_resolve_to_ctrl_j_and_ctrl_e() {

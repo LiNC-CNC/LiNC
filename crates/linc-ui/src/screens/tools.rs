@@ -2,7 +2,7 @@
 
 use egui::{RichText, Ui};
 use linc_core::command::MachineCommand;
-use linc_core::model::MachineVariant;
+use linc_core::model::{MachineVariant, ToolRow};
 
 use crate::shell::LincApp;
 use crate::state::ToolDraft;
@@ -45,6 +45,9 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         app.tools.selected_column = columns.len().saturating_sub(1);
     }
     handle_keys(app, ui, &columns);
+    // The typed-number dialog lives over the table, not instead of it: the
+    // table keeps drawing behind the window.
+    draw_number_dialog(app, ui);
     ui.add_space(4.0);
     // No change/changer panes: the table is the page. Loading the selected tool
     // is the `T` shortcut below, and the manual-change prompt is drawn by the
@@ -308,6 +311,13 @@ fn write_refusal(app: &LincApp) -> String {
 
 /// Table keys, consumed before the table draws so no widget takes them first.
 fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
+    // The tool-number dialog owns the keyboard while it is open: its Enter,
+    // Escape and Backspace are taken here, before the table and before the
+    // field itself draws. It returns early, so no table key moves underneath.
+    if app.tools.number.is_some() {
+        number_dialog_keys(app, ui);
+        return;
+    }
     if app.overlay_open() {
         // The manual-change dialog owns the keyboard: no cursor movement, no
         // cell editor and no T underneath it.
@@ -342,6 +352,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     let mut move_column = 0isize;
     let mut edit = false;
     let mut load = false;
+    let mut number = false;
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
             move_row -= 1;
@@ -371,6 +382,12 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::T) {
             load = true;
         }
+        // The page-local typed tool number. `consume_key` matches the modifiers
+        // exactly, so the bare `T` above is untouched; the chord comes from
+        // `[keys] tool_number` and a profile can move it.
+        if input.consume_key(app.keymap.tool_number.modifiers, app.keymap.tool_number.key) {
+            number = true;
+        }
     });
     if move_row != 0 && rows > 0 {
         let target = app.tools.selected_row as isize + move_row;
@@ -388,6 +405,9 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     }
     if load {
         load_selected_tool(app);
+    }
+    if number {
+        open_number_dialog(app);
     }
 }
 
@@ -408,9 +428,202 @@ fn load_selected_tool(app: &mut LincApp) {
     app.send(MachineCommand::LoadTool { tool });
 }
 
+/// Open the typed tool-number dialog, prefilled with the tool in the spindle.
+fn open_number_dialog(app: &mut LincApp) {
+    app.tools.number = Some(crate::state::ToolNumberEntry::new(
+        app.snapshot.tool_change.current_tool,
+    ));
+    app.tools.error = None;
+}
+
+/// Close it and give the keyboard back: the field held it, and the panel has no
+/// Tab to walk out with.
+fn close_number_dialog(app: &mut LincApp, ui: &mut Ui) {
+    app.tools.number = None;
+    ui.memory_mut(|memory| memory.stop_text_input());
+}
+
+/// The dialog's own keys, taken before the field and the table draw.
+///
+/// Enter confirms and Escape cancels; the digits and the Backspace reach the
+/// focused field itself. Nothing else on the page reacts while this runs,
+/// because `handle_keys` returns straight after it.
+fn number_dialog_keys(app: &mut LincApp, ui: &mut Ui) {
+    let (confirm, cancel) = ui.input_mut(|input| {
+        // Escape is the configured back key on every profile; both are taken so
+        // a rebound back key does not leave the dialog with no way out.
+        let cancel = input.consume_key(app.keymap.back.modifiers, app.keymap.back.key)
+            || input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+        let confirm = input.consume_key(app.keymap.activate.modifiers, app.keymap.activate.key);
+        (confirm, cancel)
+    });
+    if cancel {
+        close_number_dialog(app, ui);
+        return;
+    }
+    if !confirm {
+        return;
+    }
+    let Some(mut entry) = app.tools.number.take() else {
+        return;
+    };
+    match confirm_number(app, &entry.text) {
+        Ok(()) => close_number_dialog(app, ui),
+        Err(reason) => {
+            // Refused: the dialog stays open with the text, and says why.
+            entry.error = Some(reason);
+            app.tools.number = Some(entry);
+        }
+    }
+}
+
+/// What a confirmed number sends, exactly as bare `T` loads a row: the same
+/// `LoadTool` command, and the same precondition. `0` is accepted: the spindle
+/// ends up empty and `G43 H0` applies no length compensation.
+fn confirm_number(app: &mut LincApp, text: &str) -> Result<(), String> {
+    let tool = tool_number_verdict(text, &app.snapshot.tool_table.rows)?;
+    // A refused issue is reported inside the dialog rather than silently doing
+    // nothing; `load_selected_tool` keeps the same gate for a table row.
+    app.snapshot.issue_allowed()?;
+    app.tools.error = None;
+    app.toast(load_tool_message(tool), theme::ACCENT);
+    app.send(MachineCommand::LoadTool { tool });
+    Ok(())
+}
+
+/// What `LoadTool` is about to do, in the wording the bar and the toast use.
+fn load_tool_message(tool: u16) -> String {
+    if tool == 0 {
+        // `LoadTool { tool: 0 }` is `T0 M6` and then `G43 H0`: tool 0 has no
+        // length offset, so the spindle is empty with nothing compensated.
+        "T0 M6 queued — spindle empty, no length compensation".to_string()
+    } else {
+        format!("T{tool} M6 + G43 H{tool} queued")
+    }
+}
+
+/// The verdict on a typed tool number: the number to load, or why it is refused.
+///
+/// Only a number the table carries is accepted, plus `0` for an empty spindle.
+/// Digits only: the panel keyboard can type a letter, and it must not be read
+/// as a tool number.
+fn tool_number_verdict(text: &str, rows: &[ToolRow]) -> Result<u16, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("type a tool number".into());
+    }
+    if !trimmed.chars().all(|digit| digit.is_ascii_digit()) {
+        return Err(format!("{trimmed} is not a tool number"));
+    }
+    let tool = trimmed
+        .parse::<u16>()
+        .map_err(|_| format!("T{trimmed} is out of range"))?;
+    if tool == 0 || rows.iter().any(|row| row.tool == tool) {
+        Ok(tool)
+    } else {
+        Err(format!("T{tool} is not in the tool table"))
+    }
+}
+
+/// The dialog itself: a `egui::Window` kept inside the screen, one line of
+/// digits, the numbers the table accepts and - when the last confirm was
+/// refused - the reason, in red. It is drawn from the page because the page
+/// owns the command; `LincApp::overlay_open` is what makes the table, the cell
+/// editor and the shell's global keys stand down behind it.
+fn draw_number_dialog(app: &mut LincApp, ui: &mut Ui) {
+    let Some(mut entry) = app.tools.number.take() else {
+        return;
+    };
+    let accepted = accepted_numbers(&app.snapshot.tool_table.rows);
+    let fresh = std::mem::replace(&mut entry.fresh, false);
+    let error = entry.error.clone();
+    let mut text = entry.text.clone();
+    let cancel_key = app.keymap.back.label();
+    let id = egui::Id::unique("linc-tool-number");
+    egui::Window::new("TOOL NUMBER")
+        .id(egui::Id::unique("linc-tool-number-dialog"))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        // Wide enough for the VALID line on one row at 9 points: a wrapped
+        // two-line hint made the dialog change height as the table grew.
+        .default_width(400.0)
+        .show(ui.ctx(), |ui| {
+            ui.label(
+                RichText::new(&accepted)
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            ui.add_space(6.0);
+            let field = ui.add(
+                egui::TextEdit::singleline(&mut text)
+                    .id(id)
+                    .font(egui::TextStyle::Monospace)
+                    .desired_width(140.0)
+                    .hint_text("tool"),
+            );
+            if fresh {
+                // No click-to-focus and no Tab on this keyboard: the field
+                // takes it on the frame the dialog opens, with the whole value
+                // selected, so Enter alone re-loads it and the first digit
+                // replaces it.
+                field.request_focus();
+                if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(text.chars().count()),
+                        )));
+                    state.store(ui.ctx(), id);
+                }
+            }
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(format!("ENTER LOADS · {cancel_key} CANCELS"))
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            if let Some(message) = &error {
+                ui.label(
+                    RichText::new(message)
+                        .size(theme::font_size(10.0))
+                        .color(theme::ERROR),
+                );
+            }
+        });
+    entry.text = text;
+    // Put it back: the key handler re-inserts it too when a confirm was
+    // refused, and this frame drew that same entry.
+    app.tools.number = Some(entry);
+}
+
+/// The numbers a typed entry can be, in one short line inside the dialog.
+fn accepted_numbers(rows: &[ToolRow]) -> String {
+    const SHOWN: usize = 8;
+    let mut text = String::from("VALID: ");
+    if rows.is_empty() {
+        text.push_str("none in the table");
+    } else {
+        let listed: Vec<String> = rows
+            .iter()
+            .take(SHOWN)
+            .map(|row| format!("T{}", row.tool))
+            .collect();
+        text.push_str(&listed.join(" "));
+        if rows.len() > SHOWN {
+            text.push_str(&format!(" +{} more", rows.len() - SHOWN));
+        }
+    }
+    text.push_str("  ·  0 = NO TOOL");
+    text
+}
 fn table_card(app: &mut LincApp, ui: &mut Ui) {
     let pocket = app.profile.changer.uses_pockets();
     let lathe = app.profile.variant == MachineVariant::Lathe;
+    // The hint row names the configured chord, not a hardcoded one.
+    let number_key = app.keymap.tool_number.label();
     let rows = app.snapshot.tool_table.rows.clone();
     let current_tool = app.snapshot.tool_change.current_tool;
     theme::card(ui, |ui| {
@@ -734,14 +947,21 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                         let _ = &clicked;
                     });
                 });
-            if let Some((index, position)) = clicked.get() {
+            // A dialog over the table takes the pointer with the keys: a click
+            // behind it must not move the cursor, start an editor under the
+            // field, or open the TYPE selector.
+            let inert = app.overlay_open();
+            if let Some((index, position)) = clicked.get().filter(|_| !inert) {
                 if index != app.tools.selected_row || position != app.tools.selected_column {
                     app.tools.editing = false;
                     app.tools.selected_row = index;
                     app.tools.selected_column = position;
                 }
             }
-            let opened_kind = clicked_kind.get().or_else(|| pending_kind.get());
+            let opened_kind = clicked_kind
+                .get()
+                .or_else(|| pending_kind.get())
+                .filter(|_| !inert);
             if let Some((index, rect)) = opened_kind {
                 app.tools.kind_popup = Some((index, rect));
                 app.tools.kind_popup_pending = false;
@@ -751,9 +971,9 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(
-                    "ARROWS MOVE · ENTER EDITS · ESC CANCELS · T LOADS + G43 · + - * / ACCEPTED",
-                )
+                RichText::new(format!(
+                    "ARROWS MOVE · ENTER EDITS · ESC CANCELS · T LOADS + G43 · {number_key} TYPES NUMBER · + - * / ACCEPTED"
+                ))
                 .size(theme::font_size(9.0))
                 .color(theme::MUTED),
             );
@@ -1047,7 +1267,71 @@ pub fn issue_change(app: &mut LincApp) {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_number;
+    use super::{accepted_numbers, load_tool_message, parse_number, tool_number_verdict};
+    use linc_core::model::ToolRow;
+
+    fn table() -> Vec<ToolRow> {
+        vec![ToolRow::new(1), ToolRow::new(7), ToolRow::new(99)]
+    }
+
+    /// The typed tool number accepts a table number and 0, and refuses
+    /// everything else with a reason the dialog can show: an unknown number, an
+    /// empty entry and a non-numeric one are three different messages.
+    #[test]
+    fn a_typed_tool_number_is_a_table_number_or_zero() {
+        assert_eq!(tool_number_verdict("7", &table()), Ok(7));
+        assert_eq!(
+            tool_number_verdict(" 99 ", &table()),
+            Ok(99),
+            "padding is trimmed"
+        );
+        assert_eq!(
+            tool_number_verdict("0", &table()),
+            Ok(0),
+            "0 empties the spindle"
+        );
+        // The third row's tool is T99: a row index is not a tool number.
+        assert_eq!(
+            tool_number_verdict("2", &table()),
+            Err("T2 is not in the tool table".to_string())
+        );
+        assert_eq!(
+            tool_number_verdict("", &table()),
+            Err("type a tool number".to_string())
+        );
+        assert_eq!(
+            tool_number_verdict("   ", &table()),
+            Err("type a tool number".to_string())
+        );
+        for text in ["abc", "7x", "-7", "1.5"] {
+            assert!(
+                tool_number_verdict(text, &table())
+                    .is_err_and(|error| error.contains("is not a tool number")),
+                "{text} must be refused as a non-number"
+            );
+        }
+        assert!(
+            tool_number_verdict("99999", &table()).is_err(),
+            "a number past u16 is refused"
+        );
+        // An empty table still takes 0, and nothing else.
+        assert_eq!(tool_number_verdict("0", &[]), Ok(0));
+        assert!(tool_number_verdict("1", &[]).is_err());
+    }
+
+    /// The dialog's own text: the numbers the table has, and what the two
+    /// conventions (a table row, 0 for none) mean.
+    #[test]
+    fn the_dialog_lists_the_numbers_it_accepts() {
+        let text = accepted_numbers(&table());
+        assert_eq!(text, "VALID: T1 T7 T99  ·  0 = NO TOOL");
+        assert!(accepted_numbers(&[]).contains("none in the table"));
+        let many: Vec<ToolRow> = (1..=12).map(ToolRow::new).collect();
+        assert!(accepted_numbers(&many).contains("+4 more"));
+        // The toast names what the load does, and 0 has no length compensation.
+        assert_eq!(load_tool_message(7), "T7 M6 + G43 H7 queued");
+        assert!(load_tool_message(0).contains("no length compensation"));
+    }
 
     #[test]
     fn tool_dimensions_accept_arithmetic() {

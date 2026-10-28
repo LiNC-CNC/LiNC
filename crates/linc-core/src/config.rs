@@ -291,6 +291,9 @@ pub struct KeysConfig {
     pub files_delete: String,
     pub tools: String,
     pub offsets: String,
+    /// Page-local to the Tools page: type a tool number and load it, for an
+    /// operator who knows the number and does not want to cursor to the row.
+    pub tool_number: String,
     /// Toggles the limit-switch override; it has no button on the jog screens.
     pub limits_override: String,
     pub diagnostics: String,
@@ -352,6 +355,7 @@ impl KeysConfig {
             files_delete: "Delete".into(),
             tools: "F7".into(),
             offsets: "F8".into(),
+            tool_number: "Ctrl+T".into(),
             limits_override: "Ctrl+Shift+O".into(),
             diagnostics: "Ctrl+D".into(),
             help: "Ctrl+H".into(),

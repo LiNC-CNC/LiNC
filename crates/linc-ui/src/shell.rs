@@ -1155,6 +1155,11 @@ impl LincApp {
             if self.tools.selected_column == 0 {
                 self.tools.selected_column = 1;
             }
+        } else {
+            // The tool-number dialog belongs to the page. Left open across a
+            // page change it would keep `overlay_open` true with nothing on
+            // screen, and every key would stay with a dialog that is not drawn.
+            self.tools.number = None;
         }
         if page == Page::Help {
             self.help.ensure_loaded();
@@ -1433,10 +1438,15 @@ impl LincApp {
         self.modal.is_some()
             || self.messages_dialog
             || self.help.dialog.is_some()
+            || self.tools.number.is_some()
             || self.snapshot.tool_change.status == linc_core::model::ToolChangeStatus::ManualPrompt
     }
 
     pub fn escape(&mut self) {
+        if self.tools.number.is_some() {
+            self.tools.number = None;
+            return;
+        }
         if self.messages_dialog {
             self.messages_dialog = false;
             return;
@@ -2246,6 +2256,13 @@ impl LincApp {
         // keeps Escape for a dismissible dialog. Without this, F5-F8, Ctrl+D/H,
         // Ctrl+Q and the page keys could act on the page behind the dialog.
         if self.overlay_open() {
+            // The tool-number dialog takes its own Enter and Escape in the page,
+            // before the table draws: a refused number must keep it open and
+            // report why, which a consumed Escape could not do. Its field has
+            // focus, so the shell has nothing else to give it.
+            if self.tools.number.is_some() && self.modal.is_none() && self.help.dialog.is_none() {
+                return;
+            }
             let escape = ui.input_mut(|input| {
                 input.consume_key(self.keymap.back.modifiers, self.keymap.back.key)
             });
@@ -3945,6 +3962,7 @@ impl LincApp {
                 hints.push(("Arrows".into(), "SELECT"));
                 hints.push(("Enter".into(), "EDIT"));
                 hints.push(("T".into(), "LOAD + G43"));
+                hints.push((k.tool_number.label(), "TYPE NUMBER"));
             }
         }
         if !hints.is_empty() {
@@ -4140,8 +4158,16 @@ impl LincApp {
                 // operator proves the input by touching the probe with a
                 // finger, which is a fault (`PROBE TRIPPED`) and not a
                 // reading on the page that owns the probe. A profile without
-                // a probe gets no dead field. Read-only, like MACHINE ON.
-                if self.profile.config.probe.enabled {
+                // a probe gets no dead field, and neither does a machine whose
+                // spindle holds something else: the field claims a probe is
+                // fitted, so it is drawn only while the probe tool is in the
+                // spindle. Absent, not dimmed - the group is laid out from the
+                // right, so the rest of the bar does not move.
+                if probe_fitted(
+                    self.profile.config.probe.enabled,
+                    self.profile.config.probe.tool_number,
+                    self.snapshot.tool_change.current_tool,
+                ) {
                     let (probe_text, probe_color) = probe_input_field(
                         self.snapshot.probe.input_tripped,
                         self.snapshot.meta.stale,
@@ -4890,6 +4916,17 @@ fn machine_status_field(on: bool, stale: bool) -> (String, egui::Color32) {
     }
 }
 
+/// Whether the probe field belongs on the bar: a probe is configured **and**
+/// the probe tool is the one in the spindle.
+///
+/// A configured probe only says the profile has one; the machine is another
+/// matter, and the bar's right-hand group implies a fitted probe. A tool change
+/// that pulls the probe out (or fits a cutter) takes the field away entirely,
+/// so nothing dims and nothing shifts.
+fn probe_fitted(configured: bool, probe_tool: u16, current_tool: u16) -> bool {
+    configured && probe_tool == current_tool
+}
+
 /// The bottom bar's probe field: the state of the wired probe input.
 ///
 /// `Some(_)` becomes READY or TRIPPED and `None` asks, the way the machine
@@ -5573,10 +5610,82 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         }
     }
 
+    /// One pass of the bottom bar alone, with the machine state the caller set.
+    /// The probe field is a label, so its presence on the bar is a text shape
+    /// and its absence is no shape at all.
+    fn bottom_bar_texts(app: &mut LincApp, ctx: &egui::Context) -> Vec<String> {
+        let mut output = ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+            app.bottom_bar(ui);
+        });
+        output.textures_delta.clear();
+        painted_text(&output)
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect()
+    }
+
+    /// The field is drawn only while the probe tool is the one in the spindle:
+    /// fitted, not fitted, and no probe configured at all. Absent means absent -
+    /// no placeholder, no dimmed row.
+    #[test]
+    fn the_probe_field_is_drawn_only_with_the_probe_in_the_spindle() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        let probe_tool = harness.app.profile.config.probe.tool_number;
+        harness.app.snapshot.tool_change.current_tool = probe_tool;
+        harness.app.snapshot.meta.stale = false;
+        harness.app.snapshot.probe.input_tripped = Some(false);
+        let fitted = bottom_bar_texts(&mut harness.app, &harness.ctx);
+        assert!(
+            fitted.iter().any(|text| text == "PROBE READY"),
+            "the probe is fitted, so the bar carries its input: {fitted:?}"
+        );
+
+        // A cutter in the spindle: the probe is on the bench, so the field goes.
+        harness.app.snapshot.tool_change.current_tool = 12;
+        let cutter = bottom_bar_texts(&mut harness.app, &harness.ctx);
+        assert!(
+            !cutter.iter().any(|text| text.starts_with("PROBE")),
+            "no probe field while a cutter is in the spindle: {cutter:?}"
+        );
+
+        // Nothing fitted and no probe configured: no field either.
+        harness.app.snapshot.tool_change.current_tool = 0;
+        let empty = bottom_bar_texts(&mut harness.app, &harness.ctx);
+        assert!(
+            !empty.iter().any(|text| text.starts_with("PROBE")),
+            "an empty spindle carries no probe field: {empty:?}"
+        );
+        harness.app.profile.config.probe.enabled = false;
+        harness.app.snapshot.tool_change.current_tool =
+            harness.app.profile.config.probe.tool_number;
+        let disabled = bottom_bar_texts(&mut harness.app, &harness.ctx);
+        assert!(
+            !disabled.iter().any(|text| text.starts_with("PROBE")),
+            "a profile without a probe gets no field: {disabled:?}"
+        );
+    }
+
     /// The probe readout is a state word and a colour, and it never claims a
     /// reading it does not have: stale data asks, like the machine field.
     #[test]
     fn the_probe_field_reads_ready_tripped_or_asks() {
+        // The gate the bar draws behind: a configured probe is not a fitted one.
+        assert!(
+            probe_fitted(true, 99, 99),
+            "the probe tool is in the spindle"
+        );
+        assert!(
+            !probe_fitted(true, 99, 12),
+            "a cutter in the spindle means the probe is not fitted"
+        );
+        assert!(
+            !probe_fitted(true, 99, 0),
+            "an empty spindle has no probe in it"
+        );
+        assert!(
+            !probe_fitted(false, 99, 99),
+            "no probe configured is no probe fitted"
+        );
         assert_eq!(
             probe_input_field(Some(false), false),
             ("PROBE READY".to_string(), theme::SUCCESS)
@@ -5627,6 +5736,16 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             "OVR F100 R100 S100",
             PanelMode::ProgHome.label(),
         ]);
+        // The same group without the probe field: it is drawn only while the
+        // probe is in the spindle, and the absent layout must neither leave a
+        // gap nor need less than the row has.
+        let group_without_probe = measure(&[
+            "E-STOP ACTIVE",
+            "MACHINE OFF",
+            "PROTECT ON",
+            "OVR F100 R100 S100",
+            PanelMode::ProgHome.label(),
+        ]);
         let overridden = measure(&["LIMITS OVERRIDE ON"]);
         let probe = measure(&["PROBE TRIPPED"]);
 
@@ -5639,6 +5758,18 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert!(
             left + group + overridden <= room,
             "the bar overflows 1280 px with the limits override shown: {left:.1} + {group:.1} + {overridden:.1} > {room:.1}"
+        );
+        assert!(
+            left + group_without_probe <= room,
+            "the bottom bar overflows 1280 px without the probe field: {left:.1} + {group_without_probe:.1} > {room:.1}"
+        );
+        // Absent means gone, not blanked out: the group is exactly the probe
+        // field and its 24 px gap narrower, and nothing else moves.
+        let probe_cost = group - group_without_probe;
+        assert!(
+            (probe_cost - (probe + 24.0)).abs() < 0.5,
+            "the absent field frees {probe_cost:.1} px; the field and its gap cost {:.1}",
+            probe + 24.0
         );
         assert!(
             probe < 160.0,
@@ -7364,6 +7495,35 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             self.frame_with(&keys)
         }
 
+        /// Type text at whatever holds the keyboard: what the panel's digits
+        /// arrive as, in one event.
+        fn type_text(&mut self, text: &str) {
+            self.frame_events(vec![egui::Event::Text(text.to_string())]);
+        }
+
+        /// The tool-number dialog's text, while it is open.
+        fn number_text(&self) -> Option<String> {
+            self.app
+                .tools
+                .number
+                .as_ref()
+                .map(|entry| entry.text.clone())
+        }
+
+        /// Open the TOOLS page, then the tool-number dialog with its own chord.
+        fn open_number_dialog(&mut self) {
+            self.app.set_page(Page::Tools);
+            self.frame(&[]);
+            self.frame_with(&[(
+                egui::Key::T,
+                egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+            )]);
+            assert!(
+                self.app.tools.number.is_some(),
+                "Ctrl+T opens the tool-number dialog"
+            );
+        }
+
         fn frame_with(
             &mut self,
             keys: &[(egui::Key, egui::Modifiers)],
@@ -7514,6 +7674,176 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 .map(|c| format!("{c:?}"))
                 .collect()
         }
+    }
+
+    // ---- TOOLS page: the typed tool number (Ctrl+T) -------------------
+
+    /// Ctrl+T opens a dialog prefilled with the tool in the spindle, and
+    /// Enter issues exactly what bare `T` issues for a table row.
+    #[test]
+    fn ctrl_t_opens_the_tool_number_dialog_and_enter_loads_it() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.app.set_page(Page::Tools);
+        harness.frame(&[]);
+        assert!(harness.app.tools.number.is_none());
+        assert!(!harness.app.overlay_open());
+
+        // egui-winit sets `command` alongside `ctrl` on a real keyboard; a
+        // synthetic event has to carry both or the parsed binding misses.
+        harness.frame_with(&[(
+            egui::Key::T,
+            egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+        )]);
+        let current = harness.app.snapshot.tool_change.current_tool;
+        assert_eq!(
+            harness.number_text(),
+            Some(current.to_string()),
+            "prefilled with the tool in the spindle"
+        );
+        assert!(
+            harness.app.overlay_open(),
+            "the dialog makes the table, the cell editor and the shell stand down"
+        );
+
+        // The field holds the keyboard from the frame it opens, with the
+        // whole value selected: a digit replaces it. No click-to-focus and
+        // no Tab on this panel.
+        harness.frame(&[]);
+        assert!(
+            harness
+                .ctx
+                .memory(|memory| memory.has_focus(egui::Id::unique("linc-tool-number"))),
+            "the field takes focus on the frame it opens"
+        );
+        harness.type_text("1");
+        assert_eq!(
+            harness.number_text(),
+            Some("1".to_string()),
+            "the first digit replaces the selected value"
+        );
+        harness.type_text("2");
+        assert_eq!(
+            harness.number_text(),
+            Some("12".to_string()),
+            "digits append"
+        );
+
+        harness.sent.borrow_mut().clear();
+        harness.frame(&[egui::Key::Enter]);
+        assert_eq!(
+            harness.sent.borrow().as_slice(),
+            [MachineCommand::LoadTool { tool: 12 }],
+            "Enter issues the same LoadTool as bare T"
+        );
+        assert!(
+            harness.app.tools.number.is_none(),
+            "Enter closes the dialog"
+        );
+    }
+
+    /// A refused number keeps the dialog open, names the problem and sends
+    /// nothing; 0 is accepted and empties the spindle.
+    #[test]
+    fn a_refused_tool_number_stays_in_the_dialog_and_sends_nothing() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.open_number_dialog();
+        harness.sent.borrow_mut().clear();
+
+        // The fixture's table is T1 and T12: 2 is a row index, not a tool.
+        harness.type_text("2");
+        harness.frame(&[egui::Key::Enter]);
+        let entry = harness
+            .app
+            .tools
+            .number
+            .as_ref()
+            .expect("a refused entry keeps the dialog open");
+        assert_eq!(entry.text, "2", "the refused text is kept");
+        assert_eq!(entry.error.as_deref(), Some("T2 is not in the tool table"));
+        assert!(
+            harness.sent.borrow().is_empty(),
+            "a refused number sends nothing"
+        );
+        assert!(harness.app.overlay_open());
+
+        // An empty entry is refused the same way, with its own reason.
+        harness.app.tools.number.as_mut().unwrap().text.clear();
+        harness.frame(&[egui::Key::Enter]);
+        let entry = harness.app.tools.number.as_ref().expect("still open");
+        assert_eq!(entry.error.as_deref(), Some("type a tool number"));
+        assert!(harness.sent.borrow().is_empty());
+
+        // A letter is not a number, and it does not read as 0 either.
+        harness.type_text("x");
+        harness.frame(&[egui::Key::Enter]);
+        let entry = harness.app.tools.number.as_ref().expect("still open");
+        assert!(
+            entry
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("is not a tool number")),
+            "a non-numeric entry is refused: {:?}",
+            entry.error
+        );
+        assert!(harness.sent.borrow().is_empty());
+
+        // 0 is accepted: the same command, for an empty spindle.
+        harness.app.tools.number.as_mut().unwrap().text = "0".into();
+        harness.frame(&[egui::Key::Enter]);
+        assert_eq!(
+            harness.sent.borrow().as_slice(),
+            [MachineCommand::LoadTool { tool: 0 }],
+            "0 empties the spindle through the same LoadTool"
+        );
+        assert!(harness.app.tools.number.is_none());
+    }
+
+    /// Escape closes it and issues nothing; `issue_allowed` is reported
+    /// inside the dialog rather than silently doing nothing.
+    #[test]
+    fn the_tool_number_dialog_reports_the_issue_gate_and_escapes_clean() {
+        // Power off: `issue_allowed` refuses every machine command.
+        let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::Off);
+        harness.open_number_dialog();
+        harness.sent.borrow_mut().clear();
+        harness.type_text("1");
+        harness.frame(&[egui::Key::Enter]);
+        let entry = harness.app.tools.number.as_ref().expect("still open");
+        assert_eq!(
+            entry.error.as_deref(),
+            Some("machine is not ON"),
+            "the refusal is the one issue_allowed gives"
+        );
+        assert!(harness.sent.borrow().is_empty());
+
+        // Escape closes it, sends nothing and gives the page its keys back.
+        harness.frame(&[egui::Key::Escape]);
+        assert!(
+            harness.app.tools.number.is_none(),
+            "Escape closes the dialog"
+        );
+        assert!(harness.sent.borrow().is_empty(), "Escape issues nothing");
+        assert!(!harness.app.overlay_open(), "nothing is left open");
+        assert!(
+            !harness
+                .ctx
+                .memory(|memory| memory.has_focus(egui::Id::unique("linc-tool-number"))),
+            "the field gives the keyboard back"
+        );
+
+        // The dialog belongs to the page: leaving it closes the dialog rather
+        // than keeping every key for a window that is not drawn.
+        harness.frame_with(&[(
+            egui::Key::T,
+            egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+        )]);
+        assert!(harness.app.tools.number.is_some());
+        harness.app.set_page(Page::Machine);
+        assert!(
+            harness.app.tools.number.is_none(),
+            "leaving the TOOLS page closes the dialog"
+        );
+        assert!(!harness.app.overlay_open());
     }
 
     struct RecordingBackend {

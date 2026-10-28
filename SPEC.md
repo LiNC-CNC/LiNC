@@ -112,7 +112,8 @@ else, so it cannot shadow another page's command.
 | Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Backspace` delete |
 | Help | `/` or `Ctrl+F` focus search, `Up`/`Down` select, `Enter` open the reference, `Backspace` back in the reference dialog |
 | Offsets | `Up`/`Down` select a row, `X`/`Y`/`Z` edit the DRO, `A` activate the selected work system |
-| Tools, Probe | Arrows select a row |
+| Tools | Arrows select a row, `Enter` edit the selected cell, `T` load the selected row's tool (`Tn M6` + `G43 Hn`), `Ctrl+T` type a tool number and load it |
+| Probe | Arrows select a row |
 
 Every page that draws a toolpath (Machine, Program, Manual, Homing and the
 Offsets preview) pans with `Ctrl+Left`/`Ctrl+Right`/`Ctrl+Up`/`Ctrl+Down` and
@@ -132,7 +133,10 @@ sidebar holds); nav keys are never listed. The list is grouped by purpose
 While a dialog or the manual tool-change prompt is open it owns the keyboard:
 its focused buttons and fields handle Enter, arrows and typing, the shell keeps
 only Escape for a dismissible dialog, and navigation or page shortcuts do not
-act on the page behind it.
+act on the page behind it. The TOOLS page's typed tool-number dialog is one of
+those dialogs and is listed in `LincApp::overlay_open()`; it takes its own
+`Enter` and `Esc` before the table draws, because a refused number must keep
+it open and say why.
 
 ### 3.2 Physical panel
 
@@ -403,11 +407,16 @@ Fixed shell, no right-hand status column:
 - **Central page**: active screen.
 - **Bottom action bar**: real keycaps (`MAIN`, `FILE`, `OFFSET`, `TOOL`, `WIN`,
   `ESC`), context actions including `HELP`, and a compact read-only machine
-  status line (E-stop, machine on/off, the wired probe input on a profile that
-  has one, `OVR F/S/R`, program protect, alarm count). The probe field reads
-  `PROBE READY`, `PROBE TRIPPED` or `PROBE ?` from `probe.input_tripped` and
-  asks on stale data; it is a readout like MACHINE ON, with no click target and
-  no command.
+  status line (E-stop, machine on/off, the wired probe input, `OVR F/S/R`,
+  program protect, alarm count). The probe field reads `PROBE READY`,
+  `PROBE TRIPPED` or `PROBE ?` from `probe.input_tripped` and asks on stale
+  data; it is a readout like MACHINE ON, with no click target and no command.
+  It is drawn only while the probe is fitted — a probe configured
+  (`[probe] enabled`) **and** `[probe] tool_number` equal to the tool in the
+  spindle (`tool_change.current_tool`, the TOOLS page's CURRENT tool). A cutter
+  in the spindle, an empty spindle or a profile without a probe leaves the field
+  out entirely: no placeholder and no dimmed row, so nothing else on the bar
+  shifts.
 - **No persistent panel-status column.** Panel detail belongs in Diagnostics.
 
 Focus rules:
@@ -759,6 +768,23 @@ Primary quick tool-change surface; no MDI entry required.
 - `T` loads the selected row's tool: `Tn M6` followed by `G43 Hn` in one
   backend command, so the length compensation is in effect as soon as the
   change completes. The shortcut does not fire while a cell is being edited.
+- `Ctrl+T` (`[keys] tool_number`, page-local like `T`) opens a small dialog
+  that types a tool number directly, for an operator who knows the number and
+  does not want to cursor to the row. It opens on one line of digits prefilled
+  with the tool in the spindle and the whole value selected, so `Enter` alone
+  re-loads that tool and typing replaces it. `Enter` confirms, `Esc` cancels,
+  `Backspace` edits and the digits append; there is no click-to-focus and no
+  Tab, so the field takes the keyboard on the frame it opens, and gives it back
+  when the dialog closes. The dialog shows the numbers the table accepts and
+  `0 = NO TOOL`, and it names the problem on a refusal (`T7 is not in the tool
+  table`, an empty entry, a non-numeric one) without closing. Only a tool
+  number the table carries (a tool number, not a row index) or `0` is accepted.
+  Confirming issues the same `LoadTool` command bare `T` issues, under the same
+  `issue_allowed` precondition, whose reason is reported inside the dialog; a
+  success toasts like the row load. `0` is `T0 M6` plus `G43 H0`: the spindle
+  ends up empty with no length compensation in effect. It is part of
+  `LincApp::overlay_open()`, so the table, the cell editor and the shell's
+  global keys stand down while it is open.
 - Editing a cell selects the whole value (Home/End move inside it). Enter
   writes the row, reloads the tool table into the controller and re-applies
   `G43` when the edited row is the tool in the spindle. Escape restores the

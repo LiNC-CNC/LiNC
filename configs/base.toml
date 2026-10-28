@@ -162,6 +162,10 @@ program_run_from_line = "Ctrl+R"
 files_delete = "Delete"
 tools = "F7"
 offsets = "F8"
+# Page-local to the TOOLS page: type a tool number instead of cursoring to its
+# row. Enter loads it exactly as bare T does (Tn M6 + G43 Hn); 0 empties the
+# spindle. Digits, Enter, Backspace and Escape are enough: no Tab, no Shift.
+tool_number = "Ctrl+T"
 # There is no F9 on the panel: DIAGNOSTICS takes Ctrl+D and G-CODE HELP Ctrl+H;
 # F10 carries CODE/SPLIT and Esc is back/cancel. Both pages stay bound here
 # with no [ui] pages entry, so the keys are the way in.
