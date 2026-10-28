@@ -124,6 +124,11 @@ pub struct LincApp {
     /// system for a poll, and the cross would snap to the machine origin and
     /// back.
     pub graph_origin: [f64; 3],
+    /// MAIN's bottom row shows the following-error traces instead of the feed
+    /// and servo cards. Toggled with the square key there.
+    pub machine_following: bool,
+    /// Following error per axis, newest last, sampled as each snapshot arrives.
+    pub following_history: linc_core::model::AxisMap<std::collections::VecDeque<f64>>,
     /// Largest remaining distance (absolute) seen for each axis since it last
     /// stopped, i.e. the length of the move in progress. The status only carries
     /// the remainder, so this is what turns it into a percentage.
@@ -481,6 +486,8 @@ impl LincApp {
             alarm_id_seen: 0,
             jog_speed_published: None,
             graph_origin: [0.0; 3],
+            machine_following: false,
+            following_history: linc_core::model::AxisMap::new(),
             trail_cleared: false,
             trail_cleared_tip: None,
             move_distance: linc_core::model::AxisMap::new(),
@@ -620,6 +627,7 @@ impl LincApp {
             }
         }
         self.snapshot = snapshot;
+        self.sample_following_error();
         // Keep the last known work zero: loading a program can leave the
         // snapshot without an active system for a poll, and the cross must not
         // jump to the machine origin when that happens.
@@ -1731,6 +1739,34 @@ impl LincApp {
             }
         }
     }
+    /// Keep a short trace of every axis's following error for MAIN's bottom row.
+    ///
+    /// Sampled as the snapshot arrives rather than per frame: the poll is the
+    /// display's own rate, and a frame-driven trace would stretch and squeeze
+    /// with the renderer's speed instead of with time.
+    fn sample_following_error(&mut self) {
+        const SAMPLES: usize = 240;
+        let values: Vec<(String, f64)> = self
+            .snapshot
+            .machine
+            .following_error
+            .iter()
+            .map(|(axis, value)| (axis.to_string(), *value))
+            .collect();
+        for (axis, value) in values {
+            if self.following_history.get(&axis).is_none() {
+                self.following_history
+                    .insert(axis.clone(), std::collections::VecDeque::new());
+            }
+            if let Some(trace) = self.following_history.get_mut(&axis) {
+                trace.push_back(value);
+                while trace.len() > SAMPLES {
+                    trace.pop_front();
+                }
+            }
+        }
+    }
+
     pub fn active_offset_values(&self) -> Option<&linc_core::model::AxisMap<f64>> {
         active_offset(&self.snapshot)
     }
@@ -2155,6 +2191,7 @@ impl LincApp {
         let mut graph_fit = false;
         let mut graph_clear = false;
         let mut pac_man = false;
+        let mut machine_following = false;
         let mut run_from_line = false;
         let mut mdi_issue = false;
         let mut help_search = false;
@@ -2282,16 +2319,21 @@ impl LincApp {
                     nav_page = Some(Page::Program);
                 }
             }
-            // Page-local: CODE/SPLIT only exists where there is a program view.
-            // Shortcuts that mean nothing on the page in front of the operator
-            // are not consumed, so they cannot shadow another page's command.
-            if self.page == Page::Program
+            // Page-local: the square is CODE/SPLIT where there is a program
+            // view and the following-error traces on MAIN. Shortcuts that mean
+            // nothing on the page in front of the operator are not consumed, so
+            // they cannot shadow another page's command.
+            if matches!(self.page, Page::Program | Page::Machine)
                 && input.consume_key(
                     self.keymap.program_cycle_view.modifiers,
                     self.keymap.program_cycle_view.key,
                 )
             {
-                cycle_view = true;
+                if self.page == Page::Program {
+                    cycle_view = true;
+                } else {
+                    machine_following = true;
+                }
             }
             // Page-local to the pages that draw a toolpath.
             if matches!(
@@ -2712,6 +2754,9 @@ impl LincApp {
         }
         if pac_man {
             self.cycle_pac_man();
+        }
+        if machine_following {
+            self.machine_following = !self.machine_following;
         }
         if cycle_view {
             self.cycle_program_view();
@@ -3593,6 +3638,17 @@ impl LincApp {
                             (k.graph_clear.label(), "CLEAR TRAIL"),
                             (k.toggle_bounds.label(), "BOUNDS"),
                             (k.pac_man.label(), "PAC-MAN"),
+                            // The square swaps the feed/servo pair below the
+                            // graph for the following-error traces, and names
+                            // what the next press brings back.
+                            (
+                                square.to_string(),
+                                if self.machine_following {
+                                    "FEED"
+                                } else {
+                                    "F.ERROR"
+                                },
+                            ),
                             (k.view_pan_hint(), "PAN"),
                             (k.view_zoom_hint(), "ZOOM"),
                         ],
@@ -5347,6 +5403,72 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert_eq!(
             machine_status_field(false, true),
             ("MACHINE ?".to_string(), theme::WARNING)
+        );
+    }
+
+    /// The square key on MAIN swaps the feed/servo cards for the following-error
+    /// traces, and swaps them back.
+    #[test]
+    fn the_square_key_shows_the_following_error_traces_on_main() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.app.set_page(Page::Machine);
+        let texts = |harness: &mut ProbeHarness| -> Vec<String> {
+            painted_text(&harness.frame_full(Vec::new()))
+                .into_iter()
+                .map(|(text, _)| text)
+                .collect()
+        };
+        let cards = texts(&mut harness);
+        assert!(
+            cards.iter().any(|text| text == "SERVO LOAD"),
+            "the feed/servo pair is in front: {cards:?}"
+        );
+
+        harness.frame_with(&[(egui::Key::F10, egui::Modifiers::NONE)]);
+        assert!(harness.app.machine_following, "F10 shows the traces");
+        let cards = texts(&mut harness);
+        assert!(
+            cards.iter().any(|text| text == "FOLLOWING ERROR"),
+            "the traces replace both cards: {cards:?}"
+        );
+        assert!(
+            !cards.iter().any(|text| text == "SERVO LOAD"),
+            "and the servo card is gone: {cards:?}"
+        );
+        for axis in ["X", "Y", "Z"] {
+            assert!(
+                cards
+                    .iter()
+                    .any(|text| text.starts_with(&format!("{axis} "))),
+                "{axis} is keyed in the header: {cards:?}"
+            );
+        }
+
+        harness.frame_with(&[(egui::Key::F10, egui::Modifiers::NONE)]);
+        assert!(!harness.app.machine_following, "and back to the cards");
+    }
+
+    /// PAC-MAN changes what the card means - no trail, and the path eaten behind
+    /// the tool - so the card says so in its own header, not only in the
+    /// shortcut list.
+    #[test]
+    fn pac_man_is_announced_in_the_toolpath_header() {
+        let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+        harness.app.set_page(Page::Machine);
+        let header = |harness: &mut ProbeHarness| -> Vec<(String, egui::Rect)> {
+            painted_text(&harness.frame_full(Vec::new()))
+                .into_iter()
+                .filter(|(_, rect)| rect.left() > theme::NAV_WIDTH && rect.center().y < 220.0)
+                .collect()
+        };
+        assert!(
+            !header(&mut harness).iter().any(|(text, _)| text == "PAC-MAN"),
+            "no indicator with the mode off"
+        );
+        harness.app.graph_style.pac_man = true;
+        assert!(
+            header(&mut harness).iter().any(|(text, _)| text == "PAC-MAN"),
+            "the card header says PAC-MAN while it is on"
         );
     }
 

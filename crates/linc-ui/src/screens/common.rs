@@ -204,7 +204,7 @@ pub fn card_title(ui: &mut Ui, text: &str) {
 
 /// Toolpath status line: keys on the left, view and zoom on the right. Every
 /// toolpath card draws it, so no card needs a legend over the drawing.
-pub fn toolpath_header(ui: &mut Ui, view: &str, zoom: f32) {
+pub fn toolpath_header(ui: &mut Ui, view: &str, zoom: f32, pac_man: bool) {
     ui.horizontal(|ui| {
         card_title(ui, "TOOLPATH");
         ui.add_space(8.0);
@@ -245,6 +245,18 @@ pub fn toolpath_header(ui: &mut Ui, view: &str, zoom: f32) {
                 .size(theme::font_size(9.0))
                 .color(theme::FG),
         );
+        // PAC-MAN has no trail and eats the path behind the tool, so the two
+        // keys above do not describe the card: say which mode is in force.
+        if pac_man {
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("PAC-MAN")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .strong()
+                    .color(linc_view::theme::TOOL),
+            );
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 RichText::new(format!("ZOOM {:.1}x", zoom))
@@ -1926,7 +1938,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
     );
     shell_card(ui, rect, |ui| {
         let body_top = ui.cursor().top();
-        toolpath_header(ui, app.manual.view.label(), app.manual.zoom);
+        toolpath_header(ui, app.manual.view.label(), app.manual.zoom, app.graph_style.pac_man);
         let header_height = ui.cursor().top() - body_top;
         let graph_height = (rect.height() - 8.0 - header_height - 2.0).max(60.0);
         let preview = app.program.last_valid_preview.clone();
@@ -2040,6 +2052,83 @@ pub fn zero_axes(app: &mut crate::shell::LincApp, axes: Vec<String>) {
 
 /// Room above each chip for its digit: the disc is 14 px across, plus air.
 const INCREMENT_DISC_ROW: f32 = 20.0;
+
+/// MAIN's bottom row when the square key is on: every axis's following error in
+/// one lane, one colour each, on a scale they share.
+///
+/// Following error is the distance between where the controller is and where the
+/// position loop wants it. One lane makes the axes comparable at a glance, and a
+/// trace shows a sticky axis or a loose servo while it happens, which a single
+/// number cannot.
+pub fn following_error_card(app: &LincApp, ui: &mut Ui, height: f32) {
+    theme::card(ui, |ui| {
+        ui.set_min_height((height - 24.0).max(0.0));
+        ui.set_max_height((height - 24.0).max(0.0));
+        ui.set_min_width(ui.available_width());
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let axes = app.axes();
+        ui.horizontal(|ui| {
+            theme::section_header(ui, "FOLLOWING ERROR");
+            ui.add_space(12.0);
+            // The values double as the key: three traces in one lane have to say
+            // which colour is which axis.
+            for (index, axis) in axes.iter().enumerate() {
+                let value = app
+                    .snapshot
+                    .machine
+                    .following_error
+                    .get(axis)
+                    .copied()
+                    .unwrap_or(0.0);
+                ui.label(
+                    RichText::new(format!("{axis} {value:+0.3}"))
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(trace_color(index)),
+                );
+                ui.add_space(8.0);
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    RichText::new(&app.snapshot.positions.units)
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+            });
+        });
+        // The lane takes everything the title leaves: one lane, maximised, not a
+        // stack of rows.
+        let lane = (ui.available_height() - 2.0).max(24.0);
+        let owned: Vec<(Vec<f64>, egui::Color32)> = axes
+            .iter()
+            .enumerate()
+            .map(|(index, axis)| {
+                (
+                    app.following_history
+                        .get(axis)
+                        .map(|samples| samples.iter().copied().collect())
+                        .unwrap_or_default(),
+                    trace_color(index),
+                )
+            })
+            .collect();
+        let traces: Vec<(&[f64], egui::Color32)> = owned
+            .iter()
+            .map(|(values, color)| (values.as_slice(), *color))
+            .collect();
+        linc_view::draw_traces(ui, &traces, lane);
+    });
+}
+
+/// One colour per axis, in the order the machine lists them.
+fn trace_color(index: usize) -> egui::Color32 {
+    match index % 3 {
+        0 => linc_view::theme::ACCENT,
+        1 => linc_view::theme::SUCCESS,
+        _ => linc_view::theme::WARNING,
+    }
+}
 
 /// The jog increment the operator picked from `[DISPLAY] INCREMENTS`.
 ///

@@ -45,6 +45,18 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
                     |ui| graph_panel(app, ui, graph_height),
                 );
                 ui.add_space(6.0);
+                // The square key swaps the feed/servo pair for the
+                // following-error traces: one row of cards, one subject.
+                if app.machine_following {
+                    bottom_card(
+                        app,
+                        ui,
+                        bottom_row_card_width(graph_width, 1.0, 180.0),
+                        bottom_height,
+                        "following",
+                        |app, ui, _h| common::following_error_card(app, ui, bottom_height),
+                    );
+                } else {
                 let servo = !app.servo_load_rows().is_empty();
                 let cards = if servo { 2.0 } else { 1.0 };
                 let card_width = bottom_row_card_width(graph_width, cards, 180.0);
@@ -68,6 +80,7 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
                         );
                     }
                 });
+                }
             },
         );
         ui.add_space(8.0);
@@ -98,6 +111,12 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
 /// margins.
 fn bottom_cards_height(app: &LincApp) -> f32 {
     const FEED: f32 = 100.0;
+    // Three rows and room to read them; the rows divide whatever is left after
+    // the card's own header, so a shorter strip is not clipped.
+    const FOLLOWING: f32 = 132.0;
+    if app.machine_following {
+        return FOLLOWING;
+    }
     let rows = app.servo_load_rows().len();
     let servo = if rows == 0 {
         0.0
@@ -152,7 +171,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
             // One legend implementation for every toolpath card: the
             // main window had its own copy, which is why its tool key was a
             // circle while the others were already a triangle.
-            common::toolpath_header(ui, view.label(), app.program.graph_zoom);
+            common::toolpath_header(ui, view.label(), app.program.graph_zoom, app.graph_style.pac_man);
             let mut zoom = app.program.graph_zoom;
             let mut pan = app.program.graph_pan;
             let mut yaw = app.program.graph_yaw;

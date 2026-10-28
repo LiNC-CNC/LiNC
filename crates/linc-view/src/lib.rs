@@ -2426,37 +2426,64 @@ fn draw_axes(
 }
 
 /// Compact sparkline for diagnostics. Values are drawn without axes.
-pub fn draw_sparkline(ui: &mut Ui, values: &[f64], color: Color32, height: f32) -> Response {
+/// Several traces in one lane, on a scale shared by all of them.
+///
+/// One lane rather than one lane per series: the three following errors are read
+/// against each other, and a shared scale is what makes that a real comparison -
+/// a per-series scale would draw a quiet axis as busy as a struggling one.
+pub fn draw_traces(ui: &mut Ui, series: &[(&[f64], Color32)], height: f32) -> Response {
     let desired = Vec2::new(ui.available_width(), height);
     let (rect, response) = ui.allocate_exact_size(desired, Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, CornerRadius::same(3), theme::SURFACE);
-    if values.len() >= 2 {
-        let min = values.iter().copied().fold(f64::INFINITY, f64::min);
-        let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        let span = (max - min).max(1e-6);
+    let longest = series
+        .iter()
+        .map(|(values, _)| values.len())
+        .max()
+        .unwrap_or(0);
+    if longest < 2 {
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            "\u{2014}",
+            FontId::monospace(12.0 * FONT_SCALE),
+            theme::MUTED,
+        );
+        return response;
+    }
+    let min = series
+        .iter()
+        .flat_map(|(values, _)| values.iter())
+        .copied()
+        .fold(f64::INFINITY, f64::min);
+    let max = series
+        .iter()
+        .flat_map(|(values, _)| values.iter())
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let span = (max - min).max(1e-6);
+    for (values, color) in series {
+        if values.len() < 2 {
+            continue;
+        }
         let points: Vec<Pos2> = values
             .iter()
             .enumerate()
             .map(|(index, value)| {
-                let x =
-                    rect.left() + rect.width() * index as f32 / (values.len() - 1).max(1) as f32;
+                let x = rect.left()
+                    + rect.width() * index as f32 / (values.len() - 1).max(1) as f32;
                 let y =
                     rect.bottom() - 3.0 - ((*value - min) / span) as f32 * (rect.height() - 6.0);
                 Pos2::new(x, y)
             })
             .collect();
-        painter.add(egui::Shape::line(points, Stroke::new(1.4, color)));
-    } else {
-        painter.text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            "—",
-            FontId::monospace(12.0 * FONT_SCALE),
-            theme::MUTED,
-        );
+        painter.add(egui::Shape::line(points, Stroke::new(1.4, *color)));
     }
     response
+}
+
+pub fn draw_sparkline(ui: &mut Ui, values: &[f64], color: Color32, height: f32) -> Response {
+    draw_traces(ui, &[(values, color)], height)
 }
 
 /// Mini graph used by the Program CODE view; draws only XY program layers.
