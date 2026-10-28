@@ -5906,9 +5906,6 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert_eq!(harness.app.page, Page::Help);
     }
 
-    /// The style, not the page: REMAINING is what stops the trail being drawn,
-    /// and the eaten line reaches the view as it is.
-    #[test]
     /// INC and MPG show the steps and take their numbers; JOG is continuous and
     /// gets neither, so its digits stay free and no wrong value is on screen.
     #[test]
@@ -5971,6 +5968,9 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert_eq!(harness.app.jog_increment_index, 0, "and takes no digits");
     }
 
+    /// The style, not the page: REMAINING is what stops the trail being drawn,
+    /// and the eaten line reaches the view as it is.
+    #[test]
     fn remaining_takes_the_live_trail_out_of_the_style() {
         let (_dir, profile) = fixture();
         let mut style = crate::state::graph_style(&profile);
