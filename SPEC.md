@@ -843,7 +843,11 @@ previous page.
 - Left pane: removable USB media. Auto-mount on insert via `udisks2` over
   D-Bus; no `sudo`, no shell commands.
 - Right pane: `NC_FILES`, resolved from LinuxCNC `PROGRAM_PREFIX`; never a
-  duplicated path in HMI config.
+  duplicated path in HMI config. The square (`F10`) key flips it to `RECENT`,
+  the programs opened most recently, newest first, from
+  `preferences.recent_files` (deduplicated, bounded by `[files]` history).
+  `Enter` loads a recent row. `C`, `R` and delete act on a directory row, so the
+  recent view does not offer them; the left pane is unaffected.
 - Show device label/capacity, free space and mount state (`MOUNTING`, `MOUNTED`,
   `NO USB`, `ERROR`). No button row: `E` ejects.
 - Mount removable filesystems with `nosuid,nodev,noexec`; never auto-run files

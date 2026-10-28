@@ -104,23 +104,33 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
         return;
     }
     let usb = app.files.usb_focused;
+    // The right pane has two views; the left one never does.
+    let recent = !usb && app.files.recent_shown;
     let entries: Vec<FileEntry> = if usb {
         app.files.usb_entries.clone()
+    } else if recent {
+        recent_entries(app)
     } else {
         app.files.nc_entries.clone()
     };
     let current = if usb {
         app.files.usb_current.clone()
+    } else if recent {
+        None
     } else {
         Some(app.files.nc_current.clone())
     };
     let root = if usb {
         app.files.usb_root.clone()
+    } else if recent {
+        None
     } else {
         Some(app.files.nc_root.clone())
     };
     let mut selected = if usb {
         app.files.usb_selected
+    } else if recent {
+        app.files.recent_selected
     } else {
         app.files.nc_selected
     };
@@ -145,6 +155,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     let mut eject_media = false;
     let mut delete: Option<PathBuf> = None;
     let mut scroll_selection = false;
+    let mut toggle_recent = false;
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::C) {
             copy_side = true;
@@ -223,20 +234,37 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
         // editing, so it is not a Files action.
         let delete_pressed = input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
             || input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace);
-        if delete_pressed && !on_parent {
+        // No delete from the recent list: it is a list of paths, not of files
+        // the operator is looking at in their directory.
+        if delete_pressed && !on_parent && !recent {
             if let Some(entry) = entries.get(selected) {
                 if !entry.is_dir {
                     delete = Some(entry.path.clone());
                 }
             }
         }
+        if input.consume_key(
+            app.keymap.program_cycle_view.modifiers,
+            app.keymap.program_cycle_view.key,
+        ) {
+            toggle_recent = true;
+        }
     });
     if usb {
         app.files.usb_selected = selected;
         app.files.usb_parent_selected = on_parent;
+    } else if recent {
+        app.files.recent_selected = selected;
     } else {
         app.files.nc_selected = selected;
         app.files.nc_parent_selected = on_parent;
+    }
+    if toggle_recent {
+        app.files.recent_shown = !app.files.recent_shown;
+        // The square key is about the right pane, so it also takes the focus
+        // there: otherwise the toggle changes a list the arrows do not reach.
+        app.files.usb_focused = false;
+        app.files.scroll_to_selection = true;
     }
     if scroll_selection {
         app.files.scroll_to_selection = true;
@@ -260,10 +288,12 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     if copy_enter && copy_to_nc_allowed(app) {
         copy_usb_to_nc(app);
     }
-    if copy_side && !on_parent {
+    // Copy and rename act on the focused pane's directory row. The recent list
+    // is not that row, so both stand down while it is in front.
+    if copy_side && !on_parent && !recent {
         copy_selected(app);
     }
-    if rename && !on_parent {
+    if rename && !on_parent && !recent {
         begin_rename(app);
     }
     if new_file {
@@ -599,13 +629,16 @@ fn usb_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
     });
 }
 
+/// The right pane: the program directory, or the recent programs the square
+/// key switches to.
 fn nc_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
+    let recent = app.files.recent_shown;
     theme::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
         ui.set_min_height(height);
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("NC_FILES")
+                RichText::new(if recent { "RECENT" } else { "NC_FILES" })
                     .size(theme::font_size(16.0))
                     .strong()
                     .color(if app.files.usb_focused {
@@ -615,15 +648,20 @@ fn nc_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                     }),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let detail = if recent {
+                    format!("{} / NEWEST FIRST", app.preferences.recent_files.len())
+                } else {
+                    app.files.nc_current.display().to_string()
+                };
                 ui.label(
-                    RichText::new(app.files.nc_current.display().to_string())
+                    RichText::new(detail)
                         .monospace()
                         .size(theme::font_size(9.0))
                         .color(theme::MUTED),
                 );
             });
         });
-        file_list(app, ui, Pane::Nc);
+        file_list(app, ui, if recent { Pane::Recent } else { Pane::Nc });
     });
 }
 
@@ -631,24 +669,54 @@ fn nc_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
 enum Pane {
     Usb,
     Nc,
+    /// The right pane's other view: the programs opened most recently, newest
+    /// first, so the operator does not walk the directory to get back to the
+    /// job they were on. `preferences.recent_files` already holds that order.
+    Recent,
+}
+
+fn recent_entries(app: &LincApp) -> Vec<FileEntry> {
+    app.preferences
+        .recent_files
+        .iter()
+        .map(|entry| {
+            let path = PathBuf::from(entry);
+            let metadata = std::fs::metadata(&path).ok();
+            FileEntry {
+                name: path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string()),
+                path: path.clone(),
+                is_dir: false,
+                is_symlink: false,
+                size: metadata.as_ref().map(|meta| meta.len()).unwrap_or(0),
+                modified: metadata.and_then(|meta| meta.modified().ok()),
+            }
+        })
+        .collect()
 }
 
 fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
     let entries: Vec<FileEntry> = match pane {
         Pane::Usb => app.files.usb_entries.clone(),
         Pane::Nc => app.files.nc_entries.clone(),
+        Pane::Recent => recent_entries(app),
     };
     let current = match pane {
         Pane::Usb => app.files.usb_current.clone(),
         Pane::Nc => Some(app.files.nc_current.clone()),
+        Pane::Recent => None,
     };
     let root = match pane {
         Pane::Usb => app.files.usb_root.clone(),
         Pane::Nc => Some(app.files.nc_root.clone()),
+        Pane::Recent => None,
     };
     let mut selected = match pane {
         Pane::Usb => app.files.usb_selected,
         Pane::Nc => app.files.nc_selected,
+        Pane::Recent => app.files.recent_selected,
     };
     selected = selected.min(entries.len().saturating_sub(1));
     let parent = parent_row(
@@ -994,9 +1062,10 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
     match pane {
         Pane::Usb => app.files.usb_selected = selected,
         Pane::Nc => app.files.nc_selected = selected,
+        Pane::Recent => app.files.recent_selected = selected,
     }
     if let Some(path) = load_file {
-        if pane == Pane::Nc {
+        if matches!(pane, Pane::Nc | Pane::Recent) {
             load_selected(app, &path);
         }
     }

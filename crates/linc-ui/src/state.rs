@@ -408,6 +408,10 @@ pub struct FilesUi {
     pub nc_current: PathBuf,
     pub nc_entries: Vec<FileEntry>,
     pub nc_selected: usize,
+    /// The right pane shows the recent programs instead of the directory.
+    /// Toggled with the square key, like CODE/SPLIT on the Program page.
+    pub recent_shown: bool,
+    pub recent_selected: usize,
     pub status: String,
     pub error: Option<String>,
     pub copy: Option<CopyJob>,
@@ -442,6 +446,8 @@ impl FilesUi {
             nc_current: nc_root,
             nc_entries: Vec::new(),
             nc_selected: 0,
+            recent_shown: false,
+            recent_selected: 0,
             status: String::new(),
             error: None,
             copy: None,

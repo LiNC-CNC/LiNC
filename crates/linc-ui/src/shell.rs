@@ -3629,8 +3629,16 @@ impl LincApp {
                 }
             }
             Page::Files => {
+                // The square flips the right pane between the program directory
+                // and the programs opened most recently; its label names what
+                // the key gives you, like CODE/SPLIT on the Program page.
+                let right_pane = if self.files.recent_shown {
+                    "NC_FILES"
+                } else {
+                    "RECENT"
+                };
                 // Enter is contextual: a folder opens, a USB file copies into
-                // NC_FILES, an NC file loads.
+                // NC_FILES, an NC or recent file loads.
                 let (entries, selected, on_parent) = if self.files.usb_focused {
                     (
                         &self.files.usb_entries,
@@ -3644,8 +3652,12 @@ impl LincApp {
                         self.files.nc_parent_selected,
                     )
                 };
-                let enter = if on_parent || entries.get(selected).is_some_and(|entry| entry.is_dir)
-                {
+                let recent_focus = !self.files.usb_focused && self.files.recent_shown;
+                let enter = if recent_focus {
+                    // A recent row is a file path: there is no folder to open
+                    // and nothing to copy into.
+                    "LOAD"
+                } else if on_parent || entries.get(selected).is_some_and(|entry| entry.is_dir) {
                     "OPEN"
                 } else if self.files.usb_focused {
                     "COPY"
@@ -3656,17 +3668,25 @@ impl LincApp {
                     title: "BROWSE",
                     items: vec![
                         ("\u{2190}/\u{2192}".into(), "PANE"),
+                        (square.to_string(), right_pane),
                         ("Enter".into(), enter),
                     ],
                 });
-                groups.push(ShortcutGroup {
-                    title: "FILE",
-                    items: vec![
+                // Copy, rename and delete act on the focused pane's directory
+                // row; the recent list is not one, so only NEW is offered there.
+                let file_items: Vec<(String, &'static str)> = if recent_focus {
+                    vec![("N".into(), "NEW")]
+                } else {
+                    vec![
                         ("C".into(), "COPY"),
                         ("R".into(), "RENAME"),
                         ("N".into(), "NEW"),
                         (format!("Bksp/{}", k.files_delete.label()), "DELETE"),
-                    ],
+                    ]
+                };
+                groups.push(ShortcutGroup {
+                    title: "FILE",
+                    items: file_items,
                 });
                 groups.push(ShortcutGroup {
                     title: "MEDIA",
@@ -5328,6 +5348,53 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             machine_status_field(false, true),
             ("MACHINE ?".to_string(), theme::WARNING)
         );
+    }
+
+    /// The square key flips the right pane between the program directory and
+    /// the recently opened programs, newest first, and leaves the left pane
+    /// alone.
+    #[test]
+    fn the_square_key_flips_the_right_pane_to_recent_files() {
+        let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+        harness.app.set_page(Page::Files);
+        harness.app.files.usb_focused = false;
+        harness.app.preferences.recent_files = vec![
+            "/nc/newest.ngc".to_string(),
+            "/nc/older.ngc".to_string(),
+        ];
+        let texts = |harness: &mut ProbeHarness| -> Vec<String> {
+            painted_text(&harness.frame_full(Vec::new()))
+                .into_iter()
+                .map(|(text, _)| text)
+                .collect()
+        };
+        let listing = texts(&mut harness);
+        assert!(listing.iter().any(|text| text == "NC_FILES"), "{listing:?}");
+        assert!(
+            !listing.iter().any(|text| text == "newest.ngc"),
+            "the directory is in front: {listing:?}"
+        );
+
+        harness.frame_with(&[(egui::Key::F10, egui::Modifiers::NONE)]);
+        assert!(harness.app.files.recent_shown, "F10 flips the right pane");
+        assert!(
+            !harness.app.files.usb_focused,
+            "and puts the arrows in that pane"
+        );
+        let listing = texts(&mut harness);
+        assert!(listing.iter().any(|text| text == "RECENT"), "{listing:?}");
+        let newest = listing
+            .iter()
+            .position(|text| text == "newest.ngc")
+            .expect("the newest program is listed");
+        let older = listing
+            .iter()
+            .position(|text| text == "older.ngc")
+            .expect("the older program is listed");
+        assert!(newest < older, "most recent first: {listing:?}");
+
+        harness.frame_with(&[(egui::Key::F10, egui::Modifiers::NONE)]);
+        assert!(!harness.app.files.recent_shown, "and back to the directory");
     }
 
     /// The graph's frame is the controller's offset even when no program is
