@@ -2000,7 +2000,7 @@ impl LincApp {
         );
     }
 
-    /// `Ctrl+P`: REMAINING. The live trail goes away and the part of the
+    /// `Ctrl+M`: REMAINING. The live trail goes away and the part of the
     /// program path the machine has already run is eaten away, block by
     /// completed block. A view mode: no coordinate, offset or controller state
     /// changes, and the eaten blocks come back with the mode.
@@ -2448,7 +2448,7 @@ impl LincApp {
                 if zoom_out {
                     view_zoom /= VIEW_ZOOM_STEP;
                 }
-                // Page-scoped like the zoom: Ctrl+P is no text field's chord and
+                // Page-scoped like the zoom: Ctrl+M is no text field's chord and
                 // no navigation key, so it works wherever a toolpath is drawn.
                 if input.consume_key(k.remaining.modifiers, k.remaining.key) {
                     remaining = true;
@@ -6008,10 +6008,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             "bottom padding {}",
             shortcuts - last_target_bottom
         );
-        // Ctrl+P is REMAINING now, not a page: the view changes, the page does not.
+        // Ctrl+M is REMAINING: the view changes, the page does not.
         let page = harness.app.page;
-        harness.frame_with(&[(egui::Key::P, ctrl())]);
-        assert!(harness.app.graph_style.remaining, "Ctrl+P turns REMAINING on");
+        harness.frame_with(&[(egui::Key::M, ctrl())]);
+        assert!(harness.app.graph_style.remaining, "Ctrl+M turns REMAINING on");
         assert_eq!(harness.app.page, page, "a view mode, not a page");
         // The pages behind the rows still answer their own chords.
         harness.frame_with(&[(egui::Key::D, ctrl())]);

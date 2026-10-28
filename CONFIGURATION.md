@@ -691,7 +691,7 @@ Lathe profiles only; on a mill the chords do nothing.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `toggle_lathe_mirror` | `Ctrl+M` | Mirror the lathe XZ/TURN picture about the Z centreline (graph, live trail, tool marker and MDI block preview). Persisted as `lathe_mirror`. |
+| `toggle_lathe_mirror` | `Ctrl+J` | Mirror the lathe XZ/TURN picture about the Z centreline (graph, live trail, tool marker and MDI block preview). Persisted as `lathe_mirror`. |
 | `toggle_lathe_diameter` | `Ctrl+E` | Show the X readout as diameter (2X) or radius. Persisted as `lathe_diameter`. |
 
 ## 11. Validation checklist

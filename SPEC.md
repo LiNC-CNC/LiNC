@@ -106,9 +106,9 @@ else, so it cannot shadow another page's command.
 
 | Page | Keys |
 |---|---|
-| Machine (MAIN) | `Ctrl+F10`/`Ctrl+▢` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+P` REMAINING view, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail, `Ctrl+R` run from line, `Ctrl+G` go to a line number |
+| Machine (MAIN) | `Ctrl+F10`/`Ctrl+▢` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+M` REMAINING view, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail, `Ctrl+R` run from line, `Ctrl+G` go to a line number |
 | Machine (MAIN), MDI pane | `Enter` issue and commit the block, `Up`/`Down` recall a buffer line into the input, `Ctrl+Up`/`Ctrl+Down` move the selected line in the buffer (`Ctrl` because the panel keyboard has no Shift), `Ctrl+G` go to a buffer line, `Ctrl+R` run the selected line, `Ctrl+Backspace` delete the selected line or clear the input, `Ctrl+S` save the buffer to a new `.ngc` file under `PROGRAM_PREFIX`, `Esc` clear the uncommitted input; while the pane is up these replace the Machine bindings in the row above |
-| Program | `FILE` open the file browser, `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+P` REMAINING view, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
+| Program | `FILE` open the file browser, `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+M` REMAINING view, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
 | Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Backspace` delete |
 | Help | `/` or `Ctrl+F` focus search, `Up`/`Down` select, `Enter` open the reference, `Backspace` back in the reference dialog |
 | Offsets | `Up`/`Down` select a row, `X`/`Y`/`Z` edit the DRO, `A` activate the selected work system |
@@ -120,7 +120,7 @@ zooms with `Ctrl++`/`Ctrl+-` while the pointer is over the toolpath card. The
 chords are hover-scoped because they already belong to something else away from
 the graph: `Ctrl+Left`/`Ctrl+Right` moves region focus and `Ctrl+Up`/`Ctrl+Down`
 moves the selected line in the G-code editor and the MDI buffer. Wheel zoom
-works the same way. `Ctrl+P` toggles REMAINING on the same pages: it is
+works the same way. `Ctrl+M` toggles REMAINING on the same pages: it is
 page-scoped like the zoom, because no text field and no other page claims it.
 
 A page-local binding is only listed in the sidebar's `SHORTCUTS` pane while its
@@ -630,7 +630,7 @@ Program rules:
   re-seeds it at the current tool tip. It does not clear the loaded program,
   selected line, offsets or machine state, and is safe while running. A
   successful new program load starts a fresh trail.
-- REMAINING (`Ctrl+P`, a view toggle on every page that draws a toolpath)
+- REMAINING (`Ctrl+M`, a view toggle on every page that draws a toolpath)
   replaces the two layers with one picture of what is left to run: the live trail
   is not drawn at all, and every block the interpreter has already left behind is
   eaten out of the program path. The block being cut stays drawn until the next

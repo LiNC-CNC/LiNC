@@ -168,7 +168,7 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
   text field uses. `Ctrl++` also accepts Shift+`=` (what a normal keyboard sends for `+`), and stop at `MAX_ZOOM` (80). **Panning** with
   `Ctrl+arrows` stays hover-scoped: the same chords are region focus (`Ctrl+Left`/`Ctrl+Right`) and the editor/MDI line move
   (`Ctrl+Up`/`Ctrl+Down`) everywhere else, so the hover is what keeps both.
-- REMAINING (`Ctrl+P`, page-scoped on the same pages) draws no live trail and eats the completed blocks out of the program path:
+- REMAINING (`Ctrl+M`, page-scoped on the same pages) draws no live trail and eats the completed blocks out of the program path:
   `linc_core::model::ProgramState::consumed_through` gives the last finished line, `TrajectoryView::eaten` drops it. It is a view
   mode only; the eaten line is the interpreter's, so it assumes the preview is the running program.
 - The sidebar SHORTCUTS pane lists page-local commands only; navigation keys are never listed, except the Program page's FILE key, which is shown because it opens the file browser. While a program is active it also shows Esc → RESET: Esc stops and resets the program like the panel's K4. The bottom bar carries live machine state only.

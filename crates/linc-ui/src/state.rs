@@ -1846,10 +1846,10 @@ impl Keymap {
                 Binding::new(Key::B, ctrl),
                 &mut rejected,
             ),
-            remaining: binding(&keys.remaining, Binding::new(Key::P, ctrl), &mut rejected),
+            remaining: binding(&keys.remaining, Binding::new(Key::M, ctrl), &mut rejected),
             toggle_lathe_mirror: binding(
                 &keys.toggle_lathe_mirror,
-                Binding::new(Key::M, ctrl),
+                Binding::new(Key::J, ctrl),
                 &mut rejected,
             ),
             toggle_lathe_diameter: binding(
@@ -2356,10 +2356,10 @@ mod page_key_tests {
     use super::Keymap;
 
     #[test]
-    fn the_lathe_display_toggles_resolve_to_ctrl_m_and_ctrl_e() {
+    fn the_lathe_display_toggles_resolve_to_ctrl_j_and_ctrl_e() {
         let keymap = Keymap::from_config(&linc_core::config::KeysConfig::spec_default());
         assert!(keymap.rejected.is_empty(), "{:?}", keymap.rejected);
-        assert_eq!(keymap.toggle_lathe_mirror.key, egui::Key::M);
+        assert_eq!(keymap.toggle_lathe_mirror.key, egui::Key::J);
         assert!(keymap.toggle_lathe_mirror.modifiers.ctrl);
         assert_eq!(keymap.toggle_lathe_diameter.key, egui::Key::E);
         assert!(keymap.toggle_lathe_diameter.modifiers.ctrl);

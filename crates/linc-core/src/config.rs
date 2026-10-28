@@ -336,9 +336,9 @@ impl KeysConfig {
             program_cycle_view: "F10".into(),
             view_cycle: "Ctrl+F10".into(),
             toggle_bounds: "Ctrl+B".into(),
-            toggle_lathe_mirror: "Ctrl+M".into(),
+            toggle_lathe_mirror: "Ctrl+J".into(),
             toggle_lathe_diameter: "Ctrl+E".into(),
-            remaining: "Ctrl+P".into(),
+            remaining: "Ctrl+M".into(),
             graph_fit: "Ctrl+0".into(),
             graph_clear: "Ctrl+L".into(),
             view_pan_left: "Ctrl+Left".into(),
@@ -1747,7 +1747,7 @@ changer = "atc"
         );
         // The lathe display toggles ship with a chord each, and the profile
         // carries the same text the spec default does.
-        assert_eq!(keys.toggle_lathe_mirror, "Ctrl+M");
+        assert_eq!(keys.toggle_lathe_mirror, "Ctrl+J");
         assert_eq!(keys.toggle_lathe_diameter, "Ctrl+E");
         assert_eq!(
             KeysConfig::spec_default().toggle_lathe_mirror,

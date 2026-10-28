@@ -135,10 +135,10 @@ toggle_bounds = "Ctrl+B"
 # REMAINING: the live trail goes away and each completed block is eaten out of
 # the program path, so the card shows what is still to come. A view toggle; the
 # program, the offsets and the controller are untouched.
-remaining = "Ctrl+P"
+remaining = "Ctrl+M"
 # Lathe only: mirror X about the Z centreline in the XZ/TURN toolpath. The
 # projection flips on screen; no coordinate and no machine value changes.
-toggle_lathe_mirror = "Ctrl+M"
+toggle_lathe_mirror = "Ctrl+J"
 # Lathe only: read the X position as a radius (X) or a diameter (2X).
 toggle_lathe_diameter = "Ctrl+E"
 # Page-local to Program: fit the toolpath, clear the live trail.
