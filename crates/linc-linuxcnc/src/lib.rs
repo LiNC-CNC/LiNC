@@ -387,24 +387,24 @@ impl NmlBackend {
             log::warn!("could not apply G43 H{tool}: {error}");
         }
     }
-
-    /// Publish the parameter file's row for the active system when the live
-    /// row does not match it.
+    /// Publish the parameter file's work offsets when the controller does not
+    /// have them.
     ///
-    /// A blank-`OPEN_FILE` start leaves the interpreter's restored `G5X`
-    /// row unpublished, and neither an interpreter reset nor selecting the
-    /// already-active origin reloads it. A complete stored-row `G10 L2` (every
-    /// stored axis plus the stored rotation) is the deliberate write that
-    /// publishes it, and the live row is read back to confirm the result.
+    /// The invariant is not "we published once" but "the controller still has
+    /// the stored row": a startup race - the G10 sent before the task was ready,
+    /// which timed out on the first session and left G54 at all zeros - shows up
+    /// minutes later as a machine cutting in the wrong coordinate system. So a
+    /// synced session keeps watching, slowly, and publishes again if the row has
+    /// been lost.
     ///
-    /// That write changes machine state, so it is refused, and retried later,
-    /// while PROTECT is on or unknown. It never runs with a program open, so
-    /// the separate program-open restoration path cannot be disturbed.
+    /// It does not fight the operator: a row that merely *differs* is their
+    /// touch-off, mirrored into the parameter file by the UI. Only a row that
+    /// has lost every stored value is republished.
     fn sync_work_offsets(&mut self, status: &NmlStatus, panel: &PanelState) {
-        if self.offsets_synced || self.offset_sync_attempts >= MAX_OFFSET_SYNCS {
+        if Instant::now() < self.offset_sync_next {
             return;
         }
-        if Instant::now() < self.offset_sync_next {
+        if !self.offsets_synced && self.offset_sync_attempts >= MAX_OFFSET_SYNCS {
             return;
         }
         let axes = self.axis_names();
@@ -417,6 +417,8 @@ impl NmlBackend {
                     log::info!("stored work offsets: {reason}");
                 }
                 self.offsets_synced = true;
+                // Keep an eye on it, slowly.
+                self.offset_sync_next = Instant::now() + OFFSET_WATCH;
             }
             OffsetSync::Wait(reason) => {
                 if protect && !self.offset_sync_protect_logged {
@@ -427,6 +429,7 @@ impl NmlBackend {
                 } else {
                     log::debug!("stored work offsets are not published yet: {reason}");
                 }
+                self.offset_sync_next = Instant::now() + OFFSET_WATCH;
             }
             OffsetSync::Publish {
                 index,
@@ -434,28 +437,51 @@ impl NmlBackend {
                 expected,
                 rotation,
             } => {
-                let attempt = self.offset_sync_attempts + 1;
-                if attempt == 1 {
-                    if self.parameters.active_index() != index {
-                        // The parameter file records another system as active.
-                        // Restoring it is LinuxCNC's business, not a silent
-                        // WCS change by the HMI.
-                        log::info!(
-                            "the parameter file records {} as the active system; the controller is in {}",
-                            wcs_name(self.parameters.active_index()),
-                            wcs_name(index)
-                        );
-                    }
-                    log::info!("publishing stored {} offsets: {block}", wcs_name(index));
+                let lost = live_row_lost(&inputs.live, inputs.live_rotation, &axes, &expected);
+                if self.offsets_synced && !lost {
+                    // The operator's row, not ours: the parameter file follows
+                    // the controller through the UI, so there is nothing to do.
+                    log::debug!(
+                        "the live {} row differs from the stored one; leaving it to the operator",
+                        wcs_name(index)
+                    );
+                    self.offset_sync_next = Instant::now() + OFFSET_WATCH;
+                    return;
                 }
-                self.offset_sync_attempts = attempt;
-                self.offset_sync_next = Instant::now() + Duration::from_secs(2);
+                let attempt = self.offset_sync_attempts + 1;
+                if lost {
+                    log::warn!(
+                        "the controller has lost the stored {} row; publishing it again",
+                        wcs_name(index)
+                    );
+                    // A lost row is not an operator edit, so it does not consume
+                    // the publish budget: keep correcting it, slowly.
+                    self.offset_sync_next = Instant::now() + OFFSET_WATCH;
+                } else {
+                    if attempt == 1 {
+                        if self.parameters.active_index() != index {
+                            // The parameter file records another system as active.
+                            // Restoring it is LinuxCNC's business, not a silent
+                            // WCS change by the HMI.
+                            log::info!(
+                                "the parameter file records {} as the active system; the controller is in {}",
+                                wcs_name(self.parameters.active_index()),
+                                wcs_name(index)
+                            );
+                        }
+                        log::info!("publishing stored {} offsets: {block}", wcs_name(index));
+                    }
+                    self.offset_sync_attempts = attempt;
+                    self.offset_sync_next = Instant::now() + Duration::from_secs(2);
+                }
                 if let Err(error) = self.issue_blocks(&[block]) {
                     log::warn!(
                         "could not publish stored {} offsets: {error}",
                         wcs_name(index)
                     );
-                    return;
+                    // The command may have landed late: ask the controller before
+                    // deciding it failed. Returning here is what let the first
+                    // session claim a row that was never published.
                 }
                 let _ = self.client.wait_complete(Duration::from_secs(2));
                 let Ok(now) = self.client.poll_status() else {
@@ -476,7 +502,7 @@ impl NmlBackend {
                         wcs_name(index),
                         self.offset_sync_attempts
                     );
-                    if self.offset_sync_attempts >= MAX_OFFSET_SYNCS {
+                    if !lost && self.offset_sync_attempts >= MAX_OFFSET_SYNCS {
                         log::warn!(
                             "giving up on publishing the stored {} row; the table shows the controller's row, and the stored one is kept in the parameter file",
                             wcs_name(index)
@@ -1296,6 +1322,10 @@ impl MachineBackend for NmlBackend {
 }
 
 /// Number of startup attempts at publishing the stored work offsets.
+/// How often a synced session re-checks that the controller still has the
+/// stored work offsets. Slow on purpose: it is a safety net, not a heartbeat.
+const OFFSET_WATCH: Duration = Duration::from_secs(5);
+
 const MAX_OFFSET_SYNCS: u32 = 5;
 
 /// Is this live row the interpreter's *unpublished* row rather than an offset
@@ -1446,6 +1476,35 @@ fn rising_edges(previous: &[bool], now: &[bool]) -> Vec<usize> {
         .filter(|(index, pressed)| **pressed && !previous.get(*index).copied().unwrap_or(false))
         .map(|(index, _)| index)
         .collect()
+}
+
+/// Has the controller lost every stored value in the live row?
+///
+/// Not "does it differ": a touch-off (G10 L20 P1 X0 after setting an edge) is the
+/// operator's row and legitimately differs. All stored axes reading zero is the
+/// signature of a row the controller never received - a G10 that timed out
+/// because the task was not ready yet - and that row must be published again.
+fn live_row_lost(
+    live: &linuxcnc_nml::Pose,
+    _live_rotation: f64,
+    axes: &[String],
+    expected: &AxisMap<f64>,
+) -> bool {
+    let mut lost = false;
+    for (axis_index, axis) in axes.iter().enumerate() {
+        let Some(want) = expected.get(axis) else {
+            continue;
+        };
+        if want.abs() <= 1e-9 {
+            continue;
+        }
+        let index = axis_pose_index(axis).unwrap_or(axis_index);
+        if pose_component(live, index).abs() > 1e-6 {
+            return false;
+        }
+        lost = true;
+    }
+    lost
 }
 
 pub(crate) fn row_matches(
@@ -2093,5 +2152,33 @@ mod tests {
             plan_offset_sync(&offset_inputs(), &parameters, &axes3()),
             OffsetSync::Done("no stored offsets")
         );
+    }
+    /// A startup race leaves all zeros where the stored row should be, and a
+    /// row that merely differs is the operator's touch-off. Only the first is
+    /// republished.
+    #[test]
+    fn a_live_row_of_zeros_has_lost_the_stored_one() {
+        let axes = vec!["X".to_string(), "Y".to_string(), "Z".to_string()];
+        let mut expected = AxisMap::new();
+        expected.insert("X".to_string(), -156.381004);
+        expected.insert("Y".to_string(), -67.696033);
+        expected.insert("Z".to_string(), -89.943998);
+
+        let zeros = linuxcnc_nml::Pose::default();
+        assert!(super::live_row_lost(&zeros, 0.0, &axes, &expected));
+
+        // One axis holding its value means the row arrived.
+        let mut partial = linuxcnc_nml::Pose::default();
+        partial.x = -156.381004;
+        assert!(!super::live_row_lost(&partial, 0.0, &axes, &expected));
+
+        // An operator's touch-off is a different row, not a lost one.
+        let mut touched = linuxcnc_nml::Pose::default();
+        touched.x = -10.0;
+        touched.y = 5.0;
+        assert!(!super::live_row_lost(&touched, 0.0, &axes, &expected));
+
+        // Nothing stored means nothing to lose.
+        assert!(!super::live_row_lost(&zeros, 0.0, &axes, &AxisMap::new()));
     }
 }
