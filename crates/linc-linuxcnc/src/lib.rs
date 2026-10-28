@@ -88,6 +88,8 @@ pub struct NmlBackend {
     /// program is loaded, whose first move has a line of its own.
     program_line: usize,
     program_line_revision: u64,
+    /// Said once per session: which source drives the displayed line.
+    program_line_logged: bool,
 }
 
 impl NmlBackend {
@@ -153,6 +155,7 @@ impl NmlBackend {
             confirm_seq: 0,
             program_line: 0,
             program_line_revision: 0,
+            program_line_logged: false,
             tool_table,
         })
     }
@@ -188,13 +191,26 @@ impl NmlBackend {
             self.program_line = 0;
             self.program_line_revision = revision;
         }
-        if let Some(line) = self
-            .hal
-            .as_ref()
-            .and_then(|hal| hal.s32("motion.program-line"))
-        {
-            if line > 0 {
-                self.program_line = line as usize;
+        if let Some(hal) = self.hal.as_ref() {
+            match hal.s32("motion.program-line") {
+                Some(line) if line > 0 => {
+                    if !self.program_line_logged {
+                        self.program_line_logged = true;
+                        log::info!(
+                            "following motion.program-line: the line the planner is cutting"
+                        );
+                    }
+                    self.program_line = line as usize;
+                }
+                Some(_) => {}
+                None => {
+                    if !self.program_line_logged {
+                        self.program_line_logged = true;
+                        log::warn!(
+                            "no motion.program-line pin; the displayed line comes from                              task.current_line, which runs ahead of the cut"
+                        );
+                    }
+                }
             }
         }
         let executing_line = (self.program_line > 0).then_some(self.program_line);
