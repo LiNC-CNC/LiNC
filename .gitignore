@@ -6,6 +6,12 @@ configs/sim.var.bak
 configs/lathe-sim.var
 configs/lathe-sim.var.bak
 
+# Scratch and probe-session output. The PAC-MAN commit swept these in with
+# `git add -A`; they are machine-side artefacts, not source.
+/.gitconfig
+/configs/gcode/foo.ngc
+/configs/probe-review-*
+
 __pycache__/
 *.pyc
 configs/halshow.preferences
