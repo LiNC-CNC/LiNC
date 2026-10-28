@@ -31,13 +31,26 @@ pub const APP_TITLE: &str = "LiNC";
 pub const PROBE_TRIP_ACTION: &str = "RESET (ESC)";
 
 /// The probe-trip banner: what the probe hit and what the HMI did about it.
-/// The machine is switched off for as long as the trip is latched, so the
-/// banner says so rather than promising only that motion is blocked.
+///
+/// There are two answers, because there are two cases. A trip raised while the
+/// program ran switches the machine off, and for as long as the trip is
+/// latched it stays off. A trip raised while the program was paused leaves the
+/// machine on: the queue was held, nothing was aborted that had to be stopped,
+/// and the operator is doing exactly that on purpose to prove the probe input
+/// is wired. The banner says which one happened instead of promising a
+/// switched-off machine that is not.
 pub fn probe_trip_banner_text(fault: &linc_core::faults::ProbeTripFault) -> String {
-    format!(
-        "PROBE TRIPPED — {} — MACHINE SWITCHED OFF. MOTION AND MDI BLOCKED. RESET (ESC) TO CLEAR.",
-        fault.message
-    )
+    if fault.switches_machine_off() {
+        format!(
+            "PROBE TRIPPED — {} — MACHINE SWITCHED OFF. MOTION AND MDI BLOCKED. RESET (ESC) TO CLEAR.",
+            fault.message
+        )
+    } else {
+        format!(
+            "PROBE TRIPPED — {} — PROGRAM WAS PAUSED, MACHINE LEFT ON. MOTION AND MDI BLOCKED. RESET (ESC) TO CLEAR.",
+            fault.message
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4122,6 +4135,19 @@ impl LincApp {
                 );
                 field(ui, machine_text, machine_color);
                 ui.add_space(16.0);
+                // The wired probe input, right beside the machine state: the
+                // operator proves the input by touching the probe with a
+                // finger, which is a fault (`PROBE TRIPPED`) and not a
+                // reading on the page that owns the probe. A profile without
+                // a probe gets no dead field. Read-only, like MACHINE ON.
+                if self.profile.config.probe.enabled {
+                    let (probe_text, probe_color) = probe_input_field(
+                        self.snapshot.probe.input_tripped,
+                        self.snapshot.meta.stale,
+                    );
+                    field(ui, probe_text, probe_color);
+                    ui.add_space(16.0);
+                }
                 // Protect is only worth a field when it is engaged: the off
                 // state is the normal one and the row is space-limited.
                 if self.program_protected() {
@@ -4863,6 +4889,21 @@ fn machine_status_field(on: bool, stale: bool) -> (String, egui::Color32) {
     }
 }
 
+/// The bottom bar's probe field: the state of the wired probe input.
+///
+/// `Some(_)` becomes READY or TRIPPED and `None` asks, the way the machine
+/// field does. Stale data asks too: the input may have moved since the last
+/// poll, and claiming READY while the link is down is the one answer that
+/// costs a broken probe. MUTED for the unknown case: it is not a fault and not
+/// a good state either.
+fn probe_input_field(input_tripped: Option<bool>, stale: bool) -> (String, egui::Color32) {
+    match (stale, input_tripped) {
+        (false, Some(false)) => ("PROBE READY".to_string(), theme::SUCCESS),
+        (false, Some(true)) => ("PROBE TRIPPED".to_string(), theme::WARNING),
+        _ => ("PROBE ?".to_string(), theme::MUTED),
+    }
+}
+
 /// Blinking red in the status line: the limit switches are being ignored.
 ///
 /// The jog screens have no override button any more, so this is the only sign
@@ -5477,6 +5518,112 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         );
     }
 
+    /// The probe-trip banner says what actually happened to the machine: a trip
+    /// raised while the program ran switches it off, one raised while the
+    /// program was paused leaves it on so the operator can prove the probe input
+    /// by hand. Both name the key that resets the fault.
+    #[test]
+    fn the_probe_trip_banner_has_one_text_per_outcome() {
+        use linc_core::faults::{ProbeTripFault, ProbeTripKind};
+        let message = ProbeTripKind::NonProbeMove.message();
+        let switched_off = ProbeTripFault::new(ProbeTripKind::NonProbeMove, message, 1);
+        let left_on = ProbeTripFault::new_paused(ProbeTripKind::NonProbeMove, message, 1, true);
+
+        let off_text = probe_trip_banner_text(&switched_off);
+        let on_text = probe_trip_banner_text(&left_on);
+        assert_ne!(
+            off_text, on_text,
+            "the banner must not claim a switched-off machine when it was left on"
+        );
+        assert!(
+            off_text.contains("MACHINE SWITCHED OFF"),
+            "the running-program trip names the switch-off: {off_text}"
+        );
+        assert!(
+            on_text.contains("PAUSED") && on_text.contains("MACHINE LEFT ON"),
+            "the paused trip says why the machine stayed on: {on_text}"
+        );
+        for text in [&off_text, &on_text] {
+            assert!(
+                text.contains(PROBE_TRIP_ACTION),
+                "both banners name the reset key {PROBE_TRIP_ACTION}: {text}"
+            );
+            assert!(text.contains(message), "the controller text is carried: {text}");
+        }
+    }
+
+    /// The probe readout is a state word and a colour, and it never claims a
+    /// reading it does not have: stale data asks, like the machine field.
+    #[test]
+    fn the_probe_field_reads_ready_tripped_or_asks() {
+        assert_eq!(
+            probe_input_field(Some(false), false),
+            ("PROBE READY".to_string(), theme::SUCCESS)
+        );
+        assert_eq!(
+            probe_input_field(Some(true), false),
+            ("PROBE TRIPPED".to_string(), theme::WARNING)
+        );
+        assert_eq!(
+            probe_input_field(None, false),
+            ("PROBE ?".to_string(), theme::MUTED)
+        );
+        for tripped in [Some(true), Some(false), None] {
+            assert_eq!(
+                probe_input_field(tripped, true),
+                ("PROBE ?".to_string(), theme::MUTED),
+                "stale data asks, whatever the last poll said: {tripped:?}"
+            );
+        }
+    }
+
+    /// The probe field is the newest tenant of the bottom bar, and the row has to
+    /// keep fitting the 1280 px baseline window. Measured from the font rather
+    /// than guessed: every width below is theme::measure at the field's own size,
+    /// and 24 px is the gap the row leaves between two fields (add_space(16) plus
+    /// the horizontal item spacing).
+    #[test]
+    fn the_bottom_bar_readout_fits_the_minimum_window() {
+        let ctx = egui::Context::default();
+        let measure = |texts: &[&'static str]| {
+            let mut width = None;
+            let mut output = ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+                let text: f32 = texts.iter().map(|text| theme::measure(ui, text, 11.0)).sum();
+                width = Some(text + 24.0 * (texts.len() - 1) as f32);
+            });
+            output.textures_delta.clear();
+            width.expect("one measuring pass")
+        };
+        // The left-hand machine fields and the read-only group, each at the
+        // widest wording it can show at once: E-stop active, machine off, probe
+        // tripped, program protected, a program running with a DTG.
+        let left = measure(&["LN 1234/5678 100%", "HOMED", "DTG Z -123.456"]);
+        let group = measure(&[
+            "E-STOP ACTIVE",
+            "MACHINE OFF",
+            "PROBE TRIPPED",
+            "PROTECT ON",
+            "OVR F100 R100 S100",
+            PanelMode::ProgHome.label(),
+        ]);
+        let overridden = measure(&["LIMITS OVERRIDE ON"]);
+        let probe = measure(&["PROBE TRIPPED"]);
+
+        // 16 px either side of the 1280 px baseline.
+        let room = 1280.0 - 32.0;
+        assert!(
+            left + group <= room,
+            "the bottom bar overflows 1280 px: {left:.1} + {group:.1} > {room:.1}"
+        );
+        assert!(
+            left + group + overridden <= room,
+            "the bar overflows 1280 px with the limits override shown: {left:.1} + {group:.1} + {overridden:.1} > {room:.1}"
+        );
+        assert!(
+            probe < 160.0,
+            "PROBE TRIPPED and its gap cost {probe:.1} px of the row"
+        );
+    }
     /// The header's worst and mean are the run's, and a new program starts
     /// them again: a fresh run must not be judged against the last one.
     #[test]

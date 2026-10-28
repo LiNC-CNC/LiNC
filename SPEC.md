@@ -403,7 +403,11 @@ Fixed shell, no right-hand status column:
 - **Central page**: active screen.
 - **Bottom action bar**: real keycaps (`MAIN`, `FILE`, `OFFSET`, `TOOL`, `WIN`,
   `ESC`), context actions including `HELP`, and a compact read-only machine
-  status line (`OVR F/S/R`, program protect, E-stop, alarm count).
+  status line (E-stop, machine on/off, the wired probe input on a profile that
+  has one, `OVR F/S/R`, program protect, alarm count). The probe field reads
+  `PROBE READY`, `PROBE TRIPPED` or `PROBE ?` from `probe.input_tripped` and
+  asks on stale data; it is a readout like MACHINE ON, with no click target and
+  no command.
 - **No persistent panel-status column.** Panel detail belongs in Diagnostics.
 
 Focus rules:
@@ -1319,9 +1323,10 @@ etc.
   machine fault, not as a transient toast: the exact controller text goes to
   the Messages page and a persistent `PROBE TRIPPED` banner carries it on every
   page. While it is latched, MDI, probe, tool-change, jog-parameter and
-  offset/tool writes fail closed and no command is sent, and LiNC switches the
-  machine off through `linc.machine-off` so the panel cannot jog into the probe
-  either. The banner does not time out; it clears only when the operator
+  offset/tool writes fail closed and no command is sent, and a trip raised
+  during a program or a move switches the machine off through
+  `linc.machine-off` so the panel cannot jog into the probe either. The banner
+  does not time out; it clears only when the operator
   performs the controller reset (`Esc`, which works from any page including
   DIAGNOSTICS, or the banner's `RESET (ESC)` button), which sends
   `EMC_TASK_ABORT` — the same action that clears LinuxCNC's motion error.
@@ -1496,7 +1501,9 @@ HAL pins is still open.
 - A probe trip reported by LinuxCNC latches a persistent banner and blocks
   motion/MDI/probe/tool/offset commands until the operator's reset clears it.
   The banner has no timeout. The clear action is the controller's
-  `EMC_TASK_ABORT`.
+  `EMC_TASK_ABORT`. A trip raised while the program was paused leaves the
+  machine on, so the operator can trip the probe by hand and see that the input
+  is wired; the banner reports which of the two outcomes happened.
 - The trip also switches the machine off. The panel jogs straight into `halui`,
   which accepts a jog only while the task state is ON, so the HMI cannot block
   a jog by refusing it — it switches the machine off instead. The response is
@@ -1506,6 +1513,19 @@ HAL pins is still open.
   while the trip stands is not undone. The response is wired for the mill and the
   mill simulation; the lathe profile creates the pin but has no consumer yet, so
   a lathe probe trip is not switched off.
+
+  **A trip raised with the program paused leaves the machine on.** Feed hold
+  mid-block is a held queue, and nothing was aborted that had to be stopped.
+  That is the case the operator provokes on purpose — a finger on the probe,
+  machine at rest, to prove the input is wired — so cutting the power there
+  would punish the one test the machine needs. The banner says so instead: it
+  names the pause and reports the machine left on, while a trip raised during a
+  running program keeps the switched-off wording. Both banners name
+  `RESET (ESC)`. The decision comes from the state at the moment of the trip,
+  which the HMI records on the fault when the message arrives: the controller
+  aborts the program as part of the trip, so by the next poll the paused flag is
+  gone and cannot be read afterwards. The gate is the paused state alone — no
+  `motion.jog-inhibit`, no jog-stop and no other motion-based heuristic.
 - Re-powering after a trip needs a rising edge on `halui.machine.on`. On the
   mill the only writer is the cabinet machine-on switch, and toggling it ends
   the LiNC session. That is the designed recovery path; LiNC does not work

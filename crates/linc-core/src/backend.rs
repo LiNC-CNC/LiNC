@@ -303,7 +303,18 @@ fn run_worker(
             // reset. halui acts on the rising edge, so the held level never
             // switches the machine off a second time after the operator powers
             // back on; nothing here retries it.
-            let machine_off = snapshot.probe_trip_active();
+            //
+            // Except when the program was paused at the trip: the operator
+            // provokes that on purpose, with a finger on the probe, to prove the
+            // input is wired, and nothing was aborted that had to be stopped.
+            // The answer rides on the fault, recorded when the message arrived;
+            // it cannot be re-derived here, because the trip itself ends the
+            // pause.
+            let machine_off = snapshot.probe_trip_active()
+                && snapshot
+                    .probe_trip
+                    .as_ref()
+                    .is_some_and(|fault| fault.switches_machine_off());
             snapshot.hal.machine_off = machine_off;
             if machine_off != last_machine_off {
                 last_machine_off = machine_off;
@@ -604,6 +615,95 @@ mod tests {
             levels(&recording),
             vec![true, false],
             "the reset must drop the level"
+        );
+        drop(handle);
+    }
+
+    /// A trip raised while the program was paused leaves the machine on: that
+    /// is the case the operator provokes on purpose, to prove the probe input is
+    /// wired, and nothing was aborted that had to be stopped. A normal trip on
+    /// the same backend still switches the machine off.
+    #[test]
+    fn a_paused_probe_trip_leaves_the_machine_on() {
+        use std::sync::{Arc, Mutex};
+        use crate::faults::{ProbeTripFault, ProbeTripKind};
+        struct RecordingHal(Arc<Mutex<Vec<(LincOutput, HalValue)>>>);
+        impl HalWriter for RecordingHal {
+            fn write(&mut self, output: LincOutput, value: HalValue) -> Result<(), MachineError> {
+                self.0.lock().unwrap().push((output, value));
+                Ok(())
+            }
+        }
+        struct Trippable {
+            snapshot: Arc<Mutex<MachineSnapshot>>,
+        }
+        impl MachineBackend for Trippable {
+            fn snapshot(&mut self) -> MachineSnapshot {
+                self.snapshot.lock().unwrap().clone()
+            }
+            fn send(&mut self, _command: MachineCommand) -> Result<(), MachineError> {
+                Ok(())
+            }
+        }
+        fn levels(recording: &Arc<Mutex<Vec<(LincOutput, HalValue)>>>) -> Vec<bool> {
+            recording
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|(output, value)| match (output, value) {
+                    (LincOutput::MachineOff, HalValue::Bit(value)) => Some(*value),
+                    _ => None,
+                })
+                .collect()
+        }
+        fn trip(paused: bool) -> ProbeTripFault {
+            ProbeTripFault::new_paused(
+                ProbeTripKind::NonProbeMove,
+                ProbeTripKind::NonProbeMove.message(),
+                1,
+                paused,
+            )
+        }
+
+        let recording = Arc::new(Mutex::new(Vec::new()));
+        let shared = Arc::new(Mutex::new(MachineSnapshot::empty(MachineVariant::Mill)));
+        let handle = BackendHandle::spawn(
+            Box::new(Trippable {
+                snapshot: shared.clone(),
+            }),
+            Some(Box::new(RecordingHal(recording.clone()))),
+            50,
+            StatusSource::Wcs,
+        );
+
+        shared.lock().unwrap().probe_trip = Some(trip(true));
+        thread::sleep(Duration::from_millis(250));
+        assert!(
+            levels(&recording).is_empty(),
+            "a trip raised with the program paused must not switch the machine off: {:?}",
+            levels(&recording)
+        );
+        assert!(
+            !handle.snapshot().hal.machine_off,
+            "the published level stays low for a paused trip"
+        );
+
+        // Clearing a paused trip writes nothing either: the level never rose.
+        shared.lock().unwrap().probe_trip = None;
+        thread::sleep(Duration::from_millis(150));
+        assert!(
+            levels(&recording).is_empty(),
+            "no level means no falling edge: {:?}",
+            levels(&recording)
+        );
+
+        // A trip raised while the program ran is still a machine-off.
+        shared.lock().unwrap().probe_trip = Some(trip(false));
+        thread::sleep(Duration::from_millis(250));
+        assert_eq!(
+            levels(&recording),
+            vec![true],
+            "a normal trip switches the machine off"
         );
         drop(handle);
     }
