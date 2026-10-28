@@ -194,6 +194,13 @@ impl NmlBackend {
         if let Some(hal) = self.hal.as_ref() {
             match hal.s32("motion.program-line") {
                 Some(line) if line > 0 => {
+                    if line as usize != self.program_line {
+                        log::info!(
+                            "TRACE planner line {} -> {}",
+                            self.program_line,
+                            line
+                        );
+                    }
                     if !self.program_line_logged {
                         self.program_line_logged = true;
                         log::info!(
