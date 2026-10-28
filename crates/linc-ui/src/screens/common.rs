@@ -2067,8 +2067,8 @@ pub fn following_error_card(app: &LincApp, ui: &mut Ui, height: f32) {
     // This card's own frame: the header carries the numbers, so the air above it
     // is the one padding it cannot use. Four pixels instead of the shared
     // twelve.
-    const TOP: f32 = 4.0;
-    const BOTTOM: f32 = 8.0;
+    const TOP: f32 = 2.0;
+    const BOTTOM: f32 = 2.0;
     egui::Frame::new()
         .fill(theme::PANEL)
         .stroke(egui::Stroke::new(1.0, theme::BORDER))
@@ -2099,6 +2099,11 @@ pub fn following_error_card(app: &LincApp, ui: &mut Ui, height: f32) {
                     )
                 })
                 .collect();
+            // A horizontal row is as tall as `interact_size.y`, which the theme
+            // sets to a 44 px touch target. This row is one line of text, so
+            // give it the line's own height and hand the rest to the lane.
+            let line = header_line_height(ui);
+            ui.spacing_mut().interact_size.y = line;
             let header_top = ui.cursor().top();
             ui.horizontal(|ui| {
                 // Same size as the numbers beside it: the header is one line,
@@ -2141,7 +2146,7 @@ pub fn following_error_card(app: &LincApp, ui: &mut Ui, height: f32) {
             // The lane takes everything the header leaves: one lane, maximised,
             // not a stack of rows.
             let used = ui.cursor().top() - header_top;
-            let lane = (body - used - 1.0).max(24.0);
+            let lane = (body - used).max(24.0);
             let series: Vec<(&[f64], egui::Color32)> = traces
                 .iter()
                 .map(|(values, color)| (values.as_slice(), *color))
@@ -2169,6 +2174,15 @@ fn diameter_glyph(ui: &mut Ui) {
         stroke,
     );
     ui.add_space(5.0);
+}
+
+/// The height one line of the header text needs.
+///
+/// A `ui.horizontal` row is as tall as `interact_size.y` - the theme sets it
+/// to `MIN_TARGET`, a 44 px touch target - so a row of labels would claim a
+/// third of the strip. The row is given the text height instead.
+fn header_line_height(ui: &Ui) -> f32 {
+    ui.fonts_mut(|fonts| fonts.row_height(&egui::FontId::monospace(theme::font_size(9.0))))
 }
 
 fn group_label(ui: &mut Ui, label: &str) {
@@ -2663,6 +2677,28 @@ mod tests {
         );
     }
 
+    /// A header row is one line of text, not a touch target: the theme's
+    /// `MIN_TARGET` would make the row 44 px tall and take a third of the
+    /// following-error strip away from its lane.
+    #[test]
+    fn the_following_error_header_is_one_line() {
+        let ctx = egui::Context::default();
+        crate::theme::apply_design_zoom(&ctx, 1.0);
+        let mut input = egui::RawInput::default();
+        input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::Vec2::new(1280.0, 720.0),
+        ));
+        let mut output = ctx.run_ui(input, |ui| {
+            let line = super::header_line_height(ui);
+            assert!(
+                line < crate::theme::MIN_TARGET / 2.0,
+                "the header row is one line ({line}), not a touch target"
+            );
+            assert!(line > 6.0, "and it is still a readable line ({line})");
+        });
+        output.textures_delta.clear();
+    }
     /// The view eats only when the operator asked for it: the interpreter's
     /// completed line is the progress, the mode is the switch. A card that drew
     /// the running program kept its whole path until the mode was turned on.
