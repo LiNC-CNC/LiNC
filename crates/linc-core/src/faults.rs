@@ -76,34 +76,51 @@ pub struct ProbeTripFault {
     ///
     /// The controller aborts the program as part of the trip, so the paused
     /// flag is gone by the time the next poll describes the machine: the answer
-    /// has to be recorded here, at the moment the message is ingested. It
-    /// decides whether the trip switches the machine off (see
-    /// [`ProbeTripFault::switches_machine_off`]).
+    /// has to be recorded here, at the moment the message is ingested. It is
+    /// the tie-breaker for a trip raised with nothing moving; motion itself
+    /// decides (see [`ProbeTripFault::switches_machine_off`]).
     ///
     /// Defaults to `false` so a snapshot serialized before this field existed
     /// still decodes, and so a caller that constructs a fault without the
     /// information keeps the older, safer response.
     #[serde(default)]
     pub paused_when_raised: bool,
+    /// Was anything moving when the trip was raised?
+    ///
+    /// Paused is not the same as still. A paused program keeps the trajectory
+    /// queue non-empty, so `control.c` reports a probe hit during a jog as
+    /// `Probe tripped during non-probe move` - the text cannot tell the two
+    /// apart, and `task.paused` stays set while the operator switches to MANUAL
+    /// and jogs. Suppressing the switch-off on the paused flag alone would let
+    /// that jog run on into the probe, so motion is what decides and the pause
+    /// only excuses a trip raised with nothing moving.
+    ///
+    /// Defaults to `false`: a fault from before this field existed keeps the
+    /// older, safer response.
+    #[serde(default)]
+    pub moving_when_raised: bool,
 }
 
 impl ProbeTripFault {
     pub fn new(kind: ProbeTripKind, message: impl Into<String>, raised_at_ms: u64) -> Self {
-        Self::new_paused(kind, message, raised_at_ms, false)
+        Self::new_with_state(kind, message, raised_at_ms, false, false)
     }
 
-    /// A fault that also records the controller's paused flag at raise time.
-    pub fn new_paused(
+    /// A fault that also records the controller's paused and moving flags as
+    /// they stood when the trip was raised.
+    pub fn new_with_state(
         kind: ProbeTripKind,
         message: impl Into<String>,
         raised_at_ms: u64,
         paused_when_raised: bool,
+        moving_when_raised: bool,
     ) -> Self {
         Self {
             kind,
             message: message.into(),
             raised_at_ms,
             paused_when_raised,
+            moving_when_raised,
         }
     }
 
@@ -113,12 +130,17 @@ impl ProbeTripFault {
 
     /// Does this trip switch the machine off?
     ///
-    /// A trip raised while the program was paused leaves the machine alone: the
-    /// queue was held mid-block and nothing was aborted that had to be stopped.
-    /// That is the case the operator provokes on purpose, with a finger on the
-    /// probe, to prove the input is wired.
+    /// Motion decides. The one trip that leaves the machine alone is the one
+    /// raised with the program paused *and* nothing moving: the queue was held
+    /// and nothing was aborted that had to be stopped, which is exactly the case
+    /// the operator provokes on purpose, with a finger on the probe, to prove
+    /// the input is wired.
+    ///
+    /// A paused program that is being jogged is not that case: the controller
+    /// reports the jog as a non-probe move, the pause is still set, and
+    /// suppressing the switch-off would let the jog run on into the probe.
     pub fn switches_machine_off(&self) -> bool {
-        !self.paused_when_raised
+        self.moving_when_raised || !self.paused_when_raised
     }
 }
 
@@ -138,19 +160,26 @@ impl ProbeTripState {
 
     /// Latch a probe trip if `message` is one of the four LinuxCNC wordings.
     ///
-    /// `paused` is the controller's paused flag as of the last poll *before*
-    /// the message: the trip itself aborts the program, so it cannot be read
-    /// afterwards.
+    /// `paused` and `moving` are the controller's flags as of the last poll
+    /// *before* the message: the trip itself aborts the program and stops the
+    /// motion, so neither can be read afterwards.
     ///
     /// Returns the kind that was latched. A non-probe-trip message returns
     /// `None` and leaves any existing fault untouched.
-    pub fn raise(&mut self, message: &str, now_ms: u64, paused: bool) -> Option<ProbeTripKind> {
+    pub fn raise(
+        &mut self,
+        message: &str,
+        now_ms: u64,
+        paused: bool,
+        moving: bool,
+    ) -> Option<ProbeTripKind> {
         let kind = ProbeTripKind::from_message(message)?;
-        self.fault = Some(ProbeTripFault::new_paused(
+        self.fault = Some(ProbeTripFault::new_with_state(
             kind,
             message.trim(),
             now_ms,
             paused,
+            moving,
         ));
         Some(kind)
     }
@@ -206,7 +235,7 @@ mod tests {
     fn a_fault_never_expires_and_clears_only_explicitly() {
         let mut state = ProbeTripState::new();
         assert_eq!(
-            state.raise(ProbeTripKind::CoordinateJog.message(), 1_000, false),
+            state.raise(ProbeTripKind::CoordinateJog.message(), 1_000, false, false),
             Some(ProbeTripKind::CoordinateJog)
         );
         let fault = state.fault().cloned().expect("fault latched");
@@ -215,7 +244,7 @@ mod tests {
 
         // No cleaning, acknowledgement or clock advance takes it away.
         for _ in 0..10 {
-            state.raise("a later unrelated controller error", u64::MAX, false);
+            state.raise("a later unrelated controller error", u64::MAX, false, false);
         }
         assert!(state.is_active());
         assert_eq!(state.fault(), Some(&fault));
@@ -226,7 +255,7 @@ mod tests {
 
         // The same trip can be raised again after a clear.
         assert_eq!(
-            state.raise(ProbeTripKind::HomingMotion.message(), 2_000, false),
+            state.raise(ProbeTripKind::HomingMotion.message(), 2_000, false, true),
             Some(ProbeTripKind::HomingMotion)
         );
         assert!(state.is_active());
@@ -235,64 +264,98 @@ mod tests {
     #[test]
     fn a_later_probe_trip_replaces_the_previous_one() {
         let mut state = ProbeTripState::new();
-        state.raise(ProbeTripKind::JointJog.message(), 1, false);
-        state.raise(ProbeTripKind::NonProbeMove.message(), 2, false);
+        state.raise(ProbeTripKind::JointJog.message(), 1, false, true);
+        state.raise(ProbeTripKind::NonProbeMove.message(), 2, false, false);
         let fault = state.fault().expect("fault latched");
         assert_eq!(fault.kind, ProbeTripKind::NonProbeMove);
         assert_eq!(fault.message, ProbeTripKind::NonProbeMove.message());
     }
 
-    /// The paused flag is the state the trip was raised in, recorded on the
-    /// fault itself: the controller aborts the program as part of the trip, so
-    /// the next poll can no longer answer the question.
+    /// The truth table of the machine-off decision.
+    ///
+    /// Motion decides, and the pause is only the tie-breaker for a trip raised
+    /// with nothing moving: that is the finger test the operator runs to prove
+    /// the probe input is wired. A paused program being jogged is not that case
+    /// - the controller reports the jog as a non-probe move and `task.paused`
+    /// stays set - so it must still switch the machine off.
     #[test]
-    fn a_fault_records_the_paused_state_it_was_raised_with() {
-        let mut state = ProbeTripState::new();
-        state.raise(ProbeTripKind::NonProbeMove.message(), 5, true);
-        let paused = state.fault().cloned().expect("fault latched");
-        assert!(paused.paused_when_raised, "{paused:?}");
-        assert!(
-            !paused.switches_machine_off(),
-            "a trip raised with the program paused leaves the machine on"
-        );
+    fn a_paused_trip_leaves_the_machine_on_only_when_nothing_moved() {
+        let cases = [
+            // (paused, moving, switches the machine off)
+            (true, false, false),
+            (true, true, true),
+            (false, false, true),
+            (false, true, true),
+        ];
+        for (paused, moving, off) in cases {
+            let mut state = ProbeTripState::new();
+            state.raise(ProbeTripKind::NonProbeMove.message(), 7, paused, moving);
+            let fault = state.fault().cloned().expect("fault latched");
+            assert_eq!(fault.paused_when_raised, paused, "{fault:?}");
+            assert_eq!(fault.moving_when_raised, moving, "{fault:?}");
+            assert_eq!(
+                fault.switches_machine_off(),
+                off,
+                "paused={paused} moving={moving}"
+            );
+        }
 
         // Clearing and raising again records the new answer, not the old one.
+        let mut state = ProbeTripState::new();
+        state.raise(ProbeTripKind::NonProbeMove.message(), 5, true, false);
+        assert!(!state.fault().expect("latched").switches_machine_off());
         state.clear();
-        state.raise(ProbeTripKind::NonProbeMove.message(), 6, false);
-        let running = state.fault().cloned().expect("fault latched");
-        assert!(!running.paused_when_raised, "{running:?}");
+        state.raise(ProbeTripKind::NonProbeMove.message(), 6, true, true);
+        let jogged = state.fault().expect("latched");
+        assert!(jogged.paused_when_raised && jogged.moving_when_raised);
         assert!(
-            running.switches_machine_off(),
-            "a trip raised while the program ran switches the machine off"
+            jogged.switches_machine_off(),
+            "a paused program that is being jogged is switched off"
         );
     }
 
-    /// The field is new: a snapshot written before it existed still decodes, and
-    /// keeps the older response (switch the machine off).
+    /// Both flags are newer than the fault itself: a snapshot written before
+    /// them still decodes, and keeps the older response (switch the machine
+    /// off). A payload from the release between the two reads as paused with
+    /// nothing moving - what that release meant by recording the pause.
     #[test]
-    fn an_old_serialized_fault_decodes_with_the_field_defaulted() {
-        let old = r#"{
+    fn an_old_serialized_fault_decodes_with_the_fields_defaulted() {
+        let oldest = r#"{
             "fault": {
                 "kind": "JointJog",
                 "message": "Probe tripped during a joint jog.",
                 "raised_at_ms": 42
             }
         }"#;
-        let state: ProbeTripState = serde_json::from_str(old).expect("old payload decodes");
+        let state: ProbeTripState = serde_json::from_str(oldest).expect("old payload decodes");
         let fault = state.fault().expect("fault latched");
         assert_eq!(fault.raised_at_ms, 42);
         assert!(!fault.paused_when_raised);
+        assert!(!fault.moving_when_raised);
         assert!(fault.switches_machine_off());
 
-        // And the new field round-trips.
+        let paused_only = r#"{
+            "fault": {
+                "kind": "NonProbeMove",
+                "message": "Probe tripped during non-probe move.",
+                "raised_at_ms": 43,
+                "paused_when_raised": true
+            }
+        }"#;
+        let state: ProbeTripState =
+            serde_json::from_str(paused_only).expect("paused-only payload decodes");
+        let fault = state.fault().expect("fault latched");
+        assert!(fault.paused_when_raised);
+        assert!(!fault.moving_when_raised);
+        assert!(!fault.switches_machine_off());
+
+        // Both fields round-trip.
         let mut raised = ProbeTripState::new();
-        raised.raise(ProbeTripKind::JointJog.message(), 42, true);
+        raised.raise(ProbeTripKind::JointJog.message(), 42, true, true);
         let json = serde_json::to_string(&raised).expect("serializes");
         let decoded: ProbeTripState = serde_json::from_str(&json).expect("decodes");
         assert_eq!(decoded, raised);
-        assert!(decoded
-            .fault()
-            .expect("fault latched")
-            .paused_when_raised);
+        let fault = decoded.fault().expect("fault latched");
+        assert!(fault.paused_when_raised && fault.moving_when_raised);
     }
 }

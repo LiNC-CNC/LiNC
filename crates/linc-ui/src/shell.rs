@@ -32,13 +32,14 @@ pub const PROBE_TRIP_ACTION: &str = "RESET (ESC)";
 
 /// The probe-trip banner: what the probe hit and what the HMI did about it.
 ///
-/// There are two answers, because there are two cases. A trip raised while the
-/// program ran switches the machine off, and for as long as the trip is
-/// latched it stays off. A trip raised while the program was paused leaves the
-/// machine on: the queue was held, nothing was aborted that had to be stopped,
-/// and the operator is doing exactly that on purpose to prove the probe input
-/// is wired. The banner says which one happened instead of promising a
-/// switched-off machine that is not.
+/// There are two answers, because there are two cases. Everything except one
+/// switches the machine off, and for as long as the trip is latched it stays
+/// off. The exception is a trip raised with the program paused *and* nothing
+/// moving: the queue was held, nothing was aborted that had to be stopped, and
+/// the operator is doing exactly that on purpose to prove the probe input is
+/// wired. A paused program that was being jogged is not the exception - the
+/// controller reports that jog as a non-probe move while the pause is still set
+/// - so it keeps the switched-off wording. The banner says which one happened.
 pub fn probe_trip_banner_text(fault: &linc_core::faults::ProbeTripFault) -> String {
     if fault.switches_machine_off() {
         format!(
@@ -47,7 +48,7 @@ pub fn probe_trip_banner_text(fault: &linc_core::faults::ProbeTripFault) -> Stri
         )
     } else {
         format!(
-            "PROBE TRIPPED — {} — PROGRAM WAS PAUSED, MACHINE LEFT ON. MOTION AND MDI BLOCKED. RESET (ESC) TO CLEAR.",
+            "PROBE TRIPPED — {} — PROGRAM PAUSED AND NOTHING MOVING, MACHINE LEFT ON. MOTION AND MDI BLOCKED. RESET (ESC) TO CLEAR.",
             fault.message
         )
     }
@@ -5527,7 +5528,22 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         use linc_core::faults::{ProbeTripFault, ProbeTripKind};
         let message = ProbeTripKind::NonProbeMove.message();
         let switched_off = ProbeTripFault::new(ProbeTripKind::NonProbeMove, message, 1);
-        let left_on = ProbeTripFault::new_paused(ProbeTripKind::NonProbeMove, message, 1, true);
+        let left_on = ProbeTripFault::new_with_state(
+            ProbeTripKind::NonProbeMove,
+            message,
+            1,
+            true,
+            false,
+        );
+        // A paused program being jogged into the probe is not the finger test:
+        // the controller reports it as a non-probe move with the pause still set.
+        let jogged = ProbeTripFault::new_with_state(
+            ProbeTripKind::NonProbeMove,
+            message,
+            1,
+            true,
+            true,
+        );
 
         let off_text = probe_trip_banner_text(&switched_off);
         let on_text = probe_trip_banner_text(&left_on);
@@ -5542,6 +5558,11 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert!(
             on_text.contains("PAUSED") && on_text.contains("MACHINE LEFT ON"),
             "the paused trip says why the machine stayed on: {on_text}"
+        );
+        assert_eq!(
+            probe_trip_banner_text(&jogged),
+            off_text,
+            "a jog from a paused program must say the machine was switched off"
         );
         for text in [&off_text, &on_text] {
             assert!(

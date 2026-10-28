@@ -155,6 +155,14 @@ pub struct SnapshotBuilder {
     /// The builder therefore keeps the last paused state it saw and hands it
     /// to `ProbeTripState::raise` when the message is ingested.
     last_paused: bool,
+    /// Was anything moving as of the last status poll, from the same pass.
+    ///
+    /// `motion_active`: current velocity or a probing move, the predicate the
+    /// snapshot already uses for `task.motion_active`. It is the evidence that
+    /// decides the machine-off response; the pause alone would excuse a jog
+    /// started from a paused program, which the controller reports as a
+    /// non-probe move while `task.paused` is still set.
+    last_moving: bool,
     probe_transaction: Option<LiveProbeTransaction>,
     probe_last_result: Option<ProbeResult>,
     probe_history: VecDeque<ProbeResult>,
@@ -188,6 +196,7 @@ impl SnapshotBuilder {
             alarms: VecDeque::new(),
             probe_trip: ProbeTripState::new(),
             last_paused: false,
+            last_moving: false,
             probe_transaction: None,
             probe_last_result: None,
             probe_history: VecDeque::new(),
@@ -321,15 +330,23 @@ impl SnapshotBuilder {
             // Latch before the duplicate check so a repeated trip after a
             // clear raises the fault even when the text is still in the
             // dedupe window.
-            // The paused state at the moment of the trip, kept from the last
-            // poll: the controller has already aborted the program by the time
-            // this message is read, so asking again here would answer `false`
-            // for a queue that was held mid-block.
-            if let Some(trip) = self.probe_trip.raise(&message, now_ms(), self.last_paused) {
+            // The state at the moment of the trip, kept from the last poll: the
+            // controller has already aborted the program and stopped the motion
+            // by the time this message is read, so asking again here would
+            // answer `false` for a queue that was held mid-block. Both flags
+            // travel together: motion decides the machine-off response and the
+            // pause only ties the still case.
+            if let Some(trip) = self.probe_trip.raise(
+                &message,
+                now_ms(),
+                self.last_paused,
+                self.last_moving,
+            ) {
                 log::error!(
-                    "probe trip latched ({:?}, paused_when_raised={}): {}",
+                    "probe trip latched ({:?}, paused_when_raised={}, moving_when_raised={}): {}",
                     trip,
                     self.last_paused,
+                    self.last_moving,
                     message
                 );
             }
@@ -432,9 +449,10 @@ impl SnapshotBuilder {
         };
         snapshot.task.paused = status.task.paused;
         // Remembered for a probe-trip message that arrives after this poll: the
-        // trip itself aborts the program, so this is the last chance to see
-        // whether it was paused when it happened.
+        // trip itself aborts the program and stops the motion, so this is the
+        // last chance to see whether it was paused, and whether anything moved.
         self.last_paused = status.task.paused;
+        self.last_moving = motion_active(status);
         // A program runs while the interpreter is inside one - not while the
         // task happens to hold a command.
         //
@@ -1573,11 +1591,11 @@ mod tests {
         assert!(snapshot.probe_trip_active());
     }
 
-    /// The paused state at the moment of the trip is recorded on the fault: the
-    /// controller aborts the program as part of the trip, so the poll that reads
-    /// the error text no longer knows whether anything was paused.
+    /// The paused and moving state at the moment of the trip is recorded on the
+    /// fault: the controller aborts the program as part of the trip, so the poll
+    /// that reads the error text no longer knows either answer.
     #[test]
-    fn a_probe_trip_records_the_paused_state_from_the_poll_before_it() {
+    fn a_probe_trip_records_the_paused_and_moving_state_from_the_poll_before_it() {
         use linc_core::faults::ProbeTripKind;
 
         let mut builder = probe_builder();
@@ -1597,7 +1615,14 @@ mod tests {
             fault.paused_when_raised,
             "the trip was raised with the program paused"
         );
-        assert!(!fault.switches_machine_off(), "a paused trip leaves the machine on");
+        assert!(
+            !fault.moving_when_raised,
+            "nothing was moving in that poll"
+        );
+        assert!(
+            !fault.switches_machine_off(),
+            "a paused trip with nothing moving leaves the machine on"
+        );
 
         // Later idle polls are not a second answer: the abort already ended the
         // pause, and the recorded decision stands.
@@ -1613,12 +1638,35 @@ mod tests {
             );
         }
 
+        // Paused and moving is the case the paused flag alone would excuse: the
+        // operator pauses the program, switches to MANUAL and jogs into the
+        // probe, which the controller reports as a non-probe move while
+        // `task.paused` is still set. It must switch the machine off.
+        builder.clear_probe_trip();
+        let mut paused_jog = idle_status();
+        paused_jog.task.paused = true;
+        paused_jog.motion.inpos = false;
+        paused_jog.motion.current_vel = 5.0;
+        let _ = poll_probe(&mut builder, &paused_jog);
+        builder.push_message(
+            MessageKind::OperatorError,
+            ProbeTripKind::NonProbeMove.message(),
+        );
+        let snapshot = poll_probe(&mut builder, &idle_status());
+        let fault = snapshot.probe_trip.as_ref().expect("trip latched");
+        assert!(fault.paused_when_raised && fault.moving_when_raised);
+        assert!(
+            fault.switches_machine_off(),
+            "a jog from a paused program still switches the machine off"
+        );
+
         // A trip raised while the program was cutting is not a paused one.
         builder.clear_probe_trip();
         let mut cutting = idle_status();
         cutting.task.mode = NmlTaskMode::Auto;
         cutting.task.exec_state = ExecState::WaitingForMotion;
         cutting.task.interp_state = linuxcnc_nml::InterpState::Reading;
+        cutting.motion.current_vel = 10.0;
         let _ = poll_probe(&mut builder, &cutting);
         builder.push_message(
             MessageKind::OperatorError,
@@ -1627,7 +1675,10 @@ mod tests {
         let snapshot = poll_probe(&mut builder, &cutting);
         let fault = snapshot.probe_trip.as_ref().expect("trip latched");
         assert!(!fault.paused_when_raised, "a cutting poll is not paused");
-        assert!(fault.switches_machine_off(), "that trip switches the machine off");
+        assert!(
+            fault.switches_machine_off(),
+            "that trip switches the machine off"
+        );
     }
 
     fn probe_builder() -> SnapshotBuilder {

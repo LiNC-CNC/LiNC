@@ -1501,9 +1501,10 @@ HAL pins is still open.
 - A probe trip reported by LinuxCNC latches a persistent banner and blocks
   motion/MDI/probe/tool/offset commands until the operator's reset clears it.
   The banner has no timeout. The clear action is the controller's
-  `EMC_TASK_ABORT`. A trip raised while the program was paused leaves the
-  machine on, so the operator can trip the probe by hand and see that the input
-  is wired; the banner reports which of the two outcomes happened.
+  `EMC_TASK_ABORT`. A trip raised while the program is paused **and nothing is
+  moving** leaves the machine on, so the operator can trip the probe by hand
+  and see that the input is wired; the banner reports which of the two outcomes
+  happened.
 - The trip also switches the machine off. The panel jogs straight into `halui`,
   which accepts a jog only while the task state is ON, so the HMI cannot block
   a jog by refusing it — it switches the machine off instead. The response is
@@ -1514,18 +1515,28 @@ HAL pins is still open.
   mill simulation; the lathe profile creates the pin but has no consumer yet, so
   a lathe probe trip is not switched off.
 
-  **A trip raised with the program paused leaves the machine on.** Feed hold
-  mid-block is a held queue, and nothing was aborted that had to be stopped.
-  That is the case the operator provokes on purpose — a finger on the probe,
-  machine at rest, to prove the input is wired — so cutting the power there
-  would punish the one test the machine needs. The banner says so instead: it
-  names the pause and reports the machine left on, while a trip raised during a
-  running program keeps the switched-off wording. Both banners name
-  `RESET (ESC)`. The decision comes from the state at the moment of the trip,
-  which the HMI records on the fault when the message arrives: the controller
-  aborts the program as part of the trip, so by the next poll the paused flag is
-  gone and cannot be read afterwards. The gate is the paused state alone — no
-  `motion.jog-inhibit`, no jog-stop and no other motion-based heuristic.
+  **The machine is left on only when the trip is raised with the program paused
+  and nothing moving.** Feed hold mid-block is a held queue and nothing was
+  aborted that had to be stopped; that is the case the operator provokes on
+  purpose — a finger on the probe, machine at rest, to prove the input is
+  wired — so cutting the power there would punish the one test the machine
+  needs. Every other combination switches it off: not paused, or paused and
+  moving. The paused flag alone cannot carry this decision, because `control.c`
+  reports a probe hit during a *jog* as `Probe tripped during non-probe move`
+  when a paused program still holds the trajectory queue, and `task.paused`
+  stays set while the operator switches to MANUAL. Excusing that jog would let
+  it run on into the probe, which is the crash this response exists to stop.
+  So motion decides — `motion.current_vel` or `motion.probing`, the same
+  predicate as `task.motion_active` — and the pause is the tie-breaker for the
+  still case only. The banner follows the same split: only the still-and-paused
+  trip says `MACHINE LEFT ON`, and both wordings name `RESET (ESC)`.
+  The decision comes from the state at the moment of the trip, which the HMI
+  records on the fault when the message arrives: the controller aborts the
+  program and stops the motion as part of the trip, so by the next poll both
+  answers are gone. The evidence is therefore the poll *before* the message —
+  one poll interval old, which is what the paused-and-moving rule has to be
+  read with. No `motion.jog-inhibit`, no jog-stop and no other motion-based
+  heuristic is added.
 - Re-powering after a trip needs a rising edge on `halui.machine.on`. On the
   mill the only writer is the cabinet machine-on switch, and toggling it ends
   the LiNC session. That is the designed recovery path; LiNC does not work
