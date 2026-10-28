@@ -129,6 +129,14 @@ pub struct LincApp {
     pub machine_following: bool,
     /// Following error per axis, newest last, sampled as each snapshot arrives.
     pub following_history: linc_core::model::AxisMap<std::collections::VecDeque<f64>>,
+    /// Largest absolute following error per axis since the last program start.
+    pub following_run_max: linc_core::model::AxisMap<f64>,
+    /// Sum of absolute samples since the last program start, for the mean.
+    pub following_run_abs_sum: linc_core::model::AxisMap<f64>,
+    /// Samples behind that sum.
+    pub following_run_samples: linc_core::model::AxisMap<u64>,
+    /// Edge state: a program that starts clears the run's numbers.
+    pub following_run_active: bool,
     /// Largest remaining distance (absolute) seen for each axis since it last
     /// stopped, i.e. the length of the move in progress. The status only carries
     /// the remainder, so this is what turns it into a percentage.
@@ -488,6 +496,10 @@ impl LincApp {
             graph_origin: [0.0; 3],
             machine_following: false,
             following_history: linc_core::model::AxisMap::new(),
+            following_run_max: linc_core::model::AxisMap::new(),
+            following_run_abs_sum: linc_core::model::AxisMap::new(),
+            following_run_samples: linc_core::model::AxisMap::new(),
+            following_run_active: false,
             trail_cleared: false,
             trail_cleared_tip: None,
             move_distance: linc_core::model::AxisMap::new(),
@@ -1739,13 +1751,23 @@ impl LincApp {
             }
         }
     }
-    /// Keep a short trace of every axis's following error for MAIN's bottom row.
+    /// Keep a short trace of every axis's following error for MAIN's bottom row,
+    /// and the run's worst and mean values for its header.
     ///
     /// Sampled as the snapshot arrives rather than per frame: the poll is the
     /// display's own rate, and a frame-driven trace would stretch and squeeze
-    /// with the renderer's speed instead of with time.
+    /// with the renderer's speed instead of with time. The worst and the mean
+    /// start again with each program, so a fresh run is never reported against
+    /// the last one; jogging and MDI between programs count towards them.
     fn sample_following_error(&mut self) {
         const SAMPLES: usize = 240;
+        let running = self.snapshot.program.running;
+        if running && !self.following_run_active {
+            self.following_run_max = linc_core::model::AxisMap::new();
+            self.following_run_abs_sum = linc_core::model::AxisMap::new();
+            self.following_run_samples = linc_core::model::AxisMap::new();
+        }
+        self.following_run_active = running;
         let values: Vec<(String, f64)> = self
             .snapshot
             .machine
@@ -1764,7 +1786,33 @@ impl LincApp {
                     trace.pop_front();
                 }
             }
+            let worst = self.following_run_max.get(&axis).copied().unwrap_or(0.0);
+            self.following_run_max.insert(axis.clone(), worst.max(value.abs()));
+            let sum = self
+                .following_run_abs_sum
+                .get(&axis)
+                .copied()
+                .unwrap_or(0.0);
+            self.following_run_abs_sum.insert(axis.clone(), sum + value.abs());
+            let count = self.following_run_samples.get(&axis).copied().unwrap_or(0);
+            self.following_run_samples.insert(axis, count + 1);
         }
+    }
+
+    /// The worst and mean absolute following error for `axis` since the last
+    /// program start.
+    pub fn following_error_summary(&self, axis: &str) -> (f64, f64) {
+        let samples = self.following_run_samples.get(axis).copied().unwrap_or(0);
+        if samples == 0 {
+            return (0.0, 0.0);
+        }
+        let worst = self.following_run_max.get(axis).copied().unwrap_or(0.0);
+        let sum = self
+            .following_run_abs_sum
+            .get(axis)
+            .copied()
+            .unwrap_or(0.0);
+        (worst, sum / samples as f64)
     }
 
     pub fn active_offset_values(&self) -> Option<&linc_core::model::AxisMap<f64>> {
@@ -5406,6 +5454,59 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         );
     }
 
+    /// The header's worst and mean are the run's, and a new program starts
+    /// them again: a fresh run must not be judged against the last one.
+    #[test]
+    fn the_following_error_summary_belongs_to_the_run() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        let feed = |harness: &mut ProbeHarness, value: f64| {
+            harness
+                .app
+                .snapshot
+                .machine
+                .following_error
+                .insert("X", value);
+            harness.app.sample_following_error();
+        };
+
+        // Start from a cleared run: the harness has already sampled its own
+        // snapshots while building the app.
+        harness.app.following_run_max = linc_core::model::AxisMap::new();
+        harness.app.following_run_abs_sum = linc_core::model::AxisMap::new();
+        harness.app.following_run_samples = linc_core::model::AxisMap::new();
+        harness.app.following_run_active = false;
+
+        // No program yet: jogging still counts towards the numbers.
+        feed(&mut harness, -0.002);
+        feed(&mut harness, 0.004);
+        let (worst, mean) = harness.app.following_error_summary("X");
+        assert!((worst - 0.004).abs() < 1e-12, "worst {worst}");
+        assert!((mean - 0.003).abs() < 1e-12, "mean {mean}");
+
+        // A program starts: the numbers begin again.
+        harness.app.snapshot.program.running = true;
+        feed(&mut harness, 0.010);
+        let (worst, mean) = harness.app.following_error_summary("X");
+        assert!((worst - 0.010).abs() < 1e-12, "worst {worst}");
+        assert!((mean - 0.010).abs() < 1e-12, "mean {mean}");
+
+        // Still the same run: the numbers accumulate.
+        feed(&mut harness, -0.006);
+        let (worst, mean) = harness.app.following_error_summary("X");
+        assert!((worst - 0.010).abs() < 1e-12, "worst {worst}");
+        assert!((mean - 0.008).abs() < 1e-12, "mean {mean}");
+
+        // The run ends and another starts: everything is cleared, so a quiet
+        // new program does not inherit the old one's worst.
+        harness.app.snapshot.program.running = false;
+        feed(&mut harness, 0.001);
+        harness.app.snapshot.program.running = true;
+        feed(&mut harness, 0.001);
+        let (worst, mean) = harness.app.following_error_summary("X");
+        assert!((worst - 0.001).abs() < 1e-12, "worst {worst}");
+        assert!((mean - 0.001).abs() < 1e-12, "mean {mean}");
+    }
+
     /// The square key on MAIN swaps the feed/servo cards for the following-error
     /// traces, and swaps them back.
     #[test]
@@ -5435,12 +5536,25 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             !cards.iter().any(|text| text == "SERVO LOAD"),
             "and the servo card is gone: {cards:?}"
         );
-        for axis in ["X", "Y", "Z"] {
+        // Three labelled groups - value, worst, mean - one number per axis in
+        // each of them.
+        // The mean's label is a drawn diameter mark, not a glyph, so only the
+        // two typed labels can be asserted here; the per-axis count below
+        // covers all three groups.
+        for label in ["VALUE", "🗖"] {
             assert!(
-                cards
-                    .iter()
-                    .any(|text| text.starts_with(&format!("{axis} "))),
-                "{axis} is keyed in the header: {cards:?}"
+                cards.iter().any(|text| text == label),
+                "{label} is labelled once: {cards:?}"
+            );
+        }
+        for axis in ["X", "Y", "Z"] {
+            let numbers = cards
+                .iter()
+                .filter(|text| text.starts_with(axis) && text.len() > 1)
+                .count();
+            assert!(
+                numbers >= 3,
+                "{axis} appears in all three groups: {cards:?}"
             );
         }
 

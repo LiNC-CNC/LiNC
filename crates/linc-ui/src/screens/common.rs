@@ -2054,104 +2054,142 @@ pub fn zero_axes(app: &mut crate::shell::LincApp, axes: Vec<String>) {
 /// Room above each chip for its digit: the disc is 14 px across, plus air.
 const INCREMENT_DISC_ROW: f32 = 20.0;
 
-/// What a following-error trace says about one axis.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct ErrorSummary {
-    /// The sample with the largest magnitude, sign kept: a lead and a lag of the
-    /// same size are both worth seeing, and the sign says which one it was.
-    pub max: f64,
-    /// Mean magnitude. Averaging the signed values would hide a trace that
-    /// oscillates about zero, which is exactly the one worth noticing.
-    pub mean: f64,
-}
-
-pub fn error_summary(samples: &[f64]) -> ErrorSummary {
-    if samples.is_empty() {
-        return ErrorSummary::default();
-    }
-    let max = samples.iter().copied().fold(0.0f64, |worst, value| {
-        if value.abs() > worst.abs() {
-            value
-        } else {
-            worst
-        }
-    });
-    let mean = samples.iter().map(|value| value.abs()).sum::<f64>() / samples.len() as f64;
-    ErrorSummary { max, mean }
-}
-
 /// MAIN's bottom row when the square key is on: every axis's following error in
 /// one lane, one colour each, on a scale they share.
 ///
 /// Following error is the distance between where the controller is and where the
 /// position loop wants it. One lane makes the axes comparable at a glance, and a
 /// trace shows a sticky axis or a loose servo while it happens. The header
-/// carries the numbers - now, the largest magnitude in the window, the mean
-/// magnitude - so the picture answers "how bad, and how often" without reading
-/// the curve.
+/// carries the numbers in three labelled groups - the live value, the largest
+/// magnitude in the window, the mean magnitude - so the picture answers "how
+/// bad, and how often" without reading the curve.
 pub fn following_error_card(app: &LincApp, ui: &mut Ui, height: f32) {
-    theme::card(ui, |ui| {
-        ui.set_min_height((height - 24.0).max(0.0));
-        ui.set_max_height((height - 24.0).max(0.0));
-        ui.set_min_width(ui.available_width());
-        ui.spacing_mut().item_spacing.y = 0.0;
-        let axes = app.axes();
-        let traces: Vec<(Vec<f64>, egui::Color32)> = axes
-            .iter()
-            .enumerate()
-            .map(|(index, axis)| {
-                (
-                    app.following_history
-                        .get(axis)
-                        .map(|samples| samples.iter().copied().collect())
-                        .unwrap_or_default(),
-                    trace_color(index),
-                )
-            })
-            .collect();
-        ui.horizontal(|ui| {
-            theme::section_header(ui, "FOLLOWING ERROR");
-            ui.add_space(12.0);
-            // The values double as the key: three traces in one lane have to say
-            // which colour is which axis.
-            for (index, axis) in axes.iter().enumerate() {
-                let now = app
-                    .snapshot
-                    .machine
-                    .following_error
-                    .get(axis)
-                    .copied()
-                    .unwrap_or(0.0);
-                let summary = error_summary(&traces[index].0);
-                ui.label(
-                    RichText::new(format!(
-                        "{axis} {now:+0.3}  max {:+.3}  avg {:.3}",
-                        summary.max, summary.mean
-                    ))
-                    .monospace()
-                    .size(theme::font_size(9.0))
-                    .color(trace_color(index)),
-                );
+    // This card's own frame: the header carries the numbers, so the air above it
+    // is the one padding it cannot use. Four pixels instead of the shared
+    // twelve.
+    const TOP: f32 = 4.0;
+    const BOTTOM: f32 = 8.0;
+    egui::Frame::new()
+        .fill(theme::PANEL)
+        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin {
+            left: 12,
+            right: 12,
+            top: TOP as i8,
+            bottom: BOTTOM as i8,
+        })
+        .show(ui, |ui| {
+            let body = (height - TOP - BOTTOM).max(0.0);
+            ui.set_min_height(body);
+            ui.set_max_height(body);
+            ui.set_min_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let axes = app.axes();
+            let traces: Vec<(Vec<f64>, egui::Color32)> = axes
+                .iter()
+                .enumerate()
+                .map(|(index, axis)| {
+                    (
+                        app.following_history
+                            .get(axis)
+                            .map(|samples| samples.iter().copied().collect())
+                            .unwrap_or_default(),
+                        trace_color(index),
+                    )
+                })
+                .collect();
+            let header_top = ui.cursor().top();
+            ui.horizontal(|ui| {
+                theme::section_header(ui, "FOLLOWING ERROR");
                 ui.add_space(10.0);
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    RichText::new(&app.snapshot.positions.units)
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
+                // One label per group, the axes inside it in their own colours:
+                // those colours are the lane's key.
+                group_label(ui, "VALUE");
+                for (index, axis) in axes.iter().enumerate() {
+                    let now = app
+                        .snapshot
+                        .machine
+                        .following_error
+                        .get(axis)
+                        .copied()
+                        .unwrap_or(0.0);
+                    axis_number(ui, axis, format!("{now:+0.3}"), trace_color(index));
+                }
+                ui.add_space(8.0);
+                group_label(ui, "\u{1f5d6}");
+                for (index, axis) in axes.iter().enumerate() {
+                    let (worst, _) = app.following_error_summary(axis);
+                    axis_number(ui, axis, format!("{worst:.3}"), trace_color(index));
+                }
+                ui.add_space(8.0);
+                diameter_glyph(ui);
+                for (index, axis) in axes.iter().enumerate() {
+                    let (_, mean) = app.following_error_summary(axis);
+                    axis_number(ui, axis, format!("{mean:.3}"), trace_color(index));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(&app.snapshot.positions.units)
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
+                });
             });
+            // The lane takes everything the header leaves: one lane, maximised,
+            // not a stack of rows.
+            let used = ui.cursor().top() - header_top;
+            let lane = (body - used - 1.0).max(24.0);
+            let series: Vec<(&[f64], egui::Color32)> = traces
+                .iter()
+                .map(|(values, color)| (values.as_slice(), *color))
+                .collect();
+            linc_view::draw_traces(ui, &series, lane);
         });
-        // The lane takes everything the title leaves: one lane, maximised, not a
-        // stack of rows.
-        let lane = (ui.available_height() - 2.0).max(24.0);
-        let series: Vec<(&[f64], egui::Color32)> = traces
-            .iter()
-            .map(|(values, color)| (values.as_slice(), *color))
-            .collect();
-        linc_view::draw_traces(ui, &series, lane);
-    });
+}
+
+/// The diameter sign, drawn rather than typed: U+2300 is in none of egui's
+/// bundled fonts (Hack, Ubuntu-Light, the emoji faces), so the character would
+/// arrive on screen as an empty box. A circle with a slash is the same mark and
+/// depends on no font at all.
+fn diameter_glyph(ui: &mut Ui) {
+    let size = theme::font_size(9.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let center = rect.center();
+    let radius = size * 0.36;
+    let stroke = egui::Stroke::new(1.1, theme::MUTED);
+    ui.painter().circle_stroke(center, radius, stroke);
+    ui.painter().line_segment(
+        [
+            center + egui::vec2(-radius, radius),
+            center + egui::vec2(radius, -radius),
+        ],
+        stroke,
+    );
+    ui.add_space(5.0);
+}
+
+fn group_label(ui: &mut Ui, label: &str) {
+    ui.label(
+        RichText::new(label)
+            .monospace()
+            .size(theme::font_size(9.0))
+            .color(theme::MUTED),
+    );
+    ui.add_space(5.0);
+}
+
+/// `X+0.012`: the axis letter carries the identity, the colour ties it to its
+/// trace.
+fn axis_number(ui: &mut Ui, axis: &str, value: String, color: egui::Color32) {
+    ui.label(
+        RichText::new(format!("{axis}{value}"))
+            .monospace()
+            .size(theme::font_size(9.0))
+            .color(color),
+    );
+    ui.add_space(4.0);
 }
 
 /// One colour per axis, in the order the machine lists them.
@@ -2162,6 +2200,7 @@ fn trace_color(index: usize) -> egui::Color32 {
         _ => linc_view::theme::WARNING,
     }
 }
+
 /// The jog increment the operator picked from `[DISPLAY] INCREMENTS`.
 ///
 /// The panel has one keypad and no spare keys, so a step is picked by its
@@ -2621,26 +2660,6 @@ mod tests {
             (above - below).abs() <= 2.0,
             "above {above}, below {below}: the block is not centred in {card:?}"
         );
-    }
-
-    /// The header's numbers come from the same window the lane draws: the
-    /// largest magnitude keeps its sign (a lead and a lag are both faults), and
-    /// the mean is a magnitude, so a trace that oscillates about zero does not
-    /// average itself away.
-    #[test]
-    fn the_following_error_summary_reports_max_and_mean_magnitude() {
-        assert_eq!(super::error_summary(&[]), super::ErrorSummary::default());
-        let summary = super::error_summary(&[0.010, -0.040, 0.020, -0.030]);
-        assert!((summary.max + 0.040).abs() < 1e-12, "max {:?}", summary.max);
-        assert!(
-            (summary.mean - 0.025).abs() < 1e-12,
-            "mean magnitude {:?}",
-            summary.mean
-        );
-        // A trace that only ever goes one way still reports its worst.
-        let summary = super::error_summary(&[-0.002, -0.004]);
-        assert!((summary.max + 0.004).abs() < 1e-12);
-        assert!((summary.mean - 0.003).abs() < 1e-12);
     }
 
     /// The view eats only when the operator asked for it: the interpreter's
