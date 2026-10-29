@@ -9209,6 +9209,34 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     }
 
     #[test]
+    fn tall_windows_keep_hints_under_the_routine_cards() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::BossAndPocket, "");
+        let mut input = probe_raw_input(Vec::new());
+        input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1920.0, 1080.0),
+        ));
+        harness.frame_input(input);
+        let layout = harness.app.probe_layout.clone();
+        let cards_bottom = layout
+            .routine_cards
+            .iter()
+            .map(|(_, rect)| rect.bottom())
+            .fold(f32::NEG_INFINITY, f32::max);
+        let hint_top = layout
+            .hint_fields
+            .first()
+            .expect("the hint fields were drawn")
+            .1
+            .top();
+        assert!(
+            (hint_top - (cards_bottom + 10.0)).abs() < 1.0,
+            "hints start at {hint_top:?}, cards end at {cards_bottom:?}"
+        );
+    }
+
+    #[test]
     fn calibration_fields_share_one_column() {
         let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
         harness.enter_probe(ProbeCategory::Calibrate, "cal_round_boss");

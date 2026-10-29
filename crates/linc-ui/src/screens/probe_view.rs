@@ -1054,6 +1054,8 @@ const TARGET: f32 = theme::MIN_TARGET;
 const PARAM_COLUMNS: isize = 4;
 /// Vertical gap between the stacked routine-hint rows.
 const HINT_ROW_GAP: f32 = 3.0;
+/// Padding between the routine cards and their hint fields.
+const HINT_TOP_GAP: f32 = 10.0;
 /// Label column and the gap before a calibration field.
 const CALIBRATION_LABEL_WIDTH: f32 = 128.0;
 const CALIBRATION_LABEL_GAP: f32 = 16.0;
@@ -1563,16 +1565,20 @@ fn matrix_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
         let hint_h = if hints.is_empty() {
             0.0
         } else {
-            hints.len() as f32 * TARGET + (hints.len() - 1) as f32 * HINT_ROW_GAP
+            HINT_TOP_GAP + hints.len() as f32 * TARGET + (hints.len() - 1) as f32 * HINT_ROW_GAP
         };
         let consumed = ui.cursor().min.y - inner_top;
         let grid_h = (budget - consumed - hint_h).max(0.0);
         let card_h = routine_card_height(grid_h, rows, gap);
-        // The grid owns exactly what is left and clips its own overflow, so a
-        // narrower window shrinks the cards instead of pushing the Run context
-        // off the card.
-        let grid_rect =
-            Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), grid_h));
+        // The cards keep the reserved budget for sizing, but the hint fields
+        // follow the lower edge of the cards rather than the bottom of a taller
+        // pane. On a short window the grid still clips at its reserved height.
+        let grid_content_h = rows as f32 * card_h + (rows - 1) as f32 * gap;
+        let grid_visible_h = grid_content_h.min(grid_h);
+        let grid_rect = Rect::from_min_size(
+            ui.cursor().min,
+            Vec2::new(ui.available_width(), grid_visible_h),
+        );
         let mut grid = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(grid_rect)
@@ -1621,6 +1627,8 @@ fn matrix_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
             {
                 app.probe_layout.hints_drawn = Some(hints.clone());
             }
+            let top_gap = (HINT_TOP_GAP - ui.spacing().item_spacing.y).max(0.0);
+            ui.add_space(top_gap);
             let label_w = hint_label_width(ui, &hints);
             let field_w = (ui.available_width() - label_w - 8.0).clamp(58.0, 140.0);
             let field_left = ((ui.available_width() - field_w) * 0.5).max(0.0);
@@ -2835,24 +2843,9 @@ fn help_view(app: &mut LincApp, ui: &mut Ui) {
                 |ui| {
                     ui.set_width(190.0);
                     theme::section_header(ui, "HELP TOPICS");
-                    // Only the selected topic gets the blue selection fill. A
-                    // pointer left over the previous row must not look selected
-                    // after the keyboard moves the blue box.
-                    let widgets = &mut ui.visuals_mut().widgets;
-                    widgets.hovered.bg_fill = theme::PANEL_RAISED;
-                    widgets.hovered.weak_bg_fill = theme::PANEL_RAISED;
-                    widgets.hovered.bg_stroke = Stroke::new(1.0, theme::BORDER);
-                    widgets.hovered.fg_stroke = Stroke::new(1.0, theme::FG);
-                    widgets.active.bg_fill = theme::PANEL_RAISED;
-                    widgets.active.weak_bg_fill = theme::PANEL_RAISED;
-                    widgets.active.bg_stroke = Stroke::new(1.0, theme::BORDER);
-                    widgets.active.fg_stroke = Stroke::new(1.0, theme::FG);
                     for (index, item) in HELP_TOPICS.iter().enumerate() {
                         let selected = index == app.probe.help_topic;
-                        let text = RichText::new(item.title)
-                            .size(theme::font_size(11.5))
-                            .color(if selected { theme::FG } else { theme::MUTED });
-                        if ui.selectable_label(selected, text).clicked() {
+                        if help_topic_row(ui, item.title, selected).clicked() {
                             app.probe.help_topic = index;
                             app.probe.help_page = 0;
                         }
@@ -2929,6 +2922,25 @@ fn help_view(app: &mut LincApp, ui: &mut Ui) {
             });
         });
     });
+}
+
+/// A help-topic row with no hover chrome. Keyboard navigation moves the
+/// selection; a pointer left over the previous row must not grow a shadow.
+fn help_topic_row(ui: &mut Ui, title: &str, selected: bool) -> egui::Response {
+    let width = ui.available_width().min(190.0);
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 28.0), Sense::click());
+    if selected {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(4), theme::ACCENT);
+    }
+    ui.painter().text(
+        Pos2::new(rect.left() + 10.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        title,
+        FontId::proportional(theme::font_size(11.5)),
+        if selected { theme::FG } else { theme::MUTED },
+    );
+    response
 }
 
 fn help_figure_panel(app: &mut LincApp, ui: &mut Ui, figure: HelpFigure, width: f32, height: f32) {
