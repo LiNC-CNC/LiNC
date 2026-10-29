@@ -169,7 +169,8 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
   clear trail, Files copy/delete, MDI buffer recall, line move and issue. A page-local key consumed elsewhere shadows another page's command.
   The pane's line move is `Ctrl+Up`/`Ctrl+Down` because the panel keyboard has no Shift key.
 - The toolpath view zooms with `Ctrl++`/`Ctrl+-` on any page that draws one — page-scoped like `Ctrl+0`, because those chords collide with nothing a
-  text field uses. `Ctrl++` also accepts Shift+`=` (what a normal keyboard sends for `+`), and stop at `MAX_ZOOM` (80). **Panning** with
+  text field uses. `Ctrl++` also accepts Shift+`=` (what a normal keyboard sends for `+`). The ceiling belongs to the view, not the
+  shell: `linc_view::max_zoom` stops when the card's width spans 0.01 mm, so the chords and the wheel reach the same depth. **Panning** with
   `Ctrl+arrows` stays hover-scoped: the same chords are region focus (`Ctrl+Left`/`Ctrl+Right`) and the editor/MDI line move
   (`Ctrl+Up`/`Ctrl+Down`) everywhere else, so the hover is what keeps both.
 - REMAINING (`Ctrl+M`, page-scoped on the same pages) draws no live trail and eats the completed blocks out of the program path:

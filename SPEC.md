@@ -121,8 +121,11 @@ zooms with `Ctrl++`/`Ctrl+-` while the pointer is over the toolpath card. The
 chords are hover-scoped because they already belong to something else away from
 the graph: `Ctrl+Left`/`Ctrl+Right` moves region focus and `Ctrl+Up`/`Ctrl+Down`
 moves the selected line in the G-code editor and the MDI buffer. Wheel zoom
-works the same way. `Ctrl+M` toggles REMAINING on the same pages: it is
-page-scoped like the zoom, because no text field and no other page claims it.
+works the same way. Zooming in stops when the card's width spans 0.01 mm, so a
+feature at the display's resolution can still be inspected; zooming out stops
+where the fitted machine envelope is a few pixels across. `Ctrl+M` toggles
+REMAINING on the same pages: it is page-scoped like the zoom, because no text
+field and no other page claims it.
 
 A page-local binding is only listed in the sidebar's `SHORTCUTS` pane while its
 page is in front (the pane scrolls when a page has more commands than the

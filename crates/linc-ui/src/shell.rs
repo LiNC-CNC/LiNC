@@ -2152,8 +2152,12 @@ impl LincApp {
         // `rect.center() + pan` fixed, so carrying the pan with the factor is
         // what keeps the part where the operator sees it instead of walking it
         // off the card. The arrow pan is a screen distance and comes after.
-        let before = *zoom_out;
-        let after = (before * zoom).clamp(linc_view::MIN_ZOOM, linc_view::MAX_ZOOM);
+        // The upper bound belongs to the view, which knows how wide the card is
+        // and stops when the screen spans 0.01 mm (`linc_view::max_zoom`).
+        // Clamping to the old fixed ceiling here would keep the keyboard at a
+        // shallower limit than the wheel.
+        let before = (*zoom_out).max(linc_view::MIN_ZOOM);
+        let after = (before * zoom).max(linc_view::MIN_ZOOM);
         *pan_out *= after / before;
         *zoom_out = after;
         *pan_out += pan;
@@ -6270,12 +6274,14 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             harness.app.program.graph_zoom
         );
 
-        // And it reaches past the old 40 ceiling the view used to stop at.
+        // And it reaches past the old 40 ceiling. The ceiling itself belongs to
+        // the view now (`linc_view::max_zoom`: 0.01 mm across the card), which
+        // no page has drawn in this frame, so the chord simply keeps going.
         harness.app.program.graph_zoom = 70.0;
         harness.frame_with(&[(egui::Key::Plus, ctrl())]);
         assert!(
-            harness.app.program.graph_zoom > 70.0 && harness.app.program.graph_zoom <= 80.0,
-            "70 zooms on to {} and stops at 80",
+            harness.app.program.graph_zoom > 80.0,
+            "70 zooms on past the old fixed 80 ceiling, got {}",
             harness.app.program.graph_zoom
         );
     }

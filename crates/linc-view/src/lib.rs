@@ -410,7 +410,7 @@ impl Projection {
             max: expanded.max,
             rect,
             scale,
-            zoom: zoom.clamp(MIN_ZOOM, MAX_ZOOM),
+            zoom: zoom.clamp(MIN_ZOOM, max_zoom(scale, rect.width())),
             pan,
             mode,
             yaw,
@@ -657,7 +657,7 @@ fn fit_zoom_pan(
         Projection::new(target, rect, mode, yaw, pitch, 1.0, Vec2::ZERO).mirrored(mirror_x);
     let base =
         Projection::new(reference, rect, mode, yaw, pitch, 1.0, Vec2::ZERO).mirrored(mirror_x);
-    let zoom = (target_projection.scale / base.scale).clamp(MIN_ZOOM, MAX_ZOOM);
+    let zoom = (target_projection.scale / base.scale).clamp(MIN_ZOOM, max_zoom(base.scale, rect.width()));
     let centre = base.project(target.center());
     (zoom, (rect.center() - centre) * zoom)
 }
@@ -763,10 +763,28 @@ fn selected_follow_state(ui: &Ui) -> egui::Id {
     ui.scope_id().with("toolpath-block-follow-latch")
 }
 
-/// Shallowest and deepest magnification the toolpath can reach. 80 shows a
-/// single #6 hole in the card; the operator asked for it over the old 40.
+/// Shallowest magnification the toolpath can reach.
 pub const MIN_ZOOM: f32 = 0.05;
-pub const MAX_ZOOM: f32 = 80.0;
+
+/// The span of the view's width at the deepest zoom: 0.01 mm across.
+///
+/// The deepest zoom is defined by this, not by a fixed multiple: at that depth
+/// a screen-width feature measures `MIN_VIEW_SPAN_MM` in the model, so the
+/// operator can inspect a 0.01 mm feature directly whatever the fitted scale is.
+pub const MIN_VIEW_SPAN_MM: f32 = 0.01;
+
+/// The deepest zoom for a view `width` pixels wide drawn at `scale` pixels per
+/// model unit: the zoom at which the view spans exactly `MIN_VIEW_SPAN_MM`
+/// across its width.
+///
+/// `scale` is the fitted projection scale (pixels per model unit), so a part
+/// that fills the card at a smaller scale allows a correspondingly deeper zoom.
+/// There is no fixed ceiling on top of this: a fixed multiple of the fitted
+/// scale either stopped the operator short of a small feature or exposed less
+/// than the display can resolve.
+pub fn max_zoom(scale: f32, width: f32) -> f32 {
+    width / (MIN_VIEW_SPAN_MM * scale.max(1e-6))
+}
 
 /// Widest clearance kept between the tool marker and the card's edge when the
 /// view follows a moving tool: 75 px, reached at the main toolpath card's size.
@@ -875,13 +893,16 @@ mod follow_tests {
     use egui::{pos2, Rect};
 
     #[test]
-    fn the_deepest_zoom_is_80_not_40() {
+    fn the_deepest_zoom_grows_with_the_fitted_scale_not_a_fixed_80() {
         let bounds = super::Bounds3 {
             min: [0.0, 0.0, 0.0],
             max: [10.0, 10.0, 1.0],
         };
         let rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(400.0, 300.0));
-        for (asked, expected) in [(20.0, 20.0), (40.0, 40.0), (80.0, 80.0), (200.0, 80.0)] {
+        // A 10 mm part fitted to a 400 px card has a scale of 24.6 px/mm, so
+        // the deepest zoom shows 0.01 mm across the width: 400 / 0.246 ≈ 1626.
+        // Requests inside that ceiling are kept as asked.
+        for (asked, expected) in [(20.0, 20.0), (40.0, 40.0), (80.0, 80.0), (200.0, 200.0)] {
             let projection = super::Projection::new(
                 bounds,
                 rect,
@@ -896,6 +917,18 @@ mod follow_tests {
                 "a request for {asked} lands on {expected}"
             );
         }
+        // A wild request clamps to the span ceiling, not to the old fixed 80.
+        let deepest = super::Projection::new(
+            bounds,
+            rect,
+            super::ViewMode::TopXy,
+            0.0,
+            0.0,
+            1e7,
+            egui::Vec2::ZERO,
+        );
+        assert!(deepest.zoom <= super::max_zoom(deepest.scale, rect.width()));
+        assert!(deepest.zoom >= super::MIN_ZOOM);
     }
 
     #[test]
@@ -1044,10 +1077,50 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         StrokeKind::Inside,
     );
 
+    let mut bounds = view.preview.bounds.unwrap_or(Bounds3 {
+        min: [-10.0, -10.0, -10.0],
+        max: [10.0, 10.0, 10.0],
+    });
+    let mut has_data = view.preview.bounds.is_some();
+    for point in view.live_trail {
+        bounds.include(view.trail_point(point.position));
+        has_data = true;
+    }
+    if let Some(tip) = view.tool_tip {
+        bounds.include(view.trail_point(tip));
+        has_data = true;
+    }
+    // The markers are actors too: they are what the operator is looking at on
+    // the Offsets page.
+    bounds.include(view.origin);
+    if let Some(highlight) = view.highlight_origin {
+        bounds.include(highlight);
+    }
+    if !has_data {
+        bounds = Bounds3 {
+            min: [-10.0, -10.0, -10.0],
+            max: [10.0, 10.0, 10.0],
+        };
+    }
+    // The reference box is the machine envelope, not the union of everything
+    // drawn: the projection's scale and centre come from it, so using the union
+    // rescaled the whole view the moment a program was loaded, and the tool and
+    // work-zero markers appeared to jump. An explicit fit now adjusts zoom and
+    // pan instead of moving the reference, so loading a program changes what is
+    // drawn, not where the view is looking. It is computed before the wheel is
+    // read because the zoom ceiling tracks the fitted scale, and that scale is
+    // derived from this box and the card.
+    let reference = view.machine_bounds.unwrap_or(bounds);
     if response.hovered() {
         let scroll = ui.input(|input| input.smooth_scroll_delta.y);
         if scroll.abs() > 0.0 {
-            view.zoom = (view.zoom * (1.0 + scroll * 0.002)).clamp(MIN_ZOOM, MAX_ZOOM);
+            let drawn = rect.shrink(12.0);
+            let scale = Projection::new(
+                reference, drawn, view.view, view.yaw, view.pitch, 1.0, Vec2::ZERO,
+            )
+            .scale;
+            view.zoom = (view.zoom * (1.0 + scroll * 0.002))
+                .clamp(MIN_ZOOM, max_zoom(scale, drawn.width()));
             view.auto_fit = false;
         }
     }
@@ -1080,38 +1153,6 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         view.auto_fit = false;
     }
 
-    let mut bounds = view.preview.bounds.unwrap_or(Bounds3 {
-        min: [-10.0, -10.0, -10.0],
-        max: [10.0, 10.0, 10.0],
-    });
-    let mut has_data = view.preview.bounds.is_some();
-    for point in view.live_trail {
-        bounds.include(view.trail_point(point.position));
-        has_data = true;
-    }
-    if let Some(tip) = view.tool_tip {
-        bounds.include(view.trail_point(tip));
-        has_data = true;
-    }
-    // The markers are actors too: they are what the operator is looking at on
-    // the Offsets page.
-    bounds.include(view.origin);
-    if let Some(highlight) = view.highlight_origin {
-        bounds.include(highlight);
-    }
-    if !has_data {
-        bounds = Bounds3 {
-            min: [-10.0, -10.0, -10.0],
-            max: [10.0, 10.0, 10.0],
-        };
-    }
-    // The reference box is the machine envelope, not the union of everything
-    // drawn: the projection's scale and centre come from it, so using the union
-    // rescaled the whole view the moment a program was loaded, and the tool and
-    // work-zero markers appeared to jump. An explicit fit now adjusts zoom and
-    // pan instead of moving the reference, so loading a program changes what is
-    // drawn, not where the view is looking.
-    let reference = view.machine_bounds.unwrap_or(bounds);
     // The first frame of a layout can report an unbounded card; a fit computed
     // for that rect leaves a pan that puts the part outside the real one. Wait
     // for a rect the screen can actually hold, then fit once.
@@ -1211,6 +1252,10 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         view.pan,
     )
     .mirrored(view.mirror_x);
+    // The projection clamps the zoom to the span ceiling, so write the clamped
+    // value back: the stored zoom (and the `ZOOM {:.1}x` status drawn later)
+    // must never disagree with what is on the card.
+    view.zoom = projection.zoom;
 
     // Grid and axis labels.
     if view.show_grid {
@@ -1732,6 +1777,20 @@ fn stock_bounds(program: &Bounds3) -> Option<Bounds3> {
     })
 }
 
+/// Model-space height of the dimension label for a box of the given extents at
+/// the projection's current zoom.
+///
+/// A fixed 2.5 % of the box's longest side, never smaller than 18 px on screen.
+/// At the fitted zoom that fraction and the 18 px floor agree, which is why
+/// linc-demo-mill.ngc already looks right; when the operator zooms or loads a
+/// bigger or smaller part the label scales with the box drawn on screen instead
+/// of being clamped to the box's thinnest axis.
+fn dimension_glyph(size: [f64; 3], projection: &Projection) -> f64 {
+    let extent = size[0].max(size[1]).max(size[2]).max(0.5);
+    let pixels_per_unit = (projection.scale * projection.zoom).max(1e-6) as f64;
+    (extent * 0.025).max(18.0 / pixels_per_unit)
+}
+
 /// Translucent solid for the stock envelope: the three visible faces of the
 /// box, so it reads as a block rather than a wireframe.
 /// Dimension lines and labels on the program bounds, drawn the way AXIS marks
@@ -1747,12 +1806,14 @@ fn draw_bounds_dimensions(
     let min = bounds.min;
     let max = bounds.max;
     let size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
-    let smallest = size[0].min(size[1]).min(size[2]).max(0.5);
     // Annotation size in pixels, converted to model units, so the dimensions
-    // stay readable at any zoom the way a drawing's text does.
+    // stay readable at any zoom the way a drawing's text does. The label tracks
+    // the box's longest side and keeps an 18 px screen floor, see
+    // `dimension_glyph`; the gap follows the grown label so the dimension line
+    // keeps clear of it.
     let pixels_per_unit = (projection.scale * projection.zoom).max(1e-6) as f64;
-    let glyph = (18.0 / pixels_per_unit).min(smallest * 0.2);
-    let gap = 22.0 / pixels_per_unit;
+    let glyph = dimension_glyph(size, projection);
+    let gap = (glyph * 1.2).max(22.0 / pixels_per_unit);
     let color = theme::dim(theme::CYAN, 190);
     let offset = work_offset.unwrap_or([0.0; 3]);
     let pad = glyph * 0.6;
@@ -2535,6 +2596,86 @@ mod tests {
             let pos = projection.project(point);
             assert!(rect.contains(pos), "{pos:?} outside {rect:?}");
         }
+    }
+
+    #[test]
+    fn max_zoom_is_the_0_01_mm_span_and_nothing_else() {
+        // 640 px at 1 px/mm: the deepest zoom shows 0.01 mm across the width,
+        // which is 640 / 0.01 = 64000x.
+        assert_eq!(max_zoom(1.0, 640.0), 64000.0);
+        // A tiny fitted scale (a very large part) allows a deeper zoom still;
+        // there is no fixed ceiling under it.
+        assert_eq!(max_zoom(0.01, 640.0), 6_400_000.0);
+        // A very dense scale (a small part filling the card) gets a shallower
+        // ceiling than the old fixed 80: that is the point - the operator can
+        // still resolve 0.01 mm across the card, and no further.
+        assert_eq!(max_zoom(1000.0, 640.0), 64.0);
+        assert!(max_zoom(1000.0, 640.0) < 80.0);
+    }
+
+    #[test]
+    fn a_huge_zoom_request_lands_on_the_span_ceiling() {
+        let bounds = Bounds3 {
+            min: [0.0, 0.0, 0.0],
+            max: [10.0, 10.0, 1.0],
+        };
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0));
+        let projection =
+            Projection::new(bounds, rect, ViewMode::TopXy, 0.0, 0.0, 1e7, Vec2::ZERO);
+        assert!(projection.zoom <= max_zoom(projection.scale, rect.width()));
+        assert!(projection.zoom >= MIN_ZOOM);
+    }
+
+    #[test]
+    fn dimension_labels_stay_proportional_when_a_larger_program_is_fitted() {
+        // Two parts of the same shape, one 10x larger. Fitted to the same card
+        // the larger part's scale is a tenth of the smaller's, so the label's
+        // on-screen height (2.5 % of the longest side times the fitted scale) is
+        // the same for both. The card is wide enough that the 2.5 % fraction,
+        // not the 18 px floor, decides the size, so the test exercises the
+        // proportional branch.
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1600.0, 1250.0));
+        let small = Bounds3 {
+            min: [0.0, 0.0, 0.0],
+            max: [184.0, 144.0, 30.0],
+        };
+        let large = Bounds3 {
+            min: [0.0, 0.0, 0.0],
+            max: [1840.0, 1440.0, 300.0],
+        };
+        let small_size = [184.0, 144.0, 30.0];
+        let large_size = [1840.0, 1440.0, 300.0];
+        let small_proj = Projection::new(small, rect, ViewMode::TopXy, 0.0, 0.0, 1.0, Vec2::ZERO);
+        let large_proj = Projection::new(large, rect, ViewMode::TopXy, 0.0, 0.0, 1.0, Vec2::ZERO);
+        let small_px =
+            dimension_glyph(small_size, &small_proj) * (small_proj.scale * small_proj.zoom) as f64;
+        let large_px =
+            dimension_glyph(large_size, &large_proj) * (large_proj.scale * large_proj.zoom) as f64;
+        assert!(
+            (small_px / large_px - 1.0).abs() < 0.01,
+            "small {small_px} px vs large {large_px} px"
+        );
+    }
+
+    #[test]
+    fn demo_mill_proportions_still_yield_an_18_px_label_at_the_fit() {
+        // The demo-mill envelope (184x144x30 mm) fitted into a card ~628 px wide
+        // gives a scale of about 2.8 px/mm. At that fit the 2.5 % fraction is
+        // smaller than the 18 px floor, so the label is 18 px tall on screen —
+        // the size that already looks right in linc-demo-mill.ngc.
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(628.0, 491.0));
+        let bounds = Bounds3 {
+            min: [0.0, 0.0, 0.0],
+            max: [184.0, 144.0, 30.0],
+        };
+        let size = [184.0, 144.0, 30.0];
+        let projection = Projection::new(bounds, rect, ViewMode::TopXy, 0.0, 0.0, 1.0, Vec2::ZERO);
+        let on_screen =
+            dimension_glyph(size, &projection) * (projection.scale * projection.zoom) as f64;
+        assert!(
+            (on_screen - 18.0).abs() < 0.5,
+            "on-screen glyph {on_screen} px, expected about 18"
+        );
     }
 
     /// One frame of the card, with the program cut it painted.
