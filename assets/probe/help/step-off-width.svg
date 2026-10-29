@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="568" viewBox="0 0 620 568">
+  <defs>
+    <radialGradient id="ruby" cx="35%" cy="30%" r="70%">
+      <stop offset="0" stop-color="#ff9df2"/>
+      <stop offset="45%" stop-color="#c04bc2"/>
+      <stop offset="100%" stop-color="#5a175e"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="10" y="10" width="600" height="273" rx="14" fill="#14161a" stroke="#4da3ff" stroke-width="1.5"/>
+  <text x="26" y="34" fill="#e8eaed" font-family="DejaVu Sans Mono, monospace" font-size="22">
+    <tspan x="26">Step Off Width of the probe is</tspan>
+    <tspan x="26" dy="23">the distance the probe will travel</tspan>
+    <tspan x="26" dy="23">before moving down to probe the</tspan>
+    <tspan x="26" dy="23">side of the work piece. The</tspan>
+    <tspan x="26" dy="23">distance entered must be greater</tspan>
+    <tspan x="26" dy="23">than the distance between the</tspan>
+    <tspan x="26" dy="23">probe and the edge of the work</tspan>
+    <tspan x="26" dy="23">piece. If the probe is obstructed</tspan>
+    <tspan x="26" dy="23">by the work piece surface during</tspan>
+    <tspan x="26" dy="23">its -Z positioning move an error</tspan>
+    <tspan x="26" dy="23">will be triggered.</tspan>
+  </text>
+
+  <g transform="translate(0,53)">
+    <rect x="300" y="405" width="290" height="110" rx="4" fill="#37404c" stroke="#6b7280" stroke-width="2"/>
+
+    <g>
+      <rect x="202" y="230" width="16" height="78" fill="#b8bdc4" stroke="#6b7280" stroke-width="1"/>
+      <rect x="196" y="300" width="28" height="10" rx="2" fill="#8b929c" stroke="#6b7280" stroke-width="1"/>
+      <circle cx="210" cy="322" r="18" fill="url(#ruby)" stroke="#d48ad8" stroke-width="1"/>
+    </g>
+    <g>
+      <rect x="352" y="230" width="16" height="78" fill="#b8bdc4" stroke="#6b7280" stroke-width="1"/>
+      <rect x="346" y="300" width="28" height="10" rx="2" fill="#8b929c" stroke="#6b7280" stroke-width="1"/>
+      <circle cx="360" cy="322" r="18" fill="url(#ruby)" stroke="#d48ad8" stroke-width="1"/>
+    </g>
+
+    <line x1="210" y1="340" x2="210" y2="380" stroke="#4da3ff" stroke-width="1.5"/>
+    <line x1="360" y1="340" x2="360" y2="380" stroke="#4da3ff" stroke-width="1.5"/>
+    <line x1="220" y1="365" x2="350" y2="365" stroke="#4da3ff" stroke-width="2"/>
+    <polygon points="210,365 220,360 220,370" fill="#4da3ff"/>
+    <polygon points="360,365 350,360 350,370" fill="#4da3ff"/>
+    <text x="285" y="394" text-anchor="middle" fill="#e8eaed" font-family="DejaVu Sans Mono, monospace" font-size="17">STEP OFF WIDTH</text>
+  </g>
+</svg>

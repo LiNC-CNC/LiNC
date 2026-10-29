@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="542" viewBox="0 0 620 542">
+  <defs>
+    <radialGradient id="ruby" cx="35%" cy="30%" r="70%">
+      <stop offset="0" stop-color="#ff9df2"/>
+      <stop offset="45%" stop-color="#c04bc2"/>
+      <stop offset="100%" stop-color="#5a175e"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="10" y="10" width="600" height="251" rx="14" fill="#14161a" stroke="#4da3ff" stroke-width="1.5"/>
+  <text x="26" y="32" fill="#e8eaed" font-family="DejaVu Sans Mono, monospace" font-size="19">
+    <tspan x="26">The Extra Probe Depth Feature is used for</tspan>
+    <tspan x="26" dy="21">adding additional depth to the probing routine</tspan>
+    <tspan x="26" dy="21">past the predefined probing depth set by the</tspan>
+    <tspan x="26" dy="21">probe tool diameter in the tool table. This is</tspan>
+    <tspan x="26" dy="21">useful for avoiding chamfers, radii, rough edges</tspan>
+    <tspan x="26" dy="21">or other abnormalities near the edge of the</tspan>
+    <tspan x="26" dy="21">work piece to be probed. Caution should be</tspan>
+    <tspan x="26" dy="21">exercised not to exceed the depth available</tspan>
+    <tspan x="26" dy="21">between the desired probe depth and the main</tspan>
+    <tspan x="26" dy="21">probe body and the work piece surface as this</tspan>
+    <tspan x="26" dy="21">will result in a crash.</tspan>
+  </text>
+
+  <g transform="translate(0,11)">
+    <rect x="330" y="340" width="270" height="180" rx="4" fill="#37404c" stroke="#6b7280" stroke-width="2"/>
+
+    <rect x="210" y="250" width="20" height="90" fill="#b8bdc4" stroke="#6b7280" stroke-width="1"/>
+    <circle cx="220" cy="350" r="18" fill="#cfd4da" stroke="#6b7280" stroke-width="1"/>
+    <circle cx="220" cy="430" r="18" fill="url(#ruby)" stroke="#d48ad8" stroke-width="1"/>
+
+    <line x1="170" y1="350" x2="220" y2="350" stroke="#4da3ff" stroke-width="1.5"/>
+    <line x1="170" y1="430" x2="220" y2="430" stroke="#4da3ff" stroke-width="1.5"/>
+    <line x1="170" y1="360" x2="170" y2="420" stroke="#4da3ff" stroke-width="2"/>
+    <polygon points="170,350 165,360 175,360" fill="#4da3ff"/>
+    <polygon points="170,430 165,420 175,420" fill="#4da3ff"/>
+
+    <text x="16" y="374" fill="#e8eaed" font-family="DejaVu Sans Mono, monospace" font-size="17">EXTRA</text>
+    <text x="16" y="396" fill="#e8eaed" font-family="DejaVu Sans Mono, monospace" font-size="17">PROBE</text>
+    <text x="16" y="418" fill="#e8eaed" font-family="DejaVu Sans Mono, monospace" font-size="17">DEPTH</text>
+
+    <text x="250" y="286" fill="#e8eaed" font-family="DejaVu Sans Mono, monospace" font-size="14">Set using probe tool</text>
+    <text x="250" y="304" fill="#e8eaed" font-family="DejaVu Sans Mono, monospace" font-size="14">diameter in tool table</text>
+    <text x="250" y="334" fill="#e8eaed" font-family="DejaVu Sans Mono, monospace" font-size="15">0.125" Ø</text>
+  </g>
+</svg>

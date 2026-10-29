@@ -2795,17 +2795,13 @@ fn help_figure(topic: usize, page: usize) -> Option<HelpFigure> {
         (1, 0) => ("work-offsets.png", "LiNC work offsets", ""),
         (1, 1) => ("edge-angle.png", "LiNC Edge Angle routines", ""),
         (2, 0) => (
-            "step-off-width.png",
+            "step-off-width.svg",
             "Step-off width",
             "Probe Basic · GPLv3",
         ),
-        (2, 1) => (
-            "probing-hints.png",
-            "Feature hint fields",
-            "Probe Basic · GPLv3",
-        ),
+        (2, 1) => ("probing-hints.png", "LiNC feature hint fields", ""),
         (2, 2) => (
-            "extra-probe-depth.png",
+            "extra-probe-depth.svg",
             "Extra probe depth",
             "Probe Basic · GPLv3",
         ),
@@ -2839,6 +2835,18 @@ fn help_view(app: &mut LincApp, ui: &mut Ui) {
                 |ui| {
                     ui.set_width(190.0);
                     theme::section_header(ui, "HELP TOPICS");
+                    // Only the selected topic gets the blue selection fill. A
+                    // pointer left over the previous row must not look selected
+                    // after the keyboard moves the blue box.
+                    let widgets = &mut ui.visuals_mut().widgets;
+                    widgets.hovered.bg_fill = theme::PANEL_RAISED;
+                    widgets.hovered.weak_bg_fill = theme::PANEL_RAISED;
+                    widgets.hovered.bg_stroke = Stroke::new(1.0, theme::BORDER);
+                    widgets.hovered.fg_stroke = Stroke::new(1.0, theme::FG);
+                    widgets.active.bg_fill = theme::PANEL_RAISED;
+                    widgets.active.weak_bg_fill = theme::PANEL_RAISED;
+                    widgets.active.bg_stroke = Stroke::new(1.0, theme::BORDER);
+                    widgets.active.fg_stroke = Stroke::new(1.0, theme::FG);
                     for (index, item) in HELP_TOPICS.iter().enumerate() {
                         let selected = index == app.probe.help_topic;
                         let text = RichText::new(item.title)
@@ -2885,7 +2893,7 @@ fn help_view(app: &mut LincApp, ui: &mut Ui) {
                 let body_h = (height - 100.0).max(0.0);
                 let figure_gap = 18.0;
                 let figure_w = if figure.is_some() {
-                    (body_w * 0.42).clamp(300.0, 430.0)
+                    (body_w * 0.52).clamp(360.0, 500.0)
                 } else {
                     0.0
                 };
@@ -2939,11 +2947,11 @@ fn help_figure_panel(app: &mut LincApp, ui: &mut Ui, figure: HelpFigure, width: 
                 return;
             };
             let initial = texture.size_vec2();
-            let max_h = (height - 60.0).max(160.0);
+            let max_h = (height - 40.0).max(160.0);
             let scale = (width / initial.x).min(max_h / initial.y).min(1.0);
             let size = initial * scale;
             egui::Frame::new()
-                .fill(Color32::from_rgb(0xe8, 0xec, 0xf0))
+                .fill(theme::PANEL)
                 .stroke(Stroke::new(1.0, theme::BORDER))
                 .corner_radius(6)
                 .inner_margin(8)

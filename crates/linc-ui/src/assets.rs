@@ -98,12 +98,12 @@ probe_help_images!(
     "boss-and-pocket.png",
     "calibrate.png",
     "edge-angle.png",
-    "extra-probe-depth.png",
+    "extra-probe-depth.svg",
     "outside-corners.png",
     "parameters.png",
     "probing-hints.png",
     "results.png",
-    "step-off-width.png",
+    "step-off-width.svg",
     "work-offsets.png",
 );
 
@@ -139,12 +139,12 @@ mod tests {
             "boss-and-pocket.png",
             "calibrate.png",
             "edge-angle.png",
-            "extra-probe-depth.png",
+            "extra-probe-depth.svg",
             "outside-corners.png",
             "parameters.png",
             "probing-hints.png",
             "results.png",
-            "step-off-width.png",
+            "step-off-width.svg",
             "work-offsets.png",
         ] {
             assert!(

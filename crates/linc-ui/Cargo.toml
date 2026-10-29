@@ -16,3 +16,4 @@ linc-core = { path = "../linc-core" }
 linc-view = { path = "../linc-view" }
 image.workspace = true
 zbus = "4.4"
+resvg = "0.49.0"

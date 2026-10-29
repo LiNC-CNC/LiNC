@@ -1115,9 +1115,29 @@ impl ProbeUi {
             return Some(texture.clone());
         }
         let bytes = crate::assets::probe_help_image_bytes(name)?;
-        let image = image::load_from_memory(bytes).ok()?.to_rgba8();
-        let size = [image.width() as usize, image.height() as usize];
-        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+        let color_image = if name.ends_with(".svg") {
+            let mut options = resvg::usvg::Options::default();
+            options.fontdb_mut().load_system_fonts();
+            let tree = resvg::usvg::Tree::from_data(bytes, &options).ok()?;
+            let size = tree.size();
+            let scale = (1000.0 / size.width().max(1.0)).max(1.0);
+            let width = (size.width() * scale).ceil() as u32;
+            let height = (size.height() * scale).ceil() as u32;
+            let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
+            resvg::render(
+                &tree,
+                resvg::tiny_skia::Transform::from_scale(scale, scale),
+                &mut pixmap.as_mut(),
+            );
+            egui::ColorImage::from_rgba_premultiplied(
+                [width as usize, height as usize],
+                pixmap.data(),
+            )
+        } else {
+            let image = image::load_from_memory(bytes).ok()?.to_rgba8();
+            let size = [image.width() as usize, image.height() as usize];
+            egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw())
+        };
         let texture = ctx.load_texture(
             format!("probe-help-{name}"),
             color_image,
