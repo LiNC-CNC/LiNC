@@ -1176,6 +1176,7 @@ impl LincApp {
         }
         "SAVE needs an idle interpreter; the machine is running.".into()
     }
+
     /// Hand the keyboard back to the page a dialog interrupted.
     ///
     /// egui drops the focus together with the widget that held it, so a closed
@@ -1190,6 +1191,7 @@ impl LincApp {
         }
         self.page_focus_requested = true;
     }
+
     /// The screen the panel's current mode owns.
     ///
     /// `MAIN` is the operator asking for "the screen for this mode", not for the
@@ -1211,6 +1213,7 @@ impl LincApp {
         }
         self.request_page(page);
     }
+
     pub fn set_page(&mut self, page: Page) {
         self.remember_page(page);
         if page == Page::Help && self.page != Page::Help {
