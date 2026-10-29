@@ -69,11 +69,12 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 fn homing_readout(app: &LincApp, rows: &[linc_core::homing::HomeAxisRow]) -> Vec<LiveAxisRow> {
     rows.iter()
         .map(|row| {
-            let position = app.snapshot.positions.axes.get(&row.name);
+            let (work, machine, _) = common::axis_display(app, &row.name)
+                .unwrap_or((row.position, row.position, 0.0));
             LiveAxisRow {
                 name: row.name.clone(),
-                work: position.map(|p| p.work).unwrap_or(row.position),
-                machine: position.map(|p| p.machine).unwrap_or(row.position),
+                work,
+                machine,
                 // Homing is about homed state and machine position; a
                 // remaining distance to go is noise here.
                 dtg: None,

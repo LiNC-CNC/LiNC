@@ -4060,11 +4060,14 @@ impl LincApp {
         let mut position = String::new();
         let mut dtg = String::new();
         for axis in self.axes() {
-            let Some(entry) = self.snapshot.positions.axes.get(&axis) else {
+            // Same frame as the DRO cards: the bar and the cards disagreeing
+            // about commanded vs actual would read as a position glitch.
+            let Some((work, _machine, entry_dtg)) = screens::common::axis_display(self, &axis)
+            else {
                 continue;
             };
-            position.push_str(&format!("{axis}{:+width$.3} ", entry.work, width = width));
-            dtg.push_str(&format!("{axis}{:+width$.3} ", entry.dtg, width = width));
+            position.push_str(&format!("{axis}{:+width$.3} ", work, width = width));
+            dtg.push_str(&format!("{axis}{:+width$.3} ", entry_dtg, width = width));
         }
         format!("{}  DTG: {}", position.trim_end(), dtg.trim_end())
     }

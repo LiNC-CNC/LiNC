@@ -111,8 +111,8 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                 .map(|edit| edit.axis == *axis)
                 .unwrap_or(false);
             let position = app.snapshot.positions.axes.get(axis);
-            let work = position.map(|p| p.work).unwrap_or(0.0);
-            let machine = position.map(|p| p.machine).unwrap_or(0.0);
+            let actual_work = position.map(|p| p.work).unwrap_or(0.0);
+            let (work, machine, _) = common::axis_display(app, axis).unwrap_or((0.0, 0.0, 0.0));
             // The Machine page's readout, without its DTG line and move bar.
             common::paint_dro_frame(ui, rect, editing);
             common::paint_dro_readout(
@@ -182,7 +182,11 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                     }
                 }
             } else if response.clicked() && writable && active.is_some() {
-                start = Some((axis.clone(), work));
+                // The edit seeds from the controller's own work position: what
+                // the operator types overwrites it and is written back through
+                // the same path, so the commanded display frame never leaks
+                // into the value being set.
+                start = Some((axis.clone(), actual_work));
             }
         }
     });

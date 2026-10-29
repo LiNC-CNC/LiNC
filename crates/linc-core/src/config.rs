@@ -131,10 +131,19 @@ pub struct UiConfig {
     /// Window-manager decorations (title bar, resize border).
     #[serde(default = "default_true")]
     pub decorations: bool,
+    /// Which position the DROs show: `"commanded"` (the value the controller is
+    /// driving toward) or `"actual"` (the feedback position, which is what an
+    /// operator compares against a cut). Defaults to `"commanded"`.
+    #[serde(default = "default_dro_position")]
+    pub dro_position: String,
 }
 
 fn default_window_mode() -> String {
     "auto".to_string()
+}
+
+fn default_dro_position() -> String {
+    "commanded".to_string()
 }
 
 fn default_true() -> bool {
@@ -852,6 +861,12 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
             config.ui.window_mode
         )));
     }
+    if !matches!(config.ui.dro_position.as_str(), "commanded" | "actual") {
+        return Err(ConfigError::Invalid(format!(
+            "ui.dro_position must be commanded or actual (got {:?})",
+            config.ui.dro_position
+        )));
+    }
     if config.machine.name.trim().is_empty() {
         return Err(ConfigError::Invalid(
             "machine.name must not be empty".into(),
@@ -1563,6 +1578,50 @@ enabled = true
         let error = Profile::load(&profile, None).unwrap_err();
         assert!(
             error.to_string().contains("simulation.panel_scale"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn dro_position_accepts_commanded_or_actual() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let profile = dir.path().join("sim.toml");
+        let profile_text = |dro: &str| {
+            format!(
+                r#"schema_version = 1
+profile = "sim"
+extends = "base.toml"
+[machine]
+name = "Test"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[ui]
+dro_position = "{dro}"
+[panel]
+kind = "simulated"
+driver = "cnc-panel-sim"
+[panel.link]
+kind = "virtual"
+[simulation]
+enabled = true
+"#
+            )
+        };
+        // The two accepted names load; anything else fails validation naming
+        // the key.
+        write(&profile, &profile_text("commanded"));
+        let loaded = Profile::load(&profile, None).unwrap();
+        assert_eq!(loaded.config.ui.dro_position, "commanded");
+        write(&profile, &profile_text("actual"));
+        let loaded = Profile::load(&profile, None).unwrap();
+        assert_eq!(loaded.config.ui.dro_position, "actual");
+        write(&profile, &profile_text("feedback"));
+        let error = Profile::load(&profile, None).unwrap_err();
+        assert!(
+            error.to_string().contains("ui.dro_position"),
             "{error}"
         );
     }

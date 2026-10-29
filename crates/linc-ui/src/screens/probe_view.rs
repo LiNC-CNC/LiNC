@@ -588,9 +588,7 @@ fn probe_dro(app: &mut LincApp, ui: &mut Ui) {
                 .map(|edit| edit.axis == axis)
                 .unwrap_or(false);
             common::paint_dro_frame(ui, rect, editing);
-            let position = app.snapshot.positions.axes.get(axis);
-            let work = position.map(|p| p.work).unwrap_or(0.0);
-            let machine = position.map(|p| p.machine).unwrap_or(0.0);
+            let (work, machine, _) = common::axis_display(app, axis).unwrap_or((0.0, 0.0, 0.0));
             let painter = ui.painter_at(rect);
             painter.text(
                 rect.left_top() + Vec2::new(10.0, 4.0),

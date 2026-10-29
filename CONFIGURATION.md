@@ -577,6 +577,18 @@ decorations = false
 profile, which is the escape hatch for a one-off run. `--check-config` rejects
 any value other than the four names above.
 
+### DRO position source
+
+`[ui] dro_position` chooses which position the DRO readouts show: `"commanded"`
+(the default) or `"actual"`. `"commanded"` is the value the controller is
+driving toward, so the readout leads the feedback and holds steady while the
+axis catches up; `"actual"` is the feedback position, which is what an operator
+compares against a cut. The machine-coordinate value in a `"commanded"` readout
+is the commanded machine coordinate, and the work value applies the same active
+offset to it, so the two frames stay consistent. Distance-to-go always stays the
+controller's own value. `--check-config` rejects any value other than the two
+names.
+
 ## 10. Schema reference
 
 | Table | Keys |
@@ -585,7 +597,7 @@ any value other than the four names above.
 | `[machine]` | `name`, `kind`, `gui`, `linuxcnc_ini` |
 | `[mill]` | optional `max_axes` |
 | `[lathe]` | optional `turret_stations`, `power_turret`, `live_tooling`, `live_tool_max_rpm`, `c_axis`, `y_axis`, `sub_spindle` |
-| `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages`, `servo_load` |
+| `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages`, `servo_load`, `window_mode`, `decorations`, `dro_position` |
 | `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width` |
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running`, `show_parent_above_root` |
 | `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter` |

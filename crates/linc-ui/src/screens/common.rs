@@ -3,7 +3,9 @@
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align, Color32, FontId, Layout, RichText, Sense, Ui, Vec2};
 use linc_core::gcode::{lex_line, Preview, TokenKind};
-use linc_core::model::{format_clock, AxisMap, MachineSnapshot, MachineVariant, PanelMode};
+use linc_core::model::{
+    format_clock, AxisMap, MachineSnapshot, MachineVariant, PanelMode, PositionSet,
+};
 use linc_view::{draw_trajectory, TrajectoryView, ViewMode};
 
 use crate::shell::LincApp;
@@ -522,10 +524,7 @@ pub fn paint_dro_progress(ui: &Ui, rect: egui::Rect, dtg: f64, fraction: f64) {
 }
 
 fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact: bool) {
-    let position = app.snapshot.positions.axes.get(axis);
-    let work = position.map(|p| p.work).unwrap_or(0.0);
-    let machine = position.map(|p| p.machine).unwrap_or(0.0);
-    let dtg = position.map(|p| p.dtg).unwrap_or(0.0);
+    let (work, machine, dtg) = axis_display(app, axis).unwrap_or((0.0, 0.0, 0.0));
     let active = app
         .snapshot
         .panel
@@ -1693,6 +1692,44 @@ pub fn work_positions(app: &LincApp) -> AxisMap<f64> {
     map
 }
 
+/// The position one DRO shows for one axis, per `[ui] dro_position`.
+///
+/// Returns `(work, machine, dtg)` in that order. `work` and `machine` are the
+/// configured frame; `dtg` always stays the controller's distance to go.
+/// `None` means the snapshot has no position entry for this axis at all, which
+/// a backend can produce before its first poll.
+pub fn axis_display(app: &LincApp, axis: &str) -> Option<(f64, f64, f64)> {
+    let position = *app.snapshot.positions.axes.get(axis)?;
+    Some(dro_frame(
+        app.profile.config.ui.dro_position.as_str(),
+        app.snapshot.machine.commanded.get(axis).copied(),
+        position,
+    ))
+}
+
+/// Apply the configured DRO position source to one axis's feedback position.
+///
+/// `"commanded"` shows the commanded machine coordinate — falling back to the
+/// feedback machine position when a backend has not populated `machine.commanded`
+/// yet, so the readout still shows numbers — and applies the same work offset
+/// the feedback position carries: `work = machine + (actual_work - actual_machine)`.
+/// `"actual"` returns the feedback position unchanged. Either way `dtg` stays
+/// the controller's value.
+fn dro_frame(
+    source: &str,
+    commanded_machine: Option<f64>,
+    position: PositionSet,
+) -> (f64, f64, f64) {
+    match source {
+        "commanded" => {
+            let machine = commanded_machine.unwrap_or(position.machine);
+            let work = machine + (position.work - position.machine);
+            (work, machine, position.dtg)
+        }
+        _ => (position.work, position.machine, position.dtg),
+    }
+}
+
 /// Keyboard focus stop with nothing drawn.
 ///
 /// A page needs one focusable widget at the top so arrow-key navigation can
@@ -2468,6 +2505,39 @@ mod tests {
         assert_eq!(dro_axis_label("X", false), "X");
         assert_eq!(dro_axis_label("X", true), "X DIA");
         assert_eq!(dro_axis_label("Z", true), "Z");
+    }
+
+    /// The commanded frame shows the commanded machine coordinate and applies
+    /// the same work offset the feedback position carries; the fallback keeps
+    /// numbers on screen while a backend has not populated `machine.commanded`.
+    #[test]
+    fn the_dro_command_source_derives_work_from_the_same_offset() {
+        // Feedback machine 100, work 12: the active offset is -88.
+        let feedback = linc_core::model::PositionSet {
+            work: 12.0,
+            machine: 100.0,
+            dtg: -3.5,
+            velocity: 0.0,
+        };
+        // Commanded lags the feedback by 0.25 mm; the work offset is -88, so
+        // the commanded work value is 99.75 - 88 = 11.75.
+        let (work, machine, dtg) = super::dro_frame("commanded", Some(99.75), feedback);
+        assert!((work - 11.75).abs() < 1e-9);
+        assert!((machine - 99.75).abs() < 1e-9);
+        assert!((dtg + 3.5).abs() < 1e-9);
+
+        // No commanded entry yet: fall back to the feedback machine position,
+        // so the readout shows numbers instead of blanks.
+        let (work, machine, dtg) = super::dro_frame("commanded", None, feedback);
+        assert!((work - 12.0).abs() < 1e-9);
+        assert!((machine - 100.0).abs() < 1e-9);
+        assert!((dtg + 3.5).abs() < 1e-9);
+
+        // Actual returns the feedback position unchanged.
+        let (work, machine, dtg) = super::dro_frame("actual", Some(99.75), feedback);
+        assert!((work - 12.0).abs() < 1e-9);
+        assert!((machine - 100.0).abs() < 1e-9);
+        assert!((dtg + 3.5).abs() < 1e-9);
     }
 
     #[test]

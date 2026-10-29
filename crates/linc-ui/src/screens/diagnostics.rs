@@ -1320,10 +1320,10 @@ fn hal_pin_rows(app: &LincApp) -> Vec<(String, String)> {
         app.snapshot.panel.sseg_next_tool.to_string(),
     ));
     for axis in app.axes() {
-        let position = app.snapshot.positions.axes.get(&axis);
+        let (work, _machine, _) = common::axis_display(app, &axis).unwrap_or((0.0, 0.0, 0.0));
         rows.push((
             format!("axis.{}.position", axis.to_ascii_lowercase()),
-            format!("{:.4}", position.map(|p| p.work).unwrap_or(0.0)),
+            format!("{:.4}", work),
         ));
     }
     rows.push((

@@ -60,7 +60,7 @@ fn coordinates_readout(app: &LincApp) -> Vec<LiveAxisRow> {
     app.axes()
         .into_iter()
         .map(|axis| {
-            let position = app.snapshot.positions.axes.get(&axis);
+            let (work, machine, dtg) = common::axis_display(app, &axis).unwrap_or((0.0, 0.0, 0.0));
             LiveAxisRow {
                 active: app
                     .snapshot
@@ -70,9 +70,9 @@ fn coordinates_readout(app: &LincApp) -> Vec<LiveAxisRow> {
                     .as_deref()
                     .map(|name| name == axis)
                     .unwrap_or(false),
-                work: position.map(|p| p.work).unwrap_or(0.0),
-                machine: position.map(|p| p.machine).unwrap_or(0.0),
-                dtg: Some(position.map(|p| p.dtg).unwrap_or(0.0)),
+                work,
+                machine,
+                dtg: Some(dtg),
                 name: axis,
                 badge: None,
                 note: None,

@@ -409,6 +409,10 @@ Fixed shell, no right-hand status column:
 - **DRO readout**: one line — axis name at the coordinate's own size, the value,
   and a dimmed `M …` machine value that is dropped whole when it would touch the
   value. The card carries the DTG line and move bar underneath, nothing above.
+  The value is the **commanded** position by default, which is where the
+  interpreter thinks the tool is; `[ui] dro_position = "actual"` shows the
+  feedback position instead. DTG stays the controller's distance to go, and the
+  control paths (touch-off, zero, DRO entry) always use the actual/work values.
 - **Central page**: active screen.
 - **Bottom action bar**: real keycaps (`MAIN`, `FILE`, `OFFSET`, `TOOL`, `WIN`,
   `ESC`), context actions including `HELP`, and a compact read-only machine

@@ -27,6 +27,10 @@ servo_load = ["X", "Y", "Z"]
 # How the window appears at startup: "auto" takes the whole screen on a real
 # machine and opens a normal window in simulation.
 window_mode = "auto"
+# Which position the DROs show: "commanded" (the value the controller is
+# driving toward, the default) or "actual" (the feedback position, which is
+# what an operator compares against a cut).
+dro_position = "commanded"
 # Window-manager decorations. The control-panel setup is a borderless maximised
 # window: window_mode = "maximized" with decorations = false.
 decorations = true
