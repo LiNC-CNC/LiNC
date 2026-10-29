@@ -3997,7 +3997,9 @@ impl LincApp {
                         ("FILE".into(), "BROWSER"),
                         (k.program_run_from_line.label(), "RUN LINE"),
                         (k.goto_line.label(), "GOTO"),
-                        (k.messages.label(), "MESSAGES"),
+                        // No MESSAGES key here: while the editor has the
+                        // keyboard a plain letter is text, so the shortcut
+                        // advertised a key that types an M into the program.
                         (k.save.label(), "SAVE"),
                         (k.undo.label(), "UNDO"),
                         (k.redo.label(), "REDO"),
