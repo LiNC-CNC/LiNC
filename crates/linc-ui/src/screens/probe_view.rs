@@ -1215,6 +1215,7 @@ fn param_field_sized(
         );
         if editable && response.clicked() {
             app.probe.param_selected = index;
+            app.probe.calibrate_action = None;
             app.probe.param_focused = true;
             app.probe.param_editing = false;
             app.probe.param_buffer.clear();
@@ -1446,6 +1447,7 @@ pub(crate) fn issue_probe_mdi(app: &mut LincApp, block: String, toast: &str) {
 /// closes the parameter editor and clears the last error.
 fn select_routine(app: &mut LincApp, operation: &str) {
     app.probe.operation = operation.to_string();
+    app.probe.calibrate_action = None;
     app.probe.param_focused = false;
     app.probe.param_editing = false;
     app.probe.param_buffer.clear();
@@ -2518,6 +2520,15 @@ fn calibration_result_readout(app: &LincApp, ui: &mut Ui) {
         });
 }
 
+fn calibration_focus_ring(ui: &Ui, rect: Rect) {
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(5),
+        Stroke::new(2.0, theme::FG),
+        StrokeKind::Inside,
+    );
+}
+
 fn calibration_panel(app: &mut LincApp, ui: &mut Ui) {
     #[cfg_attr(not(test), allow(unused_variables))]
     let card_top = ui.cursor().min.y;
@@ -2614,21 +2625,31 @@ fn calibration_panel(app: &mut LincApp, ui: &mut Ui) {
                         .get_or_insert(calibrate.rect);
                 }
                 if calibrate.clicked() {
+                    app.probe.calibrate_action = Some(0);
                     run_calibration(app, 0);
                 }
+                if app.probe.calibrate_action == Some(0) {
+                    calibration_focus_ring(ui, calibrate.rect);
+                }
                 ui.horizontal(|ui| {
-                    if theme::action_button(ui, "CAL ON X ERROR", true).clicked() {
+                    let x = theme::action_button(ui, "CAL ON X ERROR", true);
+                    if x.clicked() {
+                        app.probe.calibrate_action = Some(1);
                         run_calibration(app, 1);
                     }
-                    if theme::action_button(ui, "CAL ON Y ERROR", true).clicked() {
+                    if app.probe.calibrate_action == Some(1) {
+                        calibration_focus_ring(ui, x.rect);
+                    }
+                    let y = theme::action_button(ui, "CAL ON Y ERROR", true);
+                    if y.clicked() {
+                        app.probe.calibrate_action = Some(2);
                         run_calibration(app, 2);
                     }
+                    if app.probe.calibrate_action == Some(2) {
+                        calibration_focus_ring(ui, y.rect);
+                    }
                 });
-                ui.label(
-                    RichText::new("CTRL+P · ARROWS · ENTER EDIT DIMENSIONS")
-                        .size(theme::font_size(7.5))
-                        .color(theme::MUTED),
-                );
+                ui.add_space(theme::font_size(9.0));
                 ui.label(
                     RichText::new(
                         "CALIBRATION OFFSET IS READ-ONLY; U/RUN CANNOT OVERWRITE NEW CALIBRATION.",
@@ -3010,6 +3031,7 @@ fn start_param_edit(app: &mut LincApp) {
         return;
     }
     app.probe.param_buffer = param_text(&app.probe.params, app.probe.param_selected);
+    app.probe.calibrate_action = None;
     app.probe.param_focused = true;
     app.probe.param_editing = true;
     app.probe.param_edit_focus = true;
@@ -3097,6 +3119,63 @@ fn on_stacked_hint(
     ) && hint_parameters(category, operation).contains(&selected)
 }
 
+fn handle_calibrate_action_keys(app: &mut LincApp, ui: &mut Ui) -> bool {
+    if app.probe.category != ProbeCategory::Calibrate {
+        app.probe.calibrate_action = None;
+        return false;
+    }
+    let Some(current) = app.probe.calibrate_action else {
+        return false;
+    };
+    let mut delta = 0isize;
+    let mut run = false;
+    let mut leave = false;
+    let mut back_to_fields = false;
+    ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+            leave = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
+            delta -= 1;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
+            delta += 1;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            delta += 1;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            if current == 0 {
+                back_to_fields = true;
+            } else {
+                delta -= 1;
+            }
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+            run = true;
+        }
+    });
+    if leave {
+        app.probe.calibrate_action = None;
+        return true;
+    }
+    if back_to_fields {
+        app.probe.calibrate_action = None;
+        app.probe.param_focused = true;
+        app.probe.param_selected = 21;
+        app.probe.param_editing = false;
+        app.probe.param_buffer.clear();
+        return true;
+    }
+    if delta != 0 {
+        app.probe.calibrate_action = Some((current as isize + delta).clamp(0, 2) as usize);
+    }
+    if run {
+        run_calibration(app, current as u8);
+    }
+    leave || back_to_fields || delta != 0 || run
+}
+
 fn handle_param_nav_keys(app: &mut LincApp, ui: &mut Ui) -> bool {
     if !app.probe.param_focused
         || !parameter_editable(app.probe.category)
@@ -3142,6 +3221,17 @@ fn handle_param_nav_keys(app: &mut LincApp, ui: &mut Ui) -> bool {
     let delta = column_delta + row_delta * row_step;
     if leave {
         app.probe.param_focused = false;
+        return true;
+    }
+    let last_calibration_parameter = editor_parameters(app).last().copied();
+    if app.probe.category == ProbeCategory::Calibrate
+        && row_delta > 0
+        && last_calibration_parameter == Some(app.probe.param_selected)
+    {
+        app.probe.param_focused = false;
+        app.probe.param_editing = false;
+        app.probe.param_buffer.clear();
+        app.probe.calibrate_action = Some(0);
         return true;
     }
     if delta == 0 && !edit {
@@ -3331,11 +3421,15 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     if focus_first && parameter_editable(app.probe.category) {
         if let Some(index) = default_parameter(app.probe.category, app.probe.operation()) {
             app.probe.param_selected = index;
+            app.probe.calibrate_action = None;
             app.probe.param_focused = true;
             app.probe.param_editing = false;
             app.probe.param_buffer.clear();
             app.probe.error = None;
         }
+        return;
+    }
+    if handle_calibrate_action_keys(app, ui) {
         return;
     }
     if handle_probe_mode_keys(app, ui) {
@@ -3388,6 +3482,7 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
 /// Enter would run.
 pub fn clear_selection(app: &mut LincApp) {
     app.probe.operation.clear();
+    app.probe.calibrate_action = None;
     app.probe.param_focused = false;
     app.probe.param_editing = false;
     app.probe.param_buffer.clear();

@@ -9557,6 +9557,70 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     }
 
     #[test]
+    fn calibration_arrows_move_from_fields_to_actions_and_back() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::Calibrate, "cal_round_boss");
+        harness.frame(&[]);
+        harness.frame_with(&[(
+            egui::Key::P,
+            egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+        )]);
+        assert_eq!(harness.app.probe.param_selected, 19);
+        assert!(harness.app.probe.param_focused);
+
+        harness.frame(&[egui::Key::ArrowDown]);
+        assert_eq!(harness.app.probe.param_selected, 20);
+        harness.frame(&[egui::Key::ArrowDown]);
+        assert_eq!(harness.app.probe.param_selected, 21);
+        harness.frame(&[egui::Key::ArrowDown]);
+        assert!(!harness.app.probe.param_focused);
+        assert_eq!(harness.app.probe.calibrate_action, Some(0));
+
+        harness.frame(&[egui::Key::ArrowRight]);
+        assert_eq!(harness.app.probe.calibrate_action, Some(1));
+        harness.frame(&[egui::Key::ArrowRight]);
+        assert_eq!(harness.app.probe.calibrate_action, Some(2));
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert_eq!(harness.app.probe.calibrate_action, Some(1));
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert_eq!(harness.app.probe.calibrate_action, Some(0));
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert_eq!(harness.app.probe.calibrate_action, None);
+        assert!(harness.app.probe.param_focused);
+        assert_eq!(harness.app.probe.param_selected, 21);
+    }
+
+    #[test]
+    fn enter_on_a_focused_calibration_action_runs_it() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::Calibrate, "cal_round_boss");
+        harness.frame(&[]);
+        harness.frame_with(&[(
+            egui::Key::P,
+            egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+        )]);
+        harness.frame(&[egui::Key::ArrowDown]);
+        harness.frame(&[egui::Key::ArrowDown]);
+        harness.frame(&[egui::Key::ArrowDown]);
+        assert_eq!(harness.app.probe.calibrate_action, Some(0));
+        let sent = harness.mdi_sent();
+        harness.frame(&[egui::Key::Enter]);
+        let after = harness.mdi_sent();
+        assert!(
+            after.len() > sent.len(),
+            "focused CAL ON action must issue MDI: {:?}",
+            harness.sent_debug()
+        );
+        assert!(
+            after
+                .iter()
+                .any(|block| block.contains("o<probe_cal_round_boss> call")),
+            "{:?}",
+            harness.sent_debug()
+        );
+    }
+
+    #[test]
     fn probe_labels_hide_internal_numbers_and_empty_apply_prompts() {
         for category in [
             ProbeCategory::OutsideCorners,

@@ -991,6 +991,9 @@ choose a routine group, then pick the operation card.
   with a shared label column and a shared input column. `Ctrl+P` selects the
   first visible hint there instead of the first common parameter; Up/Down move
   one stacked hint at a time, and Left/Right do not leave the single column.
+  On Calibrate, Down from the last dimension moves the focus to the CAL ON
+  buttons; Left/Right choose one, Enter runs it, and Up from the first button
+  returns to the dimensions.
 - `Enter` builds the selected `o<probe_...> call` and its argument values,
   then issues it immediately using Probe Basic's `issue_mdi` semantics:
   temporary MDI mode, command sent, previous task mode restored when the

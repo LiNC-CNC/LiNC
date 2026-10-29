@@ -1066,6 +1066,9 @@ pub struct ProbeUi {
     pub dro_edit: Option<DroEdit>,
     pub help_topic: usize,
     pub help_page: usize,
+    /// Calibrate tab: Some(0..=2) while keyboard focus is on the CAL ON
+    /// buttons rather than a parameter field.
+    pub calibrate_action: Option<usize>,
 }
 
 impl ProbeUi {
@@ -1089,6 +1092,7 @@ impl ProbeUi {
             dro_edit: None,
             help_topic: 0,
             help_page: 0,
+            calibrate_action: None,
         }
     }
 
