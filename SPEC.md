@@ -981,7 +981,11 @@ choose a routine group, then pick the operation card.
 - Parameter entry follows the Offsets table: click a field to select it, the
   arrow keys move between fields, `Enter` opens the inline editor, `Enter`
   again commits the value and `Esc` cancels. Arithmetic expressions are
-  accepted, as in the offset cells.
+  accepted, as in the offset cells. On Boss + Pocket and Ridge + Valley, the
+  operation-specific hint fields in the routine pane are stacked one per row,
+  with a shared label column and a shared input column. `Ctrl+P` selects the
+  first visible hint there instead of the first common parameter; Up/Down move
+  one stacked hint at a time, and Left/Right do not leave the single column.
 - `Enter` builds the selected `o<probe_...> call` and its argument values,
   then issues it immediately using Probe Basic's `issue_mdi` semantics:
   temporary MDI mode, command sent, previous task mode restored when the
@@ -1814,8 +1818,8 @@ Only the accepted versions are included.
 | `svg/lathe-dashboard.svg` | Lathe dashboard: X/Z/C/Y cards, XZ toolpath, power turret/live-tool card, spindle load and machine health |
 | `svg/probe.svg` | Touch probe — outside corners: keyboard-first Probe Basic 3×3 matrix (numpad 1–9 highlight, Enter run), passive offset-key category indicator, Probe Basic parameter/result block, work offsets and live probe LED |
 | `svg/probe-inside-corners.svg` | Touch probe — inside corners: four inside corners, straight X/Y edges and Z centre in the same 3×3 matrix |
-| `svg/probe-boss-pocket.svg` | Touch probe — boss and pocket: six round/rect boss and pocket routines plus the diam/X/Y hint row |
-| `svg/probe-ridge-valley.svg` | Touch probe — ridge and valley: six ridge/valley routines plus the X/Y hint row |
+| `svg/probe-boss-pocket.svg` | Touch probe — boss and pocket: six round/rect boss and pocket routines plus the stacked diam/X/Y hint fields |
+| `svg/probe-ridge-valley.svg` | Touch probe — ridge and valley: six ridge/valley routines plus the stacked X/Y hint fields |
 | `svg/probe-edge-angle.svg` | Touch probe — edge angle: four corner and four top-edge angle routines with the WCO-rotation note |
 | `svg/probe-calibrate.svg` | Touch probe — calibrate: calibration offset, 2×2 round/square boss/pocket routines, diameter/width fields and reset |
 | `svg/probe-help.svg` | Touch probe — help: topic list, step-off-width explanation and dimensioned probe diagram |

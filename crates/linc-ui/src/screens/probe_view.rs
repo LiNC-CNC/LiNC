@@ -303,25 +303,25 @@ const EDGE: &[Card] = &[
 
 const CALIBRATE: &[Card] = &[
     Card {
-        key: "1",
+        key: "3",
         label: "ROUND POCKET",
         operation: "cal_round_pocket",
         icon: Icon::CalRoundPocket,
     },
     Card {
-        key: "2",
+        key: "4",
         label: "ROUND BOSS",
         operation: "cal_round_boss",
         icon: Icon::CalRoundBoss,
     },
     Card {
-        key: "3",
+        key: "1",
         label: "SQUARE POCKET",
         operation: "cal_square_pocket",
         icon: Icon::CalSquarePocket,
     },
     Card {
-        key: "4",
+        key: "2",
         label: "SQUARE BOSS",
         operation: "cal_square_boss",
         icon: Icon::CalSquareBoss,
@@ -398,10 +398,15 @@ pub struct ProbeLayout {
     pub routine_cards: Vec<(String, egui::Rect)>,
     /// The hint parameters the card drew under the grid.
     pub hints_drawn: Option<Vec<usize>>,
-    /// One DRO tile, one hint field, one calibration card and one calibration
-    /// button: the remaining clickable kinds on the page.
+    /// One DRO tile, one calibration card and one calibration button: the
+    /// remaining clickable kinds on the page.
     pub dro_target: Option<egui::Rect>,
-    pub hint_target: Option<egui::Rect>,
+    /// The hint fields and their labels, in draw order, so the layout test can
+    /// prove the stack shares one label column and one field column.
+    pub hint_fields: Vec<(usize, egui::Rect)>,
+    pub hint_labels: Vec<(usize, egui::Rect)>,
+    /// The calibration parameter fields, in draw order.
+    pub calibrate_fields: Vec<(usize, egui::Rect)>,
     pub calibrate_card: Option<egui::Rect>,
     pub calibrate_action: Option<egui::Rect>,
 }
@@ -423,7 +428,9 @@ impl Default for ProbeLayout {
             routine_cards: Vec::new(),
             hints_drawn: None,
             dro_target: None,
-            hint_target: None,
+            hint_fields: Vec::new(),
+            hint_labels: Vec::new(),
+            calibrate_fields: Vec::new(),
             calibrate_card: None,
             calibrate_action: None,
         }
@@ -872,7 +879,7 @@ fn parameters_card(app: &mut LincApp, ui: &mut Ui) {
 /// Labels in absolute Probe Basic value order: index 0 is #3014 and index 22
 /// is #3036. The two machine/controller-owned values remain read-only.
 pub(crate) const PARAM_LABELS: [&str; 23] = [
-    "PROBE TOOL #3014",
+    "PROBE TOOL",
     "PROBE SLOW FDRATE",
     "PROBE FAST FDRATE",
     "PROBE TRAVERSE FR",
@@ -883,24 +890,25 @@ pub(crate) const PARAM_LABELS: [&str; 23] = [
     "EXTRA PROBE DEPTH",
     "STEP OFF WIDTH",
     "EDGE WIDTH",
-    "BOSS/POCKET DIAM #3025",
+    "BOSS/POCKET DIAM",
     "BOSS/POCKET X WIDTH",
     "BOSS/POCKET Y WIDTH",
     "RIDGE/VALLEY X WIDTH",
     "RIDGE/VALLEY Y WIDTH",
     "WCO MODE",
     "WCS ROTATION",
-    "CALIBRATION OFFSET #3032",
+    "CALIBRATION OFFSET",
     "CALIBRATION DIAMETER",
     "CALIBRATION WIDTH X",
     "CALIBRATION WIDTH Y",
-    "CALIBRATION AXIS #3036",
+    "CALIBRATION AXIS",
 ];
 
 /// Visual order in the common two-column card. #3025 lives with the other
 /// operation-specific hints instead of being mislabeled as stylus diameter.
 pub(crate) const COMMON_PARAMS: &[usize] = &[0, 1, 3, 2, 4, 5, 6, 7, 8, 9, 10];
 
+#[cfg(test)]
 fn parameter_number(index: usize) -> u16 {
     3014 + index as u16
 }
@@ -985,23 +993,70 @@ fn hint_parameters(category: ProbeCategory, operation: Option<&ProbeOperation>) 
     }
 }
 
-fn editor_parameters(app: &LincApp) -> Vec<usize> {
-    if app.probe.category == ProbeCategory::Calibrate {
-        return hint_parameters(app.probe.category, app.probe.operation());
+/// One label column wide enough for the longest visible hint. A narrower
+/// column would wrap or clip a label, and the fields would no longer share one
+/// left edge.
+fn hint_label_width(ui: &Ui, hints: &[usize]) -> f32 {
+    let font = FontId::monospace(theme::font_size(7.5));
+    let width = hints
+        .iter()
+        .map(|index| {
+            ui.fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(hint_name(*index).to_string(), font.clone(), theme::MUTED)
+                    .size()
+                    .x
+            })
+        })
+        .fold(0.0, f32::max);
+    width.max(82.0) + 4.0
+}
+
+fn editor_parameters_for(
+    category: ProbeCategory,
+    operation: Option<&ProbeOperation>,
+) -> Vec<usize> {
+    if category == ProbeCategory::Calibrate {
+        return hint_parameters(category, operation);
     }
     let mut indices: Vec<usize> = COMMON_PARAMS
         .iter()
         .copied()
         .filter(|index| parameter_value_editable(*index))
         .collect();
-    indices.extend(hint_parameters(app.probe.category, app.probe.operation()));
+    indices.extend(hint_parameters(category, operation));
     indices
+}
+
+fn editor_parameters(app: &LincApp) -> Vec<usize> {
+    editor_parameters_for(app.probe.category, app.probe.operation())
+}
+
+/// The field `Ctrl+P` selects. Boss + Pocket and Ridge + Valley put their
+/// operation-specific hints in the routine pane, so the shortcut starts there;
+/// every other tab starts at the first common parameter.
+fn default_parameter(category: ProbeCategory, operation: Option<&ProbeOperation>) -> Option<usize> {
+    let hint_first = matches!(
+        category,
+        ProbeCategory::BossAndPocket | ProbeCategory::RidgeAndValley
+    );
+    if hint_first {
+        if let Some(index) = hint_parameters(category, operation).first() {
+            return Some(*index);
+        }
+    }
+    editor_parameters_for(category, operation).first().copied()
 }
 
 /// Height of one pointer target, the minimum SPEC §5 requires at 1280x720.
 const TARGET: f32 = theme::MIN_TARGET;
 /// Columns in the parameters grid; Up/Down move one row of this many fields.
 const PARAM_COLUMNS: isize = 4;
+/// Vertical gap between the stacked routine-hint rows.
+const HINT_ROW_GAP: f32 = 3.0;
+/// Label column and the gap before a calibration field.
+const CALIBRATION_LABEL_WIDTH: f32 = 128.0;
+const CALIBRATION_LABEL_GAP: f32 = 16.0;
 
 /// Fields per row in the grid this category draws: the Calibrate panel lists
 /// its three dimensions vertically, the main card uses the parameter grid.
@@ -1014,13 +1069,14 @@ fn param_row_step(category: ProbeCategory) -> isize {
 }
 
 fn param_label(ui: &mut Ui, text: &str) {
-    ui.add_sized(
-        [104.0, 16.0],
-        egui::Label::new(
-            RichText::new(text)
-                .size(theme::font_size(7.2))
-                .color(theme::MUTED),
-        ),
+    let (rect, _) =
+        ui.allocate_exact_size(Vec2::new(CALIBRATION_LABEL_WIDTH, TARGET), Sense::hover());
+    ui.painter().text(
+        Pos2::new(rect.left(), rect.center().y),
+        Align2::LEFT_CENTER,
+        text,
+        FontId::monospace(theme::font_size(7.2)),
+        theme::MUTED,
     );
 }
 
@@ -1031,7 +1087,7 @@ fn param_cell(ui: &mut Ui, app: &mut LincApp, index: usize, width: f32) {
     param_field_sized(ui, app, index, &text, width, Some(PARAM_LABELS[index]));
 }
 
-fn read_only_field(ui: &mut Ui, text: &str, width: f32, caption: Option<&str>) {
+fn read_only_field(ui: &mut Ui, text: &str, width: f32, caption: Option<&str>) -> Rect {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, TARGET), Sense::hover());
     ui.painter()
         .rect_filled(rect, CornerRadius::same(2), theme::PANEL_RAISED);
@@ -1061,10 +1117,11 @@ fn read_only_field(ui: &mut Ui, text: &str, width: f32, caption: Option<&str>) {
         FontId::monospace(theme::font_size(9.0)),
         theme::MUTED,
     );
+    rect
 }
 
-fn param_field(ui: &mut Ui, app: &mut LincApp, index: usize, text: &str) {
-    param_field_sized(ui, app, index, text, 64.0, None);
+fn param_field(ui: &mut Ui, app: &mut LincApp, index: usize, text: &str) -> Rect {
+    param_field_sized(ui, app, index, text, 64.0, None)
 }
 
 /// `caption` draws the parameter name inside the field's top edge, which is how
@@ -1231,17 +1288,6 @@ fn results_card(app: &mut LincApp, ui: &mut Ui) {
                     ui.end_row();
                 }
             });
-        let legend = match app.snapshot.probe.calibration_offset {
-            Some(cal) => format!(
-                "#3032 CAL OFFSET {cal:+.4} · ACCENT BORDER = APPLY SOURCE · — = NOT UPDATED BY THIS RUN"
-            ),
-            None => "ACCENT BORDER = APPLY SOURCE · — = NOT UPDATED BY THIS RUN".into(),
-        };
-        ui.label(
-            RichText::new(legend)
-                .size(theme::font_size(7.0))
-                .color(theme::MUTED),
-        );
         apply_action_context(app, ui);
     });
 }
@@ -1268,13 +1314,6 @@ fn apply_source_parameters(result: &ProbeResult) -> std::collections::HashSet<u1
 fn apply_action_context(app: &LincApp, ui: &mut Ui) {
     let active = app.active_wcs_label();
     let Some(result) = app.snapshot.probe.last_result.as_ref() else {
-        // Nothing to apply: one line says it, two would only repeat each other.
-        ui.label(
-            RichText::new(format!("A APPLY — NO PROBE RESULT -> {active}"))
-                .size(theme::font_size(8.0))
-                .strong()
-                .color(theme::MUTED),
-        );
         return;
     };
     let action = format!("A APPLY {} -> {active}", result.routine);
@@ -1524,7 +1563,7 @@ fn matrix_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
         let hint_h = if hints.is_empty() {
             0.0
         } else {
-            TARGET + ui.spacing().item_spacing.y
+            hints.len() as f32 * TARGET + (hints.len() - 1) as f32 * HINT_ROW_GAP
         };
         let consumed = ui.cursor().min.y - inner_top;
         let grid_h = (budget - consumed - hint_h).max(0.0);
@@ -1582,28 +1621,38 @@ fn matrix_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
             {
                 app.probe_layout.hints_drawn = Some(hints.clone());
             }
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
+            let label_w = hint_label_width(ui, &hints);
+            let field_w = (ui.available_width() - label_w - 8.0).clamp(58.0, 140.0);
+            let field_left = ((ui.available_width() - field_w) * 0.5).max(0.0);
+            let row_left = (field_left - label_w - 8.0).max(0.0);
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                ui.spacing_mut().item_spacing.y = HINT_ROW_GAP;
                 for index in &hints {
-                    let text = param_text(&app.probe.params, *index);
-                    ui.add_sized(
-                        [82.0, 16.0],
-                        egui::Label::new(
-                            RichText::new(format!(
-                                "{} #{}",
-                                hint_name(*index),
-                                parameter_number(*index)
-                            ))
-                            .size(theme::font_size(7.5))
-                            .color(theme::MUTED),
-                        ),
-                    );
-                    #[cfg_attr(not(test), allow(unused_variables))]
-                    let field = param_field_sized(ui, app, *index, &text, 58.0, None);
-                    #[cfg(test)]
-                    {
-                        app.probe_layout.hint_target.get_or_insert(field);
-                    }
+                    ui.horizontal(|ui| {
+                        ui.add_space(row_left);
+                        #[cfg_attr(not(test), allow(unused_variables))]
+                        let label = ui.add_sized(
+                            [label_w, TARGET],
+                            egui::Label::new(
+                                RichText::new(hint_name(*index))
+                                    .monospace()
+                                    .size(theme::font_size(7.5))
+                                    .color(theme::MUTED),
+                            ),
+                        );
+                        #[cfg(test)]
+                        {
+                            app.probe_layout.hint_labels.push((*index, label.rect));
+                        }
+                        let text = param_text(&app.probe.params, *index);
+                        #[cfg_attr(not(test), allow(unused_variables))]
+                        let field = param_field_sized(ui, app, *index, &text, field_w, None);
+                        #[cfg(test)]
+                        {
+                            app.probe_layout.hint_fields.push((*index, field));
+                        }
+                    });
                 }
             });
         }
@@ -2481,21 +2530,6 @@ fn calibration_panel(app: &mut LincApp, ui: &mut Ui) {
                 );
             });
         });
-        ui.horizontal(|ui| {
-            param_label(ui, "#3032 CALIBRATION OFFSET");
-            read_only_field(ui, &param_text(&app.probe.params, 18), 86.0, None);
-            ui.label(
-                RichText::new(format!(
-                    "{} · CONTROLLER SYNC",
-                    app.snapshot.positions.units
-                ))
-                .size(theme::font_size(8.0))
-                .color(theme::MUTED),
-            );
-            if theme::action_button(ui, "Ctrl+R RESET CAL", true).clicked() {
-                reset_calibration(app);
-            }
-        });
         ui.add_space(4.0);
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
@@ -2531,30 +2565,39 @@ fn calibration_panel(app: &mut LincApp, ui: &mut Ui) {
             );
             ui.add_space(12.0);
             ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    param_label(ui, "CALIBRATION OFFSET");
+                    ui.add_space(CALIBRATION_LABEL_GAP);
+                    #[cfg_attr(not(test), allow(unused_variables))]
+                    let field = read_only_field(ui, &param_text(&app.probe.params, 18), 64.0, None);
+                    #[cfg(test)]
+                    {
+                        app.probe_layout.calibrate_fields.push((18, field));
+                    }
+                });
                 for index in [19, 20, 21] {
                     ui.horizontal(|ui| {
                         param_label(ui, PARAM_LABELS[index]);
+                        ui.add_space(CALIBRATION_LABEL_GAP);
                         let text = param_text(&app.probe.params, index);
-                        param_field(ui, app, index, &text);
-                        ui.label(
-                            RichText::new(format!("#{}", parameter_number(index)))
-                                .size(theme::font_size(7.5))
-                                .color(theme::MUTED),
-                        );
+                        #[cfg_attr(not(test), allow(unused_variables))]
+                        let field = param_field(ui, app, index, &text);
+                        #[cfg(test)]
+                        {
+                            app.probe_layout.calibrate_fields.push((index, field));
+                        }
                     });
                 }
                 ui.add_space(3.0);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!(
-                            "#3036  V CAL AXIS: {}",
-                            calibration_axis_label(app.probe.params.square_cal_axis)
-                        ))
-                        .size(theme::font_size(8.5))
-                        .strong()
-                        .color(theme::ACCENT),
-                    );
-                });
+                ui.label(
+                    RichText::new(format!(
+                        "V CAL AXIS: {}",
+                        calibration_axis_label(app.probe.params.square_cal_axis)
+                    ))
+                    .size(theme::font_size(8.5))
+                    .strong()
+                    .color(theme::ACCENT),
+                );
                 let calibrate = theme::accent_button(ui, "CAL ON AVG XY ERROR", true);
                 #[cfg(test)]
                 {
@@ -2579,9 +2622,11 @@ fn calibration_panel(app: &mut LincApp, ui: &mut Ui) {
                         .color(theme::MUTED),
                 );
                 ui.label(
-                    RichText::new("#3032 IS READ-ONLY; U/RUN CANNOT OVERWRITE NEW CALIBRATION.")
-                        .size(theme::font_size(7.0))
-                        .color(theme::MUTED),
+                    RichText::new(
+                        "CALIBRATION OFFSET IS READ-ONLY; U/RUN CANNOT OVERWRITE NEW CALIBRATION.",
+                    )
+                    .size(theme::font_size(7.0))
+                    .color(theme::MUTED),
                 );
                 run_action_context(app, ui);
                 calibration_result_readout(app, ui);
@@ -2913,6 +2958,17 @@ fn handle_param_edit_keys(app: &mut LincApp, ui: &mut Ui) {
     }
 }
 
+fn on_stacked_hint(
+    category: ProbeCategory,
+    operation: Option<&ProbeOperation>,
+    selected: usize,
+) -> bool {
+    matches!(
+        category,
+        ProbeCategory::BossAndPocket | ProbeCategory::RidgeAndValley
+    ) && hint_parameters(category, operation).contains(&selected)
+}
+
 fn handle_param_nav_keys(app: &mut LincApp, ui: &mut Ui) -> bool {
     if !app.probe.param_focused
         || !parameter_editable(app.probe.category)
@@ -2944,7 +3000,18 @@ fn handle_param_nav_keys(app: &mut LincApp, ui: &mut Ui) -> bool {
             edit = true;
         }
     });
-    let delta = column_delta + row_delta * param_row_step(app.probe.category);
+    let selected_is_hint = on_stacked_hint(
+        app.probe.category,
+        app.probe.operation(),
+        app.probe.param_selected,
+    );
+    let column_delta = if selected_is_hint { 0 } else { column_delta };
+    let row_step = if selected_is_hint {
+        1
+    } else {
+        param_row_step(app.probe.category)
+    };
+    let delta = column_delta + row_delta * row_step;
     if leave {
         app.probe.param_focused = false;
         return true;
@@ -3134,7 +3201,7 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     }
     let focus_first = ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::P));
     if focus_first && parameter_editable(app.probe.category) {
-        if let Some(index) = editor_parameters(app).first().copied() {
+        if let Some(index) = default_parameter(app.probe.category, app.probe.operation()) {
             app.probe.param_selected = index;
             app.probe.param_focused = true;
             app.probe.param_editing = false;
@@ -3250,8 +3317,8 @@ mod tests {
         let params = ProbeParameters::default();
         assert_eq!(parameter_number(0), 3014);
         assert_eq!(parameter_number(22), 3036);
-        assert_eq!(PARAM_LABELS[0], "PROBE TOOL #3014");
-        assert_eq!(PARAM_LABELS[11], "BOSS/POCKET DIAM #3025");
+        assert_eq!(PARAM_LABELS[0], "PROBE TOOL");
+        assert_eq!(PARAM_LABELS[11], "BOSS/POCKET DIAM");
         assert_eq!(param_text(&params, 2), "500.0");
         assert_eq!(param_text(&params, 3), "1000.0");
         assert_eq!(param_text(&params, 11), "50.0");
@@ -3287,6 +3354,38 @@ mod tests {
         assert!(PARAM_LABELS[13].contains("Y WIDTH"));
         assert!(PARAM_LABELS[14].contains("X WIDTH"));
         assert!(PARAM_LABELS[15].contains("Y WIDTH"));
+    }
+
+    #[test]
+    fn ctrl_p_defaults_to_the_visible_routine_hints() {
+        let round = linc_core::probe::operation("round_boss").unwrap();
+        let rect = linc_core::probe::operation("rect_boss").unwrap();
+        let ridge_y = linc_core::probe::operation("ridge_y").unwrap();
+        assert_eq!(
+            default_parameter(ProbeCategory::BossAndPocket, None),
+            Some(11)
+        );
+        assert_eq!(
+            default_parameter(ProbeCategory::BossAndPocket, Some(round)),
+            Some(11)
+        );
+        assert_eq!(
+            default_parameter(ProbeCategory::BossAndPocket, Some(rect)),
+            Some(12)
+        );
+        assert_eq!(
+            default_parameter(ProbeCategory::RidgeAndValley, None),
+            Some(14)
+        );
+        assert_eq!(
+            default_parameter(ProbeCategory::RidgeAndValley, Some(ridge_y)),
+            Some(15)
+        );
+        // The other tabs keep starting at the first common parameter.
+        assert_eq!(
+            default_parameter(ProbeCategory::OutsideCorners, None),
+            Some(1)
+        );
     }
 
     #[test]
@@ -3360,6 +3459,23 @@ mod tests {
             let keys: Vec<&str> = cards_for(category).iter().map(|card| card.key).collect();
             assert_eq!(keys, ["4", "5", "6", "1", "2", "3"]);
         }
+    }
+
+    #[test]
+    fn calibration_cards_number_from_the_bottom_row_up() {
+        let cards = cards_for(ProbeCategory::Calibrate);
+        let keys: Vec<&str> = cards.iter().map(|card| card.key).collect();
+        assert_eq!(keys, ["3", "4", "1", "2"]);
+        let operations: Vec<&str> = cards.iter().map(|card| card.operation).collect();
+        assert_eq!(
+            operations,
+            [
+                "cal_round_pocket",
+                "cal_round_boss",
+                "cal_square_pocket",
+                "cal_square_boss"
+            ]
+        );
     }
 
     #[test]

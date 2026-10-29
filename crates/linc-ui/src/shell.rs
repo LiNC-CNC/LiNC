@@ -3924,7 +3924,7 @@ impl LincApp {
                             ("Enter".into(), "RUN CALIBRATION"),
                             ("V".into(), "AVG XY / X / Y"),
                             ("Ctrl+P".into(), "DIMENSIONS"),
-                            ("Ctrl+R".into(), "RESET CALIBRATION"),
+                            ("Ctrl+R".into(), "RESET CAL"),
                             ("PgUp/PgDn".into(), "TABS"),
                             ("OFFSET".into(), "NEXT TAB"),
                             (k.back.label(), "OFFSETS"),
@@ -9067,13 +9067,15 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         for (kind, slot) in [
             ("dro", layout.dro_target),
             ("parameter", layout.parameter_target),
-            ("hint field", layout.hint_target),
             ("calibration card", layout.calibrate_card),
             ("calibration action", layout.calibrate_action),
         ] {
             if let Some(rect) = slot {
                 targets.push((kind.to_string(), rect));
             }
+        }
+        for (index, rect) in &layout.hint_fields {
+            targets.push((format!("hint field #{index}"), *rect));
         }
         for (operation, rect) in &layout.routine_cards {
             targets.push((format!("card {operation}"), *rect));
@@ -9135,12 +9137,259 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                     ProbeCategory::BossAndPocket | ProbeCategory::RidgeAndValley
                 ) {
                     assert!(
-                        layout.hint_target.is_some(),
-                        "{state}/{category:?}: the hint field is a target"
+                        !layout.hint_fields.is_empty(),
+                        "{state}/{category:?}: the hint fields are targets"
                     );
                 }
             }
         }
+    }
+
+    #[test]
+    fn boss_and_ridge_hint_fields_stack_in_aligned_columns() {
+        for category in [ProbeCategory::BossAndPocket, ProbeCategory::RidgeAndValley] {
+            let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+            harness.enter_probe(category, "");
+            harness.frame(&[]);
+            let layout = harness.app.probe_layout.clone();
+            let labels = &layout.hint_labels;
+            let fields = &layout.hint_fields;
+            assert_eq!(
+                labels.len(),
+                fields.len(),
+                "{category:?}: every hint field has a label"
+            );
+            assert!(
+                fields.len() >= 2,
+                "{category:?}: the unselected tab shows both hint rows"
+            );
+            let label_left = labels[0].1.left();
+            let field_left = fields[0].1.left();
+            let field_width = fields[0].1.width();
+            let routines_center = layout
+                .routine_grid
+                .expect("the routine grid was recorded")
+                .center()
+                .x;
+            assert!(
+                (fields[0].1.center().x - routines_center).abs() < 0.5,
+                "{category:?}: hint inputs must be centred horizontally"
+            );
+            let mut previous_bottom = f32::NEG_INFINITY;
+            for (label, field) in labels.iter().zip(fields) {
+                assert_eq!(label.0, field.0, "{category:?}: rows stay paired");
+                assert!(
+                    (label.1.left() - label_left).abs() < 0.5,
+                    "{category:?}: labels share one column"
+                );
+                assert!(
+                    (field.1.left() - field_left).abs() < 0.5,
+                    "{category:?}: fields share one column"
+                );
+                assert!(
+                    (field.1.width() - field_width).abs() < 0.5,
+                    "{category:?}: fields share one width"
+                );
+                assert!(
+                    (label.1.center().y - field.1.center().y).abs() < 0.5,
+                    "{category:?}: the label is vertically aligned with its field"
+                );
+                assert!(
+                    field.1.top() >= previous_bottom,
+                    "{category:?}: fields are stacked top to bottom"
+                );
+                assert!(
+                    inside(layout.page, field.1),
+                    "{category:?}: hint field {:?} is off the page",
+                    field.1
+                );
+                previous_bottom = field.1.bottom();
+            }
+        }
+    }
+
+    #[test]
+    fn calibration_fields_share_one_column() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::Calibrate, "cal_round_boss");
+        let output = harness.frame_full(Vec::new());
+        let fields = harness.app.probe_layout.calibrate_fields.clone();
+        assert_eq!(
+            fields.len(),
+            4,
+            "offset, diameter, X width and Y width are drawn"
+        );
+        let left = fields[0].1.left();
+        let width = fields[0].1.width();
+        for (index, rect) in &fields {
+            assert!(
+                (rect.left() - left).abs() < 0.5,
+                "calibration field {index} starts at {:?}, not {left:?}",
+                rect.left()
+            );
+            assert!(
+                (rect.width() - width).abs() < 0.5,
+                "calibration field {index} width is {:?}, not {width:?}",
+                rect.width()
+            );
+        }
+
+        let texts = painted_text(&output);
+        for (label, index) in [
+            ("CALIBRATION OFFSET", 18),
+            ("CALIBRATION DIAMETER", 19),
+            ("CALIBRATION WIDTH X", 20),
+            ("CALIBRATION WIDTH Y", 21),
+        ] {
+            let (_, label_rect) = texts
+                .iter()
+                .find(|(text, _)| text == label)
+                .unwrap_or_else(|| panic!("{label} is not painted"));
+            let field = fields
+                .iter()
+                .find(|(field_index, _)| *field_index == index)
+                .map(|(_, rect)| *rect)
+                .expect("the calibration field was recorded");
+            assert!(
+                (label_rect.center().y - field.center().y).abs() < 0.5,
+                "{label} is not vertically centred on its field"
+            );
+            assert!(
+                field.left() - label_rect.right() >= 16.0 - 0.5,
+                "{label} has too little padding before its field"
+            );
+        }
+    }
+
+    #[test]
+    fn calibration_digits_select_the_bottom_row_first() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::Calibrate, "");
+        harness.frame(&[]);
+        harness.frame_with(&[(egui::Key::Num1, egui::Modifiers::NONE)]);
+        assert_eq!(harness.app.probe.operation, "cal_square_pocket");
+        harness.frame_with(&[(egui::Key::Num2, egui::Modifiers::NONE)]);
+        assert_eq!(harness.app.probe.operation, "cal_square_boss");
+        harness.frame_with(&[(egui::Key::Num3, egui::Modifiers::NONE)]);
+        assert_eq!(harness.app.probe.operation, "cal_round_pocket");
+        harness.frame_with(&[(egui::Key::Num4, egui::Modifiers::NONE)]);
+        assert_eq!(harness.app.probe.operation, "cal_round_boss");
+    }
+
+    #[test]
+    fn probe_labels_hide_internal_numbers_and_empty_apply_prompts() {
+        for category in [
+            ProbeCategory::OutsideCorners,
+            ProbeCategory::InsideCorners,
+            ProbeCategory::BossAndPocket,
+            ProbeCategory::RidgeAndValley,
+            ProbeCategory::EdgeAngle,
+        ] {
+            let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+            harness.enter_probe(category, "");
+            let output = harness.frame_full(Vec::new());
+            let texts = painted_text(&output);
+            for (text, _) in &texts {
+                assert!(
+                    !text.contains("#30"),
+                    "{category:?}: internal parameter number is painted: {text}"
+                );
+                assert!(
+                    !text.contains("ACCENT BORDER"),
+                    "{category:?}: apply-source legend is painted: {text}"
+                );
+                assert!(
+                    !text.contains("NO PROBE RESULT"),
+                    "{category:?}: empty apply prompt is painted: {text}"
+                );
+            }
+        }
+
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::Calibrate, "cal_round_boss");
+        let output = harness.frame_full(Vec::new());
+        let texts = painted_text(&output);
+        for (text, _) in &texts {
+            assert!(
+                !text.contains("#30"),
+                "Calibrate: internal parameter number is painted: {text}"
+            );
+            assert!(
+                !text.contains("CONTROLLER SYNC"),
+                "Calibrate: controller-sync label is painted: {text}"
+            );
+            assert!(
+                !text.contains("Ctrl+R RESET CAL"),
+                "Calibrate: reset button is painted: {text}"
+            );
+            assert!(
+                !text.contains("RESET CALIBRATION"),
+                "Calibrate: reset shortcut is not shortened: {text}"
+            );
+        }
+        assert!(
+            texts.iter().any(|(text, _)| text == "CALIBRATION OFFSET"),
+            "Calibrate: the offset label remains"
+        );
+        assert!(
+            texts.iter().any(|(text, _)| text == "RESET CAL"),
+            "Calibrate: the shortened reset shortcut is painted"
+        );
+    }
+
+    #[test]
+    fn ctrl_p_focuses_the_first_routine_hint_on_boss_and_ridge() {
+        for (category, operation, expected) in [
+            (ProbeCategory::BossAndPocket, "", 11),
+            (ProbeCategory::BossAndPocket, "rect_boss", 12),
+            (ProbeCategory::RidgeAndValley, "", 14),
+            (ProbeCategory::RidgeAndValley, "ridge_y", 15),
+        ] {
+            let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+            harness.enter_probe(category, operation);
+            harness.frame(&[]);
+            harness.frame_with(&[(
+                egui::Key::P,
+                egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+            )]);
+            assert_eq!(
+                harness.app.probe.param_selected, expected,
+                "{category:?}/{operation}: Ctrl+P must start at the routine hint"
+            );
+            assert!(harness.app.probe.param_focused, "{category:?}");
+            assert!(!harness.app.probe.param_editing, "{category:?}");
+            assert!(
+                harness
+                    .app
+                    .probe_layout
+                    .hint_fields
+                    .iter()
+                    .any(|(index, _)| *index == expected),
+                "{category:?}/{operation}: the focused hint is visible"
+            );
+        }
+    }
+
+    #[test]
+    fn arrows_walk_the_stacked_hints_one_row_at_a_time() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.enter_probe(ProbeCategory::BossAndPocket, "");
+        harness.frame(&[]);
+        harness.frame_with(&[(
+            egui::Key::P,
+            egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+        )]);
+        assert_eq!(harness.app.probe.param_selected, 11);
+
+        harness.frame(&[egui::Key::ArrowDown]);
+        assert_eq!(harness.app.probe.param_selected, 12);
+        harness.frame(&[egui::Key::ArrowDown]);
+        assert_eq!(harness.app.probe.param_selected, 13);
+        // The hints are one column, so Left/Right do not leave the row.
+        harness.frame(&[egui::Key::ArrowRight]);
+        assert_eq!(harness.app.probe.param_selected, 13);
+        harness.frame(&[egui::Key::ArrowUp]);
+        assert_eq!(harness.app.probe.param_selected, 12);
     }
 
     #[test]
