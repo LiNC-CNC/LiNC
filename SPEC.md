@@ -408,7 +408,9 @@ Fixed shell, no right-hand status column:
 - **Bottom action bar**: real keycaps (`MAIN`, `FILE`, `OFFSET`, `TOOL`, `WIN`,
   `ESC`), context actions including `HELP`, and a compact read-only machine
   status line (E-stop, machine on/off, the wired probe input, `OVR F/S/R`,
-  program protect, alarm count). The probe field reads `PROBE READY`,
+  program protect, alarm count). `MACHINE OFF` is a fault and blinks at 2 Hz
+  between the error colour and a dimmed error colour; `MACHINE ON` stays steady.
+  The probe field reads `PROBE READY`,
   `PROBE TRIPPED` or `PROBE ?` from `probe.input_tripped` and asks on stale
   data; it is a readout like MACHINE ON, with no click target and no command.
   It is drawn only while the probe is fitted — a probe configured

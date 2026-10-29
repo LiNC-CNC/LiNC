@@ -4151,11 +4151,19 @@ impl LincApp {
                 ui.add_space(16.0);
                 // Machine on/off sits immediately left of the E-stop state.
                 // `halui.machine.is-on` is the authority; a stale snapshot
-                // reports `?` rather than guessing.
+                // reports `?` rather than guessing. A running machine ON stays
+                // steady; MACHINE OFF blinks so it cannot fade into a bar full
+                // of green.
+                let machine_is_off = !self.snapshot.machine.on && !self.snapshot.meta.stale;
                 let (machine_text, machine_color) = machine_status_field(
                     self.snapshot.machine.on,
                     self.snapshot.meta.stale,
                 );
+                let machine_color = if machine_is_off {
+                    blink_fault_color(ui)
+                } else {
+                    machine_color
+                };
                 field(ui, machine_text, machine_color);
                 ui.add_space(16.0);
                 // The wired probe input, right beside the machine state: the
@@ -4908,8 +4916,8 @@ pub fn page_from_name(name: &str) -> Option<Page> {
 /// The bottom bar's machine field.
 ///
 /// A machine that is off is a fault, not a quiet state: it is painted in the
-/// error colour, so a bar full of green does not hide it. Stale data claims
-/// neither, and asks.
+/// error colour and the bar blinks it through [`blink_fault_color`], so a bar
+/// full of green does not hide it. Stale data claims neither, and asks.
 fn machine_status_field(on: bool, stale: bool) -> (String, egui::Color32) {
     if stale {
         ("MACHINE ?".to_string(), theme::WARNING)
@@ -4946,6 +4954,26 @@ fn probe_input_field(input_tripped: Option<bool>, stale: bool) -> (String, egui:
     }
 }
 
+/// True on the bright half of the bottom bar's fault blink.
+///
+/// Two alternations a second: half a second bright, half a second dim. The
+/// text is painted on both halves - only the colour alternates - so a capture
+/// or a test always finds it.
+fn blink_is_bright(time: f64) -> bool {
+    ((time * 2.0) as i64).rem_euclid(2) == 0
+}
+
+/// Alternating fault colour for the bottom bar, requesting the next half.
+fn blink_fault_color(ui: &egui::Ui) -> egui::Color32 {
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(250));
+    if blink_is_bright(ui.input(|input| input.time)) {
+        theme::ERROR
+    } else {
+        theme::ERROR.gamma_multiply(0.45)
+    }
+}
+
 /// Blinking red in the status line: the limit switches are being ignored.
 ///
 /// The jog screens have no override button any more, so this is the only sign
@@ -4953,19 +4981,11 @@ fn probe_input_field(input_tripped: Option<bool>, stale: bool) -> (String, egui:
 /// both halves of the blink - only the colour alternates - so a capture or a
 /// test always finds it.
 pub fn limits_override_indicator(ui: &mut egui::Ui) {
-    let bright = ((ui.input(|input| input.time) * 2.0) as i64).rem_euclid(2) == 0;
-    ui.ctx()
-        .request_repaint_after(std::time::Duration::from_millis(250));
-    let colour = if bright {
-        theme::ERROR
-    } else {
-        theme::ERROR.gamma_multiply(0.45)
-    };
     ui.label(
         RichText::new("LIMITS OVERRIDE ON")
             .monospace()
             .size(theme::font_size(11.0))
-            .color(colour),
+            .color(blink_fault_color(ui)),
     );
 }
 
@@ -5558,6 +5578,17 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             machine_status_field(false, true),
             ("MACHINE ?".to_string(), theme::WARNING)
         );
+    }
+
+    /// MACHINE OFF alternates twice a second, bright then dim, so it reads as
+    /// a fault rather than a steady field the operator's eye skips.
+    #[test]
+    fn machine_off_blinks_twice_a_second() {
+        assert!(blink_is_bright(0.0));
+        assert!(blink_is_bright(0.49));
+        assert!(!blink_is_bright(0.5));
+        assert!(!blink_is_bright(0.99));
+        assert!(blink_is_bright(1.0));
     }
 
     /// The probe-trip banner says what actually happened to the machine: a trip
