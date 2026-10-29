@@ -878,6 +878,21 @@ profile it is absent from the strip and from the PgUp/PgDn cycle.
 No fault reset, acknowledge, cycle, jog, override, or E-stop controls here.
 `CLEAR VIEW` clears only the UI log view, never machine faults.
 
+#### Controller messages
+
+LinuxCNC's operator errors arrive on the NML error queue (`emcError`) and become
+alarms: an `ERROR NML` row in this table, an entry in `MESSAGES`, an increment of
+the `ALARM`/`MSG` counters in the top bar, and a red toast — which lives 12
+seconds rather than the 5 a status note gets, because the operator is still
+reading the console when it appears. An interpreter error that stops a program
+(`emc/task/emctask.cc: interp_error`, e.g. `Cannot do g1 with zero feed rate`)
+takes exactly this path; the console line is not the only witness.
+
+One aborted block prints the same failure several times. Identical texts inside a
+one-second burst are one entry; a repeat after that window is the operator trying
+again and is always reported again. Silently swallowing the second attempt made a
+stopped program look like an HMI that missed the error.
+
 ### 6.6 G-code Help
 
 Offline LinuxCNC G-code reference, available without network access and without

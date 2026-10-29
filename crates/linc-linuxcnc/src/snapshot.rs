@@ -23,6 +23,16 @@ use crate::parameters::ParameterFile;
 const MAX_TRAIL_POINTS: usize = 200_000;
 const MAX_PROBE_HISTORY: usize = 32;
 
+/// How long an identical controller message counts as the same event.
+///
+/// One aborted block prints the same failure several times in a row (task's
+/// `print_interp_error` prints it and queues it, and the abort path repeats
+/// for each follow-up block it refuses). Collapsing that burst keeps the log
+/// readable. A repeat *after* the window is the operator trying again and is
+/// always reported: a run that stops with nothing on the screen looks like the
+/// HMI missed the error entirely.
+const MESSAGE_DEDUPE: Duration = Duration::from_secs(1);
+
 /// Difference accepted between an intended and a live work offset.
 const OFFSET_TOLERANCE: f64 = 1e-4;
 
@@ -144,7 +154,8 @@ pub struct SnapshotBuilder {
     /// homed can drop the trail drawn in the frame the machine did not have.
     homed_last: std::collections::BTreeMap<String, bool>,
     next_alarm_id: u64,
-    last_alarm_texts: VecDeque<String>,
+    /// Texts the controller repeated inside [`MESSAGE_DEDUPE`], with when.
+    recent_message_texts: VecDeque<(String, Instant)>,
     pub(crate) alarms: VecDeque<Alarm>,
     probe_trip: ProbeTripState,
     /// The controller's paused flag as of the last status poll.
@@ -192,7 +203,7 @@ impl SnapshotBuilder {
             last_tool_tip: None,
             homed_last: std::collections::BTreeMap::new(),
             next_alarm_id: 1,
-            last_alarm_texts: VecDeque::new(),
+            recent_message_texts: VecDeque::new(),
             alarms: VecDeque::new(),
             probe_trip: ProbeTripState::new(),
             last_paused: false,
@@ -351,11 +362,11 @@ impl SnapshotBuilder {
                 );
             }
         }
-        if self
-            .last_alarm_texts
-            .iter()
-            .any(|previous| previous == &message)
-        {
+        // The interpreter prints one failure several times while it aborts a
+        // block, so an identical text inside a short burst is the same event.
+        // Anything later is the operator trying again, and that must reach the
+        // screen: a failed run that says nothing looks like the HMI is broken.
+        if self.is_burst_repeat(&message, Instant::now()) {
             return;
         }
         let severity = if kind.is_error() {
@@ -368,27 +379,43 @@ impl SnapshotBuilder {
             severity,
             AlarmSource::Nml,
             "NML",
-            message.clone(),
+            message,
         ));
         self.next_alarm_id += 1;
-        self.last_alarm_texts.push_back(message);
-        while self.last_alarm_texts.len() > 100 {
-            self.last_alarm_texts.pop_front();
-        }
         while self.alarms.len() > MAX_EVENT_LOG {
             self.alarms.pop_back();
         }
+    }
+
+    /// Note `message` as seen at `now` and report whether it repeats one that
+    /// arrived inside [`MESSAGE_DEDUPE`].
+    ///
+    /// Split out so the window can be exercised without sleeping.
+    fn is_burst_repeat(&mut self, message: &str, now: Instant) -> bool {
+        self.recent_message_texts
+            .retain(|(_, at)| now.duration_since(*at) <= MESSAGE_DEDUPE);
+        if self
+            .recent_message_texts
+            .iter()
+            .any(|(previous, _)| previous == message)
+        {
+            return true;
+        }
+        self.recent_message_texts
+            .push_back((message.to_string(), now));
+        false
     }
 
     /// Clear the latched probe trip after the controller reset was accepted.
     ///
     /// The controller no longer reports the error once it is consumed, so
     /// nothing else can clear this: no poll, age or reconnect does. Forgetting
-    /// the text in the dedupe window lets the next trip appear as a fresh
+    /// the text in the burst window lets the next trip appear as a fresh
     /// Messages entry.
     pub fn clear_probe_trip(&mut self) {
         if let Some(fault) = self.probe_trip.clear() {
-            self.last_alarm_texts.retain(|text| text != &fault.message);
+            self.recent_message_texts
+                .retain(|(text, _)| text != &fault.message);
         }
     }
 
@@ -1572,6 +1599,51 @@ mod tests {
                 .filter(|alarm| alarm.message == "Probe tripped during a coordinate jog.")
                 .count(),
             2
+        );
+    }
+
+    /// One aborted block prints the same failure several times; a later attempt
+    /// at the same program must produce a fresh entry, or the operator sees a
+    /// stopped program and nothing on the screen.
+    #[test]
+    fn a_repeated_controller_error_is_new_after_the_burst_window() {
+        let mut builder = probe_builder();
+        let text = "Cannot do g1 with zero feed rate";
+        let base = Instant::now();
+        // The burst task prints for one aborted block.
+        assert!(!builder.is_burst_repeat(text, base));
+        assert!(builder.is_burst_repeat(text, base + Duration::from_millis(200)));
+        assert!(builder.is_burst_repeat(text, base + Duration::from_millis(900)));
+        // A different text is never a repeat.
+        assert!(!builder.is_burst_repeat("program end", base + Duration::from_millis(950)));
+        // The operator runs it again a moment later.
+        assert!(!builder.is_burst_repeat(text, base + Duration::from_millis(2100)));
+    }
+
+    #[test]
+    fn a_repeated_run_reaches_the_messages_list_again() {
+        let mut builder = probe_builder();
+        let text = "Cannot do g1 with zero feed rate";
+        builder.push_message(MessageKind::OperatorError, text);
+        builder.push_message(MessageKind::OperatorError, text);
+        let count = |builder: &SnapshotBuilder| {
+            builder
+                .alarms
+                .iter()
+                .filter(|alarm| alarm.message == text)
+                .count()
+        };
+        assert_eq!(count(&builder), 1, "the burst is one entry");
+
+        // Age the burst window past its deadline, as a later retry would.
+        for (_, at) in builder.recent_message_texts.iter_mut() {
+            *at -= Duration::from_secs(2);
+        }
+        builder.push_message(MessageKind::OperatorError, text);
+        assert_eq!(count(&builder), 2, "a new attempt is a new entry");
+        assert_eq!(
+            builder.alarms.front().map(|alarm| alarm.severity),
+            Some(AlarmSeverity::Error)
         );
     }
 

@@ -774,7 +774,18 @@ impl LincApp {
                     linc_core::model::AlarmSeverity::Warning => theme::WARNING,
                     linc_core::model::AlarmSeverity::Info => theme::MUTED,
                 };
-                self.toast(alarm.message, colour);
+                // An error that stopped the program is worth more than the five
+                // seconds a status toast lives: the operator is still reading
+                // the console when it appears, and a message that is gone by the
+                // time they look reads as one that never arrived.
+                let life = if alarm.severity.is_alarm()
+                    && !matches!(alarm.severity, linc_core::model::AlarmSeverity::Warning)
+                {
+                    ALARM_TOAST_SECONDS
+                } else {
+                    TOAST_SECONDS
+                };
+                self.toast_for(alarm.message, colour, life);
             }
             self.alarm_id_seen = newest;
         }
@@ -844,7 +855,14 @@ impl LincApp {
     }
 
     pub fn toast(&mut self, text: impl Into<String>, color: Color32) {
-        self.toasts.push(toast(text, color));
+        self.toast_for(text, color, TOAST_SECONDS);
+    }
+
+    /// A toast that stays up for `seconds`: errors live longer than status
+    /// notes, so a stopped program's reason is still readable after the
+    /// operator has looked away from the console.
+    pub fn toast_for(&mut self, text: impl Into<String>, color: Color32, seconds: u64) {
+        self.toasts.push(toast_for(text, color, seconds));
         if self.toasts.len() > 6 {
             self.toasts.remove(0);
         }

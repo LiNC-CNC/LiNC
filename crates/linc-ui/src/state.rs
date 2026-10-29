@@ -1480,11 +1480,23 @@ impl GraphStyle {
     }
 }
 
+/// How long an ordinary status toast stays up.
+pub const TOAST_SECONDS: u64 = 5;
+
+/// How long a controller error or alarm stays up: long enough to read after the
+/// operator has finished watching the console.
+pub const ALARM_TOAST_SECONDS: u64 = 12;
+
 pub fn toast(text: impl Into<String>, color: egui::Color32) -> Toast {
+    toast_for(text, color, TOAST_SECONDS)
+}
+
+/// The same toast, kept on screen for `seconds`.
+pub fn toast_for(text: impl Into<String>, color: egui::Color32, seconds: u64) -> Toast {
     Toast {
         text: text.into(),
         color,
-        until: Instant::now() + Duration::from_secs(5),
+        until: Instant::now() + Duration::from_secs(seconds.max(1)),
     }
 }
 
