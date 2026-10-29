@@ -23,7 +23,7 @@ loadrt and2 names=and2.cycle_gate,and2.cycle_resume,and2.cycle_run,and2.jxn_inc,
 # in the simulation-only HAL files (linc-sim.hal, linc-sim3d.hal,
 # linc-sim-postgui.hal).
 loadrt or2 names=or2.estop_reset,or2.jog_a,or2.jog_b,or2.machine_off,or2.manual_req,or2.pause,or2.probe_sim3d
-loadrt not names=not.bdt,not.coolant,not.is_joint,not.lube,not.mode_inc,not.opt,not.paused,not.spindle_on
+loadrt not names=not.bdt,not.coolant,not.is_joint,not.lube,not.opt,not.paused,not.spindle_on
 loadrt toggle names=toggle.coolant,toggle.lube,toggle.opt,toggle.bdt,toggle.sbk,toggle.worklamp
 loadrt scale names=scale.feed,scale.rapid,scale.spindle
 loadrt conv_float_s32 names=conv.feed,conv.rapid,conv.spindle
@@ -77,7 +77,6 @@ addf not.bdt servo-thread
 addf not.coolant servo-thread
 addf not.is_joint servo-thread
 addf not.lube servo-thread
-addf not.mode_inc servo-thread
 addf not.opt servo-thread
 addf not.paused servo-thread
 addf not.spindle_on servo-thread
@@ -110,10 +109,12 @@ setp conv.spindle.clamp true
 # ---------------------------------------------------------------------------
 net mode-auto cnc_panel.mode_auto => halui.mode.auto
 net mode-mdi cnc_panel.mode_mdi => halui.mode.mdi
-net mode-jog cnc_panel.mode_jog => or2.jog_a.in0
+# `cnc_panel.mode_jog` is a pin, so it carries exactly one signal; every
+# continuous-jog gate is a reader on it (JOG is the only continuous mode).
+net mode-jog cnc_panel.mode_jog => or2.jog_a.in0 and2.xp_cont.in1 and2.xn_cont.in1 and2.yp_cont.in1 and2.yn_cont.in1 and2.zp_cont.in1 and2.zn_cont.in1
 # `cnc_panel.mode_inc` is a pin, so it carries exactly one signal; every INC
 # consumer is a reader on it.
-net mode-inc cnc_panel.mode_inc => or2.jog_a.in1 not.mode_inc.in and2.jxp_inc.in1 and2.jxn_inc.in1 and2.jyp_inc.in1 and2.jyn_inc.in1 and2.jzp_inc.in1 and2.jzn_inc.in1
+net mode-inc cnc_panel.mode_inc => or2.jog_a.in1 and2.jxp_inc.in1 and2.jxn_inc.in1 and2.jyp_inc.in1 and2.jyn_inc.in1 and2.jzp_inc.in1 and2.jzn_inc.in1
 net mode-mpg cnc_panel.mode_mpg => or2.jog_b.in0
 net mode-jog-a or2.jog_a.out => or2.jog_b.in1
 # JOG / INC / MPG jog the machine, so they must also select the MANUAL task
@@ -224,14 +225,13 @@ net worklamp-on toggle.worklamp.out => rio.worklamp.bit cnc_panel.led_worklamp
 # `halui.joint.jog-speed` and `halui.axis.jog-speed` both default to 0, so both
 # are fed from `linc.jog-speed` in the post-GUI file.
 #
-# JOG and MPG jog continuously (level pins); INC jogs one step per press
-# (edge-triggered increment pins).
+# JOG jogs continuously (level pins); INC jogs one step per press
+# (edge-triggered increment pins); MPG jogs from the handwheel only, so the
+# panel jog buttons are inert in MPG.
 # ---------------------------------------------------------------------------
 net is-teleop halui.mode.is-teleop => not.is_joint.in and2.xp_axis.in1 and2.xn_axis.in1 and2.yp_axis.in1 and2.yn_axis.in1 and2.zp_axis.in1 and2.zn_axis.in1 and2.xp_step_axis.in1 and2.xn_step_axis.in1 and2.yp_step_axis.in1 and2.yn_step_axis.in1 and2.zp_step_axis.in1 and2.zn_step_axis.in1
 
-net not-inc not.mode_inc.out => and2.xp_cont.in1 and2.xn_cont.in1 and2.yp_cont.in1 and2.yn_cont.in1 and2.zp_cont.in1 and2.zn_cont.in1
-
-# Continuous: JOG / MPG
+# Continuous: JOG
 net jog-xp cnc_panel.jog_xp => and2.xp_cont.in0 and2.xp_inc.in0
 net jog-xn cnc_panel.jog_xn => and2.xn_cont.in0 and2.xn_inc.in0
 net jog-yp cnc_panel.jog_yp => and2.yp_cont.in0 and2.yp_inc.in0

@@ -372,7 +372,9 @@ present in the real-machine build.
 
 - `hal/linc.hal` loads `linc-panel` and wires `cnc_panel.*` to `halui` modes,
   cycle start/pause/stop, jog, spindle, coolant/lube, homing, overrides, status
-  LEDs and tool displays.
+  LEDs and tool displays. The panel's jog buttons jog continuously in JOG only;
+  INC jogs one step per press through the increment pins, and MPG is
+  handwheel-only.
 - `hal/linc-postgui.hal` is loaded after the GUI has created `linc.*` and wires
   `linc.status-display` to `cnc_panel.sseg_status`,
   `linc.tool-change-confirm` to `iocontrol.0.tool-changed`, and
