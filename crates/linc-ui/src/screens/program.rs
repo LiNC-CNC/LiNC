@@ -8,6 +8,7 @@ use linc_core::gcode::{lex_line, TokenKind};
 
 use crate::screens::common;
 use crate::shell::LincApp;
+use crate::spacing;
 use crate::state::ProgramView;
 use crate::theme;
 
@@ -487,6 +488,49 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             // painted from the galley's row mapping below, not counted in
             // screen rows, so logical line numbers still match the graph.
             let wrap_width = available.max(64.0);
+            // Insert spaces before G/M and value words the operator types,
+            // exactly like the MDI input: the shared rule runs over the whole
+            // buffer before the edit draws, so the typed character lands after
+            // the space it needs and the caret stays on the right glyph. Only
+            // in an editable editor that already holds the keyboard, and only
+            // for typed characters — a paste is a whole block the operator
+            // chose. This runs before the layouter is built, so it may update
+            // `app` without fighting the layouter's own borrow of the editor's
+            // revision.
+            let editor_id = egui::Id::unique("linc-program-editor");
+            let mut typed: Vec<char> = Vec::new();
+            ui.input(|input| {
+                for event in &input.events {
+                    if let egui::Event::Text(text) = event {
+                        typed.extend(text.chars());
+                    }
+                }
+            });
+            if editable && !typed.is_empty() && ui.memory(|memory| memory.has_focus(editor_id)) {
+                let chars: Vec<char> = text.chars().collect();
+                let mut state =
+                    egui::text_edit::TextEditState::load(ui.ctx(), editor_id).unwrap_or_default();
+                let (caret, anchor) = match state.cursor.char_range() {
+                    Some(range) => {
+                        let range = range.as_sorted_char_range();
+                        (range.end.0, range.start.0)
+                    }
+                    // No cursor yet: the editor was just focused, and egui puts
+                    // the caret at the end of the text.
+                    None => (chars.len(), chars.len()),
+                };
+                if let Some((spaced, caret)) = spacing::space_typed(&chars, caret, anchor, &typed) {
+                    text = spaced.into_iter().collect();
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::one(
+                            egui::text::CCursor::new(caret),
+                        )));
+                    state.store(ui.ctx(), editor_id);
+                    app.program.editor.replace_text(text.clone());
+                    app.mark_editor_changed();
+                }
+            }
             let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
                 // `pixels_per_point` is part of the key: the shell changes the
                 // design zoom with the window, and reusing a galley laid out at
@@ -682,6 +726,17 @@ mod tests {
         assert_eq!(line_row_starts([true, true].into_iter()), vec![0, 1, 2]);
     }
 
+    #[test]
+    fn the_editor_layout_is_the_buffer_character_for_character() {
+        // Blank lines, a comment line and a long line must all come back
+        // exactly as written. The text edit maps the caret through the
+        // galley's character indices, so a placeholder character for an empty
+        // line would shift every edit after it by one glyph.
+        let text = "G0 X0\n\n(comment line)\nG1 X10 Y20 Z30 F120\n";
+        let job = layout_for_test(text, 0);
+        assert_eq!(job.text, text);
+    }
+
 }
 
 fn highlight_job(
@@ -710,9 +765,11 @@ fn highlight_job(
         if !search.is_empty() && matches.contains(&line_no) {
             format.background = theme::ACCENT_DARK;
         }
-        if line.is_empty() {
-            job.append(" ", 0.0, format.clone());
-        } else {
+        // An empty line stays empty: the galley must be the buffer character
+        // for character, or the caret maps one glyph past every blank line
+        // before it. epaint still emits a row for an empty paragraph, so the
+        // line keeps its height and its number without a placeholder character.
+        if !line.is_empty() {
             append_gcode_line(&mut job, line, &format);
         }
         if index + 1 < lines.len() {

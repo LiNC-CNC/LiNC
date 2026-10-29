@@ -1062,13 +1062,15 @@ Keys, all page-local to the pane:
   Shift key. `[keys] mdi_line_up`/`mdi_line_down` rebind it; a profile that sets
   one to a bare `Up`/`Down` is rejected like an unparsable chord, so it can never
   shadow recall.
-- Typing a value word against anything that is not a space, a tab or the start
+- Typing a word against anything that is not a space, a tab or the start
   of the line inserts one space first: `G1X10` arrives as `G1 X10`, `X10Y5` as
-  `X10 Y5`, and `M3 S1200` as typed. The words are `X Y Z A B C U V W F S`,
-  either case. Nothing is inserted inside a `(...)` comment or a `[...]`
-  expression, the caret ends after the typed character, a replaced selection is
-  replaced as a whole, and a block recalled from the buffer keeps its text until
-  the operator actually types. The rule is unconditional: it has no config key.
+  `X10 Y5`, `X10G0` as `X10 G0`, and `M3 S1200` as typed. The words are
+  `X Y Z A B C U V W F S` plus the `G` and `M` command words, either case. The
+  same rule runs in the `EDIT` buffer, per line. Nothing is inserted inside a
+  `(...)` comment or a `[...]` expression, the caret ends after the typed
+  character, a replaced selection is replaced as a whole, and a block recalled
+  from the buffer keeps its text until the operator actually types. The rule is
+  unconditional: it has no config key.
 - `Ctrl+G` opens the same go-to-line editor as AUTO and selects a line in the
   buffer instead of a line in the loaded program.
 - `Ctrl+R` issues the selected buffer line directly, with no confirmation

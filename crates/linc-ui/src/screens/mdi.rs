@@ -19,6 +19,7 @@ use linc_view::{arc_points, Projection, ViewMode};
 
 use crate::screens::common;
 use crate::shell::LincApp;
+use crate::spacing;
 use crate::state::BlockOverlay;
 use crate::theme;
 
@@ -347,16 +348,15 @@ fn caret_after_recall(app: &mut LincApp, ui: &Ui, id: egui::Id) {
     state.store(ui.ctx(), id);
 }
 
-/// Insert the space a value word needs in front of it, before the `TextEdit`
-/// draws.
+/// Insert the space a word needs in front of it, before the `TextEdit` draws.
 ///
-/// Layer: event interception. The space goes into the buffer and the stored
-/// caret — and the selection the keystroke is replacing — is moved here, so the
-/// edit inserts the character at the shifted caret and its own cursor
-/// arithmetic stays right: the caret ends after the character that was typed.
-/// Normalising after the edit would have to diff the old and new text to find
-/// where the insertion happened, and then move a cursor the widget had already
-/// stored for the next frame.
+/// Layer: event interception. The rule itself lives in [`crate::spacing`] so
+/// the program editor shares it; this caller still reads the typed characters,
+/// loads and stores the input's [`egui::text_edit::TextEditState`] and writes
+/// `app.mdi.input`. The space goes into the buffer and the stored caret — and
+/// the selection the keystroke is replacing — is moved here, so the edit
+/// inserts the character at the shifted caret and its own cursor arithmetic
+/// stays right: the caret ends after the character that was typed.
 fn auto_space(app: &mut LincApp, ui: &Ui, id: egui::Id) {
     if !ui.memory(|memory| memory.has_focus(id)) {
         return;
@@ -385,83 +385,17 @@ fn auto_space(app: &mut LincApp, ui: &Ui, id: egui::Id) {
         // the end of the text.
         None => (chars.len(), chars.len()),
     };
-    let (caret, anchor) = (caret.min(chars.len()), anchor.min(chars.len()));
-    let (start, end) = (caret.min(anchor), caret.max(anchor));
-    // The selection is replaced, so it goes first: the space has to land before
-    // the character that replaces it, not after the text being replaced.
-    let mut text: Vec<char> = chars[..start]
-        .iter()
-        .copied()
-        .chain(chars[end..].iter().copied())
-        .collect();
-    // `model` carries what the edit is about to insert, so the next character in
-    // the same frame sees the right neighbour; `text` only ever grows by the
-    // spaces, so the caret handed back is already in the buffer's coordinates.
-    let mut model: Vec<char> = text.clone();
-    let mut at = start;
-    let mut model_at = start;
-    for character in typed {
-        if needs_space(&model, model_at, character) {
-            text.insert(at, ' ');
-            model.insert(model_at, ' ');
-            at += 1;
-            model_at += 1;
-        }
-        model.insert(model_at, character);
-        model_at += 1;
-    }
-    if text == chars {
+    let Some((text, caret)) = spacing::space_typed(&chars, caret, anchor, &typed) else {
         return;
-    }
-    app.mdi.input = text.iter().collect();
+    };
+    app.mdi.input = text.into_iter().collect();
     app.mdi.last_error = None;
     state
         .cursor
         .set_char_range(Some(egui::text::CCursorRange::one(
-            egui::text::CCursor::new(at),
+            egui::text::CCursor::new(caret),
         )));
     state.store(ui.ctx(), id);
-}
-
-/// Letters that open a value word: an axis, or a feed or speed word. Either
-/// case; letters arrive lowercase from the panel keyboard.
-fn is_value_word(c: char) -> bool {
-    matches!(
-        c.to_ascii_uppercase(),
-        'X' | 'Y' | 'Z' | 'A' | 'B' | 'C' | 'U' | 'V' | 'W' | 'F' | 'S'
-    )
-}
-
-/// Whether `c` typed at character index `at` opens a new word and takes a
-/// space in front of it.
-///
-/// Never at the start of the line, never after a space or a tab, and never
-/// inside a `(...)` comment or a `[...]` expression, where the characters
-/// are prose or an expression rather than G-code words.
-fn needs_space(text: &[char], at: usize, c: char) -> bool {
-    if !is_value_word(c) || at == 0 || at > text.len() {
-        return false;
-    }
-    match text.get(at - 1) {
-        Some(' ') | Some('\t') | None => false,
-        Some(_) => !inside_comment_or_expression(&text[..at]),
-    }
-}
-
-/// Whether the characters up to the caret leave a `(...)` comment or a
-/// `[...]` expression open.
-fn inside_comment_or_expression(text: &[char]) -> bool {
-    let (mut comment, mut expression) = (0i32, 0i32);
-    for c in text {
-        match c {
-            '(' => comment += 1,
-            ')' => comment = (comment - 1).max(0),
-            '[' => expression += 1,
-            ']' => expression = (expression - 1).max(0),
-            _ => {}
-        }
-    }
-    comment > 0 || expression > 0
 }
 
 /// One line: the last issue result, or the error that stopped it.
@@ -867,18 +801,11 @@ fn card_projection(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        band_layout, card_projection, highlight, inside_comment_or_expression, needs_space,
-        CARD_INSET, INPUT_HEIGHT, LISTING_MIN,
-    };
+    use super::{band_layout, card_projection, highlight, CARD_INSET, INPUT_HEIGHT, LISTING_MIN};
     use egui::{pos2, vec2, Pos2, Rect, Vec2};
     use linc_core::gcode::{Bounds3, PathSegment, Preview, SegmentKind};
     use linc_core::model::MachineVariant;
     use linc_view::{draw_trajectory, theme as view_theme, Projection, TrajectoryView, ViewMode};
-
-    fn chars(text: &str) -> Vec<char> {
-        text.chars().collect()
-    }
 
     /// The pane must lay out a block character for character: the tokens and
     /// the spaces between them. The tokens alone read `G1Z-2F120` for a block
@@ -902,36 +829,6 @@ mod tests {
                 .map_or(0, |section| section.byte_range.end.0);
             assert_eq!(covered, block.len(), "{block:?}");
         }
-    }
-
-    #[test]
-    fn a_value_word_takes_a_space_only_where_a_word_starts() {
-        // The brief's three cases: `G1X10` and `X10Y5` split, an existing
-        // space left alone.
-        assert!(needs_space(&chars("G1"), 2, 'X'));
-        assert!(needs_space(&chars("X10"), 3, 'Y'));
-        assert!(!needs_space(&chars("M3 "), 3, 'S'));
-        // Every letter the rule covers, either case.
-        for letter in "XYZABCUVWFS".chars() {
-            assert!(needs_space(&chars("G1"), 2, letter), "{letter}");
-            assert!(
-                needs_space(&chars("G1"), 2, letter.to_ascii_lowercase()),
-                "{letter}"
-            );
-        }
-        // Nothing at the start of the line, and nothing after a space or a tab.
-        assert!(!needs_space(&chars(""), 0, 'X'));
-        assert!(!needs_space(&chars("G1 "), 3, 'X'));
-        assert!(!needs_space(&chars("G1\t"), 3, 'X'));
-        // Prose and expressions are left exactly as typed.
-        assert!(!needs_space(&chars("G1 (move"), 8, 'X'));
-        assert!(!needs_space(&chars("G1 [#1+2"), 8, 'X'));
-        assert!(!inside_comment_or_expression(&chars("G1 (a) ")));
-        assert!(needs_space(&chars("G1 (a)"), 6, 'X'));
-        // Letters that do not open a word, and a caret past the end.
-        assert!(!needs_space(&chars("G1"), 2, 'G'));
-        assert!(!needs_space(&chars("G1"), 2, '1'));
-        assert!(!needs_space(&chars("G1"), 9, 'X'));
     }
 
     #[test]
