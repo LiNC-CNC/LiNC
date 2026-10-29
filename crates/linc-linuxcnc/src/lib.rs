@@ -983,7 +983,8 @@ impl NmlBackend {
                 if expected_revision != snapshot.program.revision {
                     return Err(MachineError::RevisionConflict);
                 }
-                let canonical = self.canonical_nc_file(&path)?;
+                let canonical = contained_nc_write_target(self.profile.nc_files_root(), &path)
+                    .ok_or(MachineError::UnsafePath)?;
                 let parent = canonical.parent().ok_or(MachineError::UnsafePath)?;
                 let mut temp = tempfile::NamedTempFile::new_in(parent)?;
                 use std::io::Write;
@@ -1698,6 +1699,31 @@ fn contained_nc_file(root: &Path, requested: &Path) -> Option<PathBuf> {
     Some(candidate)
 }
 
+/// The path a save writes to.
+///
+/// A save may create the file, so the candidate itself need not exist; the same
+/// lexical containment rule as `contained_nc_file` applies, plus the parent must
+/// be an existing directory. An entry that already exists must be a regular
+/// file and not a symlink: writing through a link would land wherever it points
+/// rather than in `NC_FILES`.
+fn contained_nc_write_target(root: &Path, requested: &Path) -> Option<PathBuf> {
+    let root = normalize_lexically(root);
+    let candidate = normalize_lexically(requested);
+    if !candidate.starts_with(&root) || candidate == root {
+        return None;
+    }
+    if !candidate.parent()?.is_dir() {
+        return None;
+    }
+    match std::fs::symlink_metadata(&candidate) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => return None,
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return None,
+    }
+    Some(candidate)
+}
+
 /// Fold `.` and `..` segments without resolving symlinks or touching the disk.
 fn normalize_lexically(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
@@ -1719,7 +1745,7 @@ fn normalize_lexically(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod nc_containment_tests {
-    use super::{contained_nc_file, normalize_lexically};
+    use super::{contained_nc_file, contained_nc_write_target, normalize_lexically};
     use std::path::PathBuf;
 
     fn temp_root() -> PathBuf {
@@ -1770,6 +1796,43 @@ mod nc_containment_tests {
     fn lexical_folding_keeps_the_path_spelling() {
         assert_eq!(normalize_lexically(&PathBuf::from("/a/b/../c")), PathBuf::from("/a/c"));
         assert_eq!(normalize_lexically(&PathBuf::from("/a/./b")), PathBuf::from("/a/b"));
+    }
+
+    /// A save names a file that does not exist yet: the target must be accepted
+    /// inside NC_FILES and still refused outside it.
+    #[test]
+    fn a_save_target_may_be_new_but_must_stay_inside_the_root() {
+        let root = temp_root();
+        let fresh = root.join("new-part.ngc");
+        assert!(!fresh.exists());
+        assert_eq!(contained_nc_write_target(&root, &fresh), Some(fresh.clone()));
+
+        // An existing regular file is still a valid target.
+        let existing = root.join("top.ngc");
+        assert_eq!(
+            contained_nc_write_target(&root, &existing),
+            Some(existing)
+        );
+
+        // Outside the root, and the root itself, are not targets.
+        let outside = root.parent().unwrap().join("new-escape.ngc");
+        assert!(contained_nc_write_target(&root, &outside).is_none());
+        assert!(
+            contained_nc_write_target(&root, &root.join("sub").join("..").join("..").join("x.ngc"))
+                .is_none(),
+            ".. must not escape the root"
+        );
+        assert!(contained_nc_write_target(&root, &root).is_none());
+
+        // A directory is not a file to write, and a symlink is not followed.
+        assert!(contained_nc_write_target(&root, &root.join("sub")).is_none());
+        let link = root.join("link.ngc");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        assert!(
+            contained_nc_write_target(&root, &link).is_none(),
+            "writing through a link would leave NC_FILES"
+        );
     }
 }
 

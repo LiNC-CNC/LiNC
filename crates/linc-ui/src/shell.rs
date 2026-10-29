@@ -646,6 +646,29 @@ impl LincApp {
         self.poll_backend();
     }
 
+    /// `send`, reporting whether the backend accepted the command.
+    ///
+    /// The reporting is identical, but a caller that owns a dialog needs the
+    /// answer: closing the dialog over a refused write makes the save look like
+    /// it happened. Fires the same poll, so the snapshot is current either way.
+    fn try_send(&mut self, command: MachineCommand) -> bool {
+        let accepted = match self.backend.send(command) {
+            Ok(()) => true,
+            Err(error) => {
+                self.toast(error.to_string(), theme::ERROR);
+                self.log_ui(
+                    AlarmSeverity::Error,
+                    AlarmSource::Ui,
+                    "UI-CMD",
+                    error.to_string(),
+                );
+                false
+            }
+        };
+        self.poll_backend();
+        accepted
+    }
+
     /// Turn each axis's remaining distance into a fraction of its current move.
     fn update_move_progress(&mut self) {
         let mut updates = Vec::new();
@@ -1112,6 +1135,29 @@ impl LincApp {
         self.program.editor.dirty
     }
 
+    /// Why `SAVE` is disabled, in the order the operator can act on.
+    ///
+    /// The panel mode comes first because the controller refuses a save outside
+    /// EDIT outright; the rest are the checks the backend repeats on every
+    /// write. A dialog that greys the button without naming the reason looks
+    /// like a bug rather than a gate.
+    fn save_block_reason(&self) -> String {
+        let mode = self.snapshot.panel.mode.mode();
+        if mode != Some(PanelMode::Edit) {
+            let name = mode.map(PanelMode::label).unwrap_or("UNKNOWN");
+            return format!(
+                "SAVE needs the panel in EDIT (it is in {name}); DISCARD drops the buffer, \
+                 go back to EDIT to save it.",
+            );
+        }
+        if self.program_protected() {
+            return "SAVE needs PROGRAM PROTECT off.".into();
+        }
+        if self.panel_offline() {
+            return "SAVE needs the panel link; it is offline.".into();
+        }
+        "SAVE needs an idle interpreter; the machine is running.".into()
+    }
     /// Hand the keyboard back to the page a dialog interrupted.
     ///
     /// egui drops the focus together with the widget that held it, so a closed
@@ -1171,6 +1217,9 @@ impl LincApp {
             } else {
                 self.page
             };
+            // The program list is what the operator came for. The USB pane
+            // keeps the focus only for the visit that put it there.
+            self.files.usb_focused = false;
             self.files.refresh();
         }
         if page == Page::Probe {
@@ -1290,6 +1339,11 @@ impl LincApp {
             self.program.follow_current = true;
             self.program.focus_editor = false;
         }
+        // A new program starts at its first line: the old selection is a line
+        // of a file that is no longer loaded, and leaving it highlighted made
+        // the graph and the gutter point at the wrong block.
+        self.program.selected_line = 1;
+        self.program.code_scroll_to_line = Some(1);
         self.set_page(Page::Program);
     }
 
@@ -1394,9 +1448,15 @@ impl LincApp {
             .clone()
             .or_else(|| self.snapshot.program.path.clone())
         else {
-            self.modal = Some(Modal::Error(
-                "No program path. Load a file from NC_FILES before saving.".into(),
-            ));
+            // Nothing loaded and nothing named: ask for a name instead of
+            // failing. A program typed straight into EDIT is the common way to
+            // start one, and refusing the save threw the work away.
+            let directory = self.save_as_directory();
+            self.modal = Some(Modal::SaveProgramAs(crate::state::SaveProgramDialog {
+                name: String::new(),
+                directory,
+                error: None,
+            }));
             return;
         };
         let content = self.program.editor.text();
@@ -1420,6 +1480,129 @@ impl LincApp {
         } else if !self.program_protected() {
             self.toast("save queued", theme::ACCENT);
         }
+    }
+
+    /// The folder an untitled buffer is written into: the `NC_FILES` directory
+    /// the file browser is showing, falling back to its root when that one has
+    /// walked above the configured tree.
+    fn save_as_directory(&self) -> PathBuf {
+        let root = self.profile.nc_files_root().to_path_buf();
+        if self.files.nc_current.starts_with(&root) {
+            self.files.nc_current.clone()
+        } else {
+            root
+        }
+    }
+
+    /// The extension an unnamed program gets: the first configured G-code
+    /// extension, so the file the operator just saved is one the Files page
+    /// will load.
+    fn save_as_extension(&self) -> String {
+        self.profile
+            .config
+            .files
+            .load_extensions
+            .first()
+            .cloned()
+            .unwrap_or_else(|| ".ngc".into())
+    }
+
+    /// Write the buffer to the name the save-as dialog collected.
+    ///
+    /// Every reason to refuse is reported inside the dialog, which is still on
+    /// screen: closing it on a bad name would lose the text the operator typed
+    /// and leave the save looking like it happened.
+    fn save_program_as(&mut self, name: &str) {
+        let Some(Modal::SaveProgramAs(dialog)) = self.modal.clone() else {
+            return;
+        };
+        let name = name.trim();
+        let invalid = name.is_empty()
+            || name == "."
+            || name == ".."
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0');
+        if invalid {
+            self.edit_save_as(|dialog| dialog.error = Some("invalid file name".into()));
+            return;
+        }
+        let extension = self.save_as_extension();
+        let name = if std::path::Path::new(name).extension().is_some() {
+            name.to_string()
+        } else {
+            format!("{name}{extension}")
+        };
+        let path = dialog.directory.join(&name);
+        if path.exists() {
+            self.edit_save_as(|dialog| {
+                dialog.error = Some(format!("{name} already exists; choose another name"))
+            });
+            return;
+        }
+        if !path.starts_with(self.profile.nc_files_root()) {
+            self.edit_save_as(|dialog| {
+                dialog.error = Some("that folder is outside NC_FILES".into())
+            });
+            return;
+        }
+        let content = self.program.editor.text();
+        let accepted = self.try_send(MachineCommand::SaveProgram {
+            path: path.clone(),
+            expected_revision: self.snapshot.program.revision,
+            content: content.clone(),
+        });
+        if !accepted {
+            // The backend's reason is already a toast; keep the dialog so the
+            // typed name is not lost with it.
+            return;
+        }
+        // The buffer now has a home: the next Ctrl+S writes it without asking.
+        self.program.editor.path = Some(path);
+        // Both backends write the file before answering, so an accepted save is
+        // a save: the dirty marker must not survive it.
+        self.program.editor.mark_saved();
+        self.modal = None;
+        self.toast(format!("saved {name}"), theme::SUCCESS);
+    }
+
+    /// Edit the open save-as dialog. A closed dialog is not an error: the frame
+    /// that confirms the write clears it before this runs.
+    fn edit_save_as(&mut self, update: impl FnOnce(&mut crate::state::SaveProgramDialog)) {
+        if let Some(Modal::SaveProgramAs(dialog)) = &mut self.modal {
+            update(dialog);
+        }
+    }
+
+    /// Drop the editor buffer's unsaved changes: the loaded program is the
+    /// truth again.
+    ///
+    /// `DISCARD` in the unsaved-changes dialog means this, whatever the
+    /// operator was on their way to do. Navigating away while keeping the
+    /// buffer dirty made the same prompt come back on every trip to Files, with
+    /// nothing discarded.
+    fn discard_editor_changes(&mut self) {
+        match self.snapshot.program.content.clone() {
+            Some(text) => {
+                let path = self.snapshot.program.path.clone();
+                self.program
+                    .editor
+                    .set_loaded(path.clone().unwrap_or_default(), (*text).clone());
+                self.program.loaded_path = path;
+            }
+            None => {
+                // Nothing is loaded, so an empty buffer is what the controller
+                // would run.
+                self.program.editor = linc_core::editor::Editor::new();
+                self.program.loaded_path = None;
+            }
+        }
+        self.program.program_revision_seen = self.snapshot.program.revision;
+        self.program.selected_line = 1;
+        self.program.cursor_line = Some(1);
+        self.program.code_scroll_to_line = Some(1);
+        self.program.follow_current = true;
+        self.refresh_preview();
     }
 
     /// End the session because the cabinet was switched off, not because the
@@ -1636,6 +1819,14 @@ impl LincApp {
             return;
         };
         let prior_mode = self.last_mode.as_ref().and_then(PanelModeValidity::mode);
+        // Leaving EDIT is the one moment unsaved work can become unreachable:
+        // the controller refuses a save outside EDIT, so AUTO can only ever run
+        // the loaded file. Say so here, before the operator presses CYCLE START
+        // on a program that will not run.
+        let left_edit = prior_mode == Some(PanelMode::Edit) && new_mode != PanelMode::Edit;
+        if left_edit && self.program.editor.dirty && self.modal.is_none() {
+            self.modal = Some(Modal::UnsavedOnLeave);
+        }
         if prior_mode.map(PanelMode::is_manual).unwrap_or(false)
             && !new_mode.is_manual()
             && self.page == Page::Manual
@@ -4451,6 +4642,9 @@ impl LincApp {
         let mut save_name: Option<String> = None;
         let mut save_wrap: Option<bool> = None;
         let mut save_confirm = false;
+        let mut save_as_name: Option<String> = None;
+        let mut save_as_confirm = false;
+        let mut discard_on_leave = false;
         // A real modal, not a Window: the backdrop and modal layer stop the
         // page behind from receiving Enter/clicks while a dialog owns the
         // keyboard.
@@ -4473,7 +4667,8 @@ impl LincApp {
                         if theme::danger_button(ui, "DISCARD", true).clicked() {
                             action = Some(pending.clone());
                         }
-                        if theme::accent_button(ui, "SAVE", self.editing_allowed()).clicked() {
+                        let saving = self.editing_allowed();
+                        if theme::accent_button(ui, "SAVE", saving).clicked() {
                             save_and_continue = true;
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
@@ -4484,6 +4679,17 @@ impl LincApp {
                             close = true;
                         }
                     });
+                    // A greyed SAVE with no reason reads as a broken dialog. A
+                    // save needs the panel in EDIT, PROTECT off, an idle
+                    // interpreter and a live panel; say which one is missing.
+                    if !self.editing_allowed() {
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new(self.save_block_reason())
+                                .size(theme::font_size(10.0))
+                                .color(theme::MUTED),
+                        );
+                    }
                 }
                 Modal::ConfirmRunFromLine { line, block } => {
                     ui.label(
@@ -4773,6 +4979,100 @@ impl LincApp {
                         save_confirm = true;
                     }
                 }
+                Modal::SaveProgramAs(dialog) => {
+                    ui.label(
+                        RichText::new("SAVE PROGRAM AS")
+                            .size(theme::font_size(18.0))
+                            .strong()
+                            .color(theme::FG),
+                    );
+                    ui.add_space(6.0);
+                    ui.label("This buffer has no file yet. Name it under NC_FILES:");
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(dialog.directory.display().to_string())
+                            .monospace()
+                            .size(theme::font_size(10.0))
+                            .color(theme::MUTED),
+                    );
+                    ui.add_space(6.0);
+                    let mut text = dialog.name.clone();
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut text)
+                            .id(egui::Id::unique("linc-save-as-name"))
+                            .desired_width(280.0)
+                            .hint_text("part.ngc"),
+                    );
+                    if field.changed() {
+                        save_as_name = Some(text);
+                    }
+                    ui.add_space(6.0);
+                    if let Some(error) = &dialog.error {
+                        ui.label(
+                            RichText::new(error)
+                                .size(theme::font_size(10.0))
+                                .color(theme::ERROR),
+                        );
+                    }
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        let write = theme::accent_button(ui, "SAVE", true);
+                        if write.clicked() {
+                            save_as_confirm = true;
+                        }
+                        let cancel = theme::action_button(ui, "CANCEL", true);
+                        // The ring starts on CANCEL, not on the name field: a
+                        // dialog always opens with its safe button under the
+                        // Enter key, and a click on the field starts the name.
+                        if focus_default {
+                            cancel.request_focus();
+                        }
+                        if cancel.clicked() {
+                            close = true;
+                        }
+                    });
+                    if field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                        save_as_confirm = true;
+                    }
+                }
+                Modal::UnsavedOnLeave => {
+                    ui.label(
+                        RichText::new("UNSAVED PROGRAM")
+                            .size(theme::font_size(18.0))
+                            .strong()
+                            .color(theme::WARNING),
+                    );
+                    ui.add_space(6.0);
+                    // The panel left EDIT on its own. Say what that costs
+                    // before the operator presses CYCLE START and nothing runs:
+                    // AUTO runs the loaded file, never the editor buffer.
+                    ui.label(
+                        "The panel left EDIT with changes that were never saved. \
+                         AUTO runs the loaded program, so this buffer will not start.",
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(
+                            "A save needs the panel in EDIT. DISCARD drops the buffer; \
+                             KEEP holds it until you go back to EDIT.",
+                        )
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
+                    );
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if theme::danger_button(ui, "DISCARD BUFFER", true).clicked() {
+                            discard_on_leave = true;
+                        }
+                        let keep = theme::action_button(ui, "KEEP", true);
+                        if focus_default {
+                            keep.request_focus();
+                        }
+                        if keep.clicked() {
+                            close = true;
+                        }
+                    });
+                }
                 }
             });
         if let Some(text) = goto_buffer {
@@ -4806,6 +5106,24 @@ impl LincApp {
         if save_confirm {
             self.confirm_mdi_save();
         }
+        if let Some(name) = save_as_name {
+            self.edit_save_as(|dialog| {
+                dialog.name = name;
+                dialog.error = None;
+            });
+        }
+        if save_as_confirm {
+            let name = match &self.modal {
+                Some(Modal::SaveProgramAs(dialog)) => dialog.name.clone(),
+                _ => String::new(),
+            };
+            self.save_program_as(&name);
+        }
+        if discard_on_leave {
+            self.modal = None;
+            self.discard_editor_changes();
+            self.toast("editor changes discarded", theme::WARNING);
+        }
         if close {
             self.modal = None;
         }
@@ -4826,6 +5144,10 @@ impl LincApp {
         }
         if let Some(action) = action {
             self.modal = None;
+            // DISCARD is the operator agreeing to lose the edits, so drop them
+            // before the pending action runs. Carrying a dirty buffer through
+            // the navigation brought the same prompt back on the next visit.
+            self.discard_editor_changes();
             self.perform_pending(action);
         }
         if save_and_continue {
@@ -7098,6 +7420,59 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert_eq!(app.program.editor.text(), "G0 X0\nG1 X1\n");
     }
 
+    /// DISCARD is the operator agreeing to lose the edits, so it must drop the
+    /// buffer rather than carry it through the navigation: leaving it dirty is
+    /// what made the same prompt reappear on every trip to Files.
+    #[test]
+    fn discard_reverts_the_buffer_to_the_loaded_program() {
+        let (_dir, mut app) = make_app(PanelMode::Edit);
+        let loaded = app.snapshot.program.content.clone().expect("demo loaded");
+        app.program.editor.replace_text("G0 X9\n".into());
+        assert!(app.program_dirty());
+        app.modal = Some(Modal::ConfirmDiscard(PendingAction::OpenFiles));
+        // What the DISCARD button does.
+        app.discard_editor_changes();
+        app.perform_pending(PendingAction::OpenFiles);
+        assert_eq!(app.page, Page::Files);
+        assert!(!app.program_dirty(), "the buffer is clean again");
+        assert_eq!(app.program.editor.text(), *loaded);
+        assert_eq!(app.program.selected_line, 1);
+    }
+
+    /// A program typed straight into EDIT has no file; the save asks for a name
+    /// instead of failing with "No program path".
+    #[test]
+    fn an_untitled_buffer_saves_under_a_name_it_asks_for() {
+        let (_dir, mut app) = make_app(PanelMode::Edit);
+        app.snapshot.program.path = None;
+        app.snapshot.program.content = None;
+        app.program.editor = linc_core::editor::Editor::new();
+        app.program.editor.replace_text("G0 X0\nG1 X10\n".into());
+        app.save_program();
+        let Some(Modal::SaveProgramAs(dialog)) = app.modal.clone() else {
+            panic!("the save asks for a name, got {:?}", app.modal);
+        };
+        assert!(
+            dialog.directory.starts_with(app.profile.nc_files_root()),
+            "the name lands under NC_FILES: {:?}",
+            dialog.directory
+        );
+        app.save_program_as("part");
+        app.poll_backend();
+        assert!(app.modal.is_none());
+        let path = app.program.editor.path.clone().expect("the buffer has a path");
+        assert_eq!(
+            path.file_name().unwrap().to_string_lossy(),
+            "part.ngc",
+            "the configured G-code extension is appended"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "G0 X0\nG1 X10\n"
+        );
+        assert!(!app.program_dirty(), "the save clears the marker");
+    }
+
     /// MAIN is the screen for the mode in front of the operator, not always the
     /// AUTO dashboard; on the Program page it does not also flip SPLIT/CODE.
     #[test]
@@ -7126,6 +7501,26 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         app.request_mode_page();
         assert_eq!(app.page, Page::Machine);
     }
+
+    /// The panel moves the mode itself, so leaving EDIT is the last chance to
+    /// say that AUTO can only start the loaded file.
+    #[test]
+    fn leaving_edit_with_unsaved_changes_warns_once() {
+        let (_dir, mut app) = make_app(PanelMode::Edit);
+        app.program.editor.replace_text("G0 X1\n".into());
+        switch_mode(&mut app, PanelMode::Auto);
+        assert!(matches!(app.modal, Some(Modal::UnsavedOnLeave)));
+        // KEEP leaves the buffer alone; it is still there when EDIT comes back.
+        app.modal = None;
+        assert!(app.program_dirty());
+        switch_mode(&mut app, PanelMode::Edit);
+        assert!(app.program_dirty());
+        // A clean buffer leaves EDIT without a prompt.
+        app.discard_editor_changes();
+        switch_mode(&mut app, PanelMode::Auto);
+        assert!(app.modal.is_none());
+    }
+
     #[test]
     fn protect_unknown_fails_closed_in_the_ui() {
         let (_dir, mut app) = make_app(PanelMode::Edit);

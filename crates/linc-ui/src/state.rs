@@ -167,6 +167,17 @@ pub enum Modal {
     },
     /// Write the MDI buffer to a new program file under `PROGRAM_PREFIX`.
     MdiSave(MdiSaveDialog),
+    /// Name the file an untitled editor buffer is written to.
+    ///
+    /// A buffer typed straight into `EDIT` has no path, so `Ctrl+S` has nowhere
+    /// to write it. The dialog names it under `NC_FILES` instead of refusing.
+    SaveProgramAs(SaveProgramDialog),
+    /// The panel left `EDIT` while the buffer still had unsaved changes.
+    ///
+    /// A save needs the panel in `EDIT` (the controller refuses it otherwise),
+    /// so the only useful offer here is to drop the changes or keep them until
+    /// the operator comes back. Shown once, when the mode moves.
+    UnsavedOnLeave,
     /// Delete a file from one of the Files panes.
     ConfirmDelete {
         path: std::path::PathBuf,
@@ -209,6 +220,18 @@ impl Default for MdiSaveDialog {
             error: None,
         }
     }
+}
+
+/// The editor's save-as dialog: a file name and the directory it lands in.
+///
+/// The directory is captured when the dialog opens, so the name is resolved
+/// against the `NC_FILES` folder the operator was looking at and cannot drift
+/// while the machine changes underneath.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SaveProgramDialog {
+    pub name: String,
+    pub directory: PathBuf,
+    pub error: Option<String>,
 }
 
 pub trait UiBackend {

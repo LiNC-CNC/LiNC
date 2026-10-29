@@ -507,6 +507,11 @@ fn new_program(app: &mut LincApp) {
         .position(|entry| entry.path == path)
         .unwrap_or(0);
     app.files.usb_focused = false;
+    // The name field is drawn in the list, so it has to be on screen: a new
+    // file past the last visible row put the field out of view and the list
+    // looked frozen while every key went into it.
+    app.files.recent_shown = false;
+    app.files.scroll_to_selection = true;
     app.files.nc_parent_selected = false;
     app.files.error = None;
     app.toast(format!("created {name}"), theme::ACCENT);

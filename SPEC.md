@@ -621,10 +621,31 @@ becomes editable.
   machine.
 - Saving is explicit; no autosave. Save writes the loaded file, clears the dirty
   marker and must not run while a program is active.
+- A buffer with no file yet (a program typed straight into `EDIT`) asks for a
+  name instead of refusing: the dialog shows the `NC_FILES` folder it will land
+  in, appends the configured G-code extension when the name has none, refuses a
+  name that already exists, and the buffer keeps that path for later saves. A
+  save still needs the panel in `EDIT`, an idle interpreter and `PROTECT` off;
+  when those are missing the unsaved-changes dialog greys `SAVE` and names the
+  condition that blocks it.
+- `DISCARD` in the unsaved-changes dialog really drops the buffer: it is
+  reloaded from the loaded program (or emptied when nothing is loaded) before
+  the operator's destination is entered.
 - Unsaved changes must be confirmed before leaving Program, opening another
   file, or quitting.
+- Because the panel moves the mode itself, the HMI cannot hold `EDIT`. Leaving
+  `EDIT` with a dirty buffer warns once that `AUTO` can only start the loaded
+  program, and offers `DISCARD BUFFER` or `KEEP` until the operator returns
+  (a save is impossible in any other mode).
+- A successful load starts the view at line 1 and highlights it, whatever line
+  was selected in the previous program.
 - G/M/axis words are displayed uppercase; comments retain their case and the
   lexer is case-insensitive.
+- Typing applies the MDI pane's spacing rule inside the editor too: a word typed
+  against a non-space inserts one space in front of it, including a `G` or `M`
+  block after a value word (`G1X10` → `G1 X10`, `X10G0` → `X10 G0`). Each line
+  starts without a leading space, and nothing is inserted inside comments,
+  expressions, or when text is pasted or recalled.
 
 Program rules:
 
@@ -912,8 +933,10 @@ previous page.
 - Mount removable filesystems with `nosuid,nodev,noexec`; never auto-run files
   from USB.
 - Two equal panes, no page header and no button row: every action is a key.
-  `Left`/`Right` move the focus between the panes — the focused pane's title
-  turns accent and the other pane's row band dims; `Up`/`Down` move the
+  `NC_FILES` holds the focus on entry, because the program list is what
+  `LOAD`/`FILE` is for; `Left`/`Right` move the focus between the panes — the
+  focused pane's title turns accent and the other pane's row band dims;
+  `Up`/`Down` move the
   selection and `PageUp`/`PageDown` move a page, with the list scrolling the
   cursor into view; `Enter` opens a program from `NC_FILES` or copies a file from USB
   into `NC_FILES`; `C` copies the selected entry to
@@ -945,7 +968,9 @@ previous page.
   comment, a modal setup line with the machine's units and the active work
   system (`G21 G90 G54 G17 G40 G49 G80`), `G94`, blank body space, `M5` and
   `M30`. It then opens the name in rename mode. No motion, tool call or spindle
-  start is written. Creation is blocked by program protect.
+  start is written. Creation is blocked by program protect. The new row is
+  scrolled into view before its name field takes the keyboard, so a list longer
+  than the pane does not hide the field the operator is typing into.
 - `Enter` on a program accepts only configured G-code extensions from
   `NC_FILES`; it loads but never starts the program. Loading and writes to `NC_FILES` are disabled
   while running, and imports are blocked by program protect.

@@ -924,6 +924,37 @@ fn canonical_under(root: &Path, candidate: &Path) -> Result<PathBuf, MachineErro
     Ok(candidate)
 }
 
+/// Resolve the path a save writes to. A save may *create* the file, so the
+/// candidate itself need not exist.
+///
+/// The parent is canonicalized, so a symlinked directory cannot smuggle the
+/// write out of `NC_FILES`, and the file name is appended to that parent. An
+/// entry that already exists must be a regular file and not a symlink: writing
+/// through a link would land wherever the link points. Reads keep using
+/// `canonical_under`, which requires the file to exist.
+fn canonical_write_under(root: &Path, candidate: &Path) -> Result<PathBuf, MachineError> {
+    let root = root.canonicalize().map_err(|_| MachineError::UnsafePath)?;
+    let parent = candidate
+        .parent()
+        .ok_or(MachineError::UnsafePath)?
+        .canonicalize()
+        .map_err(|_| MachineError::UnsafePath)?;
+    let name = candidate.file_name().ok_or(MachineError::UnsafePath)?;
+    let resolved = parent.join(name);
+    if !resolved.starts_with(&root) {
+        return Err(MachineError::UnsafePath);
+    }
+    match std::fs::symlink_metadata(&resolved) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
+            return Err(MachineError::UnsafePath);
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(MachineError::UnsafePath),
+    }
+    Ok(resolved)
+}
+
 impl MachineBackend for SimBackend {
     fn snapshot(&mut self) -> MachineSnapshot {
         self.sync_panel();
@@ -1239,7 +1270,7 @@ impl MachineBackend for SimBackend {
                 if expected_revision != self.snapshot.program.revision {
                     return Err(MachineError::RevisionConflict);
                 }
-                let canonical = canonical_under(self.profile.nc_files_root(), &path)?;
+                let canonical = canonical_write_under(self.profile.nc_files_root(), &path)?;
                 let parent = canonical.parent().ok_or(MachineError::UnsafePath)?;
                 let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
                 use std::io::Write as _;
@@ -2067,6 +2098,52 @@ enabled = true
             .unwrap();
         let text = std::fs::read_to_string(root.join("PART.NC")).unwrap();
         assert_eq!(text, "G0 X1\nG1 X2\n");
+    }
+
+    /// An untitled buffer is named in the save dialog, so the save must be able
+    /// to create the file it is pointed at - and only inside NC_FILES.
+    #[test]
+    fn save_creates_a_new_file_but_never_outside_nc_files() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Edit);
+        let root = backend.profile().nc_files_root().to_path_buf();
+        let revision = backend.snapshot().program.revision;
+        let path = root.join("new-part.ngc");
+        assert!(!path.exists());
+        backend
+            .send(MachineCommand::SaveProgram {
+                path: path.clone(),
+                expected_revision: revision,
+                content: "G0 X0\n".into(),
+            })
+            .expect("a new name under NC_FILES is writable");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "G0 X0\n");
+
+        // A name outside the root is still refused, and so is a symlink.
+        let outside = root.parent().unwrap().join("escape.ngc");
+        let revision = backend.snapshot().program.revision;
+        let error = backend
+            .send(MachineCommand::SaveProgram {
+                path: outside.clone(),
+                expected_revision: revision,
+                content: "G0 X0\n".into(),
+            })
+            .unwrap_err();
+        assert_eq!(error, MachineError::UnsafePath);
+        assert!(!outside.exists());
+
+        let link = root.join("link.ngc");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        let error = backend
+            .send(MachineCommand::SaveProgram {
+                path: link,
+                expected_revision: revision,
+                content: "G0 X0\n".into(),
+            })
+            .unwrap_err();
+        assert_eq!(error, MachineError::UnsafePath);
+        assert!(!outside.exists(), "the link target is not written");
     }
 
     fn run_probe(
