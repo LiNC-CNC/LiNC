@@ -2778,86 +2778,194 @@ fn shifted_help_page(topic: usize, page: usize, delta: isize) -> usize {
     (page as isize + delta).clamp(0, count as isize - 1) as usize
 }
 
+#[derive(Clone, Copy)]
+struct HelpFigure {
+    image: &'static str,
+    caption: &'static str,
+    credit: &'static str,
+}
+
+/// The figure that belongs to a help page. UI screenshots are LiNC's own;
+/// only the three parameter diagrams come from Probe Basic. Pages without a
+/// useful figure keep the full width for their text.
+fn help_figure(topic: usize, page: usize) -> Option<HelpFigure> {
+    let (image, caption, credit) = match (topic, page) {
+        (0, 0) => ("outside-corners.png", "LiNC Outside Corners routines", ""),
+        (0, 1) => ("parameters.png", "LiNC probing parameters", ""),
+        (1, 0) => ("work-offsets.png", "LiNC work offsets", ""),
+        (1, 1) => ("edge-angle.png", "LiNC Edge Angle routines", ""),
+        (2, 0) => (
+            "step-off-width.png",
+            "Step-off width",
+            "Probe Basic · GPLv3",
+        ),
+        (2, 1) => (
+            "probing-hints.png",
+            "Feature hint fields",
+            "Probe Basic · GPLv3",
+        ),
+        (2, 2) => (
+            "extra-probe-depth.png",
+            "Extra probe depth",
+            "Probe Basic · GPLv3",
+        ),
+        (3, 0) | (3, 1) => ("results.png", "LiNC probe results", ""),
+        (4, 0) => ("calibrate.png", "LiNC calibration routines", ""),
+        (5, 0) => ("boss-and-pocket.png", "LiNC Boss + Pocket routines", ""),
+        _ => return None,
+    };
+    Some(HelpFigure {
+        image,
+        caption,
+        credit,
+    })
+}
+
 fn help_view(app: &mut LincApp, ui: &mut Ui) {
-    let available = ui.available_width();
-    let height = ui.available_height().max(380.0);
-    let right_w = 150.0;
-    let gap = 4.0;
+    let height = ui.available_height().max(420.0);
     app.probe.help_topic = app.probe.help_topic.min(HELP_TOPICS.len() - 1);
     let topic = &HELP_TOPICS[app.probe.help_topic];
     app.probe.help_page = shifted_help_page(app.probe.help_topic, app.probe.help_page, 0);
     let page = topic.pages[app.probe.help_page];
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.allocate_ui_with_layout(
-            Vec2::new((available - right_w - gap).max(400.0), height),
-            egui::Layout::top_down(Align::Min),
-            |ui| {
-                theme::card(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.set_min_height((height - 24.0).max(0.0));
-                    ui.horizontal_top(|ui| {
-                        ui.vertical(|ui| {
-                            ui.set_width(164.0);
-                            theme::section_header(ui, "HELP TOPICS");
-                            for (index, item) in HELP_TOPICS.iter().enumerate() {
-                                if ui
-                                    .selectable_label(index == app.probe.help_topic, item.title)
-                                    .clicked()
-                                {
-                                    app.probe.help_topic = index;
-                                    app.probe.help_page = 0;
-                                }
-                            }
-                            ui.add_space(8.0);
-                            help_text(ui, "↑/↓ TOPIC\n←/→ PAGE\nPGUP/PGDN CATEGORY");
-                        });
-                        ui.add_space(14.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(ui.available_width());
-                            ui.horizontal(|ui| {
-                                theme::section_header(ui, topic.title);
-                                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                    ui.label(
-                                        RichText::new(format!(
-                                            "TOPIC {}/{} · PAGE {}/{}",
-                                            app.probe.help_topic + 1,
-                                            HELP_TOPICS.len(),
-                                            app.probe.help_page + 1,
-                                            topic.pages.len()
-                                        ))
-                                        .monospace()
-                                        .size(theme::font_size(8.0))
-                                        .color(theme::MUTED),
-                                    );
-                                });
-                            });
-                            theme::separator(ui);
-                            ui.add_space(6.0);
-                            for line in page {
-                                help_text(ui, line);
-                            }
-                        });
+    let figure = help_figure(app.probe.help_topic, app.probe.help_page);
+
+    theme::card(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        ui.set_min_height((height - 24.0).max(0.0));
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(
+                Vec2::new(190.0, (height - 24.0).max(0.0)),
+                egui::Layout::top_down(Align::Min),
+                |ui| {
+                    ui.set_width(190.0);
+                    theme::section_header(ui, "HELP TOPICS");
+                    for (index, item) in HELP_TOPICS.iter().enumerate() {
+                        let selected = index == app.probe.help_topic;
+                        let text = RichText::new(item.title)
+                            .size(theme::font_size(11.5))
+                            .color(if selected { theme::FG } else { theme::MUTED });
+                        if ui.selectable_label(selected, text).clicked() {
+                            app.probe.help_topic = index;
+                            app.probe.help_page = 0;
+                        }
+                        ui.add_space(2.0);
+                    }
+                    ui.add_space(12.0);
+                    ui.label(
+                        RichText::new("↑/↓ TOPIC\n←/→ PAGE\nPGUP/PGDN CATEGORY")
+                            .size(theme::font_size(10.0))
+                            .color(theme::MUTED),
+                    );
+                },
+            );
+            ui.add_space(18.0);
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    theme::section_header(ui, topic.title);
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "TOPIC {}/{} · PAGE {}/{}",
+                                app.probe.help_topic + 1,
+                                HELP_TOPICS.len(),
+                                app.probe.help_page + 1,
+                                topic.pages.len()
+                            ))
+                            .monospace()
+                            .size(theme::font_size(9.5))
+                            .color(theme::MUTED),
+                        );
                     });
                 });
-            },
-        );
-        ui.add_space(gap);
-        ui.allocate_ui_with_layout(
-            Vec2::new(right_w, height),
-            egui::Layout::top_down(Align::Min),
-            |ui| probe_symbol(app, ui, height),
-        );
+                theme::separator(ui);
+                ui.add_space(10.0);
+
+                let body_w = ui.available_width();
+                let body_h = (height - 100.0).max(0.0);
+                let figure_gap = 18.0;
+                let figure_w = if figure.is_some() {
+                    (body_w * 0.42).clamp(300.0, 430.0)
+                } else {
+                    0.0
+                };
+                let text_w = if figure.is_some() {
+                    (body_w - figure_w - figure_gap).max(280.0)
+                } else {
+                    body_w.min(860.0)
+                };
+                ui.horizontal_top(|ui| {
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(text_w, body_h),
+                        egui::Layout::top_down(Align::Min),
+                        |ui| {
+                            ui.set_max_width(text_w);
+                            for line in page {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(*line)
+                                            .size(theme::font_size(13.0))
+                                            .color(theme::FG),
+                                    )
+                                    .wrap(),
+                                );
+                                ui.add_space(10.0);
+                            }
+                        },
+                    );
+                    if let Some(figure) = figure {
+                        ui.add_space(figure_gap);
+                        help_figure_panel(app, ui, figure, figure_w, body_h);
+                    }
+                });
+            });
+        });
     });
 }
 
-fn help_text(ui: &mut Ui, text: &str) {
-    ui.label(
-        RichText::new(text)
-            .size(theme::font_size(9.0))
-            .color(theme::MUTED),
+fn help_figure_panel(app: &mut LincApp, ui: &mut Ui, figure: HelpFigure, width: f32, height: f32) {
+    ui.allocate_ui_with_layout(
+        Vec2::new(width, height),
+        egui::Layout::top_down(Align::Min),
+        |ui| {
+            ui.set_max_width(width);
+            let Some(texture) = app.probe.help_texture(ui.ctx(), figure.image) else {
+                ui.label(
+                    RichText::new(format!("[figure: {}]", figure.image))
+                        .monospace()
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
+                );
+                return;
+            };
+            let initial = texture.size_vec2();
+            let max_h = (height - 60.0).max(160.0);
+            let scale = (width / initial.x).min(max_h / initial.y).min(1.0);
+            let size = initial * scale;
+            egui::Frame::new()
+                .fill(Color32::from_rgb(0xe8, 0xec, 0xf0))
+                .stroke(Stroke::new(1.0, theme::BORDER))
+                .corner_radius(6)
+                .inner_margin(8)
+                .show(ui, |ui| {
+                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                        texture.id(),
+                        size,
+                    )));
+                });
+            ui.add_space(6.0);
+            let label = if figure.credit.is_empty() {
+                figure.caption.to_string()
+            } else {
+                format!("{} · {}", figure.caption, figure.credit)
+            };
+            ui.label(
+                RichText::new(label)
+                    .size(theme::font_size(9.5))
+                    .color(theme::MUTED),
+            );
+        },
     );
-    ui.add_space(6.0);
 }
 
 fn parameter_editable(category: ProbeCategory) -> bool {

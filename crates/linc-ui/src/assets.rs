@@ -11,6 +11,17 @@ macro_rules! images {
     };
 }
 
+macro_rules! probe_help_images {
+    ($($name:literal),* $(,)?) => {
+        pub fn probe_help_image_bytes(name: &str) -> Option<&'static [u8]> {
+            match name {
+                $($name => Some(include_bytes!(concat!("../../../assets/probe/help/", $name))),)*
+                _ => None,
+            }
+        }
+    };
+}
+
 macro_rules! probe_icons {
     ($($name:literal),* $(,)?) => {
         pub fn probe_icon_bytes(name: &str) -> Option<&'static [u8]> {
@@ -83,6 +94,19 @@ images!(
     "twelve-holes_en.png",
 );
 
+probe_help_images!(
+    "boss-and-pocket.png",
+    "calibrate.png",
+    "edge-angle.png",
+    "extra-probe-depth.png",
+    "outside-corners.png",
+    "parameters.png",
+    "probing-hints.png",
+    "results.png",
+    "step-off-width.png",
+    "work-offsets.png",
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,6 +130,27 @@ mod tests {
             "twelve-holes_en.png",
         ] {
             assert!(image_bytes(name).is_some(), "missing {name}");
+        }
+    }
+
+    #[test]
+    fn probe_help_figures_are_embedded() {
+        for name in [
+            "boss-and-pocket.png",
+            "calibrate.png",
+            "edge-angle.png",
+            "extra-probe-depth.png",
+            "outside-corners.png",
+            "parameters.png",
+            "probing-hints.png",
+            "results.png",
+            "step-off-width.png",
+            "work-offsets.png",
+        ] {
+            assert!(
+                probe_help_image_bytes(name).is_some(),
+                "missing probe help figure {name}"
+            );
         }
     }
 }

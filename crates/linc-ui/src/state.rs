@@ -1108,6 +1108,24 @@ impl ProbeUi {
         self.textures.insert(operation.to_string(), texture.clone());
         Some(texture)
     }
+
+    pub fn help_texture(&mut self, ctx: &egui::Context, name: &str) -> Option<egui::TextureHandle> {
+        let key = format!("help:{name}");
+        if let Some(texture) = self.textures.get(&key) {
+            return Some(texture.clone());
+        }
+        let bytes = crate::assets::probe_help_image_bytes(name)?;
+        let image = image::load_from_memory(bytes).ok()?.to_rgba8();
+        let size = [image.width() as usize, image.height() as usize];
+        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+        let texture = ctx.load_texture(
+            format!("probe-help-{name}"),
+            color_image,
+            egui::TextureOptions::LINEAR,
+        );
+        self.textures.insert(key, texture.clone());
+        Some(texture)
+    }
 }
 
 /// The MDI pane's working state.
