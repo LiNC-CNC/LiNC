@@ -731,7 +731,14 @@ pub fn messages_dialog(app: &mut LincApp, ctx: &egui::Context) {
                         .color(theme::MUTED),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if theme::action_button(ui, "CLOSE", true).clicked() {
+                    // The dialog's only action, so it holds the ring from the
+                    // moment the log opens: Enter closes it, like every other
+                    // dialog's safe button.
+                    let close_button = theme::action_button(ui, "CLOSE", true);
+                    if !close_button.has_focus() {
+                        close_button.request_focus();
+                    }
+                    if close_button.clicked() {
                         close = true;
                     }
                 });

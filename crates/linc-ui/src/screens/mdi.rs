@@ -95,10 +95,11 @@ pub fn pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
             .machine_bounds()
             .and_then(|limits| app.mdi.overlay.as_ref().and_then(|cache| excess(&cache.segments, limits)));
         let response = highlighted_input(app, ui, band.input, beyond);
-        if app.profile.config.mdi.auto_focus && app.mdi.focus {
+        if app.profile.config.mdi.auto_focus && app.mdi.focus && !app.overlay_open() {
             // One-shot: the pane asks for the keyboard when it appears or when
             // the panel switches into MDI, and gives it up the moment the
-            // operator clicks the toolpath or the graph.
+            // operator clicks the toolpath or the graph. A dialog owns the
+            // keyboard while it is open, so the request waits for it.
             response.request_focus();
             app.mdi.focus = false;
         }

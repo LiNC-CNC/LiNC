@@ -591,7 +591,10 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                 .interactive(editable)
                 .layouter(&mut layouter)
                 .show(ui);
-            if app.program.focus_editor {
+            // A dialog owns the keyboard while it is open: the editor is drawn
+            // behind it, and taking the focus here would pull it off the
+            // dialog's default button. The request waits for the dialog to go.
+            if app.program.focus_editor && !app.overlay_open() {
                 if editable {
                     output.response.request_focus();
                 }

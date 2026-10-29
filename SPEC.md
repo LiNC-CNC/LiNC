@@ -136,10 +136,13 @@ sidebar holds); nav keys are never listed. The list is grouped by purpose
 While a dialog or the manual tool-change prompt is open it owns the keyboard:
 its focused buttons and fields handle Enter, arrows and typing, the shell keeps
 only Escape for a dismissible dialog, and navigation or page shortcuts do not
-act on the page behind it. The TOOLS page's typed tool-number dialog is one of
-those dialogs and is listed in `LincApp::overlay_open()`; it takes its own
-`Enter` and `Esc` before the table draws, because a refused number must keep
-it open and say why.
+act on the page behind it. A dialog puts that focus on its **safe button** the
+moment it opens — `CANCEL`, `KEEP` or the single `OK`/`CLOSE` — so the ring is
+always visible somewhere and a reflex Enter never deletes, overwrites, quits or
+starts anything; a field a dialog exists to fill is reached with a click. The
+TOOLS page's typed tool-number dialog is one of those dialogs and is listed in
+`LincApp::overlay_open()`; it takes its own `Enter` and `Esc` before the table
+draws, because a refused number must keep it open and say why.
 
 ### 3.2 Physical panel
 

@@ -511,6 +511,13 @@ pub fn draw_dialog(app: &mut LincApp, ctx: &egui::Context) {
                     } else {
                         None
                     };
+                    // A dialog opens with its safe button under the Enter key:
+                    // CLOSE, unless the operator has moved the ring to BACK.
+                    let holds_ring = close_button.has_focus()
+                        || back_button.as_ref().is_some_and(|button| button.has_focus());
+                    if !holds_ring {
+                        close_button.request_focus();
+                    }
                     // Arrows belong to the document scroll, not to focus
                     // navigation between these two buttons.
                     for button in [Some(close_button), back_button].into_iter().flatten() {

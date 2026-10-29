@@ -185,6 +185,10 @@ pub struct LincApp {
     /// Same, for the manual tool-change prompt, which is driven by the machine
     /// rather than by `self.modal`.
     pub tool_prompt_open_last_frame: bool,
+    /// Whether any dialog or prompt was open on the previous frame. Closing the
+    /// last one leaves the keyboard ownerless, so the shell hands it back to
+    /// the page (see `restore_page_keyboard`).
+    pub overlay_was_open: bool,
     pub last_connection: Option<bool>,
     pub last_protect: Option<bool>,
     pub panel_offline_toast: bool,
@@ -534,6 +538,7 @@ impl LincApp {
             move_progress: linc_core::model::AxisMap::new(),
             modal_open_last_frame: false,
             tool_prompt_open_last_frame: false,
+            overlay_was_open: false,
             messages_dialog: false,
             messages_scroll: 0.0,
             program_was_running: false,
@@ -1107,6 +1112,20 @@ impl LincApp {
         self.program.editor.dirty
     }
 
+    /// Hand the keyboard back to the page a dialog interrupted.
+    ///
+    /// egui drops the focus together with the widget that held it, so a closed
+    /// dialog left the session with no focus owner: the editor stopped taking
+    /// keys and the page keys fell through. The G-code editor is the one field
+    /// the shell can focus by name, so it takes the keyboard back on the
+    /// Program page; everywhere else the page anchor is the focus stop.
+    fn restore_page_keyboard(&mut self) {
+        if self.page == Page::Program && self.editing_allowed() {
+            self.program.focus_editor = true;
+            return;
+        }
+        self.page_focus_requested = true;
+    }
     pub fn set_page(&mut self, page: Page) {
         self.remember_page(page);
         if page == Page::Help && self.page != Page::Help {
@@ -3099,8 +3118,11 @@ impl LincApp {
             .show(ui, |ui| {
                 // The page title is the stable keyboard focus stop. It lets
                 // arrow keys enter the normal widget focus order without a
-                // mouse or Tab.
-                if self.page_focus_requested {
+                // mouse or Tab. While a dialog is open the keyboard belongs to
+                // it, so the request stays pending until the dialog closes:
+                // taking it here left a freshly opened dialog with no focused
+                // button at all.
+                if self.page_focus_requested && !self.overlay_open() {
                     ui.ctx().data_mut(|data| {
                         data.insert_temp(egui::Id::unique("linc-page-focus"), true)
                     });
@@ -3148,6 +3170,16 @@ impl LincApp {
         self.draw_tool_change_prompt(ui.ctx());
         crate::screens::help::draw_dialog(self, ui.ctx());
         crate::screens::common::messages_dialog(self, ui.ctx());
+        // Every dialog is drawn by now, so the set of overlays is final for
+        // this frame. egui drops the focus together with the widget that held
+        // it, and none of the pages asks for it again: without this the
+        // keyboard went nowhere after a dialog closed. Restore it on the frame
+        // after the last overlay has gone.
+        let overlay_open = self.overlay_open();
+        if self.overlay_was_open && !overlay_open {
+            self.restore_page_keyboard();
+        }
+        self.overlay_was_open = overlay_open;
         self.draw_toasts(ui.ctx());
         self.save_preferences(false);
         if self.quit_requested {
@@ -4575,9 +4607,6 @@ impl LincApp {
                             .desired_width(120.0)
                             .hint_text("line"),
                     );
-                    if focus_default {
-                        field.request_focus();
-                    }
                     if field.changed() {
                         // Digits only, so the field cannot hold something the
                         // jump would have to reject.
@@ -4597,6 +4626,13 @@ impl LincApp {
                             goto_accept = true;
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
+                        // The safe button takes the ring when the dialog opens,
+                        // like every other dialog: Enter must never jump the
+                        // view somewhere by itself. A click on the field starts
+                        // the typing.
+                        if focus_default {
+                            cancel.request_focus();
+                        }
                         if cancel.clicked() {
                             close = true;
                         }
@@ -4616,7 +4652,11 @@ impl LincApp {
                     ui.add_space(6.0);
                     ui.label(text);
                     ui.add_space(12.0);
-                    if theme::action_button(ui, "OK", true).clicked() {
+                    let ok = theme::action_button(ui, "OK", true);
+                    if focus_default {
+                        ok.request_focus();
+                    }
+                    if ok.clicked() {
                         close = true;
                     }
                 }
@@ -4625,7 +4665,11 @@ impl LincApp {
                     ui.add_space(6.0);
                     ui.label(text);
                     ui.add_space(12.0);
-                    if theme::action_button(ui, "OK", true).clicked() {
+                    let ok = theme::action_button(ui, "OK", true);
+                    if focus_default {
+                        ok.request_focus();
+                    }
+                    if ok.clicked() {
                         close = true;
                     }
                 }
@@ -4650,9 +4694,6 @@ impl LincApp {
                             .desired_width(260.0)
                             .hint_text("part"),
                     );
-                    if focus_default {
-                        field.request_focus();
-                    }
                     if field.changed() {
                         save_name = Some(text);
                     }
@@ -4693,6 +4734,12 @@ impl LincApp {
                             save_confirm = true;
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
+                        // The ring starts on CANCEL, not on the name field: a
+                        // dialog always opens with its safe button under the
+                        // Enter key, and a click on the field starts the name.
+                        if focus_default {
+                            cancel.request_focus();
+                        }
                         if cancel.clicked() {
                             close = true;
                         }
