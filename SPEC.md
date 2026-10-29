@@ -43,7 +43,7 @@ Available navigation keys:
 
 | Keyboard key | USB keycode | HMI action |
 |---|---|---|
-| `MAIN` | `F5` | Machine dashboard |
+| `MAIN` | `F5` | The screen the panel's mode owns: Program in `EDIT`, Manual in `JOG`/`INC`/`MPG`, Homing in `HOME`/`PROG.HOME`, and the Machine dashboard in `AUTO`/`MDI` |
 | `FILE` | `F6` | Program page; press again for the Files browser, and again to return |
 | `TOOL` | `F7` | Tools page |
 | `OFFSET` | `F8` | Offsets page |
@@ -93,7 +93,7 @@ else, so it cannot shadow another page's command.
 
 | Key | Action |
 |---|---|
-| `F5` `F6` `F7` `F8` `Ctrl+D` `Ctrl+H` | Go to Machine / Program / Tools / Offsets / Diagnostics / G-code Help |
+| `F5` `F6` `F7` `F8` `Ctrl+D` `Ctrl+H` | Go to the mode's page / Program / Tools / Offsets / Diagnostics / G-code Help |
 | `M` | Open the full-screen messages dialog (`Enter`/`Esc`/`CLOSE` closes it) |
 | `Esc` | Back, cancel, close detail; while a probe-trip fault is latched it resets and clears it; on a page that is only a view (Help, Diagnostics) it returns to the page it came from first; while a program is active it stops and resets it, the same as the panel's K4 |
 | `Ctrl+Q` | Guarded quit |

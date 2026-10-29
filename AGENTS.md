@@ -170,7 +170,8 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
 - Missing: F1–F4, F9, F11, F12, `Tab`, `Shift`, `Delete`. Files deletes with `Backspace` (or `Delete` where
   present). `Ctrl+C`/`Ctrl+X`/`Ctrl+V` belong to text editing; only the Probe page takes `Ctrl+X` (X data reset), and only
   while no text editor has focus.
-- Global keys navigate: F5 Machine, F6 Program (again → Files), F7 Tools, F8 Offsets, `Ctrl+D` Diagnostics, `Ctrl+H` G-code Help,
+- Global keys navigate: F5 the screen the panel mode owns (Program in EDIT, Manual in JOG/INC/MPG, Homing in HOME/PROG.HOME,
+  Machine in AUTO/MDI), F6 Program (again → Files), F7 Tools, F8 Offsets, `Ctrl+D` Diagnostics, `Ctrl+H` G-code Help,
   `M` Messages, `Ctrl+Q` guarded quit, Esc, arrows/Page/Home/End, Enter. `[keys]` drives the shell; `Keymap::from_config` is the only source.
 - Everything else is page-local and consumed only on that page: `Ctrl+S`, `Ctrl+Z/Y`, editor keys, `Ctrl+R` run-from-line, `Ctrl+0` fit, `Ctrl+L`
   clear trail, Files copy/delete, MDI buffer recall, line move and issue. A page-local key consumed elsewhere shadows another page's command.

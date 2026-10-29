@@ -1126,6 +1126,27 @@ impl LincApp {
         }
         self.page_focus_requested = true;
     }
+    /// The screen the panel's current mode owns.
+    ///
+    /// `MAIN` is the operator asking for "the screen for this mode", not for the
+    /// AUTO dashboard: in EDIT that screen is the program editor, in
+    /// JOG/INC/MPG it is the manual page and in HOME/PROG.HOME it is the homing
+    /// page. The shared `mode_page` mapping answers `None` for AUTO (whose
+    /// screen is MAIN) and for an unknown or zero mode, which fails closed onto
+    /// the dashboard as well.
+    pub fn mode_screen(&self) -> Page {
+        mode_page(&self.snapshot.panel.mode).unwrap_or(Page::Machine)
+    }
+
+    /// `MAIN` (F5): go to the mode's page, without the Program page's
+    /// second meaning of "flip SPLIT/CODE" when it is already in front.
+    pub fn request_mode_page(&mut self) {
+        let page = self.mode_screen();
+        if page == self.page {
+            return;
+        }
+        self.request_page(page);
+    }
     pub fn set_page(&mut self, page: Page) {
         self.remember_page(page);
         if page == Page::Help && self.page != Page::Help {
@@ -2315,6 +2336,7 @@ impl LincApp {
                 || memory.has_focus(egui::Id::unique("linc-diagnostics-search"))
         });
         let mut nav_page = None;
+        let mut mode_nav = false;
         let mut escape = false;
         let mut quit = false;
         let mut request_files = false;
@@ -2439,7 +2461,7 @@ impl LincApp {
                 }
             }
             if input.consume_key(self.keymap.machine.modifiers, self.keymap.machine.key) {
-                nav_page = Some(Page::Machine);
+                mode_nav = true;
             }
             if input.consume_key(self.keymap.program.modifiers, self.keymap.program.key) {
                 // The key is labelled FILE: it opens the program, and opens the
@@ -2897,6 +2919,9 @@ impl LincApp {
         }
         if probe_exit {
             nav_page = Some(Page::Offsets);
+        }
+        if mode_nav {
+            self.request_mode_page();
         }
         if let Some(page) = nav_page {
             self.request_page(page);
@@ -7073,6 +7098,34 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert_eq!(app.program.editor.text(), "G0 X0\nG1 X1\n");
     }
 
+    /// MAIN is the screen for the mode in front of the operator, not always the
+    /// AUTO dashboard; on the Program page it does not also flip SPLIT/CODE.
+    #[test]
+    fn main_opens_the_page_the_panel_mode_owns() {
+        let (_dir, mut app) = make_app(PanelMode::Edit);
+        assert_eq!(app.page, Page::Program);
+        app.request_mode_page();
+        assert_eq!(app.page, Page::Program, "already there, and not toggled");
+        assert_eq!(app.program.view, ProgramView::Code);
+        app.set_page(Page::Files);
+        app.request_mode_page();
+        assert_eq!(app.page, Page::Program);
+
+        switch_mode(&mut app, PanelMode::Jog);
+        app.set_page(Page::Tools);
+        app.request_mode_page();
+        assert_eq!(app.page, Page::Manual);
+
+        switch_mode(&mut app, PanelMode::Home);
+        app.set_page(Page::Tools);
+        app.request_mode_page();
+        assert_eq!(app.page, Page::Homing);
+
+        switch_mode(&mut app, PanelMode::Auto);
+        app.set_page(Page::Tools);
+        app.request_mode_page();
+        assert_eq!(app.page, Page::Machine);
+    }
     #[test]
     fn protect_unknown_fails_closed_in_the_ui() {
         let (_dir, mut app) = make_app(PanelMode::Edit);
