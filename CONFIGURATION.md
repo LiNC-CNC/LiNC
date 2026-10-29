@@ -127,8 +127,10 @@ key through `or2.machine_off` (`hal/linc-sim.hal` keeps the POWER OFF half,
 `hal/linc-sim-postgui.hal` the `linc.machine-off` half, and the instance is
 created in `hal/linc.hal` where `or2` is loaded once). Re-powering after a trip
 needs a rising edge on `halui.machine.on`; on the mill the cabinet machine-on
-switch is the only writer, so recovery is toggling that switch, which ends the
-LiNC session.
+switch is the only writer, so recovery is toggling that switch. While the trip's
+`linc.machine-off` level stands, the off half of that toggle does not end the
+LiNC session: the HMI stays up with the latched fault so the operator can reset
+it. A switch-off after the reset ends the session as usual.
 
 `LINC_CONFIG` must select the same profile as `--config`:
 

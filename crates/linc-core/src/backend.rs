@@ -310,11 +310,7 @@ fn run_worker(
             // The answer rides on the fault, recorded when the message arrived;
             // it cannot be re-derived here, because the trip itself ends the
             // pause.
-            let machine_off = snapshot.probe_trip_active()
-                && snapshot
-                    .probe_trip
-                    .as_ref()
-                    .is_some_and(|fault| fault.switches_machine_off());
+            let machine_off = snapshot.probe_trip_switched_machine_off();
             snapshot.hal.machine_off = machine_off;
             if machine_off != last_machine_off {
                 last_machine_off = machine_off;

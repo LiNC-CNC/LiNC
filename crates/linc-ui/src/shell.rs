@@ -1387,6 +1387,10 @@ impl LincApp {
     /// the confirm dialog: the machine power is going away regardless, and a
     /// modal here would leave the HMI running while LinuxCNC is being shut down.
     /// This is the only path that may quit while a program runs.
+    ///
+    /// The caller filters the probe-trip recovery toggle: a switch-off while
+    /// the trip's machine-off level stands is not a shutdown and never gets
+    /// here.
     pub fn request_machine_off(&mut self) {
         log::info!("machine-on input dropped; ending the session");
         self.quit_requested = true;

@@ -1442,6 +1442,15 @@ impl MachineSnapshot {
         self.probe_trip.is_some()
     }
 
+    /// Did the latched probe trip switch the machine off? True while the
+    /// `linc.machine-off` level stands, i.e. for every trip except the one
+    /// raised with the program paused and nothing moving.
+    pub fn probe_trip_switched_machine_off(&self) -> bool {
+        self.probe_trip
+            .as_ref()
+            .is_some_and(ProbeTripFault::switches_machine_off)
+    }
+
     pub fn program_editing_allowed(&self) -> bool {
         self.task.interp == InterpState::Idle
             && !self.task.running

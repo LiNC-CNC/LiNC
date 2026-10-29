@@ -268,6 +268,12 @@ const MACHINE_ON_PIN: &str = "linc.machine-on";
 /// The read lives here rather than in `linc-ui`, which must never touch HAL;
 /// `linc-ui` only exposes the forced-quit entry point. A session that never
 /// ends is also a Pi that never powers off, which is why this exists at all.
+///
+/// One falling edge is not a shutdown: the off half of the switch cycle that
+/// re-powers a machine a probe trip has already switched off. `halui` needs a
+/// rising edge on `halui.machine.on` to power back on, so recovery is toggling
+/// the same switch; ending LiNC there would take the HMI away from the latched
+/// fault before the operator could reset it.
 struct MachineOffGuard {
     inner: LincApp,
     reader: Option<HalReader>,
@@ -331,8 +337,11 @@ impl MachineOffGuard {
         let Some(HalPinValue::Bit(now)) = reader.read(MACHINE_ON_PIN) else {
             return;
         };
-        if machine_off_edge(self.last, now) {
+        let probe_trip_switched_machine_off = self.inner.snapshot.probe_trip_switched_machine_off();
+        if machine_off_ends_session(self.last, now, probe_trip_switched_machine_off) {
             self.inner.request_machine_off();
+        } else if machine_off_edge(self.last, now) {
+            log::info!("machine-on dropped during a probe-trip machine-off; session kept");
         }
         self.last = Some(now);
     }
@@ -345,6 +354,16 @@ fn machine_off_edge(previous: Option<bool>, now: bool) -> bool {
     previous == Some(true) && !now
 }
 
+/// A switch-off ends the session unless a probe trip has already switched the
+/// machine off and the operator is cycling the switch to re-power it.
+fn machine_off_ends_session(
+    previous: Option<bool>,
+    now: bool,
+    probe_trip_switched_machine_off: bool,
+) -> bool {
+    machine_off_edge(previous, now) && !probe_trip_switched_machine_off
+}
+
 impl eframe::App for MachineOffGuard {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.poll_machine_on();
@@ -355,7 +374,7 @@ impl eframe::App for MachineOffGuard {
 
 #[cfg(test)]
 mod machine_off_tests {
-    use super::{machine_off_edge, resolve_window_mode, WindowMode};
+    use super::{machine_off_edge, machine_off_ends_session, resolve_window_mode, WindowMode};
 
     #[test]
     fn window_mode_resolves_auto_by_machine_kind() {
@@ -380,6 +399,19 @@ mod machine_off_tests {
         assert!(!machine_off_edge(None, false));
         // High on the first read only records the baseline.
         assert!(!machine_off_edge(None, true));
+    }
+
+    #[test]
+    fn a_probe_trip_machine_off_survives_the_recovery_toggle() {
+        // The trip switched the machine off through halui; halui needs a rising
+        // edge to power back on, so the operator cycles the switch. The off
+        // half must keep the session alive for the reset.
+        assert!(!machine_off_ends_session(Some(true), false, true));
+        // The switch-off after the trip is reset is a real shutdown again.
+        assert!(machine_off_ends_session(Some(true), false, false));
+        // The trip latch suppresses only the falling edge.
+        assert!(!machine_off_ends_session(Some(false), true, true));
+        assert!(!machine_off_ends_session(None, false, true));
     }
 }
 

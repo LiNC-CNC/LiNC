@@ -1357,9 +1357,12 @@ etc.
   DIAGNOSTICS, or the banner's `RESET (ESC)` button), which sends
   `EMC_TASK_ABORT` — the same action that clears LinuxCNC's motion error.
   Re-powering afterwards needs a rising edge on `halui.machine.on`: on the mill
-  the cabinet machine-on switch is the only writer, and toggling it ends the
-  LiNC session. That is the recovery path; there is no software E-stop and no
-  jog lockout.
+  the cabinet machine-on switch is the only writer, so recovery is toggling
+  that switch. The off half of that toggle does not end the LiNC session while
+  the trip's `linc.machine-off` level stands; the session stays up with the
+  latched fault so the operator can reset it and see the machine re-power. A
+  switch-off after the reset ends the session as usual. There is no software
+  E-stop and no jog lockout.
 - Program start is physical CYCLE START only. The HMI never starts AUTO.
 - The WHB pendant contributes jog/handwheel input only in JOG mode; all other
   pendant controls are ignored.
@@ -1564,10 +1567,12 @@ HAL pins is still open.
   read with. No `motion.jog-inhibit`, no jog-stop and no other motion-based
   heuristic is added.
 - Re-powering after a trip needs a rising edge on `halui.machine.on`. On the
-  mill the only writer is the cabinet machine-on switch, and toggling it ends
-  the LiNC session. That is the designed recovery path; LiNC does not work
-  around it and adds no jog lockout, no `motion.jog-inhibit` and no software
-  E-stop.
+  mill the only writer is the cabinet machine-on switch, so recovery is
+  toggling that switch. While the trip's `linc.machine-off` level stands, the
+  off half of that toggle is not a session shutdown: LiNC keeps running with
+  the latched fault, and the operator resets it from the banner or Esc. A
+  switch-off after the reset ends the session as usual. LiNC adds no jog
+  lockout, no `motion.jog-inhibit` and no software E-stop.
 - Do not hide alarms behind tabs; persistent banner plus Diagnostics.
 - HMI crash must not stop the machine or remove panel control. The panel
   service is separate; `linc.hmi-alive` exposes UI health to HAL.

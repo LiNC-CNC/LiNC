@@ -401,7 +401,9 @@ pub struct LincHal {
     /// while the trip stands.
     machine_off: HalPin,
     /// Cabinet machine-on switch, wired through the post-GUI HAL. A falling
-    /// edge means the machine is being switched off and ends the session.
+    /// edge is a switch-off request that ends the session, except while a probe
+    /// trip's machine-off level stands: that edge is the off half of the toggle
+    /// that re-powers the machine.
     machine_on: HalPin,
     last_confirm: bool,
 }
