@@ -3967,6 +3967,8 @@ impl LincApp {
                 hints.push(("Enter".into(), "EDIT"));
                 hints.push(("T".into(), "LOAD + G43"));
                 hints.push((k.tool_number.label(), "TYPE NUMBER"));
+                hints.push(("Ctrl+N".into(), "NEW TOOL"));
+                hints.push(("Backspace".into(), "DELETE TOOL"));
             }
         }
         if !hints.is_empty() {
@@ -4377,6 +4379,7 @@ impl LincApp {
         let mut save_and_continue = false;
         let mut start_line: Option<u32> = None;
         let mut delete: Option<(std::path::PathBuf, bool)> = None;
+        let mut delete_tool: Option<u16> = None;
         let mut quit = false;
         let mut overwrite: Option<bool> = None;
         let mut goto_buffer: Option<String> = None;
@@ -4478,6 +4481,40 @@ impl LincApp {
                     ui.horizontal(|ui| {
                         if theme::danger_button(ui, "DELETE", true).clicked() {
                             delete = Some((path.clone(), *usb));
+                        }
+                        let cancel = theme::action_button(ui, "CANCEL", true);
+                        if focus_default {
+                            cancel.request_focus();
+                        }
+                        if cancel.clicked() {
+                            close = true;
+                        }
+                    });
+                }
+                Modal::ConfirmToolDelete { tool, description } => {
+                    ui.label(
+                        RichText::new("DELETE TOOL")
+                            .size(theme::font_size(18.0))
+                            .strong()
+                            .color(theme::ERROR),
+                    );
+                    ui.add_space(6.0);
+                    ui.label(format!("Delete T{tool}?"));
+                    if !description.is_empty() {
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(description)
+                                .monospace()
+                                .size(theme::font_size(10.0))
+                                .color(theme::MUTED),
+                        );
+                    }
+                    ui.add_space(8.0);
+                    ui.label("This removes the row from the tool table and cannot be undone.");
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if theme::danger_button(ui, "DELETE", true).clicked() {
+                            delete_tool = Some(*tool);
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
                         if focus_default {
@@ -4696,6 +4733,13 @@ impl LincApp {
         if let Some((path, usb)) = delete {
             self.modal = None;
             self.delete_file(path, usb);
+        }
+        if let Some(tool) = delete_tool {
+            self.modal = None;
+            self.send(linc_core::command::MachineCommand::DeleteToolTableRow {
+                tool,
+                expected_revision: self.snapshot.tool_table.revision,
+            });
         }
         if let Some(line) = start_line {
             self.modal = None;
@@ -7773,6 +7817,214 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert!(
             harness.app.tools.number.is_none(),
             "Enter closes the dialog"
+        );
+    }
+
+    #[test]
+    fn ctrl_n_creates_a_new_tool_table_row() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.app.set_page(Page::Tools);
+        harness.frame(&[]);
+        let before = harness.app.snapshot.tool_table.rows.clone();
+        let probe_tool = harness.app.profile.config.probe.tool_number;
+        let expected = (1..=u16::MAX)
+            .find(|tool| *tool != probe_tool && !before.iter().any(|row| row.tool == *tool))
+            .expect("a free tool number");
+
+        harness.sent.borrow_mut().clear();
+        harness.frame_with(&[(
+            egui::Key::N,
+            egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+        )]);
+        let sent = harness.sent.borrow();
+        assert!(
+            sent.iter().any(|command| matches!(
+                command,
+                MachineCommand::SetToolTableRow { row, .. } if row.tool == expected
+            )),
+            "{:?}",
+            harness.sent_debug()
+        );
+        drop(sent);
+
+        harness.frame(&[]);
+        assert!(
+            harness
+                .app
+                .snapshot
+                .tool_table
+                .rows
+                .iter()
+                .any(|row| row.tool == expected),
+            "the new row is in the table"
+        );
+        assert_ne!(
+            expected, probe_tool,
+            "the probe tool number is never reused"
+        );
+        let selected = harness
+            .app
+            .snapshot
+            .tool_table
+            .rows
+            .get(harness.app.tools.selected_row)
+            .map(|row| row.tool);
+        assert_eq!(selected, Some(expected), "the new row is selected");
+        let new_row = harness
+            .app
+            .snapshot
+            .tool_table
+            .rows
+            .iter()
+            .find(|row| row.tool == expected)
+            .expect("the new row");
+        assert_eq!(new_row.geometry.length, Some(0.0));
+        assert_eq!(new_row.geometry.diameter, Some(0.0));
+    }
+
+    #[test]
+    fn delete_tool_command_removes_the_row() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.app.set_page(Page::Tools);
+        harness.frame(&[]);
+        let probe_tool = harness.app.profile.config.probe.tool_number;
+        let active_tool = harness.app.snapshot.tool_change.current_tool;
+        let row = harness
+            .app
+            .snapshot
+            .tool_table
+            .rows
+            .iter()
+            .find(|row| row.tool != probe_tool && row.tool != active_tool)
+            .cloned()
+            .expect("a non-probe, non-active tool");
+        let revision = harness.app.snapshot.tool_table.revision;
+        harness.app.send(MachineCommand::DeleteToolTableRow {
+            tool: row.tool,
+            expected_revision: revision,
+        });
+        harness.frame(&[]);
+        assert!(
+            !harness
+                .app
+                .snapshot
+                .tool_table
+                .rows
+                .iter()
+                .any(|existing| existing.tool == row.tool),
+            "the row is gone"
+        );
+    }
+
+    #[test]
+    fn renumbering_a_tool_removes_the_old_row() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.app.set_page(Page::Tools);
+        harness.frame(&[]);
+        let rows = harness.app.snapshot.tool_table.rows.clone();
+        let probe_tool = harness.app.profile.config.probe.tool_number;
+        let active_tool = harness.app.snapshot.tool_change.current_tool;
+        let old = rows
+            .iter()
+            .find(|row| row.tool != probe_tool && row.tool != active_tool)
+            .cloned()
+            .expect("a non-probe, non-active tool");
+        let new_tool = (1..=u16::MAX)
+            .find(|tool| {
+                *tool != probe_tool
+                    && *tool != active_tool
+                    && !rows.iter().any(|row| row.tool == *tool)
+            })
+            .expect("a free tool number");
+        let mut renumbered = old.clone();
+        renumbered.tool = new_tool;
+        let revision = harness.app.snapshot.tool_table.revision;
+        harness.app.send(MachineCommand::SetToolTableRow {
+            row: renumbered,
+            old_tool: Some(old.tool),
+            expected_revision: revision,
+        });
+        harness.frame(&[]);
+        let rows = &harness.app.snapshot.tool_table.rows;
+        assert!(
+            !rows.iter().any(|row| row.tool == old.tool),
+            "the original row is gone"
+        );
+        assert!(
+            rows.iter().any(|row| row.tool == new_tool),
+            "the renumbered row is present"
+        );
+    }
+
+    #[test]
+    fn backspace_confirms_tool_delete_and_refuses_the_probe_tool() {
+        let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+        harness.app.set_page(Page::Tools);
+        harness.frame(&[]);
+        let probe_tool = harness.app.profile.config.probe.tool_number;
+        let rows = harness.app.snapshot.tool_table.rows.clone();
+        let active_tool = harness.app.snapshot.tool_change.current_tool;
+        let target = rows
+            .iter()
+            .position(|row| row.tool != probe_tool && row.tool != active_tool)
+            .expect("a non-probe, non-active tool");
+        let target_tool = rows[target].tool;
+
+        harness.app.tools.selected_row = target;
+        harness.sent.borrow_mut().clear();
+        harness.frame(&[egui::Key::Backspace]);
+        assert!(
+            matches!(
+                harness.app.modal,
+                Some(crate::state::Modal::ConfirmToolDelete { tool, .. })
+                    if tool == target_tool
+            ),
+            "Backspace opens a delete confirmation"
+        );
+        assert!(
+            harness.sent.borrow().is_empty(),
+            "nothing is deleted before confirmation"
+        );
+
+        harness.app.modal = None;
+        // Treat the selected row as the configured probe tool: the fixture
+        // table need not carry a T99 row for this refusal.
+        harness.app.profile.config.probe.tool_number = target_tool;
+        harness.app.tools.selected_row = target;
+        harness.frame(&[egui::Key::Backspace]);
+        assert!(
+            harness.app.modal.is_none(),
+            "the probe tool is never offered for deletion"
+        );
+        assert!(
+            harness
+                .app
+                .tools
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("probe tool")),
+            "{:?}",
+            harness.app.tools.error
+        );
+
+        harness.app.profile.config.probe.tool_number = probe_tool;
+        let active = rows
+            .iter()
+            .position(|row| row.tool == active_tool)
+            .expect("the active tool row");
+        harness.app.tools.selected_row = active;
+        harness.app.tools.error = None;
+        harness.frame(&[egui::Key::Backspace]);
+        assert!(harness.app.modal.is_none(), "the active tool is not deleted");
+        assert!(
+            harness
+                .app
+                .tools
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("active tool")),
+            "{:?}",
+            harness.app.tools.error
         );
     }
 

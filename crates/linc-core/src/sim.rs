@@ -1473,6 +1473,7 @@ impl MachineBackend for SimBackend {
             }
             MachineCommand::SetToolTableRow {
                 row,
+                old_tool,
                 expected_revision,
             } => {
                 if !self.snapshot.writes_allowed() {
@@ -1481,8 +1482,61 @@ impl MachineBackend for SimBackend {
                 if expected_revision != self.snapshot.tool_table.revision {
                     return Err(MachineError::RevisionConflict);
                 }
-                self.tool_table
+                if let Some(old) = old_tool.filter(|old| *old != row.tool) {
+                    if old == self.profile.config.probe.tool_number {
+                        return Err(MachineError::Invalid(format!(
+                            "T{old} is the probe tool and cannot be renumbered"
+                        )));
+                    }
+                    if old == self.snapshot.tool_change.current_tool {
+                        return Err(MachineError::Invalid(format!(
+                            "T{old} is the active tool and cannot be renumbered"
+                        )));
+                    }
+                }
+                let mut table = self.tool_table.clone();
+                if let Some(old) = old_tool.filter(|old| *old != row.tool) {
+                    table
+                        .remove(old)
+                        .map_err(|error| MachineError::Invalid(error.to_string()))?;
+                }
+                table
                     .upsert(row)
+                    .map_err(|error| MachineError::Invalid(error.to_string()))?;
+                table
+                    .save(expected_revision)
+                    .map_err(|error| match error {
+                        crate::tooltable::ToolTableError::RevisionConflict => {
+                            MachineError::RevisionConflict
+                        }
+                        other => MachineError::Io(other.to_string()),
+                    })?;
+                self.tool_table = table;
+                self.snapshot.tool_table = self.tool_table.state();
+                Ok(())
+            }
+            MachineCommand::DeleteToolTableRow {
+                tool,
+                expected_revision,
+            } => {
+                if !self.snapshot.writes_allowed() {
+                    return Err(MachineError::NotIdle);
+                }
+                if expected_revision != self.snapshot.tool_table.revision {
+                    return Err(MachineError::RevisionConflict);
+                }
+                if tool == self.profile.config.probe.tool_number {
+                    return Err(MachineError::Invalid(format!(
+                        "T{tool} is the probe tool and cannot be deleted"
+                    )));
+                }
+                if tool == self.snapshot.tool_change.current_tool {
+                    return Err(MachineError::Invalid(format!(
+                        "T{tool} is the active tool and cannot be deleted"
+                    )));
+                }
+                self.tool_table
+                    .remove(tool)
                     .map_err(|error| MachineError::Invalid(error.to_string()))?;
                 self.tool_table
                     .save(expected_revision)

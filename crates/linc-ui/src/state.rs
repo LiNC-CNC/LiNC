@@ -173,6 +173,11 @@ pub enum Modal {
         label: String,
         usb: bool,
     },
+    /// Delete one row from the tool table.
+    ConfirmToolDelete {
+        tool: u16,
+        description: String,
+    },
     ConfirmOverwrite(String),
     Error(String),
     Info(String),
@@ -984,6 +989,9 @@ pub struct ToolsUi {
     /// `LincApp::overlay_open`, so the table, the shell's global keys and the
     /// cell editor all stand down behind it.
     pub number: Option<ToolNumberEntry>,
+    /// Tool just created with Ctrl+N; the row is selected once the new table
+    /// arrives from the backend.
+    pub pending_select_tool: Option<u16>,
 }
 
 /// The TOOLS page's tool-number dialog: one line of digits, prefilled with the
@@ -1028,6 +1036,7 @@ impl Default for ToolsUi {
             kind_popup_pending: false,
             kind_popup_index: 0,
             number: None,
+            pending_select_tool: None,
         }
     }
 }

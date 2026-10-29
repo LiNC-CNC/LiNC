@@ -1096,15 +1096,74 @@ impl NmlBackend {
             }
             MachineCommand::SetToolTableRow {
                 row,
+                old_tool,
                 expected_revision,
             } => {
                 self.validate_controller_write()?;
                 if expected_revision != self.tool_table.revision {
                     return Err(MachineError::RevisionConflict);
                 }
+                let status = self.poll_status()?;
+                let active_tool = status.io.tool_in_spindle.max(0) as u16;
+                if let Some(old) = old_tool.filter(|old| *old != row.tool) {
+                    if old == self.profile.config.probe.tool_number {
+                        return Err(MachineError::Invalid(format!(
+                            "T{old} is the probe tool and cannot be renumbered"
+                        )));
+                    }
+                    if old == active_tool {
+                        return Err(MachineError::Invalid(format!(
+                            "T{old} is the active tool and cannot be renumbered"
+                        )));
+                    }
+                }
                 let tool = row.tool;
-                self.tool_table
+                let mut table = self.tool_table.clone();
+                if let Some(old) = old_tool.filter(|old| *old != row.tool) {
+                    table
+                        .remove(old)
+                        .map_err(|error| MachineError::Invalid(error.to_string()))?;
+                }
+                table
                     .upsert(row)
+                    .map_err(|error| MachineError::Invalid(error.to_string()))?;
+                table.save(expected_revision).map_err(|error| match error {
+                    linc_core::tooltable::ToolTableError::RevisionConflict => {
+                        MachineError::RevisionConflict
+                    }
+                    other => MachineError::Io(other.to_string()),
+                })?;
+                self.tool_table = table;
+                self.builder.tool_table = self.tool_table.clone();
+                self.nml_send(&NmlCommand::LoadToolTable(Some(
+                    self.profile.machine_ini.tool_table.clone(),
+                )))?;
+                if active_tool == tool {
+                    self.issue_blocks(&[format!("G43 H{tool}")])?;
+                }
+                Ok(())
+            }
+            MachineCommand::DeleteToolTableRow {
+                tool,
+                expected_revision,
+            } => {
+                self.validate_controller_write()?;
+                if expected_revision != self.tool_table.revision {
+                    return Err(MachineError::RevisionConflict);
+                }
+                if tool == self.profile.config.probe.tool_number {
+                    return Err(MachineError::Invalid(format!(
+                        "T{tool} is the probe tool and cannot be deleted"
+                    )));
+                }
+                let active_tool = self.poll_status()?.io.tool_in_spindle.max(0) as u16;
+                if tool == active_tool {
+                    return Err(MachineError::Invalid(format!(
+                        "T{tool} is the active tool and cannot be deleted"
+                    )));
+                }
+                self.tool_table
+                    .remove(tool)
                     .map_err(|error| MachineError::Invalid(error.to_string()))?;
                 self.tool_table
                     .save(expected_revision)
@@ -1118,10 +1177,6 @@ impl NmlBackend {
                 self.nml_send(&NmlCommand::LoadToolTable(Some(
                     self.profile.machine_ini.tool_table.clone(),
                 )))?;
-                let status = self.poll_status()?;
-                if status.io.tool_in_spindle.max(0) as u16 == tool {
-                    self.issue_blocks(&[format!("G43 H{tool}")])?;
-                }
                 Ok(())
             }
             MachineCommand::ApplyProbeResult { result, target } => {

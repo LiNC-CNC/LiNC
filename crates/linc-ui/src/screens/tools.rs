@@ -37,6 +37,19 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     let lathe = app.profile.variant == MachineVariant::Lathe;
     let pocket = app.profile.changer.uses_pockets();
     let columns = column_specs(ui, lathe, pocket);
+    if let Some(tool) = app.tools.pending_select_tool {
+        if let Some(index) = app
+            .snapshot
+            .tool_table
+            .rows
+            .iter()
+            .position(|row| row.tool == tool)
+        {
+            app.tools.selected_row = index;
+            app.tools.scroll_to_selected = true;
+            app.tools.pending_select_tool = None;
+        }
+    }
     let row_count = app.snapshot.tool_table.rows.len();
     if app.tools.selected_row >= row_count.max(1) {
         app.tools.selected_row = row_count.saturating_sub(1);
@@ -115,7 +128,7 @@ struct ColumnSpec {
 
 fn column_specs(ui: &Ui, lathe: bool, pocket: bool) -> Vec<ColumnSpec> {
     let pad = theme::CELL_PAD;
-    let tool_width = theme::measure(ui, "T00", 12.0) + pad;
+    let tool_width = theme::measure(ui, "T00000", 12.0) + pad;
     let number_width = theme::measure(ui, "-000.0000", 11.0) + CELL_TEXT_PAD * 2.0;
     // The type is read at 9 points but the cell pads its text, and "DRILL" was
     // truncating at the bare measurement.
@@ -353,6 +366,8 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     let mut edit = false;
     let mut load = false;
     let mut number = false;
+    let mut new_tool = false;
+    let mut delete_tool = false;
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
             move_row -= 1;
@@ -388,6 +403,12 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
         if input.consume_key(app.keymap.tool_number.modifiers, app.keymap.tool_number.key) {
             number = true;
         }
+        if input.consume_key(egui::Modifiers::CTRL, egui::Key::N) {
+            new_tool = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace) {
+            delete_tool = true;
+        }
     });
     if move_row != 0 && rows > 0 {
         let target = app.tools.selected_row as isize + move_row;
@@ -409,6 +430,12 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     if number {
         open_number_dialog(app);
     }
+    if new_tool {
+        create_tool(app);
+    }
+    if delete_tool {
+        request_delete_tool(app);
+    }
 }
 
 /// Load the selected row's tool with its length compensation: `Tn M6` and
@@ -426,6 +453,83 @@ fn load_selected_tool(app: &mut LincApp) {
     app.tools.error = None;
     app.toast(format!("T{tool} M6 + G43 H{tool} queued"), theme::ACCENT);
     app.send(MachineCommand::LoadTool { tool });
+}
+
+/// Ctrl+N: write a fresh row with the next free tool number. The probe tool
+/// number is skipped, and an ATC table gets the next free pocket.
+fn create_tool(app: &mut LincApp) {
+    if !app.snapshot.writes_allowed() {
+        app.tools.error = Some(write_refusal(app));
+        return;
+    }
+    let probe_tool = app.profile.config.probe.tool_number;
+    let rows = &app.snapshot.tool_table.rows;
+    let Some(tool) = (1..=u16::MAX)
+        .find(|tool| *tool != probe_tool && !rows.iter().any(|row| row.tool == *tool))
+    else {
+        app.tools.error = Some("no free tool number".into());
+        return;
+    };
+    let pocket = if app.profile.changer.uses_pockets() {
+        let Some(pocket) =
+            (1..=u16::MAX).find(|pocket| !rows.iter().any(|row| row.pocket == Some(*pocket)))
+        else {
+            app.tools.error = Some("no free pocket".into());
+            return;
+        };
+        Some(pocket)
+    } else {
+        None
+    };
+    let mut row = ToolRow::new(tool);
+    row.geometry.length = Some(0.0);
+    row.geometry.diameter = Some(0.0);
+    row.pocket = pocket;
+    row.kind = if app.profile.variant == MachineVariant::Lathe {
+        "TURN".into()
+    } else {
+        "MILL".into()
+    };
+    app.tools.error = None;
+    app.tools.pending_select_tool = Some(tool);
+    app.toast(format!("T{tool} created"), theme::ACCENT);
+    app.send(MachineCommand::SetToolTableRow {
+        row,
+        old_tool: None,
+        expected_revision: app.snapshot.tool_table.revision,
+    });
+}
+
+/// Backspace: ask before removing the selected row. The probe tool is never
+/// deletable because the probe routines depend on its table entry.
+fn request_delete_tool(app: &mut LincApp) {
+    let Some(row) = app.snapshot.tool_table.rows.get(app.tools.selected_row) else {
+        app.tools.error = Some("select a tool row".into());
+        return;
+    };
+    if row.tool == app.profile.config.probe.tool_number {
+        app.tools.error = Some(format!(
+            "T{} is the probe tool and cannot be deleted",
+            row.tool
+        ));
+        return;
+    }
+    if row.tool == app.snapshot.tool_change.current_tool {
+        app.tools.error = Some(format!(
+            "T{} is the active tool and cannot be deleted",
+            row.tool
+        ));
+        return;
+    }
+    if !app.snapshot.writes_allowed() {
+        app.tools.error = Some(write_refusal(app));
+        return;
+    }
+    app.tools.error = None;
+    app.modal = Some(crate::state::Modal::ConfirmToolDelete {
+        tool: row.tool,
+        description: row.description.clone(),
+    });
 }
 
 /// Open the typed tool-number dialog, prefilled with the tool in the spindle.
@@ -729,16 +833,21 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                 .header(HEADER_HEIGHT, |mut header| {
                     for (position, column) in columns.iter().enumerate() {
                         let response = header.col(|ui| {
-                            ui.label(
-                                RichText::new(column.heading)
-                                    .size(theme::font_size(9.0))
-                                    .strong()
-                                    .color(if position == selected_column {
-                                        theme::ACCENT
-                                    } else {
-                                        theme::MUTED
-                                    }),
-                            );
+                            let text = RichText::new(column.heading)
+                                .size(theme::font_size(9.0))
+                                .strong()
+                                .color(if position == selected_column {
+                                    theme::ACCENT
+                                } else {
+                                    theme::MUTED
+                                });
+                            if column.cell == Cell::Description {
+                                ui.label(text);
+                            } else {
+                                ui.centered_and_justified(|ui| {
+                                    ui.label(text);
+                                });
+                            }
                         });
                         if position == selected_column {
                             let rect = response.0;
@@ -904,19 +1013,6 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                 }
                             });
                             let _ = response;
-                            if let Some(rect) = selected_rect.get() {
-                                // The same rect and inset whether navigating or
-                                // editing; red marks the cell that is open.
-                                painter.rect_stroke(
-                                    rect.shrink2(egui::vec2(SELECTION_INSET, 1.0)),
-                                    egui::CornerRadius::same(theme::SELECTION_RADIUS as u8),
-                                    egui::Stroke::new(
-                                        1.5,
-                                        if editing { theme::ERROR } else { theme::ACCENT },
-                                    ),
-                                    egui::StrokeKind::Inside,
-                                );
-                            }
                         }
                         if index == selected_row {
                             if let (Some(first), Some(last)) = (first_rect.get(), last_rect.get()) {
@@ -943,6 +1039,31 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     theme::ACCENT,
                                 );
                             }
+                        }
+                        if let Some(rect) = selected_rect.get() {
+                            // Paint the active outline after the row band, and
+                            // let it grow vertically so the edit caret sits
+                            // inside a little padding rather than touching the
+                            // outline.
+                            let border = egui::Rect::from_min_max(
+                                egui::pos2(
+                                    rect.left() + SELECTION_INSET,
+                                    rect.top() - ACTIVE_BORDER_PAD,
+                                ),
+                                egui::pos2(
+                                    rect.right() - SELECTION_INSET,
+                                    rect.bottom() + ACTIVE_BORDER_PAD,
+                                ),
+                            );
+                            painter.rect_stroke(
+                                border,
+                                egui::CornerRadius::same(theme::SELECTION_RADIUS as u8),
+                                egui::Stroke::new(
+                                    1.5,
+                                    if editing { theme::ERROR } else { theme::ACCENT },
+                                ),
+                                egui::StrokeKind::Inside,
+                            );
                         }
                         let _ = &clicked;
                     });
@@ -1102,6 +1223,9 @@ const CELL_TEXT_PAD: f32 = 8.0;
 const CELL_GAP: f32 = 6.0;
 /// How far the cell selector is drawn inside its cell.
 const SELECTION_INSET: f32 = 1.0;
+/// Extra vertical room around the active cell border so the edit caret and
+/// its glyph rows are never clipped by the outline.
+const ACTIVE_BORDER_PAD: f32 = 2.0;
 /// Room kept for the table's vertical scrollbar.
 const SCROLLBAR_ALLOWANCE: f32 = 14.0;
 /// Extra room on the right of a cell, on top of the text padding.
@@ -1207,8 +1331,25 @@ fn save_tool_row(app: &mut LincApp, tool: u16) {
     }
     app.tools.error = None;
     let written = row.tool;
+    if written != tool {
+        if tool == app.profile.config.probe.tool_number {
+            app.tools.drafts.remove(&tool);
+            app.tools.error = Some(format!(
+                "T{tool} is the probe tool and cannot be renumbered"
+            ));
+            return;
+        }
+        if tool == app.snapshot.tool_change.current_tool {
+            app.tools.drafts.remove(&tool);
+            app.tools.error = Some(format!(
+                "T{tool} is the active tool and cannot be renumbered"
+            ));
+            return;
+        }
+    }
     app.send(MachineCommand::SetToolTableRow {
         row,
+        old_tool: (written != tool).then_some(tool),
         expected_revision: app.snapshot.tool_table.revision,
     });
     // Follow the row if it was renumbered, so later edits target the new tool.

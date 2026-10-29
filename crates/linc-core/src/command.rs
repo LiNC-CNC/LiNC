@@ -192,6 +192,12 @@ pub enum MachineCommand {
     },
     SetToolTableRow {
         row: ToolRow,
+        /// The row being renumbered, when `row.tool` differs.
+        old_tool: Option<u16>,
+        expected_revision: u64,
+    },
+    DeleteToolTableRow {
+        tool: u16,
         expected_revision: u64,
     },
     ApplyProbeResult {
@@ -237,6 +243,7 @@ impl MachineCommand {
             Self::SetWorkPosition { .. } => "Set work position",
             Self::RunFromLine { .. } => "Run from line",
             Self::SetToolTableRow { .. } => "Set tool table row",
+            Self::DeleteToolTableRow { .. } => "Delete tool table row",
             Self::ApplyProbeResult { .. } => "Apply probe result",
             Self::ResetProbeCalibration => "Reset probe calibration",
             Self::SetHalOutput { .. } => "Set HAL output",

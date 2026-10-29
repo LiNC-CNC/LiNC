@@ -266,6 +266,20 @@ impl ToolTable {
         Ok(())
     }
 
+    pub fn remove(&mut self, tool: u16) -> Result<(), ToolTableError> {
+        if tool == 0 {
+            return Err(ToolTableError::Invalid("tool number must be >= 1".into()));
+        }
+        let before = self.rows.len();
+        self.rows.retain(|row| row.tool != tool);
+        if self.rows.len() == before {
+            return Err(ToolTableError::Invalid(format!(
+                "T{tool} is not in the tool table"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn reset_revision_from_disk(&mut self) -> Result<(), ToolTableError> {
         let text = std::fs::read_to_string(&self.path).map_err(|source| ToolTableError::Read {
             path: self.path.clone(),

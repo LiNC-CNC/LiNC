@@ -787,6 +787,11 @@ Primary quick tool-change surface; no MDI entry required.
   ends up empty with no length compensation in effect. It is part of
   `LincApp::overlay_open()`, so the table, the cell editor and the shell's
   global keys stand down while it is open.
+- `Ctrl+N` writes a new row with the next free tool number; the configured
+  probe tool number is skipped, and an ATC/turret table gets the next free
+  pocket. `Backspace` asks for confirmation and then deletes the selected row.
+  The probe tool and the active tool (the one in the spindle) are refused, and
+  nothing is deleted before confirmation.
 - Editing a cell selects the whole value (Home/End move inside it). Enter
   writes the row, reloads the tool table into the controller and re-applies
   `G43` when the edited row is the tool in the spindle. Escape restores the
