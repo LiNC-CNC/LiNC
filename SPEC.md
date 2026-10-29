@@ -1239,7 +1239,9 @@ jog in JOG mode.
 - Mode context:
   - `JOG`: `CONTINUOUS`, active axis, jog speed and rapid state.
   - `INC`: increment size, active axis and remaining step where available.
-  - `MPG`: active axis, handwheel scale and step mode. The RS-485 link does not
+  - `MPG`: active axis, handwheel scale and step mode. The `[DISPLAY]
+    INCREMENTS` row belongs to `INC`; MPG selects its step on the handwheel, so
+    the row and its `1`..`9` keys are absent there. The RS-485 link does not
     carry encoder counts; do not fabricate a handwheel count or velocity.
 - A persistent `PANEL MODE: JOG|INC|MPG` label plus `NO ON-SCREEN JOG`
   reminder. No mode buttons, jog buttons, override sliders or E-stop.

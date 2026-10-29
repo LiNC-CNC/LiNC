@@ -46,7 +46,8 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             );
             // The step is a jog setting, so it sits under the coordinates it
             // moves, not above them: the DRO is what the operator reads first.
-            // INC and MPG are the modes that use a step; JOG is continuous, so
+            // INC is the mode that uses the `[DISPLAY] INCREMENTS` step; JOG is
+            // continuous and MPG picks its step on the handwheel, so for both
             // the row would be a value the machine is not reading.
             if increment_keys_active(app.snapshot.panel.mode.mode()) {
                 ui.add_space(8.0);
@@ -83,10 +84,12 @@ fn coordinates_readout(app: &LincApp) -> Vec<LiveAxisRow> {
 
 /// Modes whose page shows the jog increment row and takes its numbers.
 ///
-/// JOG runs continuously and ignores the step; AUTO, EDIT and MDI are not the
-/// manual family at all. An unknown panel mode fails closed like the zero keys.
+/// JOG runs continuously and ignores the step; MPG selects its step on the
+/// handwheel, not from the `[DISPLAY] INCREMENTS` list. AUTO, EDIT and MDI are
+/// not the manual family at all. An unknown panel mode fails closed like the
+/// zero keys.
 fn increment_keys_active(mode: Option<PanelMode>) -> bool {
-    matches!(mode, Some(PanelMode::Inc | PanelMode::Mpg))
+    matches!(mode, Some(PanelMode::Inc))
 }
 
 /// `1`..`9` pick the `[DISPLAY] INCREMENTS` step of that number.
@@ -207,15 +210,20 @@ pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
 mod tests {
     use super::*;
 
-    /// The numbers are the selection, and only the modes that use a step take
-    /// them: a continuous JOG has no increment to pick, and the other pages
-    /// keep their digits for themselves.
+    /// The numbers are the selection, and only the mode that uses a
+    /// `[DISPLAY] INCREMENTS` step takes them: a continuous JOG has no
+    /// increment to pick, MPG selects its step on the handwheel, and the other
+    /// pages keep their digits for themselves.
     #[test]
     fn increment_keys_belong_to_the_step_modes() {
-        for mode in [PanelMode::Inc, PanelMode::Mpg] {
-            assert!(increment_keys_active(Some(mode)), "{mode:?}");
-        }
-        for mode in [PanelMode::Jog, PanelMode::Auto, PanelMode::Edit, PanelMode::Mdi] {
+        assert!(increment_keys_active(Some(PanelMode::Inc)));
+        for mode in [
+            PanelMode::Jog,
+            PanelMode::Mpg,
+            PanelMode::Auto,
+            PanelMode::Edit,
+            PanelMode::Mdi,
+        ] {
             assert!(!increment_keys_active(Some(mode)), "{mode:?}");
         }
         assert!(!increment_keys_active(None));

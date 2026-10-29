@@ -4130,13 +4130,11 @@ impl LincApp {
                 hints.push((k.view_zoom_hint(), "ZOOM"));
                 hints.extend(lathe_hints.clone());
                 hints.push(("Arrows".into(), "SELECT"));
-                // Only the step modes take the digits: a continuous JOG has no
-                // increment to pick, and HOME/PROG.HOME share this page family.
+                // Only INC takes the digits: a continuous JOG has no increment
+                // to pick, MPG selects its step on the handwheel, and
+                // HOME/PROG.HOME share this page family without a step row.
                 if self.page == Page::Manual
-                    && matches!(
-                        self.snapshot.panel.mode.mode(),
-                        Some(PanelMode::Inc | PanelMode::Mpg)
-                    )
+                    && self.snapshot.panel.mode.mode() == Some(PanelMode::Inc)
                     && !self.increments().is_empty()
                 {
                     hints.push((format!("1-{}", self.increments().len()), "INCREMENT"));
@@ -6863,8 +6861,9 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert_eq!(harness.app.page, Page::Help);
     }
 
-    /// INC and MPG show the steps and take their numbers; JOG is continuous and
-    /// gets neither, so its digits stay free and no wrong value is on screen.
+    /// INC shows the steps and takes their numbers; JOG is continuous and MPG
+    /// selects its step on the handwheel, so both get neither and their digits
+    /// stay free with no wrong value on screen.
     #[test]
     fn the_increment_row_and_its_numbers_belong_to_the_step_modes() {
         let steps = || {
@@ -6920,6 +6919,22 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert!(
             !texts.iter().any(|text| text == "10mm") && !texts.iter().any(|text| text == "INCREMENT"),
             "a continuous jog shows no increment: {texts:?}"
+        );
+        harness.frame_with(&[(egui::Key::Num3, egui::Modifiers::NONE)]);
+        assert_eq!(harness.app.jog_increment_index, 0, "and takes no digits");
+
+        // MPG: the handwheel owns the step, so the [DISPLAY] INCREMENTS row is
+        // not drawn here either and the digits are not eaten.
+        let mut harness = ProbeHarness::new(PanelMode::Mpg, false, true);
+        harness.app.jog_increments = steps();
+        harness.app.jog_increment_index = 0;
+        harness.app.set_page(Page::Manual);
+        harness.frame(&[]);
+        let output = harness.frame_full(Vec::new());
+        let texts: Vec<String> = painted_text(&output).into_iter().map(|(text, _)| text).collect();
+        assert!(
+            !texts.iter().any(|text| text == "10mm") && !texts.iter().any(|text| text == "INCREMENT"),
+            "MPG picks its step on the handwheel: {texts:?}"
         );
         harness.frame_with(&[(egui::Key::Num3, egui::Modifiers::NONE)]);
         assert_eq!(harness.app.jog_increment_index, 0, "and takes no digits");
