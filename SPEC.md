@@ -623,7 +623,10 @@ becomes editable.
   G-code keeps the last valid graph and marks the line. Preview never moves the
   machine.
 - Saving is explicit; no autosave. Save writes the loaded file, clears the dirty
-  marker and must not run while a program is active.
+  marker and must not run while a program is active. The saved file is also
+  made the controller's loaded program: LinuxCNC keeps the copy it opened in
+  the interpreter, so the backend reopens the file after the write and `AUTO`
+  starts the saved text, not the version loaded before the edit.
 - A buffer with no file yet (a program typed straight into `EDIT`) asks for a
   name instead of refusing: the dialog shows the `NC_FILES` folder it will land
   in, appends the configured G-code extension when the name has none, refuses a

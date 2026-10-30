@@ -157,6 +157,12 @@ pub enum MachineCommand {
         path: PathBuf,
         expected_revision: Option<u64>,
     },
+    /// Write `content` to `path` and make that file the loaded program.
+    ///
+    /// The write alone is not enough: LinuxCNC keeps the program it opened in
+    /// the interpreter, so `AUTO` would still start the text loaded before the
+    /// edit. The backend reopens the file after the write; the simulator
+    /// replaces its program state the same way.
     SaveProgram {
         path: PathBuf,
         expected_revision: u64,

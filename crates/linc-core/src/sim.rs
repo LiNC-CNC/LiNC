@@ -2091,13 +2091,22 @@ enabled = true
         let revision = backend.snapshot().program.revision;
         backend
             .send(MachineCommand::SaveProgram {
-                path,
+                path: path.clone(),
                 expected_revision: revision,
                 content: "G0 X1\nG1 X2\n".into(),
             })
             .unwrap();
         let text = std::fs::read_to_string(root.join("PART.NC")).unwrap();
         assert_eq!(text, "G0 X1\nG1 X2\n");
+        // The saved file is the loaded program: writing the buffer is not
+        // enough for AUTO to run it, and the native backend reopens the file
+        // for the same reason.
+        let snapshot = backend.snapshot();
+        assert_eq!(snapshot.program.path.as_deref(), Some(path.as_path()));
+        assert_eq!(
+            snapshot.program.content.as_ref().map(|text| text.as_str()),
+            Some("G0 X1\nG1 X2\n")
+        );
     }
 
     /// An untitled buffer is named in the save dialog, so the save must be able

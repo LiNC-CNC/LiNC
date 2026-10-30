@@ -622,9 +622,9 @@ impl NmlBackend {
 
     /// A controller write that must also fail closed on a latched probe trip.
     ///
-    /// `SaveProgram` keeps using `validate_write`: it writes a file, not
-    /// machine state, and losing an operator's buffer would be worse than
-    /// letting them save it while the fault is latched.
+    /// `SaveProgram` keeps using `validate_write`: writing the file and
+    /// reopening it does not move the machine, and losing an operator's buffer
+    /// would be worse than letting them save it while the fault is latched.
     fn validate_controller_write(&mut self) -> Result<MachineSnapshot, MachineError> {
         let snapshot = self.validate_write()?;
         if snapshot.probe_trip_active() {
@@ -721,6 +721,20 @@ impl NmlBackend {
 
     fn save_parameters(&mut self) -> Result<(), MachineError> {
         self.parameters.save().map_err(MachineError::Backend)
+    }
+
+    /// Open `canonical` in the interpreter, publishing the live offsets first.
+    ///
+    /// `ProgramOpen` resets the interpreter, and the active `G5X` row it leaves
+    /// behind is all zero until the program publishes one. The live row is
+    /// written to the parameter file before the reset; opening without that
+    /// step replaced a stored row with zeros.
+    fn open_program(&mut self, canonical: PathBuf) -> Result<(), MachineError> {
+        self.capture_live_offsets();
+        self.save_parameters()?;
+        self.nml_send(&NmlCommand::ProgramOpen(canonical))?;
+        self.wait_complete(Duration::from_secs(2))?;
+        Ok(())
     }
 
     fn write_work_offset(
@@ -965,10 +979,7 @@ impl NmlBackend {
                         return Err(MachineError::RevisionConflict);
                     }
                 }
-                self.capture_live_offsets();
-                self.save_parameters()?;
-                self.nml_send(&NmlCommand::ProgramOpen(canonical))?;
-                self.wait_complete(Duration::from_secs(2))?;
+                self.open_program(canonical)?;
                 Ok(())
             }
             MachineCommand::SaveProgram {
@@ -992,6 +1003,11 @@ impl NmlBackend {
                 temp.as_file().sync_all()?;
                 temp.persist(&canonical)
                     .map_err(|error| MachineError::Io(error.error.to_string()))?;
+                // The interpreter keeps the program it opened: the write
+                // changed the file on disk, not what CYCLE START runs. Open
+                // the file just written so the save is the program AUTO
+                // starts, the way the simulator's save replaces its program.
+                self.open_program(canonical)?;
                 Ok(())
             }
             MachineCommand::SetWorkOffset {
