@@ -3,14 +3,19 @@
 
 use super::*;
 
-
 pub(super) fn metric(ui: &mut egui::Ui, label: &str, value: String, size: f32) {
     metric_colored(ui, label, value, size, theme::FG);
 }
 
 /// A top-bar metric whose value carries a state colour: the label stays quiet,
 /// the value is what has to be read at a glance.
-pub(super) fn metric_colored(ui: &mut egui::Ui, label: &str, value: String, size: f32, color: Color32) {
+pub(super) fn metric_colored(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: String,
+    size: f32,
+    color: Color32,
+) {
     ui.add_space(6.0);
     ui.vertical(|ui| {
         ui.label(
@@ -275,7 +280,7 @@ impl LincApp {
     /// True where the bar shows the full coordinate line, so the single
     /// moving-axis DTG field steps aside instead of repeating it.
     pub(super) fn shows_coordinate_status(&self) -> bool {
-        self.page == Page::Program
+        self.nav.page == Page::Program
     }
 
     /// Bottom bar: keyboard commands on the left, read-only machine status on
@@ -432,7 +437,7 @@ impl LincApp {
         }
         if self.program_protected()
             && matches!(
-                self.page,
+                self.nav.page,
                 Page::Program | Page::Offsets | Page::Tools | Page::Probe | Page::Files
             )
         {
@@ -443,7 +448,7 @@ impl LincApp {
             );
             ui.add_space(4.0);
         }
-        if self.page == Page::Program && self.program.external_change {
+        if self.nav.page == Page::Program && self.program.external_change {
             theme::banner(
                 ui,
                 theme::WARNING,
@@ -454,3 +459,19 @@ impl LincApp {
     }
 }
 
+/// State the bars paint: connection and protect edges, the lathe readout mode,
+/// and the counters the alarm strip compares frame to frame.
+pub(crate) struct ChromeUi {
+    pub quit_requested: bool,
+    pub last_snapshot_ms: u64,
+    /// Highest alarm id the operator has been told about. Controller errors used
+    /// to appear only in the Machine page's message card, so a program that
+    /// aborted looked like it had simply jumped to the end.
+    pub alarm_id_seen: u64,
+    pub last_connection: Option<bool>,
+    pub last_protect: Option<bool>,
+    /// Lathe only: read the X position as a diameter (`2X`) instead of a
+    /// radius. A display factor — the controller keeps working in radius, and
+    /// no command is issued from it.
+    pub lathe_diameter: bool,
+}

@@ -3,9 +3,10 @@
 
 use super::*;
 
-
 /// Encode an egui capture as a PNG.
-pub(super) fn png_from_color_image(image: &egui::ColorImage) -> Option<linc_core::diag::Screenshot> {
+pub(super) fn png_from_color_image(
+    image: &egui::ColorImage,
+) -> Option<linc_core::diag::Screenshot> {
     let [width, height] = image.size;
     if width == 0 || height == 0 {
         return None;
@@ -38,8 +39,8 @@ impl LincApp {
         let Ok(mut bus) = bus.lock() else { return };
         let sample = self.snapshot.meta.captured_at_ms;
         let stale = linc_core::diag::now_ms() - bus.captured_at_ms() >= 200;
-        if sample != self.diag_last_sample || stale {
-            self.diag_last_sample = sample;
+        if sample != self.diagnostics.last_sample || stale {
+            self.diagnostics.last_sample = sample;
             bus.publish_machine(self.snapshot.clone());
         }
         bus.publish_ui(self.diag_ui_snapshot());
@@ -67,8 +68,8 @@ impl LincApp {
                 linc_core::diag::UiAction::CycleView => self.cycle_toolpath_view(),
                 linc_core::diag::UiAction::ShowBounds { visible } => {
                     self.graph_style.bounds_mode = if visible { 0 } else { 3 };
-                    self.preferences.bounds_mode = Some(self.graph_style.bounds_mode);
-                    self.preferences_dirty = true;
+                    self.prefs.preferences.bounds_mode = Some(self.graph_style.bounds_mode);
+                    self.prefs.dirty = true;
                 }
                 linc_core::diag::UiAction::CycleBounds => self.cycle_bounds(),
                 linc_core::diag::UiAction::Fit => self.fit_graph(),
@@ -115,7 +116,7 @@ impl LincApp {
         // not decoded yet must not hide it.
         let mode = format!("{:?}", self.snapshot.task.mode);
         UiSnapshot {
-            page: self.page.label().into(),
+            page: self.nav.page.label().into(),
             layout: layout.into(),
             mode,
             program_view: match self.program.view {
@@ -134,22 +135,29 @@ impl LincApp {
             program_dirty: self.program.editor.dirty,
             panel_online: self.snapshot.panel.connected,
             fps: self.fps,
-            toasts: self.toasts.iter().map(|toast| toast.text.clone()).collect(),
-            viewport: self.diag_viewport.clone(),
-            regions: self.diag_regions.clone(),
-            frame_time_ms: self.diag_frame_time_ms,
+            toasts: self
+                .overlay
+                .toasts
+                .iter()
+                .map(|toast| toast.text.clone())
+                .collect(),
+            viewport: self.diagnostics.viewport.clone(),
+            regions: self.diagnostics.regions.clone(),
+            frame_time_ms: self.diagnostics.frame_time_ms,
         }
     }
 
     /// Record one shell rectangle for the screen model, in points.
     pub(super) fn note_region(&mut self, name: &str, rect: egui::Rect) {
-        self.diag_regions.push(linc_core::diag::ScreenRegion::new(
-            name,
-            rect.min.x,
-            rect.min.y,
-            rect.width(),
-            rect.height(),
-        ));
+        self.diagnostics
+            .regions
+            .push(linc_core::diag::ScreenRegion::new(
+                name,
+                rect.min.x,
+                rect.min.y,
+                rect.width(),
+                rect.height(),
+            ));
     }
 
     /// Attach the diagnostic bus the app server publishes into.
@@ -158,3 +166,19 @@ impl LincApp {
     }
 }
 
+/// Diagnostics page state and the bus bookkeeping `linc-mcp` reads.
+pub(crate) struct DiagnosticsUi {
+    /// Backend sample stamp of the last published machine snapshot.
+    pub(super) last_sample: u64,
+    pub tab: DiagnosticsTab,
+    pub search: String,
+    pub severity: Option<AlarmSeverity>,
+    pub source: Option<AlarmSource>,
+    pub clear_view: bool,
+    pub log: VecDeque<Alarm>,
+    /// Window size and scale of the last frame, for `linc_get_screen_model`.
+    pub viewport: linc_core::diag::ViewportInfo,
+    /// Named shell rectangles from the last frame.
+    pub regions: Vec<linc_core::diag::ScreenRegion>,
+    pub frame_time_ms: f32,
+}

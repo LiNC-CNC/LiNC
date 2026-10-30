@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 impl LincApp {
     /// Accept the go-to-line dialog: a program line, or the MDI buffer line
     /// the pane points at.
@@ -76,7 +75,7 @@ impl LincApp {
             return;
         }
         let (line, block) = self.run_from_line_choice();
-        self.modal = Some(crate::state::Modal::ConfirmRunFromLine { line, block });
+        self.overlay.modal = Some(crate::state::Modal::ConfirmRunFromLine { line, block });
     }
 
     /// Run from the line selected in the G-code view, not from the controller's
@@ -101,7 +100,7 @@ impl LincApp {
 
     pub fn request_load(&mut self, path: PathBuf) {
         if self.program.editor.dirty {
-            self.modal = Some(Modal::ConfirmDiscard(PendingAction::LoadProgram(path)));
+            self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::LoadProgram(path)));
         } else {
             self.load_program(path);
         }
@@ -115,17 +114,17 @@ impl LincApp {
         // Do not navigate yet: SPEC §6.7 requires that a failed load stays in
         // Files and shows the error. The navigation is committed in
         // `poll_backend` when the backend confirms the load.
-        self.pending_load = true;
+        self.program.pending_load = true;
     }
 
     /// A successful load always returns to Program in SPLIT, fitted and not
     /// started, overriding any remembered layout.
     pub(super) fn commit_load(&mut self) {
-        self.pending_load = false;
+        self.program.pending_load = false;
         if let Some(path) = self.snapshot.program.path.clone() {
             let text = path.to_string_lossy().to_string();
-            self.preferences.remember_file(&text, 12);
-            self.preferences_dirty = true;
+            self.prefs.preferences.remember_file(&text, 12);
+            self.prefs.dirty = true;
         }
         // Reset the view only when the machine is idle; the navigation itself
         // must always happen, or a load confirmed during a busy interpreter
@@ -159,7 +158,7 @@ impl LincApp {
             ProgramView::Code => ProgramView::Split,
         };
         self.program.focus_editor = false;
-        self.page = Page::Program;
+        self.nav.page = Page::Program;
     }
 
     pub fn save_program(&mut self) {
@@ -189,7 +188,7 @@ impl LincApp {
             // failing. A program typed straight into EDIT is the common way to
             // start one, and refusing the save threw the work away.
             let directory = self.save_as_directory();
-            self.modal = Some(Modal::SaveProgramAs(crate::state::SaveProgramDialog {
+            self.overlay.modal = Some(Modal::SaveProgramAs(crate::state::SaveProgramDialog {
                 name: String::new(),
                 directory,
                 error: None,
@@ -259,4 +258,3 @@ impl LincApp {
         );
     }
 }
-

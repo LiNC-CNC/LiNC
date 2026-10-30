@@ -769,7 +769,7 @@ fn reference_bounds(app: &LincApp) -> Bounds3 {
         any = true;
     }
     bounds.include(app.tool_tip());
-    bounds.include(app.graph_origin);
+    bounds.include(app.view.origin);
     if !any {
         return app.machine_bounds().unwrap_or(default_bounds());
     }

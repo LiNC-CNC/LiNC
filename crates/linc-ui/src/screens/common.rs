@@ -544,7 +544,7 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
     // Progress of the move in flight, not the position within the travel range:
     // the bar starts empty when the axis sets off, fills as the distance to go
     // shrinks, and sits full once it arrives (see `LincApp::move_progress`).
-    let fraction = app.move_progress.get(axis).copied().unwrap_or(1.0);
+    let fraction = app.view.move_progress.get(axis).copied().unwrap_or(1.0);
     paint_dro_frame(ui, rect, active);
     paint_dro_readout(
         ui,
@@ -705,14 +705,14 @@ fn message_row(ui: &mut Ui, alarm: &linc_core::model::Alarm) {
 /// Enter, Escape or CLOSE. It owns the keyboard while it is up: the shell
 /// consumes the close keys and the page keys before the page sees them.
 pub fn messages_dialog(app: &mut LincApp, ctx: &egui::Context) {
-    if !app.messages_dialog {
+    if !app.overlay.messages_dialog {
         return;
     }
     let screen = ctx.content_rect();
     let size = (screen.size() - Vec2::new(48.0, 48.0)).max(Vec2::new(640.0, 360.0));
     let logs = app.recent_logs(400);
     let (messages, alarms) = app.log_counts();
-    let scroll = std::mem::take(&mut app.messages_scroll);
+    let scroll = std::mem::take(&mut app.overlay.messages_scroll);
     let mut close = false;
     let modal = egui::Modal::new(egui::Id::unique("linc-messages-dialog"))
         .frame(
@@ -780,7 +780,7 @@ pub fn messages_dialog(app: &mut LincApp, ctx: &egui::Context) {
                 });
         });
     if close || modal.should_close() {
-        app.messages_dialog = false;
+        app.overlay.messages_dialog = false;
     }
 }
 
@@ -1638,7 +1638,7 @@ pub fn trajectory(
 ) -> DrawnTrajectory {
     // Machine coordinates throughout: the part, the trail and the tool stay put
     // when the operator touches off, and the work-zero cross moves instead.
-    let origin = app.graph_origin;
+    let origin = app.view.origin;
     let mut view = TrajectoryView::new(
         preview,
         app.snapshot.live_trail.as_slice(),
@@ -2209,7 +2209,7 @@ pub fn following_error_card(app: &LincApp, ui: &mut Ui, height: f32) {
                 .enumerate()
                 .map(|(index, axis)| {
                     (
-                        app.following_history
+                        app.following.history
                             .get(axis)
                             .map(|samples| samples.iter().copied().collect())
                             .unwrap_or_default(),

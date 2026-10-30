@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 /// Exponential moving average of the frame rate, biased so the first samples
 /// settle quickly without flickering.
 pub fn fps_step(previous: f32, dt: f32) -> f32 {
@@ -49,7 +48,10 @@ pub(super) fn probe_fitted(configured: bool, probe_tool: u16, current_tool: u16)
 /// poll, and claiming READY while the link is down is the one answer that
 /// costs a broken probe. MUTED for the unknown case: it is not a fault and not
 /// a good state either.
-pub(super) fn probe_input_field(input_tripped: Option<bool>, stale: bool) -> (String, egui::Color32) {
+pub(super) fn probe_input_field(
+    input_tripped: Option<bool>,
+    stale: bool,
+) -> (String, egui::Color32) {
     match (stale, input_tripped) {
         (false, Some(false)) => ("PROBE READY".to_string(), theme::SUCCESS),
         (false, Some(true)) => ("PROBE TRIPPED".to_string(), theme::WARNING),
@@ -258,7 +260,7 @@ impl LincApp {
     /// Keyed to the panel mode, not to page entry: returning to MAIN from
     /// another page while the panel still sits in MDI shows the pane again.
     pub fn mdi_pane_visible(&self) -> bool {
-        self.page == Page::Machine && self.snapshot.panel.mode.mode() == Some(PanelMode::Mdi)
+        self.nav.page == Page::Machine && self.snapshot.panel.mode.mode() == Some(PanelMode::Mdi)
     }
 
     /// Why the MDI buffer may not be written to disk, or `None` when it may.
@@ -284,12 +286,12 @@ impl LincApp {
     /// The worst and mean absolute following error for `axis` since the last
     /// program start.
     pub fn following_error_summary(&self, axis: &str) -> (f64, f64) {
-        let samples = self.following_run_samples.get(axis).copied().unwrap_or(0);
+        let samples = self.following.run_samples.get(axis).copied().unwrap_or(0);
         if samples == 0 {
             return (0.0, 0.0);
         }
-        let worst = self.following_run_max.get(axis).copied().unwrap_or(0.0);
-        let sum = self.following_run_abs_sum.get(axis).copied().unwrap_or(0.0);
+        let worst = self.following.run_max.get(axis).copied().unwrap_or(0.0);
+        let sum = self.following.run_abs_sum.get(axis).copied().unwrap_or(0.0);
         (worst, sum / samples as f64)
     }
 
@@ -314,7 +316,7 @@ impl LincApp {
     /// so one of them cannot report messages the other shows as zero.
     pub fn logs(&self) -> Vec<Alarm> {
         let mut logs: Vec<Alarm> = self.snapshot.alarms.iter().cloned().collect();
-        logs.extend(self.ui_log.iter().cloned());
+        logs.extend(self.diagnostics.log.iter().cloned());
         logs.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
         logs
     }
@@ -359,7 +361,7 @@ impl LincApp {
     /// log. Each source is already newest-first, so only `limit` entries of
     /// each are copied before the merge.
     pub fn recent_logs(&self, limit: usize) -> Vec<Alarm> {
-        let mut logs: Vec<Alarm> = self.ui_log.iter().take(limit).cloned().collect();
+        let mut logs: Vec<Alarm> = self.diagnostics.log.iter().take(limit).cloned().collect();
         logs.extend(self.snapshot.alarms.iter().take(limit).cloned());
         logs.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
         logs.truncate(limit);
@@ -372,7 +374,12 @@ impl LincApp {
     pub fn log_counts(&self) -> (usize, usize) {
         let mut alarms = 0;
         let mut messages = 0;
-        for entry in self.snapshot.alarms.iter().chain(self.ui_log.iter()) {
+        for entry in self
+            .snapshot
+            .alarms
+            .iter()
+            .chain(self.diagnostics.log.iter())
+        {
             if entry.severity.is_alarm() {
                 alarms += 1;
             } else {
@@ -433,8 +440,6 @@ impl LincApp {
         }
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -512,4 +517,3 @@ mod tests {
         assert_eq!(tool_change_field(&tool_change).unwrap().0, "TC T3 PENDING");
     }
 }
-

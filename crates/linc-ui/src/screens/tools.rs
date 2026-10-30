@@ -400,7 +400,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
         // The page-local typed tool number. `consume_key` matches the modifiers
         // exactly, so the bare `T` above is untouched; the chord comes from
         // `[keys] tool_number` and a profile can move it.
-        if input.consume_key(app.keymap.tool_number.modifiers, app.keymap.tool_number.key) {
+        if input.consume_key(app.prefs.keymap.tool_number.modifiers, app.prefs.keymap.tool_number.key) {
             number = true;
         }
         if input.consume_key(egui::Modifiers::CTRL, egui::Key::N) {
@@ -526,7 +526,7 @@ fn request_delete_tool(app: &mut LincApp) {
         return;
     }
     app.tools.error = None;
-    app.modal = Some(crate::state::Modal::ConfirmToolDelete {
+    app.overlay.modal = Some(crate::state::Modal::ConfirmToolDelete {
         tool: row.tool,
         description: row.description.clone(),
     });
@@ -556,9 +556,9 @@ fn number_dialog_keys(app: &mut LincApp, ui: &mut Ui) {
     let (confirm, cancel) = ui.input_mut(|input| {
         // Escape is the configured back key on every profile; both are taken so
         // a rebound back key does not leave the dialog with no way out.
-        let cancel = input.consume_key(app.keymap.back.modifiers, app.keymap.back.key)
+        let cancel = input.consume_key(app.prefs.keymap.back.modifiers, app.prefs.keymap.back.key)
             || input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
-        let confirm = input.consume_key(app.keymap.activate.modifiers, app.keymap.activate.key);
+        let confirm = input.consume_key(app.prefs.keymap.activate.modifiers, app.prefs.keymap.activate.key);
         (confirm, cancel)
     });
     if cancel {
@@ -642,7 +642,7 @@ fn draw_number_dialog(app: &mut LincApp, ui: &mut Ui) {
     let fresh = std::mem::replace(&mut entry.fresh, false);
     let error = entry.error.clone();
     let mut text = entry.text.clone();
-    let cancel_key = app.keymap.back.label();
+    let cancel_key = app.prefs.keymap.back.label();
     let id = egui::Id::unique("linc-tool-number");
     egui::Window::new("TOOL NUMBER")
         .id(egui::Id::unique("linc-tool-number-dialog"))
@@ -727,7 +727,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
     let pocket = app.profile.changer.uses_pockets();
     let lathe = app.profile.variant == MachineVariant::Lathe;
     // The hint row names the configured chord, not a hardcoded one.
-    let number_key = app.keymap.tool_number.label();
+    let number_key = app.prefs.keymap.tool_number.label();
     let rows = app.snapshot.tool_table.rows.clone();
     let current_tool = app.snapshot.tool_change.current_tool;
     theme::card(ui, |ui| {
@@ -970,7 +970,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     }
                                 } else {
                                     let kind_override = app
-                                        .preferences
+                                        .prefs.preferences
                                         .tool_kinds
                                         .get(&entry.tool.to_string())
                                         .cloned();
@@ -1124,7 +1124,7 @@ fn draw_kind_popup(app: &mut LincApp, ui: &mut Ui, opened_now: bool) {
     };
     let lathe = app.profile.variant == MachineVariant::Lathe;
     let current = app
-        .preferences
+        .prefs.preferences
         .tool_kinds
         .get(&entry.tool.to_string())
         .cloned()
@@ -1183,7 +1183,7 @@ fn draw_kind_popup(app: &mut LincApp, ui: &mut Ui, opened_now: bool) {
                 });
         });
     if let Some(kind) = chosen {
-        app.preferences
+        app.prefs.preferences
             .tool_kinds
             .insert(entry.tool.to_string(), kind.to_string());
         app.touch_preferences();

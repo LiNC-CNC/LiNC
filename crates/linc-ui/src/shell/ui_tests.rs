@@ -98,41 +98,41 @@ fn diagnostics_navigation_and_body_skip_a_hidden_turret_tab() {
     harness.app.profile.changer = ToolChangerKind::Turret;
     harness.app.set_page(Page::Diagnostics);
 
-    harness.app.diagnostics_tab = DiagnosticsTab::Motion;
+    harness.app.diagnostics.tab = DiagnosticsTab::Motion;
     harness.app.page_down();
-    assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Io);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Io);
     harness.app.page_up();
-    assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Motion);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Motion);
     harness.app.page_up();
-    assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::HalNml);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::HalNml);
 
     // Wrapping stays inside the visible list.
-    harness.app.diagnostics_tab = DiagnosticsTab::Logs;
+    harness.app.diagnostics.tab = DiagnosticsTab::Logs;
     harness.app.page_down();
-    assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Overview);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Overview);
     harness.app.page_up();
-    assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Logs);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Logs);
 
     // A remembered or restored turret tab never reaches the body.
-    harness.app.diagnostics_tab = DiagnosticsTab::Turret;
+    harness.app.diagnostics.tab = DiagnosticsTab::Turret;
     let output = harness.frame_full(Vec::new());
-    assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Overview);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Overview);
     let texts = painted_text(&output);
     assert!(!texts.iter().any(|(text, _)| text == "TURRET / LIVE TOOL"));
     assert!(texts.iter().any(|(text, _)| text == "OVERVIEW"));
 
     // Visible, the same tab is kept, drawn and navigated like any other.
     harness.app.profile.config.diagnostics.turret_tab = true;
-    harness.app.diagnostics_tab = DiagnosticsTab::Turret;
+    harness.app.diagnostics.tab = DiagnosticsTab::Turret;
     let output = harness.frame_full(Vec::new());
-    assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Turret);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Turret);
     assert!(painted_text(&output)
         .iter()
         .any(|(text, _)| text == "TURRET / LIVE TOOL"));
     harness.app.page_down();
-    assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Io);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Io);
     harness.app.page_up();
-    assert_eq!(harness.app.diagnostics_tab, DiagnosticsTab::Turret);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Turret);
 }
 
 fn make_app(mode: PanelMode) -> (tempfile::TempDir, LincApp) {
@@ -436,10 +436,10 @@ fn the_following_error_summary_belongs_to_the_run() {
 
     // Start from a cleared run: the harness has already sampled its own
     // snapshots while building the app.
-    harness.app.following_run_max = linc_core::model::AxisMap::new();
-    harness.app.following_run_abs_sum = linc_core::model::AxisMap::new();
-    harness.app.following_run_samples = linc_core::model::AxisMap::new();
-    harness.app.following_run_active = false;
+    harness.app.following.run_max = linc_core::model::AxisMap::new();
+    harness.app.following.run_abs_sum = linc_core::model::AxisMap::new();
+    harness.app.following.run_samples = linc_core::model::AxisMap::new();
+    harness.app.following.run_active = false;
 
     // No program yet: jogging still counts towards the numbers.
     feed(&mut harness, -0.002);
@@ -478,10 +478,10 @@ fn the_following_error_summary_belongs_to_the_run() {
 #[test]
 fn the_following_error_numbers_ignore_rapids() {
     let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
-    harness.app.following_run_max = linc_core::model::AxisMap::new();
-    harness.app.following_run_abs_sum = linc_core::model::AxisMap::new();
-    harness.app.following_run_samples = linc_core::model::AxisMap::new();
-    harness.app.following_history = linc_core::model::AxisMap::new();
+    harness.app.following.run_max = linc_core::model::AxisMap::new();
+    harness.app.following.run_abs_sum = linc_core::model::AxisMap::new();
+    harness.app.following.run_samples = linc_core::model::AxisMap::new();
+    harness.app.following.history = linc_core::model::AxisMap::new();
     let feed = |harness: &mut ProbeHarness, kind, value: f64| {
         harness.app.snapshot.motion_kind = kind;
         harness
@@ -497,7 +497,7 @@ fn the_following_error_numbers_ignore_rapids() {
     let (worst, mean) = harness.app.following_error_summary("X");
     assert_eq!((worst, mean), (0.0, 0.0), "a rapid is not counted");
     assert_eq!(
-        harness.app.following_history.get("X").map(|t| t.len()),
+        harness.app.following.history.get("X").map(|t| t.len()),
         Some(1)
     );
 
@@ -531,7 +531,7 @@ fn the_square_key_shows_the_following_error_traces_on_main() {
     );
 
     harness.frame_with(&[(egui::Key::F10, egui::Modifiers::NONE)]);
-    assert!(harness.app.machine_following, "F10 shows the traces");
+    assert!(harness.app.following.active, "F10 shows the traces");
     let cards = texts(&mut harness);
     assert!(
         cards.iter().any(|text| text == "FOLLOWING ERROR"),
@@ -564,7 +564,7 @@ fn the_square_key_shows_the_following_error_traces_on_main() {
     }
 
     harness.frame_with(&[(egui::Key::F10, egui::Modifiers::NONE)]);
-    assert!(!harness.app.machine_following, "and back to the cards");
+    assert!(!harness.app.following.active, "and back to the cards");
 }
 
 /// REMAINING changes what the card means - no trail, and the path eaten behind
@@ -603,7 +603,7 @@ fn the_square_key_flips_the_right_pane_to_recent_files() {
     let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
     harness.app.set_page(Page::Files);
     harness.app.files.usb_focused = false;
-    harness.app.preferences.recent_files =
+    harness.app.prefs.preferences.recent_files =
         vec!["/nc/newest.ngc".to_string(), "/nc/older.ngc".to_string()];
     let texts = |harness: &mut ProbeHarness| -> Vec<String> {
         painted_text(&harness.frame_full(Vec::new()))
@@ -1018,18 +1018,18 @@ fn the_navigation_is_compact_and_lists_six_pages() {
         shortcuts - last_target_bottom
     );
     // Ctrl+M is REMAINING: the view changes, the page does not.
-    let page = harness.app.page;
+    let page = harness.app.nav.page;
     harness.frame_with(&[(egui::Key::M, ctrl())]);
     assert!(
         harness.app.graph_style.remaining,
         "Ctrl+M turns REMAINING on"
     );
-    assert_eq!(harness.app.page, page, "a view mode, not a page");
+    assert_eq!(harness.app.nav.page, page, "a view mode, not a page");
     // The pages behind the rows still answer their own chords.
     harness.frame_with(&[(egui::Key::D, ctrl())]);
-    assert_eq!(harness.app.page, Page::Diagnostics);
+    assert_eq!(harness.app.nav.page, Page::Diagnostics);
     harness.frame_with(&[(egui::Key::H, ctrl())]);
-    assert_eq!(harness.app.page, Page::Help);
+    assert_eq!(harness.app.nav.page, Page::Help);
 }
 
 /// INC shows the steps and takes their numbers; JOG is continuous and MPG
@@ -1047,8 +1047,8 @@ fn the_increment_row_and_its_numbers_belong_to_the_step_modes() {
     };
 
     let mut harness = ProbeHarness::new(PanelMode::Inc, false, true);
-    harness.app.jog_increments = steps();
-    harness.app.jog_increment_index = 0;
+    harness.app.jog.increments = steps();
+    harness.app.jog.index = 0;
     harness.app.set_page(Page::Manual);
     harness.frame(&[]);
     let output = harness.frame_full(Vec::new());
@@ -1078,18 +1078,18 @@ fn the_increment_row_and_its_numbers_belong_to_the_step_modes() {
     );
 
     harness.frame_with(&[(egui::Key::Num3, egui::Modifiers::NONE)]);
-    assert_eq!(harness.app.jog_increment_index, 2, "3 picks the third step");
+    assert_eq!(harness.app.jog.index, 2, "3 picks the third step");
     assert_eq!(harness.app.jog_increment_value(), 0.1);
     harness.frame_with(&[(egui::Key::Num9, egui::Modifiers::NONE)]);
     assert_eq!(
-        harness.app.jog_increment_index, 2,
+        harness.app.jog.index, 2,
         "a digit past the last step is inert"
     );
 
     // JOG: no row, and the digits do nothing.
     let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
-    harness.app.jog_increments = steps();
-    harness.app.jog_increment_index = 0;
+    harness.app.jog.increments = steps();
+    harness.app.jog.index = 0;
     harness.app.set_page(Page::Manual);
     harness.frame(&[]);
     let output = harness.frame_full(Vec::new());
@@ -1102,13 +1102,13 @@ fn the_increment_row_and_its_numbers_belong_to_the_step_modes() {
         "a continuous jog shows no increment: {texts:?}"
     );
     harness.frame_with(&[(egui::Key::Num3, egui::Modifiers::NONE)]);
-    assert_eq!(harness.app.jog_increment_index, 0, "and takes no digits");
+    assert_eq!(harness.app.jog.index, 0, "and takes no digits");
 
     // MPG: the handwheel owns the step, so the [DISPLAY] INCREMENTS row is
     // not drawn here either and the digits are not eaten.
     let mut harness = ProbeHarness::new(PanelMode::Mpg, false, true);
-    harness.app.jog_increments = steps();
-    harness.app.jog_increment_index = 0;
+    harness.app.jog.increments = steps();
+    harness.app.jog.index = 0;
     harness.app.set_page(Page::Manual);
     harness.frame(&[]);
     let output = harness.frame_full(Vec::new());
@@ -1121,7 +1121,7 @@ fn the_increment_row_and_its_numbers_belong_to_the_step_modes() {
         "MPG picks its step on the handwheel: {texts:?}"
     );
     harness.frame_with(&[(egui::Key::Num3, egui::Modifiers::NONE)]);
-    assert_eq!(harness.app.jog_increment_index, 0, "and takes no digits");
+    assert_eq!(harness.app.jog.index, 0, "and takes no digits");
 }
 
 /// The style, not the page: REMAINING is what stops the trail being drawn,
@@ -1164,27 +1164,27 @@ fn the_arrow_keys_walk_all_six_navigation_rows() {
     harness.app.set_page(Page::Machine);
     harness.app.focus_nav();
     harness.frame(&[]);
-    assert_eq!(harness.app.nav.len(), 6, "six rows to walk");
-    assert_eq!(harness.app.nav_focus, 0);
+    assert_eq!(harness.app.nav.pages.len(), 6, "six rows to walk");
+    assert_eq!(harness.app.nav.nav_focus, 0);
     for expected in 1..6 {
         harness.frame(&[egui::Key::ArrowDown]);
         assert_eq!(
-            harness.app.nav_focus, expected,
+            harness.app.nav.nav_focus, expected,
             "ArrowDown reaches row {expected}"
         );
-        assert_eq!(harness.app.focus_region, FocusRegion::Nav);
+        assert_eq!(harness.app.nav.focus_region, FocusRegion::Nav);
     }
     harness.frame(&[egui::Key::ArrowDown]);
     assert_eq!(
-        harness.app.nav_focus, 5,
+        harness.app.nav.nav_focus, 5,
         "the last row is the end of the list"
     );
-    harness.app.nav_focus = 5;
+    harness.app.nav.nav_focus = 5;
     harness.frame(&[egui::Key::Enter]);
-    assert_eq!(harness.app.page, Page::Help, "Enter opens G-CODE HELP");
+    assert_eq!(harness.app.nav.page, Page::Help, "Enter opens G-CODE HELP");
     harness.app.focus_nav();
     harness.frame(&[egui::Key::ArrowUp]);
-    assert_eq!(harness.app.nav_focus, 4, "ArrowUp walks back");
+    assert_eq!(harness.app.nav.nav_focus, 4, "ArrowUp walks back");
 }
 
 /// A shell region's rect, from the frame's own report to the diagnostic
@@ -1192,7 +1192,8 @@ fn the_arrow_keys_walk_all_six_navigation_rows() {
 /// than re-deriving them.
 fn region(app: &LincApp, name: &str) -> egui::Rect {
     let found = app
-        .diag_regions
+        .diagnostics
+        .regions
         .iter()
         .find(|region| region.name == name)
         .unwrap_or_else(|| panic!("{name} is reported"));
@@ -1224,7 +1225,7 @@ fn the_shortcuts_pane_sizes_to_content_then_to_the_footer() {
     // content-sized instead of running to the footer. It must never pass
     // the navigation column's content edge.
     let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
-    harness.app.nav = nav_pages(
+    harness.app.nav.pages = nav_pages(
         &[
             "machine",
             "program",
@@ -1367,17 +1368,20 @@ fn machine_bounds_follow_the_ini_and_classify_the_toolpath() {
 fn a_dialog_owns_the_keyboard_in_front_of_the_page() {
     let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
     harness.app.set_page(Page::Program);
-    harness.app.modal = Some(Modal::Info("test".into()));
+    harness.app.overlay.modal = Some(Modal::Info("test".into()));
 
     harness.frame(&[egui::Key::F7]);
     assert_eq!(
-        harness.app.page,
+        harness.app.nav.page,
         Page::Program,
         "F7 must not navigate behind the dialog"
     );
 
     harness.frame(&[egui::Key::Escape]);
-    assert!(harness.app.modal.is_none(), "Escape dismisses the dialog");
+    assert!(
+        harness.app.overlay.modal.is_none(),
+        "Escape dismisses the dialog"
+    );
 }
 
 /// A dialog that exists to fill a field puts the ring in that field on the
@@ -1394,9 +1398,9 @@ fn a_dialog_with_a_field_focuses_the_field_not_its_safe_button() {
     // also what the unsaved-changes prompt turns into when SAVE has no
     // path to write, so the ring must move with the dialog, not only when
     // no dialog was open before.
-    harness.app.modal = Some(Modal::Info("first".into()));
+    harness.app.overlay.modal = Some(Modal::Info("first".into()));
     harness.frame(&[]);
-    harness.app.modal = Some(Modal::SaveProgramAs(crate::state::SaveProgramDialog {
+    harness.app.overlay.modal = Some(Modal::SaveProgramAs(crate::state::SaveProgramDialog {
         name: String::new(),
         directory: harness.app.save_as_directory(),
         error: None,
@@ -1411,16 +1415,16 @@ fn a_dialog_with_a_field_focuses_the_field_not_its_safe_button() {
     harness.type_text("part");
     assert!(
         matches!(
-            &harness.app.modal,
+            &harness.app.overlay.modal,
             Some(Modal::SaveProgramAs(dialog)) if dialog.name == "part"
         ),
         "typing without a click reaches the name field"
     );
 
     // The MDI buffer's save dialog does the same.
-    harness.app.modal = None;
+    harness.app.overlay.modal = None;
     harness.frame(&[]);
-    harness.app.modal = Some(Modal::MdiSave(crate::state::MdiSaveDialog::default()));
+    harness.app.overlay.modal = Some(Modal::MdiSave(crate::state::MdiSaveDialog::default()));
     harness.frame(&[]);
     assert!(
         harness
@@ -1431,16 +1435,16 @@ fn a_dialog_with_a_field_focuses_the_field_not_its_safe_button() {
     harness.type_text("part2");
     assert!(
         matches!(
-            &harness.app.modal,
+            &harness.app.overlay.modal,
             Some(Modal::MdiSave(dialog)) if dialog.name == "part2"
         ),
         "typing without a click reaches the name field"
     );
 
     // GO TO LINE collects a number the same way.
-    harness.app.modal = None;
+    harness.app.overlay.modal = None;
     harness.frame(&[]);
-    harness.app.modal = Some(Modal::GoToLine {
+    harness.app.overlay.modal = Some(Modal::GoToLine {
         buffer: String::new(),
         mdi: false,
     });
@@ -1454,20 +1458,20 @@ fn a_dialog_with_a_field_focuses_the_field_not_its_safe_button() {
     harness.type_text("3");
     assert!(
         matches!(
-            &harness.app.modal,
+            &harness.app.overlay.modal,
             Some(Modal::GoToLine { buffer, .. }) if buffer == "3"
         ),
         "typing without a click reaches the number field"
     );
 
     // A dialog with no field keeps its safe button under Enter.
-    harness.app.modal = None;
+    harness.app.overlay.modal = None;
     harness.frame(&[]);
-    harness.app.modal = Some(Modal::Info("no field".into()));
+    harness.app.overlay.modal = Some(Modal::Info("no field".into()));
     harness.frame(&[]);
     harness.frame(&[egui::Key::Enter]);
     assert!(
-        harness.app.modal.is_none(),
+        harness.app.overlay.modal.is_none(),
         "OK holds the ring in a dialog with no field"
     );
 }
@@ -1477,7 +1481,7 @@ fn enter_in_the_save_dialog_does_not_act_on_the_page_behind() {
     let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
     harness.files_page_with_one_file("behind.ngc");
     harness.frame(&[]);
-    harness.app.modal = Some(Modal::MdiSave(crate::state::MdiSaveDialog {
+    harness.app.overlay.modal = Some(Modal::MdiSave(crate::state::MdiSaveDialog {
         name: "part".into(),
         wrap: false,
         ..Default::default()
@@ -1485,7 +1489,7 @@ fn enter_in_the_save_dialog_does_not_act_on_the_page_behind() {
     harness.sent.borrow_mut().clear();
     harness.frame(&[egui::Key::Enter]);
     assert_eq!(
-        harness.app.page,
+        harness.app.nav.page,
         Page::Files,
         "Enter must not open the selected file behind the save dialog"
     );
@@ -1504,10 +1508,10 @@ fn enter_in_the_save_dialog_does_not_act_on_the_page_behind() {
 fn zero_keys_do_not_fire_behind_a_dialog() {
     let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
     harness.frame(&[]);
-    assert_eq!(harness.app.page, Page::Manual);
+    assert_eq!(harness.app.nav.page, Page::Manual);
 
     harness.sent.borrow_mut().clear();
-    harness.app.modal = Some(Modal::Info("test".into()));
+    harness.app.overlay.modal = Some(Modal::Info("test".into()));
     harness.frame(&[egui::Key::A]);
     assert!(
         !harness.sent.borrow().iter().any(|command| matches!(
@@ -1665,10 +1669,10 @@ fn a_touch_off_reaches_the_offset_table() {
 #[test]
 fn mode_driven_pages_open_and_close() {
     let (_dir, mut app) = make_app(PanelMode::Mdi);
-    assert_eq!(app.page, Page::Machine, "MDI opens the MAIN page");
+    assert_eq!(app.nav.page, Page::Machine, "MDI opens the MAIN page");
     assert!(app.mdi_pane_visible());
     switch_mode(&mut app, PanelMode::Auto);
-    assert_eq!(app.page, Page::Machine, "AUTO brings up MAIN");
+    assert_eq!(app.nav.page, Page::Machine, "AUTO brings up MAIN");
     assert!(
         !app.mdi_pane_visible(),
         "and the normal program card takes the pane's slot"
@@ -1677,20 +1681,20 @@ fn mode_driven_pages_open_and_close() {
     switch_mode(&mut app, PanelMode::Mdi);
     app.set_page(Page::Files);
     switch_mode(&mut app, PanelMode::Auto);
-    assert_eq!(app.page, Page::Machine, "AUTO brings up MAIN");
+    assert_eq!(app.nav.page, Page::Machine, "AUTO brings up MAIN");
     app.on_mode_change(PanelModeValidity::Valid(PanelMode::Home));
-    assert_eq!(app.page, Page::Homing);
+    assert_eq!(app.nav.page, Page::Homing);
     app.on_mode_change(PanelModeValidity::Valid(PanelMode::Jog));
-    assert_eq!(app.page, Page::Manual);
+    assert_eq!(app.nav.page, Page::Manual);
     app.on_mode_change(PanelModeValidity::Valid(PanelMode::Edit));
-    assert_eq!(app.page, Page::Program);
+    assert_eq!(app.nav.page, Page::Program);
     assert_eq!(app.program.view, ProgramView::Code);
 }
 
 #[test]
 fn edit_mode_starts_in_code_with_editor_focus() {
     let (_dir, app) = make_app(PanelMode::Edit);
-    assert_eq!(app.page, Page::Program);
+    assert_eq!(app.nav.page, Page::Program);
     assert_eq!(app.program.view, ProgramView::Code);
     assert!(app.program.focus_editor);
     assert!(app.editing_allowed());
@@ -1703,13 +1707,13 @@ fn unsaved_program_guards_navigation() {
     assert!(app.program_dirty());
     app.request_page(Page::Tools);
     assert!(matches!(
-        app.modal,
+        app.overlay.modal,
         Some(Modal::ConfirmDiscard(PendingAction::Navigate(Page::Tools)))
     ));
-    assert_eq!(app.page, Page::Program);
-    app.modal = None;
+    assert_eq!(app.nav.page, Page::Program);
+    app.overlay.modal = None;
     app.perform_pending(PendingAction::Navigate(Page::Tools));
-    assert_eq!(app.page, Page::Tools);
+    assert_eq!(app.nav.page, Page::Tools);
     // The buffer survives a non-destructive page change.
     assert_eq!(app.program.editor.text(), "G0 X0\nG1 X1\n");
 }
@@ -1723,11 +1727,11 @@ fn discard_reverts_the_buffer_to_the_loaded_program() {
     let loaded = app.snapshot.program.content.clone().expect("demo loaded");
     app.program.editor.replace_text("G0 X9\n".into());
     assert!(app.program_dirty());
-    app.modal = Some(Modal::ConfirmDiscard(PendingAction::OpenFiles));
+    app.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::OpenFiles));
     // What the DISCARD button does.
     app.discard_editor_changes();
     app.perform_pending(PendingAction::OpenFiles);
-    assert_eq!(app.page, Page::Files);
+    assert_eq!(app.nav.page, Page::Files);
     assert!(!app.program_dirty(), "the buffer is clean again");
     assert_eq!(app.program.editor.text(), *loaded);
     assert_eq!(app.program.selected_line, 1);
@@ -1743,8 +1747,8 @@ fn an_untitled_buffer_saves_under_a_name_it_asks_for() {
     app.program.editor = linc_core::editor::Editor::new();
     app.program.editor.replace_text("G0 X0\nG1 X10\n".into());
     app.save_program();
-    let Some(Modal::SaveProgramAs(dialog)) = app.modal.clone() else {
-        panic!("the save asks for a name, got {:?}", app.modal);
+    let Some(Modal::SaveProgramAs(dialog)) = app.overlay.modal.clone() else {
+        panic!("the save asks for a name, got {:?}", app.overlay.modal);
     };
     assert!(
         dialog.directory.starts_with(app.profile.nc_files_root()),
@@ -1753,7 +1757,7 @@ fn an_untitled_buffer_saves_under_a_name_it_asks_for() {
     );
     app.save_program_as("part");
     app.poll_backend();
-    assert!(app.modal.is_none());
+    assert!(app.overlay.modal.is_none());
     let path = app
         .program
         .editor
@@ -1774,28 +1778,32 @@ fn an_untitled_buffer_saves_under_a_name_it_asks_for() {
 #[test]
 fn main_opens_the_page_the_panel_mode_owns() {
     let (_dir, mut app) = make_app(PanelMode::Edit);
-    assert_eq!(app.page, Page::Program);
+    assert_eq!(app.nav.page, Page::Program);
     app.request_mode_page();
-    assert_eq!(app.page, Page::Program, "already there, and not toggled");
+    assert_eq!(
+        app.nav.page,
+        Page::Program,
+        "already there, and not toggled"
+    );
     assert_eq!(app.program.view, ProgramView::Code);
     app.set_page(Page::Files);
     app.request_mode_page();
-    assert_eq!(app.page, Page::Program);
+    assert_eq!(app.nav.page, Page::Program);
 
     switch_mode(&mut app, PanelMode::Jog);
     app.set_page(Page::Tools);
     app.request_mode_page();
-    assert_eq!(app.page, Page::Manual);
+    assert_eq!(app.nav.page, Page::Manual);
 
     switch_mode(&mut app, PanelMode::Home);
     app.set_page(Page::Tools);
     app.request_mode_page();
-    assert_eq!(app.page, Page::Homing);
+    assert_eq!(app.nav.page, Page::Homing);
 
     switch_mode(&mut app, PanelMode::Auto);
     app.set_page(Page::Tools);
     app.request_mode_page();
-    assert_eq!(app.page, Page::Machine);
+    assert_eq!(app.nav.page, Page::Machine);
 }
 
 /// The panel moves the mode itself, so leaving EDIT is the last chance to
@@ -1805,16 +1813,16 @@ fn leaving_edit_with_unsaved_changes_warns_once() {
     let (_dir, mut app) = make_app(PanelMode::Edit);
     app.program.editor.replace_text("G0 X1\n".into());
     switch_mode(&mut app, PanelMode::Auto);
-    assert!(matches!(app.modal, Some(Modal::UnsavedOnLeave)));
+    assert!(matches!(app.overlay.modal, Some(Modal::UnsavedOnLeave)));
     // KEEP leaves the buffer alone; it is still there when EDIT comes back.
-    app.modal = None;
+    app.overlay.modal = None;
     assert!(app.program_dirty());
     switch_mode(&mut app, PanelMode::Edit);
     assert!(app.program_dirty());
     // A clean buffer leaves EDIT without a prompt.
     app.discard_editor_changes();
     switch_mode(&mut app, PanelMode::Auto);
-    assert!(app.modal.is_none());
+    assert!(app.overlay.modal.is_none());
 }
 
 #[test]
@@ -1829,7 +1837,7 @@ fn protect_unknown_fails_closed_in_the_ui() {
     app.save_program();
     assert_eq!(app.program.editor.text(), before);
     assert!(app.program.editor.dirty);
-    assert!(app.modal.is_none());
+    assert!(app.overlay.modal.is_none());
 }
 
 #[test]
@@ -1901,7 +1909,7 @@ fn a_manual_line_pick_survives_the_running_follow() {
     let (_dir, mut app) = make_app(PanelMode::Auto);
     app.snapshot.task.running = true;
     app.program.follow_current = false;
-    app.program_was_running = false;
+    app.program.program_was_running = false;
     app.sync_program();
     assert!(app.program.follow_current, "a run start re-arms follow");
     // Ctrl+G or the arrows picked a line: the next poll must not drag it
@@ -1925,17 +1933,26 @@ fn escape_leaves_the_help_page_before_it_resets_a_running_program() {
     app.snapshot.task.interp = linc_core::model::InterpState::Reading;
     app.help.query = "G71".into();
     app.set_page(Page::Help);
-    let back = app.help_return_page;
+    let back = app.nav.help_return_page;
     assert_eq!(back, Page::Machine, "Help remembers the page it came from");
     app.escape();
-    assert_eq!(app.page, back, "Esc leaves the Help page for the main view");
+    assert_eq!(
+        app.nav.page, back,
+        "Esc leaves the Help page for the main view"
+    );
     assert!(
-        !app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
+        !app.overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text == "PROGRAM RESET"),
         "leaving the Help page must not reset the program"
     );
     app.escape();
     assert!(
-        app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
+        app.overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text == "PROGRAM RESET"),
         "the next Esc on the main view is the program reset"
     );
 }
@@ -1950,7 +1967,10 @@ fn escape_closes_the_help_dialog_before_resetting_a_running_program() {
     app.escape();
     assert!(app.help.dialog.is_none(), "Escape closes the Help viewer");
     assert!(
-        !app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
+        !app.overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text == "PROGRAM RESET"),
         "the running program behind the Help viewer must not be reset"
     );
 }
@@ -1965,18 +1985,24 @@ fn escape_leaves_the_diagnostics_page_before_it_resets_a_running_program() {
     app.set_page(Page::Diagnostics);
     app.escape();
     assert_eq!(
-        app.page,
+        app.nav.page,
         Page::Program,
         "Esc leaves DIAGNOSTICS for the page it came from"
     );
     assert!(
-        !app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
+        !app.overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text == "PROGRAM RESET"),
         "looking at a log must not stop the program"
     );
     // The next Esc, on that page, is the one that resets it.
     app.escape();
     assert!(
-        app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
+        app.overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text == "PROGRAM RESET"),
         "Esc still resets once the operator is back on the page"
     );
 }
@@ -2007,7 +2033,7 @@ fn escape_resets_a_latched_probe_trip_from_the_diagnostics_page() {
     app.escape();
     app.poll_backend();
     assert_eq!(
-        app.page,
+        app.nav.page,
         Page::Diagnostics,
         "the fault reset must not navigate away from the page the operator is reading"
     );
@@ -2016,11 +2042,13 @@ fn escape_resets_a_latched_probe_trip_from_the_diagnostics_page() {
         "Esc resets the latched trip from DIAGNOSTICS"
     );
     assert!(
-        app.toasts
+        app.overlay
+            .toasts
             .iter()
             .any(|toast| toast.text == "PROBE TRIP RESET"),
         "the reset is acknowledged: {:?}",
-        app.toasts
+        app.overlay
+            .toasts
             .iter()
             .map(|toast| &toast.text)
             .collect::<Vec<_>>()
@@ -2041,9 +2069,13 @@ fn escape_stops_a_running_program() {
         linc_core::model::InterpState::Idle
     );
     assert!(
-        app.toasts.iter().any(|toast| toast.text == "PROGRAM RESET"),
+        app.overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text == "PROGRAM RESET"),
         "the reset is acknowledged: {:?}",
-        app.toasts
+        app.overlay
+            .toasts
             .iter()
             .map(|toast| &toast.text)
             .collect::<Vec<_>>()
@@ -2131,8 +2163,8 @@ fn stepping_the_selection_clamps_at_both_ends() {
 #[test]
 fn goto_line_is_bound_to_ctrl_g() {
     let (_dir, app) = make_app(PanelMode::Edit);
-    assert!(app.keymap.goto_line.modifiers.ctrl);
-    assert_eq!(app.keymap.goto_line.key, egui::Key::G);
+    assert!(app.prefs.keymap.goto_line.modifiers.ctrl);
+    assert_eq!(app.prefs.keymap.goto_line.key, egui::Key::G);
 }
 
 #[test]
@@ -2267,8 +2299,8 @@ fn the_preview_uses_the_offset_the_program_selects() {
 #[test]
 fn the_view_cycle_key_steps_iso_x_y_z_and_refits() {
     let (_dir, mut app) = make_app(PanelMode::Jog);
-    assert!(app.keymap.view_cycle.modifiers.ctrl);
-    assert_eq!(app.keymap.view_cycle.key, egui::Key::F10);
+    assert!(app.prefs.keymap.view_cycle.modifiers.ctrl);
+    assert_eq!(app.prefs.keymap.view_cycle.key, egui::Key::F10);
     let order = [
         linc_view::ViewMode::SideYz,
         linc_view::ViewMode::SideXz,
@@ -2772,7 +2804,7 @@ fn backspace_confirms_tool_delete_and_refuses_the_probe_tool() {
     harness.frame(&[egui::Key::Backspace]);
     assert!(
         matches!(
-            harness.app.modal,
+            harness.app.overlay.modal,
             Some(crate::state::Modal::ConfirmToolDelete { tool, .. })
                 if tool == target_tool
         ),
@@ -2783,14 +2815,14 @@ fn backspace_confirms_tool_delete_and_refuses_the_probe_tool() {
         "nothing is deleted before confirmation"
     );
 
-    harness.app.modal = None;
+    harness.app.overlay.modal = None;
     // Treat the selected row as the configured probe tool: the fixture
     // table need not carry a T99 row for this refusal.
     harness.app.profile.config.probe.tool_number = target_tool;
     harness.app.tools.selected_row = target;
     harness.frame(&[egui::Key::Backspace]);
     assert!(
-        harness.app.modal.is_none(),
+        harness.app.overlay.modal.is_none(),
         "the probe tool is never offered for deletion"
     );
     assert!(
@@ -2813,7 +2845,7 @@ fn backspace_confirms_tool_delete_and_refuses_the_probe_tool() {
     harness.app.tools.error = None;
     harness.frame(&[egui::Key::Backspace]);
     assert!(
-        harness.app.modal.is_none(),
+        harness.app.overlay.modal.is_none(),
         "the active tool is not deleted"
     );
     assert!(
@@ -2963,7 +2995,8 @@ fn protect_refuses_a_calibration_run_before_issuing_anything() {
     // The refusal is painted before Enter: a calibration Run rewrites #3032.
     let reason = harness
         .app
-        .probe_layout
+        .probe
+        .layout
         .run_reason_text
         .clone()
         .unwrap_or_default();
@@ -3007,7 +3040,8 @@ fn protection_covers_the_spindle_nose_calibration_routine() {
     harness.frame(&[]);
     let reason = harness
         .app
-        .probe_layout
+        .probe
+        .layout
         .run_reason_text
         .clone()
         .unwrap_or_default();
@@ -3248,7 +3282,7 @@ fn a_hovered_toolpath_takes_the_pan_and_zoom_chords() {
         harness.app.program.graph_pan
     );
     assert_eq!(
-        harness.app.focus_region,
+        harness.app.nav.focus_region,
         FocusRegion::Page,
         "the hovered view keeps Ctrl+Left from moving the focus ring"
     );
@@ -3716,7 +3750,7 @@ fn a_focused_editor_keeps_ctrl_up_down_and_ctrl_left_right() {
         "Ctrl+Left belongs to the editor while it holds the keyboard"
     );
     assert_eq!(
-        harness.app.focus_region,
+        harness.app.nav.focus_region,
         FocusRegion::Page,
         "and it does not move the focus ring either"
     );
@@ -3767,7 +3801,7 @@ fn a_navigation_click_releases_the_keyboard_from_the_gcode_editor() {
     harness.frame_events(vec![press_at(row, true)]);
     harness.frame_events(vec![press_at(row, false)]);
     assert_eq!(
-        harness.app.page,
+        harness.app.nav.page,
         Page::Program,
         "the same page, so nothing navigated"
     );
@@ -3775,7 +3809,7 @@ fn a_navigation_click_releases_the_keyboard_from_the_gcode_editor() {
         !harness.ctx.memory(|memory| memory.has_focus(id)),
         "the nav click left the editor holding the keyboard"
     );
-    assert_eq!(harness.app.focus_region, FocusRegion::Nav);
+    assert_eq!(harness.app.nav.focus_region, FocusRegion::Nav);
 
     // Back over the toolpath — the row cycled SPLIT to CODE, so it is the
     // thumbnail beside the editor now — the pan chord is live again.
@@ -3802,7 +3836,7 @@ fn ctrl_left_still_moves_region_focus_away_from_the_toolpath() {
     harness.frame(&[]);
     let before = harness.app.program.graph_pan;
     harness.frame_with(&[(egui::Key::ArrowLeft, egui::Modifiers::CTRL)]);
-    assert_eq!(harness.app.focus_region, FocusRegion::Nav);
+    assert_eq!(harness.app.nav.focus_region, FocusRegion::Nav);
     assert_eq!(
         harness.app.program.graph_pan, before,
         "no pan without the pointer on the toolpath"
@@ -3822,7 +3856,7 @@ fn ctrl_arrow_stays_in_a_focused_text_editor() {
     harness.ctx.memory_mut(|memory| memory.request_focus(id));
     harness.frame_with(&[(egui::Key::ArrowLeft, egui::Modifiers::CTRL)]);
     assert_eq!(
-        harness.app.focus_region,
+        harness.app.nav.focus_region,
         FocusRegion::Page,
         "Ctrl+Left must stay in the editor instead of moving focus to the nav"
     );
@@ -3835,7 +3869,7 @@ fn backspace_deletes_a_file_on_the_files_page() {
 
     harness.frame(&[egui::Key::Backspace]);
 
-    match harness.app.modal {
+    match harness.app.overlay.modal {
         Some(crate::state::Modal::ConfirmDelete {
             path: deleted,
             usb: false,
@@ -3856,9 +3890,9 @@ fn the_cut_shortcut_does_nothing_on_the_files_page() {
     let commands = harness.frame_events(vec![egui::Event::Cut]);
 
     assert!(
-        harness.app.modal.is_none(),
+        harness.app.overlay.modal.is_none(),
         "Ctrl+X must not open a dialog: {:?}",
-        harness.app.modal
+        harness.app.overlay.modal
     );
     assert!(path.exists());
     assert!(harness.app.files.rename.is_none());
@@ -3880,7 +3914,7 @@ fn position_measurement_still_runs_with_protect_on() {
     harness.frame(&[]);
     // POSITION: the Run preamble assigns probe parameters, which is setup,
     // not a calibration or result write, so PROTECT must not block it.
-    assert!(harness.app.probe_layout.run_reason_text.is_none());
+    assert!(harness.app.probe.layout.run_reason_text.is_none());
     screens::probe::run(&mut harness.app);
     assert_eq!(harness.app.probe.error, None);
     let sent = harness.mdi_sent();
@@ -3952,10 +3986,10 @@ fn files_return_clears_the_probe_selection_but_keeps_the_tab() {
     });
 
     harness.app.request_files();
-    assert_eq!(harness.app.page, Page::Files);
+    assert_eq!(harness.app.nav.page, Page::Files);
     harness.app.escape();
 
-    assert_eq!(harness.app.page, Page::Probe);
+    assert_eq!(harness.app.nav.page, Page::Probe);
     assert_eq!(
         harness.app.probe.category,
         ProbeCategory::EdgeAngle,
@@ -3989,7 +4023,7 @@ fn f8_opens_the_first_probe_tab_with_no_routine_selected() {
     harness.app.probe.operation = "rect_pocket_center_start".into();
 
     harness.frame(&[egui::Key::F8]);
-    assert_eq!(harness.app.page, Page::Probe);
+    assert_eq!(harness.app.nav.page, Page::Probe);
     assert_eq!(harness.app.probe.category, ProbeCategory::OutsideCorners);
     assert!(harness.app.probe.operation.is_empty());
 }
@@ -4015,10 +4049,10 @@ fn escape_returns_to_offsets_and_reentry_never_restores_a_selection() {
     harness.enter_probe(ProbeCategory::BossAndPocket, "round_boss");
 
     harness.frame(&[egui::Key::Escape]);
-    assert_eq!(harness.app.page, Page::Offsets);
+    assert_eq!(harness.app.nav.page, Page::Offsets);
 
     harness.frame(&[egui::Key::F8]);
-    assert_eq!(harness.app.page, Page::Probe);
+    assert_eq!(harness.app.nav.page, Page::Probe);
     assert_eq!(harness.app.probe.category, ProbeCategory::OutsideCorners);
     assert!(harness.app.probe.operation.is_empty());
 }
@@ -4049,15 +4083,15 @@ fn restoring_the_probe_page_after_mode_loss_clears_the_selection() {
             });
 
             // The panel switches to a mode-driven page.
-            harness.app.last_mode = Some(PanelModeValidity::Valid(PanelMode::Auto));
+            harness.app.nav.last_mode = Some(PanelModeValidity::Valid(PanelMode::Auto));
             harness.app.on_mode_change(PanelModeValidity::Valid(mode));
-            assert_eq!(harness.app.page, mode_page, "{mode:?}");
-            assert_eq!(harness.app.last_non_mode_page, Page::Probe, "{mode:?}");
+            assert_eq!(harness.app.nav.page, mode_page, "{mode:?}");
+            assert_eq!(harness.app.nav.last_non_mode_page, Page::Probe, "{mode:?}");
 
             // ...and the mode goes away: Probe comes back through the entry
             // logic, with the tab kept and nothing selected.
             harness.app.on_mode_change(loss.clone());
-            assert_eq!(harness.app.page, Page::Probe, "{mode:?}/{loss:?}");
+            assert_eq!(harness.app.nav.page, Page::Probe, "{mode:?}/{loss:?}");
             assert_eq!(
                 harness.app.probe.category,
                 ProbeCategory::EdgeAngle,
@@ -4100,14 +4134,14 @@ fn a_valid_mode_takes_its_own_page_so_normal_transitions_never_restore_probe() {
         harness.enter_probe(ProbeCategory::BossAndPocket, "round_boss");
         harness.app.probe.param_focused = true;
 
-        harness.app.last_mode = Some(PanelModeValidity::Valid(PanelMode::Auto));
+        harness.app.nav.last_mode = Some(PanelModeValidity::Valid(PanelMode::Auto));
         harness.app.on_mode_change(PanelModeValidity::Valid(from));
-        assert!(harness.app.page.is_mode_driven(), "{from:?}");
+        assert!(harness.app.nav.page.is_mode_driven(), "{from:?}");
 
         // `sync` records the new mode before it calls back in.
-        harness.app.last_mode = Some(PanelModeValidity::Valid(from));
+        harness.app.nav.last_mode = Some(PanelModeValidity::Valid(from));
         harness.app.on_mode_change(PanelModeValidity::Valid(to));
-        assert_eq!(harness.app.page, destination, "{from:?} -> {to:?}");
+        assert_eq!(harness.app.nav.page, destination, "{from:?} -> {to:?}");
     }
 }
 
@@ -4153,7 +4187,7 @@ fn every_probe_pointer_target_meets_the_44px_minimum() {
             let mut harness = ProbeHarness::ready(PanelMode::Auto, protect, true, power);
             harness.enter_probe(category, operation);
             harness.frame(&[]);
-            let layout = harness.app.probe_layout.clone();
+            let layout = harness.app.probe.layout.clone();
 
             let targets = probe_targets(&layout);
             assert!(
@@ -4203,7 +4237,7 @@ fn boss_and_ridge_hint_fields_stack_in_aligned_columns() {
         let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
         harness.enter_probe(category, "");
         harness.frame(&[]);
-        let layout = harness.app.probe_layout.clone();
+        let layout = harness.app.probe.layout.clone();
         let labels = &layout.hint_labels;
         let fields = &layout.hint_fields;
         assert_eq!(
@@ -4270,7 +4304,7 @@ fn tall_windows_keep_hints_under_the_routine_cards() {
         egui::vec2(1920.0, 1080.0),
     ));
     harness.frame_input(input);
-    let layout = harness.app.probe_layout.clone();
+    let layout = harness.app.probe.layout.clone();
     let cards_bottom = layout
         .routine_cards
         .iter()
@@ -4293,7 +4327,7 @@ fn calibration_fields_share_one_column() {
     let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
     harness.enter_probe(ProbeCategory::Calibrate, "cal_round_boss");
     let output = harness.frame_full(Vec::new());
-    let fields = harness.app.probe_layout.calibrate_fields.clone();
+    let fields = harness.app.probe.layout.calibrate_fields.clone();
     assert_eq!(
         fields.len(),
         4,
@@ -4505,7 +4539,8 @@ fn ctrl_p_focuses_the_first_routine_hint_on_boss_and_ridge() {
         assert!(
             harness
                 .app
-                .probe_layout
+                .probe
+                .layout
                 .hint_fields
                 .iter()
                 .any(|(index, _)| *index == expected),
@@ -4542,14 +4577,15 @@ fn a_pointer_pick_updates_the_run_context_and_hints_in_the_same_frame() {
     harness.enter_probe(ProbeCategory::BossAndPocket, "round_boss");
     harness.frame(&[]);
     assert_eq!(
-        harness.app.probe_layout.hints_drawn.as_deref(),
+        harness.app.probe.layout.hints_drawn.as_deref(),
         Some(&[11usize][..]),
         "the round boss shows only the boss/pocket diameter hint"
     );
 
     let target = harness
         .app
-        .probe_layout
+        .probe
+        .layout
         .routine_cards
         .iter()
         .find(|(operation, _)| operation == "rect_boss")
@@ -4559,7 +4595,7 @@ fn a_pointer_pick_updates_the_run_context_and_hints_in_the_same_frame() {
     harness.click_at(target);
 
     assert_eq!(harness.app.probe.operation, "rect_boss");
-    let layout = harness.app.probe_layout.clone();
+    let layout = harness.app.probe.layout.clone();
     let name = linc_core::probe::operation("rect_boss").unwrap().name;
     let action = layout.run_action_text.clone().unwrap_or_default();
     assert!(
@@ -4580,7 +4616,8 @@ fn every_parameter_name_fits_inside_its_target() {
     harness.frame(&[]);
     let cell = harness
         .app
-        .probe_layout
+        .probe
+        .layout
         .parameter_target
         .expect("parameter field drawn")
         .width();
@@ -4636,7 +4673,7 @@ fn the_action_and_reason_lines_fit_at_1280x720_with_banners() {
             let mut harness = ProbeHarness::ready(PanelMode::Auto, protect, connected, power);
             harness.enter_probe(category, operation);
             harness.frame(&[]);
-            let layout = harness.app.probe_layout.clone();
+            let layout = harness.app.probe.layout.clone();
             let page = layout.page;
             let action = layout
                 .run_action
@@ -5008,9 +5045,9 @@ fn a_selection_is_replaced_with_the_space_in_front_of_the_word() {
 fn auto_brings_up_main_from_anywhere() {
     let mut harness = mdi_harness();
     harness.frame(&[]);
-    assert_eq!(harness.app.page, Page::Machine, "MDI opens MAIN");
+    assert_eq!(harness.app.nav.page, Page::Machine, "MDI opens MAIN");
     switch_mode(&mut harness.app, PanelMode::Auto);
-    assert_eq!(harness.app.page, Page::Machine, "AUTO brings up MAIN");
+    assert_eq!(harness.app.nav.page, Page::Machine, "AUTO brings up MAIN");
     assert!(
         !harness.app.mdi_pane_visible(),
         "the pane goes with the mode, so MAIN shows the program card"
@@ -5020,19 +5057,19 @@ fn auto_brings_up_main_from_anywhere() {
     switch_mode(&mut harness.app, PanelMode::Edit);
     harness.app.set_page(Page::Files);
     switch_mode(&mut harness.app, PanelMode::Auto);
-    assert_eq!(harness.app.page, Page::Machine, "AUTO brings up MAIN");
+    assert_eq!(harness.app.nav.page, Page::Machine, "AUTO brings up MAIN");
 
     // The other positions keep their mapping.
     harness.app.set_page(Page::Files);
     switch_mode(&mut harness.app, PanelMode::Edit);
-    assert_eq!(harness.app.page, Page::Program);
+    assert_eq!(harness.app.nav.page, Page::Program);
     assert_eq!(harness.app.program.view, ProgramView::Code);
     switch_mode(&mut harness.app, PanelMode::Jog);
-    assert_eq!(harness.app.page, Page::Manual);
+    assert_eq!(harness.app.nav.page, Page::Manual);
     switch_mode(&mut harness.app, PanelMode::Home);
-    assert_eq!(harness.app.page, Page::Homing);
+    assert_eq!(harness.app.nav.page, Page::Homing);
     switch_mode(&mut harness.app, PanelMode::Mdi);
-    assert_eq!(harness.app.page, Page::Machine);
+    assert_eq!(harness.app.nav.page, Page::Machine);
     // AUTO still has no page of its own, so the boot path is unchanged.
     assert!(mode_page(&PanelModeValidity::Valid(PanelMode::Auto)).is_none());
 }
@@ -5179,7 +5216,7 @@ fn ctrl_up_and_down_move_the_selected_block_and_carry_the_selection() {
 
     // The moves never issue anything and never open a dialog.
     assert_eq!(harness.mdi_sent().len(), sent);
-    assert!(harness.app.modal.is_none());
+    assert!(harness.app.overlay.modal.is_none());
     // Plain arrows still recall.
     harness.frame(&[egui::Key::ArrowUp]);
     assert_eq!(harness.app.mdi.selection, Some(1));
@@ -5222,7 +5259,7 @@ fn the_moved_block_is_the_one_run_delete_and_save_act_on() {
 fn the_mdi_pane_owns_the_program_slot_on_main_and_outlives_the_page() {
     let mut harness = mdi_harness();
     harness.frame(&[]);
-    assert_eq!(harness.app.page, Page::Machine, "MDI opens MAIN");
+    assert_eq!(harness.app.nav.page, Page::Machine, "MDI opens MAIN");
     assert!(harness.app.mdi_pane_visible());
 
     let limit = history_limit(&harness.app);
@@ -5230,7 +5267,7 @@ fn the_mdi_pane_owns_the_program_slot_on_main_and_outlives_the_page() {
 
     // Another page restores the program card and keeps the buffer.
     harness.frame(&[egui::Key::F6]);
-    assert_eq!(harness.app.page, Page::Program);
+    assert_eq!(harness.app.nav.page, Page::Program);
     assert!(!harness.app.mdi_pane_visible());
     harness.frame(&[egui::Key::F5]);
     assert!(harness.app.mdi_pane_visible(), "MAIN shows the pane again");
@@ -5243,7 +5280,7 @@ fn the_mdi_pane_owns_the_program_slot_on_main_and_outlives_the_page() {
     harness
         .app
         .on_mode_change(PanelModeValidity::Valid(PanelMode::Mdi));
-    assert_eq!(harness.app.page, Page::Machine);
+    assert_eq!(harness.app.nav.page, Page::Machine);
     assert!(harness.app.mdi_pane_visible());
     assert_eq!(blocks(&harness.app), vec!["G0 X0".to_string()]);
     // auto_focus: the pane takes the keyboard when it appears, so a block
@@ -5366,7 +5403,10 @@ fn ctrl_r_issues_the_selected_block_with_no_dialog() {
 
     harness.frame_with(&[(egui::Key::R, ctrl())]);
     assert_eq!(harness.mdi_sent(), vec!["G0 X3".to_string()]);
-    assert!(harness.app.modal.is_none(), "Ctrl+R confirms nothing");
+    assert!(
+        harness.app.overlay.modal.is_none(),
+        "Ctrl+R confirms nothing"
+    );
     assert_eq!(harness.app.mdi.len(), 1, "the block is already buffered");
 }
 
@@ -5386,7 +5426,7 @@ fn a_blocked_run_puts_the_reason_in_the_strip_and_sends_nothing() {
         harness.app.mdi.last_error.as_deref(),
         Some("home every axis first")
     );
-    assert!(harness.app.modal.is_none());
+    assert!(harness.app.overlay.modal.is_none());
 
     // The panel not in MDI blocks it the same way.
     let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
@@ -5411,11 +5451,14 @@ fn ctrl_g_selects_a_buffer_line_and_leaves_the_program_goto_alone() {
 
     harness.frame_with(&[(egui::Key::G, ctrl())]);
     assert!(
-        matches!(harness.app.modal, Some(Modal::GoToLine { mdi: true, .. })),
+        matches!(
+            harness.app.overlay.modal,
+            Some(Modal::GoToLine { mdi: true, .. })
+        ),
         "Ctrl+G on the pane targets the buffer"
     );
     // Accepting closes the dialog first, the way the modal handler does.
-    harness.app.modal = None;
+    harness.app.overlay.modal = None;
     harness.app.go_to_line(99, true);
     assert_eq!(harness.app.mdi.selection, Some(1), "bounded by the buffer");
     assert_eq!(harness.app.mdi.input, "G1 X2");
@@ -5424,7 +5467,7 @@ fn ctrl_g_selects_a_buffer_line_and_leaves_the_program_goto_alone() {
     harness.app.set_page(Page::Program);
     harness.frame_with(&[(egui::Key::G, ctrl())]);
     assert!(matches!(
-        harness.app.modal,
+        harness.app.overlay.modal,
         Some(Modal::GoToLine { mdi: false, .. })
     ));
     harness.app.go_to_line(1, false);
@@ -5447,7 +5490,7 @@ fn ctrl_s_writes_the_buffer_through_mdi_file() {
 
     harness.frame_with(&[(egui::Key::S, ctrl())]);
     assert!(
-        matches!(harness.app.modal, Some(Modal::MdiSave(_))),
+        matches!(harness.app.overlay.modal, Some(Modal::MdiSave(_))),
         "Ctrl+S opens the dialog"
     );
     // The wrapper starts ticked, so the saved program carries the
@@ -5456,7 +5499,7 @@ fn ctrl_s_writes_the_buffer_through_mdi_file() {
         .app
         .edit_mdi_save(|dialog| dialog.name = "part".into());
     harness.app.confirm_mdi_save();
-    assert!(harness.app.modal.is_none());
+    assert!(harness.app.overlay.modal.is_none());
     let wrapped = std::fs::read_to_string(prefix.join("part.ngc")).unwrap();
     let mut lines = wrapped.lines();
     assert_eq!(lines.next(), Some("G17"));
@@ -5465,7 +5508,7 @@ fn ctrl_s_writes_the_buffer_through_mdi_file() {
     assert_eq!(harness.app.mdi.len(), 2, "the buffer is kept after a save");
 
     // Unticked: the blocks alone.
-    harness.app.modal = Some(crate::state::Modal::MdiSave(crate::state::MdiSaveDialog {
+    harness.app.overlay.modal = Some(crate::state::Modal::MdiSave(crate::state::MdiSaveDialog {
         name: "plain".into(),
         wrap: false,
         ..Default::default()
@@ -5478,7 +5521,7 @@ fn ctrl_s_writes_the_buffer_through_mdi_file() {
 
     // An existing name needs the confirm inside the dialog first.
     harness.app.mdi.commit(limit, "G0 Z5".into());
-    harness.app.modal = Some(crate::state::Modal::MdiSave(crate::state::MdiSaveDialog {
+    harness.app.overlay.modal = Some(crate::state::Modal::MdiSave(crate::state::MdiSaveDialog {
         name: "plain".into(),
         wrap: false,
         ..Default::default()
@@ -5486,7 +5529,7 @@ fn ctrl_s_writes_the_buffer_through_mdi_file() {
     harness.app.confirm_mdi_save();
     assert!(
         matches!(
-            harness.app.modal,
+            harness.app.overlay.modal,
             Some(Modal::MdiSave(crate::state::MdiSaveDialog {
                 confirm_overwrite: true,
                 ..
@@ -5500,7 +5543,7 @@ fn ctrl_s_writes_the_buffer_through_mdi_file() {
         "nothing is written before the confirm"
     );
     harness.app.confirm_mdi_save();
-    assert!(harness.app.modal.is_none());
+    assert!(harness.app.overlay.modal.is_none());
     assert_eq!(
         std::fs::read_to_string(prefix.join("plain.ngc")).unwrap(),
         "G0 X0 Y0\nG1 Z-1 F100\nG0 Z5\n"
@@ -5516,17 +5559,20 @@ fn protect_refuses_the_mdi_save_before_it_opens_the_dialog() {
     let prefix = harness.app.profile.machine_ini.program_prefix.clone();
 
     harness.frame_with(&[(egui::Key::S, ctrl())]);
-    assert!(harness.app.modal.is_none(), "protect keeps the dialog shut");
+    assert!(
+        harness.app.overlay.modal.is_none(),
+        "protect keeps the dialog shut"
+    );
     assert!(!prefix.join("part.ngc").exists());
 
     // A protect that turns on while the dialog is open still refuses.
-    harness.app.modal = Some(crate::state::Modal::MdiSave(crate::state::MdiSaveDialog {
+    harness.app.overlay.modal = Some(crate::state::Modal::MdiSave(crate::state::MdiSaveDialog {
         name: "part".into(),
         ..Default::default()
     }));
     harness.app.confirm_mdi_save();
     assert!(
-        harness.app.modal.is_some(),
+        harness.app.overlay.modal.is_some(),
         "the dialog stays open with the reason"
     );
     assert!(!prefix.join("part.ngc").exists());

@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FocusRegion {
     Nav,
@@ -25,13 +24,16 @@ impl LincApp {
         self.hand_cut_to_page(ui);
         // A modal messages dialog owns the keyboard: Enter/Escape close it and
         // the page keys scroll it. Nothing behind it may react to a key.
-        if self.messages_dialog {
+        if self.overlay.messages_dialog {
             let page = ui.ctx().content_rect().height() * 0.7;
             let mut close = false;
             let mut scroll = 0.0;
             ui.input_mut(|input| {
-                if input.consume_key(self.keymap.back.modifiers, self.keymap.back.key)
-                    || input.consume_key(self.keymap.activate.modifiers, self.keymap.activate.key)
+                if input.consume_key(self.prefs.keymap.back.modifiers, self.prefs.keymap.back.key)
+                    || input.consume_key(
+                        self.prefs.keymap.activate.modifiers,
+                        self.prefs.keymap.activate.key,
+                    )
                 {
                     close = true;
                 }
@@ -48,9 +50,9 @@ impl LincApp {
                     scroll -= 40.0;
                 }
             });
-            self.messages_scroll = scroll;
+            self.overlay.messages_scroll = scroll;
             if close {
-                self.messages_dialog = false;
+                self.overlay.messages_dialog = false;
             }
             return;
         }
@@ -63,13 +65,16 @@ impl LincApp {
             // before the table draws: a refused number must keep it open and
             // report why, which a consumed Escape could not do. Its field has
             // focus, so the shell has nothing else to give it.
-            if self.tools.number.is_some() && self.modal.is_none() && self.help.dialog.is_none() {
+            if self.tools.number.is_some()
+                && self.overlay.modal.is_none()
+                && self.help.dialog.is_none()
+            {
                 return;
             }
             let escape = ui.input_mut(|input| {
-                input.consume_key(self.keymap.back.modifiers, self.keymap.back.key)
+                input.consume_key(self.prefs.keymap.back.modifiers, self.prefs.keymap.back.key)
             });
-            if escape && (self.modal.is_some() || self.help.dialog.is_some()) {
+            if escape && (self.overlay.modal.is_some() || self.help.dialog.is_some()) {
                 self.escape();
             }
             return;
@@ -155,45 +160,48 @@ impl LincApp {
                 // for the plain arrow to take. `consume_key` matches the
                 // modifiers exactly, so the order is belt and braces.
                 if input.consume_key(
-                    self.keymap.mdi_line_up.modifiers,
-                    self.keymap.mdi_line_up.key,
+                    self.prefs.keymap.mdi_line_up.modifiers,
+                    self.prefs.keymap.mdi_line_up.key,
                 ) {
                     mdi_line_up = true;
                 }
                 if input.consume_key(
-                    self.keymap.mdi_line_down.modifiers,
-                    self.keymap.mdi_line_down.key,
+                    self.prefs.keymap.mdi_line_down.modifiers,
+                    self.prefs.keymap.mdi_line_down.key,
                 ) {
                     mdi_line_down = true;
                 }
                 if input.consume_key(
-                    self.keymap.mdi_history_up.modifiers,
-                    self.keymap.mdi_history_up.key,
+                    self.prefs.keymap.mdi_history_up.modifiers,
+                    self.prefs.keymap.mdi_history_up.key,
                 ) {
                     mdi_up = true;
                 }
                 if input.consume_key(
-                    self.keymap.mdi_history_down.modifiers,
-                    self.keymap.mdi_history_down.key,
+                    self.prefs.keymap.mdi_history_down.modifiers,
+                    self.prefs.keymap.mdi_history_down.key,
                 ) {
                     mdi_down = true;
                 }
                 if input.consume_key(
-                    self.keymap.mdi_buffer_delete.modifiers,
-                    self.keymap.mdi_buffer_delete.key,
+                    self.prefs.keymap.mdi_buffer_delete.modifiers,
+                    self.prefs.keymap.mdi_buffer_delete.key,
                 ) {
                     mdi_delete = true;
                 }
                 if input.consume_key(
-                    self.keymap.program_run_from_line.modifiers,
-                    self.keymap.program_run_from_line.key,
+                    self.prefs.keymap.program_run_from_line.modifiers,
+                    self.prefs.keymap.program_run_from_line.key,
                 ) {
                     mdi_run = true;
                 }
-                if input.consume_key(self.keymap.goto_line.modifiers, self.keymap.goto_line.key) {
+                if input.consume_key(
+                    self.prefs.keymap.goto_line.modifiers,
+                    self.prefs.keymap.goto_line.key,
+                ) {
                     mdi_goto = true;
                 }
-                if input.consume_key(self.keymap.save.modifiers, self.keymap.save.key) {
+                if input.consume_key(self.prefs.keymap.save.modifiers, self.prefs.keymap.save.key) {
                     mdi_save = true;
                 }
                 // `Esc` keeps its global meanings (a dialog, a latched probe
@@ -201,8 +209,11 @@ impl LincApp {
                 // clear chord itself when the profile moved it off the back
                 // key; otherwise that path clears the input after the global
                 // checks have declined the key.
-                if self.keymap.mdi_clear != self.keymap.back
-                    && input.consume_key(self.keymap.mdi_clear.modifiers, self.keymap.mdi_clear.key)
+                if self.prefs.keymap.mdi_clear != self.prefs.keymap.back
+                    && input.consume_key(
+                        self.prefs.keymap.mdi_clear.modifiers,
+                        self.prefs.keymap.mdi_clear.key,
+                    )
                 {
                     mdi_clear = true;
                 }
@@ -210,19 +221,28 @@ impl LincApp {
                 // pane test comes first and the mode flag second: consume_key
                 // swallows the key whatever the rest of the condition says.
                 if self.profile.config.mdi.execute_on_enter
-                    && input.consume_key(self.keymap.mdi_issue.modifiers, self.keymap.mdi_issue.key)
+                    && input.consume_key(
+                        self.prefs.keymap.mdi_issue.modifiers,
+                        self.prefs.keymap.mdi_issue.key,
+                    )
                 {
                     mdi_issue = true;
                 }
             }
-            if input.consume_key(self.keymap.machine.modifiers, self.keymap.machine.key) {
+            if input.consume_key(
+                self.prefs.keymap.machine.modifiers,
+                self.prefs.keymap.machine.key,
+            ) {
                 mode_nav = true;
             }
-            if input.consume_key(self.keymap.program.modifiers, self.keymap.program.key) {
+            if input.consume_key(
+                self.prefs.keymap.program.modifiers,
+                self.prefs.keymap.program.key,
+            ) {
                 // The key is labelled FILE: it opens the program, and opens the
                 // file browser when the program is already in front. CODE/SPLIT
                 // is a separate command on the square key.
-                if self.page == Page::Program {
+                if self.nav.page == Page::Program {
                     request_files = true;
                 } else {
                     nav_page = Some(Page::Program);
@@ -232,13 +252,13 @@ impl LincApp {
             // view and the following-error traces on MAIN. Shortcuts that mean
             // nothing on the page in front of the operator are not consumed, so
             // they cannot shadow another page's command.
-            if matches!(self.page, Page::Program | Page::Machine)
+            if matches!(self.nav.page, Page::Program | Page::Machine)
                 && input.consume_key(
-                    self.keymap.program_cycle_view.modifiers,
-                    self.keymap.program_cycle_view.key,
+                    self.prefs.keymap.program_cycle_view.modifiers,
+                    self.prefs.keymap.program_cycle_view.key,
                 )
             {
-                if self.page == Page::Program {
+                if self.nav.page == Page::Program {
                     cycle_view = true;
                 } else {
                     machine_following = true;
@@ -246,21 +266,24 @@ impl LincApp {
             }
             // Page-local to the pages that draw a toolpath.
             if matches!(
-                self.page,
+                self.nav.page,
                 Page::Machine | Page::Program | Page::Manual | Page::Homing
             ) {
-                if input.consume_key(self.keymap.graph_fit.modifiers, self.keymap.graph_fit.key) {
+                if input.consume_key(
+                    self.prefs.keymap.graph_fit.modifiers,
+                    self.prefs.keymap.graph_fit.key,
+                ) {
                     graph_fit = true;
                 }
                 if input.consume_key(
-                    self.keymap.graph_clear.modifiers,
-                    self.keymap.graph_clear.key,
+                    self.prefs.keymap.graph_clear.modifiers,
+                    self.prefs.keymap.graph_clear.key,
                 ) {
                     graph_clear = true;
                 }
                 if input.consume_key(
-                    self.keymap.program_run_from_line.modifiers,
-                    self.keymap.program_run_from_line.key,
+                    self.prefs.keymap.program_run_from_line.modifiers,
+                    self.prefs.keymap.program_run_from_line.key,
                 ) {
                     run_from_line = true;
                 }
@@ -279,7 +302,7 @@ impl LincApp {
             // block move). Clicking the toolpath itself hands it the keyboard,
             // so the pan is one click away instead of unreachable.
             let view_page = matches!(
-                self.page,
+                self.nav.page,
                 Page::Machine | Page::Program | Page::Manual | Page::Homing | Page::Offsets
             );
             // Zoom is page-scoped, not hover-scoped: it collides with nothing a
@@ -288,7 +311,7 @@ impl LincApp {
             // reported sometimes. Ctrl+0 was always page-scoped, so the two agree
             // now.
             if view_page {
-                let k = &self.keymap;
+                let k = &self.prefs.keymap;
                 // Ctrl+Plus is the numpad key; on a normal keyboard the plus is
                 // Shift+equals, which egui reports as Equals. Accept both, or the
                 // chord depends on which key the operator reaches for.
@@ -317,7 +340,7 @@ impl LincApp {
             let view_hovered = view_page && toolpath_hovered;
             let view_pan_keys = view_hovered && !text_focused;
             if view_pan_keys {
-                let k = &self.keymap;
+                let k = &self.prefs.keymap;
                 if input.consume_key(k.view_pan_left.modifiers, k.view_pan_left.key) {
                     view_pan.x -= VIEW_PAN_STEP;
                 }
@@ -331,19 +354,25 @@ impl LincApp {
                     view_pan.y += VIEW_PAN_STEP;
                 }
             }
-            if input.consume_key(self.keymap.tools.modifiers, self.keymap.tools.key) {
+            if input.consume_key(
+                self.prefs.keymap.tools.modifiers,
+                self.prefs.keymap.tools.key,
+            ) {
                 nav_page = Some(Page::Tools);
             }
             // The jog screens carry no button for the limit override, so the
             // chord is the only way to free a joint parked on a switch.
             if input.consume_key(
-                self.keymap.limits_override.modifiers,
-                self.keymap.limits_override.key,
+                self.prefs.keymap.limits_override.modifiers,
+                self.prefs.keymap.limits_override.key,
             ) {
                 self.send(linc_core::command::MachineCommand::ToggleLimitsOverride);
             }
-            if input.consume_key(self.keymap.offsets.modifiers, self.keymap.offsets.key) {
-                if self.page == Page::Probe {
+            if input.consume_key(
+                self.prefs.keymap.offsets.modifiers,
+                self.prefs.keymap.offsets.key,
+            ) {
+                if self.nav.page == Page::Probe {
                     if linc_core::probe::ProbeCategory::ALL.last().copied()
                         == Some(self.probe.category)
                     {
@@ -351,7 +380,7 @@ impl LincApp {
                     } else {
                         probe_next = true;
                     }
-                } else if self.page == Page::Offsets
+                } else if self.nav.page == Page::Offsets
                     && self.snapshot.probe.enabled
                     && self.profile.variant == linc_core::model::MachineVariant::Mill
                 {
@@ -362,44 +391,47 @@ impl LincApp {
             }
             // Ctrl+D duplicates a line in the editable program; that page-local
             // command shadows the global Diagnostics key there.
-            let editing_program = self.page == Page::Program && self.editing_allowed();
+            let editing_program = self.nav.page == Page::Program && self.editing_allowed();
             if !editing_program
                 && input.consume_key(
-                    self.keymap.diagnostics.modifiers,
-                    self.keymap.diagnostics.key,
+                    self.prefs.keymap.diagnostics.modifiers,
+                    self.prefs.keymap.diagnostics.key,
                 )
             {
                 nav_page = Some(Page::Diagnostics);
             }
-            if input.consume_key(self.keymap.help.modifiers, self.keymap.help.key) {
+            if input.consume_key(self.prefs.keymap.help.modifiers, self.prefs.keymap.help.key) {
                 nav_page = Some(Page::Help);
             }
             if !text_editing
                 && !self.overlay_open()
-                && input.consume_key(self.keymap.messages.modifiers, self.keymap.messages.key)
+                && input.consume_key(
+                    self.prefs.keymap.messages.modifiers,
+                    self.prefs.keymap.messages.key,
+                )
             {
                 open_messages = true;
             }
-            if input.consume_key(self.keymap.quit.modifiers, self.keymap.quit.key) {
+            if input.consume_key(self.prefs.keymap.quit.modifiers, self.prefs.keymap.quit.key) {
                 quit = true;
             }
             // Not on Program: FILE is the way to the file browser there, and a
             // second key for the same destination only crowds the hint row.
-            if self.page != Page::Program
-                && input.consume_key(self.keymap.open.modifiers, self.keymap.open.key)
+            if self.nav.page != Page::Program
+                && input.consume_key(self.prefs.keymap.open.modifiers, self.prefs.keymap.open.key)
             {
                 request_files = true;
             }
             // Page-local commands: test the page before `consume_key`, or the
             // key is swallowed on every other page (and in every text field).
             // This is the same rule the MDI binding below documents.
-            if self.page == Page::Program
-                && input.consume_key(self.keymap.save.modifiers, self.keymap.save.key)
+            if self.nav.page == Page::Program
+                && input.consume_key(self.prefs.keymap.save.modifiers, self.prefs.keymap.save.key)
             {
                 save = true;
             }
-            if self.page == Page::Help
-                && input.consume_key(self.keymap.find.modifiers, self.keymap.find.key)
+            if self.nav.page == Page::Help
+                && input.consume_key(self.prefs.keymap.find.modifiers, self.prefs.keymap.find.key)
             {
                 find = true;
             }
@@ -420,44 +452,47 @@ impl LincApp {
             // Files owns Ctrl+R (refresh). Program and the toolpath pages bind
             // it to RUN FROM LINE above; Probe binds it to RESET DATA, so those
             // pages must leave the key alone rather than swallow it.
-            if self.page == Page::Files
-                && input.consume_key(self.keymap.refresh.modifiers, self.keymap.refresh.key)
+            if self.nav.page == Page::Files
+                && input.consume_key(
+                    self.prefs.keymap.refresh.modifiers,
+                    self.prefs.keymap.refresh.key,
+                )
             {
                 refresh = true;
             }
             // Undo/redo belong to the focused G-code editor. Every other text
             // field keeps the chords for its own undo stack.
-            if self.page == Page::Program && self.program.focus_editor {
-                if input.consume_key(self.keymap.undo.modifiers, self.keymap.undo.key) {
+            if self.nav.page == Page::Program && self.program.focus_editor {
+                if input.consume_key(self.prefs.keymap.undo.modifiers, self.prefs.keymap.undo.key) {
                     undo = true;
                 }
-                if input.consume_key(self.keymap.redo.modifiers, self.keymap.redo.key) {
+                if input.consume_key(self.prefs.keymap.redo.modifiers, self.prefs.keymap.redo.key) {
                     redo = true;
                 }
             }
             // An edit or a page popup owns Escape: it cancels the edit (or
             // closes the selector) rather than leaving the page.
-            let editing_in_place = (self.page == Page::Tools
+            let editing_in_place = (self.nav.page == Page::Tools
                 && (self.tools.editing || self.tools.kind_popup.is_some()))
-                || (self.page == Page::Offsets
+                || (self.nav.page == Page::Offsets
                     && (self.offsets.editing || self.offsets.dro_edit.is_some()))
-                || (self.page == Page::Files && self.files.rename.is_some())
-                || (self.page == Page::Probe
+                || (self.nav.page == Page::Files && self.files.rename.is_some())
+                || (self.nav.page == Page::Probe
                     && (self.probe.param_editing
                         || self.probe.param_focused
                         || self.probe.dro_edit.is_some()))
                 || self.help.dialog.is_some();
             if !editing_in_place
-                && input.consume_key(self.keymap.back.modifiers, self.keymap.back.key)
+                && input.consume_key(self.prefs.keymap.back.modifiers, self.prefs.keymap.back.key)
             {
                 escape = true;
             }
             // A read-only G-code pane has no text cursor, so the arrows and the
             // page keys move the selected line there; an editable pane leaves
             // them to the editor.
-            if self.page == Page::Program
+            if self.nav.page == Page::Program
                 && !self.editing_allowed()
-                && self.focus_region == FocusRegion::Page
+                && self.nav.focus_region == FocusRegion::Page
             {
                 if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
                     line_step -= 1;
@@ -472,26 +507,31 @@ impl LincApp {
                     line_step += LINE_PAGE;
                 }
             }
-            if matches!(self.page, Page::Program | Page::Machine)
-                && input.consume_key(self.keymap.goto_line.modifiers, self.keymap.goto_line.key)
+            if matches!(self.nav.page, Page::Program | Page::Machine)
+                && input.consume_key(
+                    self.prefs.keymap.goto_line.modifiers,
+                    self.prefs.keymap.goto_line.key,
+                )
             {
                 goto_line = true;
             }
             // Every page with a toolpath: ISO -> X -> Y -> Z. F10 on its own
             // already toggles SPLIT/CODE on the Program page.
             if matches!(
-                self.page,
+                self.nav.page,
                 Page::Machine | Page::Program | Page::Manual | Page::Homing
-            ) && input.consume_key(self.keymap.view_cycle.modifiers, self.keymap.view_cycle.key)
-            {
+            ) && input.consume_key(
+                self.prefs.keymap.view_cycle.modifiers,
+                self.prefs.keymap.view_cycle.key,
+            ) {
                 cycle_toolpath_view = true;
             }
             if matches!(
-                self.page,
+                self.nav.page,
                 Page::Machine | Page::Program | Page::Manual | Page::Homing | Page::Offsets
             ) && input.consume_key(
-                self.keymap.toggle_bounds.modifiers,
-                self.keymap.toggle_bounds.key,
+                self.prefs.keymap.toggle_bounds.modifiers,
+                self.prefs.keymap.toggle_bounds.key,
             ) {
                 toggle_bounds = true;
             }
@@ -502,25 +542,25 @@ impl LincApp {
             // them and the chords stay free for the mill keys.
             if self.profile.variant == MachineVariant::Lathe
                 && input.consume_key(
-                    self.keymap.toggle_lathe_mirror.modifiers,
-                    self.keymap.toggle_lathe_mirror.key,
+                    self.prefs.keymap.toggle_lathe_mirror.modifiers,
+                    self.prefs.keymap.toggle_lathe_mirror.key,
                 )
             {
                 toggle_lathe_mirror = true;
             }
             if self.profile.variant == MachineVariant::Lathe
                 && input.consume_key(
-                    self.keymap.toggle_lathe_diameter.modifiers,
-                    self.keymap.toggle_lathe_diameter.key,
+                    self.prefs.keymap.toggle_lathe_diameter.modifiers,
+                    self.prefs.keymap.toggle_lathe_diameter.key,
                 )
             {
                 toggle_lathe_diameter = true;
             }
             // The tool table pages its own cursor with these keys, so they must
             // reach the page instead of being consumed for tab navigation.
-            let page_keys_belong_to_page = matches!(self.page, Page::Tools | Page::Files)
+            let page_keys_belong_to_page = matches!(self.nav.page, Page::Tools | Page::Files)
                 || self.help.dialog.is_some()
-                || (self.page == Page::Probe
+                || (self.nav.page == Page::Probe
                     && (self.probe.param_editing || self.probe.dro_edit.is_some()));
             if !text_focused
                 && !page_keys_belong_to_page
@@ -559,11 +599,11 @@ impl LincApp {
             }
             // The Help search owns `/`; on other pages the character must reach
             // the page or text field instead of being consumed for nothing.
-            if self.page == Page::Help
+            if self.nav.page == Page::Help
                 && !text_focused
                 && input.consume_key(
-                    self.keymap.help_search.modifiers,
-                    self.keymap.help_search.key,
+                    self.prefs.keymap.help_search.modifiers,
+                    self.prefs.keymap.help_search.key,
                 )
             {
                 help_search = true;
@@ -592,22 +632,22 @@ impl LincApp {
         if toggle_lathe_diameter {
             self.cycle_lathe_diameter();
         }
-        if goto_line && matches!(self.page, Page::Program | Page::Machine) {
-            self.modal = Some(crate::state::Modal::GoToLine {
+        if goto_line && matches!(self.nav.page, Page::Program | Page::Machine) {
+            self.overlay.modal = Some(crate::state::Modal::GoToLine {
                 buffer: String::new(),
                 mdi: false,
             });
         }
-        if line_step != 0 && self.page == Page::Program {
+        if line_step != 0 && self.nav.page == Page::Program {
             self.step_selected_line(line_step);
         }
-        if save && self.page == Page::Program {
+        if save && self.nav.page == Page::Program {
             self.save_program();
         }
-        if refresh && self.page == Page::Files {
+        if refresh && self.nav.page == Page::Files {
             self.files.refresh();
         }
-        if self.page == Page::Program {
+        if self.nav.page == Page::Program {
             let selected = self.program.selected_line;
             if duplicate_line && self.editing_allowed() {
                 if let Some(line) = self.program.editor.duplicate_line(selected) {
@@ -639,14 +679,14 @@ impl LincApp {
             }
         }
         if undo
-            && self.page == Page::Program
+            && self.nav.page == Page::Program
             && self.program.focus_editor
             && self.program.editor.undo()
         {
             self.mark_editor_changed();
         }
         if redo
-            && self.page == Page::Program
+            && self.nav.page == Page::Program
             && self.program.focus_editor
             && self.program.editor.redo()
         {
@@ -668,7 +708,7 @@ impl LincApp {
             self.cycle_remaining();
         }
         if machine_following {
-            self.machine_following = !self.machine_following;
+            self.following.active = !self.following.active;
         }
         if cycle_view {
             self.cycle_program_view();
@@ -684,7 +724,7 @@ impl LincApp {
         if let Some(page) = nav_page {
             self.request_page(page);
         }
-        if (help_search || find) && self.page == Page::Help && !self.overlay_open() {
+        if (help_search || find) && self.nav.page == Page::Help && !self.overlay_open() {
             self.help.focus_search = true;
         }
         if probe_enter {
@@ -710,11 +750,11 @@ impl LincApp {
             self.focus_nav();
         }
         if focus_right {
-            self.focus_region = FocusRegion::Page;
-            self.page_focus_requested = true;
+            self.nav.focus_region = FocusRegion::Page;
+            self.nav.page_focus_requested = true;
         }
         if open_messages {
-            self.messages_dialog = true;
+            self.overlay.messages_dialog = true;
         }
         if escape {
             self.escape();
@@ -744,7 +784,7 @@ impl LincApp {
             screens::mdi::run_selected(self);
         }
         if mdi_goto {
-            self.modal = Some(crate::state::Modal::GoToLine {
+            self.overlay.modal = Some(crate::state::Modal::GoToLine {
                 buffer: String::new(),
                 mdi: true,
             });
@@ -753,23 +793,28 @@ impl LincApp {
             self.request_mdi_save();
         }
 
-        if self.focus_region == FocusRegion::Nav {
+        if self.nav.focus_region == FocusRegion::Nav {
             let mut activate = false;
             ui.input_mut(|input| {
                 if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-                    self.nav_focus = (self.nav_focus + 1).min(self.nav.len().saturating_sub(1));
+                    self.nav.nav_focus =
+                        (self.nav.nav_focus + 1).min(self.nav.pages.len().saturating_sub(1));
                 }
                 if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
-                    self.nav_focus = self.nav_focus.saturating_sub(1);
+                    self.nav.nav_focus = self.nav.nav_focus.saturating_sub(1);
                 }
-                if input.consume_key(self.keymap.activate.modifiers, self.keymap.activate.key) {
+                if input.consume_key(
+                    self.prefs.keymap.activate.modifiers,
+                    self.prefs.keymap.activate.key,
+                ) {
                     activate = true;
                 }
             });
             if activate {
                 let page = self
                     .nav
-                    .get(self.nav_focus)
+                    .pages
+                    .get(self.nav.nav_focus)
                     .copied()
                     .unwrap_or(Page::Machine);
                 self.request_page(page);
@@ -778,14 +823,14 @@ impl LincApp {
     }
 
     pub fn page_up(&mut self) {
-        match self.page {
+        match self.nav.page {
             Page::Diagnostics => {
                 let tabs = DiagnosticsTab::visible(&self.profile);
                 let index = tabs
                     .iter()
-                    .position(|tab| *tab == self.diagnostics_tab)
+                    .position(|tab| *tab == self.diagnostics.tab)
                     .unwrap_or(0);
-                self.diagnostics_tab = tabs[(index + tabs.len() - 1) % tabs.len()];
+                self.diagnostics.tab = tabs[(index + tabs.len() - 1) % tabs.len()];
             }
             Page::Offsets => {
                 self.offsets.selected = if self.offsets.selected <= 1 {
@@ -800,14 +845,14 @@ impl LincApp {
     }
 
     pub fn page_down(&mut self) {
-        match self.page {
+        match self.nav.page {
             Page::Diagnostics => {
                 let tabs = DiagnosticsTab::visible(&self.profile);
                 let index = tabs
                     .iter()
-                    .position(|tab| *tab == self.diagnostics_tab)
+                    .position(|tab| *tab == self.diagnostics.tab)
                     .unwrap_or(0);
-                self.diagnostics_tab = tabs[(index + 1) % tabs.len()];
+                self.diagnostics.tab = tabs[(index + 1) % tabs.len()];
             }
             Page::Offsets => {
                 self.offsets.selected = if self.offsets.selected >= 9 {
@@ -822,7 +867,7 @@ impl LincApp {
     }
 
     pub fn first_item(&mut self) {
-        match self.page {
+        match self.nav.page {
             Page::Files => {
                 self.files.nc_selected = 0;
                 self.files.usb_selected = 0;
@@ -836,7 +881,7 @@ impl LincApp {
     }
 
     pub fn last_item(&mut self) {
-        match self.page {
+        match self.nav.page {
             Page::Files => {
                 self.files.nc_selected = self.files.nc_entries.len().saturating_sub(1);
                 self.files.usb_selected = self.files.usb_entries.len().saturating_sub(1);
@@ -848,4 +893,3 @@ impl LincApp {
         }
     }
 }
-

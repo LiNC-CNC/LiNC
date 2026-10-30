@@ -2,7 +2,6 @@
 
 use super::*;
 
-
 /// One titled group of page-local keyboard commands shown in the sidebar.
 /// An empty title means the group has no header (most pages).
 pub(super) struct ShortcutGroup {
@@ -14,7 +13,7 @@ impl LincApp {
     /// Keyboard commands available on the current page, grouped and titled for
     /// the sidebar. Rendered as hints only — they are not buttons.
     pub(super) fn key_hints(&self) -> Vec<ShortcutGroup> {
-        let k = &self.keymap;
+        let k = &self.prefs.keymap;
         // The square is the key glyph for the view toggles: F10 alone flips
         // SPLIT/CODE, Ctrl+F10 cycles the toolpath view. Both sit at the top of
         // the pane so the display commands are the first things in reach.
@@ -34,7 +33,7 @@ impl LincApp {
                     ),
                     (
                         k.toggle_lathe_diameter.label(),
-                        if self.lathe_diameter {
+                        if self.chrome.lathe_diameter {
                             "RADIUS"
                         } else {
                             "DIAMETER"
@@ -52,7 +51,7 @@ impl LincApp {
             });
         }
         let mut hints: Vec<(String, &'static str)> = Vec::new();
-        match self.page {
+        match self.nav.page {
             Page::Program => {
                 groups.push(ShortcutGroup {
                     title: "VIEW",
@@ -111,7 +110,7 @@ impl LincApp {
                             // what the next press brings back.
                             (
                                 square.to_string(),
-                                if self.machine_following {
+                                if self.following.active {
                                     "FEED"
                                 } else {
                                     "F.ERROR"
@@ -240,7 +239,7 @@ impl LincApp {
                 // Only INC takes the digits: a continuous JOG has no increment
                 // to pick, MPG selects its step on the handwheel, and
                 // HOME/PROG.HOME share this page family without a step row.
-                if self.page == Page::Manual
+                if self.nav.page == Page::Manual
                     && self.snapshot.panel.mode.mode() == Some(PanelMode::Inc)
                     && !self.increments().is_empty()
                 {
@@ -337,4 +336,3 @@ impl LincApp {
         groups
     }
 }
-

@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 /// Screen pixels the toolpath moves per arrow-key pan.
 ///
 /// A few presses should cross the part, but one press must not jump it out of
@@ -19,7 +18,10 @@ pub(super) const VIEW_ZOOM_STEP: f32 = 1.25;
 /// snapshot carries the old points, and repainting them made the trail flash
 /// away and come straight back. The applied clear leaves a single point; a moved
 /// tool tip means the points are new and should be kept.
-pub(super) fn cleared_trail_pending(snapshot: &MachineSnapshot, cleared_tip: Option<[f64; 3]>) -> bool {
+pub(super) fn cleared_trail_pending(
+    snapshot: &MachineSnapshot,
+    cleared_tip: Option<[f64; 3]>,
+) -> bool {
     let moved = match (snapshot.tool_tip, cleared_tip) {
         (Some(now), Some(before)) => {
             (now[0] - before[0]).abs() > 1e-4
@@ -89,7 +91,7 @@ impl LincApp {
         if let Some(due) = self.program.preview_due {
             if Instant::now() >= due {
                 self.program.preview_due = None;
-                self.preview_ticks += 1;
+                self.view.preview_ticks += 1;
                 self.refresh_preview();
             }
         }
@@ -101,8 +103,8 @@ impl LincApp {
     /// `Ctrl+B`: dimensions only -> + machine box -> + program box -> off.
     pub fn cycle_bounds(&mut self) {
         self.graph_style.bounds_mode = (self.graph_style.bounds_mode + 1) % 4;
-        self.preferences.bounds_mode = Some(self.graph_style.bounds_mode);
-        self.preferences_dirty = true;
+        self.prefs.preferences.bounds_mode = Some(self.graph_style.bounds_mode);
+        self.prefs.dirty = true;
         let label = match self.graph_style.bounds_mode {
             0 => "bounds: dimensions",
             1 => "bounds: + machine",
@@ -117,8 +119,8 @@ impl LincApp {
     pub fn cycle_lathe_mirror(&mut self) {
         let on = !self.graph_style.lathe_mirror;
         self.graph_style.lathe_mirror = on;
-        self.preferences.lathe_mirror = Some(on);
-        self.preferences_dirty = true;
+        self.prefs.preferences.lathe_mirror = Some(on);
+        self.prefs.dirty = true;
         // The pan was aimed at the picture the other way round, so re-frame:
         // a flipped part that keeps the old pan can slide off the card.
         self.program.fit_requested = true;
@@ -140,8 +142,8 @@ impl LincApp {
     pub fn cycle_remaining(&mut self) {
         let on = !self.graph_style.remaining;
         self.graph_style.remaining = on;
-        self.preferences.remaining = Some(on);
-        self.preferences_dirty = true;
+        self.prefs.preferences.remaining = Some(on);
+        self.prefs.dirty = true;
         self.toast(
             if on {
                 "remaining: path eaten behind the tool"
@@ -156,10 +158,10 @@ impl LincApp {
     /// only: the X position the controller reports is a radius, and every
     /// command still carries that number.
     pub fn cycle_lathe_diameter(&mut self) {
-        let diameter = !self.lathe_diameter;
-        self.lathe_diameter = diameter;
-        self.preferences.lathe_diameter = Some(diameter);
-        self.preferences_dirty = true;
+        let diameter = !self.chrome.lathe_diameter;
+        self.chrome.lathe_diameter = diameter;
+        self.prefs.preferences.lathe_diameter = Some(diameter);
+        self.prefs.dirty = true;
         self.toast(
             if diameter {
                 "lathe X: diameter (2X)"
@@ -173,7 +175,7 @@ impl LincApp {
     /// Whether the X readouts show a diameter. A mill's X is a position, never
     /// a diameter, so the flag only lives on a lathe.
     pub fn reads_x_as_diameter(&self) -> bool {
-        self.lathe_diameter && self.profile.variant == MachineVariant::Lathe
+        self.chrome.lathe_diameter && self.profile.variant == MachineVariant::Lathe
     }
 
     pub fn cycle_toolpath_view(&mut self) {
@@ -189,7 +191,7 @@ impl LincApp {
     /// Fit the program toolpath: reset zoom/pan and ask the view to reframe.
     pub fn fit_graph(&mut self) {
         // The manual modes draw their own view state.
-        if matches!(self.page, Page::Manual | Page::Homing) {
+        if matches!(self.nav.page, Page::Manual | Page::Homing) {
             self.manual.zoom = 1.0;
             self.manual.pan = Vec2::ZERO;
             self.manual.fit = true;
@@ -209,7 +211,7 @@ impl LincApp {
     /// move. A view the operator has moved stops auto-fitting: while it is on,
     /// the fit is recomputed every frame and would undo the press.
     pub(super) fn pan_view(&mut self, pan: Vec2, zoom: f32) {
-        let (zoom_out, pan_out, auto_fit) = match self.page {
+        let (zoom_out, pan_out, auto_fit) = match self.nav.page {
             Page::Manual | Page::Homing => (
                 &mut self.manual.zoom,
                 &mut self.manual.pan,
@@ -253,10 +255,33 @@ impl LincApp {
         self.snapshot.live_trail =
             std::sync::Arc::new(vec![linc_core::model::TrailPoint::new(tip, false)]);
         self.snapshot.tool_tip = Some(tip);
-        self.trail_cleared = true;
-        self.trail_cleared_tip = Some(tip);
+        self.view.trail_cleared = true;
+        self.view.trail_cleared_tip = Some(tip);
         self.send(MachineCommand::ClearTrail);
         self.toast("live trail cleared", theme::MUTED);
     }
 }
 
+/// Toolpath view and trail state that the card reads each frame.
+pub(crate) struct ViewState {
+    /// The work-zero cross, in machine coordinates. Held rather than recomputed
+    /// each frame: while a program loads the snapshot can report no active
+    /// system for a poll, and the cross would snap to the machine origin and
+    /// back.
+    pub origin: [f64; 3],
+    /// Largest remaining distance (absolute) seen for each axis since it last
+    /// stopped, i.e. the length of the move in progress. The status only carries
+    /// the remainder, so this is what turns it into a percentage.
+    /// Set by `clear_trail`: the backend applies the clear on its next
+    /// conversion, and until it does its snapshot still carries the old points.
+    /// While set, those are replaced by the cleared tip so the trail cannot flash
+    /// back for a frame.
+    pub trail_cleared: bool,
+    /// Tool tip at the moment of the clear, to tell a stale trail from new
+    /// motion.
+    pub trail_cleared_tip: Option<[f64; 3]>,
+    pub move_distance: linc_core::model::AxisMap<f64>,
+    /// 0..1 of the current move already travelled, per axis.
+    pub move_progress: linc_core::model::AxisMap<f64>,
+    pub preview_ticks: u64,
+}

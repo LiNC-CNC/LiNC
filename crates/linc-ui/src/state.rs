@@ -722,11 +722,18 @@ pub struct ProgramUi {
     /// and a stale frame shifts the tool marker by the whole offset.
     pub preview_offsets_rows: Vec<f64>,
     pub external_change: bool,
+    /// Rising-edge detector, so follow-current is re-armed when a program
+    /// starts but not again on every poll after the operator selects a line.
+    pub program_was_running: bool,
+    /// A program load is in flight; navigation waits for the backend verdict.
+    pub pending_load: bool,
 }
 
 impl Default for ProgramUi {
     fn default() -> Self {
         Self {
+            program_was_running: false,
+            pending_load: false,
             editor: Editor::new(),
             view: ProgramView::Split,
             preview: Preview::empty(),
@@ -1119,6 +1126,9 @@ pub struct ProbeUi {
     /// Calibrate tab: Some(0..=2) while keyboard focus is on the CAL ON
     /// buttons rather than a parameter field.
     pub calibrate_action: Option<usize>,
+    /// Geometry the Probe page painted, read by the 1280x720 layout tests.
+    #[cfg(test)]
+    pub layout: crate::screens::probe_view::ProbeLayout,
 }
 
 impl ProbeUi {
@@ -1134,6 +1144,8 @@ impl ProbeUi {
             last_run_operation: None,
             calibration_offset_seen,
             textures: HashMap::new(),
+            #[cfg(test)]
+            layout: Default::default(),
             param_selected: 1,
             param_focused: false,
             param_editing: false,

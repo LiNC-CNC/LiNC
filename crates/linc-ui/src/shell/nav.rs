@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 pub(super) fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Page, color: Color32) {
     let s = egui::Stroke::new(1.5, color);
     let c = rect.center();
@@ -153,7 +152,8 @@ pub const NAV_ITEMS: [(Page, &str, &str); 6] = [
 /// finds on the panel. DIAGNOSTICS and G-CODE HELP are reached by a chord or by
 /// the arrows, so they draw as one-line rows without an icon — a third of the
 /// attention, and in a six-row list the vertical space.
-pub(super) const NAV_PRIMARY: [Page; 4] = [Page::Machine, Page::Program, Page::Tools, Page::Offsets];
+pub(super) const NAV_PRIMARY: [Page; 4] =
+    [Page::Machine, Page::Program, Page::Tools, Page::Offsets];
 
 /// Geometry of one navigation row: the target the operator gets and the pill
 /// painted inside it.
@@ -252,7 +252,7 @@ impl LincApp {
     /// second meaning of "flip SPLIT/CODE" when it is already in front.
     pub fn request_mode_page(&mut self) {
         let page = self.mode_screen();
-        if page == self.page {
+        if page == self.nav.page {
             return;
         }
         self.request_page(page);
@@ -260,27 +260,27 @@ impl LincApp {
 
     pub fn set_page(&mut self, page: Page) {
         self.remember_page(page);
-        if page == Page::Help && self.page != Page::Help {
+        if page == Page::Help && self.nav.page != Page::Help {
             // Captured before the assignment below, which would otherwise make
             // the Help page its own return destination.
-            self.help_return_page = if self.page.is_mode_driven() {
-                self.last_non_mode_page
+            self.nav.help_return_page = if self.nav.page.is_mode_driven() {
+                self.nav.last_non_mode_page
             } else {
-                self.page
+                self.nav.page
             };
         }
-        if page == Page::Diagnostics && self.page != Page::Diagnostics {
-            self.diagnostics_return_page = if self.page.is_mode_driven() {
-                self.last_non_mode_page
+        if page == Page::Diagnostics && self.nav.page != Page::Diagnostics {
+            self.nav.diagnostics_return_page = if self.nav.page.is_mode_driven() {
+                self.nav.last_non_mode_page
             } else {
-                self.page
+                self.nav.page
             };
         }
         if page == Page::Files {
-            self.files_return_page = if self.page == Page::Files {
+            self.nav.files_return_page = if self.nav.page == Page::Files {
                 Page::Program
             } else {
-                self.page
+                self.nav.page
             };
             // The program list is what the operator came for. The USB pane
             // keeps the focus only for the visit that put it there.
@@ -288,18 +288,18 @@ impl LincApp {
             self.files.refresh();
         }
         if page == Page::Probe {
-            self.homing_return_page = Page::Offsets;
+            self.nav.homing_return_page = Page::Offsets;
             // Every entry path starts with nothing selected: Esc from Files
             // returns to the tab, not to a routine Enter would run. The tab
             // itself is preserved; only F8 selects the first one.
             screens::probe::clear_selection(self);
         }
         if !page.is_mode_driven() {
-            self.last_non_mode_page = page;
+            self.nav.last_non_mode_page = page;
         }
-        self.page = page;
-        self.focus_region = FocusRegion::Page;
-        self.page_focus_requested = true;
+        self.nav.page = page;
+        self.nav.focus_region = FocusRegion::Page;
+        self.nav.page_focus_requested = true;
         if page == Page::Tools {
             // The table takes the keyboard as soon as the page opens: nothing
             // else on the page holds focus, and the cursor starts at the first
@@ -332,30 +332,30 @@ impl LincApp {
     }
 
     pub fn request_page(&mut self, page: Page) {
-        if page == Page::Program && self.page == Page::Program {
+        if page == Page::Program && self.nav.page == Page::Program {
             self.cycle_program_view();
             return;
         }
-        if self.program.editor.dirty && self.page == Page::Program && page != Page::Program {
-            self.modal = Some(Modal::ConfirmDiscard(PendingAction::Navigate(page)));
+        if self.program.editor.dirty && self.nav.page == Page::Program && page != Page::Program {
+            self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::Navigate(page)));
         } else {
             self.set_page(page);
         }
     }
 
     pub fn request_files(&mut self) {
-        if self.program.editor.dirty && self.page == Page::Program {
-            self.modal = Some(Modal::ConfirmDiscard(PendingAction::OpenFiles));
+        if self.program.editor.dirty && self.nav.page == Page::Program {
+            self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::OpenFiles));
         } else {
             self.open_files();
         }
     }
 
     pub fn open_files(&mut self) {
-        self.files_return_page = if self.page == Page::Files {
+        self.nav.files_return_page = if self.nav.page == Page::Files {
             Page::Program
         } else {
-            self.page
+            self.nav.page
         };
         self.files.refresh();
         self.set_page(Page::Files);
@@ -367,9 +367,9 @@ impl LincApp {
             return;
         }
         let key = page_key(page);
-        if self.preferences.last_page.as_deref() != Some(key) {
-            self.preferences.last_page = Some(key.to_string());
-            self.preferences_dirty = true;
+        if self.prefs.preferences.last_page.as_deref() != Some(key) {
+            self.prefs.preferences.last_page = Some(key.to_string());
+            self.prefs.dirty = true;
         }
     }
 
@@ -381,64 +381,68 @@ impl LincApp {
         if page == Page::Probe {
             screens::probe::clear_selection(self);
         }
-        self.page = page;
+        self.nav.page = page;
     }
 
     pub(super) fn on_mode_change(&mut self, mode: PanelModeValidity) {
         let Some(new_mode) = mode.mode() else {
-            if self.page.is_mode_driven() {
-                self.restore_page(self.last_non_mode_page);
+            if self.nav.page.is_mode_driven() {
+                self.restore_page(self.nav.last_non_mode_page);
             }
             return;
         };
-        let prior_mode = self.last_mode.as_ref().and_then(PanelModeValidity::mode);
+        let prior_mode = self
+            .nav
+            .last_mode
+            .as_ref()
+            .and_then(PanelModeValidity::mode);
         // Leaving EDIT is the one moment unsaved work can become unreachable:
         // the controller refuses a save outside EDIT, so AUTO can only ever run
         // the loaded file. Say so here, before the operator presses CYCLE START
         // on a program that will not run.
         let left_edit = prior_mode == Some(PanelMode::Edit) && new_mode != PanelMode::Edit;
-        if left_edit && self.program.editor.dirty && self.modal.is_none() {
-            self.modal = Some(Modal::UnsavedOnLeave);
+        if left_edit && self.program.editor.dirty && self.overlay.modal.is_none() {
+            self.overlay.modal = Some(Modal::UnsavedOnLeave);
         }
         if prior_mode.map(PanelMode::is_manual).unwrap_or(false)
             && !new_mode.is_manual()
-            && self.page == Page::Manual
+            && self.nav.page == Page::Manual
         {
-            self.restore_page(self.last_non_mode_page);
+            self.restore_page(self.nav.last_non_mode_page);
         }
         if matches!(
             prior_mode,
             Some(PanelMode::Home) | Some(PanelMode::ProgHome)
         ) && !matches!(new_mode, PanelMode::Home | PanelMode::ProgHome)
-            && self.page == Page::Homing
+            && self.nav.page == Page::Homing
         {
-            self.restore_page(self.last_non_mode_page);
+            self.restore_page(self.nav.last_non_mode_page);
         }
         match new_mode {
             PanelMode::Mdi => {
                 // MDI is not a page: the panel position opens MAIN, whose
                 // program card the mode swaps for the MDI pane.
-                self.page = Page::Machine;
+                self.nav.page = Page::Machine;
                 if self.profile.config.mdi.auto_focus {
                     self.mdi.focus = true;
                 }
             }
             PanelMode::Home | PanelMode::ProgHome => {
-                if self.page != Page::Homing {
-                    self.homing_return_page = if self.page.is_mode_driven() {
-                        self.last_non_mode_page
+                if self.nav.page != Page::Homing {
+                    self.nav.homing_return_page = if self.nav.page.is_mode_driven() {
+                        self.nav.last_non_mode_page
                     } else {
-                        self.page
+                        self.nav.page
                     };
                 }
-                self.page = Page::Homing;
+                self.nav.page = Page::Homing;
             }
             PanelMode::Jog | PanelMode::Inc | PanelMode::Mpg => {
-                if self.page != Page::Manual {
-                    self.last_non_mode_page = if self.page.is_mode_driven() {
-                        self.last_non_mode_page
+                if self.nav.page != Page::Manual {
+                    self.nav.last_non_mode_page = if self.nav.page.is_mode_driven() {
+                        self.nav.last_non_mode_page
                     } else {
-                        self.page
+                        self.nav.page
                     };
                 }
                 self.manual.view = if self.profile.variant == MachineVariant::Lathe {
@@ -446,13 +450,13 @@ impl LincApp {
                 } else {
                     self.manual.view
                 };
-                self.page = Page::Manual;
+                self.nav.page = Page::Manual;
             }
             PanelMode::Edit => {
-                if self.page != Page::Program {
-                    self.homing_return_page = self.page;
+                if self.nav.page != Page::Program {
+                    self.nav.homing_return_page = self.nav.page;
                 }
-                self.page = Page::Program;
+                self.nav.page = Page::Program;
                 self.program.view = ProgramView::Code;
                 self.program.focus_editor = self.program_editing_allowed();
             }
@@ -462,21 +466,22 @@ impl LincApp {
                 // cards carry the active line. Leaving MDI swaps the pane back
                 // for the normal read-only program card. This runs on the mode
                 // change only, so navigating away afterwards is left alone.
-                self.page = Page::Machine;
+                self.nav.page = Page::Machine;
             }
         }
     }
 
     pub fn focus_nav(&mut self) {
-        self.focus_region = FocusRegion::Nav;
-        self.nav_focus = self
+        self.nav.focus_region = FocusRegion::Nav;
+        self.nav.nav_focus = self
             .nav
+            .pages
             .iter()
-            .position(|page| *page == self.page)
+            .position(|page| *page == self.nav.page)
             .unwrap_or(0);
     }
 
-    pub(super) fn nav(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn draw_nav(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.0);
         ui.label(
             RichText::new("NAVIGATION")
@@ -485,7 +490,7 @@ impl LincApp {
         );
         ui.add_space(4.0);
         // Copied out: the loop body navigates, which borrows `self` mutably.
-        let nav = self.nav.clone();
+        let nav = self.nav.pages.clone();
         // The rows carry their own gap: the list spacing the sidebar inherits
         // is 8 px a row, which put a band of dead space around every entry.
         ui.spacing_mut().item_spacing.y = theme::NAV_ROW_GAP;
@@ -497,8 +502,8 @@ impl LincApp {
             // TOUCH PROBE is a subpage of OFFSETS; keep the parent marked in
             // the sidebar instead of leaving no entry highlighted.
             let selected =
-                *page == self.page || (*page == Page::Offsets && self.page == Page::Probe);
-            let focused = self.focus_region == FocusRegion::Nav && self.nav_focus == index;
+                *page == self.nav.page || (*page == Page::Offsets && self.nav.page == Page::Probe);
+            let focused = self.nav.focus_region == FocusRegion::Nav && self.nav.nav_focus == index;
             let geometry = nav_row_geometry(*page);
             // The target every row keeps, whatever it paints inside it.
             let (rect, response) = ui.allocate_exact_size(
@@ -602,8 +607,8 @@ impl LincApp {
                 // panel keyboard has no Tab), so the toolpath's pan chords and
                 // the page keys stayed dead after navigating, while the nav row
                 // drew its focus border and looked ready for the arrows.
-                self.nav_focus = index;
-                self.focus_region = FocusRegion::Nav;
+                self.nav.nav_focus = index;
+                self.nav.focus_region = FocusRegion::Nav;
                 self.request_page(*page);
             }
         }
@@ -719,8 +724,6 @@ impl LincApp {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -750,3 +753,21 @@ mod tests {
     }
 }
 
+/// Page routing state: which page is open, where it returns to, and which
+/// navigation row holds the ring.
+pub(crate) struct NavUi {
+    pub page: Page,
+    pub last_non_mode_page: Page,
+    pub files_return_page: Page,
+    pub help_return_page: Page,
+    /// Where Esc on the Diagnostics page goes back to: the page the operator
+    /// left to look at it, not the program reset.
+    pub diagnostics_return_page: Page,
+    pub nav_focus: usize,
+    pub focus_region: FocusRegion,
+    pub last_mode: Option<PanelModeValidity>,
+    pub homing_return_page: Page,
+    pub page_focus_requested: bool,
+    /// Navigation entries the profile shows, in display order.
+    pub pages: Vec<Page>,
+}

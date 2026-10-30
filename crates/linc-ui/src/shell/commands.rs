@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 /// Fraction of the current move already travelled, from the remaining distance.
 ///
 /// `remaining` is the magnitude of the DTG — the sign only says which way the
@@ -83,25 +82,25 @@ impl LincApp {
     pub(super) fn update_move_progress(&mut self) {
         let mut updates = Vec::new();
         for (axis, position) in self.snapshot.positions.axes.iter() {
-            let total = self.move_distance.get(axis).copied().unwrap_or(0.0);
+            let total = self.view.move_distance.get(axis).copied().unwrap_or(0.0);
             let (fraction, total) = move_progress(position.dtg, total);
             updates.push((axis.to_string(), total, fraction));
         }
         for (axis, total, fraction) in updates {
-            self.move_distance.insert(axis.clone(), total);
-            self.move_progress.insert(axis, fraction);
+            self.view.move_distance.insert(axis.clone(), total);
+            self.view.move_progress.insert(axis, fraction);
         }
     }
 
     pub fn poll_backend(&mut self) {
         let mut snapshot = self.backend.snapshot();
-        if self.trail_cleared {
-            if cleared_trail_pending(&snapshot, self.trail_cleared_tip) {
+        if self.view.trail_cleared {
+            if cleared_trail_pending(&snapshot, self.view.trail_cleared_tip) {
                 let tip = snapshot.tool_tip.unwrap_or([0.0; 3]);
                 snapshot.live_trail =
                     std::sync::Arc::new(vec![linc_core::model::TrailPoint::new(tip, false)]);
             } else {
-                self.trail_cleared = false;
+                self.view.trail_cleared = false;
             }
         }
         self.snapshot = snapshot;
@@ -110,7 +109,7 @@ impl LincApp {
         // snapshot without an active system for a poll, and the cross must not
         // jump to the machine origin when that happens.
         if let Some(offset) = active_offset(&self.snapshot) {
-            self.graph_origin = [
+            self.view.origin = [
                 offset.get("X").copied().unwrap_or(0.0),
                 offset.get("Y").copied().unwrap_or(0.0),
                 offset.get("Z").copied().unwrap_or(0.0),
@@ -146,11 +145,12 @@ impl LincApp {
         // fault.
         if !self.snapshot.probe_trip_active()
             && self
-                .jog_speed_published
+                .jog
+                .speed_published
                 .map(|value| (value - wanted).abs() > 1e-9)
                 .unwrap_or(true)
         {
-            self.jog_speed_published = Some(wanted);
+            self.jog.speed_published = Some(wanted);
             self.send_quiet(linc_core::command::MachineCommand::SetHalOutput {
                 output: linc_core::command::LincOutput::JogSpeed,
                 value: linc_core::command::HalValue::Float(wanted * 60.0),
@@ -165,16 +165,16 @@ impl LincApp {
             .map(|alarm| alarm.id)
             .max()
             .unwrap_or(0);
-        if self.alarm_id_seen == 0 {
+        if self.chrome.alarm_id_seen == 0 {
             // First poll: the controller may already hold a backlog. Show it in
             // the message strip, but do not fire a toast for every entry.
-            self.alarm_id_seen = newest;
-        } else if newest > self.alarm_id_seen {
+            self.chrome.alarm_id_seen = newest;
+        } else if newest > self.chrome.alarm_id_seen {
             let fresh: Vec<linc_core::model::Alarm> = self
                 .snapshot
                 .alarms
                 .iter()
-                .filter(|alarm| alarm.id > self.alarm_id_seen)
+                .filter(|alarm| alarm.id > self.chrome.alarm_id_seen)
                 .cloned()
                 .collect();
             for alarm in fresh {
@@ -197,11 +197,11 @@ impl LincApp {
                 };
                 self.toast_for(alarm.message, colour, life);
             }
-            self.alarm_id_seen = newest;
+            self.chrome.alarm_id_seen = newest;
         }
         let mut loaded = false;
         let mut load_failed = false;
-        self.last_snapshot_ms = now_ms();
+        self.chrome.last_snapshot_ms = now_ms();
         let events = self.backend.drain_events();
         for event in events {
             match event {
@@ -232,21 +232,21 @@ impl LincApp {
                         );
                     }
                 },
-                BackendEvent::Log(alarm) => self.ui_log.push_front(alarm),
+                BackendEvent::Log(alarm) => self.diagnostics.log.push_front(alarm),
                 BackendEvent::SnapshotLost => {
                     self.toast("status snapshot lost", theme::WARNING);
                 }
             }
         }
-        while self.ui_log.len() > 1000 {
-            self.ui_log.pop_back();
+        while self.diagnostics.log.len() > 1000 {
+            self.diagnostics.log.pop_back();
         }
-        if self.pending_load {
+        if self.program.pending_load {
             if loaded {
                 self.commit_load();
             } else if load_failed {
                 // Stay in Files so the operator sees the error next to the file.
-                self.pending_load = false;
+                self.program.pending_load = false;
             }
         }
     }
@@ -258,10 +258,15 @@ impl LincApp {
         code: &str,
         message: impl Into<String>,
     ) {
-        let id = self.ui_log.front().map(|alarm| alarm.id + 1).unwrap_or(1);
+        let id = self
+            .diagnostics
+            .log
+            .front()
+            .map(|alarm| alarm.id + 1)
+            .unwrap_or(1);
         let mut alarm = Alarm::new(id, severity, source, code, message);
         alarm.timestamp_ms = now_ms();
-        self.ui_log.push_front(alarm);
+        self.diagnostics.log.push_front(alarm);
     }
 
     pub fn toast(&mut self, text: impl Into<String>, color: Color32) {
@@ -272,14 +277,12 @@ impl LincApp {
     /// notes, so a stopped program's reason is still readable after the
     /// operator has looked away from the console.
     pub fn toast_for(&mut self, text: impl Into<String>, color: Color32, seconds: u64) {
-        self.toasts.push(toast_for(text, color, seconds));
-        if self.toasts.len() > 6 {
-            self.toasts.remove(0);
+        self.overlay.toasts.push(toast_for(text, color, seconds));
+        if self.overlay.toasts.len() > 6 {
+            self.overlay.toasts.remove(0);
         }
     }
 }
-
-
 
 #[cfg(test)]
 mod move_progress_tests {
@@ -326,4 +329,3 @@ mod move_progress_tests {
         assert_eq!(total, 0.0);
     }
 }
-

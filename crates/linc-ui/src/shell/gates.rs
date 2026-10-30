@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 /// The probe-trip banner's action button. The panel keyboard has no pointer, so
 /// the button names the key that does the same thing: Esc resets the trip.
 pub const PROBE_TRIP_ACTION: &str = "RESET (ESC)";
@@ -130,11 +129,11 @@ impl LincApp {
     /// the shell can focus by name, so it takes the keyboard back on the
     /// Program page; everywhere else the page anchor is the focus stop.
     pub(super) fn restore_page_keyboard(&mut self) {
-        if self.page == Page::Program && self.editing_allowed() {
+        if self.nav.page == Page::Program && self.editing_allowed() {
             self.program.focus_editor = true;
             return;
         }
-        self.page_focus_requested = true;
+        self.nav.page_focus_requested = true;
     }
 
     /// End the session because the cabinet was switched off, not because the
@@ -148,7 +147,7 @@ impl LincApp {
     /// here.
     pub fn request_machine_off(&mut self) {
         log::info!("machine-on input dropped; ending the session");
-        self.quit_requested = true;
+        self.chrome.quit_requested = true;
     }
 
     pub fn request_quit(&mut self) {
@@ -160,11 +159,11 @@ impl LincApp {
             return;
         }
         if self.program.editor.dirty {
-            self.modal = Some(Modal::ConfirmDiscard(PendingAction::Quit));
+            self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::Quit));
         } else if self.profile.config.safety.confirm_quit {
-            self.modal = Some(Modal::ConfirmQuit);
+            self.overlay.modal = Some(Modal::ConfirmQuit);
         } else {
-            self.quit_requested = true;
+            self.chrome.quit_requested = true;
         }
     }
 
@@ -173,7 +172,7 @@ impl LincApp {
             PendingAction::Navigate(page) => self.set_page(page),
             PendingAction::OpenFiles => self.open_files(),
             PendingAction::LoadProgram(path) => self.load_program(path),
-            PendingAction::Quit => self.quit_requested = true,
+            PendingAction::Quit => self.chrome.quit_requested = true,
             PendingAction::NewFile => {
                 self.program = ProgramUi {
                     graph_view: if self.profile.variant == MachineVariant::Lathe {
@@ -183,7 +182,7 @@ impl LincApp {
                     },
                     ..Default::default()
                 };
-                self.page = Page::Program;
+                self.nav.page = Page::Program;
             }
             PendingAction::OpenRecent(path) => self.load_program(path),
         }
@@ -194,8 +193,8 @@ impl LincApp {
     /// Page-local key handlers must not move, edit or load the control
     /// underneath it: the dialog's button holds focus and takes Enter.
     pub fn overlay_open(&self) -> bool {
-        self.modal.is_some()
-            || self.messages_dialog
+        self.overlay.modal.is_some()
+            || self.overlay.messages_dialog
             || self.help.dialog.is_some()
             || self.tools.number.is_some()
             || self.snapshot.tool_change.status == linc_core::model::ToolChangeStatus::ManualPrompt
@@ -206,12 +205,12 @@ impl LincApp {
             self.tools.number = None;
             return;
         }
-        if self.messages_dialog {
-            self.messages_dialog = false;
+        if self.overlay.messages_dialog {
+            self.overlay.messages_dialog = false;
             return;
         }
-        if self.modal.is_some() {
-            self.modal = None;
+        if self.overlay.modal.is_some() {
+            self.overlay.modal = None;
             return;
         }
         // The Help viewer owns Escape while it is open: closing it must not
@@ -236,16 +235,16 @@ impl LincApp {
         // The top-level Help page is a view, not the machine: Esc leaves it for
         // the page it came from. It must not fall through to the program reset;
         // the next Esc, on that page, is the one that stops a running program.
-        if self.page == Page::Help {
-            self.set_page(self.help_return_page);
+        if self.nav.page == Page::Help {
+            self.set_page(self.nav.help_return_page);
             return;
         }
         // The Diagnostics page is a view too: Esc leaves it for the page it came
         // from, so an operator who opened it to look at a log does not stop the
         // program that is cutting behind it. The next Esc, on that page, is the
         // one that resets.
-        if self.page == Page::Diagnostics {
-            self.set_page(self.diagnostics_return_page);
+        if self.nav.page == Page::Diagnostics {
+            self.set_page(self.nav.diagnostics_return_page);
             return;
         }
         // K4's program reset on the keyboard: Esc stops the running program
@@ -261,8 +260,8 @@ impl LincApp {
             self.mdi.clear_input();
             return;
         }
-        match self.page {
-            Page::Files => self.set_page(self.files_return_page),
+        match self.nav.page {
+            Page::Files => self.set_page(self.nav.files_return_page),
             Page::Probe => self.set_page(Page::Offsets),
             Page::Program => {
                 if self.program.focus_editor {
@@ -308,4 +307,3 @@ impl LincApp {
         self.editing_allowed()
     }
 }
-

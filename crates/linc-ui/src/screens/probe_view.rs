@@ -440,7 +440,7 @@ impl Default for ProbeLayout {
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
     #[cfg(test)]
     {
-        app.probe_layout = ProbeLayout {
+        app.probe.layout = ProbeLayout {
             page: ui.available_rect_before_wrap(),
             ..ProbeLayout::default()
         };
@@ -487,7 +487,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         );
         #[cfg(test)]
         {
-            app.probe_layout.left_column = Some(left.response.rect);
+            app.probe.layout.left_column = Some(left.response.rect);
         }
         ui.add_space(gap);
         ui.allocate_ui_with_layout(
@@ -579,7 +579,7 @@ fn probe_dro(app: &mut LincApp, ui: &mut Ui) {
             let (rect, response) = ui.allocate_exact_size(Vec2::new(card_w, 56.0), Sense::click());
             #[cfg(test)]
             {
-                app.probe_layout.dro_target.get_or_insert(rect);
+                app.probe.layout.dro_target.get_or_insert(rect);
             }
             let editing = app
                 .probe
@@ -1141,7 +1141,7 @@ fn param_field_sized(
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, TARGET), Sense::click());
     #[cfg(test)]
     {
-        app.probe_layout.parameter_target.get_or_insert(rect);
+        app.probe.layout.parameter_target.get_or_insert(rect);
     }
     ui.painter()
         .rect_filled(rect, CornerRadius::same(2), theme::PANEL_RAISED);
@@ -1619,13 +1619,13 @@ fn matrix_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
         record_card_hits(ui, column, hits.clone());
         #[cfg(test)]
         {
-            app.probe_layout.routine_grid = Some(grid_rect);
-            app.probe_layout.routine_cards = hits;
+            app.probe.layout.routine_grid = Some(grid_rect);
+            app.probe.layout.routine_cards = hits;
         }
         if !hints.is_empty() {
             #[cfg(test)]
             {
-                app.probe_layout.hints_drawn = Some(hints.clone());
+                app.probe.layout.hints_drawn = Some(hints.clone());
             }
             let top_gap = (HINT_TOP_GAP - ui.spacing().item_spacing.y).max(0.0);
             ui.add_space(top_gap);
@@ -1651,14 +1651,14 @@ fn matrix_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
                         );
                         #[cfg(test)]
                         {
-                            app.probe_layout.hint_labels.push((*index, label.rect));
+                            app.probe.layout.hint_labels.push((*index, label.rect));
                         }
                         let text = param_text(&app.probe.params, *index);
                         #[cfg_attr(not(test), allow(unused_variables))]
                         let field = param_field_sized(ui, app, *index, &text, field_w, None);
                         #[cfg(test)]
                         {
-                            app.probe_layout.hint_fields.push((*index, field));
+                            app.probe.layout.hint_fields.push((*index, field));
                         }
                     });
                 }
@@ -1667,7 +1667,7 @@ fn matrix_card(app: &mut LincApp, ui: &mut Ui, height: f32) {
     });
     #[cfg(test)]
     {
-        app.probe_layout.routines_card = Some(card_span(ui, card_top));
+        app.probe.layout.routines_card = Some(card_span(ui, card_top));
     }
 }
 
@@ -1711,7 +1711,7 @@ fn run_action_context(app: &mut LincApp, ui: &mut Ui) {
     };
     #[cfg(test)]
     {
-        app.probe_layout.run_action_text = Some(action.clone());
+        app.probe.layout.run_action_text = Some(action.clone());
     }
     #[cfg_attr(not(test), allow(unused_variables))]
     let action_response = ui.label(
@@ -1726,7 +1726,7 @@ fn run_action_context(app: &mut LincApp, ui: &mut Ui) {
     );
     #[cfg(test)]
     {
-        app.probe_layout.run_action = Some(action_response.rect);
+        app.probe.layout.run_action = Some(action_response.rect);
     }
     if let Some(reason) = reason {
         #[cfg_attr(not(test), allow(unused_variables))]
@@ -1737,8 +1737,8 @@ fn run_action_context(app: &mut LincApp, ui: &mut Ui) {
         );
         #[cfg(test)]
         {
-            app.probe_layout.run_reason = Some(reason_response.rect);
-            app.probe_layout.run_reason_text = Some(format!("RUN UNAVAILABLE: {reason}"));
+            app.probe.layout.run_reason = Some(reason_response.rect);
+            app.probe.layout.run_reason_text = Some(format!("RUN UNAVAILABLE: {reason}"));
         }
     }
     if let Some(warning) = run_warning(app) {
@@ -2569,7 +2569,7 @@ fn calibration_panel(app: &mut LincApp, ui: &mut Ui) {
                                 );
                                 #[cfg(test)]
                                 {
-                                    app.probe_layout.calibrate_card.get_or_insert(rect);
+                                    app.probe.layout.calibrate_card.get_or_insert(rect);
                                 }
                                 if clicked {
                                     select_routine(app, card.operation);
@@ -2589,7 +2589,7 @@ fn calibration_panel(app: &mut LincApp, ui: &mut Ui) {
                     let field = read_only_field(ui, &param_text(&app.probe.params, 18), 64.0, None);
                     #[cfg(test)]
                     {
-                        app.probe_layout.calibrate_fields.push((18, field));
+                        app.probe.layout.calibrate_fields.push((18, field));
                     }
                 });
                 for index in [19, 20, 21] {
@@ -2601,7 +2601,7 @@ fn calibration_panel(app: &mut LincApp, ui: &mut Ui) {
                         let field = param_field(ui, app, index, &text);
                         #[cfg(test)]
                         {
-                            app.probe_layout.calibrate_fields.push((index, field));
+                            app.probe.layout.calibrate_fields.push((index, field));
                         }
                     });
                 }
@@ -2618,7 +2618,7 @@ fn calibration_panel(app: &mut LincApp, ui: &mut Ui) {
                 let calibrate = theme::accent_button(ui, "CAL ON AVG XY ERROR", true);
                 #[cfg(test)]
                 {
-                    app.probe_layout
+                    app.probe.layout
                         .calibrate_action
                         .get_or_insert(calibrate.rect);
                 }
@@ -2674,7 +2674,7 @@ fn calibration_panel(app: &mut LincApp, ui: &mut Ui) {
     });
     #[cfg(test)]
     {
-        app.probe_layout.calibrate_panel = Some(card_span(ui, card_top));
+        app.probe.layout.calibrate_panel = Some(card_span(ui, card_top));
     }
 }
 

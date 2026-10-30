@@ -2,15 +2,15 @@
 
 use super::*;
 
-
 impl LincApp {
     /// The finite steps the INI declares.
     pub fn increments(&self) -> &[(String, f64)] {
-        &self.jog_increments
+        &self.jog.increments
     }
 
     pub fn jog_increment_index(&self) -> usize {
-        self.jog_increment_index
+        self.jog
+            .index
             .min(self.increments().len().saturating_sub(1))
     }
 
@@ -28,12 +28,12 @@ impl LincApp {
     /// Publish the selection to `linc.jog-increment` when it changes.
     pub fn set_jog_increment_index(&mut self, index: usize) {
         let index = index.min(self.increments().len().saturating_sub(1));
-        if index == self.jog_increment_index {
+        if index == self.jog.index {
             return;
         }
-        self.jog_increment_index = index;
-        self.preferences.jog_increment = Some(index);
-        self.preferences_dirty = true;
+        self.jog.index = index;
+        self.prefs.preferences.jog_increment = Some(index);
+        self.prefs.dirty = true;
         let value = self.jog_increment_value();
         self.send(linc_core::command::MachineCommand::SetHalOutput {
             output: linc_core::command::LincOutput::JogIncrement,
@@ -65,7 +65,7 @@ impl LincApp {
         };
         // The feed override scales the jog, as probe_basic does with its
         // `mult2.jog-speed` (feed override * 100 -> jog speed percentage).
-        let percent = self.jog_speed_percent * self.snapshot.panel.feed_override;
+        let percent = self.jog.speed_percent * self.snapshot.panel.feed_override;
         crate::state::jog_speed(ceiling / 60.0, percent)
     }
 
@@ -79,7 +79,7 @@ impl LincApp {
         // Only the Probe page binds Ctrl+X. Every other page keeps the
         // clipboard event, so Ctrl+X stays a text-editing chord there and the
         // Files page's delete is Backspace.
-        if self.page != Page::Probe {
+        if self.nav.page != Page::Probe {
             return;
         }
         if ui.ctx().text_edit_focused() || self.overlay_open() {
@@ -107,3 +107,17 @@ impl LincApp {
     }
 }
 
+/// The jog selections and the last speed published to HAL.
+pub(crate) struct JogUi {
+    /// Last jog speed handed to the HAL, so RAPID and the slider publish once
+    /// instead of on every poll.
+    pub speed_published: Option<f64>,
+    /// The finite steps from `[DISPLAY] INCREMENTS`, without the continuous
+    /// `JOG` entry: continuous is selected by the panel's JOG mode.
+    pub increments: Vec<(String, f64)>,
+    /// Index into `jog_increments`.
+    pub index: usize,
+    /// Fixed at 100: the feed override is what scales the jog now, so there is
+    /// no second control to keep in step with it.
+    pub speed_percent: f64,
+}

@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 impl LincApp {
     /// `Ctrl+S` on the pane: open the save dialog, or say why it cannot write.
     pub fn request_mdi_save(&mut self) {
@@ -15,7 +14,7 @@ impl LincApp {
             self.mdi.last_error = Some("the MDI buffer is empty".into());
             return;
         }
-        self.modal = Some(crate::state::Modal::MdiSave(
+        self.overlay.modal = Some(crate::state::Modal::MdiSave(
             crate::state::MdiSaveDialog::default(),
         ));
     }
@@ -23,7 +22,7 @@ impl LincApp {
     /// Edit the open save dialog. A closed dialog is not an error: the frame
     /// that confirms a write clears it before these run.
     pub(super) fn edit_mdi_save(&mut self, update: impl FnOnce(&mut crate::state::MdiSaveDialog)) {
-        if let Some(crate::state::Modal::MdiSave(dialog)) = &mut self.modal {
+        if let Some(crate::state::Modal::MdiSave(dialog)) = &mut self.overlay.modal {
             update(dialog);
         }
     }
@@ -31,7 +30,7 @@ impl LincApp {
     /// One step of the save dialog: write the buffer, or, when the name is
     /// taken, arm the overwrite step inside the same dialog.
     pub(super) fn confirm_mdi_save(&mut self) {
-        let Some(crate::state::Modal::MdiSave(dialog)) = self.modal.clone() else {
+        let Some(crate::state::Modal::MdiSave(dialog)) = self.overlay.modal.clone() else {
             return;
         };
         if let Some(reason) = self.mdi_save_block() {
@@ -42,7 +41,7 @@ impl LincApp {
             Ok(path) => {
                 // The buffer is kept: the blocks are still the session's
                 // working list, and a save is not a reset.
-                self.modal = None;
+                self.overlay.modal = None;
                 self.mdi.last_error = None;
                 self.toast(format!("saved {}", path.display()), theme::SUCCESS);
             }
@@ -89,7 +88,7 @@ impl LincApp {
     /// screen: closing it on a bad name would lose the text the operator typed
     /// and leave the save looking like it happened.
     pub(super) fn save_program_as(&mut self, name: &str) {
-        let Some(Modal::SaveProgramAs(dialog)) = self.modal.clone() else {
+        let Some(Modal::SaveProgramAs(dialog)) = self.overlay.modal.clone() else {
             return;
         };
         let name = name.trim();
@@ -138,14 +137,17 @@ impl LincApp {
         // Both backends write the file before answering, so an accepted save is
         // a save: the dirty marker must not survive it.
         self.program.editor.mark_saved();
-        self.modal = None;
+        self.overlay.modal = None;
         self.toast(format!("saved {name}"), theme::SUCCESS);
     }
 
     /// Edit the open save-as dialog. A closed dialog is not an error: the frame
     /// that confirms the write clears it before this runs.
-    pub(super) fn edit_save_as(&mut self, update: impl FnOnce(&mut crate::state::SaveProgramDialog)) {
-        if let Some(Modal::SaveProgramAs(dialog)) = &mut self.modal {
+    pub(super) fn edit_save_as(
+        &mut self,
+        update: impl FnOnce(&mut crate::state::SaveProgramDialog),
+    ) {
+        if let Some(Modal::SaveProgramAs(dialog)) = &mut self.overlay.modal {
             update(dialog);
         }
     }
@@ -158,11 +160,11 @@ impl LincApp {
     /// `tool.change_active` rather than a page, and has no dismiss action.
     pub(super) fn draw_tool_change_prompt(&mut self, ctx: &egui::Context) {
         if self.snapshot.tool_change.status != linc_core::model::ToolChangeStatus::ManualPrompt {
-            self.tool_prompt_open_last_frame = false;
+            self.overlay.tool_prompt_open_last_frame = false;
             return;
         }
-        let focus_default = !self.tool_prompt_open_last_frame;
-        self.tool_prompt_open_last_frame = true;
+        let focus_default = !self.overlay.tool_prompt_open_last_frame;
+        self.overlay.tool_prompt_open_last_frame = true;
         let state = self.snapshot.tool_change.clone();
         let remark = self
             .snapshot
@@ -239,8 +241,8 @@ impl LincApp {
     }
 
     pub(super) fn draw_modal(&mut self, ctx: &egui::Context) {
-        let Some(modal) = self.modal.clone() else {
-            self.modal_open_last_frame = None;
+        let Some(modal) = self.overlay.modal.clone() else {
+            self.overlay.modal_open_last_frame = None;
             return;
         };
         // On the frame a dialog opens the keyboard goes where the operator's
@@ -249,8 +251,8 @@ impl LincApp {
         // never deletes, overwrites, quits or starts anything. There is no
         // click-to-focus on this panel and no Tab to walk in with. A different
         // dialog replacing this one on the same frame counts as opening.
-        let first_frame = self.modal_open_last_frame != Some(modal.kind());
-        self.modal_open_last_frame = Some(modal.kind());
+        let first_frame = self.overlay.modal_open_last_frame != Some(modal.kind());
+        self.overlay.modal_open_last_frame = Some(modal.kind());
         let mut close = false;
         let mut action: Option<PendingAction> = None;
         let mut save_and_continue = false;
@@ -700,18 +702,18 @@ impl LincApp {
                 }
             });
         if let Some(text) = goto_buffer {
-            let mdi = matches!(self.modal, Some(Modal::GoToLine { mdi: true, .. }));
-            self.modal = Some(Modal::GoToLine { buffer: text, mdi });
+            let mdi = matches!(self.overlay.modal, Some(Modal::GoToLine { mdi: true, .. }));
+            self.overlay.modal = Some(Modal::GoToLine { buffer: text, mdi });
         }
         if goto_accept {
-            let target = match self.modal.as_ref() {
+            let target = match self.overlay.modal.as_ref() {
                 Some(Modal::GoToLine { buffer, mdi }) => {
                     buffer.trim().parse::<usize>().ok().map(|line| (line, *mdi))
                 }
                 _ => None,
             };
             if let Some((line, mdi)) = target {
-                self.modal = None;
+                self.overlay.modal = None;
                 self.go_to_line(line, mdi);
             }
         }
@@ -737,37 +739,37 @@ impl LincApp {
             });
         }
         if save_as_confirm {
-            let name = match &self.modal {
+            let name = match &self.overlay.modal {
                 Some(Modal::SaveProgramAs(dialog)) => dialog.name.clone(),
                 _ => String::new(),
             };
             self.save_program_as(&name);
         }
         if discard_on_leave {
-            self.modal = None;
+            self.overlay.modal = None;
             self.discard_editor_changes();
             self.toast("editor changes discarded", theme::WARNING);
         }
         if close {
-            self.modal = None;
+            self.overlay.modal = None;
         }
         if let Some((path, usb)) = delete {
-            self.modal = None;
+            self.overlay.modal = None;
             self.delete_file(path, usb);
         }
         if let Some(tool) = delete_tool {
-            self.modal = None;
+            self.overlay.modal = None;
             self.send(linc_core::command::MachineCommand::DeleteToolTableRow {
                 tool,
                 expected_revision: self.snapshot.tool_table.revision,
             });
         }
         if let Some(line) = start_line {
-            self.modal = None;
+            self.overlay.modal = None;
             self.send(linc_core::command::MachineCommand::RunFromLine { line });
         }
         if let Some(action) = action {
-            self.modal = None;
+            self.overlay.modal = None;
             // DISCARD is the operator agreeing to lose the edits, so drop them
             // before the pending action runs. Carrying a dirty buffer through
             // the navigation brought the same prompt back on the next visit.
@@ -782,18 +784,18 @@ impl LincApp {
             let before = self.program.editor.dirty;
             self.save_program();
             if !self.program.editor.dirty || !before {
-                self.modal = None;
+                self.overlay.modal = None;
                 if let Some(pending) = pending {
                     self.perform_pending(pending);
                 }
             }
         }
         if quit {
-            self.modal = None;
-            self.quit_requested = true;
+            self.overlay.modal = None;
+            self.chrome.quit_requested = true;
         }
         if let Some(overwrite) = overwrite {
-            self.modal = None;
+            self.overlay.modal = None;
             screens::files::finish_overwrite(self, overwrite);
         }
     }
@@ -804,7 +806,7 @@ impl LincApp {
             .anchor(Align2::RIGHT_BOTTOM, Vec2::new(-24.0, -90.0))
             .interactable(false);
         area.show(ctx, |ui| {
-            for toast in self.toasts.iter().rev() {
+            for toast in self.overlay.toasts.iter().rev() {
                 Frame::new()
                     .fill(theme::PANEL_RAISED)
                     .stroke(Stroke::new(1.0, toast.color))
@@ -827,3 +829,24 @@ impl LincApp {
     }
 }
 
+/// Everything that sits in front of a page: the open modal, the messages
+/// strip, toasts, and the one-shot flags that keep a dialog from looking dead.
+pub(crate) struct OverlayUi {
+    pub modal: Option<Modal>,
+    /// Full-screen controller log, opened with `[keys].messages`.
+    pub messages_dialog: bool,
+    /// Page-scroll requested by the dialog's keys this frame.
+    pub messages_scroll: f32,
+    pub toasts: Vec<Toast>,
+    /// Which dialog was open last frame, so a newly opened one can put the
+    /// keyboard on its input field, or on its safe button when it has none.
+    pub modal_open_last_frame: Option<&'static str>,
+    /// Same, for the manual tool-change prompt, which is driven by the machine
+    /// rather than by `self.overlay.modal`.
+    pub tool_prompt_open_last_frame: bool,
+    /// Whether any dialog or prompt was open on the previous frame. Closing the
+    /// last one leaves the keyboard ownerless, so the shell hands it back to
+    /// the page (see `restore_page_keyboard`).
+    pub overlay_was_open: bool,
+    pub confirm_token: Option<linc_core::model::ToolChangeToken>,
+}

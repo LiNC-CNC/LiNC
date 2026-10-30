@@ -12,18 +12,18 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     let tabs = DiagnosticsTab::visible(&app.profile);
     // A tab remembered or restored from an earlier profile can name one this
     // profile hides; nothing below may draw its body.
-    if !tabs.contains(&app.diagnostics_tab) {
-        app.diagnostics_tab = DiagnosticsTab::Overview;
+    if !tabs.contains(&app.diagnostics.tab) {
+        app.diagnostics.tab = DiagnosticsTab::Overview;
     }
     // No page title: the navigation names the page.
     common::focus_anchor(ui, "diagnostics-page-focus");
-    if app.diagnostics_clear_view {
-        app.diagnostics_clear_view = false;
+    if app.diagnostics.clear_view {
+        app.diagnostics.clear_view = false;
     }
     ui.horizontal(|ui| {
         for tab in tabs {
-            if common::page_tab(ui, tab.label(), app.diagnostics_tab == tab).clicked() {
-                app.diagnostics_tab = tab;
+            if common::page_tab(ui, tab.label(), app.diagnostics.tab == tab).clicked() {
+                app.diagnostics.tab = tab;
             }
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -39,7 +39,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     egui::ScrollArea::vertical()
         .id_salt("diagnostics-body")
         .max_height(ui.available_height())
-        .show(ui, |ui| match app.diagnostics_tab {
+        .show(ui, |ui| match app.diagnostics.tab {
             DiagnosticsTab::Overview => overview(app, ui),
             DiagnosticsTab::PanelLink => panel_link(app, ui),
             DiagnosticsTab::HalNml => hal_nml(app, ui),
@@ -589,13 +589,13 @@ fn hal_nml(app: &mut LincApp, ui: &mut Ui) {
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "HAL PIN BROWSER");
                     ui.add(
-                        egui::TextEdit::singleline(&mut app.diagnostics_search)
+                        egui::TextEdit::singleline(&mut app.diagnostics.search)
                             .id(egui::Id::unique("linc-diagnostics-search"))
                             .hint_text("filter pin")
                             .desired_width(220.0),
                     );
                     compact_rows(ui);
-                    let filter = app.diagnostics_search.to_ascii_lowercase();
+                    let filter = app.diagnostics.search.to_ascii_lowercase();
                     let pins = hal_pin_rows(app);
                     egui::ScrollArea::vertical()
                         .id_salt("hal-pins-scroll")
@@ -946,13 +946,13 @@ fn io(app: &mut LincApp, ui: &mut Ui) {
                 theme::card(ui, |ui| {
                     theme::section_header(ui, "HAL PIN BROWSER");
                     ui.add(
-                        egui::TextEdit::singleline(&mut app.diagnostics_search)
+                        egui::TextEdit::singleline(&mut app.diagnostics.search)
                             .id(egui::Id::unique("linc-diagnostics-search"))
                             .hint_text("filter pin")
                             .desired_width(220.0),
                     );
                     compact_rows(ui);
-                    let filter = app.diagnostics_search.to_ascii_lowercase();
+                    let filter = app.diagnostics.search.to_ascii_lowercase();
                     egui::ScrollArea::vertical()
                         .id_salt("io-hal-pins-scroll")
                         .max_height(370.0)
@@ -996,7 +996,7 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
                 .color(theme::MUTED),
         );
         ui.add(
-            egui::TextEdit::singleline(&mut app.diagnostics_search)
+            egui::TextEdit::singleline(&mut app.diagnostics.search)
                 .id(egui::Id::unique("linc-diagnostics-search"))
                 .hint_text("message, code, source")
                 .desired_width(240.0),
@@ -1008,9 +1008,9 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
             AlarmSeverity::Error,
             AlarmSeverity::Critical,
         ] {
-            let active = app.diagnostics_severity == Some(severity);
+            let active = app.diagnostics.severity == Some(severity);
             if common::page_tab(ui, severity.label(), active).clicked() {
-                app.diagnostics_severity = if active { None } else { Some(severity) };
+                app.diagnostics.severity = if active { None } else { Some(severity) };
             }
         }
         ui.add_space(6.0);
@@ -1024,9 +1024,9 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
             AlarmSource::Motion,
             AlarmSource::Io,
         ] {
-            let active = app.diagnostics_source == Some(source);
+            let active = app.diagnostics.source == Some(source);
             if common::page_tab(ui, source.label(), active).clicked() {
-                app.diagnostics_source = if active { None } else { Some(source) };
+                app.diagnostics.source = if active { None } else { Some(source) };
             }
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1044,15 +1044,15 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
             .logs()
             .into_iter()
             .filter(|alarm| {
-                app.diagnostics_severity
+                app.diagnostics.severity
                     .map(|severity| alarm.severity == severity)
                     .unwrap_or(true)
                     && app
-                        .diagnostics_source
+                        .diagnostics.source
                         .map(|source| alarm.source == source)
                         .unwrap_or(true)
                     && {
-                        let query = app.diagnostics_search.to_ascii_lowercase();
+                        let query = app.diagnostics.search.to_ascii_lowercase();
                         query.is_empty()
                             || alarm.message.to_ascii_lowercase().contains(&query)
                             || alarm.code.to_ascii_lowercase().contains(&query)

@@ -6,9 +6,9 @@
 //! submodule can reach `LincApp`'s private fields, so the split is a move of
 //! text, not a change of shape.
 
-use std::collections::VecDeque;
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use crate::screens;
+use crate::state::*;
+use crate::theme;
 use egui::{
     Align, Align2, Color32, FontId, Frame, Layout, Margin, RichText, Sense, Stroke, StrokeKind,
     Vec2,
@@ -23,9 +23,9 @@ use linc_core::model::{
     ToolChangeState, ToolChangeStatus,
 };
 use linc_core::probe::ProbeParameters;
-use crate::screens;
-use crate::state::*;
-use crate::theme;
+use std::collections::VecDeque;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 mod chrome;
 mod commands;
@@ -74,11 +74,14 @@ use sync::*;
 #[allow(unused_imports)]
 use view::*;
 
-pub use commands::{move_progress};
-pub use gates::{PROBE_TRIP_ACTION, probe_trip_banner_text};
-pub use keyboard::{FocusRegion};
-pub use nav::{page_from_name, NAV_ITEMS, NavRowGeometry, nav_row_geometry, mode_page};
-pub use status::{fps_step, limits_override_indicator, override_readout, active_offset, machine_bounds, state_label};
+pub use commands::move_progress;
+pub use gates::{probe_trip_banner_text, PROBE_TRIP_ACTION};
+pub use keyboard::FocusRegion;
+pub use nav::{mode_page, nav_row_geometry, page_from_name, NavRowGeometry, NAV_ITEMS};
+pub use status::{
+    active_offset, fps_step, limits_override_indicator, machine_bounds, override_readout,
+    state_label,
+};
 
 pub const APP_TITLE: &str = "LiNC";
 
@@ -88,22 +91,9 @@ pub struct LincApp {
     pub diag_bus: Option<std::sync::Arc<std::sync::Mutex<linc_core::diag::Bus>>>,
     /// Smoothed frame rate, shown in the top bar and published for diagnostics.
     pub fps: f32,
-    /// Backend sample stamp of the last published machine snapshot.
-    diag_last_sample: u64,
     pub profile: Profile,
     pub backend: Box<dyn UiBackend>,
     pub snapshot: MachineSnapshot,
-    pub page: Page,
-    pub last_non_mode_page: Page,
-    pub files_return_page: Page,
-    pub help_return_page: Page,
-    /// Where Esc on the Diagnostics page goes back to: the page the operator
-    /// left to look at it, not the program reset.
-    pub diagnostics_return_page: Page,
-    pub nav_focus: usize,
-    pub focus_region: FocusRegion,
-    pub last_mode: Option<PanelModeValidity>,
-    pub start_page: Page,
     pub graph_style: GraphStyle,
     pub program: ProgramUi,
     pub offsets: OffsetsUi,
@@ -112,113 +102,16 @@ pub struct LincApp {
     pub mdi: MdiUi,
     pub help: HelpUi,
     pub files: FilesUi,
-    pub homing_return_page: Page,
     pub manual: ManualUi,
-    pub diagnostics_tab: DiagnosticsTab,
-    pub diagnostics_search: String,
-    pub diagnostics_severity: Option<AlarmSeverity>,
-    pub diagnostics_source: Option<AlarmSource>,
-    pub diagnostics_clear_view: bool,
-    pub ui_log: VecDeque<Alarm>,
     pub design_scale: f32,
-    pub page_focus_requested: bool,
-    pub modal: Option<Modal>,
-    /// Full-screen controller log, opened with `[keys].messages`.
-    pub messages_dialog: bool,
-    /// Page-scroll requested by the dialog's keys this frame.
-    pub messages_scroll: f32,
-    /// Rising-edge detector, so follow-current is re-armed when a program
-    /// starts but not again on every poll after the operator selects a line.
-    pub program_was_running: bool,
-    /// Geometry the Probe page painted, read by the 1280x720 layout tests.
-    #[cfg(test)]
-    pub probe_layout: screens::probe_view::ProbeLayout,
-    pub toasts: Vec<Toast>,
-    pub quit_requested: bool,
-    pub last_snapshot_ms: u64,
-    /// Highest alarm id the operator has been told about. Controller errors used
-    /// to appear only in the Machine page's message card, so a program that
-    /// aborted looked like it had simply jumped to the end.
-    pub alarm_id_seen: u64,
-    /// Last jog speed handed to the HAL, so RAPID and the slider publish once
-    /// instead of on every poll.
-    pub jog_speed_published: Option<f64>,
-    /// The work-zero cross, in machine coordinates. Held rather than recomputed
-    /// each frame: while a program loads the snapshot can report no active
-    /// system for a poll, and the cross would snap to the machine origin and
-    /// back.
-    pub graph_origin: [f64; 3],
-    /// MAIN's bottom row shows the following-error traces instead of the feed
-    /// and servo cards. Toggled with the square key there.
-    pub machine_following: bool,
-    /// Following error per axis, newest last, sampled as each snapshot arrives.
-    pub following_history: linc_core::model::AxisMap<std::collections::VecDeque<f64>>,
-    /// Largest absolute following error per axis since the last program start.
-    pub following_run_max: linc_core::model::AxisMap<f64>,
-    /// Sum of absolute samples since the last program start, for the mean.
-    pub following_run_abs_sum: linc_core::model::AxisMap<f64>,
-    /// Samples behind that sum.
-    pub following_run_samples: linc_core::model::AxisMap<u64>,
-    /// Edge state: a program that starts clears the run's numbers.
-    pub following_run_active: bool,
-    /// Largest remaining distance (absolute) seen for each axis since it last
-    /// stopped, i.e. the length of the move in progress. The status only carries
-    /// the remainder, so this is what turns it into a percentage.
-    /// Set by `clear_trail`: the backend applies the clear on its next
-    /// conversion, and until it does its snapshot still carries the old points.
-    /// While set, those are replaced by the cleared tip so the trail cannot flash
-    /// back for a frame.
-    pub trail_cleared: bool,
-    /// Tool tip at the moment of the clear, to tell a stale trail from new
-    /// motion.
-    pub trail_cleared_tip: Option<[f64; 3]>,
-    pub move_distance: linc_core::model::AxisMap<f64>,
-    /// 0..1 of the current move already travelled, per axis.
-    pub move_progress: linc_core::model::AxisMap<f64>,
-    /// Which dialog was open last frame, so a newly opened one can put the
-    /// keyboard on its input field, or on its safe button when it has none.
-    pub modal_open_last_frame: Option<&'static str>,
-    /// Same, for the manual tool-change prompt, which is driven by the machine
-    /// rather than by `self.modal`.
-    pub tool_prompt_open_last_frame: bool,
-    /// Whether any dialog or prompt was open on the previous frame. Closing the
-    /// last one leaves the keyboard ownerless, so the shell hands it back to
-    /// the page (see `restore_page_keyboard`).
-    pub overlay_was_open: bool,
-    pub last_connection: Option<bool>,
-    pub last_protect: Option<bool>,
-    pub panel_offline_toast: bool,
-    pub preview_ticks: u64,
-    pub confirm_token: Option<linc_core::model::ToolChangeToken>,
-    /// A program load is in flight; navigation waits for the backend verdict.
-    pub pending_load: bool,
-    /// Resolved `[keys]` bindings. The profile owns the keymap; the shell
-    /// consumes it instead of hardcoding keys.
-    pub keymap: crate::state::Keymap,
-    /// Runtime UI preferences (CONFIGURATION.md §9). Machine identity, HAL
-    /// pins, safety flags and the INI path are never stored here.
-    pub preferences: linc_core::preferences::Preferences,
-    /// Navigation entries the profile shows, in display order.
-    pub nav: Vec<Page>,
-    /// The finite steps from `[DISPLAY] INCREMENTS`, without the continuous
-    /// `JOG` entry: continuous is selected by the panel's JOG mode.
-    pub jog_increments: Vec<(String, f64)>,
-    /// Index into `jog_increments`.
-    pub jog_increment_index: usize,
-    /// Fixed at 100: the feed override is what scales the jog now, so there is
-    /// no second control to keep in step with it.
-    pub jog_speed_percent: f64,
-    /// Window size and scale of the last frame, for `linc_get_screen_model`.
-    pub diag_viewport: linc_core::diag::ViewportInfo,
-    /// Named shell rectangles from the last frame.
-    pub diag_regions: Vec<linc_core::diag::ScreenRegion>,
-    pub diag_frame_time_ms: f32,
-    /// Lathe only: read the X position as a diameter (`2X`) instead of a
-    /// radius. A display factor — the controller keeps working in radius, and
-    /// no command is issued from it.
-    pub lathe_diameter: bool,
-    preferences_dirty: bool,
-    preferences_saved_at: std::time::Instant,
+    pub(super) nav: NavUi,
+    pub(super) diagnostics: DiagnosticsUi,
+    pub(super) overlay: OverlayUi,
+    pub(super) jog: JogUi,
+    pub(super) prefs: PrefsUi,
+    pub(super) view: ViewState,
+    pub(super) following: FollowError,
+    pub(super) chrome: ChromeUi,
 }
 
 impl LincApp {
@@ -312,19 +205,6 @@ impl LincApp {
         let graph_zoom = preferences.toolpath_zoom;
         let mut app = Self {
             snapshot: snapshot.clone(),
-            page: initial_page,
-            last_non_mode_page: if initial_page.is_mode_driven() {
-                start_page
-            } else {
-                initial_page
-            },
-            files_return_page: Page::Machine,
-            help_return_page: Page::Machine,
-            diagnostics_return_page: Page::Machine,
-            nav_focus: 0,
-            focus_region: FocusRegion::Page,
-            last_mode: Some(mode),
-            start_page,
             graph_style,
             program: ProgramUi {
                 editor,
@@ -339,6 +219,8 @@ impl LincApp {
                 } else {
                     linc_view::ViewMode::Iso3d
                 },
+                pending_load: false,
+                program_was_running: false,
                 ..Default::default()
             },
             offsets: OffsetsUi::default(),
@@ -350,7 +232,6 @@ impl LincApp {
                 profile.machine_ini.program_prefix.clone(),
                 profile.config.files.show_parent_above_root,
             ),
-            homing_return_page: start_page,
             manual: ManualUi {
                 view: if profile.variant == MachineVariant::Lathe {
                     linc_view::ViewMode::LatheXz
@@ -359,60 +240,84 @@ impl LincApp {
                 },
                 ..Default::default()
             },
-            diagnostics_tab: DiagnosticsTab::Overview,
-            diagnostics_search: String::new(),
-            diagnostics_severity: None,
-            diagnostics_source: None,
-            diagnostics_clear_view: false,
-            ui_log: VecDeque::new(),
             design_scale: configured_scale,
-            page_focus_requested: true,
-            modal: None,
-            toasts: Vec::new(),
             diag_bus: None,
-            diag_last_sample: 0,
             fps: 0.0,
-            quit_requested: false,
-            pending_load: false,
-            keymap: crate::state::Keymap::from_config(&profile.config.keys),
-            nav: nav_pages(&profile.config.ui.pages),
-            jog_increments: crate::state::finite_increments(&profile.machine_ini.increments),
-            jog_increment_index: preferences.jog_increment.unwrap_or(0),
-            jog_speed_percent: 100.0,
-            lathe_diameter: preferences.lathe_diameter.unwrap_or(false),
-            diag_viewport: linc_core::diag::ViewportInfo::default(),
-            diag_regions: Vec::new(),
-            diag_frame_time_ms: 0.0,
-            preferences,
-            preferences_dirty: false,
-            preferences_saved_at: std::time::Instant::now(),
-            last_snapshot_ms: now_ms(),
-            alarm_id_seen: 0,
-            jog_speed_published: None,
-            graph_origin: [0.0; 3],
-            machine_following: false,
-            following_history: linc_core::model::AxisMap::new(),
-            following_run_max: linc_core::model::AxisMap::new(),
-            following_run_abs_sum: linc_core::model::AxisMap::new(),
-            following_run_samples: linc_core::model::AxisMap::new(),
-            following_run_active: false,
-            trail_cleared: false,
-            trail_cleared_tip: None,
-            move_distance: linc_core::model::AxisMap::new(),
-            move_progress: linc_core::model::AxisMap::new(),
-            modal_open_last_frame: None,
-            tool_prompt_open_last_frame: false,
-            overlay_was_open: false,
-            messages_dialog: false,
-            messages_scroll: 0.0,
-            program_was_running: false,
-            #[cfg(test)]
-            probe_layout: screens::probe_view::ProbeLayout::default(),
-            last_connection: Some(snapshot.panel.connected),
-            last_protect: Some(snapshot.panel.protect_effective()),
-            panel_offline_toast: false,
-            preview_ticks: 0,
-            confirm_token: None,
+            nav: NavUi {
+                page: initial_page,
+                last_non_mode_page: if initial_page.is_mode_driven() {
+                    start_page
+                } else {
+                    initial_page
+                },
+                files_return_page: Page::Machine,
+                help_return_page: Page::Machine,
+                diagnostics_return_page: Page::Machine,
+                nav_focus: 0,
+                focus_region: FocusRegion::Page,
+                last_mode: Some(mode),
+                homing_return_page: start_page,
+                page_focus_requested: true,
+                pages: nav_pages(&profile.config.ui.pages),
+            },
+            diagnostics: DiagnosticsUi {
+                tab: DiagnosticsTab::Overview,
+                search: String::new(),
+                severity: None,
+                source: None,
+                clear_view: false,
+                log: VecDeque::new(),
+                last_sample: 0,
+                viewport: linc_core::diag::ViewportInfo::default(),
+                regions: Vec::new(),
+                frame_time_ms: 0.0,
+            },
+            overlay: OverlayUi {
+                modal: None,
+                toasts: Vec::new(),
+                modal_open_last_frame: None,
+                tool_prompt_open_last_frame: false,
+                overlay_was_open: false,
+                messages_dialog: false,
+                messages_scroll: 0.0,
+                confirm_token: None,
+            },
+            jog: JogUi {
+                increments: crate::state::finite_increments(&profile.machine_ini.increments),
+                index: preferences.jog_increment.unwrap_or(0),
+                speed_percent: 100.0,
+                speed_published: None,
+            },
+            view: ViewState {
+                origin: [0.0; 3],
+                trail_cleared: false,
+                trail_cleared_tip: None,
+                move_distance: linc_core::model::AxisMap::new(),
+                move_progress: linc_core::model::AxisMap::new(),
+                preview_ticks: 0,
+            },
+            following: FollowError {
+                active: false,
+                history: linc_core::model::AxisMap::new(),
+                run_max: linc_core::model::AxisMap::new(),
+                run_abs_sum: linc_core::model::AxisMap::new(),
+                run_samples: linc_core::model::AxisMap::new(),
+                run_active: false,
+            },
+            chrome: ChromeUi {
+                quit_requested: false,
+                lathe_diameter: preferences.lathe_diameter.unwrap_or(false),
+                last_snapshot_ms: now_ms(),
+                alarm_id_seen: 0,
+                last_connection: Some(snapshot.panel.connected),
+                last_protect: Some(snapshot.panel.protect_effective()),
+            },
+            prefs: PrefsUi {
+                keymap: crate::state::Keymap::from_config(&profile.config.keys),
+                dirty: false,
+                saved_at: std::time::Instant::now(),
+                preferences,
+            },
             profile,
             backend,
         };
@@ -466,13 +371,13 @@ impl LincApp {
         }
         // Seed the preference with the page we actually opened, so the file is
         // written even if the operator never navigates.
-        let opening_page = app.page;
+        let opening_page = app.nav.page;
         app.remember_page(opening_page);
         app.help.ensure_loaded();
         app.offsets = OffsetsUi::default();
         app.sync_offsets_from_snapshot(true);
         app.sync_tools_from_snapshot(true);
-        if app.page == Page::Program
+        if app.nav.page == Page::Program
             && app.snapshot.panel.mode.mode() == Some(PanelMode::Edit)
             && app.editing_allowed()
         {
@@ -485,9 +390,9 @@ impl LincApp {
     pub fn draw(&mut self, ui: &mut egui::Ui) {
         self.sync();
         // A fresh model each frame: a region that disappears must not linger.
-        self.diag_regions.clear();
+        self.diagnostics.regions.clear();
         let screen = ui.available_rect_before_wrap();
-        self.diag_viewport = linc_core::diag::ViewportInfo {
+        self.diagnostics.viewport = linc_core::diag::ViewportInfo {
             width: screen.width(),
             height: screen.height(),
             pixels_per_point: ui.ctx().pixels_per_point(),
@@ -495,7 +400,7 @@ impl LincApp {
                 .ctx()
                 .input(|input| input.viewport().fullscreen.unwrap_or(false)),
         };
-        self.diag_frame_time_ms = ui.ctx().input(|input| input.unstable_dt * 1000.0);
+        self.diagnostics.frame_time_ms = ui.ctx().input(|input| input.unstable_dt * 1000.0);
         ui.painter().rect_filled(ui.max_rect(), 0.0, theme::SURFACE);
         let top_bar = egui::containers::Panel::top("linc-top")
             .exact_size(theme::TOP_BAR_HEIGHT)
@@ -524,7 +429,7 @@ impl LincApp {
                     .fill(theme::SURFACE)
                     .inner_margin(Margin::symmetric(10, 8)),
             )
-            .show(ui, |ui| self.nav(ui));
+            .show(ui, |ui| self.draw_nav(ui));
         self.note_region("nav", nav.response.rect);
         let central = egui::containers::CentralPanel::default()
             .frame(
@@ -539,11 +444,11 @@ impl LincApp {
                 // it, so the request stays pending until the dialog closes:
                 // taking it here left a freshly opened dialog with no focused
                 // button at all.
-                if self.page_focus_requested && !self.overlay_open() {
+                if self.nav.page_focus_requested && !self.overlay_open() {
                     ui.ctx().data_mut(|data| {
                         data.insert_temp(egui::Id::unique("linc-page-focus"), true)
                     });
-                    self.page_focus_requested = false;
+                    self.nav.page_focus_requested = false;
                 }
                 self.banners(ui);
                 // The central page must end above the fixed bottom action bar.
@@ -553,7 +458,7 @@ impl LincApp {
                 ui.allocate_ui_with_layout(
                     Vec2::new(ui.available_width(), page_height),
                     egui::Layout::top_down(egui::Align::Min),
-                    |ui| match self.page {
+                    |ui| match self.nav.page {
                         Page::Machine => screens::machine::show(self, ui),
                         Page::Program => screens::program::show(self, ui),
                         Page::Offsets => screens::offsets::show(self, ui),
@@ -572,17 +477,19 @@ impl LincApp {
         // a few points larger than the rect the app's `Ui` was given; report
         // the extent the shell actually drew, so the model is self-consistent.
         let right = self
-            .diag_regions
+            .diagnostics
+            .regions
             .iter()
             .map(|region| region.x + region.width)
             .fold(0.0f32, f32::max);
         let bottom = self
-            .diag_regions
+            .diagnostics
+            .regions
             .iter()
             .map(|region| region.y + region.height)
             .fold(0.0f32, f32::max);
-        self.diag_viewport.width = self.diag_viewport.width.max(right);
-        self.diag_viewport.height = self.diag_viewport.height.max(bottom);
+        self.diagnostics.viewport.width = self.diagnostics.viewport.width.max(right);
+        self.diagnostics.viewport.height = self.diagnostics.viewport.height.max(bottom);
         self.draw_modal(ui.ctx());
         self.draw_tool_change_prompt(ui.ctx());
         crate::screens::help::draw_dialog(self, ui.ctx());
@@ -593,13 +500,13 @@ impl LincApp {
         // keyboard went nowhere after a dialog closed. Restore it on the frame
         // after the last overlay has gone.
         let overlay_open = self.overlay_open();
-        if self.overlay_was_open && !overlay_open {
+        if self.overlay.overlay_was_open && !overlay_open {
             self.restore_page_keyboard();
         }
-        self.overlay_was_open = overlay_open;
+        self.overlay.overlay_was_open = overlay_open;
         self.draw_toasts(ui.ctx());
         self.save_preferences(false);
-        if self.quit_requested {
+        if self.chrome.quit_requested {
             self.save_preferences(true);
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }

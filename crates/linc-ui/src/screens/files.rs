@@ -244,8 +244,8 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
             }
         }
         if input.consume_key(
-            app.keymap.program_cycle_view.modifiers,
-            app.keymap.program_cycle_view.key,
+            app.prefs.keymap.program_cycle_view.modifiers,
+            app.prefs.keymap.program_cycle_view.key,
         ) {
             toggle_recent = true;
         }
@@ -307,7 +307,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string());
-        app.modal = Some(crate::state::Modal::ConfirmDelete { path, label, usb });
+        app.overlay.modal = Some(crate::state::Modal::ConfirmDelete { path, label, usb });
     }
 }
 
@@ -654,7 +654,7 @@ fn nc_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let detail = if recent {
-                    format!("{} / NEWEST FIRST", app.preferences.recent_files.len())
+                    format!("{} / NEWEST FIRST", app.prefs.preferences.recent_files.len())
                 } else {
                     app.files.nc_current.display().to_string()
                 };
@@ -681,7 +681,7 @@ enum Pane {
 }
 
 fn recent_entries(app: &LincApp) -> Vec<FileEntry> {
-    app.preferences
+    app.prefs.preferences
         .recent_files
         .iter()
         .map(|entry| {
@@ -1126,7 +1126,7 @@ fn copy_nc_to_usb(app: &mut LincApp) {
     let destination = usb_root.join(&entry.name);
     if destination.exists() {
         app.files.pending_overwrite = Some((entry.path, usb_root, destination.clone()));
-        app.modal = Some(crate::state::Modal::ConfirmOverwrite(entry.name));
+        app.overlay.modal = Some(crate::state::Modal::ConfirmOverwrite(entry.name));
         return;
     }
     start_copy_job(app, entry.path, usb_root, destination, false);
@@ -1156,7 +1156,7 @@ fn copy_usb_to_nc(app: &mut LincApp) {
     let destination = destination_root.join(&entry.name);
     if destination.exists() {
         app.files.pending_overwrite = Some((entry.path, destination_root, destination.clone()));
-        app.modal = Some(crate::state::Modal::ConfirmOverwrite(entry.name));
+        app.overlay.modal = Some(crate::state::Modal::ConfirmOverwrite(entry.name));
         return;
     }
     start_copy_job(app, entry.path, destination_root, destination, false);

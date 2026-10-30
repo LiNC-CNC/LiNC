@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 /// The numbers the preview's frame depends on, flattened in a stable order.
 ///
 /// An offset row is a handful of floats; comparing them per poll is cheaper than
@@ -22,17 +21,17 @@ impl LincApp {
     pub fn sync(&mut self) {
         self.poll_backend();
         let mode = self.snapshot.panel.mode.clone();
-        if self.last_mode.as_ref() != Some(&mode) {
+        if self.nav.last_mode.as_ref() != Some(&mode) {
             self.on_mode_change(mode.clone());
-            self.last_mode = Some(mode);
+            self.nav.last_mode = Some(mode);
         }
 
-        if self.snapshot.panel.connected != self.last_connection.unwrap_or(false) {
-            self.last_connection = Some(self.snapshot.panel.connected);
+        if self.snapshot.panel.connected != self.chrome.last_connection.unwrap_or(false) {
+            self.chrome.last_connection = Some(self.snapshot.panel.connected);
         }
         let protect = self.snapshot.panel.protect_effective();
-        if self.last_protect != Some(protect) {
-            self.last_protect = Some(protect);
+        if self.chrome.last_protect != Some(protect) {
+            self.chrome.last_protect = Some(protect);
         }
 
         self.sync_program();
@@ -44,7 +43,9 @@ impl LincApp {
             self.toast("probe result received", theme::SUCCESS);
         }
         self.tick_preview();
-        self.toasts.retain(|toast| toast.until > Instant::now());
+        self.overlay
+            .toasts
+            .retain(|toast| toast.until > Instant::now());
     }
 
     pub(super) fn sync_program(&mut self) {
@@ -94,10 +95,10 @@ impl LincApp {
         // Re-arm the follow only when a run starts. Doing it on every poll
         // overrode a line the operator had just picked with Ctrl+G or the
         // arrows, so the selection snapped back to the running line.
-        if self.snapshot.task.running && !self.program_was_running {
+        if self.snapshot.task.running && !self.program.program_was_running {
             self.program.follow_current = true;
         }
-        self.program_was_running = self.snapshot.task.running;
+        self.program.program_was_running = self.snapshot.task.running;
     }
 
     pub(crate) fn sync_offsets_from_snapshot(&mut self, force: bool) {
@@ -141,7 +142,7 @@ impl LincApp {
                 .insert(row.tool, crate::state::ToolDraft::from_row(row));
         }
         if let Some(token) = self.snapshot.tool_change.token.clone() {
-            self.confirm_token = Some(token);
+            self.overlay.confirm_token = Some(token);
         }
     }
 
@@ -191,12 +192,12 @@ impl LincApp {
     pub(super) fn sample_following_error(&mut self) {
         const SAMPLES: usize = 240;
         let running = self.snapshot.program.running;
-        if running && !self.following_run_active {
-            self.following_run_max = linc_core::model::AxisMap::new();
-            self.following_run_abs_sum = linc_core::model::AxisMap::new();
-            self.following_run_samples = linc_core::model::AxisMap::new();
+        if running && !self.following.run_active {
+            self.following.run_max = linc_core::model::AxisMap::new();
+            self.following.run_abs_sum = linc_core::model::AxisMap::new();
+            self.following.run_samples = linc_core::model::AxisMap::new();
         }
-        self.following_run_active = running;
+        self.following.run_active = running;
         let values: Vec<(String, f64)> = self
             .snapshot
             .machine
@@ -208,11 +209,12 @@ impl LincApp {
         // the cut's accuracy: the numbers are the run's cutting error.
         let cutting = self.snapshot.motion_kind.is_cutting();
         for (axis, value) in values {
-            if self.following_history.get(&axis).is_none() {
-                self.following_history
+            if self.following.history.get(&axis).is_none() {
+                self.following
+                    .history
                     .insert(axis.clone(), std::collections::VecDeque::new());
             }
-            if let Some(trace) = self.following_history.get_mut(&axis) {
+            if let Some(trace) = self.following.history.get_mut(&axis) {
                 trace.push_back(value);
                 while trace.len() > SAMPLES {
                     trace.pop_front();
@@ -221,19 +223,38 @@ impl LincApp {
             if !cutting {
                 continue;
             }
-            let worst = self.following_run_max.get(&axis).copied().unwrap_or(0.0);
-            self.following_run_max
+            let worst = self.following.run_max.get(&axis).copied().unwrap_or(0.0);
+            self.following
+                .run_max
                 .insert(axis.clone(), worst.max(value.abs()));
             let sum = self
-                .following_run_abs_sum
+                .following
+                .run_abs_sum
                 .get(&axis)
                 .copied()
                 .unwrap_or(0.0);
-            self.following_run_abs_sum
+            self.following
+                .run_abs_sum
                 .insert(axis.clone(), sum + value.abs());
-            let count = self.following_run_samples.get(&axis).copied().unwrap_or(0);
-            self.following_run_samples.insert(axis, count + 1);
+            let count = self.following.run_samples.get(&axis).copied().unwrap_or(0);
+            self.following.run_samples.insert(axis, count + 1);
         }
     }
 }
 
+/// Following-error sampling for the square key: one run per program start.
+pub(crate) struct FollowError {
+    /// MAIN's bottom row shows the following-error traces instead of the feed
+    /// and servo cards. Toggled with the square key there.
+    pub active: bool,
+    /// Following error per axis, newest last, sampled as each snapshot arrives.
+    pub history: linc_core::model::AxisMap<std::collections::VecDeque<f64>>,
+    /// Largest absolute following error per axis since the last program start.
+    pub run_max: linc_core::model::AxisMap<f64>,
+    /// Sum of absolute samples since the last program start, for the mean.
+    pub run_abs_sum: linc_core::model::AxisMap<f64>,
+    /// Samples behind that sum.
+    pub run_samples: linc_core::model::AxisMap<u64>,
+    /// Edge state: a program that starts clears the run's numbers.
+    pub run_active: bool,
+}

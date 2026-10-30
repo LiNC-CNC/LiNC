@@ -47,7 +47,7 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
                 ui.add_space(6.0);
                 // The square key swaps the feed/servo pair for the
                 // following-error traces: one row of cards, one subject.
-                if app.machine_following {
+                if app.following.active {
                     bottom_card(
                         app,
                         ui,
@@ -120,7 +120,7 @@ fn bottom_cards_height(app: &LincApp) -> f32 {
     // Three rows and room to read them; the rows divide whatever is left after
     // the card's own header, so a shorter strip is not clipped.
     const FOLLOWING: f32 = 132.0;
-    if app.machine_following {
+    if app.following.active {
         return FOLLOWING;
     }
     let rows = app.servo_load_rows().len();
