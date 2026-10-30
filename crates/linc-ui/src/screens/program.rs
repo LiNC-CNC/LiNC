@@ -163,14 +163,13 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
     // path's frame so the two layers show the same cut.
     common::shell_card(ui, rect, |ui| {
         let top = ui.cursor().top();
-        match kind {
+        let header = match kind {
             ViewKind::MiniXy => {
                 common::card_title(ui, "PATH");
+                None
             }
-            ViewKind::Full => {
-                common::toolpath_header(ui, app.program.graph_view.label(), app.program.graph_zoom, app.graph_style.remaining)
-            }
-        }
+            ViewKind::Full => Some(common::toolpath_header(ui, app.graph_style.remaining)),
+        };
         // Measured from the cursor: `min_rect` already holds the minimum size
         // the shell set, so it would report the whole card as the header and
         // shrink the graph to nothing.
@@ -187,7 +186,7 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
         let mut pitch = app.program.graph_pitch;
         let mut fit = app.program.fit_requested || mini_card_resized(ui, kind, rect.size());
         let mut auto_fit = app.program.graph_auto_fit;
-        common::trajectory(
+        let drawn = common::trajectory(
             app,
             ui,
             &preview,
@@ -207,6 +206,9 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
             false,
             None,
         );
+        if let Some(header) = header {
+            common::toolpath_status(ui, header, view.label(), drawn.span_mm);
+        }
         app.program.graph_zoom = zoom;
         app.program.graph_pan = pan;
         app.program.graph_yaw = yaw;
@@ -485,7 +487,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
         .id_salt("program-editor")
         .max_height(height)
         .auto_shrink([false, false]);
-    let mut scroll_target: Option<f32> = None;
+    let mut scroll_target: Option<(f32, f32)> = None;
     scroll.show(ui, |ui| {
         ui.horizontal_top(|ui| {
             // Lane for the current-line bar, so it sits left of the numbers
@@ -680,27 +682,22 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             // on the executing line while a program runs.
             let current = app.program.selected_line.max(1);
             if current <= starts.len() {
-                let first = starts[current - 1];
-                let next = starts.get(current).copied().unwrap_or(rows.len());
-                let top = output.galley_pos.y + rows.get(first).map_or(0.0, |placed| placed.pos.y);
-                let bottom = if next < rows.len() {
-                    output.galley_pos.y + rows[next].pos.y
-                } else {
-                    rows.last()
-                        .map_or(top + line_height(), |placed| output.galley_pos.y + placed.rect().bottom())
-                };
+                let (top, bottom) =
+                    line_span(&output.galley, output.galley_pos.y, &starts, current);
                 let band = egui::Rect::from_min_max(
                     egui::pos2(clip.left() + common::SELECTION_EDGE_PADDING, top),
-                    egui::pos2(clip.right(), bottom.max(top + line_height())),
+                    egui::pos2(clip.right(), bottom),
                 );
                 common::selection_band(ui, band);
             }
             if let Some(line) = scroll_to {
                 let index = line.max(1).min(starts.len());
-                let row = starts[index - 1];
-                scroll_target = rows
-                    .get(row)
-                    .map(|placed| output.galley_pos.y + placed.pos.y);
+                scroll_target = Some(line_span(
+                    &output.galley,
+                    output.galley_pos.y,
+                    &starts,
+                    index,
+                ));
             }
             // A little room under the last line, so it does not sit flush
             // against the bottom of the scroll viewport.
@@ -708,15 +705,39 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             let _ = output.state;
             let _ = available;
         });
-        if let Some(top) = scroll_target {
+        if let Some((top, bottom)) = scroll_target {
             let content = ui.min_rect();
-            let rect = egui::Rect::from_min_size(
+            // A block taller than the viewport cannot be centred whole; cap the
+            // rect at one viewport so its first row stays on screen.
+            let bottom = bottom
+                .max(top + line_height())
+                .min(top + height.max(line_height()));
+            let rect = egui::Rect::from_min_max(
                 egui::pos2(content.left(), top),
-                Vec2::new(content.width().max(10.0), line_height()),
+                egui::pos2(content.left() + content.width().max(10.0), bottom),
             );
             ui.scroll_to_rect(rect, Some(egui::Align::Center));
         }
     });
+}
+
+/// Top and bottom of one logical line's painted rows, from its first row to
+/// the row after its last. A wrapped line spans every row it was laid out on,
+/// which is what lets the selection band and the follow scroll centre the whole
+/// block instead of its first row.
+fn line_span(galley: &egui::Galley, galley_top: f32, starts: &[usize], line: usize) -> (f32, f32) {
+    let rows = &galley.rows;
+    let first = starts.get(line - 1).copied().unwrap_or(0);
+    let next = starts.get(line).copied().unwrap_or(rows.len());
+    let top = galley_top + rows.get(first).map_or(0.0, |placed| placed.pos.y);
+    let bottom = if next < rows.len() {
+        galley_top + rows[next].pos.y
+    } else {
+        rows.last().map_or(top + line_height(), |placed| {
+            galley_top + placed.rect().bottom()
+        })
+    };
+    (top, bottom.max(top + line_height()))
 }
 
 /// Cache key for the editor galley: editor revision, highlight inputs, wrap
@@ -763,6 +784,41 @@ mod tests {
         assert_eq!(job.text, text);
     }
 
+    /// The follow scroll centres the logical line, not its first row: a line
+    /// that soft-wraps covers several rows, and centring only the first one
+    /// left the rest of the line hanging below the middle of the pane.
+    #[test]
+    fn a_wrapped_line_spans_every_row_it_occupies() {
+        let ctx = egui::Context::default();
+        let mut laid_out: Option<Arc<Galley>> = None;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut job = LayoutJob::default();
+            job.append(
+                "first\nG1 X0 Y0 (a line long enough to wrap over several rows)\nthird\n",
+                0.0,
+                TextFormat {
+                    font_id: FontId::monospace(13.0),
+                    ..Default::default()
+                },
+            );
+            job.wrap.max_width = 140.0;
+            laid_out = Some(ui.fonts_mut(|fonts| fonts.layout_job(job)));
+        });
+        output.textures_delta.clear();
+        let galley = laid_out.expect("the buffer lays out");
+        let starts = line_row_starts(galley.rows.iter().map(|placed| placed.ends_with_newline));
+        assert!(
+            starts[2] - starts[1] > 1,
+            "the middle line wraps: starts {starts:?}"
+        );
+        let (top, bottom) = line_span(&galley, 0.0, &starts, 2);
+        assert!((top - galley.rows[starts[1]].pos.y).abs() < 0.01);
+        assert!((bottom - galley.rows[starts[2]].pos.y).abs() < 0.01);
+        assert!(
+            bottom - top > line_height() * 1.5,
+            "every wrapped row belongs to the line: {top}..{bottom}"
+        );
+    }
 }
 
 fn highlight_job(

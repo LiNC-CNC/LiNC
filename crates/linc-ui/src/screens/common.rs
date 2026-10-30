@@ -204,9 +204,15 @@ pub fn card_title(ui: &mut Ui, text: &str) {
     );
 }
 
-/// Toolpath status line: keys on the left, view and zoom on the right. Every
-/// toolpath card draws it, so no card needs a legend over the drawing.
-pub fn toolpath_header(ui: &mut Ui, view: &str, zoom: f32, remaining: bool) {
+/// Toolpath status line: keys on the left. Every toolpath card draws it, so no
+/// card needs a legend over the drawing.
+///
+/// The right-hand end is left empty here: the card only knows its viewport
+/// width after it has drawn, so `toolpath_status` fills it. Returns the row it
+/// used, which is where that status goes.
+pub fn toolpath_header(ui: &mut Ui, remaining: bool) -> egui::Rect {
+    let top = ui.cursor().min;
+    let right = ui.available_rect_before_wrap().right();
     ui.horizontal(|ui| {
         card_title(ui, "TOOLPATH");
         ui.add_space(8.0);
@@ -259,22 +265,24 @@ pub fn toolpath_header(ui: &mut Ui, view: &str, zoom: f32, remaining: bool) {
                     .color(linc_view::theme::TOOL),
             );
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                RichText::new(format!("ZOOM {:.1}x", zoom))
-                    .monospace()
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new(view)
-                    .monospace()
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-        });
     });
+    egui::Rect::from_min_max(top, egui::pos2(right, ui.cursor().min.y))
+}
+
+/// Right-hand end of the toolpath status line: the view and the width of the
+/// card's viewport in model units.
+///
+/// Painted after the card draws, so the number is the scale that is on screen
+/// rather than a prediction of it: a fit changes the zoom inside the draw, and
+/// a status drawn before it would report the frame before.
+pub fn toolpath_status(ui: &Ui, row: egui::Rect, view: &str, span_mm: f32) {
+    ui.painter().text(
+        row.right_center(),
+        egui::Align2::RIGHT_CENTER,
+        format!("{view}  •  {}", linc_view::span_label_mm(span_mm)),
+        egui::FontId::monospace(theme::font_size(9.0)),
+        theme::MUTED,
+    );
 }
 
 /// MODAL pane drawn into an exact rect.
@@ -927,27 +935,47 @@ const PROGRESS_HEIGHT: f32 = 46.0;
 /// `pitch` is one row's height plus the gap the card's layout adds after
 /// it; counting rows by the row's height alone is what let the last rows run
 /// past the band.
-/// First line of the listing window.
+fn listing_rows(available: f32, pitch: f32) -> usize {
+    (available / pitch.max(1.0)).floor().max(0.0) as usize
+}
+
+/// First painted line of the running listing and the gap above it.
 ///
-/// While a program runs, the line being cut sits a third of the way down: the
-/// third above it is what has just gone, the two thirds below are what is
-/// coming, which is the part the operator is reading ahead in. Centring it put
-/// half the window behind the tool and left the running line out of the window
-/// altogether once a few long lines wrapped above it.
-///
-/// Idle, the window follows the operator's selection instead, clamped so the
-/// last page of the program still fills the window.
-fn listing_first_line(focus: usize, window_len: usize, running: bool, total: usize) -> isize {
-    let window_len = window_len.max(1);
-    if running {
-        // Negative is fine and intended: before the program has cut a full
-        // third, the window pads above line 1 so the running line stays put
-        // instead of jumping down the card as the first lines execute.
-        focus as isize - (window_len / 3) as isize
-    } else {
-        let last_first = (total.saturating_sub(window_len) + 1).max(1) as isize;
-        (focus.saturating_sub(window_len / 2).max(1) as isize).min(last_first)
+/// While a program runs, the line being cut is centred by measured row heights:
+/// a wrapped line above it costs the rows it really takes, where counting
+/// logical lines let those wraps push the line being cut down the card and out
+/// of the window. `heights_above` walks the lines before `focus` backwards, as
+/// `(line number, painted height)`.
+fn running_listing_window(
+    focus: usize,
+    window_height: f32,
+    focus_height: f32,
+    heights_above: impl Iterator<Item = (usize, f32)>,
+) -> (isize, f32) {
+    let focus = focus.max(1);
+    // Centre the block itself rather than its first row, so a long wrapped
+    // block reads symmetrically above and below the middle of the card.
+    let target = ((window_height - focus_height) * 0.5).max(0.0);
+    let mut above = 0.0;
+    let mut first = focus as isize;
+    for (line, height) in heights_above {
+        if above + height > target {
+            break;
+        }
+        above += height;
+        first = line as isize;
     }
+    // The gap above `first` is what is left of the target once the lines that
+    // fit above it are counted, so the block lands exactly in the middle; on a
+    // short program it pads above line 1 instead of climbing to the top.
+    (first, (target - above).max(0.0))
+}
+
+/// One listing row's galley, wrapped to the card's text lane.
+fn listing_galley(ui: &Ui, line: &str, text_lane: f32) -> std::sync::Arc<egui::Galley> {
+    let mut job = token_job(line, 9.5);
+    job.wrap.max_width = text_lane;
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
 /// Top row for an *idle* listing: keep the highlighted line where it is and
@@ -977,10 +1005,6 @@ fn listing_follow(previous: isize, focus: usize, window_len: usize, total: usize
         };
     }
     first.clamp(1, last_first)
-}
-
-fn listing_rows(available: f32, pitch: f32) -> usize {
-    (available / pitch.max(1.0)).floor().max(0.0) as usize
 }
 
 pub fn program_card(app: &LincApp, ui: &mut Ui) {
@@ -1035,14 +1059,6 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                 );
                 let pitch = row_height + ui.spacing().item_spacing.y;
                 let window_len = listing_rows(listing.height(), pitch);
-                let mut list_ui = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(listing)
-                        .layout(egui::Layout::top_down(egui::Align::Min)),
-                );
-                // Whatever the rows turn out to measure, and whatever the
-                // program carries, nothing of the listing reaches the band.
-                list_ui.set_clip_rect(listing.intersect(ui.clip_rect()));
                 if let Some(content) = content {
                     // Follow the line motion is cutting, not the interpreter's
                     // read-ahead, which reaches the end of the program first.
@@ -1057,15 +1073,6 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                     } else {
                         app.program.selected_line.clamp(1, total)
                     };
-                    let first = if is_running {
-                        listing_first_line(focus, window_len, true, total)
-                    } else {
-                        listing_follow(app.program.listing_first.get(), focus, window_len, total)
-                    };
-                    // Remembered either way, so the handover when a run ends
-                    // does not throw the window back to where it was idle.
-                    app.program.listing_first.set(first);
-                    let mut lines = content.lines().skip((first.max(1) - 1) as usize);
                     let number_font = FontId::monospace(theme::font_size(7.5));
                     let number_width = ui.fonts_mut(|fonts| {
                         fonts
@@ -1074,26 +1081,88 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                             .x
                     });
                     let text_lane =
-                        (list_ui.available_width() - theme::SELECTION_BAR - number_width - 8.0)
-                            .max(40.0);
-                    for row in 0..window_len {
+                        (listing.width() - theme::SELECTION_BAR - number_width - 8.0).max(40.0);
+                    let spacing = ui.spacing().item_spacing.y;
+                    // What one logical line takes on the card: its wrapped rows,
+                    // at least one row, plus the gap the layout leaves under it.
+                    let line_extent = |text: &str| {
+                        listing_galley(ui, text, text_lane).size().y.max(row_height) + spacing
+                    };
+                    // Running centres the executing line by measured rows, so a
+                    // wrapped line above it cannot shove it down the card. Idle
+                    // keeps the one-line-at-a-time follow.
+                    let (first, content_top) = if is_running {
+                        // The rows around the executing line, newest last. Only
+                        // the ones that can fit on the card are kept, so this
+                        // does not grow with the program.
+                        let keep = window_len + 3;
+                        let mut nearby: std::collections::VecDeque<(usize, &str)> =
+                            std::collections::VecDeque::with_capacity(keep);
+                        for (index, text) in content.lines().take(focus).enumerate() {
+                            if nearby.len() == keep {
+                                nearby.pop_front();
+                            }
+                            nearby.push_back((index + 1, text));
+                        }
+                        let focus_height = nearby
+                            .pop_back()
+                            .map_or(row_height, |(_, text)| line_extent(text));
+                        let (first, pad) = running_listing_window(
+                            focus,
+                            listing.height(),
+                            focus_height,
+                            nearby
+                                .iter()
+                                .rev()
+                                .map(|(line, text)| (*line, line_extent(text))),
+                        );
+                        (first, listing.top() + pad)
+                    } else {
+                        (
+                            listing_follow(
+                                app.program.listing_first.get(),
+                                focus,
+                                window_len,
+                                total,
+                            ),
+                            listing.top(),
+                        )
+                    };
+                    // Remembered either way, so the handover when a run ends
+                    // does not throw the window back to where it was idle.
+                    app.program.listing_first.set(first);
+                    let mut list_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(egui::Rect::from_min_max(
+                                egui::pos2(listing.left(), content_top),
+                                listing.max,
+                            ))
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    // Whatever the rows turn out to measure, and whatever the
+                    // program carries, nothing of the listing reaches the band.
+                    list_ui.set_clip_rect(listing.intersect(ui.clip_rect()));
+                    let mut lines = content.lines().skip((first.max(1) - 1) as usize);
+                    // A window of whole rows can hold at most `window_len`
+                    // one-row lines; the extra rows cover a partial pad above a
+                    // short program without costing anything when unused.
+                    let max_rows = if is_running {
+                        window_len + 2
+                    } else {
+                        window_len
+                    };
+                    for row in 0..max_rows {
                         let line_number = first + row as isize;
                         let line = if line_number >= 1 { lines.next() } else { None };
                         let is_current = line_number == focus as isize;
-                        let galley = line.map(|line| {
-                            let mut job = token_job(line, 9.5);
-                            job.wrap.max_width = text_lane;
-                            ui.fonts_mut(|fonts| fonts.layout_job(job))
-                        });
+                        let galley = line.map(|line| listing_galley(ui, line, text_lane));
                         let height = galley
                             .as_ref()
                             .map_or(row_height, |galley| galley.size().y.max(row_height))
-                            + ui.spacing().item_spacing.y;
+                            + spacing;
                         // Whole rows inside the listing only: a row that would
                         // cross the band's top stays unpainted, so wrapped
-                        // lines cost rows instead of reaching the band.
-                        // A row that would cross the band stays unpainted, so
-                        // wrapped lines cost rows instead of reaching the band -
+                        // lines cost rows instead of reaching the band -
                         // except the line being cut: that one is the reason the
                         // operator is looking, so it is painted and clipped.
                         if list_ui.cursor().min.y + height > listing.max.y + 0.5 && !is_current {
@@ -1148,6 +1217,12 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                         }
                     }
                 } else {
+                    let mut list_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(listing)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    list_ui.set_clip_rect(listing.intersect(ui.clip_rect()));
                     for _ in 0..window_len {
                         if list_ui.cursor().min.y + row_height > listing.max.y + 0.5 {
                             break;
@@ -1527,6 +1602,14 @@ pub fn turret_card(app: &LincApp, ui: &mut Ui) {
     });
 }
 
+/// What a toolpath card drew: the response for clicks and overlays, and the
+/// scale it drew at for the card's status line.
+pub struct DrawnTrajectory {
+    pub response: egui::Response,
+    /// Width of the card's viewport in model units, as drawn.
+    pub span_mm: f32,
+}
+
 pub fn trajectory(
     app: &LincApp,
     ui: &mut Ui,
@@ -1552,7 +1635,7 @@ pub fn trajectory(
     // A second origin marker, in the current-line colour: the OFFSETS page
     // highlights the row being edited without moving the active cross.
     highlight: Option<([f64; 3], String)>,
-) -> egui::Response {
+) -> DrawnTrajectory {
     // Machine coordinates throughout: the part, the trail and the tool stay put
     // when the operator touches off, and the work-zero cross moves instead.
     let origin = app.graph_origin;
@@ -1622,7 +1705,10 @@ pub fn trajectory(
     *pitch = view.pitch;
     *fit = view.fit;
     *auto_fit = view.auto_fit;
-    response
+    DrawnTrajectory {
+        response,
+        span_mm: view.span_mm,
+    }
 }
 
 /// The last block the REMAINING view may eat: the interpreter's, and only in that
@@ -1971,12 +2057,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
     );
     shell_card(ui, rect, |ui| {
         let body_top = ui.cursor().top();
-        toolpath_header(
-            ui,
-            app.manual.view.label(),
-            app.manual.zoom,
-            app.graph_style.remaining,
-        );
+        let header = toolpath_header(ui, app.graph_style.remaining);
         let header_height = ui.cursor().top() - body_top;
         let graph_height = (rect.height() - 8.0 - header_height - 2.0).max(60.0);
         let preview = app.program.last_valid_preview.clone();
@@ -1988,7 +2069,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
         let mut pitch = app.manual.pitch;
         let mut fit = app.manual.fit;
         let mut auto_fit = app.manual.auto_fit;
-        trajectory(
+        let drawn = trajectory(
             app,
             ui,
             &preview,
@@ -2008,6 +2089,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
             false,
             None,
         );
+        toolpath_status(ui, header, view.label(), drawn.span_mm);
         app.manual.zoom = zoom;
         app.manual.pan = pan;
         app.manual.yaw = yaw;
@@ -2453,37 +2535,48 @@ mod tests {
     }
 
     #[test]
-    fn the_running_line_keeps_its_place_a_third_down_the_listing() {
-        for (focus, window) in [(1usize, 9usize), (2, 9), (5, 9), (40, 12), (1, 3), (7, 3)] {
-            let first = super::listing_first_line(focus, window, true, 100);
-            let slot = focus as isize - first;
-            assert!(
-                slot >= 0 && slot < window as isize,
-                "focus {focus} in a {window}-row window lands at slot {slot} (first {first})"
-            );
-            assert_eq!(
-                slot,
-                (window / 3) as isize,
-                "focus {focus} sits a third down a {window}-row window"
-            );
-        }
+    fn the_running_line_is_centred_by_the_rows_it_really_takes() {
+        // A 100 px window and a 40 px executing block: the block's top belongs
+        // 30 px down the card. Line 3 is 20 px, line 2 is 20 px, line 1 is
+        // 20 px. Only line 3 fits in that 30 px, so the window starts at line 3
+        // and a 10 px pad above it lands the block exactly in the middle.
+        let (first, pad) = super::running_listing_window(
+            4,
+            100.0,
+            40.0,
+            [(3usize, 20.0f32), (2, 20.0), (1, 20.0)].into_iter(),
+        );
+        assert_eq!(first, 3);
+        assert!((pad - 10.0).abs() < 1e-3, "pad {pad}");
+        assert!(
+            (pad + 20.0 - 30.0).abs() < 1e-3,
+            "one row above plus the pad"
+        );
+
+        // One tall wrapped line above the block cannot fit in the target, so
+        // the window starts at the block itself and the measured pad centres
+        // it. Counting logical lines put the block at one window-third down,
+        // where the wraps above could push it off the card altogether.
+        let (first, pad) =
+            super::running_listing_window(4, 100.0, 40.0, [(3usize, 70.0f32)].into_iter());
+        assert_eq!(first, 4);
+        assert!((pad - 30.0).abs() < 1e-3, "pad {pad}");
     }
 
-    /// At the very start the window pads above line 1 instead of letting the
-    /// running line slide to the top of the card, and the padding never grows
-    /// past the third.
     #[test]
-    fn the_first_lines_of_a_program_pad_above_instead_of_climbing() {
-        assert_eq!(super::listing_first_line(1, 9, true, 100), -2);
-        assert_eq!(super::listing_first_line(4, 9, true, 100), 1);
-        // Idle, the window follows the selection and fills at the end.
-        assert_eq!(super::listing_first_line(1, 9, false, 100), 1);
-        assert_eq!(super::listing_first_line(100, 9, false, 100), 92);
+    fn the_start_of_a_program_pads_above_instead_of_climbing() {
+        // Nothing above line 1: the whole half-window is blank, so the first
+        // line opens in the middle of the card rather than at its top.
+        let (first, pad) = super::running_listing_window(1, 100.0, 40.0, std::iter::empty());
+        assert_eq!(first, 1);
+        assert!((pad - 30.0).abs() < 1e-3, "pad {pad}");
+        // A wrapped first block taller than the card starts at the top; there
+        // is nowhere to centre it.
+        let (first, pad) = super::running_listing_window(1, 100.0, 160.0, std::iter::empty());
+        assert_eq!(first, 1);
+        assert_eq!(pad, 0.0);
     }
 
-    /// At the very start the window pads above line 1 instead of letting the
-    /// running line slide to the top of the card, and the padding never grows
-    /// past the third.
     use super::{
         dro_axis_label, dro_value, feed_rows, listing_rows, modal_height, modal_mnemonic,
         modal_strip_height,
@@ -2853,6 +2946,8 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     struct CardPaint {
         band: Option<egui::Rect>,
         listing: Vec<(egui::Rect, egui::Rect)>,
+        /// The executing line's painted galley and the listing's clip rect.
+        focus: Option<(egui::Rect, egui::Rect)>,
         progress: Option<egui::Rect>,
         card: Option<egui::Rect>,
     }
@@ -2864,6 +2959,8 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 let string = text.galley.text().to_string();
                 if string.contains("LISTROW") {
                     paint.listing.push((painted, clip));
+                } else if string.contains("FOCUSROW") {
+                    paint.focus = Some((painted, clip));
                 } else if string == "MODAL" {
                     paint.band = Some(clip);
                 } else if string == "PROGRESS" {
@@ -2943,6 +3040,91 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
 
     fn band_top(paint: &CardPaint) -> f32 {
         paint.band.expect("the band always paints").top()
+    }
+
+    /// Draw the program card with a program whose lines wrap, and report what
+    /// it painted. The executing line is line 4; the three lines above it are
+    /// long enough to take several rows each, which is the shape of
+    /// linuxcnc-logo.ngc.
+    fn paint_wrapped_listing(running: bool, height: f32) -> CardPaint {
+        let (_dir, profile) = program_fixture();
+        let ctx = egui::Context::default();
+        let raw = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 720.0),
+            )),
+            ..Default::default()
+        };
+        let mut app = None;
+        let mut output = ctx.run_ui(raw(), |ui| {
+            let backend = Box::new(crate::state::LocalBackend::new(
+                profile.clone(),
+                linc_core::model::PanelMode::Auto,
+            ));
+            app = Some(crate::shell::LincApp::new(
+                profile.clone(),
+                backend,
+                ui.ctx(),
+            ));
+        });
+        output.textures_delta.clear();
+        let mut app = app.unwrap();
+        let long = format!("G1 X1 Y1 ({})", "long comment ".repeat(20));
+        let text = format!("{long}\n{long}\n{long}\nFOCUSROW G1 X2 Y2\nG1 X3 Y3\n");
+        app.snapshot.program.content = Some(std::sync::Arc::new(text));
+        app.snapshot.program.line_count = 5;
+        app.snapshot.program.motion_line = 4;
+        app.snapshot.program.current_line = 4;
+        app.snapshot.task.running = running;
+        app.program.selected_line = 4;
+        app.snapshot.program.modal = (0..3)
+            .map(|index| (format!("G{}", index + 1), "1.0".to_string()))
+            .collect();
+        let slot =
+            egui::Rect::from_min_size(egui::Pos2::new(400.0, 20.0), egui::vec2(360.0, height));
+        let mut out = ctx.run_ui(raw(), |ui| {
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(slot)
+                    .layout(egui::Layout::top_down(egui::Align::Min)),
+            );
+            super::program_card_sized(&app, &mut child, height);
+        });
+        out.textures_delta.clear();
+        let mut paint = CardPaint::default();
+        for clipped in &out.shapes {
+            walk_card_paint(&clipped.shape, clipped.clip_rect, &mut paint);
+        }
+        paint
+    }
+
+    /// The defect: the running window was counted in logical lines, so three
+    /// wrapped lines above the executing line pushed it down the card instead
+    /// of leaving it in the middle. The listing must place the executing block
+    /// by the rows it really takes.
+    #[test]
+    fn a_wrapped_line_above_the_running_line_keeps_it_in_the_middle() {
+        let paint = paint_wrapped_listing(true, 600.0);
+        let (focus, clip) = paint.focus.expect("the executing line paints");
+        let middle = (clip.top() + clip.bottom()) * 0.5;
+        assert!(
+            (focus.center().y - middle).abs() <= 2.0,
+            "the executing line sits at {:.1}, not the listing's middle {middle:.1}",
+            focus.center().y
+        );
+        assert!(
+            focus.bottom() <= clip.bottom() + 0.5,
+            "and it stays on the card: {focus:?} in {clip:?}"
+        );
+        // Idle keeps the selection visible too, with the window starting at
+        // line 1 rather than at a padded offset.
+        let idle = paint_wrapped_listing(false, 600.0);
+        let (focus, clip) = idle.focus.expect("the selected line paints");
+        assert!(
+            focus.top() >= clip.top() - 0.5 && focus.bottom() <= clip.bottom() + 0.5,
+            "the idle selection is in the window: {focus:?} in {clip:?}"
+        );
     }
 
     /// The defect: a band taller than the space the listing had left (a second

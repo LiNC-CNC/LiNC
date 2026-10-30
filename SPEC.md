@@ -670,7 +670,9 @@ Program rules:
   connector crosses the part. A program whose only move is that rapid still
   draws it.
 - The toolpath card's status line is the key: `— CUT`, `-- RAPID`, `— LIVE`
-  and an amber `▽ TOOL`, with the view (`3D / ISO`) and `ZOOM` on the right. A
+  and an amber `▽ TOOL`, with the view (`3D / ISO`) and the width of the
+  card's viewport in millimetres on the right (`3D / ISO  •  184.00 mm`). The
+  number is the drawn scale, so it follows a fit and the zoom chords alike. A
   legend box inside the graph is not drawn — it repeated that line and covered
   the drawing.
 - The toolhead is an inverted amber triangle whose point sits on the tool
@@ -724,7 +726,10 @@ Program rules:
 - On editor changes, wait for the debounce, run the preview syntax check, then
   replace the graph only if it succeeds. On failure, keep the last valid graph,
   mark the offending line and show a syntax error; never move the machine.
-- While running, the editor is read-only and auto-scrolls to the current line.
+- While running, the editor is read-only and auto-scrolls to the current line,
+  centring its whole wrapped block rather than its first row. The MAIN program
+  card does the same, measured in the rows the lines really take, so wrapped
+  code above the executing line cannot push it down the card.
 - Edits and saves are allowed only when stopped, `program_protect` is off and
   the panel is in `EDIT`.
 - The physical panel's **PROGRAM PROTECT** switch is authoritative. While it

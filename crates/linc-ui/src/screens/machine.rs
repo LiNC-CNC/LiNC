@@ -57,29 +57,35 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
                         |app, ui, _h| common::following_error_card(app, ui, bottom_height),
                     );
                 } else {
-                let servo = !app.servo_load_rows().is_empty();
-                let cards = if servo { 2.0 } else { 1.0 };
-                let card_width = bottom_row_card_width(graph_width, cards, 180.0);
-                ui.horizontal_top(|ui| {
-                    // The explicit gap below is the whole gap: the default
-                    // item spacing would add 8 more per card and push the
-                    // servo card past the graph's right edge.
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    bottom_card(app, ui, card_width, bottom_height, "feed", |app, ui, _h| {
-                        common::feed_speed_card(app, ui, bottom_height);
+                    let servo = !app.servo_load_rows().is_empty();
+                    let cards = if servo { 2.0 } else { 1.0 };
+                    let card_width = bottom_row_card_width(graph_width, cards, 180.0);
+                    ui.horizontal_top(|ui| {
+                        // The explicit gap below is the whole gap: the default
+                        // item spacing would add 8 more per card and push the
+                        // servo card past the graph's right edge.
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        bottom_card(app, ui, card_width, bottom_height, "feed", |app, ui, _h| {
+                            common::feed_speed_card(app, ui, bottom_height);
+                        });
+                        if servo {
+                            ui.add_space(8.0);
+                            bottom_card(
+                                app,
+                                ui,
+                                card_width,
+                                bottom_height,
+                                "servo",
+                                |app, ui, _h| {
+                                    common::servo_load_card(
+                                        &app.servo_load_rows(),
+                                        ui,
+                                        bottom_height,
+                                    )
+                                },
+                            );
+                        }
                     });
-                    if servo {
-                        ui.add_space(8.0);
-                        bottom_card(
-                            app,
-                            ui,
-                            card_width,
-                            bottom_height,
-                            "servo",
-                            |app, ui, _h| common::servo_load_card(&app.servo_load_rows(), ui, bottom_height),
-                        );
-                    }
-                });
                 }
             },
         );
@@ -171,14 +177,14 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
             // One legend implementation for every toolpath card: the
             // main window had its own copy, which is why its tool key was a
             // circle while the others were already a triangle.
-            common::toolpath_header(ui, view.label(), app.program.graph_zoom, app.graph_style.remaining);
+            let header = common::toolpath_header(ui, app.graph_style.remaining);
             let mut zoom = app.program.graph_zoom;
             let mut pan = app.program.graph_pan;
             let mut yaw = app.program.graph_yaw;
             let mut pitch = app.program.graph_pitch;
             let mut fit = app.program.fit_requested;
             let mut auto_fit = app.program.graph_auto_fit;
-            let response = common::trajectory(
+            let drawn = common::trajectory(
                 app,
                 ui,
                 &preview,
@@ -204,10 +210,20 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
             app.program.graph_pitch = pitch;
             app.program.fit_requested = false;
             app.program.graph_auto_fit = auto_fit;
+            common::toolpath_status(ui, header, view.label(), drawn.span_mm);
             // The block the MDI pane is composing, drawn over the program in
             // the pane's own colour. Nothing is drawn for an empty or
             // unparsable block, and the pane is only up in MDI.
-            crate::screens::mdi::draw_overlay(app, ui, response.rect, view, zoom, pan, yaw, pitch);
+            crate::screens::mdi::draw_overlay(
+                app,
+                ui,
+                drawn.response.rect,
+                view,
+                zoom,
+                pan,
+                yaw,
+                pitch,
+            );
             ui.horizontal(|ui| {
                 let program = if app.snapshot.program.display_name.is_empty() {
                     "NO PROGRAM".to_string()
@@ -301,7 +317,8 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                         false,
                         false,
                         None,
-                    );
+                    )
+                    .response;
                     app.program.graph_zoom = zoom;
                     app.program.graph_pan = pan;
                     app.program.graph_yaw = yaw;
@@ -340,7 +357,9 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                             card_width,
                             bottom_height,
                             "servo",
-                            |app, ui, _h| common::servo_load_card(&app.servo_load_rows(), ui, bottom_height),
+                            |app, ui, _h| {
+                                common::servo_load_card(&app.servo_load_rows(), ui, bottom_height)
+                            },
                         );
                     }
                 });

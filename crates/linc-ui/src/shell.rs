@@ -9394,12 +9394,20 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         }
     }
 
-    /// The card's ZOOM readout, as painted in one frame.
+    /// The card's status readout, as painted in one frame.
     fn zoom_readout(output: &egui::FullOutput) -> Option<String> {
         painted_text(output)
             .into_iter()
             .map(|(text, _)| text)
-            .find(|text| text.starts_with("ZOOM "))
+            .find(|text| text.contains(" mm"))
+    }
+
+    /// Parse the millimetres out of the card's status readout.
+    fn readout_mm(readout: &str) -> f32 {
+        readout
+            .split_whitespace()
+            .find_map(|word| word.parse::<f32>().ok())
+            .expect("the status line carries a millimetre figure")
     }
 
     /// Ctrl+Plus and Ctrl+Minus are the view's even while the G-code editor
@@ -9455,11 +9463,13 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         );
     }
 
-    /// Ctrl+0 refits, and the card's readout shows the zoom the card is drawn
-    /// at. It used to show a placeholder 1.0x for the frame the fit request was
-    /// made in — the whole visible effect of the key on an already-fitted view.
+    /// Ctrl+0 refits, and the card's status reports the viewport width in mm
+    /// that the card is drawn at. A status painted before the card would show
+    /// the previous scale for the fit frame; this one is painted after the
+    /// projection has been made, so the frame that refits already reads the
+    /// fitted width.
     #[test]
-    fn ctrl_zero_refits_the_toolpath_and_the_zoom_readout_never_shows_a_placeholder() {
+    fn ctrl_zero_refits_the_toolpath_and_the_mm_status_follows_it() {
         let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
         harness
             .app
@@ -9475,11 +9485,13 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         harness.app.program.graph_auto_fit = false;
         harness.app.program.graph_zoom = 4.0;
         let output = harness.frame_full(Vec::new());
-        assert_eq!(
-            zoom_readout(&output).as_deref(),
-            Some("ZOOM 4.0x"),
-            "the readout shows the zoom the card is drawn at"
+        let zoomed = zoom_readout(&output).expect("the card paints its status line");
+        assert!(
+            !zoomed.starts_with("ZOOM"),
+            "the readout is the viewport width, not the zoom factor: {zoomed:?}"
         );
+        let zoomed_mm = readout_mm(&zoomed);
+        assert!(zoomed_mm > 0.0, "the width is a real span: {zoomed:?}");
 
         let output = harness.frame_full(vec![egui::Event::Key {
             key: egui::Key::Num0,
@@ -9497,18 +9509,21 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             harness.app.program.graph_auto_fit,
             "the fit re-arms the follow-the-program framing"
         );
-        assert_eq!(
-            zoom_readout(&output).as_deref(),
-            Some("ZOOM 4.0x"),
-            "the fit frame still reports the zoom that was on screen; the old code wrote 1.0 here"
+        // The fit frame is already drawn at the fitted scale, so its status is
+        // the fitted width. The span is inverse to the zoom, and the operator's
+        // zoom was 4x the fitted one.
+        let fitted_readout = zoom_readout(&output).expect("the fitted card paints its status");
+        let fitted_mm = readout_mm(&fitted_readout);
+        assert!(
+            (fitted_mm / zoomed_mm - 4.0 / fitted).abs() < 0.25,
+            "the fit frame reports the fitted width: {fitted_readout:?} against {zoomed:?} at fitted zoom {fitted}"
         );
-        let expected = format!("ZOOM {fitted:.1}x");
         for _ in 0..2 {
             let output = harness.frame_full(Vec::new());
             assert_eq!(
                 zoom_readout(&output).as_deref(),
-                Some(expected.as_str()),
-                "the fitted zoom is what the readout shows from then on"
+                Some(fitted_readout.as_str()),
+                "the fitted width is what the readout shows from then on"
             );
         }
     }

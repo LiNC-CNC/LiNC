@@ -126,6 +126,11 @@ pub struct TrajectoryView<'a> {
     pub view: ViewMode,
     pub zoom: f32,
     pub pan: Vec2,
+    /// Width of the card's viewport in model units, written back by
+    /// `draw_trajectory` from the projection that actually drew it. The status
+    /// line reports this instead of the zoom factor: the operator reads the
+    /// scale in millimetres, and the number follows a fit as well as a wheel.
+    pub span_mm: f32,
     /// Orbit of the 3D view: rotation about the vertical axis and elevation.
     /// Ignored by the flat views, which have a fixed direction.
     pub yaw: f32,
@@ -209,6 +214,7 @@ impl<'a> TrajectoryView<'a> {
             },
             zoom: 1.0,
             pan: Vec2::ZERO,
+            span_mm: 0.0,
             yaw: DEFAULT_YAW,
             pitch: DEFAULT_PITCH,
             show_grid: true,
@@ -449,6 +455,13 @@ impl Projection {
         )
     }
 
+    /// Width of a card `width` pixels wide in model units at this projection's
+    /// zoom. Panning moves the picture without rescaling it, so it does not
+    /// enter here.
+    pub fn span(&self, width: f32) -> f32 {
+        width / (self.scale * self.zoom).max(1e-6)
+    }
+
     fn draw_line(painter: &Painter, start: Pos2, end: Pos2, stroke: Stroke, dotted: bool) {
         if dotted {
             draw_dotted(painter, start, end, stroke);
@@ -657,7 +670,8 @@ fn fit_zoom_pan(
         Projection::new(target, rect, mode, yaw, pitch, 1.0, Vec2::ZERO).mirrored(mirror_x);
     let base =
         Projection::new(reference, rect, mode, yaw, pitch, 1.0, Vec2::ZERO).mirrored(mirror_x);
-    let zoom = (target_projection.scale / base.scale).clamp(MIN_ZOOM, max_zoom(base.scale, rect.width()));
+    let zoom =
+        (target_projection.scale / base.scale).clamp(MIN_ZOOM, max_zoom(base.scale, rect.width()));
     let centre = base.project(target.center());
     (zoom, (rect.center() - centre) * zoom)
 }
@@ -1116,7 +1130,13 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         if scroll.abs() > 0.0 {
             let drawn = rect.shrink(12.0);
             let scale = Projection::new(
-                reference, drawn, view.view, view.yaw, view.pitch, 1.0, Vec2::ZERO,
+                reference,
+                drawn,
+                view.view,
+                view.yaw,
+                view.pitch,
+                1.0,
+                Vec2::ZERO,
             )
             .scale;
             view.zoom = (view.zoom * (1.0 + scroll * 0.002))
@@ -1193,7 +1213,9 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     // that auto-fitted for a while would otherwise compare against the last tip
     // it saw before the fit took over, read the whole stretch of motion as one
     // jump, and pan the moment the operator dropped the fit.
-    let moved = view.tool_tip.map(|tip| tool_moved(ui, view.trail_point(tip)));
+    let moved = view
+        .tool_tip
+        .map(|tip| tool_moved(ui, view.trail_point(tip)));
     // Idle: follow the highlighted block instead of the tool. Walking a long
     // program with the cursor moves the highlight down the code, and the card
     // has to keep up or the operator is looking somewhere else entirely. While a
@@ -1253,9 +1275,10 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     )
     .mirrored(view.mirror_x);
     // The projection clamps the zoom to the span ceiling, so write the clamped
-    // value back: the stored zoom (and the `ZOOM {:.1}x` status drawn later)
-    // must never disagree with what is on the card.
+    // value back: the stored zoom (and the span status drawn later) must never
+    // disagree with what is on the card.
     view.zoom = projection.zoom;
+    view.span_mm = projection.span(rect.width());
 
     // Grid and axis labels.
     if view.show_grid {
@@ -1625,12 +1648,12 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             Align2::LEFT_TOP,
             if view.view == ViewMode::Iso3d {
                 format!(
-                    "{}  •  ZOOM {:.1}x  •  MMB ORBIT",
+                    "{}  •  {}  •  MMB ORBIT",
                     view.view.label(),
-                    view.zoom
+                    span_label_mm(view.span_mm)
                 )
             } else {
-                format!("{}  •  ZOOM {:.1}x", view.view.label(), view.zoom)
+                format!("{}  •  {}", view.view.label(), span_label_mm(view.span_mm))
             },
             FontId::monospace(9.0 * FONT_SCALE),
             theme::MUTED,
@@ -1658,6 +1681,21 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     );
 
     response
+}
+
+/// The viewport width in model units, written the way a dimension is: whole
+/// millimetres across a machine, three decimals at the deepest zoom.
+pub fn span_label_mm(span_mm: f32) -> String {
+    let span = span_mm.max(0.0);
+    if span >= 100.0 {
+        format!("{span:.0} mm")
+    } else if span >= 10.0 {
+        format!("{span:.1} mm")
+    } else if span >= 1.0 {
+        format!("{span:.2} mm")
+    } else {
+        format!("{span:.3} mm")
+    }
 }
 
 /// The axes present in `labels`, as a screen direction or `None` when the axis
@@ -1777,17 +1815,50 @@ fn stock_bounds(program: &Bounds3) -> Option<Bounds3> {
     })
 }
 
-/// Model-space height of the dimension label for a box of the given extents at
-/// the projection's current zoom.
+/// Screen span, in pixels, of a box projected through `projection`.
+fn projected_extent(bounds: Bounds3, projection: &Projection) -> (f64, f64) {
+    let mut min = [f64::INFINITY; 2];
+    let mut max = [f64::NEG_INFINITY; 2];
+    for corner in 0..8 {
+        let point = [
+            if corner & 1 == 0 {
+                bounds.min[0]
+            } else {
+                bounds.max[0]
+            },
+            if corner & 2 == 0 {
+                bounds.min[1]
+            } else {
+                bounds.max[1]
+            },
+            if corner & 4 == 0 {
+                bounds.min[2]
+            } else {
+                bounds.max[2]
+            },
+        ];
+        let at = projection.project(point);
+        min = [min[0].min(at.x as f64), min[1].min(at.y as f64)];
+        max = [max[0].max(at.x as f64), max[1].max(at.y as f64)];
+    }
+    (max[0] - min[0], max[1] - min[1])
+}
+
+/// Model-space height of the dimension label for a box drawn at the
+/// projection's current zoom.
 ///
-/// A fixed 2.5 % of the box's longest side, never smaller than 18 px on screen.
-/// At the fitted zoom that fraction and the 18 px floor agree, which is why
-/// linc-demo-mill.ngc already looks right; when the operator zooms or loads a
-/// bigger or smaller part the label scales with the box drawn on screen instead
-/// of being clamped to the box's thinnest axis.
-fn dimension_glyph(size: [f64; 3], projection: &Projection) -> f64 {
-    let extent = size[0].max(size[1]).max(size[2]).max(0.5);
+/// A fixed 2.5 % of the box's largest span *on the card*, never smaller than
+/// 18 px on screen. Sizing it from the 3-D extents instead scaled the label by
+/// an axis the view does not show: a wide, flat part drawn in the YZ view fits
+/// its 40 mm width to the card, so the labels became several times taller than
+/// the same labels in the other views. At the fitted zoom the fraction and the
+/// 18 px floor agree, which is why linc-demo-mill.ngc already looks right, and
+/// when the operator zooms or loads a bigger or smaller part the label scales
+/// with the box drawn on screen.
+fn dimension_glyph(bounds: Bounds3, projection: &Projection) -> f64 {
+    let (width, height) = projected_extent(bounds, projection);
     let pixels_per_unit = (projection.scale * projection.zoom).max(1e-6) as f64;
+    let extent = (width.max(height) / pixels_per_unit).max(0.5);
     (extent * 0.025).max(18.0 / pixels_per_unit)
 }
 
@@ -1812,7 +1883,7 @@ fn draw_bounds_dimensions(
     // `dimension_glyph`; the gap follows the grown label so the dimension line
     // keeps clear of it.
     let pixels_per_unit = (projection.scale * projection.zoom).max(1e-6) as f64;
-    let glyph = dimension_glyph(size, projection);
+    let glyph = dimension_glyph(bounds, projection);
     let gap = (glyph * 1.2).max(22.0 / pixels_per_unit);
     let color = theme::dim(theme::CYAN, 190);
     let offset = work_offset.unwrap_or([0.0; 3]);
@@ -2541,8 +2612,8 @@ pub fn draw_traces(ui: &mut Ui, series: &[(&[f64], Color32)], height: f32) -> Re
             .iter()
             .enumerate()
             .map(|(index, value)| {
-                let x = rect.left()
-                    + rect.width() * index as f32 / (values.len() - 1).max(1) as f32;
+                let x =
+                    rect.left() + rect.width() * index as f32 / (values.len() - 1).max(1) as f32;
                 let y =
                     rect.bottom() - 3.0 - ((*value - min) / span) as f32 * (rect.height() - 6.0);
                 Pos2::new(x, y)
@@ -2620,10 +2691,49 @@ mod tests {
             max: [10.0, 10.0, 1.0],
         };
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0));
-        let projection =
-            Projection::new(bounds, rect, ViewMode::TopXy, 0.0, 0.0, 1e7, Vec2::ZERO);
+        let projection = Projection::new(bounds, rect, ViewMode::TopXy, 0.0, 0.0, 1e7, Vec2::ZERO);
         assert!(projection.zoom <= max_zoom(projection.scale, rect.width()));
         assert!(projection.zoom >= MIN_ZOOM);
+    }
+
+    #[test]
+    fn the_card_reports_its_viewport_width_in_mm() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0));
+        let bounds = Bounds3 {
+            min: [0.0, 0.0, 0.0],
+            max: [100.0, 50.0, 20.0],
+        };
+        let projection = Projection::new(bounds, rect, ViewMode::TopXy, 0.0, 0.0, 1.0, Vec2::ZERO);
+        let fitted = projection.span(rect.width());
+        assert!(
+            (fitted - rect.width() / (projection.scale * projection.zoom)).abs() < 1e-3,
+            "the span is the card's width in model units: {fitted}"
+        );
+        // The card spans more than the part's 100 mm: the fit leaves its 18 %
+        // margin, and the number describes the card, not the part.
+        assert!(fitted > 100.0);
+        // Zooming in halves the span; panning does not change it.
+        let zoomed = Projection::new(bounds, rect, ViewMode::TopXy, 0.0, 0.0, 2.0, Vec2::ZERO);
+        assert!((zoomed.span(rect.width()) - fitted * 0.5).abs() < 1e-3);
+        let panned = Projection::new(
+            bounds,
+            rect,
+            ViewMode::TopXy,
+            0.0,
+            0.0,
+            1.0,
+            Vec2::new(30.0, -12.0),
+        );
+        assert!((panned.span(rect.width()) - fitted).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_span_label_keeps_the_precision_the_scale_needs() {
+        assert_eq!(span_label_mm(412.7), "413 mm");
+        assert_eq!(span_label_mm(42.75), "42.8 mm");
+        assert_eq!(span_label_mm(4.271), "4.27 mm");
+        assert_eq!(span_label_mm(0.0421), "0.042 mm");
+        assert_eq!(span_label_mm(-1.0), "0.000 mm");
     }
 
     #[test]
@@ -2643,17 +2753,41 @@ mod tests {
             min: [0.0, 0.0, 0.0],
             max: [1840.0, 1440.0, 300.0],
         };
-        let small_size = [184.0, 144.0, 30.0];
-        let large_size = [1840.0, 1440.0, 300.0];
         let small_proj = Projection::new(small, rect, ViewMode::TopXy, 0.0, 0.0, 1.0, Vec2::ZERO);
         let large_proj = Projection::new(large, rect, ViewMode::TopXy, 0.0, 0.0, 1.0, Vec2::ZERO);
         let small_px =
-            dimension_glyph(small_size, &small_proj) * (small_proj.scale * small_proj.zoom) as f64;
+            dimension_glyph(small, &small_proj) * (small_proj.scale * small_proj.zoom) as f64;
         let large_px =
-            dimension_glyph(large_size, &large_proj) * (large_proj.scale * large_proj.zoom) as f64;
+            dimension_glyph(large, &large_proj) * (large_proj.scale * large_proj.zoom) as f64;
         assert!(
             (small_px / large_px - 1.0).abs() < 0.01,
             "small {small_px} px vs large {large_px} px"
+        );
+    }
+
+    #[test]
+    fn a_side_view_sizes_dimension_labels_from_the_box_it_shows() {
+        // A wide, flat part: X 180 mm, Y 40 mm, no Z extent. The YZ view fits
+        // the 40 mm width to the card, so its scale is several times the XY
+        // view's. Sizing the glyph from the 3-D longest side (180 mm) then drew
+        // the YZ labels that many times too tall; the label must follow the box
+        // on the card instead.
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 400.0));
+        let bounds = Bounds3 {
+            min: [0.0, 0.0, 0.0],
+            max: [180.0, 40.0, 0.0],
+        };
+        let top = Projection::new(bounds, rect, ViewMode::TopXy, 0.0, 0.0, 1.0, Vec2::ZERO);
+        let side = Projection::new(bounds, rect, ViewMode::SideYz, 0.0, 0.0, 1.0, Vec2::ZERO);
+        let top_px = dimension_glyph(bounds, &top) * (top.scale * top.zoom) as f64;
+        let side_px = dimension_glyph(bounds, &side) * (side.scale * side.zoom) as f64;
+        assert!(
+            (top_px - side_px).abs() < 0.5,
+            "the YZ label is {side_px} px against the XY view's {top_px} px"
+        );
+        assert!(
+            (side_px - 18.0).abs() < 0.5,
+            "the side view keeps the readable 18 px floor, got {side_px}"
         );
     }
 
@@ -2668,10 +2802,9 @@ mod tests {
             min: [0.0, 0.0, 0.0],
             max: [184.0, 144.0, 30.0],
         };
-        let size = [184.0, 144.0, 30.0];
         let projection = Projection::new(bounds, rect, ViewMode::TopXy, 0.0, 0.0, 1.0, Vec2::ZERO);
         let on_screen =
-            dimension_glyph(size, &projection) * (projection.scale * projection.zoom) as f64;
+            dimension_glyph(bounds, &projection) * (projection.scale * projection.zoom) as f64;
         assert!(
             (on_screen - 18.0).abs() < 0.5,
             "on-screen glyph {on_screen} px, expected about 18"
