@@ -263,13 +263,17 @@ behaviour; `--hal --no-window` is the same thing from the command line. Because
 `scripts/sim3d-hal.sh` passes the environment through, the setting can live in
 whatever starts LinuxCNC.
 
-As HAL startup under LinuxCNC (`scripts/start-sim.sh` runs `configs/sim.ini`,
-whose `[HAL]` section loads `hal/linc-sim3d.hal`):
+As HAL startup under LinuxCNC (`scripts/start-sim.sh --sim3d` runs
+`configs/sim.ini`, whose `[HAL]` section loads `hal/linc-sim3d.hal`):
 
 ```
-scripts/start-sim.sh --detach       # LinuxCNC + HAL + panel + HMI, and the 3D window
-LINC_CONFIG=configs/sim.toml linc   # (the script does this for you)
+scripts/start-sim.sh --detach --sim3d   # LinuxCNC + HAL + panel + HMI, and the 3D window
+LINC_CONFIG=configs/sim.toml linc       # (the script does this for you)
 ```
+
+Without `--sim3d` the launcher runs `configs/sim-no3d.ini`, which loads
+`hal/linc-sim-no3d.hal` instead: the probe input then has only the panel's
+PROBE key behind it, and this simulator is not in the session at all.
 
 `hal/linc-sim3d.hal` runs `scripts/sim3d-hal.sh`, which `exec`s
 `target/release/linc-sim3d --hal --config configs/sim3d.toml` (or the debug

@@ -2,10 +2,10 @@
 //!
 //! configs/sim-no3d.ini is configs/sim.ini with the linc-sim3d HAL file swapped
 //! for hal/linc-sim-no3d.hal, which keeps the panel PROBE key wired to
-//! motion.probe-input, and scripts/start-sim.sh --no-sim3d is what selects it.
-//! These tests read the repository files, so editing sim.ini (or renaming the
-//! flag or its INI) without the counterpart fails here instead of silently
-//! starting the wrong rig.
+//! motion.probe-input, and the launcher loads that INI unless `--sim3d` asks
+//! for the 3D rig. These tests read the repository files, so editing sim.ini
+//! (or renaming the flag or its INI) without the counterpart fails here instead
+//! of silently starting the wrong rig.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -188,22 +188,32 @@ fn the_no_simulator_rig_loads_its_own_probe_reader_once() {
 }
 
 #[test]
-fn the_launcher_offers_the_flag_and_the_ini_it_selects() {
+fn the_launcher_runs_without_the_simulator_by_default() {
     let script = read_repo_file("scripts/start-sim.sh");
 
     assert!(
-        script.contains("--no-sim3d"),
-        "the launcher must offer --no-sim3d"
+        script.lines().any(|line| line.trim() == "SIM3D=0"),
+        "the simulator is off until a flag asks for it"
     );
     assert!(
         script
             .lines()
-            .any(|line| line.trim() == "--no-sim3d) NO_SIM3D=1 ;;"),
-        "the flag must set NO_SIM3D"
+            .any(|line| line.trim() == "--sim3d) SIM3D=1 ;;"),
+        "--sim3d must turn the simulator on"
+    );
+    assert!(
+        script
+            .lines()
+            .any(|line| line.trim() == "--no-sim3d) SIM3D=0 ;;"),
+        "--no-sim3d stays accepted and still asks for no simulator"
     );
     assert!(
         script.contains("INI=\"$ROOT/configs/sim-no3d.ini\""),
-        "the flag must select configs/sim-no3d.ini"
+        "the default rig must select configs/sim-no3d.ini"
+    );
+    assert!(
+        script.contains("INI=\"$ROOT/configs/sim.ini\""),
+        "--sim3d must select configs/sim.ini"
     );
     assert!(
         script.contains("[[ -z \"${LINC_SIM_INI:-}\" ]]"),
@@ -212,7 +222,7 @@ fn the_launcher_offers_the_flag_and_the_ini_it_selects() {
     assert!(
         script
             .lines()
-            .any(|line| line.trim_start().starts_with('#') && line.contains("--no-sim3d")),
+            .any(|line| line.trim_start().starts_with('#') && line.contains("--sim3d")),
         "the flag belongs in the documented options at the top"
     );
 }
@@ -235,10 +245,10 @@ fn only_the_simulator_branch_builds_the_simulator() {
     let without = between(&script, "\n    else", "\n    fi");
     assert!(
         !without.contains("linc-sim3d"),
-        "--no-sim3d must not build or name the simulator: {without:?}"
+        "the rig without the simulator must not build or name it: {without:?}"
     );
 
-    // The requirement is gated on the same flag, and the flag clears it.
+    // The requirement follows the flag, and the flag follows --sim3d.
     let guard = script
         .lines()
         .find(|line| line.contains("NEED_SIM3D") && line.contains("SIM3D_BIN"))
@@ -250,7 +260,7 @@ fn only_the_simulator_branch_builds_the_simulator() {
     assert!(
         script
             .lines()
-            .any(|line| line.trim() == "(( NO_SIM3D )) && NEED_SIM3D=0"),
-        "--no-sim3d must clear NEED_SIM3D"
+            .any(|line| line.trim() == "NEED_SIM3D=$SIM3D"),
+        "the build requirement must follow --sim3d"
     );
 }

@@ -12,6 +12,7 @@
 #   --home            home every axis
 #   --load [FILE]     load a program; FILE defaults to the demo mill program
 #   --float           float the HMI window under Hyprland at 1280x720
+#   --sim3d           add the 3D machine simulator (see below)
 #   --no-probe-key    hide the panel's PROBE CONTACT test key (see below)
 #
 # The simulated panel shows its PROBE CONTACT key by default: it asserts
@@ -19,10 +20,12 @@
 # running a probe program. `--no-probe-key` hides it, and an explicit
 # LINC_PROBE_KEY in the environment wins over both.
 #
-# --no-sim3d starts the same rig without the 3D simulator: it loads
+# The rig runs without the 3D simulator by default: it loads
 # configs/sim-no3d.ini (configs/sim.ini minus the linc-sim3d HAL file), and the
-# simulator binary is neither required nor built. An explicit LINC_SIM_INI is a
-# deliberate choice, so it still wins over the flag's default.
+# simulator binary is neither required nor built. --sim3d adds it: the session
+# loads configs/sim.ini and target/release/linc-sim3d comes up with the HAL.
+# --no-sim3d is still accepted and asks for what the default already does. An
+# explicit LINC_SIM_INI is a deliberate choice, so it wins over either default.
 #
 # The E-stop and POWER ON keys are panel inputs, so they are asked of the panel
 # (`LINC_SIM_READY`) rather than pressed behind its back; start-sim.sh then runs
@@ -34,9 +37,11 @@
 #
 # Environment:
 #   LINC_SIM_CONFIG   profile (default: configs/sim.toml)
-#   LINC_SIM_INI      LinuxCNC INI (default: configs/sim.ini)
+#   LINC_SIM_INI      LinuxCNC INI (default: configs/sim-no3d.ini, or
+#                     configs/sim.ini with --sim3d)
 #   LINC_BIN          linc binary (default: target/release/linc)
-#   LINC_SIM3D_BIN    3D simulator HAL binary (default: target/release/linc-sim3d)
+#   LINC_SIM3D_BIN    3D simulator HAL binary (default: target/release/linc-sim3d;
+#                     only --sim3d needs it)
 #   LINC_LOG_LEVEL    RUST_LOG for linc/linc-panel (default: the binaries' own
 #                     filter — LiNC crates at info, everything else at warn)
 #   LINC_PROBE_KEY    show the panel's PROBE CONTACT key (default: 1 here;
@@ -46,7 +51,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 PROFILE="${LINC_SIM_CONFIG:-$ROOT/configs/sim.toml}"
-INI="${LINC_SIM_INI:-$ROOT/configs/sim.ini}"
+# The INI follows --sim3d, and an explicit LINC_SIM_INI; it is chosen below,
+# once the flags are read.
+INI="${LINC_SIM_INI:-}"
 BIN="${LINC_BIN:-$ROOT/target/release/linc}"
 PANEL_BIN="${LINC_PANEL_BIN:-$ROOT/target/release/linc-panel}"
 SIM3D_BIN="${LINC_SIM3D_BIN:-$ROOT/target/release/linc-sim3d}"
@@ -67,12 +74,10 @@ if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
     echo "no graphical session: set DISPLAY or WAYLAND_DISPLAY" >&2
     exit 1
 fi
-for file in "$PROFILE" "$INI"; do
-    if [[ ! -f "$file" ]]; then
-        echo "file not found: $file" >&2
-        exit 1
-    fi
-done
+if [[ ! -f "$PROFILE" ]]; then
+    echo "file not found: $PROFILE" >&2
+    exit 1
+fi
 
 DETACH=0
 RELEASE_ESTOP=0
@@ -80,7 +85,7 @@ POWER_ON=0
 HOME_AXES=0
 LOAD_PROGRAM=""
 FLOAT_WINDOW=0
-NO_SIM3D=0
+SIM3D=0
 PROBE_KEY=1
 READY_TIMEOUT="${LINC_READY_TIMEOUT:-60}"
 ARGS=()
@@ -100,7 +105,8 @@ while [[ $# -gt 0 ]]; do
             ;;
         --load=*) LOAD_PROGRAM="${1#--load=}" ;;
         --float) FLOAT_WINDOW=1 ;;
-        --no-sim3d) NO_SIM3D=1 ;;
+        --sim3d) SIM3D=1 ;;
+        --no-sim3d) SIM3D=0 ;;
         --no-probe-key) PROBE_KEY=0 ;;
         --timeout) READY_TIMEOUT="${2:?--timeout needs seconds}"; shift ;;
         *) ARGS+=("$1") ;;
@@ -116,18 +122,24 @@ if (( PROBE_KEY )) && [[ -z "${LINC_PROBE_KEY:-}" ]]; then
     export LINC_PROBE_KEY=1
 fi
 
-# --no-sim3d runs the same rig without the 3D simulator. An explicit
-# LINC_SIM_INI is a deliberate choice, so it wins over the flag's default.
-if (( NO_SIM3D )) && [[ -z "${LINC_SIM_INI:-}" ]]; then
-    INI="$ROOT/configs/sim-no3d.ini"
-    if [[ ! -f "$INI" ]]; then
-        echo "file not found: $INI" >&2
-        exit 1
+# The default rig has no 3D simulator and loads configs/sim-no3d.ini; --sim3d
+# loads configs/sim.ini instead. An explicit LINC_SIM_INI is a deliberate
+# choice, so it wins over either default, and it is checked for existence here
+# because this is where the INI to run is known.
+if [[ -z "${LINC_SIM_INI:-}" ]]; then
+    if (( SIM3D )); then
+        INI="$ROOT/configs/sim.ini"
+    else
+        INI="$ROOT/configs/sim-no3d.ini"
     fi
+fi
+if [[ ! -f "$INI" ]]; then
+    echo "file not found: $INI" >&2
+    exit 1
 fi
 
 # The build guard sits below the option parsing because it depends on it: the
-# normal rig also needs the simulator binary, --no-sim3d neither needs nor
+# 3D rig also needs the simulator binary, the default rig neither needs nor
 # builds it.
 #
 # `scripts/build-appimage.sh` writes its `--no-default-features` build to the
@@ -139,8 +151,7 @@ fi
 linc_has_nml() {
     ldd "$1" 2>/dev/null | grep -q 'libnml'
 }
-NEED_SIM3D=1
-(( NO_SIM3D )) && NEED_SIM3D=0
+NEED_SIM3D=$SIM3D
 if [[ ! -x "$BIN" || ! -x "$PANEL_BIN" || ( $NEED_SIM3D -eq 1 && ! -x "$SIM3D_BIN" ) ]] \
     || ! linc_has_nml "$BIN"; then
     echo "building LiNC release binaries..." >&2

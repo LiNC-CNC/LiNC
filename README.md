@@ -188,7 +188,7 @@ key into `motion.probe-input`. Cutting material is **not** simulated.
 ./target/debug/linc-sim3d --selftest                    # probe sweep, PASS/FAIL lines
 ```
 
-`--hal` is the mode `scripts/start-sim.sh` starts, so the rig shows the 3D window by default: one process owns the HAL component and the view, and closing the window (Esc) keeps sampling, so a probe move in progress is never interrupted. A headless rig sets `LINC_SIM3D_WINDOW=0` or passes `--no-window`; `--window` forces the window even when no display is detected.
+`--hal` is the mode `scripts/start-sim.sh --sim3d` starts: one process owns the HAL component and the view, and closing the window (Esc) keeps sampling, so a probe move in progress is never interrupted. The launcher leaves the simulator out by default (`configs/sim-no3d.ini`), so a session that should model the probe asks for it with `--sim3d`. A headless rig sets `LINC_SIM3D_WINDOW=0` or passes `--no-window`; `--window` forces the window even when no display is detected.
 
 Full documentation - pins, probe wiring, coordinates, STEP workpieces,
 performance and limitations - is in [docs/sim3d.md](docs/sim3d.md).
