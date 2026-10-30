@@ -884,6 +884,17 @@ fn live_state_key(key: &str) -> bool {
             .is_ok_and(|index| (5000..6000).contains(&index))
 }
 
+/// Whether a parameter outlives the subroutine that writes it.
+///
+/// "Subroutines can change the value of parameters above #30 and those changes
+/// will be visible to the calling code", and a named parameter whose name
+/// starts with an underscore is global; #1-#30 and a plain `#<name>` belong to
+/// the call that set them. Treating every parameter as call-local lost `#61`
+/// between `daisy.ngc`'s two subroutines and stopped the preview.
+fn global_key(key: &str) -> bool {
+    key.starts_with('_') || key.parse::<u32>().is_ok_and(|index| index >= 31)
+}
+
 fn record_iteration(traces: &mut [LoopTrace], index: Option<usize>, params: &Params) {
     let Some(index) = index else { return };
     let Some(trace) = traces.get_mut(index) else {
@@ -1043,6 +1054,29 @@ fn word_value(tokens: &[Token], letter: char) -> Option<f64> {
         }
     }
     None
+}
+
+/// One axis of the work offset the preview draws against, in machine units.
+/// G10 L2/L20 can change it mid-program, so it lives in a value the parser owns
+/// rather than in the map the caller passed in.
+fn offset_of(offsets: &AxisMap<f64>, name: &str) -> f64 {
+    offsets.get(name).copied().unwrap_or(0.0)
+}
+
+/// The system number a G5X name selects, as G10's P word spells it.
+fn wcs_index(name: &str) -> Option<u8> {
+    match name {
+        "G54" => Some(1),
+        "G55" => Some(2),
+        "G56" => Some(3),
+        "G57" => Some(4),
+        "G58" => Some(5),
+        "G59" => Some(6),
+        "G59.1" => Some(7),
+        "G59.2" => Some(8),
+        "G59.3" => Some(9),
+        _ => None,
+    }
 }
 
 fn word_int(tokens: &[Token], letter: char) -> Option<u32> {
@@ -2774,7 +2808,14 @@ fn plan_statements(
             }
             Stmt::SubStart => pc = after[pc],
             Stmt::SubEnd { line } | Stmt::Return { line } => match calls.pop() {
-                Some((return_to, saved)) => {
+                Some((return_to, mut saved)) => {
+                    // The callee's locals vanish with its frame; what it wrote to
+                    // a global parameter is the whole point of a global one.
+                    for (key, value) in params.iter() {
+                        if global_key(key) {
+                            saved.insert(key.clone(), *value);
+                        }
+                    }
                     params = saved;
                     pc = return_to + 1;
                 }
@@ -2821,7 +2862,13 @@ fn plan_statements(
                     pc += 1;
                     continue;
                 }
-                let mut frame = params.clone();
+                // Lexical scope: the callee sees the globals and not the
+                // caller's locals, and its arguments arrive as #1..#n.
+                let mut frame: Params = params
+                    .iter()
+                    .filter(|(key, _)| global_key(key))
+                    .map(|(key, value)| (key.clone(), *value))
+                    .collect();
                 for (index, value) in values.iter().enumerate() {
                     frame.insert((index + 1).to_string(), *value);
                 }
@@ -3048,8 +3095,9 @@ pub fn parse_preview_with(
             _ => None,
         }
     };
-    let offset_values =
-        |name: &str| -> f64 { offset.and_then(|map| map.get(name).copied()).unwrap_or(0.0) };
+    // The work offset the path is drawn against. It starts as the caller's and
+    // a G10 L2/L20 block changes it for the rest of the program.
+    let mut offsets: AxisMap<f64> = offset.cloned().unwrap_or_default();
 
     let mut position = current_position;
     let mut absolute = true;
@@ -3097,6 +3145,8 @@ pub fn parse_preview_with(
             continue;
         }
         let line_start_segment = preview.segments.len();
+        // Set by a G10 in this block: the block writes an offset, it never moves.
+        let mut g10 = false;
 
         // Modal words.
         for token in &tokens {
@@ -3140,6 +3190,8 @@ pub fn parse_preview_with(
                         lathe_diameter = false;
                     } else if (54.0..=59.3).contains(&value) {
                         wcs = format_g(value);
+                    } else if value == 10.0 {
+                        g10 = true;
                     }
                 }
             } else if token.kind == TokenKind::MCode {
@@ -3160,6 +3212,46 @@ pub fn parse_preview_with(
         // One X word, in machine units. Only X is a diameter; the work offset
         // an absolute word is drawn against is already in machine units.
         let dia = |value: f64| if lathe_diameter { value * 0.5 } else { value };
+
+        // G10 writes a coordinate system, it does not move. Drawing its axis
+        // words as a move put a rapid to the offset value on the path, so every
+        // probe macro that zeroed a WCS showed a spike to the origin.
+        if g10 {
+            let mode = word_int(&tokens, 'l').unwrap_or(0);
+            // P0 means the system that is active right now.
+            let index = word_int(&tokens, 'p').map(|index| index as u8);
+            let applies = match index {
+                Some(index) => wcs_index(&wcs) == Some(index),
+                None => true,
+            };
+            let mut row = offsets.clone();
+            for (letter, axis, axis_index) in [('x', "X", 0usize), ('y', "Y", 1), ('z', "Z", 2)] {
+                let Some(value) = word_value(&tokens, letter) else {
+                    continue;
+                };
+                let value = if axis_index == 0 {
+                    dia(mm(value))
+                } else {
+                    mm(value)
+                };
+                let value = match mode {
+                    // L2: the axis words are the offset itself.
+                    2 if absolute => value,
+                    2 => offset_of(&row, axis) + value,
+                    // L20: the axis words are what the current position should
+                    // read, so the offset is the gap between the two.
+                    20 => position[axis_index] - value,
+                    // L1/L10/L11 write the tool table, which the preview does
+                    // not read; the block still moves nothing.
+                    _ => continue,
+                };
+                row.insert(axis, value);
+            }
+            if applies && (mode == 2 || mode == 20) {
+                offsets = row;
+            }
+            continue;
+        }
 
         if let Some(value) = word_value(&tokens, 'f') {
             feed = Some(value);
@@ -3226,131 +3318,178 @@ pub fn parse_preview_with(
             }
         }
         if let Some(cycle) = drill_cycle.as_mut() {
-            // The interpreter turns polar words into a hole position too, one
-            // radius/angle step per repeat. Drawing the holes without them
-            // would look right and be wrong, so say so instead.
-            if has_polar_word {
-                preview.error = Some(SyntaxIssue {
-                    line: line_no,
-                    message: "polar coordinates in a drilling cycle are not drawn yet".into(),
-                });
-                break;
-            }
             cycle.retract_to_r = retract_to_r;
             // R first: in incremental mode the Z depth is measured from R.
             if let Some(value) = word_value(&tokens, 'r') {
                 cycle.r = if absolute {
-                    mm(value) + offset_values("Z")
+                    mm(value) + offset_of(&offsets, "Z")
                 } else {
                     position[2] + mm(value)
                 };
             }
             if let Some(value) = word_value(&tokens, 'z') {
                 cycle.depth = if absolute {
-                    mm(value) + offset_values("Z")
+                    mm(value) + offset_of(&offsets, "Z")
                 } else {
                     cycle.r + mm(value)
                 };
             }
-            let mut hole = position;
-            let mut has_hole_axis = false;
-            for (letter, axis) in [('x', 0usize), ('y', 1)] {
-                if let Some(value) = word_value(&tokens, letter) {
-                    has_hole_axis = true;
-                    let value = if axis == 0 { dia(mm(value)) } else { mm(value) };
-                    hole[axis] = if absolute {
-                        value + offset_values(&letter.to_ascii_uppercase().to_string())
-                    } else {
-                        position[axis] + value
-                    };
+            if has_polar_word && has_xy_word {
+                preview.error = Some(SyntaxIssue {
+                    line: line_no,
+                    message: "polar coordinates cannot be combined with X or Y words".into(),
+                });
+                break;
+            }
+            if has_polar_word && plane != Plane::Xy {
+                preview.error = Some(SyntaxIssue {
+                    line: line_no,
+                    message: "polar coordinates need the G17 plane".into(),
+                });
+                break;
+            }
+            // L repeats the whole cycle. With incremental words each pass steps
+            // once more, which is how `hole-circle.ngc` bolts a ring of holes in
+            // one block; in absolute mode every pass names the same hole.
+            let repeats = word_int(&tokens, 'l').unwrap_or(1).max(1);
+            let mut holes: Vec<[f64; 3]> = Vec::new();
+            // The first block of a cycle drills even without a hole word (Z
+            // only); a modal repeat needs X/Y/polar to name a new hole.
+            if (requested_cycle.is_some() && has_axis_word) || has_xy_word || has_polar_word {
+                if has_polar_word {
+                    // The interpreter resolves polar words in program
+                    // coordinates, so measure from the program origin and add
+                    // the work offset afterwards.
+                    let mut at = [
+                        position[0] - offset_of(&offsets, "X"),
+                        position[1] - offset_of(&offsets, "Y"),
+                    ];
+                    let mut failed = false;
+                    for _ in 0..repeats {
+                        match polar_target(at, polar_radius.map(mm), polar_theta, absolute) {
+                            Ok(next) => at = next,
+                            Err(message) => {
+                                preview.error = Some(SyntaxIssue {
+                                    line: line_no,
+                                    message: message.into(),
+                                });
+                                failed = true;
+                                break;
+                            }
+                        }
+                        holes.push([
+                            at[0] + offset_of(&offsets, "X"),
+                            at[1] + offset_of(&offsets, "Y"),
+                            position[2],
+                        ]);
+                    }
+                    if failed {
+                        break;
+                    }
+                } else {
+                    let mut hole = position;
+                    for _ in 0..repeats {
+                        for (letter, axis) in [('x', 0usize), ('y', 1)] {
+                            let Some(value) = word_value(&tokens, letter) else {
+                                continue;
+                            };
+                            let value = if axis == 0 { dia(mm(value)) } else { mm(value) };
+                            hole[axis] = if absolute {
+                                value
+                                    + offset_of(&offsets, &letter.to_ascii_uppercase().to_string())
+                            } else {
+                                hole[axis] + value
+                            };
+                        }
+                        holes.push(hole);
+                    }
                 }
             }
-            // The first block of a cycle drills even without X/Y (Z only); a
-            // modal repeat needs an X or Y to name a new hole.
-            let drill = (requested_cycle.is_some() && has_axis_word) || has_hole_axis;
-            if drill {
+            if !holes.is_empty() {
                 let depth = cycle.depth;
                 let r = cycle.r;
                 let initial = cycle.initial_z;
-                // 1. If the tool starts below R, move Z to R before X/Y.
-                if position[2] < r - 1e-9 {
-                    push_cycle_segment(
-                        &mut preview,
-                        position,
-                        [position[0], position[1], r],
-                        SegmentKind::Rapid,
-                        line_no,
-                        tool,
-                        pass,
-                    );
-                    position[2] = r;
+                for hole in holes {
+                    // 1. If the tool starts below R, move Z to R before X/Y.
+                    if position[2] < r - 1e-9 {
+                        push_cycle_segment(
+                            &mut preview,
+                            position,
+                            [position[0], position[1], r],
+                            SegmentKind::Rapid,
+                            line_no,
+                            tool,
+                            pass,
+                        );
+                        position[2] = r;
+                    }
+                    // 2. Rapid to the hole at the current Z.
+                    if (hole[0] - position[0]).abs() > 1e-9 || (hole[1] - position[1]).abs() > 1e-9
+                    {
+                        push_cycle_segment(
+                            &mut preview,
+                            position,
+                            [hole[0], hole[1], position[2]],
+                            SegmentKind::Rapid,
+                            line_no,
+                            tool,
+                            pass,
+                        );
+                        position[0] = hole[0];
+                        position[1] = hole[1];
+                    }
+                    // 3. Rapid down to the R plane.
+                    if (position[2] - r).abs() > 1e-9 {
+                        push_cycle_segment(
+                            &mut preview,
+                            position,
+                            [hole[0], hole[1], r],
+                            SegmentKind::Rapid,
+                            line_no,
+                            tool,
+                            pass,
+                        );
+                        position[2] = r;
+                    }
+                    // 4. Feed from R to the depth: this is the cutting move.
+                    if (position[2] - depth).abs() > 1e-9 {
+                        push_cycle_segment(
+                            &mut preview,
+                            position,
+                            [hole[0], hole[1], depth],
+                            SegmentKind::Feed,
+                            line_no,
+                            tool,
+                            pass,
+                        );
+                        position[2] = depth;
+                    }
+                    // 5. Rapid to clear Z: G98 keeps the initial Z when it is
+                    // above R, G99 (and a lower initial Z) clear to R.
+                    let clear = if !cycle.retract_to_r && initial > r + 1e-9 {
+                        initial
+                    } else {
+                        r
+                    };
+                    if (position[2] - clear).abs() > 1e-9 {
+                        push_cycle_segment(
+                            &mut preview,
+                            position,
+                            [hole[0], hole[1], clear],
+                            SegmentKind::Rapid,
+                            line_no,
+                            tool,
+                            pass,
+                        );
+                    }
+                    position = [hole[0], hole[1], clear];
                 }
-                // 2. Rapid to the hole at the current Z.
-                if (hole[0] - position[0]).abs() > 1e-9 || (hole[1] - position[1]).abs() > 1e-9 {
-                    push_cycle_segment(
-                        &mut preview,
-                        position,
-                        [hole[0], hole[1], position[2]],
-                        SegmentKind::Rapid,
-                        line_no,
-                        tool,
-                        pass,
-                    );
-                    position[0] = hole[0];
-                    position[1] = hole[1];
-                }
-                // 3. Rapid down to the R plane.
-                if (position[2] - r).abs() > 1e-9 {
-                    push_cycle_segment(
-                        &mut preview,
-                        position,
-                        [hole[0], hole[1], r],
-                        SegmentKind::Rapid,
-                        line_no,
-                        tool,
-                        pass,
-                    );
-                    position[2] = r;
-                }
-                // 4. Feed from R to the depth: this is the cutting move.
-                if (position[2] - depth).abs() > 1e-9 {
-                    push_cycle_segment(
-                        &mut preview,
-                        position,
-                        [hole[0], hole[1], depth],
-                        SegmentKind::Feed,
-                        line_no,
-                        tool,
-                        pass,
-                    );
-                    position[2] = depth;
-                }
-                // 5. Rapid to clear Z: G98 keeps the initial Z when it is
-                // above R, G99 (and a lower initial Z) clear to R.
-                let clear = if !cycle.retract_to_r && initial > r + 1e-9 {
-                    initial
-                } else {
-                    r
-                };
-                if (position[2] - clear).abs() > 1e-9 {
-                    push_cycle_segment(
-                        &mut preview,
-                        position,
-                        [hole[0], hole[1], clear],
-                        SegmentKind::Rapid,
-                        line_no,
-                        tool,
-                        pass,
-                    );
-                }
-                position = [hole[0], hole[1], clear];
                 saw_motion = true;
                 preview
                     .line_bounds
                     .insert(line_no, (line_start_segment, preview.segments.len()));
-                continue;
             }
-            // A G81/G82/G83/G73 line with no axis words only selects the mode.
+            // A G81/G82/G83/G73 line with no hole words only selects the mode.
             continue;
         }
 
@@ -3370,7 +3509,7 @@ pub fn parse_preview_with(
             };
             let value = if axis == 0 { dia(mm(value)) } else { mm(value) };
             let base = if absolute {
-                value + offset_values(name)
+                value + offset_of(&offsets, name)
             } else {
                 position[axis] + value
             };
@@ -3382,7 +3521,7 @@ pub fn parse_preview_with(
             if let Some(value) = word_value(&tokens, letter) {
                 let value = if axis == 0 { dia(mm(value)) } else { mm(value) };
                 target[axis] = if absolute {
-                    value + offset_values(&letter.to_ascii_uppercase().to_string())
+                    value + offset_of(&offsets, &letter.to_ascii_uppercase().to_string())
                 } else {
                     position[axis] + value
                 };
@@ -3408,13 +3547,13 @@ pub fn parse_preview_with(
             // the radius and angle are measured from the program origin and the
             // work offset is added afterwards.
             let program = [
-                position[0] - offset_values("X"),
-                position[1] - offset_values("Y"),
+                position[0] - offset_of(&offsets, "X"),
+                position[1] - offset_of(&offsets, "Y"),
             ];
             match polar_target(program, polar_radius.map(mm), polar_theta, absolute) {
                 Ok([x, y]) => {
-                    target[0] = x + offset_values("X");
-                    target[1] = y + offset_values("Y");
+                    target[0] = x + offset_of(&offsets, "X");
+                    target[1] = y + offset_of(&offsets, "Y");
                 }
                 Err(message) => {
                     preview.error = Some(SyntaxIssue {
@@ -3752,6 +3891,95 @@ mod tests {
         let (sin, cos) = 4.5f64.to_radians().sin_cos();
         assert!((end[0] - radius * cos).abs() < 1e-9, "{end:?}");
         assert!((end[1] - radius * sin).abs() < 1e-9, "{end:?}");
+    }
+
+    #[test]
+    fn a_polar_word_names_the_next_hole_in_a_drill_cycle() {
+        // polar.ngc: the first position establishes the radius, then `^` steps
+        // the angle. The interpreter turns those into hole positions, so the
+        // holes are drawn instead of the block being refused.
+        let preview = parse_preview(
+            "G21 G90 G17 G0 X63.5 Y0 Z5\nG81 R2.54 Z-12.7 F60\n^120\n^240\nM2\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let holes: Vec<[f64; 3]> = preview
+            .segments
+            .iter()
+            .filter(|segment| segment.kind == SegmentKind::Feed)
+            .map(|segment| segment.end)
+            .collect();
+        assert_eq!(holes.len(), 3, "{holes:?}");
+        assert!((holes[0][0] - 63.5).abs() < 1e-9, "{:?}", holes[0]);
+        let (sin, cos) = 120f64.to_radians().sin_cos();
+        assert!((holes[1][0] - 63.5 * cos).abs() < 1e-9, "{:?}", holes[1]);
+        assert!((holes[1][1] - 63.5 * sin).abs() < 1e-9, "{:?}", holes[1]);
+    }
+
+    #[test]
+    fn the_l_word_repeats_a_drill_cycle() {
+        // hole-circle.ngc in one block: six holes 60 degrees apart on a 3 inch
+        // bolt circle, each pass one polar step further round.
+        let preview = parse_preview(
+            "G20 G17 G90\nG0 X1.5 Y0 Z0\nG91 G81 R.1 Z-.5 ^60 L6 F10\nM2\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let holes: Vec<[f64; 3]> = preview
+            .segments
+            .iter()
+            .filter(|segment| segment.kind == SegmentKind::Feed)
+            .map(|segment| segment.end)
+            .collect();
+        assert_eq!(holes.len(), 6, "{holes:?}");
+        let radius = 1.5 * 25.4;
+        let (sin, cos) = 60f64.to_radians().sin_cos();
+        assert!((holes[0][0] - radius * cos).abs() < 1e-6, "{:?}", holes[0]);
+        assert!((holes[0][1] - radius * sin).abs() < 1e-6, "{:?}", holes[0]);
+        // The sixth pass is a full turn from the start.
+        assert!((holes[5][0] - radius).abs() < 1e-6, "{:?}", holes[5]);
+        assert!(holes[5][1].abs() < 1e-6, "{:?}", holes[5]);
+    }
+
+    #[test]
+    fn a_parameter_above_thirty_survives_a_subroutine_return() {
+        // daisy.ngc sets #61 in one subroutine and reads it in another.
+        // "Subroutines can change the value of parameters above #30 and those
+        // changes will be visible to the calling code"; #1-#30 and a plain
+        // `#<name>` are local to the call.
+        let text = "G21 G90\n#1 = 7\no100 sub\n#1 = 99\n#61 = 42\n#<local> = 5\n#<_kept> = 3\no100 endsub\no100 call\nG1 X[#1] Y[#61] F100\nG0 X[#<_kept>]\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        let feed = preview
+            .segments
+            .iter()
+            .find(|segment| segment.kind == SegmentKind::Feed)
+            .expect("a feed move");
+        assert_eq!((feed.end[0], feed.end[1]), (7.0, 42.0));
+        let end = preview.segments.last().expect("a move").end;
+        assert_eq!(end[0], 3.0, "the global named parameter is visible");
+    }
+
+    #[test]
+    fn a_g10_block_writes_an_offset_without_moving() {
+        // The probe macros zero a WCS with `G10 L2 P#5220 ...`. The axis words
+        // are an offset, not a destination, so the block draws no segment and
+        // the moves after it are drawn against the new row.
+        let preview = parse_preview(
+            "G21 G90 G54\nG0 X0 Y0 Z5\nG10 L2 P1 X10 Y20\nG0 X1 Y0\nM2\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert_eq!(preview.segments.len(), 2, "two G0 moves and no G10 move");
+        let end = preview.segments.last().expect("a move").end;
+        assert_eq!((end[0], end[1]), (11.0, 20.0));
     }
 
     #[test]
