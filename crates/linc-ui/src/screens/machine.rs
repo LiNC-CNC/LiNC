@@ -249,11 +249,16 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                             .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
-                    ui.label(
-                        RichText::new(readout.text())
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::ACCENT),
+                    // One line: a narrow card cuts the innermost loop rather
+                    // than wrapping the status row into a second line.
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(readout.line())
+                                .monospace()
+                                .size(theme::font_size(9.0))
+                                .color(theme::ACCENT),
+                        )
+                        .truncate(),
                     );
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

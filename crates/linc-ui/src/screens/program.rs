@@ -383,6 +383,17 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
         // One status line. The buffer's name and editability are in the header;
         // everything here is progress, so a wrapped row would only cost the
         // listing a line to say nothing twice.
+        let (status, status_color) = if let Some(error) = &app.program.preview.error {
+            (
+                format!("SYNTAX LN {}: {}", error.line, error.message),
+                theme::ERROR,
+            )
+        } else {
+            ("PREVIEW VALID".to_string(), theme::SUCCESS)
+        };
+        // Inside a subroutine the controller reports a line of the routine's own
+        // file and does not publish that file's name, so the preview names it.
+        let chip = subroutine_chip(app);
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(format!(
@@ -394,51 +405,51 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                 .size(theme::font_size(9.0))
                 .color(theme::MUTED),
             );
-            // Where the run is inside a loop, and the value its test is working
-            // with. The controller publishes no parameters, so this is the
+            // Where the run is inside a loop: each loop's counters and the pass
+            // it is on. The controller publishes no parameters, so this is the
             // preview's reading; the marker says so when the test reads the
-            // machine.
+            // machine. Cut to what the right group leaves rather than painted
+            // over it.
             if let Some(readout) =
                 crate::state::LoopReadout::current(&app.program.preview, &app.program.loop_progress)
             {
-                ui.label(
-                    RichText::new(readout.text())
+                let reserved = theme::measure(ui, &status, 9.0)
+                    + chip
+                        .as_deref()
+                        .map_or(0.0, |text| theme::measure(ui, text, 9.0) + 10.0)
+                    + 16.0;
+                let room = (ui.available_width() - reserved).max(60.0);
+                let text = fit_text(ui, &readout.line(), room);
+                let cut = text != readout.line();
+                let response = ui.label(
+                    RichText::new(text)
                         .monospace()
                         .size(theme::font_size(9.0))
                         .color(theme::ACCENT),
                 );
+                if cut {
+                    response.on_hover_text(readout.line());
+                }
             }
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 ui.add_space(8.0);
-                let (text, color) = if let Some(error) = &app.program.preview.error {
-                    (
-                        format!("SYNTAX LN {}: {}", error.line, error.message),
-                        theme::ERROR,
-                    )
-                } else {
-                    ("PREVIEW VALID".to_string(), theme::SUCCESS)
-                };
-                // Inside a subroutine the controller reports a line of the
-                // routine's own file and does not publish that file's name, so
-                // the preview names the routine.
-                let chip = subroutine_chip(app);
                 let chip_room = chip
                     .as_deref()
                     .map_or(0.0, |text| theme::measure(ui, text, 9.0) + 10.0);
                 let room = (ui.available_width() - chip_room).max(80.0);
-                let fitted = fit_text(ui, &text, room);
+                let fitted = fit_text(ui, &status, room);
                 let response = ui.label(
                     RichText::new(fitted.clone())
                         .monospace()
                         .size(theme::font_size(9.0))
-                        .color(color),
+                        .color(status_color),
                 );
                 // A cut message stays readable on hover instead of wrapping the
                 // row into a second line.
-                if fitted != text {
-                    response.on_hover_text(&text);
+                if fitted != status {
+                    response.on_hover_text(&status);
                 }
-                if let Some(chip) = chip {
+                if let Some(chip) = &chip {
                     ui.label(
                         RichText::new(chip)
                             .monospace()

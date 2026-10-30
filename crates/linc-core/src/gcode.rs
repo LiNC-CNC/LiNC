@@ -654,12 +654,15 @@ pub struct Preview {
     /// Every loop the program runs, with the parameters its test reads and the
     /// value each had when an iteration was entered.
     pub loops: Vec<LoopTrace>,
-    /// For each segment, the loop pass that produced it: the loop's index into
-    /// [Preview::loops] + 1 in the high half, the pass in the low half, and 0
-    /// for a block outside every loop. The controller reports only lines, and a
-    /// loop body repeats them, so this is what tells a running line's pass
-    /// apart from the same line in another pass.
+    /// For each segment, an index into [Preview::loop_stacks]: the loops a
+    /// block sits inside and the pass each is on. The controller reports only
+    /// lines, and a loop body repeats them, so this is what tells a running
+    /// line's pass apart from the same line in another pass.
     pub segment_loop: Vec<u32>,
+    /// The distinct loop stacks, outermost loop first, index 0 being "inside no
+    /// loop". A nested program re-enters the same few stacks, so the table
+    /// stays small while every segment still names its whole nest.
+    pub loop_stacks: Vec<Vec<(u32, u32)>>,
 }
 
 /// A loop the program runs, as the preview saw it.
@@ -695,6 +698,10 @@ pub struct LoopTrace {
     /// The parameters the test reads, as the interpreter keys them: `i` for
     /// `#<i>`, `1` for `#1`.
     pub variables: Vec<String>,
+    /// The subset of [LoopTrace::variables] the body assigns: the counters.
+    /// The rest are the limits the test compares them against, and a status
+    /// line naming a limit tells the operator nothing the program does not.
+    pub counters: Vec<String>,
     /// One entry per iteration the preview ran, in run order. Capped at
     /// [LOOP_TRACE_LIMIT] entries: a loop that runs longer is a program the
     /// preview is not going to describe anyway.
@@ -846,6 +853,7 @@ impl Preview {
             subroutines: Vec::new(),
             loops: Vec::new(),
             segment_loop: Vec::new(),
+            loop_stacks: vec![Vec::new()],
         }
     }
 
@@ -1732,17 +1740,15 @@ struct PlannedBlock {
     loop_at: u32,
 }
 
-/// Pack a loop index and pass into [Preview::segment_loop]'s word.
-fn pack_pass(trace: usize, pass: usize) -> u32 {
-    (((trace as u32) + 1) << 16) | (pass as u32 & 0xffff)
-}
-
-/// The loop index and pass packed into [`Preview::segment_loop`].
-pub fn unpack_pass(packed: u32) -> Option<(usize, usize)> {
-    if packed == 0 {
-        None
-    } else {
-        Some((((packed >> 16) - 1) as usize, (packed & 0xffff) as usize))
+impl Preview {
+    /// The loops a segment sits inside, outermost first, each with the pass it
+    /// is on. Empty for a block outside every loop.
+    pub fn segment_stack(&self, segment: usize) -> &[(u32, u32)] {
+        self.segment_loop
+            .get(segment)
+            .and_then(|id| self.loop_stacks.get(*id as usize))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 }
 
@@ -1752,6 +1758,7 @@ struct PlannedPreview {
     incomplete: Option<String>,
     subroutines: Vec<SubroutineBody>,
     loops: Vec<LoopTrace>,
+    loop_stacks: Vec<Vec<(u32, u32)>>,
 }
 
 /// Split an o-word line into its label and the rest, as the interpreter reads
@@ -2487,6 +2494,23 @@ fn plan_statements(
             at -= 1;
         }
         let variables = parameter_keys(&test);
+        // A counter is a test parameter the body changes; a limit is one it only
+        // reads. That is what the interpreter's loops look like, and it is what
+        // lets the status line show the walk without repeating the bound.
+        let counters: Vec<String> = variables
+            .iter()
+            .filter(|key| {
+                statements[index..after[index].min(statements.len())]
+                    .iter()
+                    .any(|statement| {
+                        matches!(
+                            statement,
+                            Stmt::Assign { name, .. } if name == *key
+                        )
+                    })
+            })
+            .cloned()
+            .collect();
         let live = variables.iter().any(|key| live_state_key(key));
         let trace = traces.len();
         trace_of[index] = Some(trace);
@@ -2497,6 +2521,7 @@ fn plan_statements(
             test_line,
             end_line,
             variables,
+            counters,
             iterations: Vec::new(),
             live,
         });
@@ -2504,16 +2529,30 @@ fn plan_statements(
 
     let mut params = Params::new();
     let mut blocks: Vec<PlannedBlock> = Vec::new();
-    // The loops whose body the planner is inside, innermost last. A block's pass
-    // is the innermost one's: the outer pass shows when the inner loop is not
-    // running, which is where a nested program spends its time between passes.
+    // The loops whose body the planner is inside, outermost first. A block's
+    // tag is the whole nest, so the readout can stack every enclosing loop.
     let mut open: Vec<usize> = Vec::new();
+    // Distinct nests, index 0 being "inside no loop".
+    let mut stacks: Vec<Vec<(u32, u32)>> = vec![Vec::new()];
     macro_rules! current_pass {
-        () => {
-            open.last().map_or(0, |&trace| {
-                pack_pass(trace, traces[trace].iterations.len().saturating_sub(1))
-            })
-        };
+        () => {{
+            let nest: Vec<(u32, u32)> = open
+                .iter()
+                .map(|&trace| {
+                    (
+                        trace as u32,
+                        traces[trace].iterations.len().saturating_sub(1) as u32,
+                    )
+                })
+                .collect();
+            match stacks.iter().position(|found| *found == nest) {
+                Some(index) => index as u32,
+                None => {
+                    stacks.push(nest);
+                    (stacks.len() - 1) as u32
+                }
+            }
+        }};
     }
     macro_rules! leave_loop {
         ($trace:expr) => {
@@ -2676,7 +2715,9 @@ fn plan_statements(
             } => match Expression::evaluate(condition, &params) {
                 Ok(value) if value != 0.0 => {
                     record_iteration(&mut traces, trace_of[pc], &params);
-                    if let Some(trace) = trace_of[pc] {
+                    // The test runs once per pass, and the loop stays open
+                    // between them; only a loop not yet open is entered.
+                    if let Some(trace) = trace_of[pc].filter(|trace| !open.contains(trace)) {
                         open.push(trace);
                     }
                     pc += 1;
@@ -2695,7 +2736,7 @@ fn plan_statements(
             },
             Stmt::Do { .. } => {
                 record_iteration(&mut traces, trace_of[pc], &params);
-                if let Some(trace) = trace_of[pc] {
+                if let Some(trace) = trace_of[pc].filter(|trace| !open.contains(trace)) {
                     open.push(trace);
                 }
                 pc += 1;
@@ -2728,7 +2769,7 @@ fn plan_statements(
                 Ok(value) if value >= 1.0 => {
                     record_iteration(&mut traces, trace_of[pc], &params);
                     repeats.push((pc, value.trunc() as i64));
-                    if let Some(trace) = trace_of[pc] {
+                    if let Some(trace) = trace_of[pc].filter(|trace| !open.contains(trace)) {
                         open.push(trace);
                     }
                     pc += 1;
@@ -2823,6 +2864,7 @@ fn plan_statements(
         incomplete,
         subroutines: bodies,
         loops: traces,
+        loop_stacks: stacks,
     }
 }
 
@@ -2893,9 +2935,11 @@ pub fn parse_preview_with(
         incomplete,
         subroutines,
         loops,
+        loop_stacks,
     } = plan_preview(text, subs);
     preview.subroutines = subroutines;
     preview.loops = loops;
+    preview.loop_stacks = loop_stacks;
     let total_lines = text.lines().count();
 
     for block in blocks {
@@ -4259,6 +4303,36 @@ mod tests {
         assert_eq!(trace.iteration_index(1), 0);
         assert_eq!(trace.iteration_index(3), 2);
         assert_eq!(trace.values(2), Some([2.0].as_slice()));
+    }
+
+    #[test]
+    fn a_nested_block_carries_the_whole_loop_nest() {
+        // Outer pass runs the inner loop to completion, so every segment of the
+        // outer body names both loops and the pass each is on.
+        let preview = plan(
+            "o10 while [#<outer> lt 2]\n#<inner> = 0\no20 while [#<inner> lt 2]\n\
+             G0 X[#<inner> + 1]\n#<inner> = [#<inner> + 1]\no20 endwhile\n\
+             #<outer> = [#<outer> + 1]\no10 endwhile\n",
+        );
+        assert_eq!(preview.loops.len(), 2);
+        let nests: Vec<Vec<(u32, u32)>> = (0..preview.segments.len())
+            .map(|index| preview.segment_stack(index).to_vec())
+            .collect();
+        assert_eq!(
+            nests,
+            vec![
+                vec![(0, 0), (1, 0)],
+                vec![(0, 0), (1, 1)],
+                // The inner trace is unrolled across the whole run, so its pass
+                // keeps counting through the outer passes: 3 is the second pass
+                // of the second time round.
+                vec![(0, 1), (1, 2)],
+                vec![(0, 1), (1, 3)],
+            ],
+            "outermost pass first, inner pass last"
+        );
+        assert_eq!(preview.loops[0].iterations.len(), 2);
+        assert_eq!(preview.loops[1].iterations.len(), 4);
     }
 
     #[test]
