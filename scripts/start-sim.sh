@@ -129,9 +129,20 @@ fi
 # The build guard sits below the option parsing because it depends on it: the
 # normal rig also needs the simulator binary, --no-sim3d neither needs nor
 # builds it.
+#
+# `scripts/build-appimage.sh` writes its `--no-default-features` build to the
+# same path, and that binary has no NML client. An executable on disk is
+# therefore not enough: it also has to link libnml, the client this rig drives,
+# or the sim dies at "this build has no LinuxCNC backend". libnml names the NML
+# client exactly; a looser `liblinuxcnc` pattern would also match
+# liblinuxcnchal, which a display can link without the status channel.
+linc_has_nml() {
+    ldd "$1" 2>/dev/null | grep -q 'libnml'
+}
 NEED_SIM3D=1
 (( NO_SIM3D )) && NEED_SIM3D=0
-if [[ ! -x "$BIN" || ! -x "$PANEL_BIN" || ( $NEED_SIM3D -eq 1 && ! -x "$SIM3D_BIN" ) ]]; then
+if [[ ! -x "$BIN" || ! -x "$PANEL_BIN" || ( $NEED_SIM3D -eq 1 && ! -x "$SIM3D_BIN" ) ]] \
+    || ! linc_has_nml "$BIN"; then
     echo "building LiNC release binaries..." >&2
     if (( NEED_SIM3D )); then
         (cd "$ROOT" && cargo build --release -p linc-app -p linc-panel -p linc-sim3d)
