@@ -874,18 +874,23 @@ impl<'t, 'p> Expression<'t, 'p> {
         None
     }
 
-    /// A word operator, only when it stands alone.
+    /// A word operator, only when it stands alone. The interpreter matches
+    /// these without regard to case: `lt` is `LT`.
     fn take_keyword(&mut self, words: &[&str]) -> Option<String> {
         self.skip_whitespace();
         for word in words {
-            if !self.starts_with(word) {
+            let end = self.pos + word.len();
+            let Some(candidate) = self.raw.get(self.pos..end) else {
+                continue;
+            };
+            if !candidate.eq_ignore_ascii_case(word.as_bytes()) {
                 continue;
             }
-            let after = self.raw.get(self.pos + word.len()).copied();
+            let after = self.raw.get(end).copied();
             if after.is_some_and(|byte| (byte as char).is_ascii_alphanumeric() || byte == b'_') {
                 continue;
             }
-            self.pos += word.len();
+            self.pos = end;
             return Some((*word).to_string());
         }
         None
@@ -1242,10 +1247,10 @@ fn expression_at(raw: &str, from: usize) -> Option<(usize, String)> {
                 }
             }
             b'#' => {
+                // A numeric parameter is digits only: in `Z#7K[...]` the K
+                // starts the next word, not part of the parameter name.
                 index += 1;
-                while index < bytes.len()
-                    && ((bytes[index] as char).is_ascii_alphanumeric() || bytes[index] == b'_')
-                {
+                while index < bytes.len() && (bytes[index] as char).is_ascii_digit() {
                     index += 1;
                 }
             }
@@ -1335,6 +1340,17 @@ enum Stmt {
     Else,
     EndIf,
     While {
+        line: usize,
+        label: String,
+        condition: String,
+    },
+    /// `o<label> do`: the top of a do-while loop. Its body runs at least once;
+    /// the `o<label> while [condition]` at the bottom decides whether to repeat.
+    Do {
+        label: String,
+    },
+    /// The `o<label> while [condition]` that closes a `do`.
+    DoWhile {
         line: usize,
         condition: String,
     },
@@ -1519,7 +1535,11 @@ fn o_word_statement(line: usize, label: &str, rest: &str) -> Stmt {
         "endif" => Stmt::EndIf,
         "while" => Stmt::While {
             line,
+            label: label.to_string(),
             condition: payload,
+        },
+        "do" => Stmt::Do {
+            label: label.to_string(),
         },
         "endwhile" => Stmt::EndWhile,
         "repeat" => Stmt::Repeat {
@@ -1540,25 +1560,111 @@ fn o_word_statement(line: usize, label: &str, rest: &str) -> Stmt {
     }
 }
 
-fn assignment_statement(line: usize, trimmed: &str) -> Stmt {
-    let Some(equals) = top_level_equals(trimmed) else {
-        return Stmt::Unsupported {
+/// Every assignment on a line. The interpreter allows several in one block:
+/// `#9=0 #10=0` sets both.
+fn assignment_statements(line: usize, trimmed: &str) -> Vec<Stmt> {
+    let mut out = Vec::new();
+    let mut rest = trimmed;
+    loop {
+        let unsupported = |text: &str| Stmt::Unsupported {
             line,
-            what: trimmed.to_string(),
+            what: text.trim().to_string(),
         };
-    };
-    let left = trimmed[..equals].trim();
-    let right = trimmed[equals + 1..].trim();
-    match parameter_key(left) {
-        Some(name) => Stmt::Assign {
+        let Some(equals) = top_level_equals(rest) else {
+            out.push(unsupported(rest));
+            return out;
+        };
+        let Some(name) = parameter_key(rest[..equals].trim()) else {
+            out.push(unsupported(rest));
+            return out;
+        };
+        let after = &rest[equals + 1..];
+        let value_end = next_assignment(after);
+        out.push(Stmt::Assign {
             line,
             name,
-            expr: right.to_string(),
-        },
-        None => Stmt::Unsupported {
-            line,
-            what: trimmed.to_string(),
-        },
+            expr: after[..value_end].trim().to_string(),
+        });
+        rest = after[value_end..].trim_start();
+        if rest.is_empty() {
+            return out;
+        }
+        if !rest.starts_with('#') {
+            out.push(unsupported(rest));
+            return out;
+        }
+    }
+}
+
+/// Where the next assignment of a block starts: a `#name=` at bracket depth
+/// zero. `#9=#10+1` is one assignment whose value reads `#10`; `#9=0 #10=0` is
+/// two.
+fn next_assignment(text: &str) -> usize {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'[' => depth += 1,
+            b']' => depth = depth.saturating_sub(1),
+            b'#' if depth == 0 => {
+                let mut end = index + 1;
+                if bytes.get(end) == Some(&b'<') {
+                    while end < bytes.len() && bytes[end] != b'>' {
+                        end += 1;
+                    }
+                    end = (end + 1).min(bytes.len());
+                } else {
+                    while end < bytes.len() && (bytes[end] as char).is_ascii_digit() {
+                        end += 1;
+                    }
+                }
+                let mut equals = end;
+                while equals < bytes.len() && (bytes[equals] as char).is_whitespace() {
+                    equals += 1;
+                }
+                if equals > index + 1
+                    && bytes.get(equals) == Some(&b'=')
+                    && bytes.get(equals + 1) != Some(&b'=')
+                {
+                    return index;
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    text.len()
+}
+
+/// Pair every `o<label> do` with the `o<label> while` that closes it, so the
+/// planner and the run see the bottom test instead of a second loop.
+fn pair_do_loops(statements: &mut [Stmt]) {
+    let mut open: Vec<(String, usize)> = Vec::new();
+    let mut bottoms: Vec<usize> = Vec::new();
+    for index in 0..statements.len() {
+        match &statements[index] {
+            Stmt::Do { label } => open.push((label.clone(), index)),
+            Stmt::While { label, .. } if open.last().is_some_and(|(open, _)| open == label) => {
+                open.pop();
+                bottoms.push(index);
+            }
+            _ => {}
+        }
+    }
+    for index in bottoms {
+        let replacement = match &statements[index] {
+            Stmt::While {
+                line,
+                label: _,
+                condition,
+            } => Stmt::DoWhile {
+                line: *line,
+                condition: condition.clone(),
+            },
+            _ => continue,
+        };
+        statements[index] = replacement;
     }
 }
 
@@ -1604,8 +1710,9 @@ fn plan_preview(text: &str) -> PlannedPreview {
             continue;
         }
         if trimmed.starts_with('#') {
-            statements.push(assignment_statement(line, trimmed));
-            labels.push(None);
+            let parsed = assignment_statements(line, trimmed);
+            labels.resize(labels.len() + parsed.len(), None);
+            statements.extend(parsed);
             continue;
         }
         if trimmed.starts_with('o') || trimmed.starts_with('O') {
@@ -1626,6 +1733,9 @@ fn plan_preview(text: &str) -> PlannedPreview {
         });
         labels.push(None);
     }
+
+    // A `while` that closes a `do` is that loop's bottom test, not a new loop.
+    pair_do_loops(&mut statements);
 
     let mut targets: BTreeMap<String, usize> = BTreeMap::new();
     let mut subroutines: BTreeMap<String, usize> = BTreeMap::new();
@@ -1674,7 +1784,13 @@ fn plan_preview(text: &str) -> PlannedPreview {
                     enter[previous] = index + 1;
                 }
             }
-            Stmt::While { .. } | Stmt::Repeat { .. } => loop_stack.push(index),
+            Stmt::While { .. } | Stmt::Repeat { .. } | Stmt::Do { .. } => loop_stack.push(index),
+            Stmt::DoWhile { .. } => {
+                if let Some(start) = loop_stack.pop() {
+                    after[start] = index + 1;
+                    back[index] = start + 1;
+                }
+            }
             Stmt::EndWhile | Stmt::EndRepeat => {
                 if let Some(start) = loop_stack.pop() {
                     after[start] = index + 1;
@@ -1833,7 +1949,9 @@ fn plan_preview(text: &str) -> PlannedPreview {
             Stmt::Else => pc = after[pc],
             Stmt::EndIf => pc += 1,
             Stmt::Label => pc += 1,
-            Stmt::While { line, condition } => match Expression::evaluate(condition, &params) {
+            Stmt::While {
+                line, condition, ..
+            } => match Expression::evaluate(condition, &params) {
                 Ok(value) if value != 0.0 => pc += 1,
                 Ok(_) => pc = after[pc],
                 Err(_) => {
@@ -1842,6 +1960,21 @@ fn plan_preview(text: &str) -> PlannedPreview {
                             Some(format!("line {}: could not evaluate {}", line, condition));
                     }
                     pc = after[pc];
+                }
+            },
+            Stmt::Do { .. } => pc += 1,
+            Stmt::DoWhile {
+                line, condition, ..
+            } => match Expression::evaluate(condition, &params) {
+                // The bottom test: true repeats the body, false leaves the loop.
+                Ok(value) if value != 0.0 => pc = back[pc],
+                Ok(_) => pc += 1,
+                Err(_) => {
+                    if incomplete.is_none() {
+                        incomplete =
+                            Some(format!("line {}: could not evaluate {}", line, condition));
+                    }
+                    pc += 1;
                 }
             },
             Stmt::EndWhile => {
@@ -3004,6 +3137,64 @@ mod tests {
         let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
         assert!(preview.error.is_none(), "{:?}", preview.error);
         assert!(preview.incomplete, "{:?}", preview.incomplete_reason);
+    }
+
+    #[test]
+    fn comparison_words_are_not_case_sensitive() {
+        // The interpreter accepts `lt`, `Le`, `NE`; the shipped programs use
+        // lowercase.
+        assert_eq!(expression("[3 lt 2]").unwrap(), 0.0);
+        assert_eq!(expression("[3 Le 3]").unwrap(), 1.0);
+        assert_eq!(expression("[3 nE 2]").unwrap(), 1.0);
+        assert_eq!(expression("[1 aNd 0 oR 1]").unwrap(), 1.0);
+        let text = "G21 G90\n#1 = 5\no100 if [#1 lt 7]\nG1 X2 F100\no100 endif\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        assert_eq!(preview.segments.last().expect("a move").end[0], 2.0);
+    }
+
+    #[test]
+    fn a_do_while_loop_runs_its_body_at_least_once() {
+        // `o10 do ... o10 while [cond]` tests at the bottom; the body runs once
+        // even when the condition is false from the start.
+        let text = "G21 G90\n#1 = 10\no10 do\nG1 X[#1] F100\n#1 = [#1 - 1]\no10 while [#1 lt 3]\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        let ends: Vec<f64> = preview
+            .segments
+            .iter()
+            .map(|segment| segment.end[0])
+            .collect();
+        assert_eq!(ends, vec![10.0]);
+        // Counting down from 3 loops until the test fails: 3, 2, 1.
+        let text = "G21 G90\n#1 = 3\no10 do\nG1 X[#1] F100\n#1 = [#1 - 1]\no10 while [#1 gt 0]\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let ends: Vec<f64> = preview
+            .segments
+            .iter()
+            .map(|segment| segment.end[0])
+            .collect();
+        assert_eq!(ends, vec![3.0, 2.0, 1.0]);
+    }
+
+    #[test]
+    fn a_block_may_assign_several_parameters() {
+        let text = "G21 G90\n#9=0 #10=7\nG0 X[#9 + #10]\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        assert_eq!(preview.segments.last().expect("a move").end[0], 7.0);
+    }
+
+    #[test]
+    fn a_numeric_parameter_stops_at_the_next_word() {
+        // `Z#7K[..]`: the K is a word, not part of the parameter name.
+        let text = "G21 G90\n#7 = 1\nG33 Z#7 K[sqrt[4]*[#7]] F100\nG0 X1\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
     }
 
     #[test]
