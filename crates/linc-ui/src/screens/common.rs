@@ -43,7 +43,7 @@ pub fn token_color(kind: TokenKind) -> Color32 {
         TokenKind::Number => theme::FG,
         TokenKind::FeedSpeed => theme::C4,
         TokenKind::Tool => theme::C5,
-        TokenKind::Parameter => theme::C6,
+        TokenKind::Word => theme::C3,
         TokenKind::Variable => theme::C6,
         TokenKind::Comment => theme::COMMENT,
         TokenKind::ProgramNumber => theme::C6,

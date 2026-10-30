@@ -817,6 +817,20 @@ mod tests {
             colour_at(&job, text.find("CALL").expect("laid out")),
             theme::C2
         );
+        // An arc centre word reads like the axis words beside it, not like a
+        // `#` parameter reference.
+        let job = layout_for_test("G2 X10 Y0 I2 J0", 0);
+        let text = job.text.clone();
+        assert_eq!(
+            colour_at(&job, text.find("I2").expect("laid out")),
+            colour_at(&job, text.find("X10").expect("laid out"))
+        );
+        let job = layout_for_test("#1 = 2", 0);
+        assert_ne!(
+            colour_at(&job, job.text.find("#1").expect("laid out")),
+            theme::C3,
+            "a parameter reference is not an axis word"
+        );
         // Symbol operators are operators too, on an assignment as well.
         let job = layout_for_test("#1 = [sqrt[4] + 2 * 3]", 0);
         let text = job.text.clone();
@@ -980,7 +994,8 @@ fn token_color(kind: TokenKind) -> Color32 {
         TokenKind::Number => theme::FG,
         TokenKind::FeedSpeed => theme::C4,
         TokenKind::Tool => theme::C5,
-        TokenKind::Parameter => theme::C6,
+        // A value word reads like an axis word, not like a parameter reference.
+        TokenKind::Word => theme::C3,
         TokenKind::Variable => theme::C6,
         TokenKind::Comment => theme::COMMENT,
         TokenKind::ProgramNumber => theme::C6,

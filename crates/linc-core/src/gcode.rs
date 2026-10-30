@@ -21,7 +21,9 @@ pub enum TokenKind {
     Number,
     FeedSpeed,
     Tool,
-    Parameter,
+    /// A word that carries a value but is not an axis: the arc-centre words
+    /// I, J, K, the radius R, the cycle and offset words P, Q, L, D, H, E.
+    Word,
     Variable,
     Comment,
     ProgramNumber,
@@ -55,7 +57,7 @@ impl Token {
             | TokenKind::Axis
             | TokenKind::FeedSpeed
             | TokenKind::Tool
-            | TokenKind::Parameter
+            | TokenKind::Word
             | TokenKind::OWord
             | TokenKind::Keyword
             | TokenKind::Operator
@@ -379,7 +381,7 @@ pub fn lex_line(line: &str) -> Vec<Token> {
                             letter,
                             'i' | 'j' | 'k' | 'r' | 'p' | 'q' | 'l' | 'd' | 'h' | 'e'
                         ) {
-                            TokenKind::Parameter
+                            TokenKind::Word
                         } else {
                             TokenKind::Axis
                         },
@@ -1507,7 +1509,7 @@ fn resolve_words(tokens: &[Token], raw: &str, params: &Params) -> Result<Vec<Tok
         }
         if !matches!(
             token.kind,
-            TokenKind::Axis | TokenKind::Parameter | TokenKind::FeedSpeed | TokenKind::Tool
+            TokenKind::Axis | TokenKind::Word | TokenKind::FeedSpeed | TokenKind::Tool
         ) {
             words.push(token.clone());
             continue;
@@ -4067,6 +4069,41 @@ mod tests {
             .into_iter()
             .map(|token| (token.kind, token.text))
             .collect()
+    }
+
+    #[test]
+    fn arc_centre_words_are_value_words_not_parameters() {
+        // I, J and K carry a value on the block. A `#` reference is what a
+        // parameter looks like, and they must not be painted alike.
+        assert_eq!(
+            kinds("G2 X10 Y0 I2 J0"),
+            vec![
+                (TokenKind::GCode, "G2".into()),
+                (TokenKind::Axis, "X10".into()),
+                (TokenKind::Axis, "Y0".into()),
+                (TokenKind::Word, "I2".into()),
+                (TokenKind::Word, "J0".into()),
+            ]
+        );
+        assert_eq!(
+            kinds("G18 G3 X10 Z0 I2 K0")[4..],
+            [
+                (TokenKind::Word, "I2".into()),
+                (TokenKind::Word, "K0".into())
+            ]
+        );
+        // A signed centre and a bracketed one are words too.
+        assert_eq!(
+            kinds("G2 X10 Y10 I-5 J0")[3],
+            (TokenKind::Word, "I-5".into())
+        );
+        assert_eq!(kinds("G2 X[#1] I[#2] J0")[5], (TokenKind::Word, "I".into()));
+        // A radius, and a cycle's parameter words, are the same kind.
+        assert_eq!(kinds("G2 X10 Y0 R5")[3], (TokenKind::Word, "R5".into()));
+        assert_eq!(
+            kinds("G81 X0 Y0 Z-5 R2 P1")[5],
+            (TokenKind::Word, "P1".into())
+        );
     }
 
     #[test]
