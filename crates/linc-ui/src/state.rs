@@ -194,6 +194,33 @@ pub enum Modal {
     Info(String),
 }
 
+impl Modal {
+    /// The dialog's kind, without its content.
+    ///
+    /// `draw_modal` puts the keyboard on a dialog's field or safe button on the
+    /// frame it opens. Landing on a different kind is that same frame: `SAVE`
+    /// in the unsaved-changes prompt can turn it into `SAVE PROGRAM AS`, and
+    /// that name field must take the ring too. A dialog rewriting its own state
+    /// (a typed name, an armed overwrite, a refusal) keeps the same kind and
+    /// keeps the keyboard where the operator left it.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Modal::ConfirmDiscard(_) => "confirm-discard",
+            Modal::ConfirmQuit => "confirm-quit",
+            Modal::ConfirmRunFromLine { .. } => "confirm-run-from-line",
+            Modal::GoToLine { .. } => "go-to-line",
+            Modal::MdiSave(_) => "mdi-save",
+            Modal::SaveProgramAs(_) => "save-program-as",
+            Modal::UnsavedOnLeave => "unsaved-on-leave",
+            Modal::ConfirmDelete { .. } => "confirm-delete",
+            Modal::ConfirmToolDelete { .. } => "confirm-tool-delete",
+            Modal::ConfirmOverwrite(_) => "confirm-overwrite",
+            Modal::Error(_) => "error",
+            Modal::Info(_) => "info",
+        }
+    }
+}
+
 /// The MDI pane's save dialog: a file name and the pre/postamble wrapper.
 ///
 /// An existing name is confirmed here, not in a second dialog: the same window

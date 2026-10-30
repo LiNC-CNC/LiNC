@@ -179,9 +179,9 @@ pub struct LincApp {
     pub move_distance: linc_core::model::AxisMap<f64>,
     /// 0..1 of the current move already travelled, per axis.
     pub move_progress: linc_core::model::AxisMap<f64>,
-    /// Whether a modal was open last frame, so a newly opened one can put the
-    /// keyboard on its default button.
-    pub modal_open_last_frame: bool,
+    /// Which dialog was open last frame, so a newly opened one can put the
+    /// keyboard on its input field, or on its safe button when it has none.
+    pub modal_open_last_frame: Option<&'static str>,
     /// Same, for the manual tool-change prompt, which is driven by the machine
     /// rather than by `self.modal`.
     pub tool_prompt_open_last_frame: bool,
@@ -536,7 +536,7 @@ impl LincApp {
             trail_cleared_tip: None,
             move_distance: linc_core::model::AxisMap::new(),
             move_progress: linc_core::model::AxisMap::new(),
-            modal_open_last_frame: false,
+            modal_open_last_frame: None,
             tool_prompt_open_last_frame: false,
             overlay_was_open: false,
             messages_dialog: false,
@@ -4643,13 +4643,17 @@ impl LincApp {
 
     fn draw_modal(&mut self, ctx: &egui::Context) {
         let Some(modal) = self.modal.clone() else {
-            self.modal_open_last_frame = false;
+            self.modal_open_last_frame = None;
             return;
         };
-        // On the frame a dialog opens, put the keyboard on its default button so
-        // Enter takes it and the arrow keys reach the others.
-        let focus_default = !self.modal_open_last_frame;
-        self.modal_open_last_frame = true;
+        // On the frame a dialog opens the keyboard goes where the operator's
+        // work is: a dialog with an input field puts the ring in that field,
+        // and one without a field puts it on the safe button so a reflex Enter
+        // never deletes, overwrites, quits or starts anything. There is no
+        // click-to-focus on this panel and no Tab to walk in with. A different
+        // dialog replacing this one on the same frame counts as opening.
+        let first_frame = self.modal_open_last_frame != Some(modal.kind());
+        self.modal_open_last_frame = Some(modal.kind());
         let mut close = false;
         let mut action: Option<PendingAction> = None;
         let mut save_and_continue = false;
@@ -4693,7 +4697,7 @@ impl LincApp {
                             save_and_continue = true;
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
-                        if focus_default {
+                        if first_frame {
                             cancel.request_focus();
                         }
                         if cancel.clicked() {
@@ -4742,7 +4746,7 @@ impl LincApp {
                             start_line = Some(*line);
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
-                        if focus_default {
+                        if first_frame {
                             cancel.request_focus();
                         }
                         if cancel.clicked() {
@@ -4774,7 +4778,7 @@ impl LincApp {
                             delete = Some((path.clone(), *usb));
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
-                        if focus_default {
+                        if first_frame {
                             cancel.request_focus();
                         }
                         if cancel.clicked() {
@@ -4808,7 +4812,7 @@ impl LincApp {
                             delete_tool = Some(*tool);
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
-                        if focus_default {
+                        if first_frame {
                             cancel.request_focus();
                         }
                         if cancel.clicked() {
@@ -4826,7 +4830,7 @@ impl LincApp {
                             quit = true;
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
-                        if focus_default {
+                        if first_frame {
                             cancel.request_focus();
                         }
                         if cancel.clicked() {
@@ -4859,6 +4863,13 @@ impl LincApp {
                             .desired_width(120.0)
                             .hint_text("line"),
                     );
+                    // The dialog exists to collect a number, so the field takes
+                    // the ring on the frame it opens: Enter accepts what was
+                    // typed and CANCEL is one arrow away. An empty field accepts
+                    // nothing, so Enter cannot jump the view by itself.
+                    if first_frame {
+                        field.request_focus();
+                    }
                     if field.changed() {
                         // Digits only, so the field cannot hold something the
                         // jump would have to reject.
@@ -4878,13 +4889,6 @@ impl LincApp {
                             goto_accept = true;
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
-                        // The safe button takes the ring when the dialog opens,
-                        // like every other dialog: Enter must never jump the
-                        // view somewhere by itself. A click on the field starts
-                        // the typing.
-                        if focus_default {
-                            cancel.request_focus();
-                        }
                         if cancel.clicked() {
                             close = true;
                         }
@@ -4895,7 +4899,7 @@ impl LincApp {
                     ui.add_space(6.0);
                     ui.label(format!("{name} already exists in the destination. Replace it atomically?"));
                     ui.add_space(12.0);
-                    if let Some(choice) = screens::files::overwrite_dialog(ui, focus_default) {
+                    if let Some(choice) = screens::files::overwrite_dialog(ui, first_frame) {
                         overwrite = Some(choice);
                     }
                 }
@@ -4905,7 +4909,7 @@ impl LincApp {
                     ui.label(text);
                     ui.add_space(12.0);
                     let ok = theme::action_button(ui, "OK", true);
-                    if focus_default {
+                    if first_frame {
                         ok.request_focus();
                     }
                     if ok.clicked() {
@@ -4918,7 +4922,7 @@ impl LincApp {
                     ui.label(text);
                     ui.add_space(12.0);
                     let ok = theme::action_button(ui, "OK", true);
-                    if focus_default {
+                    if first_frame {
                         ok.request_focus();
                     }
                     if ok.clicked() {
@@ -4946,6 +4950,13 @@ impl LincApp {
                             .desired_width(260.0)
                             .hint_text("part"),
                     );
+                    // The dialog exists to name the file, so the field takes the
+                    // ring on the frame it opens: Enter writes the typed name
+                    // rather than taking a button. A dialog with no field focuses
+                    // its safe button instead.
+                    if first_frame {
+                        field.request_focus();
+                    }
                     if field.changed() {
                         save_name = Some(text);
                     }
@@ -4986,12 +4997,6 @@ impl LincApp {
                             save_confirm = true;
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
-                        // The ring starts on CANCEL, not on the name field: a
-                        // dialog always opens with its safe button under the
-                        // Enter key, and a click on the field starts the name.
-                        if focus_default {
-                            cancel.request_focus();
-                        }
                         if cancel.clicked() {
                             close = true;
                         }
@@ -5024,6 +5029,13 @@ impl LincApp {
                             .desired_width(280.0)
                             .hint_text("part.ngc"),
                     );
+                    // The dialog exists to name the file, so the field takes the
+                    // ring on the frame it opens: Enter writes the typed name
+                    // rather than taking a button. A dialog with no field focuses
+                    // its safe button instead.
+                    if first_frame {
+                        field.request_focus();
+                    }
                     if field.changed() {
                         save_as_name = Some(text);
                     }
@@ -5042,12 +5054,6 @@ impl LincApp {
                             save_as_confirm = true;
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
-                        // The ring starts on CANCEL, not on the name field: a
-                        // dialog always opens with its safe button under the
-                        // Enter key, and a click on the field starts the name.
-                        if focus_default {
-                            cancel.request_focus();
-                        }
                         if cancel.clicked() {
                             close = true;
                         }
@@ -5086,7 +5092,7 @@ impl LincApp {
                             discard_on_leave = true;
                         }
                         let keep = theme::action_button(ui, "KEEP", true);
-                        if focus_default {
+                        if first_frame {
                             keep.request_focus();
                         }
                         if keep.clicked() {
@@ -7214,6 +7220,98 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
 
         harness.frame(&[egui::Key::Escape]);
         assert!(harness.app.modal.is_none(), "Escape dismisses the dialog");
+    }
+
+    /// A dialog that exists to fill a field puts the ring in that field on the
+    /// frame it opens: there is no click-to-focus and no Tab on this panel, so
+    /// a dialog that focused its safe button could not be typed into at all.
+    /// A dialog with no field keeps its safe button under the Enter key.
+    #[test]
+    fn a_dialog_with_a_field_focuses_the_field_not_its_safe_button() {
+        let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+        harness.app.set_page(Page::Program);
+        harness.frame(&[]);
+
+        // SAVE PROGRAM AS: Ctrl+S on a buffer with no file names it. It is
+        // also what the unsaved-changes prompt turns into when SAVE has no
+        // path to write, so the ring must move with the dialog, not only when
+        // no dialog was open before.
+        harness.app.modal = Some(Modal::Info("first".into()));
+        harness.frame(&[]);
+        harness.app.modal = Some(Modal::SaveProgramAs(crate::state::SaveProgramDialog {
+            name: String::new(),
+            directory: harness.app.save_as_directory(),
+            error: None,
+        }));
+        harness.frame(&[]);
+        assert!(
+            harness
+                .ctx
+                .memory(|memory| memory.has_focus(egui::Id::unique("linc-save-as-name"))),
+            "the save-as dialog puts the ring in its name field"
+        );
+        harness.type_text("part");
+        assert!(
+            matches!(
+                &harness.app.modal,
+                Some(Modal::SaveProgramAs(dialog)) if dialog.name == "part"
+            ),
+            "typing without a click reaches the name field"
+        );
+
+        // The MDI buffer's save dialog does the same.
+        harness.app.modal = None;
+        harness.frame(&[]);
+        harness.app.modal = Some(Modal::MdiSave(crate::state::MdiSaveDialog::default()));
+        harness.frame(&[]);
+        assert!(
+            harness
+                .ctx
+                .memory(|memory| memory.has_focus(egui::Id::unique("linc-mdi-save-name"))),
+            "the MDI save dialog puts the ring in its name field"
+        );
+        harness.type_text("part2");
+        assert!(
+            matches!(
+                &harness.app.modal,
+                Some(Modal::MdiSave(dialog)) if dialog.name == "part2"
+            ),
+            "typing without a click reaches the name field"
+        );
+
+        // GO TO LINE collects a number the same way.
+        harness.app.modal = None;
+        harness.frame(&[]);
+        harness.app.modal = Some(Modal::GoToLine {
+            buffer: String::new(),
+            mdi: false,
+        });
+        harness.frame(&[]);
+        assert!(
+            harness
+                .ctx
+                .memory(|memory| memory.has_focus(egui::Id::unique("linc-goto-line-input"))),
+            "the go-to-line dialog puts the ring in its number field"
+        );
+        harness.type_text("3");
+        assert!(
+            matches!(
+                &harness.app.modal,
+                Some(Modal::GoToLine { buffer, .. }) if buffer == "3"
+            ),
+            "typing without a click reaches the number field"
+        );
+
+        // A dialog with no field keeps its safe button under Enter.
+        harness.app.modal = None;
+        harness.frame(&[]);
+        harness.app.modal = Some(Modal::Info("no field".into()));
+        harness.frame(&[]);
+        harness.frame(&[egui::Key::Enter]);
+        assert!(
+            harness.app.modal.is_none(),
+            "OK holds the ring in a dialog with no field"
+        );
     }
 
     #[test]

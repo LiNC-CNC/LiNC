@@ -142,10 +142,11 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
   editor's keyboard are the ones the shell provides: a click on the toolpath card requests focus for it
   (`common::trajectory`), and a click on a nav row calls `stop_text_input()`. Without those the editor
   keeps the keyboard for the rest of the session and every `!text_focused` gate stays shut.
-- Every dialog opens with the focus ring on its safe button (`CANCEL`, `KEEP`, or the single `OK`/`CLOSE`)
-  and that button takes Enter; a field a dialog exists to fill is reached with a click. A dialog with no
-  focused button looks dead, and a reflex Enter must never delete, overwrite, quit or start something.
-  `focus_default` in `draw_modal` is the one-shot that puts it there; `restore_page_keyboard` hands the
+- A dialog with an input field opens with the focus ring in that field and the field takes Enter; a
+  dialog with no field opens on its safe button (`CANCEL`, `KEEP`, or the single `OK`/`CLOSE`) and that
+  button takes Enter. Either way a dialog never looks dead, and a reflex Enter must never delete,
+  overwrite, quit or start something. `first_frame` in `draw_modal` is the one-shot that puts it there;
+  `restore_page_keyboard` hands the
   keyboard back when the last overlay closes. A page or editor focus request
   (`page_focus_requested`, `program.focus_editor`, `mdi.focus`) waits while `overlay_open()` — otherwise
   the widget drawn behind the dialog takes the ring off its default button.
