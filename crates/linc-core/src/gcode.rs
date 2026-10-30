@@ -57,6 +57,15 @@ impl Token {
     }
 }
 
+/// Skip the blanks between a word letter and its value. LinuxCNC accepts
+/// `G0 X 16.339` and `G1 X	0` as one word.
+fn skip_spaces(bytes: &[u8], mut index: usize) -> usize {
+    while index < bytes.len() && (bytes[index] as char).is_whitespace() {
+        index += 1;
+    }
+    index
+}
+
 /// Lex one line. Offsets are byte offsets within the line.
 pub fn lex_line(line: &str) -> Vec<Token> {
     let bytes = line.as_bytes();
@@ -217,6 +226,12 @@ pub fn lex_line(line: &str) -> Vec<Token> {
                 }
                 'x' | 'y' | 'z' | 'a' | 'b' | 'c' | 'u' | 'v' | 'w' | 'i' | 'j' | 'k' | 'r'
                 | 'p' | 'q' | 'l' | 'd' | 'h' | 'e' => {
+                    let value = skip_spaces(bytes, i);
+                    if let Some(first) = bytes.get(value) {
+                        if first.is_ascii_digit() || matches!(*first, b'.' | b'-' | b'+') {
+                            i = value;
+                        }
+                    }
                     while i < bytes.len()
                         && ((bytes[i] as char).is_ascii_digit()
                             || bytes[i] == b'.'
@@ -240,6 +255,12 @@ pub fn lex_line(line: &str) -> Vec<Token> {
                     });
                 }
                 'f' | 's' => {
+                    let value = skip_spaces(bytes, i);
+                    if let Some(first) = bytes.get(value) {
+                        if first.is_ascii_digit() || matches!(*first, b'.' | b'-' | b'+') {
+                            i = value;
+                        }
+                    }
                     while i < bytes.len()
                         && ((bytes[i] as char).is_ascii_digit()
                             || bytes[i] == b'.'
@@ -603,6 +624,16 @@ fn word_int(tokens: &[Token], letter: char) -> Option<u32> {
     })
 }
 
+/// Whether this word ends the program. `M2` and `M30` do; the interpreter reads
+/// no further line, so a file may end with notes that are not G-code.
+fn is_program_end(token: &Token) -> bool {
+    token.kind == TokenKind::MCode
+        && matches!(
+            parse_number(&token.text[1..]),
+            Some(value) if value == 2.0 || value == 30.0
+        )
+}
+
 /// The work system a program selects, as an index 1..=9 (`G54`..`G59.3`), or
 /// `None` when it never selects one.
 ///
@@ -689,9 +720,16 @@ fn apply_arc(
             radius.abs(),
         )
     } else {
-        let cu = start[u] + i.unwrap_or(0.0);
-        let cv = start[v] + j.unwrap_or(0.0);
-        let _ = k;
+        // The two center words belong to the plane: I/J in XY, I/K in XZ,
+        // J/K in YZ. A lathe program writes `G3 X.. Z.. I.. K..`, and reading
+        // only I/J would give that arc no center at all.
+        let (offset_u, offset_v) = match plane {
+            Plane::Xy | Plane::Uv => (i, j),
+            Plane::Xz | Plane::Uw => (i, k),
+            Plane::Yz | Plane::Vw => (j, k),
+        };
+        let cu = start[u] + offset_u.unwrap_or(0.0);
+        let cv = start[v] + offset_v.unwrap_or(0.0);
         let radius = ((start[u] - cu).powi(2) + (start[v] - cv).powi(2)).sqrt();
         (cu, cv, radius)
     };
@@ -1219,6 +1257,29 @@ fn expression_at(raw: &str, from: usize) -> Option<(usize, String)> {
     Some((end, raw[start..end].trim().to_string()))
 }
 
+/// Whether the `(...)` comments on a line are balanced.
+///
+/// A `;` comment runs to the end of the line, so a parenthesis inside it is
+/// text: `;  1) z axis not altered (remains ...` must not fail the line. The
+/// `;` inside `(...)` is text too.
+fn comments_balanced(line: &str) -> bool {
+    let mut depth = 0usize;
+    for byte in line.bytes() {
+        match byte {
+            b';' if depth == 0 => break,
+            b'(' => depth += 1,
+            b')' => {
+                if depth == 0 {
+                    return false;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    depth == 0
+}
+
 /// Strip comments from a line while keeping offsets: each comment character
 /// becomes a space, so an expression found by offset still lines up.
 fn strip_comments(line: &str) -> String {
@@ -1315,6 +1376,8 @@ struct PlannedPreview {
 /// it: "o1000 sub", "o<probe_z_minus_wco> call [...]".
 fn o_word(line: &str) -> Option<(String, String)> {
     let rest = line.strip_prefix('o').or_else(|| line.strip_prefix('O'))?;
+    // The label may follow a space: `o <sub> call`.
+    let rest = rest.trim_start();
     if let Some(rest) = rest.strip_prefix('<') {
         let end = rest.find('>')?;
         Some((
@@ -1523,7 +1586,7 @@ fn plan_preview(text: &str) -> PlannedPreview {
 
     for (index, raw) in text.lines().enumerate() {
         let line = index + 1;
-        if raw.matches('(').count() != raw.matches(')').count() {
+        if !comments_balanced(raw) {
             error = Some(SyntaxIssue {
                 line,
                 message: "unmatched comment parenthesis".into(),
@@ -1542,6 +1605,17 @@ fn plan_preview(text: &str) -> PlannedPreview {
         }
         if trimmed.starts_with('#') {
             statements.push(assignment_statement(line, trimmed));
+            labels.push(None);
+            continue;
+        }
+        if trimmed.starts_with('o') || trimmed.starts_with('O') {
+            // An o-word this preview cannot model, such as a computed label
+            // (`o[#1*10] call`). The interpreter may still run it; mark the
+            // path partial instead of calling the program broken.
+            statements.push(Stmt::Unsupported {
+                line,
+                what: trimmed.to_string(),
+            });
             labels.push(None);
             continue;
         }
@@ -1630,11 +1704,18 @@ fn plan_preview(text: &str) -> PlannedPreview {
         }
         match &statements[pc] {
             Stmt::Block { line, raw, tokens } => {
+                let mut program_end = false;
                 match resolve_words(tokens, raw, &params) {
-                    Ok(words) => blocks.push(PlannedBlock {
-                        line: *line,
-                        tokens: words,
-                    }),
+                    Ok(words) => {
+                        // `M2` and `M30` end the program: the interpreter reads
+                        // no further line, so prose or a comment block after the
+                        // end mark is not G-code.
+                        program_end = words.iter().any(is_program_end);
+                        blocks.push(PlannedBlock {
+                            line: *line,
+                            tokens: words,
+                        });
+                    }
                     Err(failure) if failure.syntax => {
                         error = Some(SyntaxIssue {
                             line: *line,
@@ -1647,6 +1728,9 @@ fn plan_preview(text: &str) -> PlannedPreview {
                             incomplete = Some(format!("line {}: {}", line, failure.message));
                         }
                     }
+                }
+                if program_end {
+                    break;
                 }
                 pc += 1;
             }
@@ -2857,6 +2941,69 @@ mod tests {
             .find(|segment| segment.kind == SegmentKind::Arc)
             .expect("arc segment");
         assert!((arc.end[0] - 1.5).abs() < 1e-9, "{:?}", arc.end);
+    }
+
+    #[test]
+    fn a_word_value_may_follow_a_space() {
+        // LinuxCNC accepts the gap: `G0 X 16.339` and `G1 X\t0` are one word,
+        // and the shipped sim configs are written that way.
+        let text = "G21 G90\nG0 X 10 Y 0\nG1 X -5 Y\t2 F100\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        let end = preview.segments.last().expect("a move").end;
+        assert_eq!((end[0], end[1]), (-5.0, 2.0));
+    }
+
+    #[test]
+    fn an_arc_reads_the_center_words_of_its_plane() {
+        // G18 takes I and K, G19 takes J and K. Reading only I and J leaves
+        // every lathe arc without a center.
+        for (plane, words) in [("G18", "I1 K0"), ("G19", "J1 K0")] {
+            let axis = if plane == "G18" { "X" } else { "Y" };
+            let text = format!("G21 G90 {plane}\nG0 {axis}0 Z0\nG3 {axis}2 Z0 {words} F100\n");
+            let preview = parse_preview(&text, &preview_axes(), None, [0.0; 3]);
+            assert!(preview.error.is_none(), "{plane}: {:?}", preview.error);
+            assert_eq!(preview.arcs, 1, "{plane}");
+        }
+    }
+
+    #[test]
+    fn a_semicolon_comment_may_contain_a_parenthesis() {
+        let text = "G21 G90\n;notes:\n;  1) z axis not altered (remains at z)\nG0 X1\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert_eq!(preview.segments.len(), 1);
+        // A nested comment is still one comment.
+        let text = "G21 G90\n(a (b) c)\nG0 X1\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+    }
+
+    #[test]
+    fn the_preview_stops_at_program_end() {
+        // The interpreter reads no line after `M2`, so the prose the shipped
+        // `on_abort.ngc` handlers keep below it is not G-code.
+        for end in ["M2", "M30"] {
+            let text = format!("G21 G90\nG0 X1\n{end}\nThese are abort numbers:\n");
+            let preview = parse_preview(&text, &preview_axes(), None, [0.0; 3]);
+            assert!(preview.error.is_none(), "{end}: {:?}", preview.error);
+            assert_eq!(preview.segments.len(), 1, "{end}");
+        }
+    }
+
+    #[test]
+    fn an_o_word_label_may_follow_a_space_and_a_computed_one_is_partial() {
+        // `o <name> call` is legal; a computed label cannot be resolved before
+        // the program runs, so the path is partial, not broken.
+        let text = "G21 G90\no <thing> sub\nG1 X5 F100\no <thing> endsub\no <thing> call\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert_eq!(preview.segments.last().expect("a move").end[0], 5.0);
+        let text = "G21 G90\n#1 = 2\nO[#1 * 10] call\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(preview.incomplete, "{:?}", preview.incomplete_reason);
     }
 
     #[test]
