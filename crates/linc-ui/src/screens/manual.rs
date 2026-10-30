@@ -184,10 +184,9 @@ pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
             (egui::Key::Y, "Y"),
             (egui::Key::Z, "Z"),
         ] {
-            if input.consume_key(egui::Modifiers::NONE, key) {
-                if axes.iter().any(|name| name == axis) {
-                    zero = Some(vec![axis.to_string()]);
-                }
+            if input.consume_key(egui::Modifiers::NONE, key) && axes.iter().any(|name| name == axis)
+            {
+                zero = Some(vec![axis.to_string()]);
             }
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::A) {
@@ -204,7 +203,6 @@ pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
         common::zero_axes(app, axes);
     }
 }
-
 
 #[cfg(test)]
 mod tests {

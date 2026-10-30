@@ -166,19 +166,14 @@ impl PanelMode {
 }
 
 /// Result of decoding the physical one-hot mode inputs.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PanelModeValidity {
     Valid(PanelMode),
     /// Zero or multiple inputs active. Fails closed to `Unknown`.
     Invalid(Vec<PanelMode>),
     /// The panel link is down or the snapshot is stale.
+    #[default]
     Unknown,
-}
-
-impl Default for PanelModeValidity {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 impl PanelModeValidity {
@@ -258,7 +253,6 @@ impl MachinePower {
         }
     }
 }
-
 
 /// What kind of move the machine is executing right now.
 ///
@@ -973,7 +967,7 @@ impl Default for ProbeState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct AtcState {
     pub pockets: u16,
     pub current_pocket: Option<u16>,
@@ -985,23 +979,6 @@ pub struct AtcState {
     pub live_tool_direction: i8,
     pub live_tool_axial: Option<bool>,
     pub fault: Option<String>,
-}
-
-impl Default for AtcState {
-    fn default() -> Self {
-        Self {
-            pockets: 0,
-            current_pocket: None,
-            prepared_pocket: None,
-            clamped: None,
-            indexing: false,
-            station: None,
-            live_tool_rpm: None,
-            live_tool_direction: 0,
-            live_tool_axial: None,
-            fault: None,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1197,7 +1174,7 @@ pub struct PanelDisplay {
     pub homing: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct HalOutputs {
     pub hmi_alive: bool,
     pub tool_change_confirm: bool,
@@ -1213,21 +1190,6 @@ pub struct HalOutputs {
     /// `linc.machine-off`: the level the backend last published for a latched
     /// probe trip. True while the trip stands, false once it is reset.
     pub machine_off: bool,
-}
-
-impl Default for HalOutputs {
-    fn default() -> Self {
-        Self {
-            hmi_alive: false,
-            tool_change_confirm: false,
-            status_display: None,
-            tool_change_confirm_seq: 0,
-            jog_increment: None,
-            jog_speed: None,
-            heartbeat_seq: 0,
-            machine_off: false,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

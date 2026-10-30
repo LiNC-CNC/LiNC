@@ -69,21 +69,22 @@ pub fn lex_line(line: &str) -> Vec<Token> {
             continue;
         }
         // Line number at the start: N123.
-        if (i == 0 || line[..i].trim().is_empty()) && (ch == 'N' || ch == 'n') {
-            if bytes.get(i + 1).is_some_and(|c| c.is_ascii_digit()) {
-                let start = i;
+        if (i == 0 || line[..i].trim().is_empty())
+            && (ch == 'N' || ch == 'n')
+            && bytes.get(i + 1).is_some_and(|c| c.is_ascii_digit())
+        {
+            let start = i;
+            i += 1;
+            while i < bytes.len() && ((bytes[i] as char).is_ascii_digit()) {
                 i += 1;
-                while i < bytes.len() && ((bytes[i] as char).is_ascii_digit()) {
-                    i += 1;
-                }
-                tokens.push(Token {
-                    kind: TokenKind::LineNumber,
-                    start,
-                    end: i,
-                    text: line[start..i].to_string(),
-                });
-                continue;
             }
+            tokens.push(Token {
+                kind: TokenKind::LineNumber,
+                start,
+                end: i,
+                text: line[start..i].to_string(),
+            });
+            continue;
         }
         if ch == '(' {
             let start = i;
@@ -759,7 +760,6 @@ fn push_cycle_segment(
     });
 }
 
-
 /// Hard limits on the preview interpreter. A runaway program -- a "while [1]"
 /// or a subroutine that calls itself without a base case -- must stop the
 /// preview, not hang the HMI. Hitting a limit marks the preview incomplete
@@ -864,7 +864,11 @@ impl<'t, 'p> Expression<'t, 'p> {
             let left = value != 0.0;
             let right = rhs != 0.0;
             value = if op == "OR" {
-                if left || right { 1.0 } else { 0.0 }
+                if left || right {
+                    1.0
+                } else {
+                    0.0
+                }
             } else if left != right {
                 1.0
             } else {
@@ -894,7 +898,10 @@ impl<'t, 'p> Expression<'t, 'p> {
                 Some("GE") => Some(CompareOp::Ge),
                 Some("LT") => Some(CompareOp::Lt),
                 Some("LE") => Some(CompareOp::Le),
-                _ => match self.take_symbol(&["==", "!=", "<=", ">=", "<", ">"]).as_deref() {
+                _ => match self
+                    .take_symbol(&["==", "!=", "<=", ">=", "<", ">"])
+                    .as_deref()
+                {
                     Some("==") => Some(CompareOp::Eq),
                     Some("!=") => Some(CompareOp::Ne),
                     Some("<=") => Some(CompareOp::Le),
@@ -2406,7 +2413,11 @@ mod tests {
         .unwrap();
         let axes = vec!["X".to_string(), "Y".to_string(), "Z".to_string()];
         let preview = parse_preview(&text, &axes, None, [0.0; 3]);
-        for segment in preview.segments.iter().filter(|s| (10..=16).contains(&s.line)) {
+        for segment in preview
+            .segments
+            .iter()
+            .filter(|s| (10..=16).contains(&s.line))
+        {
             eprintln!(
                 "line {} {:?} {:?} -> {:?}",
                 segment.line, segment.kind, segment.start, segment.end
@@ -2684,26 +2695,46 @@ mod tests {
     /// whole drawing came out 25.4 times too small.
     #[test]
     fn g20_words_reach_the_preview_in_machine_units() {
-        let preview = parse_preview("G20 G90\nG0 X0 Y0\nG1 X1 Y1\n", &preview_axes(), None, [0.0; 3]);
+        let preview = parse_preview(
+            "G20 G90\nG0 X0 Y0\nG1 X1 Y1\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
         assert!(preview.error.is_none(), "{:?}", preview.error);
         let end = preview.segments.last().unwrap().end;
         assert!((end[0] - 25.4).abs() < 1e-9, "X {}", end[0]);
         assert!((end[1] - 25.4).abs() < 1e-9, "Y {}", end[1]);
 
         // Z too, and an incremental word is an increment in inches.
-        let preview = parse_preview("G20 G90\nG0 Z1\nG91 G1 Z-0.5\n", &preview_axes(), None, [0.0; 3]);
+        let preview = parse_preview(
+            "G20 G90\nG0 Z1\nG91 G1 Z-0.5\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
         assert!((preview.segments[0].end[2] - 25.4).abs() < 1e-9);
         assert!((preview.segments[1].end[2] - 12.7).abs() < 1e-9);
 
         // An R arc keeps its radius and its endpoint in machine units.
-        let preview = parse_preview("G20 G90\nG0 X0 Y0\nG2 X1 Y0 R0.5\n", &preview_axes(), None, [0.0; 3]);
+        let preview = parse_preview(
+            "G20 G90\nG0 X0 Y0\nG2 X1 Y0 R0.5\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
         let last = preview.segments.last().unwrap();
         assert!((last.end[0] - 25.4).abs() < 1e-9);
         let arc = last.arc.as_ref().expect("arc");
         assert!((arc.radius - 12.7).abs() < 1e-9, "R {}", arc.radius);
 
         // G21 leaves the words alone, and a G20 block applies from itself.
-        let preview = parse_preview("G21 G90\nG1 X1\nG20\nG1 X2\n", &preview_axes(), None, [0.0; 3]);
+        let preview = parse_preview(
+            "G21 G90\nG1 X1\nG20\nG1 X2\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
         assert!((preview.segments[0].end[0] - 1.0).abs() < 1e-9);
         assert!((preview.segments[1].end[0] - 50.8).abs() < 1e-9);
     }
@@ -2731,7 +2762,10 @@ mod tests {
         assert!(bounds.size()[1] > 90.0, "{bounds:?}");
         // Only the last arc of the spiral comes back to the middle.
         let last = preview.segments.last().expect("segments");
-        assert!(last.end[0].abs() < 0.1 && last.end[1].abs() < 0.1, "{last:?}");
+        assert!(
+            last.end[0].abs() < 0.1 && last.end[1].abs() < 0.1,
+            "{last:?}"
+        );
     }
 
     /// No error, a complete preview, and the path reaches the program's final
@@ -2754,7 +2788,10 @@ mod tests {
         let bounds = preview.bounds.expect("bounds");
         assert!((bounds.max[0] - 3.75).abs() < 1e-9, "{bounds:?}");
         assert!((bounds.max[1] - 3.95).abs() < 1e-9, "{bounds:?}");
-        assert!((bounds.min[1] - -0.01036297108184514).abs() < 1e-9, "{bounds:?}");
+        assert!(
+            (bounds.min[1] - -0.01036297108184514).abs() < 1e-9,
+            "{bounds:?}"
+        );
 
         // Segments 0..2 are the preamble. The first leaf is five nested first
         // thirds from (.25, 1.0): each level calls its first sub with the same
@@ -2768,7 +2805,10 @@ mod tests {
             expected = (0.25 * 2.0 + expected) / 3.0;
         }
         let first_leaf = preview.segments[3].end;
-        assert!((first_leaf[0] - expected).abs() < 1e-12, "{first_leaf:?} {expected}");
+        assert!(
+            (first_leaf[0] - expected).abs() < 1e-12,
+            "{first_leaf:?} {expected}"
+        );
         assert!((first_leaf[1] - 1.0).abs() < 1e-12, "{first_leaf:?}");
     }
 
@@ -2778,7 +2818,11 @@ mod tests {
         let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
         assert!(preview.error.is_none(), "{:?}", preview.error);
         assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
-        let ends: Vec<f64> = preview.segments.iter().map(|segment| segment.end[0]).collect();
+        let ends: Vec<f64> = preview
+            .segments
+            .iter()
+            .map(|segment| segment.end[0])
+            .collect();
         assert_eq!(ends, vec![10.0, 20.0, 30.0, 10.0, 10.0, 20.0, 62.0]);
     }
 
@@ -2787,7 +2831,11 @@ mod tests {
         let text = "G21 G90\n#<n> = 0\no100 if [#<n> LT 2]\n  #<n> = [#<n> + 1]\n  G1 X[#<n> * 5] F100\n  o100 goto 100\no100 endif\nG1 X99\n";
         let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
         assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
-        let ends: Vec<f64> = preview.segments.iter().map(|segment| segment.end[0]).collect();
+        let ends: Vec<f64> = preview
+            .segments
+            .iter()
+            .map(|segment| segment.end[0])
+            .collect();
         assert_eq!(ends, vec![5.0, 10.0, 99.0]);
     }
 
@@ -2817,13 +2865,19 @@ mod tests {
         assert!(preview.incomplete, "a limit must be reported");
         let reason = preview.incomplete_reason.clone().unwrap_or_default();
         assert!(reason.contains("depth"), "{reason}");
-        assert!(reason.contains(&PREVIEW_DEPTH_LIMIT.to_string()), "{reason}");
+        assert!(
+            reason.contains(&PREVIEW_DEPTH_LIMIT.to_string()),
+            "{reason}"
+        );
         assert!(
             preview.segments.len() <= PREVIEW_DEPTH_LIMIT + 1,
             "the depth limit bounds the work: {}",
             preview.segments.len()
         );
-        assert!(!preview.segments.iter().any(|segment| (segment.end[0] - 99.0).abs() < 1e-9));
+        assert!(!preview
+            .segments
+            .iter()
+            .any(|segment| (segment.end[0] - 99.0).abs() < 1e-9));
     }
 
     /// An unsupported construct, an unreadable expression or a call with no

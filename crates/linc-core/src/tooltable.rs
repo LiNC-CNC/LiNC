@@ -197,7 +197,7 @@ impl ToolTable {
 
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str(";");
+        out.push(';');
         for column in &self.columns {
             out.push_str(column.label());
             out.push(' ');

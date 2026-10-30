@@ -416,13 +416,13 @@ impl MachineIni {
             return Err(format!("{name} value is not finite"));
         }
         if let Some(axis) = self.axis(name) {
-            if axis.min_limit != 0.0 || axis.max_limit != 0.0 {
-                if value < axis.min_limit || value > axis.max_limit {
-                    return Err(format!(
-                        "{name} {value:.3} outside travel {:.3}…{:.3}",
-                        axis.min_limit, axis.max_limit
-                    ));
-                }
+            if (axis.min_limit != 0.0 || axis.max_limit != 0.0)
+                && (value < axis.min_limit || value > axis.max_limit)
+            {
+                return Err(format!(
+                    "{name} {value:.3} outside travel {:.3}…{:.3}",
+                    axis.min_limit, axis.max_limit
+                ));
             }
         }
         Ok(())

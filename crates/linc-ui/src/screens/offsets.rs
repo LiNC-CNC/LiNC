@@ -407,7 +407,7 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     if app.offsets.selected_row >= offsets.len() {
         app.offsets.selected_row = offsets.len().saturating_sub(1);
     }
-    if app.offsets.selected_column >= columns + 1 {
+    if app.offsets.selected_column > columns {
         app.offsets.selected_column = columns;
     }
     // The table holds the keyboard, as the tool table does, so the arrow keys
@@ -645,11 +645,7 @@ fn cell(
 ) {
     let selected = app.offsets.selected_row == row_index && app.offsets.selected_column == column;
     let editing = selected && app.offsets.editing;
-    let draft = app
-        .offsets
-        .rows
-        .entry(index)
-        .or_insert_with(crate::state::OffsetDraft::default);
+    let draft = app.offsets.rows.entry(index).or_default();
     let text = match &field {
         CellField::Axis(axis) => draft
             .values

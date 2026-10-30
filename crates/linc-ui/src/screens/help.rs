@@ -83,7 +83,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     } else {
         app.help.selected_row = app.help.selected_row.min(anchors.len() - 1);
         let current = app.help.selected_anchor.as_deref();
-        if current.map_or(true, |anchor| !anchors.iter().any(|a| a == anchor)) {
+        if current.is_none_or(|anchor| !anchors.iter().any(|a| a == anchor)) {
             app.help.selected_anchor = Some(anchors[app.help.selected_row].clone());
         }
     }
@@ -260,14 +260,12 @@ impl Columns {
 /// One table row: the documentation's own padding, so the header band, the
 /// group bands and the body rows share a left edge and a row rhythm.
 fn doc_row_frame(fill: Color32) -> egui::Frame {
-    egui::Frame::new()
-        .fill(fill)
-        .inner_margin(Margin {
-            left: DOC_CELL_PAD as i8,
-            right: DOC_CELL_PAD as i8,
-            top: 2,
-            bottom: 2,
-        })
+    egui::Frame::new().fill(fill).inner_margin(Margin {
+        left: DOC_CELL_PAD as i8,
+        right: DOC_CELL_PAD as i8,
+        top: 2,
+        bottom: 2,
+    })
 }
 
 fn header_row(ui: &mut Ui, columns: &Columns) {
@@ -514,7 +512,9 @@ pub fn draw_dialog(app: &mut LincApp, ctx: &egui::Context) {
                     // A dialog opens with its safe button under the Enter key:
                     // CLOSE, unless the operator has moved the ring to BACK.
                     let holds_ring = close_button.has_focus()
-                        || back_button.as_ref().is_some_and(|button| button.has_focus());
+                        || back_button
+                            .as_ref()
+                            .is_some_and(|button| button.has_focus());
                     if !holds_ring {
                         close_button.request_focus();
                     }
@@ -1233,9 +1233,7 @@ mod tests {
             .blocks
             .iter()
             .find_map(|block| match block {
-                HelpBlock::Para { spans, .. }
-                    if spans.iter().any(|span| span.link.is_some()) =>
-                {
+                HelpBlock::Para { spans, .. } if spans.iter().any(|span| span.link.is_some()) => {
                     Some(spans.as_slice())
                 }
                 _ => None,
@@ -1387,10 +1385,22 @@ mod tests {
 
     #[test]
     fn syntax_classes_match_the_probe_basic_remap() {
-        assert_eq!(code_color(CodeClass::Word), Color32::from_rgb(0x7d, 0x8c, 0xf6));
-        assert_eq!(code_color(CodeClass::Oword), Color32::from_rgb(0xa3, 0xb2, 0xee));
-        assert_eq!(code_color(CodeClass::Axis), Color32::from_rgb(0xff, 0xb3, 0x6b));
-        assert_eq!(code_color(CodeClass::Number), Color32::from_rgb(0xd9, 0x9b, 0xd9));
+        assert_eq!(
+            code_color(CodeClass::Word),
+            Color32::from_rgb(0x7d, 0x8c, 0xf6)
+        );
+        assert_eq!(
+            code_color(CodeClass::Oword),
+            Color32::from_rgb(0xa3, 0xb2, 0xee)
+        );
+        assert_eq!(
+            code_color(CodeClass::Axis),
+            Color32::from_rgb(0xff, 0xb3, 0x6b)
+        );
+        assert_eq!(
+            code_color(CodeClass::Number),
+            Color32::from_rgb(0xd9, 0x9b, 0xd9)
+        );
         assert_eq!(
             code_color(CodeClass::Comment),
             Color32::from_rgb(0xe8, 0x9f, 0x92)
@@ -1399,7 +1409,10 @@ mod tests {
             code_color(CodeClass::Parameter),
             Color32::from_rgb(0x93, 0xd4, 0x93)
         );
-        assert_eq!(code_color(CodeClass::Plain), Color32::from_rgb(0xd9, 0xd9, 0xd9));
+        assert_eq!(
+            code_color(CodeClass::Plain),
+            Color32::from_rgb(0xd9, 0xd9, 0xd9)
+        );
         assert!(code_format(11.0, CodeClass::Comment).italics);
         assert!(!code_format(11.0, CodeClass::Word).italics);
         assert_eq!(
@@ -1421,7 +1434,10 @@ mod tests {
             vec![(CodeClass::Axis, "X"), (CodeClass::Number, "10.5")]
         );
         assert_eq!(code_runs("#5070"), vec![(CodeClass::Parameter, "#5070")]);
-        assert_eq!(code_runs("#<feed>"), vec![(CodeClass::Parameter, "#<feed>")]);
+        assert_eq!(
+            code_runs("#<feed>"),
+            vec![(CodeClass::Parameter, "#<feed>")]
+        );
         assert_eq!(
             code_runs("(set unit)"),
             vec![(CodeClass::Comment, "(set unit)")]
@@ -1482,7 +1498,8 @@ mod tests {
             HelpAdmonition::Important,
             HelpAdmonition::Caution,
         ];
-        let styles: Vec<AdmonitionStyle> = kinds.iter().map(|kind| admonition_style(*kind)).collect();
+        let styles: Vec<AdmonitionStyle> =
+            kinds.iter().map(|kind| admonition_style(*kind)).collect();
         for (index, style) in styles.iter().enumerate() {
             assert!(!style.label.is_empty());
             for other in &styles[index + 1..] {
@@ -1534,9 +1551,7 @@ mod tests {
     }
 
     /// Rect fills and laid-out text colours a fixture paints, in draw order.
-    fn painted(
-        draw: impl FnOnce(&mut Ui),
-    ) -> (Vec<Color32>, Vec<(String, Vec<Color32>)>) {
+    fn painted(draw: impl FnOnce(&mut Ui)) -> (Vec<Color32>, Vec<(String, Vec<Color32>)>) {
         fn collect(
             shape: &egui::Shape,
             fills: &mut Vec<Color32>,
@@ -1563,7 +1578,10 @@ mod tests {
         }
         let ctx = egui::Context::default();
         let input = egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(900.0, 700.0))),
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(900.0, 700.0),
+            )),
             ..Default::default()
         };
         let mut fills = Vec::new();

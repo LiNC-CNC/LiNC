@@ -347,12 +347,10 @@ impl SnapshotBuilder {
             // answer `false` for a queue that was held mid-block. Both flags
             // travel together: motion decides the machine-off response and the
             // pause only ties the still case.
-            if let Some(trip) = self.probe_trip.raise(
-                &message,
-                now_ms(),
-                self.last_paused,
-                self.last_moving,
-            ) {
+            if let Some(trip) =
+                self.probe_trip
+                    .raise(&message, now_ms(), self.last_paused, self.last_moving)
+            {
                 log::error!(
                     "probe trip latched ({:?}, paused_when_raised={}, moving_when_raised={}): {}",
                     trip,
@@ -785,7 +783,8 @@ impl SnapshotBuilder {
         // leaves at 0 for ordinary moves, and `task.current_line` is the line of
         // the command the task last issued - ahead of the cut by the depth of the
         // motion queue.
-        let motion_line = self.executing_line
+        let motion_line = self
+            .executing_line
             .filter(|line| *line > 0)
             .unwrap_or(status.task.motion_line.max(0) as usize);
         let executed = if motion_line > 0 {
@@ -973,7 +972,7 @@ impl SnapshotBuilder {
             match direct_write_check(
                 operation,
                 &results,
-                &parameters,
+                parameters,
                 &transaction.values,
                 &provenance,
                 snapshot,
@@ -1687,10 +1686,7 @@ mod tests {
             fault.paused_when_raised,
             "the trip was raised with the program paused"
         );
-        assert!(
-            !fault.moving_when_raised,
-            "nothing was moving in that poll"
-        );
+        assert!(!fault.moving_when_raised, "nothing was moving in that poll");
         assert!(
             !fault.switches_machine_off(),
             "a paused trip with nothing moving leaves the machine on"
@@ -1826,13 +1822,7 @@ mod tests {
         status.task.mode = NmlTaskMode::Auto;
         status.task.exec_state = ExecState::Done;
         status.task.interp_state = linuxcnc_nml::InterpState::Reading;
-        let snapshot = builder.build(
-            &status,
-            &panel,
-            Vec::new(),
-            &ParameterFile::default(),
-            None,
-        );
+        let snapshot = builder.build(&status, &panel, Vec::new(), &ParameterFile::default(), None);
         assert!(
             snapshot.task.running,
             "the queue is cutting even though the task has no command in hand"
@@ -1842,24 +1832,12 @@ mod tests {
 
         // Idle interpreter, done task: nothing runs.
         status.task.interp_state = linuxcnc_nml::InterpState::Idle;
-        let snapshot = builder.build(
-            &status,
-            &panel,
-            Vec::new(),
-            &ParameterFile::default(),
-            None,
-        );
+        let snapshot = builder.build(&status, &panel, Vec::new(), &ParameterFile::default(), None);
         assert!(!snapshot.task.running);
 
         // Paused mid-program still counts as running.
         status.task.interp_state = linuxcnc_nml::InterpState::Paused;
-        let snapshot = builder.build(
-            &status,
-            &panel,
-            Vec::new(),
-            &ParameterFile::default(),
-            None,
-        );
+        let snapshot = builder.build(&status, &panel, Vec::new(), &ParameterFile::default(), None);
         assert!(snapshot.task.running);
     }
     /// The line being cut comes from the trajectory planner's id when the
@@ -1892,13 +1870,7 @@ mod tests {
         );
 
         // Without it (no HAL), the NML motion line, then the issued line.
-        let snapshot = builder.build(
-            &status,
-            &panel,
-            Vec::new(),
-            &ParameterFile::default(),
-            None,
-        );
+        let snapshot = builder.build(&status, &panel, Vec::new(), &ParameterFile::default(), None);
         assert_eq!(snapshot.program.executing_line(), 5000);
 
         // A pin that reads 0 (queue empty for a cycle) does not blank the line.

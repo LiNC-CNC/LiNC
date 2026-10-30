@@ -84,7 +84,7 @@ impl Editor {
     /// content is ignored so key events that do not change the buffer do not
     /// pollute undo history.
     pub fn replace_text(&mut self, text: String) -> bool {
-        if text == self.rope.to_string() {
+        if text == self.rope {
             return false;
         }
         self.push_undo();
@@ -112,7 +112,7 @@ impl Editor {
 
     pub fn set_saved_text(&mut self, text: String) {
         self.last_saved_text = text;
-        self.dirty = self.rope.to_string() != self.last_saved_text;
+        self.dirty = self.rope != self.last_saved_text;
     }
 
     fn push_undo(&mut self) {

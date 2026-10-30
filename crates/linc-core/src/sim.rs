@@ -1534,14 +1534,12 @@ impl MachineBackend for SimBackend {
                 table
                     .upsert(row)
                     .map_err(|error| MachineError::Invalid(error.to_string()))?;
-                table
-                    .save(expected_revision)
-                    .map_err(|error| match error {
-                        crate::tooltable::ToolTableError::RevisionConflict => {
-                            MachineError::RevisionConflict
-                        }
-                        other => MachineError::Io(other.to_string()),
-                    })?;
+                table.save(expected_revision).map_err(|error| match error {
+                    crate::tooltable::ToolTableError::RevisionConflict => {
+                        MachineError::RevisionConflict
+                    }
+                    other => MachineError::Io(other.to_string()),
+                })?;
                 self.tool_table = table;
                 self.snapshot.tool_table = self.tool_table.state();
                 Ok(())

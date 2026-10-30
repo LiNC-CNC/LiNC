@@ -2126,9 +2126,7 @@ impl Keymap {
         // Nothing on screen shows these any more (SETTINGS is gone), and a key
         // that silently does not work is a mystery at the machine: say it.
         for chord in &keymap.rejected {
-            log::warn!(
-                "[keys] {chord:?} is not a chord this shell understands; its default holds"
-            );
+            log::warn!("[keys] {chord:?} is not a chord this shell understands; its default holds");
         }
         keymap
     }
@@ -2450,7 +2448,10 @@ mod mdi_ui_tests {
 
         let long: Vec<String> = (0..5).map(|index| format!("G0 X{index}")).collect();
         let ui = MdiUi::restored(&long, 2);
-        assert_eq!(ui.block_texts(), vec!["G0 X3".to_string(), "G0 X4".to_string()]);
+        assert_eq!(
+            ui.block_texts(),
+            vec!["G0 X3".to_string(), "G0 X4".to_string()]
+        );
     }
 }
 

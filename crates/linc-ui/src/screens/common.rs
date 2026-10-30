@@ -1060,12 +1060,7 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                     let first = if is_running {
                         listing_first_line(focus, window_len, true, total)
                     } else {
-                        listing_follow(
-                            app.program.listing_first.get(),
-                            focus,
-                            window_len,
-                            total,
-                        )
+                        listing_follow(app.program.listing_first.get(), focus, window_len, total)
                     };
                     // Remembered either way, so the handover when a run ends
                     // does not throw the window back to where it was idle.
@@ -1074,11 +1069,7 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                     let number_font = FontId::monospace(theme::font_size(7.5));
                     let number_width = ui.fonts_mut(|fonts| {
                         fonts
-                            .layout_no_wrap(
-                                "0000".to_string(),
-                                number_font.clone(),
-                                theme::MUTED,
-                            )
+                            .layout_no_wrap("0000".to_string(), number_font.clone(), theme::MUTED)
                             .size()
                             .x
                     });
@@ -1148,10 +1139,7 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                         if let Some(galley) = galley {
                             row_ui.painter().galley(
                                 egui::pos2(
-                                    rect.left()
-                                        + theme::SELECTION_BAR
-                                        + number_width
-                                        + 8.0,
+                                    rect.left() + theme::SELECTION_BAR + number_width + 8.0,
                                     rect.top() + 1.0,
                                 ),
                                 galley,
@@ -1764,7 +1752,7 @@ pub fn focus_anchor_locked(ui: &mut Ui, salt: &str, lock_arrows: bool) -> egui::
         response.request_focus();
     }
     if lock_arrows {
-        let _ = ui.memory_mut(|memory| {
+        ui.memory_mut(|memory| {
             memory.set_focus_lock_filter(
                 response.id,
                 egui::EventFilter {
@@ -1983,7 +1971,12 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
     );
     shell_card(ui, rect, |ui| {
         let body_top = ui.cursor().top();
-        toolpath_header(ui, app.manual.view.label(), app.manual.zoom, app.graph_style.remaining);
+        toolpath_header(
+            ui,
+            app.manual.view.label(),
+            app.manual.zoom,
+            app.graph_style.remaining,
+        );
         let header_height = ui.cursor().top() - body_top;
         let graph_height = (rect.height() - 8.0 - header_height - 2.0).max(60.0);
         let preview = app.program.last_valid_preview.clone();
@@ -2023,7 +2016,6 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
         app.manual.auto_fit = auto_fit;
     });
 }
-
 
 /// Touch-off card shared by every live mode.
 ///
@@ -2185,7 +2177,6 @@ pub fn following_error_card(app: &LincApp, ui: &mut Ui, height: f32) {
                     let (_, mean) = app.following_error_summary(axis);
                     axis_number(ui, axis, format!("{mean:.3}"), trace_color(index));
                 }
-
             });
             // The lane takes everything the header leaves: one lane, maximised,
             // not a stack of rows.
@@ -2316,8 +2307,7 @@ pub fn increment_row(app: &mut LincApp, ui: &mut Ui) {
                         ink,
                     );
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    if theme::chip_sized(ui, label.clone(), index == selected, chip_width)
-                        .clicked()
+                    if theme::chip_sized(ui, label.clone(), index == selected, chip_width).clicked()
                     {
                         pick = Some(index);
                     }
@@ -2881,9 +2871,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 }
             }
             egui::Shape::Rect(rect) => {
-                let frame =
-                    rect.stroke.color == crate::theme::BORDER && rect.corner_radius.nw == 6;
-                let bigger = paint.card.map_or(true, |card| rect.rect.area() > card.area());
+                let frame = rect.stroke.color == crate::theme::BORDER && rect.corner_radius.nw == 6;
+                let bigger = paint
+                    .card
+                    .map_or(true, |card| rect.rect.area() > card.area());
                 if frame && bigger {
                     paint.card = Some(rect.rect);
                 }
@@ -2915,21 +2906,25 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 profile.clone(),
                 linc_core::model::PanelMode::Auto,
             ));
-            app = Some(crate::shell::LincApp::new(profile.clone(), backend, ui.ctx()));
+            app = Some(crate::shell::LincApp::new(
+                profile.clone(),
+                backend,
+                ui.ctx(),
+            ));
         });
         output.textures_delta.clear();
         let mut app = app.unwrap();
-        let text: String = (1..=400).map(|index| format!("LISTROW{index:04}\n")).collect();
+        let text: String = (1..=400)
+            .map(|index| format!("LISTROW{index:04}\n"))
+            .collect();
         app.snapshot.program.content = Some(std::sync::Arc::new(text));
         app.snapshot.program.line_count = 400;
         app.snapshot.program.current_line = 1;
         app.snapshot.program.modal = (0..codes)
             .map(|index| (format!("G{}", index + 1), "1.0".to_string()))
             .collect();
-        let slot = egui::Rect::from_min_size(
-            egui::Pos2::new(400.0, 20.0),
-            egui::vec2(360.0, height),
-        );
+        let slot =
+            egui::Rect::from_min_size(egui::Pos2::new(400.0, 20.0), egui::vec2(360.0, height));
         let mut out = ctx.run_ui(raw(), |ui| {
             let mut child = ui.new_child(
                 egui::UiBuilder::new()
@@ -3019,7 +3014,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             let card = paint.card.expect("the card frame paints");
             // The slot ends on the page's bottom edge at 620; the frame's stroke
             // sits on it.
-            assert!((card.max.y - 620.0).abs() <= 2.5, "the card ends at {card:?}");
+            assert!(
+                (card.max.y - 620.0).abs() <= 2.5,
+                "the card ends at {card:?}"
+            );
             let progress = paint.progress.expect("the progress line paints");
             assert!(
                 progress.min.y > band_top(&paint),

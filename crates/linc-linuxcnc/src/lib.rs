@@ -194,7 +194,6 @@ impl NmlBackend {
         if let Some(hal) = self.hal.as_ref() {
             match hal.s32("motion.program-line") {
                 Some(line) if line > 0 => {
-
                     if !self.program_line_logged {
                         self.program_line_logged = true;
                         log::info!(
@@ -215,9 +214,9 @@ impl NmlBackend {
             }
         }
         let executing_line = (self.program_line > 0).then_some(self.program_line);
-        let mut snapshot = self
-            .builder
-            .build(&status, &panel, spindles, &self.parameters, executing_line);
+        let mut snapshot =
+            self.builder
+                .build(&status, &panel, spindles, &self.parameters, executing_line);
         if let Some(stored) = self.last_snapshot.as_mut() {
             carry_hal_selections(&mut snapshot, stored);
         }
@@ -654,7 +653,12 @@ impl NmlBackend {
         }
         let stored = self.parameters.work_offset(index, &axes);
         let stored_rotation = self.parameters.rotation(index);
-        if unpublished_live_row(&values, status.offsets.rotation_xy, &stored, stored_rotation) {
+        if unpublished_live_row(
+            &values,
+            status.offsets.rotation_xy,
+            &stored,
+            stored_rotation,
+        ) {
             if !self.offset_unpublished_logged {
                 log::warn!(
                     "{} is not published by the interpreter; keeping the stored row ({}) instead of mirroring zeros",
@@ -1343,9 +1347,7 @@ impl NmlBackend {
                     }
                     // The worker owns these: it publishes them from its own
                     // snapshot and nothing here has state to mirror.
-                    LincOutput::HmiAlive
-                    | LincOutput::StatusDisplay
-                    | LincOutput::MachineOff => {}
+                    LincOutput::HmiAlive | LincOutput::StatusDisplay | LincOutput::MachineOff => {}
                 }
                 Ok(())
             }
@@ -1748,7 +1750,10 @@ fn normalize_lexically(path: &Path) -> PathBuf {
             Component::CurDir => {}
             Component::ParentDir => {
                 // Only pop a normal segment; `..` above `/` stays put.
-                if out.components().next_back().is_some_and(|last| matches!(last, Component::Normal(_)))
+                if out
+                    .components()
+                    .next_back()
+                    .is_some_and(|last| matches!(last, Component::Normal(_)))
                 {
                     out.pop();
                 }
@@ -1768,10 +1773,18 @@ mod nc_containment_tests {
         let dir = std::env::temp_dir().join(format!("linc-nc-{}", std::process::id()));
         let root = dir.join("nc_files");
         std::fs::create_dir_all(root.join("sub")).unwrap();
-        std::fs::write(root.join("sub").join("part.ngc"), "G0 X0
-").unwrap();
-        std::fs::write(root.join("top.ngc"), "G0 X0
-").unwrap();
+        std::fs::write(
+            root.join("sub").join("part.ngc"),
+            "G0 X0
+",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("top.ngc"),
+            "G0 X0
+",
+        )
+        .unwrap();
         root
     }
 
@@ -1788,30 +1801,49 @@ mod nc_containment_tests {
         // A standard nc_files tree has these: examples -> /usr/share/linuxcnc/ncfiles
         let outside = root.parent().unwrap().join("shared");
         std::fs::create_dir_all(&outside).unwrap();
-        std::fs::write(outside.join("demo.ngc"), "G0 X0
-").unwrap();
+        std::fs::write(
+            outside.join("demo.ngc"),
+            "G0 X0
+",
+        )
+        .unwrap();
         let link = root.join("examples");
         let _ = std::fs::remove_file(&link);
         std::os::unix::fs::symlink(&outside, &link).unwrap();
         let found = contained_nc_file(&root, &link.join("demo.ngc"));
-        assert!(found.is_some(), "paths reached through a symlink inside NC_FILES must load");
+        assert!(
+            found.is_some(),
+            "paths reached through a symlink inside NC_FILES must load"
+        );
     }
 
     #[test]
     fn a_path_that_escapes_the_root_is_rejected() {
         let root = temp_root();
         let outside = root.parent().unwrap().join("elsewhere.ngc");
-        std::fs::write(&outside, "G0 X0
-").unwrap();
+        std::fs::write(
+            &outside, "G0 X0
+",
+        )
+        .unwrap();
         assert!(contained_nc_file(&root, &outside).is_none());
         let dotted = root.join("sub").join("..").join("..").join("elsewhere.ngc");
-        assert!(contained_nc_file(&root, &dotted).is_none(), ".. must not escape the root");
+        assert!(
+            contained_nc_file(&root, &dotted).is_none(),
+            ".. must not escape the root"
+        );
     }
 
     #[test]
     fn lexical_folding_keeps_the_path_spelling() {
-        assert_eq!(normalize_lexically(&PathBuf::from("/a/b/../c")), PathBuf::from("/a/c"));
-        assert_eq!(normalize_lexically(&PathBuf::from("/a/./b")), PathBuf::from("/a/b"));
+        assert_eq!(
+            normalize_lexically(&PathBuf::from("/a/b/../c")),
+            PathBuf::from("/a/c")
+        );
+        assert_eq!(
+            normalize_lexically(&PathBuf::from("/a/./b")),
+            PathBuf::from("/a/b")
+        );
     }
 
     /// A save names a file that does not exist yet: the target must be accepted
@@ -1821,14 +1853,14 @@ mod nc_containment_tests {
         let root = temp_root();
         let fresh = root.join("new-part.ngc");
         assert!(!fresh.exists());
-        assert_eq!(contained_nc_write_target(&root, &fresh), Some(fresh.clone()));
+        assert_eq!(
+            contained_nc_write_target(&root, &fresh),
+            Some(fresh.clone())
+        );
 
         // An existing regular file is still a valid target.
         let existing = root.join("top.ngc");
-        assert_eq!(
-            contained_nc_write_target(&root, &existing),
-            Some(existing)
-        );
+        assert_eq!(contained_nc_write_target(&root, &existing), Some(existing));
 
         // Outside the root, and the root itself, are not targets.
         let outside = root.parent().unwrap().join("new-escape.ngc");
@@ -2102,7 +2134,11 @@ mod tests {
     }
 
     fn row(values: &[(&str, f64)]) -> AxisMap<f64> {
-        AxisMap::from_entries(values.iter().map(|(axis, value)| (axis.to_string(), *value)))
+        AxisMap::from_entries(
+            values
+                .iter()
+                .map(|(axis, value)| (axis.to_string(), *value)),
+        )
     }
 
     /// An unpublished live row is zeros, and zeros are also a legitimate

@@ -375,8 +375,14 @@ mod tests {
         parameters.record_offset_axes(1, &values, &axes);
         parameters.save().unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("5223\t-4.500000"), "Z must land in 5223: {text}");
-        assert!(!text.contains("5222\t-4.500000"), "Z must not land in Y: {text}");
+        assert!(
+            text.contains("5223\t-4.500000"),
+            "Z must land in 5223: {text}"
+        );
+        assert!(
+            !text.contains("5222\t-4.500000"),
+            "Z must not land in Y: {text}"
+        );
         let reread = ParameterFile::load(Some(path));
         assert_eq!(reread.work_offset(1, &axes).get("Z"), Some(&-4.5));
     }

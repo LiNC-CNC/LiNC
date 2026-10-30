@@ -1110,17 +1110,15 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
         ));
     }
 
-    if config.machine.gui == "lathe" {
-        if config.probe.enabled {
-            return Err(ConfigError::Invalid(
-                "the mill-oriented touch probe must be disabled for lathe profiles".into(),
-            ));
-        }
+    if config.machine.gui == "lathe" && config.probe.enabled {
+        return Err(ConfigError::Invalid(
+            "the mill-oriented touch probe must be disabled for lathe profiles".into(),
+        ));
     }
     if config.probe.subroutines != "ini" {
         return Err(ConfigError::Invalid("probe.subroutines must be ini".into()));
     }
-    if config.homing.auto_open != true && config.machine.gui == "mill" {
+    if !config.homing.auto_open && config.machine.gui == "mill" {
         // Homing is panel-driven; opening automatically is part of the contract.
         return Err(ConfigError::Invalid("homing.auto_open must be true".into()));
     }
@@ -1160,7 +1158,7 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
             "diagnostics.panel_link_stats must be none, optional or required".into(),
         ));
     }
-    if config.pendant.jog_only != true {
+    if !config.pendant.jog_only {
         return Err(ConfigError::Invalid("pendant.jog_only must be true".into()));
     }
     if config.pendant.enabled && config.pendant.kind != "whb04b6" {
@@ -1620,10 +1618,7 @@ enabled = true
         assert_eq!(loaded.config.ui.dro_position, "actual");
         write(&profile, &profile_text("feedback"));
         let error = Profile::load(&profile, None).unwrap_err();
-        assert!(
-            error.to_string().contains("ui.dro_position"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("ui.dro_position"), "{error}");
     }
 
     #[test]

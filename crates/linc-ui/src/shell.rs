@@ -477,10 +477,7 @@ impl LincApp {
             offsets: OffsetsUi::default(),
             tools: ToolsUi::default(),
             probe: ProbeUi::new(probe_params, active_probe_wcs),
-            mdi: MdiUi::restored(
-                &preferences.mdi_history,
-                profile.config.mdi.history_limit,
-            ),
+            mdi: MdiUi::restored(&preferences.mdi_history, profile.config.mdi.history_limit),
             help: HelpUi::default(),
             files: FilesUi::new(
                 profile.machine_ini.program_prefix.clone(),
@@ -2093,13 +2090,15 @@ impl LincApp {
                 continue;
             }
             let worst = self.following_run_max.get(&axis).copied().unwrap_or(0.0);
-            self.following_run_max.insert(axis.clone(), worst.max(value.abs()));
+            self.following_run_max
+                .insert(axis.clone(), worst.max(value.abs()));
             let sum = self
                 .following_run_abs_sum
                 .get(&axis)
                 .copied()
                 .unwrap_or(0.0);
-            self.following_run_abs_sum.insert(axis.clone(), sum + value.abs());
+            self.following_run_abs_sum
+                .insert(axis.clone(), sum + value.abs());
             let count = self.following_run_samples.get(&axis).copied().unwrap_or(0);
             self.following_run_samples.insert(axis, count + 1);
         }
@@ -2113,11 +2112,7 @@ impl LincApp {
             return (0.0, 0.0);
         }
         let worst = self.following_run_max.get(axis).copied().unwrap_or(0.0);
-        let sum = self
-            .following_run_abs_sum
-            .get(axis)
-            .copied()
-            .unwrap_or(0.0);
+        let sum = self.following_run_abs_sum.get(axis).copied().unwrap_or(0.0);
         (worst, sum / samples as f64)
     }
 
@@ -2761,8 +2756,7 @@ impl LincApp {
                 }
                 // egui reports the numpad key and the main-row key as Minus alike,
                 // so unlike the plus there is nothing to alias here.
-                let zoom_out =
-                    input.consume_key(k.view_zoom_out.modifiers, k.view_zoom_out.key);
+                let zoom_out = input.consume_key(k.view_zoom_out.modifiers, k.view_zoom_out.key);
                 if zoom_out {
                     view_zoom /= VIEW_ZOOM_STEP;
                 }
@@ -3096,15 +3090,19 @@ impl LincApp {
                 }
             }
         }
-        if undo && self.page == Page::Program && self.program.focus_editor {
-            if self.program.editor.undo() {
-                self.mark_editor_changed();
-            }
+        if undo
+            && self.page == Page::Program
+            && self.program.focus_editor
+            && self.program.editor.undo()
+        {
+            self.mark_editor_changed();
         }
-        if redo && self.page == Page::Program && self.program.focus_editor {
-            if self.program.editor.redo() {
-                self.mark_editor_changed();
-            }
+        if redo
+            && self.page == Page::Program
+            && self.program.focus_editor
+            && self.program.editor.redo()
+        {
+            self.mark_editor_changed();
         }
         if run_from_line {
             self.request_run_from_line();
@@ -4358,7 +4356,9 @@ impl LincApp {
         .flatten()
         {
             for axis in 0..3 {
-                extent = extent.max(bounds.min[axis].abs()).max(bounds.max[axis].abs());
+                extent = extent
+                    .max(bounds.min[axis].abs())
+                    .max(bounds.max[axis].abs());
             }
         }
         // Sign, the integer digits of the extent, the point, the decimals.
@@ -4395,21 +4395,16 @@ impl LincApp {
             if self.shows_coordinate_status() {
                 let bar = ui.max_rect();
                 let text = self.coordinate_status_line();
-                let galley = ui.painter().layout_no_wrap(
-                    text,
-                    FontId::monospace(size),
-                    theme::FG,
-                );
+                let galley = ui
+                    .painter()
+                    .layout_no_wrap(text, FontId::monospace(size), theme::FG);
                 // Never let it run into the left or the right block: the bar is
                 // 1280 px wide at the minimum and those two need about 600.
                 if galley.size().x + 24.0 < bar.width() * 0.5 {
                     // Left-aligned in the flow, right after the machine fields:
                     // the operator reads the bar left to right, and a centred
                     // block floats away from the line it belongs to.
-                    let pos = egui::pos2(
-                        ui.cursor().min.x,
-                        bar.center().y - galley.size().y / 2.0,
-                    );
+                    let pos = egui::pos2(ui.cursor().min.x, bar.center().y - galley.size().y / 2.0);
                     ui.painter().galley(pos, galley, theme::FG);
                 }
             }
@@ -4433,10 +4428,8 @@ impl LincApp {
                 // steady; MACHINE OFF blinks so it cannot fade into a bar full
                 // of green.
                 let machine_is_off = !self.snapshot.machine.on && !self.snapshot.meta.stale;
-                let (machine_text, machine_color) = machine_status_field(
-                    self.snapshot.machine.on,
-                    self.snapshot.meta.stale,
-                );
+                let (machine_text, machine_color) =
+                    machine_status_field(self.snapshot.machine.on, self.snapshot.meta.stale);
                 let machine_color = if machine_is_off {
                     blink_fault_color(ui)
                 } else {
@@ -5328,7 +5321,7 @@ fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Page, color: C
 impl eframe::App for LincApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         theme::apply_design_zoom(ui.ctx(), self.design_scale);
-        let dt = ui.ctx().input(|input| input.stable_dt) as f32;
+        let dt = ui.ctx().input(|input| input.stable_dt);
         self.fps = fps_step(self.fps, dt);
         self.apply_diag_actions();
         self.publish_diag();
@@ -6072,22 +6065,12 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         use linc_core::faults::{ProbeTripFault, ProbeTripKind};
         let message = ProbeTripKind::NonProbeMove.message();
         let switched_off = ProbeTripFault::new(ProbeTripKind::NonProbeMove, message, 1);
-        let left_on = ProbeTripFault::new_with_state(
-            ProbeTripKind::NonProbeMove,
-            message,
-            1,
-            true,
-            false,
-        );
+        let left_on =
+            ProbeTripFault::new_with_state(ProbeTripKind::NonProbeMove, message, 1, true, false);
         // A paused program being jogged into the probe is not the finger test:
         // the controller reports it as a non-probe move with the pause still set.
-        let jogged = ProbeTripFault::new_with_state(
-            ProbeTripKind::NonProbeMove,
-            message,
-            1,
-            true,
-            true,
-        );
+        let jogged =
+            ProbeTripFault::new_with_state(ProbeTripKind::NonProbeMove, message, 1, true, true);
 
         let off_text = probe_trip_banner_text(&switched_off);
         let on_text = probe_trip_banner_text(&left_on);
@@ -6113,7 +6096,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 text.contains(PROBE_TRIP_ACTION),
                 "both banners name the reset key {PROBE_TRIP_ACTION}: {text}"
             );
-            assert!(text.contains(message), "the controller text is carried: {text}");
+            assert!(
+                text.contains(message),
+                "the controller text is carried: {text}"
+            );
         }
     }
 
@@ -6225,7 +6211,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         let measure = |texts: &[&'static str]| {
             let mut width = None;
             let mut output = ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
-                let text: f32 = texts.iter().map(|text| theme::measure(ui, text, 11.0)).sum();
+                let text: f32 = texts
+                    .iter()
+                    .map(|text| theme::measure(ui, text, 11.0))
+                    .sum();
                 width = Some(text + 24.0 * (texts.len() - 1) as f32);
             });
             output.textures_delta.clear();
@@ -6362,7 +6351,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         feed(&mut harness, linc_core::model::MotionKind::Traverse, 0.500);
         let (worst, mean) = harness.app.following_error_summary("X");
         assert_eq!((worst, mean), (0.0, 0.0), "a rapid is not counted");
-        assert_eq!(harness.app.following_history.get("X").map(|t| t.len()), Some(1));
+        assert_eq!(
+            harness.app.following_history.get("X").map(|t| t.len()),
+            Some(1)
+        );
 
         feed(&mut harness, linc_core::model::MotionKind::Feed, 0.010);
         feed(&mut harness, linc_core::model::MotionKind::ArcFeed, 0.020);
@@ -6444,12 +6436,16 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 .collect()
         };
         assert!(
-            !header(&mut harness).iter().any(|(text, _)| text == "REMAINING"),
+            !header(&mut harness)
+                .iter()
+                .any(|(text, _)| text == "REMAINING"),
             "no indicator with the mode off"
         );
         harness.app.graph_style.remaining = true;
         assert!(
-            header(&mut harness).iter().any(|(text, _)| text == "REMAINING"),
+            header(&mut harness)
+                .iter()
+                .any(|(text, _)| text == "REMAINING"),
             "the card header says REMAINING while it is on"
         );
     }
@@ -6462,10 +6458,8 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
         harness.app.set_page(Page::Files);
         harness.app.files.usb_focused = false;
-        harness.app.preferences.recent_files = vec![
-            "/nc/newest.ngc".to_string(),
-            "/nc/older.ngc".to_string(),
-        ];
+        harness.app.preferences.recent_files =
+            vec!["/nc/newest.ngc".to_string(), "/nc/older.ngc".to_string()];
         let texts = |harness: &mut ProbeHarness| -> Vec<String> {
             painted_text(&harness.frame_full(Vec::new()))
                 .into_iter()
@@ -6536,7 +6530,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             .clone()
             .expect("the controller's offset is the frame, program or not");
         assert_eq!(offset.get("X").copied(), Some(-156.381));
-        assert!(harness.app.program.preview.segments.is_empty(), "no program");
+        assert!(
+            harness.app.program.preview.segments.is_empty(),
+            "no program"
+        );
         // The marker lands where the work reading already is: its shift is zero,
         // not the whole offset.
         let shift = crate::state::live_trail_shift(&harness.app.snapshot, Some(&offset));
@@ -6615,7 +6612,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         let line = harness.app.coordinate_status_line();
         let (position, dtg) = line.split_once("  DTG: ").expect("two groups");
         for axis in ["X", "Y", "Z"] {
-            assert!(position.contains(axis), "{axis} in the position group: {line}");
+            assert!(
+                position.contains(axis),
+                "{axis} in the position group: {line}"
+            );
             assert!(dtg.contains(axis), "{axis} in the DTG group: {line}");
         }
         assert_eq!(position.matches('X').count(), 1, "{line}");
@@ -6797,14 +6797,7 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 .map(|(_, rect)| *rect)
                 .unwrap_or_else(|| panic!("{text} is a navigation row"))
         };
-        for label in [
-            "MACHINE",
-            "PROGRAM",
-            "TOOLS",
-            "OFFSETS",
-            "DIAG",
-            "G-CODE",
-        ] {
+        for label in ["MACHINE", "PROGRAM", "TOOLS", "OFFSETS", "DIAG", "G-CODE"] {
             in_nav(label);
         }
         assert!(
@@ -6850,7 +6843,8 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             "{heights:?}"
         );
         assert_eq!(
-            theme::NAV_PILL_SECONDARY, theme::NAV_PILL_PRIMARY,
+            theme::NAV_PILL_SECONDARY,
+            theme::NAV_PILL_PRIMARY,
             "a one-line row paints the same pill as the others"
         );
         // Pitch: the target plus the gap, from the labels that sit in them.
@@ -6881,7 +6875,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         // Ctrl+M is REMAINING: the view changes, the page does not.
         let page = harness.app.page;
         harness.frame_with(&[(egui::Key::M, ctrl())]);
-        assert!(harness.app.graph_style.remaining, "Ctrl+M turns REMAINING on");
+        assert!(
+            harness.app.graph_style.remaining,
+            "Ctrl+M turns REMAINING on"
+        );
         assert_eq!(harness.app.page, page, "a view mode, not a page");
         // The pages behind the rows still answer their own chords.
         harness.frame_with(&[(egui::Key::D, ctrl())]);
@@ -6910,7 +6907,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         harness.app.set_page(Page::Manual);
         harness.frame(&[]);
         let output = harness.frame_full(Vec::new());
-        let texts: Vec<String> = painted_text(&output).into_iter().map(|(text, _)| text).collect();
+        let texts: Vec<String> = painted_text(&output)
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect();
         for label in ["10mm", "1mm", ".1mm", ".01mm"] {
             assert!(
                 texts.iter().any(|text| text == label),
@@ -6920,7 +6920,11 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         // The number is the key and sits outside the chip, so the button keeps
         // the value alone.
         assert!(
-            texts.iter().filter(|text| ("1"..="4").contains(&text.as_str())).count() >= 4,
+            texts
+                .iter()
+                .filter(|text| ("1"..="4").contains(&text.as_str()))
+                .count()
+                >= 4,
             "the four digits are painted next to their steps: {texts:?}"
         );
         assert!(
@@ -6944,9 +6948,13 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         harness.app.set_page(Page::Manual);
         harness.frame(&[]);
         let output = harness.frame_full(Vec::new());
-        let texts: Vec<String> = painted_text(&output).into_iter().map(|(text, _)| text).collect();
+        let texts: Vec<String> = painted_text(&output)
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect();
         assert!(
-            !texts.iter().any(|text| text == "10mm") && !texts.iter().any(|text| text == "INCREMENT"),
+            !texts.iter().any(|text| text == "10mm")
+                && !texts.iter().any(|text| text == "INCREMENT"),
             "a continuous jog shows no increment: {texts:?}"
         );
         harness.frame_with(&[(egui::Key::Num3, egui::Modifiers::NONE)]);
@@ -6960,9 +6968,13 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         harness.app.set_page(Page::Manual);
         harness.frame(&[]);
         let output = harness.frame_full(Vec::new());
-        let texts: Vec<String> = painted_text(&output).into_iter().map(|(text, _)| text).collect();
+        let texts: Vec<String> = painted_text(&output)
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect();
         assert!(
-            !texts.iter().any(|text| text == "10mm") && !texts.iter().any(|text| text == "INCREMENT"),
+            !texts.iter().any(|text| text == "10mm")
+                && !texts.iter().any(|text| text == "INCREMENT"),
             "MPG picks its step on the handwheel: {texts:?}"
         );
         harness.frame_with(&[(egui::Key::Num3, egui::Modifiers::NONE)]);
@@ -6986,7 +6998,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
 
         style.remaining = false;
         style.apply(&mut view, None, None, None);
-        assert!(view.show_live_trail, "the trail comes back with the mode off");
+        assert!(
+            view.show_live_trail,
+            "the trail comes back with the mode off"
+        );
         assert_eq!(view.eaten_through, None);
     }
 
@@ -7596,16 +7611,18 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         app.save_program_as("part");
         app.poll_backend();
         assert!(app.modal.is_none());
-        let path = app.program.editor.path.clone().expect("the buffer has a path");
+        let path = app
+            .program
+            .editor
+            .path
+            .clone()
+            .expect("the buffer has a path");
         assert_eq!(
             path.file_name().unwrap().to_string_lossy(),
             "part.ngc",
             "the configured G-code extension is appended"
         );
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            "G0 X0\nG1 X10\n"
-        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "G0 X0\nG1 X10\n");
         assert!(!app.program_dirty(), "the save clears the marker");
     }
 
@@ -7826,8 +7843,11 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         use linc_core::faults::{ProbeTripFault, ProbeTripKind};
         let (_dir, mut app) = make_app(PanelMode::Auto);
         app.poll_backend();
-        let fault =
-            ProbeTripFault::new(ProbeTripKind::JointJog, ProbeTripKind::JointJog.message(), 1);
+        let fault = ProbeTripFault::new(
+            ProbeTripKind::JointJog,
+            ProbeTripKind::JointJog.message(),
+            1,
+        );
         // The banner's button has to name the key that does the same thing: the
         // panel keyboard is the operator's only input.
         assert!(
@@ -7857,7 +7877,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
                 .iter()
                 .any(|toast| toast.text == "PROBE TRIP RESET"),
             "the reset is acknowledged: {:?}",
-            app.toasts.iter().map(|toast| &toast.text).collect::<Vec<_>>()
+            app.toasts
+                .iter()
+                .map(|toast| &toast.text)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -8655,7 +8678,10 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         harness.app.tools.selected_row = active;
         harness.app.tools.error = None;
         harness.frame(&[egui::Key::Backspace]);
-        assert!(harness.app.modal.is_none(), "the active tool is not deleted");
+        assert!(
+            harness.app.modal.is_none(),
+            "the active tool is not deleted"
+        );
         assert!(
             harness
                 .app
@@ -9112,9 +9138,7 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
             harness.app.program.graph_zoom
         );
         assert!(
-            (harness.app.program.graph_pan - pan_before * VIEW_ZOOM_STEP)
-                .length()
-                < 1e-3,
+            (harness.app.program.graph_pan - pan_before * VIEW_ZOOM_STEP).length() < 1e-3,
             "the pan carries the zoom so the card centre stays put, {:?} -> {:?}",
             pan_before,
             harness.app.program.graph_pan
@@ -10696,7 +10720,9 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         assert!(texts.iter().any(|(text, _)| text.contains("BLOCKS")));
         // An idle strip draws nothing: the issue keys are already on the rail.
         assert!(
-            !texts.iter().any(|(text, _)| text.starts_with("ENTER ISSUES")),
+            !texts
+                .iter()
+                .any(|(text, _)| text.starts_with("ENTER ISSUES")),
             "the idle strip must not repeat the shortcuts rail"
         );
         harness.app.mdi.last_result = Some("G1 X10".into());
