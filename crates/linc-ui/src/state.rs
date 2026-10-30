@@ -679,6 +679,159 @@ pub fn read_dir_entries(root: &std::path::Path) -> Vec<FileEntry> {
     entries
 }
 
+/// Where the cut is in the program's loops.
+///
+/// The controller publishes no parameter values, so the numbers come from the
+/// preview's own run of the same statements. What it does publish is
+/// `motion.program-line`, the line being cut - not `current_line`, which races
+/// ahead of the tool - and that is what advances this cursor through the
+/// preview's unrolled plan.
+#[derive(Clone, Debug, Default)]
+pub struct LoopProgress {
+    /// Segment the cut has reached in `Preview::segments`.
+    pub cursor: usize,
+    /// The loop the cut is in, and the pass within it.
+    pub current: Option<(usize, usize)>,
+    /// The preview generation these belong to.
+    pub generation: u64,
+}
+
+impl LoopProgress {
+    /// Follow a newly reported motion line. The body line repeats once per pass
+    /// and the controller reports only the number, so the pass comes from where
+    /// the tool is: the segment that runs this line and ends nearest the tool is
+    /// the one being cut.
+    pub fn follow(&mut self, preview: &Preview, motion: usize, tip: [f64; 3], generation: u64) {
+        if generation != self.generation {
+            *self = Self {
+                generation,
+                ..Self::default()
+            };
+        }
+        if motion == 0 || preview.segments.is_empty() {
+            self.current = None;
+            return;
+        }
+        let segments = &preview.segments;
+        // A window around the cursor first: the cut moves forward, so the pass
+        // being cut is near where the last one was. A full scan only when the
+        // window holds nothing, which is what a restart or a jump looks like.
+        let from = self.cursor.saturating_sub(1024);
+        let to = (self.cursor + 4096).min(segments.len());
+        let mut found = nearest_on_line(segments, motion, tip, from, to);
+        if found.is_none() {
+            found = nearest_on_line(segments, motion, tip, 0, segments.len());
+        }
+        let Some(index) = found else {
+            self.current = None;
+            return;
+        };
+        self.cursor = index;
+        self.current =
+            linc_core::gcode::unpack_pass(preview.segment_loop.get(index).copied().unwrap_or(0));
+    }
+}
+
+/// The segment that runs `line` and ends nearest `tip`, within `from..to`.
+fn nearest_on_line(
+    segments: &[linc_core::gcode::PathSegment],
+    line: usize,
+    tip: [f64; 3],
+    from: usize,
+    to: usize,
+) -> Option<usize> {
+    let mut best: Option<(usize, f64)> = None;
+    for (index, segment) in segments.iter().enumerate().take(to).skip(from) {
+        if segment.line != line {
+            continue;
+        }
+        let end = segment.end;
+        let distance =
+            (end[0] - tip[0]).powi(2) + (end[1] - tip[1]).powi(2) + (end[2] - tip[2]).powi(2);
+        if best.is_none_or(|(_, found)| distance < found) {
+            best = Some((index, distance));
+        }
+    }
+    best.map(|(index, _)| index)
+}
+
+/// What a status line says about the loop the run is in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoopReadout {
+    /// The line that opens the loop.
+    pub line: usize,
+    /// The parameters its test reads, named as the program writes them, with
+    /// the value each had when this pass was entered.
+    pub values: Vec<(String, f64)>,
+    /// The pass in progress and how many the preview expects, 1-based. A
+    /// `repeat` has no counter the preview can see, so it has no index.
+    pub iteration: Option<(usize, usize)>,
+    /// The test reads live machine state, so these are the preview's model.
+    pub live: bool,
+}
+
+impl LoopReadout {
+    /// The preview's reading of the loop the cut is in.
+    pub fn current(preview: &Preview, progress: &LoopProgress) -> Option<Self> {
+        let (index, pass) = progress.current?;
+        let trace = preview.loops.get(index)?;
+        let values = trace
+            .values(pass)
+            .map(|values| {
+                trace
+                    .variables
+                    .iter()
+                    .take(3)
+                    .zip(values)
+                    .map(|(key, value)| (linc_core::gcode::LoopTrace::variable_label(key), *value))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let total = trace.iterations.len();
+        let iteration = match trace.kind {
+            // The `repeat` counter lives in the interpreter, not in a parameter.
+            linc_core::gcode::LoopKind::Repeat => None,
+            _ if total > 0 => Some((pass.min(total - 1) + 1, total)),
+            _ => None,
+        };
+        Some(Self {
+            line: trace.line,
+            values,
+            iteration,
+            live: trace.live,
+        })
+    }
+
+    pub fn text(&self) -> String {
+        let mut text = format!("LOOP LN {}", self.line);
+        if self.live {
+            text.push_str(" \u{2248}");
+        }
+        for (name, value) in &self.values {
+            text.push_str("  ");
+            text.push_str(name);
+            text.push_str(" = ");
+            text.push_str(&loop_value(*value));
+        }
+        if let Some((index, total)) = self.iteration {
+            text.push_str(&format!("  {index}/{total}"));
+        }
+        text
+    }
+}
+
+/// An integer without a decimal point, anything else to three places: the
+/// readout is scanned, not read, and a full float would not fit.
+fn loop_value(value: f64) -> String {
+    if value.is_finite() && value.fract() == 0.0 && value.abs() < 1e12 {
+        format!("{value:.0}")
+    } else if value.is_finite() {
+        format!("{value:.3}")
+    } else {
+        "--".to_string()
+    }
+}
+
 pub struct ProgramUi {
     pub editor: Editor,
     pub view: ProgramView,
@@ -727,6 +880,11 @@ pub struct ProgramUi {
     pub program_was_running: bool,
     /// A program load is in flight; navigation waits for the backend verdict.
     pub pending_load: bool,
+    /// How the run has moved through the program's loops.
+    pub loop_progress: LoopProgress,
+    /// Bumped whenever the preview is rebuilt, so loop counters for the old
+    /// program cannot be read against the new one's loops.
+    pub preview_generation: u64,
 }
 
 impl Default for ProgramUi {
@@ -734,6 +892,8 @@ impl Default for ProgramUi {
         Self {
             program_was_running: false,
             pending_load: false,
+            loop_progress: LoopProgress::default(),
+            preview_generation: 0,
             editor: Editor::new(),
             view: ProgramView::Split,
             preview: Preview::empty(),
@@ -2704,5 +2864,107 @@ mod trail_frame_tests {
             place(&mut snapshot, axis, work_value, offset + work_value);
         }
         assert_eq!(live_trail_shift(&snapshot, Some(&work)), [0.0; 3]);
+    }
+}
+
+#[cfg(test)]
+mod loop_readout_tests {
+    use super::{LoopProgress, LoopReadout};
+    use linc_core::gcode::Preview;
+
+    fn plan(text: &str) -> Preview {
+        let axes: Vec<String> = vec!["X".into(), "Y".into(), "Z".into()];
+        linc_core::gcode::parse_preview(text, &axes, None, [0.0; 3])
+    }
+
+    fn while_loop() -> Preview {
+        plan("#<i> = 1\no100 while [#<i> lt 4]\nG0 X#<i>\n#<i> = [#<i> + 1]\no100 endwhile\n")
+    }
+
+    fn follow(preview: &Preview, motion: usize, tip: [f64; 3]) -> LoopProgress {
+        let mut progress = LoopProgress::default();
+        progress.follow(preview, motion, tip, 1);
+        progress
+    }
+
+    #[test]
+    fn the_plan_tags_each_segment_with_its_pass() {
+        let preview = while_loop();
+        assert_eq!(preview.segment_loop.len(), preview.segments.len());
+        let passes: Vec<Option<(usize, usize)>> = preview
+            .segment_loop
+            .iter()
+            .map(|packed| linc_core::gcode::unpack_pass(*packed))
+            .collect();
+        assert_eq!(
+            passes,
+            vec![Some((0, 0)), Some((0, 1)), Some((0, 2))],
+            "one rapid per pass, tagged with that pass"
+        );
+    }
+
+    #[test]
+    fn the_readout_names_the_loop_and_its_value() {
+        let preview = while_loop();
+        // The cut is on the body line, at the end of the first pass's move.
+        let readout = LoopReadout::current(&preview, &follow(&preview, 3, [1.0, 0.0, 0.0]))
+            .expect("inside the loop");
+        assert_eq!(readout.text(), "LOOP LN 2  #<i> = 1  1/3");
+        assert!(!readout.live);
+    }
+
+    #[test]
+    fn a_later_pass_moves_the_readout_on() {
+        let preview = while_loop();
+        let mut progress = LoopProgress::default();
+        progress.follow(&preview, 3, [1.0, 0.0, 0.0], 1);
+        assert_eq!(progress.current, Some((0, 0)));
+        // Further along the plan the same line ends at the next pass's point,
+        // which is where the tool is now.
+        progress.follow(&preview, 3, [2.0, 0.0, 0.0], 1);
+        let readout = LoopReadout::current(&preview, &progress).expect("inside the loop");
+        assert_eq!(readout.text(), "LOOP LN 2  #<i> = 2  2/3");
+    }
+
+    #[test]
+    fn the_readout_clears_when_the_cut_leaves_the_loop() {
+        let preview = while_loop();
+        // Line 5 is the loop's own `endwhile`: no motion, so nothing matches.
+        assert!(LoopReadout::current(&preview, &follow(&preview, 5, [0.0; 3])).is_none());
+    }
+
+    #[test]
+    fn a_repeat_loop_shows_its_count_without_a_pass_index() {
+        let preview =
+            plan("#<j> = 1\no200 repeat [4]\nG0 X#<j>\n#<j> = [#<j> + 1]\no200 endrepeat\n");
+        let readout = LoopReadout::current(&preview, &follow(&preview, 3, [1.0, 0.0, 0.0]))
+            .expect("inside the loop");
+        // The pass counter lives in the interpreter, so there is nothing to
+        // count and the readout does not pretend otherwise.
+        assert_eq!(readout.text(), "LOOP LN 2");
+        assert!(readout.iteration.is_none());
+    }
+
+    #[test]
+    fn a_loop_that_reads_machine_state_is_marked() {
+        let preview = plan("o400 while [#5070 lt 1]\nG0 X5\no400 endwhile\n");
+        let readout = LoopReadout::current(&preview, &follow(&preview, 2, [0.0; 3]))
+            .expect("inside the loop");
+        assert!(readout.live);
+        assert!(readout.text().starts_with("LOOP LN 1 \u{2248}"));
+    }
+
+    #[test]
+    fn a_new_preview_starts_the_follow_again() {
+        let preview = while_loop();
+        let mut progress = LoopProgress::default();
+        progress.follow(&preview, 3, [2.0, 0.0, 0.0], 1);
+        assert_eq!(progress.current, Some((0, 1)));
+        progress.follow(&preview, 3, [0.0; 3], 2);
+        assert_eq!(
+            progress.current,
+            Some((0, 0)),
+            "a rebuilt preview has not been run"
+        );
     }
 }

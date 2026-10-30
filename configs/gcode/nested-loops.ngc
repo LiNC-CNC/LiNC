@@ -1,0 +1,44 @@
+(NESTED LOOPS - three loops, one axis each)
+(A lattice of engraved circles, one layer per depth level.)
+(Loop 1 sets Z and walks the levels; loop 2 sets Y and walks the rows;)
+(loop 3 sets X and walks the columns. Every pass of the inner loop is)
+(one circle, so the loop readout steps through columns, rows, levels.)
+(Each circle is two half arcs with their end points written out.)
+
+#<cols> = 6            (features along X)
+#<rows> = 4            (rows along Y)
+#<levels> = 3          (depth layers)
+#<pitch> = 10          (X and Y spacing, mm)
+#<radius> = 2.5        (engraved circle radius, mm)
+#<drop> = 1.5          (Z drop per level, mm)
+#<safe> = 5            (clearance plane, mm)
+#<feed> = 250          (cutting feed, mm/min)
+
+G21 G90 G54 G17
+G0 Z#<safe>
+
+#<level> = 0
+o100 while [#<level> lt #<levels>]
+#<z> = [-#<level> * #<drop>]
+#<row> = 0
+o110 while [#<row> lt #<rows>]
+#<y> = [#<row> * #<pitch>]
+#<col> = 0
+o120 while [#<col> lt #<cols>]
+#<x> = [#<col> * #<pitch>]
+G0 Z#<safe>
+G0 X[#<x> - #<radius>] Y#<y>
+G1 Z#<z> F#<feed>
+G2 X[#<x> + #<radius>] Y#<y> I#<radius> J0     (left half)
+G2 X[#<x> - #<radius>] Y#<y> I[0 - #<radius>] J0  (right half)
+G1 Z[#<z> + 1]
+#<col> = [#<col> + 1]
+o120 endwhile
+#<row> = [#<row> + 1]
+o110 endwhile
+#<level> = [#<level> + 1]
+o100 endwhile
+
+G0 Z#<safe>
+G0 X0 Y0
+M2

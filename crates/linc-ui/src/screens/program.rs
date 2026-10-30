@@ -394,6 +394,20 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                 .size(theme::font_size(9.0))
                 .color(theme::MUTED),
             );
+            // Where the run is inside a loop, and the value its test is working
+            // with. The controller publishes no parameters, so this is the
+            // preview's reading; the marker says so when the test reads the
+            // machine.
+            if let Some(readout) =
+                crate::state::LoopReadout::current(&app.program.preview, &app.program.loop_progress)
+            {
+                ui.label(
+                    RichText::new(readout.text())
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::ACCENT),
+                );
+            }
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 ui.add_space(8.0);
                 let (text, color) = if let Some(error) = &app.program.preview.error {

@@ -43,6 +43,7 @@ impl LincApp {
             self.toast("probe result received", theme::SUCCESS);
         }
         self.tick_preview();
+        self.tick_loops();
         self.overlay
             .toasts
             .retain(|toast| toast.until > Instant::now());

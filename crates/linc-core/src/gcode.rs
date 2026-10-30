@@ -494,6 +494,150 @@ pub struct Preview {
     /// Subroutines the preview followed into another file, so the UI can name
     /// the routine the controller reports a line in.
     pub subroutines: Vec<SubroutineBody>,
+    /// Every loop the program runs, with the parameters its test reads and the
+    /// value each had when an iteration was entered.
+    pub loops: Vec<LoopTrace>,
+    /// For each segment, the loop pass that produced it: the loop's index into
+    /// [Preview::loops] + 1 in the high half, the pass in the low half, and 0
+    /// for a block outside every loop. The controller reports only lines, and a
+    /// loop body repeats them, so this is what tells a running line's pass
+    /// apart from the same line in another pass.
+    pub segment_loop: Vec<u32>,
+}
+
+/// A loop the program runs, as the preview saw it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoopKind {
+    /// `o10 while [...]`: the test runs before each pass.
+    While,
+    /// `o10 do ... o10 while [...]`: the test runs after each pass.
+    DoWhile,
+    /// `o10 repeat [n]`: a pass counter, with no parameter of its own.
+    Repeat,
+}
+
+/// A loop, the parameters its test reads, and the value each had at the moment
+/// an iteration was entered.
+///
+/// The controller publishes no parameter values while a program runs (the
+/// interpreter writes them to the var file only on reset), so these come from
+/// the preview's own run of the same statements. That is exact while the test
+/// reads program parameters, and a model - flagged by [LoopTrace::live] - when
+/// it reads live machine state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoopTrace {
+    pub kind: LoopKind,
+    /// The line that opens the loop: the `while`, `repeat` or `do` line.
+    pub line: usize,
+    /// The line whose evaluation ends an iteration: the `while` line, the
+    /// `repeat` line, or a `do`'s closing `while`.
+    pub test_line: usize,
+    /// The last line of the body, so a caller can tell a running line is inside
+    /// this loop.
+    pub end_line: usize,
+    /// The parameters the test reads, as the interpreter keys them: `i` for
+    /// `#<i>`, `1` for `#1`.
+    pub variables: Vec<String>,
+    /// One entry per iteration the preview ran, in run order. Capped at
+    /// [LOOP_TRACE_LIMIT] entries: a loop that runs longer is a program the
+    /// preview is not going to describe anyway.
+    pub iterations: Vec<Vec<f64>>,
+    /// The test reads live machine state, so the values are the preview's model.
+    pub live: bool,
+}
+
+impl LoopTrace {
+    /// The loop a running line is inside, innermost first.
+    pub fn containing(loops: &[Self], line: usize) -> Option<usize> {
+        loops
+            .iter()
+            .enumerate()
+            .filter(|(_, trace)| line >= trace.line && line <= trace.end_line.max(trace.line))
+            .min_by_key(|(_, trace)| trace.end_line.saturating_sub(trace.line))
+            .map(|(index, _)| index)
+    }
+
+    /// The iteration a count of tests corresponds to. A `while` tests once
+    /// before each pass, so its first pass is the first test; a `do` tests only
+    /// at the bottom, so the pass in progress is one past the tests seen.
+    pub fn iteration_index(&self, tests: usize) -> usize {
+        match self.kind {
+            LoopKind::While | LoopKind::Repeat => tests.saturating_sub(1),
+            LoopKind::DoWhile => tests,
+        }
+    }
+
+    /// The recorded values for an iteration, when the trace has them.
+    pub fn values(&self, iteration: usize) -> Option<&[f64]> {
+        self.iterations
+            .get(iteration.min(self.iterations.len().saturating_sub(1)))
+            .map(Vec::as_slice)
+    }
+
+    /// How the interpreter names a parameter: `#<i>`, `#1`.
+    pub fn variable_label(key: &str) -> String {
+        if key.chars().all(|ch| ch.is_ascii_digit()) {
+            format!("#{key}")
+        } else {
+            format!("#<{key}>")
+        }
+    }
+}
+
+/// A loop body that runs longer than this is described by its test and its
+/// first values, not by a full trace; the preview's own step limit is 200 000,
+/// and one `Vec` per iteration would spend the UI's memory on nothing.
+pub const LOOP_TRACE_LIMIT: usize = 4096;
+
+/// The parameter keys a test expression reads. A computed index (`#[#1+1]`) is
+/// left out: its key is not knowable before the test runs.
+fn parameter_keys(test: &str) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    for token in lex_line(test) {
+        if token.kind != TokenKind::Variable {
+            continue;
+        }
+        let raw = &test[token.start..token.end];
+        let key = if let Some(rest) = raw.strip_prefix("#<") {
+            rest.trim_end_matches('>').trim().to_string()
+        } else if let Some(rest) = raw.strip_prefix('#') {
+            if rest.is_empty() || !rest.chars().all(|ch| ch.is_ascii_digit()) {
+                continue;
+            }
+            rest.to_string()
+        } else {
+            continue;
+        };
+        if !key.is_empty() && !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    keys
+}
+
+/// A parameter that comes from the machine rather than from the program: the
+/// read-only status block and the named system parameters.
+fn live_state_key(key: &str) -> bool {
+    key.starts_with('_')
+        || key
+            .parse::<u32>()
+            .is_ok_and(|index| (5000..6000).contains(&index))
+}
+
+fn record_iteration(traces: &mut [LoopTrace], index: Option<usize>, params: &Params) {
+    let Some(index) = index else { return };
+    let Some(trace) = traces.get_mut(index) else {
+        return;
+    };
+    if trace.iterations.len() >= LOOP_TRACE_LIMIT {
+        return;
+    }
+    let values = trace
+        .variables
+        .iter()
+        .map(|key| params.get(key).copied().unwrap_or(0.0))
+        .collect();
+    trace.iterations.push(values);
 }
 
 /// A subroutine body the preview took from a file on `SUBROUTINE_PATH`.
@@ -543,6 +687,8 @@ impl Preview {
             incomplete: false,
             incomplete_reason: None,
             subroutines: Vec::new(),
+            loops: Vec::new(),
+            segment_loop: Vec::new(),
         }
     }
 
@@ -571,6 +717,9 @@ impl Preview {
             return false;
         }
         self.segments.remove(0);
+        if !self.segment_loop.is_empty() {
+            self.segment_loop.remove(0);
+        }
         self.rapids = self.rapids.saturating_sub(1);
         let old = std::mem::take(&mut self.line_bounds);
         for (line, (from, to)) in old {
@@ -812,6 +961,7 @@ fn push_cycle_segment(
     kind: SegmentKind,
     line: usize,
     tool: Option<u16>,
+    pass: u32,
 ) {
     if kind == SegmentKind::Rapid {
         preview.rapids += 1;
@@ -824,6 +974,7 @@ fn push_cycle_segment(
         arc: None,
         tool,
     });
+    preview.segment_loop.push(pass);
 }
 
 /// Hard limits on the preview interpreter. A runaway program -- a "while [1]"
@@ -1420,6 +1571,22 @@ enum Stmt {
 struct PlannedBlock {
     line: usize,
     tokens: Vec<Token>,
+    /// The loop pass this block runs in, packed as [Preview::segment_loop].
+    loop_at: u32,
+}
+
+/// Pack a loop index and pass into [Preview::segment_loop]'s word.
+fn pack_pass(trace: usize, pass: usize) -> u32 {
+    (((trace as u32) + 1) << 16) | (pass as u32 & 0xffff)
+}
+
+/// The loop index and pass packed into [`Preview::segment_loop`].
+pub fn unpack_pass(packed: u32) -> Option<(usize, usize)> {
+    if packed == 0 {
+        None
+    } else {
+        Some((((packed >> 16) - 1) as usize, (packed & 0xffff) as usize))
+    }
 }
 
 struct PlannedPreview {
@@ -1427,6 +1594,7 @@ struct PlannedPreview {
     error: Option<SyntaxIssue>,
     incomplete: Option<String>,
     subroutines: Vec<SubroutineBody>,
+    loops: Vec<LoopTrace>,
 }
 
 /// Split an o-word line into its label and the rest, as the interpreter reads
@@ -2117,8 +2285,88 @@ fn plan_statements(
         }
     }
 
+    // One trace per loop statement, in file order, so the UI can name the loop
+    // a running line is in even before the preview has run it. A `do` and its
+    // closing `while` are one loop: the door is the `do`, the test is the
+    // `while`, and both statements map to the same trace.
+    let mut traces: Vec<LoopTrace> = Vec::new();
+    let mut trace_of: Vec<Option<usize>> = vec![None; statements.len()];
+    for index in 0..statements.len() {
+        let (kind, line, test_line, test, door) = match &statements[index] {
+            Stmt::While {
+                line, condition, ..
+            } => (LoopKind::While, *line, *line, condition.clone(), index),
+            Stmt::Do { .. } => {
+                let at = after[index].saturating_sub(1);
+                let Stmt::DoWhile {
+                    line: test_line,
+                    condition,
+                } = statements.get(at).cloned().unwrap_or(Stmt::EndWhile)
+                else {
+                    continue;
+                };
+                // A `do` carries no line of its own; the body does.
+                let line = (index + 1..at)
+                    .find_map(|statement| statement_line(&statements[statement]))
+                    .unwrap_or(test_line);
+                (LoopKind::DoWhile, line, test_line, condition, at)
+            }
+            // A closing `while` belongs to its `do`, which was handled above.
+            Stmt::DoWhile { .. } => continue,
+            Stmt::Repeat { line, count, .. } => {
+                (LoopKind::Repeat, *line, *line, count.clone(), index)
+            }
+            _ => continue,
+        };
+        // The body's last line: an `endwhile` carries no line of its own, so
+        // walk back to the last statement that does.
+        let mut end_line = test_line;
+        let mut at = after[index].saturating_sub(1);
+        while at > index {
+            if let Some(body_line) = statement_line(&statements[at]) {
+                end_line = end_line.max(body_line);
+                break;
+            }
+            at -= 1;
+        }
+        let variables = parameter_keys(&test);
+        let live = variables.iter().any(|key| live_state_key(key));
+        let trace = traces.len();
+        trace_of[index] = Some(trace);
+        trace_of[door] = Some(trace);
+        traces.push(LoopTrace {
+            kind,
+            line,
+            test_line,
+            end_line,
+            variables,
+            iterations: Vec::new(),
+            live,
+        });
+    }
+
     let mut params = Params::new();
     let mut blocks: Vec<PlannedBlock> = Vec::new();
+    // The loops whose body the planner is inside, innermost last. A block's pass
+    // is the innermost one's: the outer pass shows when the inner loop is not
+    // running, which is where a nested program spends its time between passes.
+    let mut open: Vec<usize> = Vec::new();
+    macro_rules! current_pass {
+        () => {
+            open.last().map_or(0, |&trace| {
+                pack_pass(trace, traces[trace].iterations.len().saturating_sub(1))
+            })
+        };
+    }
+    macro_rules! leave_loop {
+        ($trace:expr) => {
+            if let Some(trace) = $trace {
+                if let Some(at) = open.iter().position(|&open| open == trace) {
+                    open.truncate(at);
+                }
+            }
+        };
+    }
     let mut incomplete: Option<String> = None;
     let mut calls: Vec<(usize, Params)> = Vec::new();
     let mut repeats: Vec<(usize, i64)> = Vec::new();
@@ -2146,6 +2394,7 @@ fn plan_statements(
                         blocks.push(PlannedBlock {
                             line: *line,
                             tokens: words,
+                            loop_at: current_pass!(),
                         });
                     }
                     Err(failure) if failure.syntax => {
@@ -2268,8 +2517,17 @@ fn plan_statements(
             Stmt::While {
                 line, condition, ..
             } => match Expression::evaluate(condition, &params) {
-                Ok(value) if value != 0.0 => pc += 1,
-                Ok(_) => pc = after[pc],
+                Ok(value) if value != 0.0 => {
+                    record_iteration(&mut traces, trace_of[pc], &params);
+                    if let Some(trace) = trace_of[pc] {
+                        open.push(trace);
+                    }
+                    pc += 1;
+                }
+                Ok(_) => {
+                    leave_loop!(trace_of[pc]);
+                    pc = after[pc];
+                }
                 Err(_) => {
                     if incomplete.is_none() {
                         incomplete =
@@ -2278,13 +2536,25 @@ fn plan_statements(
                     pc = after[pc];
                 }
             },
-            Stmt::Do { .. } => pc += 1,
+            Stmt::Do { .. } => {
+                record_iteration(&mut traces, trace_of[pc], &params);
+                if let Some(trace) = trace_of[pc] {
+                    open.push(trace);
+                }
+                pc += 1;
+            }
             Stmt::DoWhile {
                 line, condition, ..
             } => match Expression::evaluate(condition, &params) {
                 // The bottom test: true repeats the body, false leaves the loop.
-                Ok(value) if value != 0.0 => pc = back[pc],
-                Ok(_) => pc += 1,
+                Ok(value) if value != 0.0 => {
+                    record_iteration(&mut traces, trace_of[pc], &params);
+                    pc = back[pc];
+                }
+                Ok(_) => {
+                    leave_loop!(trace_of[pc]);
+                    pc += 1;
+                }
                 Err(_) => {
                     if incomplete.is_none() {
                         incomplete =
@@ -2299,14 +2569,22 @@ fn plan_statements(
             }
             Stmt::Repeat { line, count, .. } => match Expression::evaluate(count, &params) {
                 Ok(value) if value >= 1.0 => {
+                    record_iteration(&mut traces, trace_of[pc], &params);
                     repeats.push((pc, value.trunc() as i64));
+                    if let Some(trace) = trace_of[pc] {
+                        open.push(trace);
+                    }
                     pc += 1;
                 }
-                Ok(_) => pc = after[pc],
+                Ok(_) => {
+                    leave_loop!(trace_of[pc]);
+                    pc = after[pc];
+                }
                 Err(_) => {
                     if incomplete.is_none() {
                         incomplete = Some(format!("line {}: could not evaluate {}", line, count));
                     }
+                    leave_loop!(trace_of[pc]);
                     pc = after[pc];
                 }
             },
@@ -2321,8 +2599,10 @@ fn plan_statements(
                         remaining = entry.1;
                     }
                     if remaining > 0 {
+                        record_iteration(&mut traces, trace_of[start], &params);
                         pc = start + 1;
                     } else {
+                        leave_loop!(trace_of[start]);
                         pc += 1;
                     }
                 }
@@ -2385,6 +2665,7 @@ fn plan_statements(
         error,
         incomplete,
         subroutines: bodies,
+        loops: traces,
     }
 }
 
@@ -2454,12 +2735,17 @@ pub fn parse_preview_with(
         error,
         incomplete,
         subroutines,
+        loops,
     } = plan_preview(text, subs);
     preview.subroutines = subroutines;
+    preview.loops = loops;
     let total_lines = text.lines().count();
 
     for block in blocks {
         let line_no = block.line;
+        // Which loop pass this block runs in, for the readout that follows a
+        // running line back to its pass.
+        let pass = block.loop_at;
         let tokens = block.tokens;
         if tokens.is_empty() {
             continue;
@@ -2624,6 +2910,7 @@ pub fn parse_preview_with(
                         SegmentKind::Rapid,
                         line_no,
                         tool,
+                        pass,
                     );
                     position[2] = r;
                 }
@@ -2636,6 +2923,7 @@ pub fn parse_preview_with(
                         SegmentKind::Rapid,
                         line_no,
                         tool,
+                        pass,
                     );
                     position[0] = hole[0];
                     position[1] = hole[1];
@@ -2649,6 +2937,7 @@ pub fn parse_preview_with(
                         SegmentKind::Rapid,
                         line_no,
                         tool,
+                        pass,
                     );
                     position[2] = r;
                 }
@@ -2661,6 +2950,7 @@ pub fn parse_preview_with(
                         SegmentKind::Feed,
                         line_no,
                         tool,
+                        pass,
                     );
                     position[2] = depth;
                 }
@@ -2679,6 +2969,7 @@ pub fn parse_preview_with(
                         SegmentKind::Rapid,
                         line_no,
                         tool,
+                        pass,
                     );
                 }
                 position = [hole[0], hole[1], clear];
@@ -2768,6 +3059,7 @@ pub fn parse_preview_with(
             preview.rapids += 1;
         }
         preview.segments.push(segment);
+        preview.segment_loop.push(pass);
         preview
             .line_bounds
             .insert(line_no, (line_start_segment, preview.segments.len()));
@@ -3608,6 +3900,79 @@ mod tests {
         assert!(preview.incomplete, "a mismatched label is not a jump");
         let reason = preview.incomplete_reason.clone().unwrap_or_default();
         assert!(reason.contains("break"), "{reason}");
+    }
+
+    fn plan(text: &str) -> Preview {
+        let axes: Vec<String> = ["X", "Y", "Z"].iter().map(|s| s.to_string()).collect();
+        parse_preview(text, &axes, None, [0.0; 3])
+    }
+
+    #[test]
+    fn a_while_loop_records_its_test_parameter_per_iteration() {
+        let preview = plan("o100 while [#<i> lt 3]\nG0 X#<i>\n#<i> = [#<i> + 1]\no100 endwhile\n");
+        assert_eq!(preview.loops.len(), 1);
+        let trace = &preview.loops[0];
+        assert_eq!(trace.kind, LoopKind::While);
+        assert_eq!(trace.line, 1);
+        assert_eq!(trace.test_line, 1);
+        assert_eq!(trace.end_line, 3);
+        assert_eq!(trace.variables, vec!["i".to_string()]);
+        // `#<i>` starts at 0 in an uninitialised parameter.
+        assert_eq!(trace.iterations, vec![vec![0.0], vec![1.0], vec![2.0]]);
+        assert!(!trace.live);
+        // The running line is inside the loop body, not past it.
+        assert_eq!(LoopTrace::containing(&preview.loops, 3), Some(0));
+        assert_eq!(LoopTrace::containing(&preview.loops, 1), Some(0));
+        assert_eq!(LoopTrace::containing(&preview.loops, 4), None);
+        // The third pass is the third test.
+        assert_eq!(trace.iteration_index(1), 0);
+        assert_eq!(trace.iteration_index(3), 2);
+        assert_eq!(trace.values(2), Some([2.0].as_slice()));
+    }
+
+    #[test]
+    fn a_repeat_loop_records_one_value_per_pass() {
+        let preview = plan("o200 repeat [4]\nG0 X1\no200 endrepeat\n");
+        let trace = &preview.loops[0];
+        assert_eq!(trace.kind, LoopKind::Repeat);
+        assert_eq!(trace.line, 1);
+        assert!(trace.variables.is_empty());
+        // Four passes, and the body's own line as the extent.
+        assert_eq!(trace.iterations.len(), 4);
+        assert_eq!(trace.end_line, 2);
+    }
+
+    #[test]
+    fn a_do_while_loop_records_the_first_pass_before_its_test() {
+        let preview = plan("o300 do\n#<n> = [#<n> + 1]\no300 while [#<n> lt 2]\n");
+        let trace = &preview.loops[0];
+        assert_eq!(trace.kind, LoopKind::DoWhile);
+        // The door is the `do`; a `do` carries no line, so the body's is used.
+        assert_eq!(trace.line, 2);
+        assert_eq!(trace.test_line, 3);
+        assert_eq!(trace.end_line, 3);
+        assert_eq!(trace.variables, vec!["n".to_string()]);
+        // The pass that runs before the first test is recorded too.
+        assert_eq!(trace.iterations, vec![vec![0.0], vec![1.0]]);
+        assert_eq!(trace.iteration_index(0), 0);
+        assert_eq!(trace.iteration_index(1), 1);
+        assert_eq!(LoopTrace::containing(&preview.loops, 2), Some(0));
+    }
+
+    #[test]
+    fn a_loop_test_that_reads_machine_state_is_marked() {
+        let preview = plan("o400 while [#5070 lt 100]\nG0 X1\no400 endwhile\n");
+        let trace = &preview.loops[0];
+        assert_eq!(trace.variables, vec!["5070".to_string()]);
+        assert!(trace.live);
+        assert_eq!(LoopTrace::variable_label("5070"), "#5070");
+        assert_eq!(LoopTrace::variable_label("i"), "#<i>");
+    }
+
+    #[test]
+    fn a_negative_number_index_is_not_a_parameter_key() {
+        // `#-1` is not a parameter the tracer can name; it must not become one.
+        assert!(parameter_keys("[#-1 lt 2]").is_empty());
     }
 
     #[test]

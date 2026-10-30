@@ -72,6 +72,7 @@ impl LincApp {
             self.program.last_valid_preview = preview.clone();
         }
         self.program.preview = preview;
+        self.program.preview_generation = self.program.preview_generation.wrapping_add(1);
     }
 
     /// The work offset the preview is drawn with, in machine coordinates: the
@@ -85,6 +86,21 @@ impl LincApp {
             .find(|row| row.index == index)
             .map(|row| row.values.clone())
             .or_else(|| self.active_offset().cloned())
+    }
+
+    /// Follow the cut through the program's loops. `motion.program-line` is the
+    /// line being cut; `current_line` is the interpreter's read-ahead and sits
+    /// at the end of the program while the tool is still in the first pass.
+    pub fn tick_loops(&mut self) {
+        let motion = self.snapshot.program.motion_line;
+        let tip = self.tool_tip();
+        let generation = self.program.preview_generation;
+        let crate::state::ProgramUi {
+            preview,
+            loop_progress,
+            ..
+        } = &mut self.program;
+        loop_progress.follow(preview, motion, tip, generation);
     }
 
     pub fn tick_preview(&mut self) {

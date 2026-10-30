@@ -236,6 +236,26 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                         .size(theme::font_size(9.0))
                         .color(theme::MUTED),
                 );
+                // The loop the run is in, in the same words as the PROGRAM
+                // page's status line. Dropped first when the card is narrow:
+                // the listing carries it too.
+                if let Some(readout) = crate::state::LoopReadout::current(
+                    &app.program.preview,
+                    &app.program.loop_progress,
+                ) {
+                    ui.label(
+                        RichText::new("\u{00b7}")
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
+                    ui.label(
+                        RichText::new(readout.text())
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::ACCENT),
+                    );
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let spindle = app
                         .snapshot
