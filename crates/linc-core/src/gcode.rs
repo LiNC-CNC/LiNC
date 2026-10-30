@@ -311,6 +311,34 @@ pub fn lex_line(line: &str) -> Vec<Token> {
             });
             continue;
         }
+        // Polar words: `@` is a radius, `^` an angle in degrees. Neither
+        // letter is alphabetic, so they would otherwise land in the catch-all
+        // as `Other` and the whole block would read as having no words at all.
+        if ch == '@' || ch == '^' {
+            let start = i;
+            i += 1;
+            let value = skip_spaces(bytes, i);
+            if let Some(first) = bytes.get(value) {
+                if first.is_ascii_digit() || matches!(*first, b'.' | b'-' | b'+') {
+                    i = value;
+                }
+            }
+            while i < bytes.len()
+                && ((bytes[i] as char).is_ascii_digit()
+                    || bytes[i] == b'.'
+                    || bytes[i] == b'-'
+                    || bytes[i] == b'+')
+            {
+                i += 1;
+            }
+            tokens.push(Token {
+                kind: TokenKind::Axis,
+                start,
+                end: i,
+                text: line[start..i].to_string(),
+            });
+            continue;
+        }
         if expression && ch.is_ascii_alphabetic() {
             let start = i;
             while i < bytes.len() && (bytes[i] as char).is_ascii_alphabetic() {
@@ -1153,6 +1181,62 @@ fn apply_arc(
         clockwise,
         plane,
     })
+}
+
+/// Resolve a block's polar words into an XY position in program coordinates.
+///
+/// `@` is a radius and `^` an angle in degrees, both from the program origin.
+/// In absolute mode (G90) they name the position, so a lone `@` keeps the
+/// current angle and a lone `^` keeps the current radius. In incremental mode
+/// (G91) they are added to the current radius and angle, radius first, exactly
+/// as `interp_find.cc` resolves them. Either way the point is indeterminate at
+/// the origin, where neither radius nor angle is defined.
+fn polar_target(
+    program: [f64; 2],
+    radius: Option<f64>,
+    theta: Option<f64>,
+    absolute: bool,
+) -> Result<[f64; 2], &'static str> {
+    let [mut x, mut y] = program;
+    let angle = |x: f64, y: f64| y.atan2(x);
+    // The interpreter compares against zero the same way: there is no tolerance
+    // to pick here, the point either has an angle or it does not.
+    let at_origin = x == 0.0 && y == 0.0;
+    match (radius, theta) {
+        (None, None) => {}
+        (Some(radius), Some(theta)) if absolute => {
+            let (sin, cos) = theta.to_radians().sin_cos();
+            (x, y) = (radius * cos, radius * sin);
+        }
+        (Some(radius), None) if absolute => {
+            if at_origin {
+                return Err("a polar radius needs an angle when the move starts at the origin");
+            }
+            let (sin, cos) = angle(x, y).sin_cos();
+            (x, y) = (radius * cos, radius * sin);
+        }
+        (None, Some(theta)) if absolute => {
+            let radius = x.hypot(y);
+            let (sin, cos) = theta.to_radians().sin_cos();
+            (x, y) = (radius * cos, radius * sin);
+        }
+        (radius, theta) => {
+            if at_origin {
+                return Err("a polar move in incremental mode is indeterminate at the origin");
+            }
+            if let Some(increment) = radius {
+                let (sin, cos) = angle(x, y).sin_cos();
+                let radius = x.hypot(y) + increment;
+                (x, y) = (radius * cos, radius * sin);
+            }
+            if let Some(increment) = theta {
+                let (sin, cos) = (angle(x, y) + increment.to_radians()).sin_cos();
+                let radius = x.hypot(y);
+                (x, y) = (radius * cos, radius * sin);
+            }
+        }
+    }
+    Ok([x, y])
 }
 
 /// Modal state of a drilling canned cycle (G81/G82/G83/G73).
@@ -3107,6 +3191,21 @@ pub fn parse_preview_with(
                     .is_some_and(|ch| "XYZUVW".contains(ch.to_ascii_uppercase()))
         });
 
+        // Polar coordinates: `@` is a radius and `^` an angle in degrees. The
+        // interpreter reads them in the G17 plane in place of X and Y, so a
+        // block can move without naming an axis at all.
+        let polar_radius = word_value(&tokens, '@');
+        let polar_theta = word_value(&tokens, '^');
+        let has_polar_word = polar_radius.is_some() || polar_theta.is_some();
+        let has_xy_word = tokens.iter().any(|token| {
+            token.kind == TokenKind::Axis
+                && token
+                    .text
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| "XYxy".contains(ch))
+        });
+
         // Drilling cycle: the block's X/Y is the next hole. Preliminary motion
         // moves X/Y at the current Z, then rapids to the R plane; the feed is
         // from R to the Z depth; the retract clears to the initial Z (G98,
@@ -3127,6 +3226,16 @@ pub fn parse_preview_with(
             }
         }
         if let Some(cycle) = drill_cycle.as_mut() {
+            // The interpreter turns polar words into a hole position too, one
+            // radius/angle step per repeat. Drawing the holes without them
+            // would look right and be wrong, so say so instead.
+            if has_polar_word {
+                preview.error = Some(SyntaxIssue {
+                    line: line_no,
+                    message: "polar coordinates in a drilling cycle are not drawn yet".into(),
+                });
+                break;
+            }
             cycle.retract_to_r = retract_to_r;
             // R first: in incremental mode the Z depth is measured from R.
             if let Some(value) = word_value(&tokens, 'r') {
@@ -3245,8 +3354,8 @@ pub fn parse_preview_with(
             continue;
         }
 
-        let is_motion =
-            (motion == 0.0 || motion == 1.0 || motion == 2.0 || motion == 3.0) && has_axis_word;
+        let is_motion = (motion == 0.0 || motion == 1.0 || motion == 2.0 || motion == 3.0)
+            && (has_axis_word || has_polar_word);
         if !is_motion || tokens.iter().any(|t| t.kind == TokenKind::OWord) {
             continue;
         }
@@ -3277,6 +3386,43 @@ pub fn parse_preview_with(
                 } else {
                     position[axis] + value
                 };
+            }
+        }
+
+        if has_polar_word && has_xy_word {
+            preview.error = Some(SyntaxIssue {
+                line: line_no,
+                message: "polar coordinates cannot be combined with X or Y words".into(),
+            });
+            break;
+        }
+        if has_polar_word && plane != Plane::Xy {
+            preview.error = Some(SyntaxIssue {
+                line: line_no,
+                message: "polar coordinates need the G17 plane".into(),
+            });
+            break;
+        }
+        if has_polar_word {
+            // The interpreter resolves polar words in program coordinates, so
+            // the radius and angle are measured from the program origin and the
+            // work offset is added afterwards.
+            let program = [
+                position[0] - offset_values("X"),
+                position[1] - offset_values("Y"),
+            ];
+            match polar_target(program, polar_radius.map(mm), polar_theta, absolute) {
+                Ok([x, y]) => {
+                    target[0] = x + offset_values("X");
+                    target[1] = y + offset_values("Y");
+                }
+                Err(message) => {
+                    preview.error = Some(SyntaxIssue {
+                        line: line_no,
+                        message: message.into(),
+                    });
+                    break;
+                }
             }
         }
 
@@ -3487,6 +3633,166 @@ mod tests {
         let bounds = preview.bounds.unwrap();
         assert!(bounds.min[2] <= -2.0);
         assert!(bounds.max[0] >= 80.0);
+    }
+
+    #[test]
+    fn a_full_circle_bounds_both_axes() {
+        // CIRCLE_XY.NGC's tuning move: every segment ends on X10 Y0, so the
+        // ends alone measure the path 10 mm wide in X and nothing in Y. The
+        // drawn path is a 10 mm circle in both.
+        let text = "G21 G90 G17\nG0 X10 Y0\nG3 X10 Y0 I-5 J0 F3000\n";
+        let preview = parse_preview(text, &["X".into(), "Y".into(), "Z".into()], None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let bounds = preview.bounds.expect("bounds");
+        let [width, height, _] = bounds.size();
+        assert!((width - 10.0).abs() < 1e-6, "{bounds:?}");
+        assert!((height - 10.0).abs() < 1e-6, "{bounds:?}");
+        assert!((bounds.min[1] + 5.0).abs() < 1e-6, "{bounds:?}");
+        assert!((bounds.max[1] - 5.0).abs() < 1e-6, "{bounds:?}");
+    }
+
+    #[test]
+    fn an_arc_bounds_only_the_quarter_turns_it_passes() {
+        // A quarter turn in the first quadrant reaches X10 Y10 and no further.
+        // The bounds must not grow to the circle the arc is part of, or every
+        // rounded corner would claim its radius in both directions.
+        let text = "G21 G90 G17\nG0 X10 Y0\nG3 X0 Y10 I-10 J0 F300\n";
+        let preview = parse_preview(text, &["X".into(), "Y".into()], None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let bounds = preview.bounds.expect("bounds");
+        for (axis, expected) in [(0, (0.0, 10.0)), (1, (0.0, 10.0))] {
+            assert!((bounds.min[axis] - expected.0).abs() < 1e-6, "{bounds:?}");
+            assert!((bounds.max[axis] - expected.1).abs() < 1e-6, "{bounds:?}");
+        }
+    }
+
+    #[test]
+    fn the_circle_tuning_move_measures_round() {
+        // The whole program, loop and all: the Y extent of a circle drawn by
+        // repeated full turns is the diameter, not zero.
+        let text = "G21 G90 G17 G40 G49 G80\n#1 = 1\n#<iterations> = 3\n#<RADIUS> = 5\n\
+                    G0 X10 Y0\nO100 WHILE [#1 LE #<iterations>]\n\
+                    G3 X10 Y0 I[-#<radius>] J0 F3000\n#1 = [ #1 + 1]\n\
+                    O100 ENDWHILE\nG0 X0 Y0\nM2\n";
+        let preview = parse_preview(text, &["X".into(), "Y".into()], None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert_eq!(preview.arcs, 3, "the loop draws one circle per pass");
+        let [width, height, _] = preview.bounds.expect("bounds").size();
+        assert!((width - 10.0).abs() < 1e-6, "width {width}");
+        assert!((height - 10.0).abs() < 1e-6, "height {height}");
+    }
+
+    #[test]
+    fn polar_words_keep_their_letter_and_value() {
+        assert_eq!(
+            kinds("g91 g1 @-.0025 ^4.5"),
+            vec![
+                (TokenKind::GCode, "g91".into()),
+                (TokenKind::GCode, "g1".into()),
+                (TokenKind::Axis, "@-.0025".into()),
+                (TokenKind::Axis, "^4.5".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn polar_absolute_names_the_point_by_radius_and_angle() {
+        let preview = parse_preview(
+            "G21 G90 G17 G0 X0 Y0\nG1 @10 ^90\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let end = preview.segments.last().expect("a move").end;
+        assert!(end[0].abs() < 1e-9, "{end:?}");
+        assert!((end[1] - 10.0).abs() < 1e-9, "{end:?}");
+    }
+
+    #[test]
+    fn a_lone_polar_word_keeps_the_other_coordinate() {
+        // `@` keeps the angle the tool is already at; `^` keeps its radius.
+        let preview = parse_preview(
+            "G21 G90 G17 G0 X10 Y0\nG1 @5\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let end = preview.segments.last().expect("a move").end;
+        assert!((end[0] - 5.0).abs() < 1e-9, "{end:?}");
+        assert!(end[1].abs() < 1e-9, "{end:?}");
+
+        let preview = parse_preview(
+            "G21 G90 G17 G0 X10 Y0\nG1 ^90\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let end = preview.segments.last().expect("a move").end;
+        assert!(end[0].abs() < 1e-9, "{end:?}");
+        assert!((end[1] - 10.0).abs() < 1e-9, "{end:?}");
+    }
+
+    #[test]
+    fn polar_incremental_adds_radius_then_angle() {
+        // The spiral.ngc step in inches: 2 in out, then 0.0025 in in and 4.5
+        // degrees on. The interpreter keeps the angle while it shrinks the
+        // radius, then turns, which is the same point as doing both at once.
+        let preview = parse_preview(
+            "G20 G90 G17 G0 X2 Y0\nG91 G1 @-.0025 ^4.5\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let end = preview.segments.last().expect("a move").end;
+        let radius = (2.0 - 0.0025) * 25.4;
+        let (sin, cos) = 4.5f64.to_radians().sin_cos();
+        assert!((end[0] - radius * cos).abs() < 1e-9, "{end:?}");
+        assert!((end[1] - radius * sin).abs() < 1e-9, "{end:?}");
+    }
+
+    #[test]
+    fn polar_refuses_the_blocks_the_interpreter_refuses() {
+        // X or Y in the same block leaves the plane ambiguous.
+        let preview = parse_preview("G21 G90 G17 G1 X1 @2 ^3\n", &preview_axes(), None, [0.0; 3]);
+        let issue = preview.error.expect("error");
+        assert!(issue.message.contains("X or Y"), "{}", issue.message);
+        assert!(preview.incomplete);
+
+        // Polar turns are XY only.
+        let preview = parse_preview("G21 G90 G18 G1 @2 ^3\n", &preview_axes(), None, [0.0; 3]);
+        let issue = preview.error.expect("error");
+        assert!(issue.message.contains("G17"), "{}", issue.message);
+
+        // At the origin there is no angle for a radius to keep.
+        let preview = parse_preview("G21 G90 G17 G91 G1 @2\n", &preview_axes(), None, [0.0; 3]);
+        let issue = preview.error.expect("error");
+        assert!(issue.message.contains("origin"), "{}", issue.message);
+    }
+
+    #[test]
+    fn the_spiral_program_draws_every_pass() {
+        let text = "g20 g64 g90\ns3400 m3\n\ng0 z1\ng0 x2 y0\ng1 z-.1 f24\n\n\
+                    o100 repeat [800]\ng91 g1 @-.0025 ^4.5\no100 endrepeat\n\n\
+                    g90 g0 z1\nm2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        assert_eq!(
+            preview.segments.len(),
+            804,
+            "three setup moves, 800 polar moves, one retract"
+        );
+        let bounds = preview.bounds.expect("bounds");
+        let [width, height, _] = bounds.size();
+        assert!(width > 90.0 && width < 104.0, "{bounds:?}");
+        assert!(height > 90.0 && height < 104.0, "{bounds:?}");
+        // Ten turns in, 0.0025 in per turn, the tool is back at the middle.
+        let end = preview.segments[802].end;
+        assert!(end[0].abs() < 1e-6 && end[1].abs() < 1e-6, "{end:?}");
     }
 
     #[test]
