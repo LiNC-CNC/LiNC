@@ -1400,18 +1400,31 @@ fn parameter_key(text: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-/// The assignment equals sign: not inside brackets, not part of a comparison.
+/// The assignment equals sign: the one after the parameter the line assigns.
+///
+/// Not inside brackets, and not part of a comparison. The `>` that closes
+/// `#<name>` is a name delimiter, not the `>=` operator, so `#<scale>=1.5`
+/// assigns exactly like `#<scale> = 1.5` does — LinuxCNC's own example programs
+/// write it without the space.
 fn top_level_equals(text: &str) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut depth = 0usize;
+    let mut in_name = false;
+    let mut name_end = None;
     for (index, &byte) in bytes.iter().enumerate() {
         match byte {
             b'[' => depth += 1,
             b']' => depth = depth.saturating_sub(1),
+            b'<' if depth == 0 && index > 0 && bytes[index - 1] == b'#' => in_name = true,
+            b'>' if depth == 0 && in_name => {
+                in_name = false;
+                name_end = Some(index);
+            }
             b'=' if depth == 0 => {
                 let before = if index > 0 { bytes[index - 1] } else { b' ' };
                 let after = bytes.get(index + 1).copied().unwrap_or(b' ');
-                if !matches!(before, b'<' | b'>' | b'!' | b'=') && after != b'=' {
+                let closes_name = before == b'>' && name_end == Some(index - 1);
+                if (closes_name || !matches!(before, b'<' | b'>' | b'!' | b'=')) && after != b'=' {
                     return Some(index);
                 }
             }
@@ -2824,6 +2837,26 @@ mod tests {
             .map(|segment| segment.end[0])
             .collect();
         assert_eq!(ends, vec![10.0, 20.0, 30.0, 10.0, 10.0, 20.0, 62.0]);
+    }
+
+    #[test]
+    fn a_named_parameter_assigns_without_a_space_before_the_equals() {
+        // LinuxCNC's example programs write `#<scale>=1.5`. The `>` that closes
+        // the name is not the `>=` operator: read as a comparison, the
+        // assignment is dropped, the parameter keeps the undefined value 0, and
+        // every bracketed word collapses to zero. The shipped logo program then
+        // reports an arc with no radius.
+        let text = "#<scale>=1.5\nG21 G90\nG0 X0 Y0\nG2 X[1*#<scale>] Y[0] I[0.5*#<scale>] J[0.5*#<scale>]\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        assert_eq!(preview.arcs, 1);
+        let arc = preview
+            .segments
+            .iter()
+            .find(|segment| segment.kind == SegmentKind::Arc)
+            .expect("arc segment");
+        assert!((arc.end[0] - 1.5).abs() < 1e-9, "{:?}", arc.end);
     }
 
     #[test]
