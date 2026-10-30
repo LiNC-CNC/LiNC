@@ -758,6 +758,7 @@ fn nearest_on_line(
 /// What a status line says about the loop the run is in.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoopReadout {
+    pub kind: linc_core::gcode::LoopKind,
     /// The line that opens the loop.
     pub line: usize,
     /// The parameters its test reads, named as the program writes them, with
@@ -787,14 +788,12 @@ impl LoopReadout {
                     .collect()
             })
             .unwrap_or_default();
+        // The pass count is the trace's, so a `repeat` gets one too: its
+        // counter is the interpreter's, but the passes the preview ran are not.
         let total = trace.iterations.len();
-        let iteration = match trace.kind {
-            // The `repeat` counter lives in the interpreter, not in a parameter.
-            linc_core::gcode::LoopKind::Repeat => None,
-            _ if total > 0 => Some((pass.min(total - 1) + 1, total)),
-            _ => None,
-        };
+        let iteration = (total > 0).then(|| (pass.min(total - 1) + 1, total));
         Some(Self {
+            kind: trace.kind,
             line: trace.line,
             values,
             iteration,
@@ -814,7 +813,14 @@ impl LoopReadout {
             text.push_str(&loop_value(*value));
         }
         if let Some((index, total)) = self.iteration {
-            text.push_str(&format!("  {index}/{total}"));
+            if self.kind == linc_core::gcode::LoopKind::Repeat {
+                // No parameter holds this number: the interpreter counts the
+                // passes, so the readout says where the count comes from.
+                text.push_str("  REPEAT ");
+            } else {
+                text.push_str("  ");
+            }
+            text.push_str(&format!("{index}/{total}"));
         }
         text
     }
@@ -2934,15 +2940,28 @@ mod loop_readout_tests {
     }
 
     #[test]
-    fn a_repeat_loop_shows_its_count_without_a_pass_index() {
+    fn a_repeat_loop_shows_the_count_the_interpreter_keeps() {
         let preview =
             plan("#<j> = 1\no200 repeat [4]\nG0 X#<j>\n#<j> = [#<j> + 1]\no200 endrepeat\n");
-        let readout = LoopReadout::current(&preview, &follow(&preview, 3, [1.0, 0.0, 0.0]))
+        let mut progress = LoopProgress::default();
+        progress.follow(&preview, 3, [1.0, 0.0, 0.0], 1);
+        // No parameter holds this number, so the readout names where it comes
+        // from; the count and the total are the trace's own.
+        let readout = LoopReadout::current(&preview, &progress).expect("inside the loop");
+        assert_eq!(readout.text(), "LOOP LN 2  REPEAT 1/4");
+        assert_eq!(readout.iteration, Some((1, 4)));
+        // The second pass's move ends at X2, and the counter follows it.
+        progress.follow(&preview, 3, [2.0, 0.0, 0.0], 1);
+        let readout = LoopReadout::current(&preview, &progress).expect("inside the loop");
+        assert_eq!(readout.text(), "LOOP LN 2  REPEAT 2/4");
+    }
+
+    #[test]
+    fn a_repeat_whose_count_is_a_parameter_shows_it() {
+        let preview = plan("#<n> = 3\no300 repeat [#<n>]\nG0 X10\nG0 X0\no300 endrepeat\n");
+        let readout = LoopReadout::current(&preview, &follow(&preview, 3, [10.0, 0.0, 0.0]))
             .expect("inside the loop");
-        // The pass counter lives in the interpreter, so there is nothing to
-        // count and the readout does not pretend otherwise.
-        assert_eq!(readout.text(), "LOOP LN 2");
-        assert!(readout.iteration.is_none());
+        assert_eq!(readout.text(), "LOOP LN 2  #<n> = 3  REPEAT 1/3");
     }
 
     #[test]
