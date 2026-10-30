@@ -264,3 +264,50 @@ fn only_the_simulator_branch_builds_the_simulator() {
         "the build requirement must follow --sim3d"
     );
 }
+
+/// `net <signal> <pin>...`: a pin name always carries its component, so a word
+/// without a dot is a signal name in a pin's place. That is what broke the rig
+/// without the simulator: `net probe-input sig_rio_probe_bit => motion.probe-input`
+/// made halcmd read `sig_rio_probe_bit` as a pin and LinuxCNC aborted the session.
+#[test]
+fn the_simulator_hal_files_net_pins_not_signal_names() {
+    for file in ["hal/linc-sim3d.hal", "hal/linc-sim-no3d.hal"] {
+        let text = read_repo_file(file);
+        for line in text.lines() {
+            let line = line.trim();
+            let Some(net) = line.strip_prefix("net ") else {
+                continue;
+            };
+            for word in net.split_whitespace().skip(1) {
+                if word == "=>" || word == "<=" {
+                    continue;
+                }
+                assert!(
+                    word.contains('.'),
+                    "{file}: `{word}` is not a pin name: {line}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_no_simulator_rig_joins_the_simulated_probe_signal() {
+    let hal = read_repo_file("hal/linc-sim-no3d.hal");
+    let nets: Vec<&str> = hal
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("net "))
+        .collect();
+    assert_eq!(nets.len(), 1, "one net carries the probe path: {nets:?}");
+    assert_eq!(
+        nets[0], "net sig_rio_probe_bit => motion.probe-input",
+        "the signal name comes from rio_sim.hal, so motion.probe-input joins it"
+    );
+    let rio = read_repo_file("hal/rio_sim.hal");
+    assert!(
+        rio.lines()
+            .any(|line| line.trim_start().starts_with("net sig_rio_probe_bit")),
+        "hal/rio_sim.hal must define the signal the rig joins"
+    );
+}

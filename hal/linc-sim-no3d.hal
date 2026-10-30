@@ -7,4 +7,8 @@
 # Do not load this file together with hal/linc-sim3d.hal - motion.probe-input
 # takes exactly one signal.
 
-net probe-input sig_rio_probe_bit => motion.probe-input
+# rio_sim.hal already defines this signal (net sig_rio_probe_bit <= rio.probe.bit),
+# so this line joins that signal the way the machine's postgui HAL does. Writing
+# `net probe-input sig_rio_probe_bit` instead makes halcmd read the second word as
+# a pin name and abort the session with "Pin 'sig_rio_probe_bit' does not exist".
+net sig_rio_probe_bit => motion.probe-input
