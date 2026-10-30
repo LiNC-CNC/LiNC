@@ -1357,9 +1357,20 @@ enum Stmt {
     EndWhile,
     Repeat {
         line: usize,
+        label: String,
         count: String,
     },
     EndRepeat,
+    /// `o<label> break`: leave the loop this label opened.
+    Break {
+        line: usize,
+        label: String,
+    },
+    /// `o<label> continue`: run the loop's test again.
+    Continue {
+        line: usize,
+        label: String,
+    },
     Goto {
         line: usize,
         target: String,
@@ -1544,9 +1555,18 @@ fn o_word_statement(line: usize, label: &str, rest: &str) -> Stmt {
         "endwhile" => Stmt::EndWhile,
         "repeat" => Stmt::Repeat {
             line,
+            label: label.to_string(),
             count: payload,
         },
         "endrepeat" => Stmt::EndRepeat,
+        "break" => Stmt::Break {
+            line,
+            label: label.to_string(),
+        },
+        "continue" => Stmt::Continue {
+            line,
+            label: label.to_string(),
+        },
         "goto" => Stmt::Goto {
             line,
             target: payload,
@@ -1755,6 +1775,9 @@ fn plan_preview(text: &str) -> PlannedPreview {
     let mut after: Vec<usize> = vec![statements.len(); statements.len()];
     let mut enter: Vec<usize> = vec![statements.len(); statements.len()];
     let mut back: Vec<usize> = vec![usize::MAX; statements.len()];
+    // Where `continue` sends the run: the test of a `while`, the bottom test of
+    // a `do`, the decrementing `endrepeat` of a repeat.
+    let mut again: Vec<usize> = vec![usize::MAX; statements.len()];
     let mut sub_stack: Vec<usize> = Vec::new();
     let mut if_stack: Vec<usize> = Vec::new();
     let mut loop_stack: Vec<usize> = Vec::new();
@@ -1789,13 +1812,49 @@ fn plan_preview(text: &str) -> PlannedPreview {
                 if let Some(start) = loop_stack.pop() {
                     after[start] = index + 1;
                     back[index] = start + 1;
+                    again[start] = index;
                 }
             }
             Stmt::EndWhile | Stmt::EndRepeat => {
                 if let Some(start) = loop_stack.pop() {
                     after[start] = index + 1;
                     back[index] = start;
+                    // A `while` re-tests at its own statement; a repeat lands on
+                    // `endrepeat`, which decrements the count.
+                    again[start] = if matches!(statements[start], Stmt::Repeat { .. }) {
+                        index
+                    } else {
+                        start
+                    };
                 }
+            }
+            _ => {}
+        }
+    }
+
+    // `break` and `continue` name the loop they act on. Resolve each to its
+    // jump once the loop extents are known; a statement whose label does not
+    // name the enclosing loop stays unresolved and reports itself at run time.
+    let mut break_at: Vec<usize> = vec![usize::MAX; statements.len()];
+    let mut continue_at: Vec<usize> = vec![usize::MAX; statements.len()];
+    let mut open_loops: Vec<(usize, String)> = Vec::new();
+    for index in 0..statements.len() {
+        match &statements[index] {
+            Stmt::While { label, .. } | Stmt::Repeat { label, .. } | Stmt::Do { label } => {
+                open_loops.push((index, label.clone()));
+            }
+            Stmt::DoWhile { .. } | Stmt::EndWhile | Stmt::EndRepeat => {
+                open_loops.pop();
+            }
+            Stmt::Break { label, .. } | Stmt::Continue { label, .. } => {
+                let Some((start, open)) = open_loops.last() else {
+                    continue;
+                };
+                if open != label {
+                    continue;
+                }
+                break_at[index] = after[*start];
+                continue_at[index] = again[*start];
             }
             _ => {}
         }
@@ -1981,7 +2040,7 @@ fn plan_preview(text: &str) -> PlannedPreview {
                 let start = back[pc];
                 pc = if start == usize::MAX { pc + 1 } else { start };
             }
-            Stmt::Repeat { line, count } => match Expression::evaluate(count, &params) {
+            Stmt::Repeat { line, count, .. } => match Expression::evaluate(count, &params) {
                 Ok(value) if value >= 1.0 => {
                     repeats.push((pc, value.trunc() as i64));
                     pc += 1;
@@ -2011,6 +2070,30 @@ fn plan_preview(text: &str) -> PlannedPreview {
                     }
                 }
             }
+            Stmt::Break { line, .. } => match break_at[pc] {
+                target if target != usize::MAX => pc = target,
+                _ => {
+                    if incomplete.is_none() {
+                        incomplete = Some(format!(
+                            "line {}: break does not name the enclosing loop",
+                            line
+                        ));
+                    }
+                    pc += 1;
+                }
+            },
+            Stmt::Continue { line, .. } => match continue_at[pc] {
+                target if target != usize::MAX => pc = target,
+                _ => {
+                    if incomplete.is_none() {
+                        incomplete = Some(format!(
+                            "line {}: continue does not name the enclosing loop",
+                            line
+                        ));
+                    }
+                    pc += 1;
+                }
+            },
             Stmt::Goto { line, target } => {
                 let name = goto_label(target);
                 let destination = targets.get(&name).copied().or_else(|| {
@@ -3195,6 +3278,58 @@ mod tests {
         let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
         assert!(preview.error.is_none(), "{:?}", preview.error);
         assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+    }
+
+    #[test]
+    fn break_leaves_the_loop_and_continue_runs_its_test_again() {
+        // `break` names the enclosing loop: it jumps past that loop's end.
+        let text = "G21 G90\n#1 = 0\no10 while [#1 lt 10]\n#1 = [#1 + 1]\nG1 X[#1] F100\no20 if [#1 eq 2]\no10 break\no20 endif\no10 endwhile\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        let ends: Vec<f64> = preview
+            .segments
+            .iter()
+            .map(|segment| segment.end[0])
+            .collect();
+        assert_eq!(ends, vec![1.0, 2.0]);
+
+        // `continue` skips the rest of the body and re-tests.
+        let text = "G21 G90\n#1 = 0\no10 while [#1 lt 3]\n#1 = [#1 + 1]\no20 if [#1 eq 2]\no10 continue\no20 endif\nG1 X[#1] F100\no10 endwhile\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        let ends: Vec<f64> = preview
+            .segments
+            .iter()
+            .map(|segment| segment.end[0])
+            .collect();
+        assert_eq!(ends, vec![1.0, 3.0]);
+    }
+
+    #[test]
+    fn break_ends_a_do_while_that_would_never_test_false() {
+        // The shipped `do-while-break` test programs use `while [1]` and leave
+        // through `break`; without it the preview runs to the step limit.
+        let text = "G21 G90\n#1 = 0\no30 do\n#1 = [#1 + 1]\nG1 X[#1] F100\no40 if [#1 eq 2]\no30 break\no40 endif\no30 while [1]\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        let ends: Vec<f64> = preview
+            .segments
+            .iter()
+            .map(|segment| segment.end[0])
+            .collect();
+        assert_eq!(ends, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn a_break_that_names_the_wrong_loop_is_reported() {
+        let text = "G21 G90\n#1 = 0\no10 while [#1 lt 2]\n#1 = [#1 + 1]\no20 break\no10 endwhile\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(preview.incomplete, "a mismatched label is not a jump");
+        let reason = preview.incomplete_reason.clone().unwrap_or_default();
+        assert!(reason.contains("break"), "{reason}");
     }
 
     #[test]
