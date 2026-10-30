@@ -127,7 +127,7 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
 - Table cells edit in place: Enter selects the whole value, Escape restores the
   previous one, and the open cell keeps the selection border's size in red
   (Tools, Offsets). Home/End belong to the cell while it has focus; add its id to
-  the `text_focused` list in `shell.rs` if you add another editor.
+  the `text_focused` list in `shell/keyboard.rs` if you add another editor.
 
 - No page titles; the navigation names the page. Start each page with `common::focus_anchor(ui, "<page>-page-focus")` so arrow navigation has a
   starting point. Banners stay because they carry live state.
@@ -213,7 +213,7 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
 - **Sibling checkouts.** `sim.toml` is self-contained (`configs/` + `hal/`), but `baiermill.toml` and `baiermill-pb.toml` point into
   `../../baiermill_pb`; `configs/lathe-sim.ini` keeps the INI in-repo, while its `HALFILE`s and `SUBROUTINE_PATH` resolve into
   `../probe_basic_dev`. `--check-config` fails without the mill tree; `start-lathe-sim.sh` refuses to start without its checkout.
-- **egui 0.37.** The workspace pins `egui`/`eframe`/`egui_extras` 0.37. Copy API style from `theme.rs`/`shell.rs`; older egui examples may not
+- **egui 0.37.** The workspace pins `egui`/`eframe`/`egui_extras` 0.37. Copy API style from `theme.rs`/`shell/`; older egui examples may not
   compile, and a second egui version breaks type compatibility.
 
 ## Reporting

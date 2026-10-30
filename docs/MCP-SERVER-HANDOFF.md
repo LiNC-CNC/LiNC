@@ -1968,7 +1968,7 @@ Exit criteria:
 | `crates/linc-mcp/src/policy.rs` | Read-only/sim/write policy |
 | `crates/linc-app/src/main.rs` | CLI flags, log tap, diag server, UI publisher |
 | `crates/linc-app/src/diag.rs` | Start/stop diagnostic services |
-| `crates/linc-ui/src/shell.rs` | Publish UI snapshot, screenshot/action channels |
+| `crates/linc-ui/src/shell/diag.rs` | Publish UI snapshot, screenshot/action channels |
 | `crates/linc-ui/src/state.rs` | UI snapshot helpers |
 | `crates/linc-ui/src/screens/*.rs` | Page-local snapshot extraction where needed |
 | `crates/linc-panel/src/main.rs` | Start panel diagnostic server |
