@@ -376,6 +376,29 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                         .size(theme::font_size(9.0))
                         .color(color),
                 );
+                // Inside a subroutine the controller reports a line of the
+                // routine's own file, and it does not publish that file's name.
+                // Name the routine from the preview's bodies and show the line
+                // the interpreter is on; the listing above keeps the program's
+                // own line so the marker cannot land on unrelated G-code.
+                if app.snapshot.program.call_level > 0 {
+                    let line = app.snapshot.program.sub_line.max(1);
+                    let named = linc_core::gcode::SubroutineBody::named_at(
+                        &app.program.preview.subroutines,
+                        line,
+                    )
+                    .map(|body| body.name.clone());
+                    let text = match named {
+                        Some(name) => format!("SUBROUTINE {name} LN {line}"),
+                        None => format!("SUBROUTINE LN {line}"),
+                    };
+                    ui.label(
+                        RichText::new(text)
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::ACCENT),
+                    );
+                }
             });
         });
         theme::separator(ui);

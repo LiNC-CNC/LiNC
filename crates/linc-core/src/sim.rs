@@ -11,7 +11,7 @@ use std::time::Instant;
 use crate::backend::MachineBackend;
 use crate::command::{HalValue, LincOutput, MachineCommand, MachineError, MdiOrigin, ProbeTarget};
 use crate::config::Profile;
-use crate::gcode::{parse_preview, SegmentKind};
+use crate::gcode::{parse_preview_with, SegmentKind};
 use crate::model::*;
 use crate::tooltable::ToolTable;
 
@@ -362,6 +362,8 @@ impl SimBackend {
             line_count,
             current_line: start_line.min(line_count),
             motion_line: 0,
+            call_level: 0,
+            sub_line: 0,
             next_line: None,
             current_block: text
                 .lines()
@@ -400,11 +402,12 @@ impl SimBackend {
                 .iter()
                 .find(|o| o.index == index)
         });
-        let preview = parse_preview(
+        let preview = parse_preview_with(
             content.as_str(),
             &axis_names,
             active_offset.map(|offset| &offset.values),
             self.current_tool_tip(),
+            &self.profile.subroutines(),
         );
         self.snapshot.program.syntax_error = preview.error.clone();
         self.snapshot.program.modal = preview.modal.lines();
@@ -458,7 +461,7 @@ impl SimBackend {
                 .iter()
                 .find(|o| o.index == index)
         });
-        let preview = parse_preview(
+        let preview = parse_preview_with(
             self.snapshot
                 .program
                 .content
@@ -468,6 +471,7 @@ impl SimBackend {
             &axis_names,
             active_offset.map(|offset| &offset.values),
             self.current_tool_tip(),
+            &self.profile.subroutines(),
         );
         let limit = self.snapshot.program.current_line.max(1);
         let mut points: Vec<TrailPoint> = Vec::new();
@@ -817,11 +821,12 @@ impl SimBackend {
                 .iter()
                 .find(|o| o.index == index)
         });
-        let preview = parse_preview(
+        let preview = parse_preview_with(
             line,
             &axis_names,
             active_offset.map(|offset| &offset.values),
             self.current_tool_tip(),
+            &self.profile.subroutines(),
         );
         if let Some(segment) = preview.segments.last() {
             let start = segment.start;

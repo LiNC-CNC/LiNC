@@ -220,6 +220,25 @@ impl NmlBackend {
         if let Some(stored) = self.last_snapshot.as_mut() {
             carry_hal_selections(&mut snapshot, stored);
         }
+        // A subroutine runs from its own file. The controller then reports that
+        // file's line numbers (`task.callLevel` is above zero and the
+        // interpreter's line is in the routine), but it publishes only the
+        // loaded program's name. Keep the program's own line so the listing does
+        // not jump to a line number that means something else, and publish the
+        // reported line separately: the UI names the routine from the preview's
+        // subroutine bodies.
+        let call_level = status.task.call_level.max(0) as usize;
+        snapshot.program.call_level = call_level;
+        if call_level > 0 {
+            snapshot.program.sub_line = executing_line
+                .unwrap_or(snapshot.program.current_line)
+                .max(1);
+            if let Some(previous) = self.last_snapshot.as_ref() {
+                snapshot.program.current_line = previous.program.current_line;
+                snapshot.program.motion_line = previous.program.motion_line;
+                snapshot.program.current_block = previous.program.current_block.clone();
+            }
+        }
         snapshot.hal.tool_change_confirm_seq = self.confirm_seq;
         snapshot.machine.hal_thread_ok = self.hal.is_some();
         snapshot.bridge = Some(self.bridge_info());

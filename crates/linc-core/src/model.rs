@@ -690,6 +690,13 @@ pub struct ProgramState {
     /// Line motion is executing. Lags `current_line`, which the interpreter
     /// reads ahead by the queue length, so this is the line the tool is cutting.
     pub motion_line: usize,
+    /// Interpreter call depth: above zero while a subroutine runs. The
+    /// controller then reports line numbers of the subroutine's file and does
+    /// not publish that file's name, so `current_line` and `motion_line` keep
+    /// the program's own line and the reported one lands in `sub_line`.
+    pub call_level: usize,
+    /// The line the controller reports while inside a subroutine (0 otherwise).
+    pub sub_line: usize,
     pub next_line: Option<String>,
     pub current_block: String,
     pub modal: Vec<(String, String)>,
@@ -744,6 +751,8 @@ impl Default for ProgramState {
             line_count: 0,
             current_line: 0,
             motion_line: 0,
+            call_level: 0,
+            sub_line: 0,
             next_line: None,
             current_block: String::new(),
             modal: Vec::new(),

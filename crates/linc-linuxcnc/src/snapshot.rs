@@ -807,6 +807,8 @@ impl SnapshotBuilder {
             line_count,
             current_line,
             motion_line,
+            call_level: 0,
+            sub_line: 0,
             next_line: text
                 .as_ref()
                 .and_then(|text| text.lines().nth(executed).map(str::to_string)),

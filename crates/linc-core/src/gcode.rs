@@ -7,7 +7,8 @@
 //! assignment and expressions) under a hard step and call-depth limit, and it
 //! says so on the result when it had to stop short.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 use crate::model::AxisMap;
 use crate::model::SyntaxIssue;
@@ -490,6 +491,32 @@ pub struct Preview {
     pub incomplete: bool,
     /// Why `incomplete` is set, for the operator and for tests.
     pub incomplete_reason: Option<String>,
+    /// Subroutines the preview followed into another file, so the UI can name
+    /// the routine the controller reports a line in.
+    pub subroutines: Vec<SubroutineBody>,
+}
+
+/// A subroutine body the preview took from a file on `SUBROUTINE_PATH`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubroutineBody {
+    pub name: String,
+    pub path: PathBuf,
+    /// The lines the body covers in its own file, inclusive.
+    pub first_line: usize,
+    pub last_line: usize,
+}
+
+impl SubroutineBody {
+    /// The body a controller line number falls in, when exactly one body has
+    /// that line: two subroutines can number the same line, and the controller
+    /// does not say which file it is in.
+    pub fn named_at(subroutines: &[Self], line: usize) -> Option<&Self> {
+        let mut found = subroutines
+            .iter()
+            .filter(|body| (body.first_line..=body.last_line).contains(&line));
+        let first = found.next()?;
+        found.next().is_none().then_some(first)
+    }
 }
 
 impl Preview {
@@ -515,6 +542,7 @@ impl Preview {
             rapids: 0,
             incomplete: false,
             incomplete_reason: None,
+            subroutines: Vec::new(),
         }
     }
 
@@ -1309,6 +1337,7 @@ fn strip_comments(line: &str) -> String {
 }
 
 /// One statement of the preview interpreter.
+#[derive(Clone)]
 enum Stmt {
     Block {
         line: usize,
@@ -1397,6 +1426,7 @@ struct PlannedPreview {
     blocks: Vec<PlannedBlock>,
     error: Option<SyntaxIssue>,
     incomplete: Option<String>,
+    subroutines: Vec<SubroutineBody>,
 }
 
 /// Split an o-word line into its label and the rest, as the interpreter reads
@@ -1702,10 +1732,220 @@ fn goto_label(payload: &str) -> String {
     text.trim().to_string()
 }
 
+/// The directories `[RS274NGC] SUBROUTINE_PATH` names: where the interpreter
+/// looks for the file behind an `o<name> call` the program does not define.
+#[derive(Clone, Debug, Default)]
+pub struct Subroutines {
+    dirs: Vec<PathBuf>,
+}
+
+impl Subroutines {
+    pub fn new(dirs: impl IntoIterator<Item = PathBuf>) -> Self {
+        Self {
+            dirs: dirs.into_iter().collect(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.dirs.is_empty()
+    }
+
+    /// The text of `<name>.ngc` along the search path. A numeric o-word names a
+    /// label in the program, never a file.
+    fn read(&self, name: &str) -> Option<(PathBuf, String)> {
+        if name.is_empty()
+            || name.chars().all(|ch| ch.is_ascii_digit())
+            || name.contains(['/', '\\'])
+            || name.contains("..")
+        {
+            return None;
+        }
+        let file = format!("{name}.ngc");
+        self.dirs.iter().find_map(|dir| {
+            let path = dir.join(&file);
+            std::fs::read_to_string(&path).ok().map(|text| (path, text))
+        })
+    }
+}
+
+impl Stmt {
+    /// Rename the labels a subroutine body defines, so its `o10` cannot meet the
+    /// program's `o10` once the body joins the program's statement list. A call
+    /// to another file keeps its plain name and is imported on its own.
+    fn rename(&mut self, prefix: &str, local: &BTreeSet<String>) {
+        match self {
+            Stmt::Call { label, .. } => {
+                if local.contains(label) {
+                    *label = format!("{prefix}{label}");
+                }
+            }
+            Stmt::While { label, .. }
+            | Stmt::Do { label }
+            | Stmt::Repeat { label, .. }
+            | Stmt::Break { label, .. }
+            | Stmt::Continue { label, .. } => *label = format!("{prefix}{label}"),
+            Stmt::Goto { target, .. } => *target = format!("{prefix}{target}"),
+            _ => {}
+        }
+    }
+}
+
+/// The body of the subroutine `name` in a parsed file: the statements between
+/// its `sub` and the matching `endsub`.
+fn local_sub(statements: &[Stmt], labels: &[Option<String>], name: &str) -> Option<(usize, usize)> {
+    let start = labels
+        .iter()
+        .position(|label| label.as_deref() == Some(name))?;
+    if !matches!(statements.get(start), Some(Stmt::SubStart)) {
+        return None;
+    }
+    let mut depth = 0usize;
+    for (index, statement) in statements.iter().enumerate().skip(start) {
+        match statement {
+            Stmt::SubStart => depth += 1,
+            Stmt::SubEnd { .. } => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some((start + 1, index));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Append the bodies of subroutines the program calls but does not define.
+///
+/// The interpreter resolves such a call along `SUBROUTINE_PATH`. Without this the
+/// preview stops at the call and reports the path partial, which is what every
+/// program using the mill's `subroutines/` (probe routines, `go_to_home`, ...)
+/// did.
+fn import_subroutines(
+    statements: &mut Vec<Stmt>,
+    labels: &mut Vec<Option<String>>,
+    subs: &Subroutines,
+) -> Vec<SubroutineBody> {
+    let mut done: Vec<SubroutineBody> = Vec::new();
+    if subs.is_empty() {
+        return done;
+    }
+    // Only `sub` statements define a routine: a call's own label sits in the
+    // label list too, and must not make the call look locally satisfied.
+    let defined: BTreeSet<String> = statements
+        .iter()
+        .zip(labels.iter())
+        .filter_map(|(statement, label)| match (statement, label) {
+            (Stmt::SubStart, Some(label)) => Some(label.clone()),
+            _ => None,
+        })
+        .collect();
+    let mut pending: Vec<String> = statements
+        .iter()
+        .filter_map(|statement| match statement {
+            Stmt::Call { label, .. } if !defined.contains(label) => Some(label.clone()),
+            _ => None,
+        })
+        .collect();
+    let mut loaded: BTreeSet<String> = BTreeSet::new();
+    while let Some(name) = pending.pop() {
+        if !loaded.insert(name.clone()) {
+            continue;
+        }
+        let Some((path, text)) = subs.read(&name) else {
+            continue;
+        };
+        let (foreign, foreign_labels, _) = parse_statements(&text);
+        let Some((from, to)) = local_sub(&foreign, &foreign_labels, &name) else {
+            continue;
+        };
+        let local: BTreeSet<String> = foreign
+            .iter()
+            .zip(&foreign_labels)
+            .filter_map(|(statement, label)| match (statement, label) {
+                (Stmt::SubStart, Some(label)) => Some(label.clone()),
+                _ => None,
+            })
+            .collect();
+        // U+0001 cannot occur in a label the lexer produces, so the prefix is
+        // unique to this file.
+        let prefix = format!("\u{1}{name}\u{1}");
+        let start = statements.len();
+        // The body joins the program as a subroutine of its own, so a call
+        // enters it at `start + 1` and its `endsub` returns to the caller.
+        statements.push(Stmt::SubStart);
+        labels.push(Some(name.clone()));
+        for index in from..to {
+            let mut statement = foreign[index].clone();
+            statement.rename(&prefix, &local);
+            statements.push(statement);
+            labels.push(
+                foreign_labels[index]
+                    .clone()
+                    .map(|label| format!("{prefix}{label}")),
+            );
+        }
+        statements.push(foreign[to].clone());
+        labels.push(
+            foreign_labels[to]
+                .clone()
+                .map(|label| format!("{prefix}{label}")),
+        );
+        let mut first_line = usize::MAX;
+        let mut last_line = 0usize;
+        for statement in &foreign[from..to] {
+            if let Some(line) = statement_line(statement) {
+                first_line = first_line.min(line);
+                last_line = last_line.max(line);
+            }
+        }
+        done.push(SubroutineBody {
+            name: name.clone(),
+            path,
+            first_line: if first_line == usize::MAX {
+                0
+            } else {
+                first_line
+            },
+            last_line,
+        });
+        // A call the body makes to yet another file, too.
+        for statement in &statements[start..] {
+            if let Stmt::Call { label, .. } = statement {
+                if !label.contains('\u{1}') && !defined.contains(label) {
+                    pending.push(label.clone());
+                }
+            }
+        }
+    }
+    done
+}
+
+/// The file line a statement came from, when it carries one.
+fn statement_line(statement: &Stmt) -> Option<usize> {
+    match statement {
+        Stmt::Block { line, .. }
+        | Stmt::Assign { line, .. }
+        | Stmt::SubEnd { line }
+        | Stmt::Call { line, .. }
+        | Stmt::If { line, .. }
+        | Stmt::ElseIf { line, .. }
+        | Stmt::While { line, .. }
+        | Stmt::DoWhile { line, .. }
+        | Stmt::Repeat { line, .. }
+        | Stmt::Break { line, .. }
+        | Stmt::Continue { line, .. }
+        | Stmt::Goto { line, .. }
+        | Stmt::Return { line }
+        | Stmt::Unsupported { line, .. } => Some(*line),
+        _ => None,
+    }
+}
+
 /// Read the file into the statements the interpreter runs. The file is read
 /// once; a block is only turned into numbers when the interpreter reaches it,
 /// because a parameter can change between two visits to the same line.
-fn plan_preview(text: &str) -> PlannedPreview {
+fn parse_statements(text: &str) -> (Vec<Stmt>, Vec<Option<String>>, Option<SyntaxIssue>) {
     let mut statements: Vec<Stmt> = Vec::new();
     let mut labels: Vec<Option<String>> = Vec::new();
     let mut error: Option<SyntaxIssue> = None;
@@ -1754,6 +1994,23 @@ fn plan_preview(text: &str) -> PlannedPreview {
         labels.push(None);
     }
 
+    (statements, labels, error)
+}
+
+/// Plan the preview: the program's own statements plus the subroutine bodies its
+/// calls resolve to, then run them.
+fn plan_preview(text: &str, subs: &Subroutines) -> PlannedPreview {
+    let (mut statements, mut labels, error) = parse_statements(text);
+    let bodies = import_subroutines(&mut statements, &mut labels, subs);
+    plan_statements(statements, labels, bodies, error)
+}
+
+fn plan_statements(
+    mut statements: Vec<Stmt>,
+    labels: Vec<Option<String>>,
+    bodies: Vec<SubroutineBody>,
+    mut error: Option<SyntaxIssue>,
+) -> PlannedPreview {
     // A `while` that closes a `do` is that loop's bottom test, not a new loop.
     pair_do_loops(&mut statements);
 
@@ -2127,6 +2384,7 @@ fn plan_preview(text: &str) -> PlannedPreview {
         blocks,
         error,
         incomplete,
+        subroutines: bodies,
     }
 }
 
@@ -2137,6 +2395,24 @@ pub fn parse_preview(
     axis_names: &[String],
     offset: Option<&AxisMap<f64>>,
     current_position: [f64; 3],
+) -> Preview {
+    parse_preview_with(
+        text,
+        axis_names,
+        offset,
+        current_position,
+        &Subroutines::default(),
+    )
+}
+
+/// The same preview, but following `o<name> call` into the machine's
+/// subroutine files the way the interpreter does.
+pub fn parse_preview_with(
+    text: &str,
+    axis_names: &[String],
+    offset: Option<&AxisMap<f64>>,
+    current_position: [f64; 3],
+    subs: &Subroutines,
 ) -> Preview {
     let mut preview = Preview::empty();
     let axis_index = |name: &str| -> Option<usize> {
@@ -2177,7 +2453,9 @@ pub fn parse_preview(
         blocks,
         error,
         incomplete,
-    } = plan_preview(text);
+        subroutines,
+    } = plan_preview(text, subs);
+    preview.subroutines = subroutines;
     let total_lines = text.lines().count();
 
     for block in blocks {
@@ -3330,6 +3608,97 @@ mod tests {
         assert!(preview.incomplete, "a mismatched label is not a jump");
         let reason = preview.incomplete_reason.clone().unwrap_or_default();
         assert!(reason.contains("break"), "{reason}");
+    }
+
+    #[test]
+    fn a_call_follows_the_subroutine_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("slot.ngc"),
+            "o<slot> sub\nG1 X[#1] F100\nG1 Y5\no<slot> endsub\n",
+        )
+        .expect("write");
+        let subs = Subroutines::new([dir.path().to_path_buf()]);
+        let text = "G21 G90\nG0 X0 Y0\no<slot> call [3]\nG0 X0\n";
+        let preview = parse_preview_with(text, &preview_axes(), None, [0.0; 3], &subs);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        assert_eq!(preview.subroutines.len(), 1);
+        assert_eq!(preview.subroutines[0].name, "slot");
+        assert!(preview.subroutines[0].path.ends_with("slot.ngc"));
+        assert_eq!(preview.subroutines[0].first_line, 2);
+        assert_eq!(preview.subroutines[0].last_line, 3);
+        assert!(SubroutineBody::named_at(&preview.subroutines, 3).is_some());
+        assert!(SubroutineBody::named_at(&preview.subroutines, 9).is_none());
+        // Two bodies can number the same line; the controller does not say
+        // which file it is in, so neither does the preview.
+        let ambiguous = [
+            SubroutineBody {
+                name: "a".into(),
+                path: PathBuf::from("a.ngc"),
+                first_line: 1,
+                last_line: 5,
+            },
+            SubroutineBody {
+                name: "b".into(),
+                path: PathBuf::from("b.ngc"),
+                first_line: 4,
+                last_line: 8,
+            },
+        ];
+        assert!(SubroutineBody::named_at(&ambiguous, 4).is_none());
+        assert!(SubroutineBody::named_at(&ambiguous, 2).is_some());
+        let ends: Vec<[f64; 3]> = preview.segments.iter().map(|segment| segment.end).collect();
+        assert_eq!(
+            ends,
+            vec![
+                // The preamble moves nowhere, then the body runs, then the
+                // program's closing rapid.
+                [0.0, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [3.0, 5.0, 0.0],
+                [0.0, 5.0, 0.0],
+            ]
+        );
+    }
+
+    #[test]
+    fn an_imported_body_keeps_its_labels_apart_from_the_programs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("twice.ngc"),
+            "o<twice> sub\no100 while [#1 lt 5]\nG1 X[#1] F100\n#1 = [#1 + 1]\no100 endwhile\no<twice> endsub\n",
+        )
+        .expect("write");
+        let subs = Subroutines::new([dir.path().to_path_buf()]);
+        // The program uses o100 for its own sub, the imported body uses it for
+        // a loop: the two must not meet.
+        let text = "G21 G90\no100 sub\nG1 X1 F100\no100 endsub\no100 call\no<twice> call [3]\n";
+        let preview = parse_preview_with(text, &preview_axes(), None, [0.0; 3], &subs);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        let ends: Vec<f64> = preview
+            .segments
+            .iter()
+            .map(|segment| segment.end[0])
+            .collect();
+        assert_eq!(ends, vec![1.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn a_subroutine_the_path_does_not_provide_stays_partial() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let subs = Subroutines::new([dir.path().to_path_buf()]);
+        let text = "G21 G90\no<nothing> call\nG0 X1\n";
+        let preview = parse_preview_with(text, &preview_axes(), None, [0.0; 3], &subs);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(preview.incomplete, "a missing body is partial");
+        let reason = preview.incomplete_reason.clone().unwrap_or_default();
+        assert!(reason.contains("nothing"), "{reason}");
+        // A numeric label names a program label, not a file: no lookup.
+        let text = "G21 G90\no10 sub\nG1 X1 F100\no10 endsub\no10 call\n";
+        let preview = parse_preview_with(text, &preview_axes(), None, [0.0; 3], &subs);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
     }
 
     #[test]

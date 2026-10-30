@@ -584,6 +584,15 @@ pub struct Profile {
     pub changer: ToolChangerKind,
 }
 
+impl Profile {
+    /// Where the interpreter looks for the file behind an `o<name> call` the
+    /// program does not define: the machine INI's `[RS274NGC] SUBROUTINE_PATH`,
+    /// in order.
+    pub fn subroutines(&self) -> crate::gcode::Subroutines {
+        crate::gcode::Subroutines::new(self.machine_ini.subroutine_paths.iter().cloned())
+    }
+}
+
 impl UiConfig {
     /// Effective UI zoom factor. `"auto"` leaves the native scale untouched;
     /// numeric strings are validated by the loader.

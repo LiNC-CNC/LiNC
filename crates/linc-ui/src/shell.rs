@@ -11,7 +11,7 @@ use egui::{
 };
 use linc_core::command::{BackendEvent, CommandResult, MachineCommand};
 use linc_core::config::Profile;
-use linc_core::gcode::{parse_preview, Bounds3, Preview};
+use linc_core::gcode::{parse_preview_with, Bounds3, Preview};
 use linc_core::mdi_file::SaveError;
 use linc_core::model::{
     format_clock, now_ms, Alarm, AlarmSeverity, AlarmSource, AxisMap, MachinePower,
@@ -383,7 +383,7 @@ impl LincApp {
         if let Some(text) = &snapshot.program.content {
             let axes = profile.machine_ini.axis_names();
             let offset = active_offset(&snapshot);
-            preview = parse_preview(text, &axes, offset, [0.0; 3]);
+            preview = parse_preview_with(text, &axes, offset, [0.0; 3], &profile.subroutines());
             preview.trim_approach([0.0; 3]);
         }
         editor.set_saved_text(
@@ -2220,7 +2220,13 @@ impl LincApp {
         // the program selects (a `G54`/`G55` in its preamble is where it will
         // cut), falling back to the controller's active system for a program that
         // selects none.
-        let mut preview = parse_preview(&text, &axes, offset.as_ref(), self.tool_tip());
+        let mut preview = parse_preview_with(
+            &text,
+            &axes,
+            offset.as_ref(),
+            self.tool_tip(),
+            &self.profile.subroutines(),
+        );
         // The first rapid is the approach from the live tool position to the
         // program start. Keep the program geometry; do not draw that connector.
         preview.trim_approach(self.tool_tip());
