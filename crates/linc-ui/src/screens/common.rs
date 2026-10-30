@@ -48,7 +48,8 @@ pub fn token_color(kind: TokenKind) -> Color32 {
         TokenKind::Comment => theme::COMMENT,
         TokenKind::ProgramNumber => theme::C6,
         TokenKind::LineNumber => theme::LINE_NUMBER,
-        TokenKind::OWord => theme::C2,
+        TokenKind::OWord | TokenKind::Keyword => theme::C2,
+        TokenKind::Operator => theme::C5,
         TokenKind::Other => theme::FG,
     }
 }
@@ -2209,7 +2210,8 @@ pub fn following_error_card(app: &LincApp, ui: &mut Ui, height: f32) {
                 .enumerate()
                 .map(|(index, axis)| {
                     (
-                        app.following.history
+                        app.following
+                            .history
                             .get(axis)
                             .map(|samples| samples.iter().copied().collect())
                             .unwrap_or_default(),

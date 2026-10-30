@@ -26,7 +26,13 @@ pub enum TokenKind {
     Comment,
     ProgramNumber,
     LineNumber,
+    /// The label of an o-word statement: `o100`, `o<probe_z>`.
     OWord,
+    /// The word that tells the interpreter what the o-word does: `while`,
+    /// `call`, `endrepeat`.
+    Keyword,
+    /// A comparison or function word inside an expression: `lt`, `and`, `sqrt`.
+    Operator,
     Other,
 }
 
@@ -51,6 +57,8 @@ impl Token {
             | TokenKind::Tool
             | TokenKind::Parameter
             | TokenKind::OWord
+            | TokenKind::Keyword
+            | TokenKind::Operator
             | TokenKind::ProgramNumber
             | TokenKind::LineNumber => self.text.to_ascii_uppercase(),
             _ => self.text.clone(),
@@ -68,10 +76,122 @@ fn skip_spaces(bytes: &[u8], mut index: usize) -> usize {
 }
 
 /// Lex one line. Offsets are byte offsets within the line.
+/// The o-word statement a line starts with: the label's span, the keyword that
+/// follows it, and where the rest of the line begins.
+///
+/// The interpreter reads these words as a keyword and an expression, not as
+/// G-code words, so `while` must not be lexed as the axis word W followed by a
+/// run of parameter letters - which is what a word lexer sees in it.
+fn o_statement(line: &str) -> Option<(usize, usize, Option<(usize, usize)>, usize)> {
+    // The keywords the interpreter dispatches on (interp_read.cc, `read_o_word`
+    // under `CMP`), and nothing else: a word it does not know is an error there,
+    // so colouring one as a keyword would promise syntax that will not run.
+    const KEYWORDS: [&str; 15] = [
+        "sub",
+        "endsub",
+        "call",
+        "do",
+        "while",
+        "repeat",
+        "if",
+        "elseif",
+        "else",
+        "endif",
+        "break",
+        "continue",
+        "endwhile",
+        "endrepeat",
+        "return",
+    ];
+    let bytes = line.as_bytes();
+    let mut start = 0;
+    while start < bytes.len() && (bytes[start] as char).is_whitespace() {
+        start += 1;
+    }
+    let mut i = start;
+    if !matches!(bytes.get(i), Some(b'o') | Some(b'O')) {
+        return None;
+    }
+    i += 1;
+    // The label is a number, a name, or an expression: `o100`, `o<myfile>`,
+    // `o[#101+2]`.
+    match bytes.get(i) {
+        Some(b'<') => {
+            while i < bytes.len() && bytes[i] != b'>' {
+                i += 1;
+            }
+            if i >= bytes.len() {
+                return None;
+            }
+            i += 1;
+        }
+        Some(b'[') => {
+            let mut depth = 0usize;
+            while i < bytes.len() {
+                match bytes[i] {
+                    b'[' => depth += 1,
+                    b']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+        }
+        Some(byte) if byte.is_ascii_digit() => {
+            while i < bytes.len() && (bytes[i] as char).is_ascii_digit() {
+                i += 1;
+            }
+        }
+        _ => return None,
+    }
+    let label_end = i;
+    let mut at = i;
+    while at < bytes.len() && (bytes[at] as char).is_whitespace() {
+        at += 1;
+    }
+    let keyword_start = at;
+    while at < bytes.len() && (bytes[at] as char).is_ascii_alphabetic() {
+        at += 1;
+    }
+    let word = &line[keyword_start..at];
+    let keyword = KEYWORDS
+        .iter()
+        .any(|known| word.eq_ignore_ascii_case(known))
+        .then_some((keyword_start, at));
+    Some((start, label_end, keyword, at))
+}
+
 pub fn lex_line(line: &str) -> Vec<Token> {
     let bytes = line.as_bytes();
     let mut tokens = Vec::new();
     let mut i = 0;
+    // An o-word statement owns the whole line: its label, its keyword, and an
+    // expression. Lexing it as G-code words is what turned `while` into W, H, I,
+    // L, E and coloured each letter as an axis or a parameter.
+    let mut expression = false;
+    if let Some((label_start, label_end, keyword, rest)) = o_statement(line) {
+        tokens.push(Token {
+            kind: TokenKind::OWord,
+            start: label_start,
+            end: label_end,
+            text: line[label_start..label_end].to_string(),
+        });
+        if let Some((from, to)) = keyword {
+            tokens.push(Token {
+                kind: TokenKind::Keyword,
+                start: from,
+                end: to,
+                text: line[from..to].to_string(),
+            });
+            expression = true;
+        }
+        i = rest;
+    }
     while i < bytes.len() {
         let ch = bytes[i] as char;
         if ch.is_whitespace() {
@@ -183,6 +303,19 @@ pub fn lex_line(line: &str) -> Vec<Token> {
             }
             tokens.push(Token {
                 kind: TokenKind::Variable,
+                start,
+                end: i,
+                text: line[start..i].to_string(),
+            });
+            continue;
+        }
+        if expression && ch.is_ascii_alphabetic() {
+            let start = i;
+            while i < bytes.len() && (bytes[i] as char).is_ascii_alphabetic() {
+                i += 1;
+            }
+            tokens.push(Token {
+                kind: TokenKind::Operator,
                 start,
                 end: i,
                 text: line[start..i].to_string(),
@@ -302,7 +435,15 @@ pub fn lex_line(line: &str) -> Vec<Token> {
             }
             continue;
         }
-        if ch.is_ascii_digit() || ch == '-' || ch == '+' || ch == '.' {
+        // A sign belongs to a number only when a digit or a point follows it.
+        // In an expression `[#1 + 2]` the plus is an operator, not a number
+        // whose text happens to be "+".
+        let signed = !expression
+            && matches!(ch, '-' | '+')
+            && bytes
+                .get(i + 1)
+                .is_some_and(|next| next.is_ascii_digit() || *next == b'.');
+        if ch.is_ascii_digit() || signed || ch == '.' {
             let start = i;
             i += 1;
             while i < bytes.len()
@@ -317,6 +458,20 @@ pub fn lex_line(line: &str) -> Vec<Token> {
             }
             tokens.push(Token {
                 kind: TokenKind::Number,
+                start,
+                end: i,
+                text: line[start..i].to_string(),
+            });
+            continue;
+        }
+        // Symbol operators: `+`, `-`, `*`, `/`, `=`, and `**` as one run.
+        if matches!(ch, '+' | '-' | '*' | '/' | '=') {
+            let start = i;
+            while i < bytes.len() && matches!(bytes[i], b'+' | b'-' | b'*' | b'/' | b'=') {
+                i += 1;
+            }
+            tokens.push(Token {
+                kind: TokenKind::Operator,
                 start,
                 end: i,
                 text: line[start..i].to_string(),
@@ -3905,6 +4060,145 @@ mod tests {
     fn plan(text: &str) -> Preview {
         let axes: Vec<String> = ["X", "Y", "Z"].iter().map(|s| s.to_string()).collect();
         parse_preview(text, &axes, None, [0.0; 3])
+    }
+
+    fn kinds(line: &str) -> Vec<(TokenKind, String)> {
+        lex_line(line)
+            .into_iter()
+            .map(|token| (token.kind, token.text))
+            .collect()
+    }
+
+    #[test]
+    fn an_o_statement_lexes_its_keyword_and_operators() {
+        // The bug this covers: `while` lexed as the axis word W plus a run of
+        // parameter letters, so the editor coloured each letter separately.
+        assert_eq!(
+            kinds("o100 WHILE [#<i> Lt 4]"),
+            vec![
+                (TokenKind::OWord, "o100".into()),
+                (TokenKind::Keyword, "WHILE".into()),
+                (TokenKind::Variable, "[".into()),
+                (TokenKind::Variable, "#<i>".into()),
+                (TokenKind::Operator, "Lt".into()),
+                (TokenKind::Number, "4".into()),
+                (TokenKind::Variable, "]".into()),
+            ]
+        );
+        // A named label, mixed case, and no space after the label.
+        assert_eq!(
+            kinds("o<probe_z> call [1]"),
+            vec![
+                (TokenKind::OWord, "o<probe_z>".into()),
+                (TokenKind::Keyword, "call".into()),
+                (TokenKind::Variable, "[".into()),
+                (TokenKind::Number, "1".into()),
+                (TokenKind::Variable, "]".into()),
+            ]
+        );
+        assert_eq!(
+            kinds("o200 Endwhile")[1],
+            (TokenKind::Keyword, "Endwhile".into())
+        );
+        assert_eq!(
+            kinds("o100while[#1 lt 2]")[1],
+            (TokenKind::Keyword, "while".into())
+        );
+    }
+
+    #[test]
+    fn every_interpreter_o_keyword_lexes_as_one() {
+        // interp_read.cc `read_o_word`: the closed set the interpreter
+        // dispatches on.
+        for keyword in [
+            "sub",
+            "endsub",
+            "call",
+            "do",
+            "while",
+            "repeat",
+            "if",
+            "elseif",
+            "else",
+            "endif",
+            "break",
+            "continue",
+            "endwhile",
+            "endrepeat",
+            "return",
+        ] {
+            let line = format!("o100 {keyword}");
+            let kinds = kinds(&line);
+            assert_eq!(kinds[0], (TokenKind::OWord, "o100".into()), "{line}");
+            assert_eq!(
+                kinds[1],
+                (TokenKind::Keyword, keyword.to_string()),
+                "{line} is a keyword"
+            );
+        }
+        // `goto` is not one of them: the interpreter rejects it, so it must not
+        // be painted as syntax that runs.
+        let kinds = kinds("o100 goto 20");
+        assert!(kinds.iter().all(|(kind, _)| *kind != TokenKind::Keyword));
+    }
+
+    #[test]
+    fn every_label_form_the_interpreter_accepts_lexes_as_a_label() {
+        // A number, a name, and a computed expression.
+        for (line, label) in [
+            ("o100 call", "o100"),
+            ("o<myfile> call", "o<myfile>"),
+            ("o[#101+2] call", "o[#101+2]"),
+        ] {
+            let kinds = kinds(line);
+            assert_eq!(kinds[0], (TokenKind::OWord, label.into()), "{line}");
+            assert_eq!(
+                kinds[1],
+                (TokenKind::Keyword, "call".into()),
+                "{line} is a call"
+            );
+        }
+        // The Fanuc-style bare definition has a label and nothing else.
+        assert_eq!(kinds("o2000"), vec![(TokenKind::OWord, "o2000".into())]);
+        assert_eq!(
+            kinds("o100 (Example 1)")[0],
+            (TokenKind::OWord, "o100".into())
+        );
+    }
+
+    #[test]
+    fn a_return_value_expression_lexes_after_the_keyword() {
+        assert_eq!(
+            kinds("o123 endsub [3 * 4]"),
+            vec![
+                (TokenKind::OWord, "o123".into()),
+                (TokenKind::Keyword, "endsub".into()),
+                (TokenKind::Variable, "[".into()),
+                (TokenKind::Number, "3".into()),
+                (TokenKind::Operator, "*".into()),
+                (TokenKind::Number, "4".into()),
+                (TokenKind::Variable, "]".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_line_that_only_starts_with_o_is_not_an_o_statement() {
+        // No label, so the words are ordinary G-code and keep their own kinds.
+        assert_eq!(kinds("G0 X1")[0], (TokenKind::GCode, "G0".into()));
+        assert!(kinds("oops G0")
+            .iter()
+            .all(|(kind, _)| *kind != TokenKind::Keyword));
+    }
+
+    #[test]
+    fn an_o_statement_still_drives_the_planner() {
+        // The lexer's kinds are the editor's business; the planner reads the
+        // line's text, so a keyword token must not change the path.
+        let preview = plan("o100 while [#<i> lt 2]\nG0 X#<i>\n#<i> = [#<i> + 1]\no100 endwhile\n");
+        assert!(preview.error.is_none());
+        assert_eq!(preview.loops.len(), 1);
+        assert_eq!(preview.loops[0].iterations, vec![vec![0.0], vec![1.0]]);
     }
 
     #[test]

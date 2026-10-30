@@ -790,6 +790,45 @@ fn line_row_starts(ends_with_newline: impl Iterator<Item = bool>) -> Vec<usize> 
 mod tests {
     use super::*;
 
+    /// The colour the editor paints the character at `at`.
+    fn colour_at(job: &LayoutJob, at: usize) -> Color32 {
+        job.format_at_byte(egui::text::ByteIndex(at)).color
+    }
+
+    #[test]
+    fn an_o_statement_colours_its_keyword_and_operators() {
+        let job = layout_for_test("o100 WHILE [#<i> Lt 4]", 0);
+        let text = job.text.clone();
+        let at = |needle: &str| text.find(needle).expect("the line is laid out");
+        // The statement word and the comparison word have their own colours;
+        // the letters are not on-screen as an axis word and parameter words.
+        assert_eq!(colour_at(&job, at("WHILE")), theme::C2);
+        assert_eq!(colour_at(&job, at("LT")), theme::C5);
+        assert_ne!(colour_at(&job, at("WHILE")), theme::C3);
+        assert_ne!(colour_at(&job, at("LT")), theme::C6);
+        // A named label is one token too.
+        let job = layout_for_test("o<probe_z> call [1]", 0);
+        let text = job.text.clone();
+        assert_eq!(
+            colour_at(&job, text.find("PROBE_Z").expect("laid out")),
+            theme::C2
+        );
+        assert_eq!(
+            colour_at(&job, text.find("CALL").expect("laid out")),
+            theme::C2
+        );
+        // Symbol operators are operators too, on an assignment as well.
+        let job = layout_for_test("#1 = [sqrt[4] + 2 * 3]", 0);
+        let text = job.text.clone();
+        for needle in ["=", "+", "*"] {
+            assert_eq!(
+                colour_at(&job, text.find(needle).expect("laid out")),
+                theme::C5,
+                "{needle} is an operator"
+            );
+        }
+    }
+
     #[test]
     fn wrapped_rows_do_not_start_new_logical_lines() {
         // long line wrapped to two rows, then a short line, then a blank line.
@@ -946,7 +985,8 @@ fn token_color(kind: TokenKind) -> Color32 {
         TokenKind::Comment => theme::COMMENT,
         TokenKind::ProgramNumber => theme::C6,
         TokenKind::LineNumber => theme::LINE_NUMBER,
-        TokenKind::OWord => theme::C2,
+        TokenKind::OWord | TokenKind::Keyword => theme::C2,
+        TokenKind::Operator => theme::C5,
         TokenKind::Other => theme::FG,
     }
 }
