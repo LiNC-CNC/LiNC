@@ -1394,11 +1394,16 @@ etc.
   `[DISPLAY] INCREMENTS` list, so the HMI offers exactly the values LinuxCNC was
   configured with (the same list Axis and Probe Basic use). The selector lives
   in the HMI's `INC` context card and publishes `linc.jog-increment`, wired to
-  `halui.axis.L.increment` in the post-GUI HAL file. The list's leading `JOG`
+  `halui.axis.L.increment` **and** `halui.joint.N.increment` in the post-GUI
+  HAL file. Both pin sets must carry the step: halui reads the axis pins for a
+  teleop jog and the joint pins for a joint/FREE jog, and an unwired pin turns
+  every INC key into a zero-length step. The list's leading `JOG`
   entry is continuous and is not offered as a step: continuous is the panel's
   `JOG` mode, not a zero step. Jog keys are routed by panel mode — continuous
   to `halui.axis.L.plus/minus` (level) and incremental to
-  `halui.axis.L.increment-plus/minus` (edge triggered).
+  `halui.axis.L.increment-plus/minus` (edge triggered) in teleop, and to the
+  matching `halui.joint.N` pins in joint/FREE, selected by
+  `halui.mode.is-teleop` / `is-joint`.
   **Jog speed** is a percentage of the machine INI's
   `[DISPLAY] DEFAULT_LINEAR_VELOCITY`, set with a slider in the mode context
   card. The HMI publishes the result in machine units per second on

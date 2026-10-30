@@ -16,7 +16,7 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 # ---------------------------------------------------------------------------
 # Logic and conversion components
 # ---------------------------------------------------------------------------
-loadrt and2 names=and2.cycle_gate,and2.cycle_resume,and2.cycle_run,and2.jxn_inc,and2.jxp_inc,and2.jyn_inc,and2.jyp_inc,and2.jzn_inc,and2.jzp_inc,and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint
+loadrt and2 names=and2.cycle_gate,and2.cycle_resume,and2.cycle_run,and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint
 # `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
 # with "or2: already exists". Instances only used by the simulation
 # (or2.estop_reset, or2.machine_off, or2.probe_sim3d) are created here and wired
@@ -31,12 +31,6 @@ loadrt conv_float_s32 names=conv.feed,conv.rapid,conv.spindle
 addf and2.cycle_gate servo-thread
 addf and2.cycle_resume servo-thread
 addf and2.cycle_run servo-thread
-addf and2.jxn_inc servo-thread
-addf and2.jxp_inc servo-thread
-addf and2.jyn_inc servo-thread
-addf and2.jyp_inc servo-thread
-addf and2.jzn_inc servo-thread
-addf and2.jzp_inc servo-thread
 addf and2.xn_axis servo-thread
 addf and2.xn_cont servo-thread
 addf and2.xn_inc servo-thread
@@ -114,7 +108,7 @@ net mode-mdi cnc_panel.mode_mdi => halui.mode.mdi
 net mode-jog cnc_panel.mode_jog => or2.jog_a.in0 and2.xp_cont.in1 and2.xn_cont.in1 and2.yp_cont.in1 and2.yn_cont.in1 and2.zp_cont.in1 and2.zn_cont.in1
 # `cnc_panel.mode_inc` is a pin, so it carries exactly one signal; every INC
 # consumer is a reader on it.
-net mode-inc cnc_panel.mode_inc => or2.jog_a.in1 and2.jxp_inc.in1 and2.jxn_inc.in1 and2.jyp_inc.in1 and2.jyn_inc.in1 and2.jzp_inc.in1 and2.jzn_inc.in1
+net mode-inc cnc_panel.mode_inc => or2.jog_a.in1 and2.xp_inc.in1 and2.xn_inc.in1 and2.yp_inc.in1 and2.yn_inc.in1 and2.zp_inc.in1 and2.zn_inc.in1
 net mode-mpg cnc_panel.mode_mpg => or2.jog_b.in0
 net mode-jog-a or2.jog_a.out => or2.jog_b.in1
 # JOG / INC / MPG jog the machine, so they must also select the MANUAL task

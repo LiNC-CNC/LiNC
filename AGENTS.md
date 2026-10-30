@@ -100,6 +100,10 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
   manual, but `linc-core::tooltable` inserts and writes it. Never "clean up" a manual table by
   dropping P.
 - Panel modes are steady one-hot; zero or several active modes decode to `Unknown` and the UI fails closed. Do not add pulse latching.
+- The INC step must reach both `halui.axis.L.increment` and `halui.joint.N.increment`. halui reads the axis pins for a
+  teleop jog and the joint pins for a joint/FREE jog, so a missing pin makes the INC keys dead in one motion mode and alive
+  in the other. `halui` also acts only on a rising edge of a mode request, so a task-mode round trip (MDI and back) can
+  restore teleop while the dial never re-requests it.
 - `Ctrl+Q` is guarded: never quit while a program runs or the machine moves.
 - Minimum window 1280×720; interactive targets at least 44 px.
 
