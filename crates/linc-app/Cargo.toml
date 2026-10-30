@@ -8,6 +8,10 @@ license.workspace = true
 name = "linc"
 path = "src/main.rs"
 
+[features]
+default = ["linuxcnc"]
+linuxcnc = ["dep:linc-linuxcnc"]
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
@@ -21,4 +25,4 @@ linc-core = { path = "../linc-core" }
 linc-diag = { path = "../linc-diag" }
 linc-ui = { path = "../linc-ui" }
 linc-hal = { path = "../linc-hal" }
-linc-linuxcnc = { path = "../linc-linuxcnc" }
+linc-linuxcnc = { path = "../linc-linuxcnc", optional = true }

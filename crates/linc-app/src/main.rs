@@ -8,7 +8,10 @@ use clap::{Parser, ValueEnum};
 use linc_core::backend::{BackendHandle, HalWriter, MachineBackend};
 use linc_core::config::Profile;
 use linc_core::model::PanelMode;
-use linc_hal::{HalPinValue, HalReader, LincHal};
+use linc_hal::LincHal;
+#[cfg(feature = "linuxcnc")]
+use linc_hal::{HalPinValue, HalReader};
+#[cfg(feature = "linuxcnc")]
 use linc_linuxcnc::NmlBackend;
 use linc_ui::{LincApp, UiBackend};
 
@@ -107,19 +110,44 @@ fn main() -> Result<()> {
         args.backend
     };
     let use_linuxcnc = match backend_choice {
-        BackendChoice::Linuxcnc => true,
+        BackendChoice::Linuxcnc => {
+            #[cfg(not(feature = "linuxcnc"))]
+            anyhow::bail!("this build has no LinuxCNC backend; use --sim or --backend sim");
+            #[cfg(feature = "linuxcnc")]
+            {
+                true
+            }
+        }
         BackendChoice::Sim => false,
-        BackendChoice::Auto => !profile.is_sim(),
+        BackendChoice::Auto => {
+            // A build without the NML client can only run the simulator, even
+            // for a profile that names a real machine.
+            #[cfg(feature = "linuxcnc")]
+            {
+                !profile.is_sim()
+            }
+            #[cfg(not(feature = "linuxcnc"))]
+            {
+                false
+            }
+        }
     };
     let demo_mode = parse_demo_mode(args.demo_mode.as_deref()).unwrap_or(PanelMode::Auto);
 
     let status_hz = profile.config.backend.status_hz;
     let status_source = profile.status_source;
     let backend: Box<dyn MachineBackend> = if use_linuxcnc {
-        Box::new(
-            NmlBackend::connect(profile.clone())
-                .context("cannot open the LinuxCNC NML channels")?,
-        )
+        #[cfg(feature = "linuxcnc")]
+        {
+            Box::new(
+                NmlBackend::connect(profile.clone())
+                    .context("cannot open the LinuxCNC NML channels")?,
+            )
+        }
+        #[cfg(not(feature = "linuxcnc"))]
+        {
+            anyhow::bail!("this build has no LinuxCNC backend; use --sim or --backend sim")
+        }
     } else {
         Box::new(linc_core::sim::SimBackend::new_connected(
             profile.clone(),
@@ -207,10 +235,7 @@ fn main() -> Result<()> {
     let window_mode = if args.fullscreen {
         WindowMode::Fullscreen
     } else {
-        resolve_window_mode(
-            &profile.config.ui.window_mode,
-            &profile.config.machine.kind,
-        )
+        resolve_window_mode(&profile.config.ui.window_mode, &profile.config.machine.kind)
     };
     // Fullscreen has no frame to decorate either way.
     let decorated = window_mode != WindowMode::Fullscreen && profile.config.ui.decorations;
@@ -231,7 +256,11 @@ fn main() -> Result<()> {
         Box::new(move |cc| {
             let mut app = LincApp::new(profile.clone(), handle, &cc.egui_ctx);
             app.set_diag_bus(diag_bus.clone());
-            Ok(Box::new(MachineOffGuard::new(app, hal_enabled, window_mode)))
+            Ok(Box::new(MachineOffGuard::new(
+                app,
+                hal_enabled,
+                window_mode,
+            )))
         }),
     );
     result.map_err(|error| anyhow::anyhow!("UI error: {error}"))?;
@@ -261,6 +290,7 @@ fn resolve_window_mode(mode: &str, machine_kind: &str) -> WindowMode {
 
 /// HAL pin the cabinet's machine-on switch drives; see the machine's post-GUI
 /// file, which extends `sig_rio_machine-on-switch_bit` into it.
+#[cfg(feature = "linuxcnc")]
 const MACHINE_ON_PIN: &str = "linc.machine-on";
 
 /// Ends the session when the cabinet is switched off.
@@ -276,7 +306,9 @@ const MACHINE_ON_PIN: &str = "linc.machine-on";
 /// fault before the operator could reset it.
 struct MachineOffGuard {
     inner: LincApp,
+    #[cfg(feature = "linuxcnc")]
     reader: Option<HalReader>,
+    #[cfg(feature = "linuxcnc")]
     last: Option<bool>,
     /// How the window should sit, re-asserted after creation.
     window: WindowMode,
@@ -287,6 +319,9 @@ struct MachineOffGuard {
 
 impl MachineOffGuard {
     fn new(inner: LincApp, hal_enabled: bool, window: WindowMode) -> Self {
+        #[cfg(not(feature = "linuxcnc"))]
+        let _ = hal_enabled;
+        #[cfg(feature = "linuxcnc")]
         let reader = if hal_enabled {
             match HalReader::new_with_role("ui") {
                 Ok(reader) => Some(reader),
@@ -300,7 +335,9 @@ impl MachineOffGuard {
         };
         Self {
             inner,
+            #[cfg(feature = "linuxcnc")]
             reader,
+            #[cfg(feature = "linuxcnc")]
             last: None,
             window,
             window_attempts: 0,
@@ -332,6 +369,7 @@ impl MachineOffGuard {
         }
     }
 
+    #[cfg(feature = "linuxcnc")]
     fn poll_machine_on(&mut self) {
         let Some(reader) = &self.reader else { return };
         let Some(HalPinValue::Bit(now)) = reader.read(MACHINE_ON_PIN) else {
@@ -345,17 +383,23 @@ impl MachineOffGuard {
         }
         self.last = Some(now);
     }
+
+    /// A build without the HAL reader has no machine-on switch to watch.
+    #[cfg(not(feature = "linuxcnc"))]
+    fn poll_machine_on(&mut self) {}
 }
 
 /// True only on a genuine high-to-low transition. `previous` stays `None` until
 /// the first successful read, so a pin that is low from the start — an
 /// unwired input in simulation — never quits the session.
+#[cfg(feature = "linuxcnc")]
 fn machine_off_edge(previous: Option<bool>, now: bool) -> bool {
     previous == Some(true) && !now
 }
 
 /// A switch-off ends the session unless a probe trip has already switched the
 /// machine off and the operator is cycling the switch to re-power it.
+#[cfg(feature = "linuxcnc")]
 fn machine_off_ends_session(
     previous: Option<bool>,
     now: bool,
@@ -374,18 +418,30 @@ impl eframe::App for MachineOffGuard {
 
 #[cfg(test)]
 mod machine_off_tests {
-    use super::{machine_off_edge, machine_off_ends_session, resolve_window_mode, WindowMode};
+    #[cfg(feature = "linuxcnc")]
+    use super::{machine_off_edge, machine_off_ends_session};
+    use super::{resolve_window_mode, WindowMode};
 
     #[test]
     fn window_mode_resolves_auto_by_machine_kind() {
         assert_eq!(resolve_window_mode("auto", "real"), WindowMode::Fullscreen);
         assert_eq!(resolve_window_mode("auto", "sim"), WindowMode::Windowed);
-        assert_eq!(resolve_window_mode("maximized", "real"), WindowMode::Maximized);
-        assert_eq!(resolve_window_mode("windowed", "real"), WindowMode::Windowed);
-        assert_eq!(resolve_window_mode("fullscreen", "sim"), WindowMode::Fullscreen);
+        assert_eq!(
+            resolve_window_mode("maximized", "real"),
+            WindowMode::Maximized
+        );
+        assert_eq!(
+            resolve_window_mode("windowed", "real"),
+            WindowMode::Windowed
+        );
+        assert_eq!(
+            resolve_window_mode("fullscreen", "sim"),
+            WindowMode::Fullscreen
+        );
     }
 
     #[test]
+    #[cfg(feature = "linuxcnc")]
     fn quits_only_on_a_falling_edge() {
         assert!(machine_off_edge(Some(true), false));
         assert!(!machine_off_edge(Some(false), false));
@@ -394,6 +450,7 @@ mod machine_off_tests {
     }
 
     #[test]
+    #[cfg(feature = "linuxcnc")]
     fn an_unwired_pin_never_quits() {
         // Low from the very first read: no edge, no quit.
         assert!(!machine_off_edge(None, false));
@@ -402,6 +459,7 @@ mod machine_off_tests {
     }
 
     #[test]
+    #[cfg(feature = "linuxcnc")]
     fn a_probe_trip_machine_off_survives_the_recovery_toggle() {
         // The trip switched the machine off through halui; halui needs a rising
         // edge to power back on, so the operator cycles the switch. The off

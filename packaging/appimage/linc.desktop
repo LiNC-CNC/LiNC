@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=LiNC
+GenericName=CNC control panel HMI
+Comment=LiNC simulation demo: HMI and simulated control panel
+Exec=linc
+Icon=linc
+Terminal=false
+Categories=Engineering;
+Keywords=cnc;linuxcnc;mill;lathe;hmi;simulation;

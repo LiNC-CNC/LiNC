@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# LiNC AppImage launcher.
+#
+# Starts the simulated CNC control panel and the HMI as two cooperating
+# processes, then waits for either window to close. The profile, tool table,
+# parameter file and demo programs are copied to a writable runtime directory
+# because the AppImage mount is read-only.
+set -euo pipefail
+
+HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+APPDIR="${APPDIR:-$HERE}"
+BIN="$APPDIR/usr/bin"
+SHARE="$APPDIR/usr/share/linc"
+
+if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+  echo "LiNC: no graphical session (set DISPLAY or WAYLAND_DISPLAY)" >&2
+  exit 1
+fi
+
+ORIG_HOME="${HOME:-/tmp}"
+STATE_DIR="${XDG_STATE_HOME:-$ORIG_HOME/.local/state}/linc/appimage"
+mkdir -p "$STATE_DIR"
+HMI_LOG="$STATE_DIR/hmi.log"
+PANEL_LOG="$STATE_DIR/panel.log"
+: >"$HMI_LOG"
+: >"$PANEL_LOG"
+
+RUNTIME_BASE="${XDG_RUNTIME_DIR:-/tmp}"
+if [[ ! -d "$RUNTIME_BASE" ]]; then
+  RUNTIME_BASE=/tmp
+fi
+RUNTIME="$(mktemp -d "$RUNTIME_BASE/linc-appimage-XXXXXX")"
+chmod 700 "$RUNTIME"
+
+cleanup() {
+  trap - EXIT INT TERM
+  [[ -n "${HMI_PID:-}" ]] && kill "$HMI_PID" 2>/dev/null || true
+  [[ -n "${PANEL_PID:-}" ]] && kill "$PANEL_PID" 2>/dev/null || true
+  wait 2>/dev/null || true
+  rm -rf "$RUNTIME"
+}
+trap cleanup EXIT INT TERM
+
+# A writable copy of the simulation profile and the files it names.
+cp -a "$SHARE/configs" "$RUNTIME/configs"
+cp -a "$SHARE/hal" "$RUNTIME/hal"
+cp -a "$SHARE/subroutines" "$RUNTIME/subroutines"
+# The mount is read-only, and cp -a can carry those modes across. The probe and
+# tool pages write the parameter file and tool table, so make the copy writable.
+chmod -R u+w "$RUNTIME/configs"
+mkdir -p "$RUNTIME/home" "$RUNTIME/ipc"
+
+# Preferences live under the copied home, so every launch starts with a clean
+# page and window size instead of inheriting the last session's.
+export HOME="$RUNTIME/home"
+export PATH="$BIN:$PATH"
+export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LINC_SIM_IPC="$RUNTIME/ipc/panel-sim"
+export LINC_INSTANCE="appimage-$$"
+export LINC_SIM_READY=power
+export LINC_CONFIG="$RUNTIME/configs/sim.toml"
+export RUST_LOG="${RUST_LOG:-warn,linc_app=info,linc_ui=info,linc_panel=info}"
+
+if [[ ! -x "$BIN/linc" || ! -x "$BIN/linc-panel" ]]; then
+  echo "LiNC: the AppImage is incomplete; linc or linc-panel is missing" >&2
+  exit 1
+fi
+
+"$BIN/linc-panel" --config "$LINC_CONFIG" --sim --no-hal --window \
+  >>"$PANEL_LOG" 2>&1 &
+PANEL_PID=$!
+
+# Wait for the panel's first state file. Without it the HMI would come up with
+# a PANEL OFFLINE banner and no mode or override state.
+for _ in $(seq 1 60); do
+  [[ -f "$LINC_SIM_IPC.state.json" ]] && break
+  if ! kill -0 "$PANEL_PID" 2>/dev/null; then
+    echo "LiNC: the simulated panel stopped during start-up" >&2
+    tail -n 20 "$PANEL_LOG" >&2 || true
+    exit 1
+  fi
+  sleep 0.1
+done
+if [[ ! -f "$LINC_SIM_IPC.state.json" ]]; then
+  echo "LiNC: the simulated panel did not publish its state" >&2
+  tail -n 20 "$PANEL_LOG" >&2 || true
+  exit 1
+fi
+
+"$BIN/linc" --config "$LINC_CONFIG" --sim --no-hal --demo-mode auto \
+  >>"$HMI_LOG" 2>&1 &
+HMI_PID=$!
+
+# On X11 without a window manager the two windows land on top of one another.
+# Move the panel to the free corner when xdotool is available; Wayland
+# compositors place their own windows, so this is best-effort only.
+if [[ -n "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]] && command -v xdotool >/dev/null; then
+  PANEL_WIN=""
+  for _ in $(seq 1 40); do
+    PANEL_WIN="$(xdotool search --name "CNC Control Panel" 2>/dev/null | head -1 || true)"
+    [[ -n "$PANEL_WIN" ]] && break
+    sleep 0.1
+  done
+  if [[ -n "$PANEL_WIN" ]]; then
+    read -r SCREEN_W SCREEN_H <<<"$(xdotool getdisplaygeometry 2>/dev/null || echo "0 0")"
+    if (( SCREEN_W > 1280 && SCREEN_H > 720 )); then
+      xdotool windowmove "$PANEL_WIN" \
+        $(( SCREEN_W - 1280 - 40 )) $(( SCREEN_H - 720 - 40 )) 2>/dev/null || true
+    fi
+  fi
+fi
+
+set +e
+wait -n "$PANEL_PID" "$HMI_PID"
+STATUS=$?
+set -e
+
+if (( STATUS != 0 )); then
+  echo "LiNC exited with status $STATUS" >&2
+  echo "--- HMI log ---" >&2
+  tail -n 30 "$HMI_LOG" >&2 || true
+  echo "--- panel log ---" >&2
+  tail -n 20 "$PANEL_LOG" >&2 || true
+fi
+
+exit "$STATUS"

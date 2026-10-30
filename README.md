@@ -78,6 +78,23 @@ scales proportionally above it, and preserves the SVG font ratios. `linc --check
 validates a profile, its LinuxCNC INI, the probe bundle it resolves and the
 safety policy without opening the display or HAL.
 
+## Simulation AppImage
+
+`scripts/build-appimage.sh` builds a self-contained demo for a desktop with no
+LinuxCNC, HAL or serial panel. It starts the HMI and the simulated control panel
+as two windows and uses the embedded `SimBackend` and demo program.
+
+```sh
+scripts/build-appimage.sh
+./target/appimage/LiNC-0.1.0-x86_64.AppImage
+```
+
+The HMI is built with `--no-default-features`, which drops the native NML client,
+so the archive needs only glibc. When `zig` is installed the script links against
+glibc 2.36; `--native` builds against the host instead. `appimagetool` is
+downloaded on first use. This is the demo build: it does not connect to a
+machine, a real LinuxCNC session or the panel's RS-485 link.
+
 ## Configuration
 
 The HMI is configured per machine, with explicit profile selection:
