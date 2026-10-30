@@ -79,6 +79,7 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
 - Code and tests decide current behaviour when prose drifts. `LincOutput::ALLOWED` and `configs/base.toml` list six outputs (`hmi-alive`,
   `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`, `machine-off`); SPEC §5/§11, CONFIGURATION §1/§8 keep the same list. Follow
   the code; fix the docs.
+- `docs/solutions/` — documented solutions to past problems (bugs, best practices, workflow patterns), organized by category with YAML frontmatter (`module`, `tags`, `problem_type`); check it when working in a documented area.
 
 ## Hard invariants
 
@@ -210,3 +211,9 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
   `../probe_basic_dev`. `--check-config` fails without the mill tree; `start-lathe-sim.sh` refuses to start without its checkout.
 - **egui 0.37.** The workspace pins `egui`/`eframe`/`egui_extras` 0.37. Copy API style from `theme.rs`/`shell.rs`; older egui examples may not
   compile, and a second egui version breaks type compatibility.
+
+## Reporting
+
+Write every report, summary, or handoff to the user through the `ce-noslop` skill. This applies when you are the top-level agent writing to the user, not when you are a subagent reporting to its caller. Do not apply it to code, config, verbatim quotes, or text the user asked to post as written.
+
+After a solved, verified problem, offer once to invoke the `ce-compound` skill at the completion checkpoint only when the work produced durable project reasoning that is not readily recoverable from the final code, tests, types, comments, or existing documentation, and losing it would plausibly cause recurrence, material risk, or substantial rediscovery. Apply this counterfactual: if the learning document disappeared, would a future engineer reading the final implementation still be likely to repeat the mistake or redo substantial investigation? If not, do not offer. Completion, effort, and diff size alone are not enough. Offer at the checkpoint so a qualifying learning can ship in the PR that produced it, and only where the repository treats captured learnings as tracked, committed knowledge.

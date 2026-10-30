@@ -19,3 +19,7 @@ configs/halshow.preferences
 # LinuxCNC writes the parameter file (work offsets, G92) on exit; it is machine
 # state, not source. Tracking it made `git checkout` restore stale offsets.
 configs/sim.var
+
+# Compound Engineering local scratch (ce-* skills)
+.context/compound-engineering/
+.compound-engineering/
