@@ -763,7 +763,7 @@ fn parameter_keys(test: &str) -> Vec<String> {
         }
         let raw = &test[token.start..token.end];
         let key = if let Some(rest) = raw.strip_prefix("#<") {
-            rest.trim_end_matches('>').trim().to_string()
+            named_key(rest.trim_end_matches('>'))
         } else if let Some(rest) = raw.strip_prefix('#') {
             if rest.is_empty() || !rest.chars().all(|ch| ch.is_ascii_digit()) {
                 continue;
@@ -1151,9 +1151,18 @@ pub const PREVIEW_STEP_LIMIT: usize = 200_000;
 /// Nested subroutine calls the preview follows before it gives up.
 pub const PREVIEW_DEPTH_LIMIT: usize = 64;
 
-/// Interpreter parameters, keyed as written: "#<level>" is "level", "#1" is
-/// "1". An unset parameter reads as 0, as in the interpreter.
+/// Interpreter parameters, keyed by [`named_key`] or the digits of a numbered
+/// parameter: "#<level>" is "level", "#1" is "1". An unset parameter reads as
+/// 0, as in the interpreter.
 type Params = BTreeMap<String, f64>;
+
+/// The map key a named parameter is stored under. LinuxCNC keeps named
+/// parameters in a `std::map` compared with `strcasecmp`, so `#<RADIUS>` and
+/// `#<radius>` are one parameter; a case-sensitive key here reads `CIRCLE_XY`'s
+/// `I[-#<radius>]` as `I0` and puts a zero-radius arc on the error list.
+fn named_key(name: &str) -> String {
+    name.trim().to_ascii_lowercase()
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CompareOp {
@@ -1399,9 +1408,7 @@ impl<'t, 'p> Expression<'t, 'p> {
                 while self.pos < self.raw.len() && self.raw[self.pos] != b'>' {
                     self.pos += 1;
                 }
-                let name = String::from_utf8_lossy(&self.raw[start..self.pos])
-                    .trim()
-                    .to_string();
+                let name = named_key(&String::from_utf8_lossy(&self.raw[start..self.pos]));
                 if self.raw.get(self.pos).copied() == Some(b'>') {
                     self.pos += 1;
                 }
@@ -1841,7 +1848,7 @@ fn parameter_key(text: &str) -> Option<String> {
     let rest = text.trim().strip_prefix('#')?;
     if let Some(rest) = rest.strip_prefix('<') {
         let end = rest.find('>')?;
-        return Some(rest[..end].trim().to_string());
+        return Some(named_key(&rest[..end]));
     }
     let end = rest
         .find(|ch: char| !ch.is_ascii_digit())
@@ -3746,6 +3753,21 @@ mod tests {
         assert!(expression("[1 / 0]").is_err(), "division by zero");
         assert!(expression("[NOPE[1]]").is_err(), "unknown function");
         assert!(expression("[1 +]").is_err(), "truncated expression");
+    }
+
+    #[test]
+    fn named_parameters_are_case_insensitive() {
+        // CIRCLE_XY.NGC assigns `#<RADIUS>` and draws with `I[-#<radius>]`. The
+        // interpreter keeps named parameters in a map compared with
+        // `strcasecmp`, so this is one parameter and the arc has a radius.
+        let preview = plan("G21 G90\n#<RADIUS> = 5\nG0 X10 Y0\nG3 X10 Y0 I[-#<radius>] J0 F3000\n");
+        assert_eq!(preview.error, None);
+        let arc = preview
+            .segments
+            .iter()
+            .find_map(|segment| segment.arc.clone())
+            .expect("one arc");
+        assert!((arc.radius - 5.0).abs() < 1e-9, "radius {}", arc.radius);
     }
 
     /// A block without a G word continues the last G0/G1/G2/G3. The current
