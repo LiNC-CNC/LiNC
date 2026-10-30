@@ -360,54 +360,13 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                             theme::WARNING
                         }),
                 );
-                ui.label(
-                    RichText::new(format!("{} LINES", app.program.editor.line_count()))
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                // Syntax / preview state belongs with the buffer it describes.
-                let (status, color) = if let Some(error) = &app.program.preview.error {
-                    (format!("SYNTAX ERROR LN {}", error.line), theme::WARNING)
-                } else {
-                    ("VALID".to_string(), theme::SUCCESS)
-                };
-                ui.label(
-                    RichText::new(status)
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(color),
-                );
-                // Inside a subroutine the controller reports a line of the
-                // routine's own file, and it does not publish that file's name.
-                // Name the routine from the preview's bodies and show the line
-                // the interpreter is on; the listing above keeps the program's
-                // own line so the marker cannot land on unrelated G-code.
-                if app.snapshot.program.call_level > 0 {
-                    let line = app.snapshot.program.sub_line.max(1);
-                    let named = linc_core::gcode::SubroutineBody::named_at(
-                        &app.program.preview.subroutines,
-                        line,
-                    )
-                    .map(|body| body.name.clone());
-                    let text = match named {
-                        Some(name) => format!("SUBROUTINE {name} LN {line}"),
-                        None => format!("SUBROUTINE LN {line}"),
-                    };
-                    ui.label(
-                        RichText::new(text)
-                            .monospace()
-                            .size(theme::font_size(9.0))
-                            .color(theme::ACCENT),
-                    );
-                }
             });
         });
         theme::separator(ui);
         // Sized from the card's rect, not from `available_height`: a frame does
         // not bound what it gives its content, so the editor asked for more
         // than the card had and pushed the card past the column beside it.
-        const FOOTER_HEIGHT: f32 = 32.0;
+        const FOOTER_HEIGHT: f32 = 22.0;
         let header_height = ui.cursor().top() - content_top;
         let editor_height = (rect.height() - 8.0 - header_height - FOOTER_HEIGHT - 4.0).max(80.0);
         let (rect, _) = ui.allocate_exact_size(
@@ -421,7 +380,10 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
         );
         scroll_editor(app, &mut child, editor_height, editable);
         ui.add_space(6.0);
-        ui.horizontal_wrapped(|ui| {
+        // One status line. The buffer's name and editability are in the header;
+        // everything here is progress, so a wrapped row would only cost the
+        // listing a line to say nothing twice.
+        ui.horizontal(|ui| {
             ui.label(
                 RichText::new(format!(
                     "LN {}  /  {} LINES",
@@ -433,6 +395,7 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                 .color(theme::MUTED),
             );
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                ui.add_space(8.0);
                 let (text, color) = if let Some(error) = &app.program.preview.error {
                     (
                         format!("SYNTAX LN {}: {}", error.line, error.message),
@@ -441,15 +404,68 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                 } else {
                     ("PREVIEW VALID".to_string(), theme::SUCCESS)
                 };
-                ui.label(
-                    RichText::new(text)
+                // Inside a subroutine the controller reports a line of the
+                // routine's own file and does not publish that file's name, so
+                // the preview names the routine.
+                let chip = subroutine_chip(app);
+                let chip_room = chip
+                    .as_deref()
+                    .map_or(0.0, |text| theme::measure(ui, text, 9.0) + 10.0);
+                let room = (ui.available_width() - chip_room).max(80.0);
+                let fitted = fit_text(ui, &text, room);
+                let response = ui.label(
+                    RichText::new(fitted.clone())
                         .monospace()
                         .size(theme::font_size(9.0))
                         .color(color),
                 );
+                // A cut message stays readable on hover instead of wrapping the
+                // row into a second line.
+                if fitted != text {
+                    response.on_hover_text(&text);
+                }
+                if let Some(chip) = chip {
+                    ui.label(
+                        RichText::new(chip)
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::ACCENT),
+                    );
+                }
             });
         });
     });
+}
+
+/// The subroutine the controller is inside, named from the preview's bodies.
+fn subroutine_chip(app: &LincApp) -> Option<String> {
+    if app.snapshot.program.call_level == 0 {
+        return None;
+    }
+    let line = app.snapshot.program.sub_line.max(1);
+    let named = linc_core::gcode::SubroutineBody::named_at(&app.program.preview.subroutines, line)
+        .map(|body| body.name.clone());
+    Some(match named {
+        Some(name) => format!("SUBROUTINE {name} LN {line}"),
+        None => format!("SUBROUTINE LN {line}"),
+    })
+}
+
+/// `text` cut to `room` pixels on a character boundary, marked where it ends.
+fn fit_text(ui: &Ui, text: &str, room: f32) -> String {
+    if theme::measure(ui, text, 9.0) <= room {
+        return text.to_string();
+    }
+    const ELLIPSIS: &str = "\u{2026}";
+    let mut chars: Vec<char> = text.chars().collect();
+    while !chars.is_empty() {
+        chars.pop();
+        let candidate = format!("{}{}", chars.iter().collect::<String>(), ELLIPSIS);
+        if theme::measure(ui, &candidate, 9.0) <= room {
+            return candidate;
+        }
+    }
+    ELLIPSIS.to_string()
 }
 
 fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
