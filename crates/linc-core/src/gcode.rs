@@ -512,6 +512,16 @@ impl Plane {
             Self::Vw => "VW",
         }
     }
+
+    /// The two coordinate indices an angle in this plane runs between: the
+    /// point at angle `a` is `center + r * (cos a, sin a)` on these axes.
+    pub fn axes(self) -> (usize, usize) {
+        match self {
+            Self::Xy | Self::Uv => (0, 1),
+            Self::Xz | Self::Uw => (0, 2),
+            Self::Yz | Self::Vw => (1, 2),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -529,6 +539,45 @@ pub struct ArcSpec {
     pub end_angle: f64,
     pub clockwise: bool,
     pub plane: Plane,
+}
+
+impl ArcSpec {
+    /// The quarter turns the sweep passes through. An arc is not bounded by its
+    /// two ends: a full circle starts and ends on the same point, so the ends
+    /// alone say it is round in neither axis.
+    pub fn extent_points(&self) -> Vec<[f64; 3]> {
+        const TAU: f64 = std::f64::consts::TAU;
+        let (u, v) = self.plane.axes();
+        let travel = if self.clockwise {
+            self.start_angle - self.end_angle
+        } else {
+            self.end_angle - self.start_angle
+        };
+        // A full turn is stored as a whole TAU, whose remainder is zero, so it
+        // is read before the sweep wraps.
+        let sweep = if travel >= TAU - 1e-9 {
+            TAU
+        } else {
+            travel.rem_euclid(TAU)
+        };
+        let mut points = Vec::with_capacity(4);
+        for turn in 0..4 {
+            let angle = turn as f64 * std::f64::consts::FRAC_PI_2;
+            let delta = if self.clockwise {
+                (self.start_angle - angle).rem_euclid(TAU)
+            } else {
+                (angle - self.start_angle).rem_euclid(TAU)
+            };
+            if delta > sweep + 1e-9 {
+                continue;
+            }
+            let mut point = self.center;
+            point[u] = self.center[u] + self.radius * angle.cos();
+            point[v] = self.center[v] + self.radius * angle.sin();
+            points.push(point);
+        }
+        points
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -569,6 +618,25 @@ impl Bounds3 {
             self.min[axis] = self.min[axis].min(point[axis]);
             self.max[axis] = self.max[axis].max(point[axis]);
         }
+    }
+
+    /// The bounds of a drawn path: every segment end, plus what an arc reaches
+    /// between them. Reading ends alone is wrong for arcs, and reads a full
+    /// circle as a single point. The first segment's start is left out on
+    /// purpose: it is where the tool happened to stand, not where the part is.
+    pub fn from_segments(segments: &[PathSegment]) -> Option<Self> {
+        let mut iter = segments.iter();
+        let first = iter.next()?;
+        let mut bounds = Self::from_points([first.end])?;
+        for segment in std::iter::once(first).chain(iter) {
+            bounds.include(segment.end);
+            if let Some(arc) = &segment.arc {
+                for point in arc.extent_points() {
+                    bounds.include(point);
+                }
+            }
+        }
+        Some(bounds)
     }
 
     pub fn center(&self) -> [f64; 3] {
@@ -892,7 +960,7 @@ impl Preview {
             let to = to.saturating_sub(1).min(self.segments.len());
             self.line_bounds.insert(line, (from, to));
         }
-        self.bounds = Bounds3::from_points(self.segments.iter().map(|segment| segment.end));
+        self.bounds = Bounds3::from_segments(&self.segments);
         true
     }
 
@@ -911,19 +979,12 @@ impl Preview {
             min: [0.0, 0.0, 0.0],
             max: [0.0, 0.0, 0.0],
         });
-        // Include arc sweeps conservatively.
+        // Include arc sweeps: the ends alone leave a round feature as narrow
+        // as its chord.
         for segment in self.segments_for_line(line) {
             if let Some(arc) = &segment.arc {
-                let r = arc.radius.abs();
-                for axis in 0..2 {
-                    if arc.plane == Plane::Xy {
-                        bounds.include([arc.center[0] + r, arc.center[1], arc.center[2]]);
-                        bounds.include([arc.center[0] - r, arc.center[1], arc.center[2]]);
-                        bounds.include([arc.center[0], arc.center[1] + r, arc.center[2]]);
-                        bounds.include([arc.center[0], arc.center[1] - r, arc.center[2]]);
-                    } else {
-                        let _ = axis;
-                    }
+                for point in arc.extent_points() {
+                    bounds.include(point);
                 }
             }
         }
@@ -1032,14 +1093,7 @@ fn apply_arc(
     k: Option<f64>,
     r: Option<f64>,
 ) -> Option<ArcSpec> {
-    let (u, v) = match plane {
-        Plane::Xy => (0, 1),
-        Plane::Xz => (0, 2),
-        Plane::Yz => (1, 2),
-        Plane::Uv => (0, 1),
-        Plane::Uw => (0, 2),
-        Plane::Vw => (1, 2),
-    };
+    let (u, v) = plane.axes();
     let sep = |a: [f64; 3], b: [f64; 3]| {
         let dx = a[u] - b[u];
         let dy = a[v] - b[v];
@@ -3288,13 +3342,14 @@ pub fn parse_preview_with(
             .as_ref()
             .map(|issue| format!("line {}: {}", issue.line, issue.message))
     });
-    // Destination points only: the first segment starts at the tool's position
-    // when the program was parsed, and including it made the program bounds (and
-    // the stock) stretch out to wherever the tool happened to be, then shrink as
-    // it moved in. The approach line is still drawn; it just does not define the
-    // part's extents.
+    // Destination points plus what the arcs reach between them: the first
+    // segment starts at the tool's position when the program was parsed, and
+    // including it made the program bounds (and the stock) stretch out to
+    // wherever the tool happened to be, then shrink as it moved in. The
+    // approach line is still drawn; it just does not define the part's
+    // extents.
     preview.bounds = if saw_motion {
-        Bounds3::from_points(preview.segments.iter().map(|segment| segment.end))
+        Bounds3::from_segments(&preview.segments)
     } else {
         None
     };
@@ -3845,10 +3900,14 @@ mod tests {
         assert!((preview.segments[1].end[0] - 50.8).abs() < 1e-9);
     }
 
-    /// The whole spiral, not its first arc. Extreme words: X-1.94789 and
-    /// X1.883429 inches, Y-1.97843 and Y1.915669; times 25.4 that is the extent
-    /// asserted below. The extent was read out of the file by a script that
-    /// shares no code with this parser.
+    /// The whole spiral, not its first arc. Every arc reaches a little past its
+    /// own endpoint words, so the extent is the swept path: X -49.476410 and
+    /// 47.880597 mm, Y -50.274371 and 48.678496 mm.
+    ///
+    /// Reference: a Python script that shares no code with this parser samples
+    /// the same file at 4000 points per arc, picking R-form centers by the
+    /// major/minor-arc rule. It gives exactly those four numbers; the endpoint
+    /// words alone would be short by up to 0.05 mm.
     #[test]
     fn arcspiral_preview_spans_the_whole_spiral_in_machine_units() {
         let preview = parse_preview(ARCSPIRAL, &preview_axes(), None, [0.0; 3]);
@@ -3858,10 +3917,10 @@ mod tests {
         assert_eq!(preview.rapids, 4);
         assert_eq!(preview.segments.len(), 1005);
         let bounds = preview.bounds.expect("bounds");
-        assert!((bounds.min[0] - -49.476406).abs() < 1e-4, "{bounds:?}");
-        assert!((bounds.max[0] - 47.8390966).abs() < 1e-4, "{bounds:?}");
-        assert!((bounds.min[1] - -50.252122).abs() < 1e-4, "{bounds:?}");
-        assert!((bounds.max[1] - 48.6579926).abs() < 1e-4, "{bounds:?}");
+        assert!((bounds.min[0] - -49.476410).abs() < 1e-4, "{bounds:?}");
+        assert!((bounds.max[0] - 47.880597).abs() < 1e-4, "{bounds:?}");
+        assert!((bounds.min[1] - -50.274371).abs() < 1e-4, "{bounds:?}");
+        assert!((bounds.max[1] - 48.678496).abs() < 1e-4, "{bounds:?}");
         assert!((bounds.min[2] - -2.54).abs() < 1e-9, "{bounds:?}");
         assert!((bounds.max[2] - 25.4).abs() < 1e-9, "{bounds:?}");
         assert!(bounds.size()[0] > 90.0, "{bounds:?}");
