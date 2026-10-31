@@ -748,6 +748,19 @@ Program rules:
   drawn as separate moves. A polar `@`/`^` pair names the hole too, and `L`
   repeats the cycle once per pass, stepping the polar radius/angle in
   incremental mode and repeating the same hole in absolute mode.
+- The lathe cycles are previewed as the geometry they leave. `G70`/`G71`/`G72`
+  (and their `.1`/`.2` pocket forms) draw the contour of the subroutine their
+  `Q` word names, run once: their own `X` and `Z` are the limits the passes work
+  inside, not a point to move to, and drawing them put a line where no cut
+  happens. That contour is the finished surface, so a `G71` followed by a `G70`
+  draws one contour, and the stepped roughing passes in between are reported
+  rather than drawn. A `Q` that names no subroutine in the program is reported
+  too. `G76` draws the thread: an entry taper or a rapid plunge to the root at
+  `I + K` beyond the drive line, the root itself to the programmed `Z`, and the
+  exit taper (or a rapid out) back to the drive line, which is where the cycle
+  leaves the tool. The passes between the first cut and the root are reported
+  rather than drawn. A `G76` outside the ZX plane is the error the interpreter
+  raises.
 - Cutter compensation is previewed as the tool centre, not the programmed
   contour. G41 keeps the tool centre a tool radius to the left of the
   programmed direction and G42 to the right, in the G17/G18/G19 plane. The

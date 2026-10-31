@@ -1116,6 +1116,48 @@ fn word_int(tokens: &[Token], letter: char) -> Option<u32> {
     })
 }
 
+/// A lathe cycle whose contour is the subroutine its `Q` word names.
+struct LatheProfileCycle {
+    /// The G code as written, for the message a report carries.
+    code: String,
+    q: Option<u16>,
+    /// G71/G72 remove material in passes first; G70 only finishes.
+    roughing: bool,
+}
+
+/// The `G70`/`G71`/`G72` family in a block, if one is there.
+///
+/// These cycles do not go where their axis words point: `X` and `Z` are the
+/// limits the cycle works inside, and the shape it cuts comes from the
+/// subroutine `Q` names. Their `.1` and `.2` variants are the pocket-cutting
+/// forms of the same two cycles.
+fn lathe_profile_cycle(tokens: &[Token]) -> Option<LatheProfileCycle> {
+    for token in tokens {
+        if token.kind != TokenKind::GCode {
+            continue;
+        }
+        let Some(value) = parse_number(&token.text[1..]) else {
+            continue;
+        };
+        let (roughing, finishing) = match value {
+            70.0 | 70.1 | 70.2 => (false, true),
+            71.0 | 71.1 | 71.2 | 72.0 | 72.1 | 72.2 => (true, true),
+            _ => (false, false),
+        };
+        if !finishing {
+            continue;
+        }
+        return Some(LatheProfileCycle {
+            code: format_g(value),
+            q: word_int(tokens, 'q')
+                .filter(|label| *label > 0)
+                .map(|l| l as u16),
+            roughing,
+        });
+    }
+    None
+}
+
 /// Whether this word ends the program. `M2` and `M30` do; the interpreter reads
 /// no further line, so a file may end with notes that are not G-code.
 fn is_program_end(token: &Token) -> bool {
@@ -3706,6 +3748,60 @@ fn plan_statements(
                         if let Some(tool) = live.selected {
                             live.selected_pocket = tools.pocket(tool);
                         }
+                        // A G70/G71/G72 cycle does not move where its X and Z
+                        // words say: those are the cycle's limits. The contour it
+                        // cuts is the one the subroutine named by Q draws, so run
+                        // that body once and draw it -- that is the surface the
+                        // cycle leaves behind. The stepped roughing passes between
+                        // are not drawn, and the preview says so.
+                        if let Some(cycle) = lathe_profile_cycle(&words) {
+                            let profile = cycle
+                                .q
+                                .and_then(|label| subroutines.get(&label.to_string()).copied());
+                            match profile {
+                                Some(start) if calls.len() < PREVIEW_DEPTH_LIMIT => {
+                                    if cycle.roughing && incomplete.is_none() {
+                                        incomplete = Some(format!(
+                                            "line {}: the {} roughing passes are not drawn, only \
+                                             its profile",
+                                            line, cycle.code
+                                        ));
+                                    }
+                                    // The profile body runs as a call with no
+                                    // arguments: it sees the program's globals and
+                                    // none of its locals, as a subroutine does.
+                                    let frame: Params = params
+                                        .iter()
+                                        .filter(|(key, _)| global_key(key))
+                                        .map(|(key, value)| (key.clone(), *value))
+                                        .collect();
+                                    calls.push((pc, std::mem::replace(&mut params, frame)));
+                                    pc = start + 1;
+                                    continue;
+                                }
+                                Some(_) => {
+                                    if incomplete.is_none() {
+                                        incomplete = Some(format!(
+                                            "subroutine call depth limit {} reached at line {}",
+                                            PREVIEW_DEPTH_LIMIT, line
+                                        ));
+                                    }
+                                    pc += 1;
+                                    continue;
+                                }
+                                None => {
+                                    if incomplete.is_none() {
+                                        incomplete = Some(format!(
+                                            "line {}: the {} profile subroutine is not in this \
+                                             program",
+                                            line, cycle.code
+                                        ));
+                                    }
+                                    pc += 1;
+                                    continue;
+                                }
+                            }
+                        }
                         blocks.push(PlannedBlock {
                             line: *line,
                             tokens: words,
@@ -4351,6 +4447,105 @@ pub fn parse_preview_full(
                     .next()
                     .is_some_and(|ch| "XYxy".contains(ch))
         });
+
+        // G76 threads in the ZX plane: the tool stands on the drive line, `I`
+        // places the thread peak against it and `K` is the full depth, so the
+        // root the cycle leaves is `I + K` away. `Z` is where the thread ends and
+        // `E`/`L` taper the entry, the exit or both. The passes between the first
+        // cut and the root are the same line cut deeper, so they are reported
+        // rather than drawn as a solid block of material removed.
+        if tokens.iter().any(|token| {
+            token.kind == TokenKind::GCode && parse_number(&token.text[1..]) == Some(76.0)
+        }) {
+            if plane != Plane::Xz {
+                preview.error = Some(SyntaxIssue {
+                    line: line_no,
+                    message: "G76 threads in the ZX plane: it needs G18".into(),
+                });
+                break;
+            }
+            let Some(end_word) = word_value(&tokens, 'z') else {
+                if incomplete.is_none() {
+                    incomplete = Some(format!(
+                        "line {line_no}: G76 needs a Z word for where the thread ends"
+                    ));
+                }
+                continue;
+            };
+            // A thread offset is a radius on the machine axis: in G7 diameter
+            // mode the words are diameters, so they count half.
+            let depth = if lathe_diameter { 0.5 } else { 1.0 };
+            let peak = mm(word_value(&tokens, 'i').unwrap_or(0.0));
+            let full = mm(word_value(&tokens, 'k').unwrap_or(0.0));
+            let drive_x = position[0];
+            let start_z = position[2];
+            let root_x = drive_x + (peak + full) * depth;
+            let end_z = if absolute {
+                mm(end_word) + offset_of(&offsets, "Z")
+            } else {
+                start_z + mm(end_word)
+            };
+            let direction = if end_z >= start_z { 1.0 } else { -1.0 };
+            let room = (end_z - start_z).abs();
+            let taper = mm(word_value(&tokens, 'e').unwrap_or(0.0)).abs();
+            let ends = word_int(&tokens, 'l').unwrap_or(0);
+            let entry = if ends == 1 || ends == 3 {
+                taper.min(room)
+            } else {
+                0.0
+            };
+            let exit = if ends == 2 || ends == 3 {
+                taper.min(room - entry)
+            } else {
+                0.0
+            };
+            let y = position[1];
+            let mut at = [drive_x, y, start_z];
+            let cut = |preview: &mut Preview, from: [f64; 3], to: [f64; 3], kind| {
+                if (to[2] - from[2]).abs() > 1e-12 || (to[0] - from[0]).abs() > 1e-12 {
+                    push_cycle_segment(preview, from, to, kind, line_no, tool, pass);
+                }
+            };
+            if entry > 0.0 {
+                let to = [root_x, y, start_z + direction * entry];
+                cut(&mut preview, at, to, SegmentKind::Feed);
+                at = to;
+            } else {
+                // No entry taper: the tool rapids in to the cut depth, then
+                // synchronises and starts cutting.
+                let to = [root_x, y, start_z];
+                cut(&mut preview, at, to, SegmentKind::Rapid);
+                at = to;
+            }
+            let root_end = [root_x, y, end_z - direction * exit];
+            cut(&mut preview, at, root_end, SegmentKind::Feed);
+            at = root_end;
+            // The tool finishes at the end of the drive line, tapering out if `L`
+            // asked for it and rapiding clear if it did not.
+            let out = [drive_x, y, end_z];
+            cut(
+                &mut preview,
+                at,
+                out,
+                if exit > 0.0 {
+                    SegmentKind::Feed
+                } else {
+                    SegmentKind::Rapid
+                },
+            );
+            position = out;
+            saw_motion = true;
+            preview
+                .line_bounds
+                .insert(line_no, (line_start_segment, preview.segments.len()));
+            if incomplete.is_none() {
+                incomplete = Some(format!(
+                    "line {line_no}: the threading passes between the first cut and the root are \
+                     not drawn"
+                ));
+            }
+            continue;
+        }
 
         // Drilling cycle: the block's X/Y is the next hole. Preliminary motion
         // moves X/Y at the current Z, then rapids to the R plane; the feed is
@@ -5576,6 +5771,12 @@ mod tests {
             .map_or([0.0; 3], |segment| segment.end)
     }
 
+    /// Every drawn endpoint, in three axes, so a lathe program's X and Z can be
+    /// told apart from a mill program's X and Y.
+    fn segment_ends(preview: &Preview) -> Vec<[f64; 3]> {
+        preview.segments.iter().map(|segment| segment.end).collect()
+    }
+
     #[test]
     fn a_g53_block_draws_the_machine_point_it_names() {
         // G53 X20 puts the machine at 20 whatever the work offset is, so the
@@ -5590,6 +5791,99 @@ mod tests {
             (ends(&preview)[0] - 110.0).abs() < 1e-9,
             "{:?}",
             ends(&preview)
+        );
+    }
+
+    #[test]
+    fn a_thread_cycle_draws_the_root_it_leaves() {
+        // g76.ngc's thread: the tool is on the drive line at X0.2, I-0.075 puts
+        // the peak 0.075 in and K0.045 the full depth beyond it, so the root the
+        // cycle cuts is at 0.2 - 0.075 + 0.045 = 0.17 inches. L2 with E0.05 tapers
+        // the exit.
+        let text =
+            "G20 G90 G18\nG0 X0.2 Z0\nG76 P0.05 Z-.5 I-.075 J0.008 K0.045 Q29.5 L2 E0.05\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let root = 0.17 * 25.4;
+        let cut = preview
+            .segments
+            .iter()
+            .find(|segment| segment.kind == SegmentKind::Feed)
+            .expect("the threading cut");
+        assert!((cut.start[0] - root).abs() < 1e-6, "{cut:?}");
+        assert!((cut.end[2] + 0.45 * 25.4).abs() < 1e-6, "{cut:?}");
+        // The tool finishes at the end of the drive line, tapered out to X0.2.
+        let end = ends(&preview);
+        assert!((end[0] - 0.2 * 25.4).abs() < 1e-6, "{end:?}");
+        assert!((end[2] + 0.5 * 25.4).abs() < 1e-6, "{end:?}");
+        assert!(preview.incomplete, "the passes between are not drawn");
+        let reason = preview.incomplete_reason.clone().unwrap_or_default();
+        assert!(reason.contains("threading passes"), "{reason}");
+    }
+
+    #[test]
+    fn a_thread_cycle_outside_the_zx_plane_is_reported() {
+        let text = "G21 G90\nG0 X5 Z0\nG76 P1 Z-10 I-1 J0.2 K1 Q29.5 H0\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        let error = preview.error.expect("a reported error");
+        assert_eq!(error.line, 3);
+        assert!(error.message.contains("G18"), "{}", error.message);
+    }
+
+    #[test]
+    fn a_profile_cycle_draws_the_contour_its_q_subroutine_names() {
+        // `G71 Q100 X2 Z-20` names a contour, not a point: X2 Z-20 are the limits
+        // the roughing passes work inside. Drawing the block's own words put a
+        // line where no cut happens; the cut is the profile in `o100 sub`.
+        let text = "G21 G90 G18\nG0 X10 Z0\nG71 Q100 X2 Z-20 D0.5 I1 R0.3\nM2\n\
+                    o100 sub\nG0 X10 Z0\nG1 X6 Z-10 F200\nG1 X2 Z-10\no100 endsub\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let contour = segment_ends(&preview);
+        assert!(
+            contour
+                .iter()
+                .any(|end| (end[0] - 6.0).abs() < 1e-9 && (end[2] + 10.0).abs() < 1e-9),
+            "the profile's first cut: {contour:?}"
+        );
+        assert!(
+            contour.iter().all(|end| (end[2] + 20.0).abs() > 1e-9),
+            "nothing goes to the cycle's Z limit: {contour:?}"
+        );
+        assert!(preview.incomplete, "the roughing passes are not drawn");
+        let reason = preview.incomplete_reason.clone().unwrap_or_default();
+        assert!(reason.contains("G71 roughing passes"), "{reason}");
+    }
+
+    #[test]
+    fn a_finishing_cycle_draws_the_profile_without_a_roughing_report() {
+        // G70 only follows the profile, so nothing is left undrawn.
+        let text = "G21 G90 G18\nG0 X10 Z0\nG70 Q100 X2 Z-20 D0.5 P1\nM2\n\
+                    o100 sub\nG1 X6 Z-10 F200\nG1 X2 Z-10\no100 endsub\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        let contour = segment_ends(&preview);
+        assert!(
+            contour
+                .iter()
+                .any(|end| (end[0] - 2.0).abs() < 1e-9 && (end[2] + 10.0).abs() < 1e-9),
+            "the profile's last cut: {contour:?}"
+        );
+    }
+
+    #[test]
+    fn a_profile_cycle_without_its_subroutine_is_reported() {
+        let text = "G21 G90 G18\nG0 X10 Z0\nG72 Q999 X2 Z-20 D0.5 I1 R0.3\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let reason = preview.incomplete_reason.clone().unwrap_or_default();
+        assert!(reason.contains("G72 profile subroutine"), "{reason}");
+        // The cycle's own X/Z words are limits, so they draw nothing either.
+        let contour = segment_ends(&preview);
+        assert!(
+            contour.iter().all(|end| (end[2] + 20.0).abs() > 1e-9),
+            "no line to the limits: {contour:?}"
         );
     }
 
