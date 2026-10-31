@@ -15,7 +15,7 @@ use egui::{
 };
 use linc_core::command::{BackendEvent, CommandResult, MachineCommand};
 use linc_core::config::Profile;
-use linc_core::gcode::{parse_preview_with, Bounds3, Preview};
+use linc_core::gcode::{parse_preview_full, Bounds3, Preview, Tools};
 use linc_core::mdi_file::SaveError;
 use linc_core::model::{
     format_clock, now_ms, Alarm, AlarmSeverity, AlarmSource, AxisMap, MachinePower,
@@ -143,7 +143,14 @@ impl LincApp {
         if let Some(text) = &snapshot.program.content {
             let axes = profile.machine_ini.axis_names();
             let offset = active_offset(&snapshot);
-            preview = parse_preview_with(text, &axes, offset, [0.0; 3], &profile.subroutines());
+            preview = parse_preview_full(
+                text,
+                &axes,
+                offset,
+                [0.0; 3],
+                &profile.subroutines(),
+                &Tools::from_rows(&snapshot.tool_table.rows),
+            );
             preview.trim_approach([0.0; 3]);
         }
         editor.set_saved_text(

@@ -57,12 +57,16 @@ impl LincApp {
         // the program selects (a `G54`/`G55` in its preamble is where it will
         // cut), falling back to the controller's active system for a program that
         // selects none.
-        let mut preview = parse_preview_with(
+        // Cutter compensation draws the tool centre, so it needs the radii the
+        // tool table carries; without them a G41/G42 program is drawn on its
+        // programmed contour.
+        let mut preview = parse_preview_full(
             &text,
             &axes,
             offset.as_ref(),
             self.tool_tip(),
             &self.profile.subroutines(),
+            &Tools::from_rows(&self.snapshot.tool_table.rows),
         );
         // The first rapid is the approach from the live tool position to the
         // program start. Keep the program geometry; do not draw that connector.

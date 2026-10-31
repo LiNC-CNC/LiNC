@@ -11,7 +11,7 @@ use std::time::Instant;
 use crate::backend::MachineBackend;
 use crate::command::{HalValue, LincOutput, MachineCommand, MachineError, MdiOrigin, ProbeTarget};
 use crate::config::Profile;
-use crate::gcode::{parse_preview_with, SegmentKind};
+use crate::gcode::{parse_preview_full, SegmentKind, Tools};
 use crate::model::*;
 use crate::tooltable::ToolTable;
 
@@ -402,12 +402,13 @@ impl SimBackend {
                 .iter()
                 .find(|o| o.index == index)
         });
-        let preview = parse_preview_with(
+        let preview = parse_preview_full(
             content.as_str(),
             &axis_names,
             active_offset.map(|offset| &offset.values),
             self.current_tool_tip(),
             &self.profile.subroutines(),
+            &Tools::from_rows(&self.snapshot.tool_table.rows),
         );
         self.snapshot.program.syntax_error = preview.error.clone();
         self.snapshot.program.modal = preview.modal.lines();
@@ -461,7 +462,7 @@ impl SimBackend {
                 .iter()
                 .find(|o| o.index == index)
         });
-        let preview = parse_preview_with(
+        let preview = parse_preview_full(
             self.snapshot
                 .program
                 .content
@@ -472,6 +473,7 @@ impl SimBackend {
             active_offset.map(|offset| &offset.values),
             self.current_tool_tip(),
             &self.profile.subroutines(),
+            &Tools::from_rows(&self.snapshot.tool_table.rows),
         );
         let limit = self.snapshot.program.current_line.max(1);
         let mut points: Vec<TrailPoint> = Vec::new();
@@ -821,12 +823,13 @@ impl SimBackend {
                 .iter()
                 .find(|o| o.index == index)
         });
-        let preview = parse_preview_with(
+        let preview = parse_preview_full(
             line,
             &axis_names,
             active_offset.map(|offset| &offset.values),
             self.current_tool_tip(),
             &self.profile.subroutines(),
+            &Tools::from_rows(&self.snapshot.tool_table.rows),
         );
         if let Some(segment) = preview.segments.last() {
             let start = segment.start;

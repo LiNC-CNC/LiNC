@@ -1320,6 +1320,263 @@ fn push_cycle_segment(
 /// instead of drawing a partial path as if it were the whole program.
 pub const PREVIEW_STEP_LIMIT: usize = 200_000;
 
+/// Tool radii the preview needs for cutter compensation.
+///
+/// `G41`/`G42` name a tool with the D word and the machine reads that tool's
+/// radius from the tool table; `G41.1`/`G42.1` carry the radius in D directly.
+/// The preview has no table of its own, so the caller hands over the radii it
+/// already has. Radii are machine units (mm), like every other length here.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Tools {
+    radii: BTreeMap<u16, f64>,
+}
+
+impl Tools {
+    pub fn new(entries: impl IntoIterator<Item = (u16, f64)>) -> Self {
+        Self {
+            radii: entries
+                .into_iter()
+                .filter(|(_, radius)| radius.is_finite())
+                .collect(),
+        }
+    }
+
+    /// The radius of `tool`, when the table has one.
+    pub fn radius(&self, tool: u16) -> Option<f64> {
+        self.radii.get(&tool).copied()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.radii.is_empty()
+    }
+
+    /// The radii a machine's tool table carries, from the tool rows the
+    /// snapshot publishes. A tool whose diameter is on file contributes half of
+    /// it; one with no diameter is left out, so `G41 D<n>` naming it is reported
+    /// instead of silently drawn as an uncompensated path.
+    pub fn from_rows(rows: &[crate::model::ToolRow]) -> Self {
+        Self::new(rows.iter().filter_map(|row| {
+            let diameter = row.geometry.diameter?;
+            (diameter > 0.0).then_some((row.tool, diameter * 0.5))
+        }))
+    }
+}
+
+/// Cutter compensation as `G41`/`G42` select it: which side of the programmed
+/// path the tool centre runs on, and how far out, in machine units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Comp {
+    /// `G41`: the tool centre runs to the left of the programmed direction.
+    left: bool,
+    radius: f64,
+}
+
+impl Comp {
+    /// The in-plane unit normal the tool centre is displaced along for a move
+    /// in direction `(du, dv)`. Left of travel is the direction rotated a
+    /// quarter turn counter-clockwise, as the interpreter's G41 defines it.
+    fn normal(self, du: f64, dv: f64, len: f64) -> (f64, f64) {
+        let sign = if self.left { 1.0 } else { -1.0 };
+        (sign * -dv / len, sign * du / len)
+    }
+}
+
+/// One compensated move: where the tool centre enters and leaves it.
+struct Compensated {
+    start: [f64; 3],
+    end: [f64; 3],
+    arc: Option<ArcSpec>,
+    /// The exit point and travel direction, for the next move to join onto.
+    junction: ([f64; 2], [f64; 2]),
+}
+
+/// The two in-plane indices cutter compensation acts on, or `None` for a plane
+/// the interpreter does not allow compensation in.
+fn comp_axes(plane: Plane) -> Option<(usize, usize)> {
+    match plane {
+        Plane::Xy => Some((0, 1)),
+        Plane::Xz => Some((0, 2)),
+        Plane::Yz => Some((1, 2)),
+        // The UV/UW/VW planes have no rotary axes the preview draws.
+        _ => None,
+    }
+}
+
+/// The tool-centre move for one programmed move under cutter compensation.
+///
+/// The programmed line is the part contour, so the tool centre runs alongside
+/// it at `comp.radius`. Consecutive moves are joined where their offset lines
+/// cross, which is what the interpreter does for a corner the tool can reach;
+/// a corner it cannot reach (the offset lines meet far past the corner) is
+/// reported instead of guessed, because a guessed join would draw a straight
+/// cut through the part.
+///
+/// `previous` is the exit point and direction of the last compensated move, or
+/// `None` on the first move after `G41`/`G42`, where the programmed start is the
+/// lead-in the interpreter requires.
+fn compensate(
+    comp: Comp,
+    plane: Plane,
+    start: [f64; 3],
+    end: [f64; 3],
+    arc: Option<&ArcSpec>,
+    previous: Option<([f64; 2], [f64; 2])>,
+) -> Result<Compensated, String> {
+    let (u, v) = match comp_axes(plane) {
+        Some(axes) => axes,
+        None => {
+            return Err(
+                "cutter compensation is drawn for the G17, G18 and G19 planes only".to_string(),
+            )
+        }
+    };
+    let radius = comp.radius;
+
+    // An arc is offset by moving its radius: the tool centre sweeps a circle
+    // with the same centre. Whether that circle is the smaller or the larger
+    // one depends on which side the tool is on and which way the arc turns.
+    if let Some(arc) = arc {
+        let inside = comp.left != arc.clockwise;
+        let offset_radius = if inside {
+            arc.radius - radius
+        } else {
+            arc.radius + radius
+        };
+        if offset_radius <= 1e-9 {
+            return Err(format!(
+                "the tool radius {radius} is wider than the {} arc it must follow",
+                arc.radius
+            ));
+        }
+        let at = |angle: f64| {
+            let mut point = arc.center;
+            point[u] += offset_radius * angle.cos();
+            point[v] += offset_radius * angle.sin();
+            point
+        };
+        let mut offset_arc = arc.clone();
+        offset_arc.radius = offset_radius;
+        let mut from = at(arc.start_angle);
+        let mut to = at(arc.end_angle);
+        // Table rotation and the in-plane axes stay as programmed; only the two
+        // in-plane coordinates move out to the tool centre.
+        from[2] = start[2];
+        to[2] = end[2];
+        let direction = {
+            let du = to[u] - from[u];
+            let dv = to[v] - from[v];
+            let len = du.hypot(dv);
+            if len < 1e-12 {
+                // A full circle: the tangent at the start angle.
+                let slant = if arc.clockwise { -1.0 } else { 1.0 };
+                (
+                    -slant * arc.start_angle.sin(),
+                    slant * arc.start_angle.cos(),
+                )
+            } else {
+                (du / len, dv / len)
+            }
+        };
+        return Ok(Compensated {
+            start: from,
+            end: to,
+            arc: Some(offset_arc),
+            junction: ([to[u], to[v]], [direction.0, direction.1]),
+        });
+    }
+
+    let du = end[u] - start[u];
+    let dv = end[v] - start[v];
+    let len = du.hypot(dv);
+    // A move that changes no in-plane coordinate (a plain Z plunge) leaves the
+    // tool centre where the previous move put it.
+    if len < 1e-12 {
+        let Some((point, direction)) = previous else {
+            return Ok(Compensated {
+                start,
+                end,
+                arc: None,
+                junction: ([start[u], start[v]], [0.0, 0.0]),
+            });
+        };
+        let mut from = start;
+        from[u] = point[0];
+        from[v] = point[1];
+        let mut to = end;
+        to[u] = point[0];
+        to[v] = point[1];
+        return Ok(Compensated {
+            start: from,
+            end: to,
+            arc: None,
+            junction: (point, direction),
+        });
+    }
+    let direction = [du / len, dv / len];
+    let normal = comp.normal(du, dv, len);
+    let exit = [end[u] + normal.0 * radius, end[v] + normal.1 * radius];
+    let entry: [f64; 2] = match previous {
+        // The first move after G41/G42 is the lead-in: it starts on the
+        // programmed point, which must lie at least a tool radius away.
+        None => {
+            if len < radius - 1e-9 {
+                return Err(format!(
+                    "the lead-in move is shorter than the {} tool radius",
+                    radius
+                ));
+            }
+            [start[u], start[v]]
+        }
+        Some((point, along)) => {
+            let cross = along[0] * direction[1] - along[1] * direction[0];
+            if cross.abs() < 1e-9 {
+                // The two moves run the same way (or fold straight back on each
+                // other); either way the offset lines are parallel.
+                if radius > 1e-9 && along[0] * direction[0] + along[1] * direction[1] < 0.0 {
+                    return Err(
+                        "the path doubles back on itself while cutter compensation is on"
+                            .to_string(),
+                    );
+                }
+                point
+            } else {
+                // Where the previous offset line meets this one.
+                let t = ((exit[0] - point[0]) * direction[1] - (exit[1] - point[1]) * direction[0])
+                    / cross;
+                let meet = [point[0] + t * along[0], point[1] + t * along[1]];
+                // A corner the tool cannot wrap is one whose join lands far from
+                // the corner itself, which is this move's start point. LinuxCNC
+                // refuses there or inserts a loop; drawing the cross-over
+                // straight would cut into the part. A zero radius is the "no
+                // tool loaded, no D word" case, where the tool centre is the
+                // programmed line and no corner is too sharp.
+                let corner = [start[u], start[v]];
+                if radius > 1e-9 && (meet[0] - corner[0]).hypot(meet[1] - corner[1]) > 4.0 * radius
+                {
+                    return Err(
+                        "the path turns too sharply for the tool to follow under cutter \
+                         compensation"
+                            .to_string(),
+                    );
+                }
+                meet
+            }
+        }
+    };
+    let mut from = start;
+    from[u] = entry[0];
+    from[v] = entry[1];
+    let mut to = end;
+    to[u] = exit[0];
+    to[v] = exit[1];
+    Ok(Compensated {
+        start: from,
+        end: to,
+        arc: None,
+        junction: (exit, direction),
+    })
+}
+
 /// Nested subroutine calls the preview follows before it gives up.
 pub const PREVIEW_DEPTH_LIMIT: usize = 64;
 
@@ -3086,6 +3343,26 @@ pub fn parse_preview_with(
     current_position: [f64; 3],
     subs: &Subroutines,
 ) -> Preview {
+    parse_preview_full(
+        text,
+        axis_names,
+        offset,
+        current_position,
+        subs,
+        &Tools::default(),
+    )
+}
+
+/// The full preview: the same as [`parse_preview_with`], plus the tool radii
+/// `G41`/`G42` need to draw the tool centre instead of the programmed contour.
+pub fn parse_preview_full(
+    text: &str,
+    axis_names: &[String],
+    offset: Option<&AxisMap<f64>>,
+    current_position: [f64; 3],
+    subs: &Subroutines,
+    tools: &Tools,
+) -> Preview {
     let mut preview = Preview::empty();
     let axis_index = |name: &str| -> Option<usize> {
         match name.to_ascii_uppercase().as_str() {
@@ -3117,6 +3394,16 @@ pub fn parse_preview_with(
     // Drilling canned cycle: modal, one hole per block with X/Y.
     let mut drill_cycle: Option<DrillCycle> = None;
     let mut cycle_request: Option<u16> = None;
+    // Cutter compensation. `comp` is the state a move is drawn under; a
+    // G41/G42 in the block itself lands in `comp_request` and applies to that
+    // block's move, which is the lead-in. `comp_exit` is where the last
+    // compensated move left the tool centre, so the next one can join onto it.
+    let mut comp: Option<Comp> = None;
+    let mut comp_request: Option<Comp> = None;
+    let mut comp_exit: Option<([f64; 2], [f64; 2])> = None;
+    // A G41/G42 that named a tool the table has no radius for: the move is
+    // drawn as programmed and the preview says why it had to guess.
+    let mut comp_radius_unknown: Option<(usize, u16)> = None;
     // G98 (initial Z) is the default retract mode; G99 retracts to R.
     let mut retract_to_r = false;
 
@@ -3130,6 +3417,9 @@ pub fn parse_preview_with(
         loops,
         loop_stacks,
     } = plan_preview(text, subs);
+    // The planner's own verdict on what it could not follow; the drawing pass
+    // below adds to it when it meets a path it cannot compensate.
+    let mut incomplete = incomplete;
     preview.subroutines = subroutines;
     preview.loops = loops;
     preview.loop_stacks = loop_stacks;
@@ -3192,6 +3482,41 @@ pub fn parse_preview_with(
                         wcs = format_g(value);
                     } else if value == 10.0 {
                         g10 = true;
+                    } else if value == 40.0 {
+                        // G40 ends compensation; the block's own move, if any,
+                        // is the lead-out and runs on the programmed path.
+                        comp = None;
+                        comp_request = None;
+                        comp_exit = None;
+                    } else if value == 41.0 || value == 42.0 || value == 41.1 || value == 42.1 {
+                        let left = value == 41.0 || value == 41.1;
+                        // G41.1/G42.1 carry the radius in D; G41/G42 carry a
+                        // tool number there and take its radius from the table.
+                        let dynamic = value == 41.1 || value == 42.1;
+                        let d = word_int(&tokens, 'd');
+                        let (radius, unknown) = if dynamic {
+                            // The radius itself, which need not be a whole number.
+                            (word_value(&tokens, 'd').unwrap_or(0.0), None)
+                        } else {
+                            match d {
+                                Some(tool) if tool > 0 => match tools.radius(tool as u16) {
+                                    Some(radius) => (radius, None),
+                                    None => (0.0, Some(tool as u16)),
+                                },
+                                // No D word: the tool in the spindle, and 0
+                                // when that tool has no radius on file.
+                                _ => match tool.and_then(|tool| tools.radius(tool)) {
+                                    Some(radius) => (radius, None),
+                                    None => (0.0, tool),
+                                },
+                            }
+                        };
+                        if let Some(tool) = unknown {
+                            if !tools.is_empty() {
+                                comp_radius_unknown = Some((line_no, tool));
+                            }
+                        }
+                        comp_request = Some(Comp { left, radius });
                     }
                 }
             } else if token.kind == TokenKind::MCode {
@@ -3567,6 +3892,12 @@ pub fn parse_preview_with(
 
         saw_motion = true;
 
+        // A G41/G42 in this block applies to its move, which is the lead-in.
+        if let Some(requested) = comp_request.take() {
+            comp = Some(requested);
+            comp_exit = None;
+        }
+
         let start = position;
         let mut segment = PathSegment {
             start,
@@ -3605,6 +3936,67 @@ pub fn parse_preview_with(
         } else if segment.kind == SegmentKind::Rapid {
             preview.rapids += 1;
         }
+
+        // Cutter compensation: the programmed line is the contour, so the tool
+        // centre runs alongside it. The parser keeps tracking the programmed
+        // point; only the drawn segment moves out to the tool centre.
+        if let Some(active) = comp {
+            let joining = comp_exit.is_some();
+            match compensate(
+                active,
+                plane,
+                start,
+                target,
+                segment.arc.as_ref(),
+                comp_exit,
+            ) {
+                Ok(compensated) => {
+                    segment.start = compensated.start;
+                    segment.end = compensated.end;
+                    segment.arc = compensated.arc;
+                    // The offset lines meet at a point that belongs to both
+                    // moves, so the previous move is stretched to it: without
+                    // that the drawn contour jumps at every corner.
+                    if joining {
+                        if let (Some(last), Some((u, v))) =
+                            (preview.segments.last_mut(), comp_axes(plane))
+                        {
+                            let closed = (last.start[u] - last.end[u]).abs() < 1e-9
+                                && (last.start[v] - last.end[v]).abs() < 1e-9;
+                            if !closed {
+                                last.end[u] = compensated.start[u];
+                                last.end[v] = compensated.start[v];
+                                if let Some(spec) = last.arc.as_mut() {
+                                    spec.end_angle = (last.end[v] - spec.center[v])
+                                        .atan2(last.end[u] - spec.center[u]);
+                                }
+                            }
+                        }
+                    }
+                    comp_exit = Some(compensated.junction);
+                }
+                Err(reason) => {
+                    // A move the tool cannot follow: report it and draw that one
+                    // move on the programmed line, then re-engage at the next.
+                    // Dropping compensation for the rest of the program would
+                    // turn one reported corner into a silently uncompensated
+                    // contour.
+                    if incomplete.is_none() {
+                        incomplete = Some(format!("line {line_no}: {reason}"));
+                    }
+                    comp_exit = None;
+                }
+            }
+            if let Some((at, tool)) = comp_radius_unknown.take() {
+                if incomplete.is_none() {
+                    incomplete = Some(format!(
+                        "line {at}: the tool table has no radius for tool {tool}, so the \
+                         compensated path is drawn at the programmed line"
+                    ));
+                }
+            }
+        }
+
         preview.segments.push(segment);
         preview.segment_loop.push(pass);
         preview
@@ -3661,6 +4053,11 @@ pub fn parse_preview_with(
                 Plane::Vw => "G19.1".to_string(),
             });
             codes.push(wcs.clone());
+            // Cutter compensation is modal and changes what every following
+            // move does, so the readout names it while it is on.
+            if let Some(active) = comp {
+                codes.push(if active.left { "G41" } else { "G42" }.to_string());
+            }
             codes
         },
         mcodes: preview.modal.mcodes.clone(),
@@ -4074,6 +4471,132 @@ mod tests {
 
     fn preview_axes() -> Vec<String> {
         vec!["X".to_string(), "Y".to_string(), "Z".to_string()]
+    }
+
+    /// Parse with a tool radius on file, which is what `G41`/`G42` read.
+    fn parse_with_tool(text: &str, tool: u16, diameter: f64) -> Preview {
+        parse_preview_full(
+            text,
+            &preview_axes(),
+            None,
+            [0.0; 3],
+            &Subroutines::default(),
+            &Tools::new([(tool, diameter * 0.5)]),
+        )
+    }
+
+    /// The drawn contour, rounded, so a test can name where the tool centre
+    /// goes without carrying float noise.
+    fn drawn(preview: &Preview) -> Vec<([f64; 2], [f64; 2])> {
+        preview
+            .segments
+            .iter()
+            .map(|segment| {
+                let round = |point: [f64; 3]| {
+                    [
+                        (point[0] * 1e6).round() / 1e6,
+                        (point[1] * 1e6).round() / 1e6,
+                    ]
+                };
+                (round(segment.start), round(segment.end))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn g41_runs_the_tool_centre_left_of_the_contour() {
+        // A 10 mm cutter (D=10) cutting the top of a block while travelling in
+        // +X: the tool centre is 5 mm above the programmed line, and the first
+        // move is the lead-in from the programmed start.
+        let text = "G21 G90 G17\nG0 X0 Y0 Z5\nG1 Z0 F100\nG41 D1\nG1 X40\nG1 Y20\nG40\nM2\n";
+        let preview = parse_with_tool(text, 1, 10.0);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        let contour = drawn(&preview);
+        // The Z plunge, then the lead-in from the programmed start to the
+        // offset line, then the line itself, then up the joined corner.
+        assert_eq!(contour[2], ([0.0, 0.0], [35.0, 5.0]));
+        assert_eq!(contour[3], ([35.0, 5.0], [35.0, 20.0]));
+    }
+
+    #[test]
+    fn g42_runs_the_tool_centre_right_of_the_contour() {
+        let text = "G21 G90 G17\nG0 X0 Y0 Z5\nG1 Z0 F100\nG42 D1\nG1 X40\nG1 Y20\nG40\nM2\n";
+        let preview = parse_with_tool(text, 1, 10.0);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        let contour = drawn(&preview);
+        assert_eq!(contour[2], ([0.0, 0.0], [45.0, -5.0]));
+        assert_eq!(contour[3], ([45.0, -5.0], [45.0, 20.0]));
+    }
+
+    #[test]
+    fn the_d_word_names_the_tool_whose_radius_is_used() {
+        // comp311.ngc switches tools before it compensates and lets the D word
+        // be absent, so the radius comes from the tool in the spindle.
+        let text = "G21 G90 G17\nT4 M6\nG0 X0 Y0 Z5\nG1 Z0 F100\nG41\nG1 X40\nG40\nM2\n";
+        let preview = parse_with_tool(text, 4, 8.0);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        assert_eq!(drawn(&preview)[2], ([0.0, 0.0], [40.0, 4.0]));
+    }
+
+    #[test]
+    fn g41_1_takes_the_radius_from_the_d_word() {
+        // The dynamic form carries the radius itself, so it needs no table.
+        let text = "G21 G90 G17\nG0 X0 Y0 Z5\nG1 Z0 F100\nG41.1 D2.5\nG1 X40\nG40\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        assert_eq!(drawn(&preview)[2], ([0.0, 0.0], [40.0, 2.5]));
+    }
+
+    #[test]
+    fn a_compensated_arc_keeps_its_centre_and_moves_its_radius() {
+        // G41 round a clockwise arc keeps the tool outside it, so the tool
+        // centre swings on a circle one radius larger than the programmed one.
+        let text = "G21 G90 G17\nG0 X10 Y0 Z5\nG1 Z0 F100\nG41 D1\nG2 X0 Y-10 I-10 J0\nG40\nM2\n";
+        let preview = parse_with_tool(text, 1, 6.0);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        let arc = preview
+            .segments
+            .iter()
+            .find(|segment| segment.kind == SegmentKind::Arc)
+            .expect("the compensated arc");
+        let spec = arc.arc.as_ref().expect("arc spec").clone();
+        assert!((spec.radius - 13.0).abs() < 1e-9, "{spec:?}");
+        assert!(spec.center[0].abs() < 1e-9, "{spec:?}");
+        assert!((arc.end[1] + 13.0).abs() < 1e-9, "{:?}", arc.end);
+    }
+
+    #[test]
+    fn compensation_without_a_known_radius_is_reported() {
+        // The table is present but has no row for tool 7, so the path is drawn
+        // on the programmed line and the preview says why.
+        let tools = Tools::new([(1, 5.0)]);
+        let text = "G21 G90 G17\nG0 X0 Y0 Z5\nG41 D7\nG1 X40 F100\nG40\nM2\n";
+        let preview = parse_preview_full(
+            text,
+            &preview_axes(),
+            None,
+            [0.0; 3],
+            &Subroutines::default(),
+            &tools,
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let reason = preview.incomplete_reason.clone().expect("a reason");
+        assert!(reason.contains("no radius for tool 7"), "{reason}");
+        assert_eq!(drawn(&preview)[1], ([0.0, 0.0], [40.0, 0.0]));
+    }
+
+    #[test]
+    fn a_lead_in_shorter_than_the_radius_is_reported() {
+        let text = "G21 G90 G17\nG0 X0 Y0 Z5\nG1 Z0 F100\nG41 D1\nG1 X1\nG40\nM2\n";
+        let preview = parse_with_tool(text, 1, 20.0);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let reason = preview.incomplete_reason.clone().expect("a reason");
+        assert!(reason.contains("shorter than"), "{reason}");
     }
 
     fn lathe_axes() -> Vec<String> {

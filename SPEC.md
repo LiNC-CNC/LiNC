@@ -722,7 +722,21 @@ Program rules:
   otherwise R; G99: R). If the tool starts below R, Z moves to R before X/Y.
   R is the retract plane. Each block with X/Y is another hole; G80 or an
   ordinary motion mode cancels the cycle. G83 pecking and G82 dwelling are not
-  drawn as separate moves.
+  drawn as separate moves. A polar `@`/`^` pair names the hole too, and `L`
+  repeats the cycle once per pass, stepping the polar radius/angle in
+  incremental mode and repeating the same hole in absolute mode.
+- Cutter compensation is previewed as the tool centre, not the programmed
+  contour. G41 keeps the tool centre a tool radius to the left of the
+  programmed direction and G42 to the right, in the G17/G18/G19 plane. The
+  radius comes from the D word's tool in the tool table, or from the tool in
+  the spindle when there is no D word; G41.1/G42.1 carry the radius in D
+  directly. Consecutive moves are joined where their offset lines cross, an
+  arc keeps its centre and has its radius moved by the tool radius, and the
+  first compensated move is the lead-in from the programmed point. A path the
+  tool cannot follow is reported rather than drawn: a lead-in shorter than the
+  radius, a corner too sharp to join, a tool wider than the arc it must follow,
+  or a D word naming a tool with no radius on file. The block is then drawn on
+  the programmed line and compensation re-engages on the next move.
 - On editor changes, wait for the debounce, run the preview syntax check, then
   replace the graph only if it succeeds. On failure, keep the last valid graph,
   mark the offending line and show a syntax error; never move the machine.
