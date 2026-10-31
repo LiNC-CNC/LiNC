@@ -61,11 +61,12 @@ impl LincApp {
         // keeps Escape for a dismissible dialog. Without this, F5-F8, Ctrl+D/H,
         // Ctrl+Q and the page keys could act on the page behind the dialog.
         if self.overlay_open() {
-            // The tool-number dialog takes its own Enter and Escape in the page,
-            // before the table draws: a refused number must keep it open and
-            // report why, which a consumed Escape could not do. Its field has
-            // focus, so the shell has nothing else to give it.
-            if self.tools.number.is_some()
+            // The tool-number and tool-position dialogs take their own Enter
+            // and Escape in the page, before the table draws: a refused entry
+            // must keep the dialog open and report why, which a consumed Escape
+            // could not do. Their fields have focus, so the shell has nothing
+            // else to give them.
+            if (self.tools.number.is_some() || self.tools.position.is_some())
                 && self.overlay.modal.is_none()
                 && self.help.dialog.is_none()
             {
@@ -85,6 +86,7 @@ impl LincApp {
         let text_focused = ui.memory(|memory| {
             memory.has_focus(egui::Id::unique("linc-program-editor"))
                 || memory.has_focus(egui::Id::unique("linc-tool-cell"))
+                || memory.has_focus(egui::Id::unique("linc-tool-position"))
                 || memory.has_focus(egui::Id::unique("linc-offset-cell"))
                 || memory.has_focus(egui::Id::unique("linc-offsets-dro"))
                 || memory.has_focus(egui::Id::unique("linc-file-rename"))

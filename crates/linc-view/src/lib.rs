@@ -167,6 +167,20 @@ pub struct TrajectoryView<'a> {
     /// an offset far from the part is still on screen; the Machine page keeps
     /// the program-only fit.
     pub fit_all: bool,
+    /// Frame the program together with the live tool tip, and nothing else.
+    ///
+    /// The live manual views use it so the part and the head are both on screen
+    /// when the page opens and after `Ctrl+0`. Unlike `fit_all`, the live trail
+    /// is left out: a probe session can drag it across the whole envelope and
+    /// shrink the part to nothing. The head that was framed is latched (see
+    /// `fit_tool_tip`), so a fit that keeps running does not rescale the picture
+    /// as the operator jogs; the tool follow keeps the head on the card after
+    /// that.
+    pub fit_tool: bool,
+    /// The head a `fit_tool` fit framed, latched by `draw_trajectory` so a
+    /// moving tool does not rescale the picture. `fit_target` falls back to the
+    /// live tip when nothing has been latched yet (a test, or the first frame).
+    pub fit_tool_tip: Option<[f64; 3]>,
     /// Draw the machine-origin triad in a muted colour and a line from it to the
     /// active work origin. The Offsets page is where the distance between the
     /// two matters; the Machine page shows only the work origin.
@@ -230,6 +244,8 @@ impl<'a> TrajectoryView<'a> {
             opacity: 1.0,
             show_legend: true,
             fit_all: false,
+            fit_tool: false,
+            fit_tool_tip: None,
             origin_tether: false,
             machine_bounds_always: false,
             mirror_x: false,
@@ -685,6 +701,12 @@ fn fit_zoom_pan(
 /// the opposite: everything drawn, so an offset far from the part still shows.
 fn fit_target(view: &TrajectoryView<'_>, reference: Bounds3) -> Bounds3 {
     let mut target = view.preview.bounds.unwrap_or(reference);
+    if view.fit_tool {
+        if let Some(tip) = view.fit_tool_tip.or(view.tool_tip) {
+            target.include(view.trail_point(tip));
+        }
+        return target;
+    }
     if !view.fit_all {
         return target;
     }
@@ -1173,9 +1195,28 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
         view.auto_fit = false;
     }
 
+    // A tool-inclusive fit frames the head the fit was asked for, not the one
+    // that happens to be there now: the tool moves every frame, and a fit that
+    // followed it would rescale the picture while the operator jogs. The tip is
+    // latched here (in egui's own per-card memory) and re-latched whenever a fit
+    // is requested — page entry, `Ctrl+0`, a view switch, a double-click — so
+    // the head is framed again wherever it has got to. The auto-fit stays on,
+    // so a card that measures itself late or a window resize still refits to the
+    // program and that head.
+    if view.fit_tool {
+        let id = ui.scope_id().with("toolpath-fit-tool-tip");
+        let latched: Option<[f64; 3]> = ui.ctx().data(|data| data.get_temp(id));
+        if view.fit || latched.is_none() {
+            if let Some(tip) = view.tool_tip {
+                ui.ctx().data_mut(|data| data.insert_temp(id, tip));
+            }
+        }
+        view.fit_tool_tip = ui.ctx().data(|data| data.get_temp(id));
+    }
+
     // The first frame of a layout can report an unbounded card; a fit computed
     // for that rect leaves a pan that puts the part outside the real one. Wait
-    // for a rect the screen can actually hold, then fit once.
+    // for a rect the screen can actually hold, then fit.
     let plausible = rect.width() <= screen.width() + 1.0 && rect.height() <= screen.height() + 1.0;
     if (view.fit || view.auto_fit) && plausible {
         view.fit = false;
@@ -3795,6 +3836,99 @@ mod tests {
             "the highlighted system is inside the fit"
         );
         assert_eq!(all.min[0], -30.0, "the program is still inside the fit");
+    }
+
+    #[test]
+    fn fit_tool_frames_the_program_and_the_tool_only() {
+        let mut preview = Preview::empty();
+        preview.bounds = Some(Bounds3 {
+            min: [-30.0, -20.0, -10.0],
+            max: [-10.0, 0.0, 0.0],
+        });
+        let reference = Bounds3 {
+            min: [-500.0, -320.0, -250.0],
+            max: [0.0, 0.0, 0.0],
+        };
+        let mut view = TrajectoryView::new(&preview, &[], MachineVariant::Mill);
+        view.fit_tool = true;
+        view.tool_tip = Some([200.0, 0.0, 0.0]);
+        // A trail point far away is what `fit_all` includes and this must not:
+        // it would shrink the part to make room for a probe session.
+        view.origin = [0.0, -400.0, 0.0];
+        let target = fit_target(&view, reference);
+        assert_eq!(target.max[0], 200.0, "the tool head is inside the fit");
+        assert_eq!(target.min[0], -30.0, "the program is still inside the fit");
+        assert_eq!(target.min[1], -20.0, "the work zero is not in a tool fit");
+    }
+
+    #[test]
+    fn a_tool_fit_latches_the_head_it_framed() {
+        let mut preview = Preview::empty();
+        preview.bounds = Some(Bounds3 {
+            min: [-30.0, -20.0, -10.0],
+            max: [-10.0, 0.0, 0.0],
+        });
+        let mut view = TrajectoryView::new(&preview, &[], MachineVariant::Mill);
+        view.show_grid = false;
+        view.show_legend = false;
+        view.show_program_bounds = false;
+        view.show_stock = false;
+        view.show_selected_line = false;
+        view.machine_bounds = Some(Bounds3 {
+            min: [-500.0, -320.0, -250.0],
+            max: [0.0, 0.0, 0.0],
+        });
+        view.fit = true;
+        view.auto_fit = true;
+        view.fit_tool = true;
+        view.tool_tip = Some([-20.0, -10.0, -5.0]);
+
+        let ctx = egui::Context::default();
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input(), |ui| {
+            draw_trajectory(ui, &mut view);
+        });
+        output.textures_delta.clear();
+        assert!(!view.fit, "the requested fit ran");
+        assert!(
+            view.auto_fit,
+            "the fit stays automatic, so a late layout or a resize refits to the program and the framed head"
+        );
+        assert_eq!(view.fit_tool_tip, Some([-20.0, -10.0, -5.0]));
+        let fitted = view.zoom;
+
+        // The head moves far away: the latched fit does not follow it, so the
+        // scale the operator sees stays put instead of rescaling while jogging.
+        view.tool_tip = Some([200.0, 0.0, 0.0]);
+        let mut output = ctx.run_ui(input(), |ui| {
+            draw_trajectory(ui, &mut view);
+        });
+        output.textures_delta.clear();
+        assert!(
+            (view.zoom - fitted).abs() < 1e-6,
+            "zoom {} moved from the fitted {fitted}",
+            view.zoom
+        );
+
+        // An explicit fit (Ctrl+0) re-latches and frames the head where it is.
+        view.fit = true;
+        let mut output = ctx.run_ui(input(), |ui| {
+            draw_trajectory(ui, &mut view);
+        });
+        output.textures_delta.clear();
+        assert_eq!(view.fit_tool_tip, Some([200.0, 0.0, 0.0]));
+        assert!(
+            view.zoom < fitted,
+            "the refit zooms out to take in the head at {}: {fitted} -> {}",
+            view.tool_tip.map(|tip| tip[0]).unwrap_or_default(),
+            view.zoom
+        );
     }
 
     #[test]

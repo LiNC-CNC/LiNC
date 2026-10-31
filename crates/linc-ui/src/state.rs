@@ -1329,9 +1329,13 @@ impl ToolDraft {
                 .diameter
                 .map(|v| v.to_string())
                 .unwrap_or_default(),
+            // `Z` and the length are one value; the length column is the draft's
+            // single field for it. A row that carries only the values map (an
+            // older or hand-built row) still shows its Z.
             length: row
                 .geometry
                 .length
+                .or_else(|| row.geometry.values.get("Z").copied())
                 .map(|v| v.to_string())
                 .unwrap_or_default(),
             nose_radius: row
@@ -1345,7 +1349,7 @@ impl ToolDraft {
                 .map(|v| v.to_string())
                 .unwrap_or_default(),
             pocket: row.pocket.map(|v| v.to_string()).unwrap_or_default(),
-            axes: ["X", "Z", "I", "J"]
+            axes: ["X", "I", "J"]
                 .into_iter()
                 .map(|axis| {
                     (
@@ -1387,6 +1391,11 @@ pub struct ToolsUi {
     pub kind_popup_pending: bool,
     /// Highlighted choice in the open TYPE selector.
     pub kind_popup_index: usize,
+    /// The in-spindle tool the table selection last followed. The row snaps to
+    /// the active tool when this changes, so a tool change leaves the operator
+    /// on the row they are about to touch off; browsing the table by hand is
+    /// left alone while the tool in the spindle stays the same.
+    pub active_tool_seen: Option<u16>,
     /// The typed tool number, while the dialog is open. Part of
     /// `LincApp::overlay_open`, so the table, the shell's global keys and the
     /// cell editor all stand down behind it.
@@ -1394,6 +1403,10 @@ pub struct ToolsUi {
     /// Tool just created with Ctrl+N; the row is selected once the new table
     /// arrives from the backend.
     pub pending_select_tool: Option<u16>,
+    /// The tool-position dialog, while it is open. Part of
+    /// `LincApp::overlay_open`, so the table, the cell editor and the shell's
+    /// global keys stand down behind it.
+    pub position: Option<ToolPositionEntry>,
 }
 
 /// The TOOLS page's tool-number dialog: one line of digits, prefilled with the
@@ -1420,6 +1433,35 @@ impl ToolNumberEntry {
     }
 }
 
+/// The TOOLS page's tool-position dialog: the operator says where the tool is,
+/// and the HMI writes the tool offset so the work coordinate reads that value.
+#[derive(Clone)]
+pub struct ToolPositionEntry {
+    /// Axis being entered: `Z` when the shortcut opened it, or the axis a click
+    /// or an `X`/`Y`/`Z` key selected.
+    pub axis: String,
+    pub buffer: String,
+    /// The field was just focused or re-seeded (open, axis change): select the
+    /// whole value, so typing replaces it instead of appending to it.
+    pub fresh: bool,
+    /// Why the last confirm was refused, shown inside the dialog. A refused
+    /// entry keeps the dialog open with its text.
+    pub error: Option<String>,
+}
+
+impl ToolPositionEntry {
+    /// The dialog as it opens on `axis`, seeded with the work coordinate the
+    /// controller reports now.
+    pub fn new(axis: String, shown: f64) -> Self {
+        Self {
+            axis,
+            buffer: format!("{shown:.3}"),
+            fresh: true,
+            error: None,
+        }
+    }
+}
+
 impl Default for ToolsUi {
     fn default() -> Self {
         Self {
@@ -1437,8 +1479,10 @@ impl Default for ToolsUi {
             kind_popup: None,
             kind_popup_pending: false,
             kind_popup_index: 0,
+            active_tool_seen: None,
             number: None,
             pending_select_tool: None,
+            position: None,
         }
     }
 }

@@ -4,6 +4,7 @@ use egui::{RichText, Ui};
 use linc_core::command::MachineCommand;
 use linc_core::model::{MachineVariant, ToolRow};
 
+use crate::screens::common;
 use crate::shell::LincApp;
 use crate::state::ToolDraft;
 use crate::theme;
@@ -51,6 +52,29 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         }
     }
     let row_count = app.snapshot.tool_table.rows.len();
+    // Snapped on a change of the in-spindle tool, not on every frame: a tool
+    // change is the moment the selected row should be the active one. A table
+    // that has not arrived yet keeps the flag unset and is picked up next frame.
+    let current_tool = app.snapshot.tool_change.current_tool;
+    if app.tools.active_tool_seen != Some(current_tool) {
+        match app
+            .snapshot
+            .tool_table
+            .rows
+            .iter()
+            .position(|row| row.tool == current_tool)
+        {
+            Some(index) => {
+                app.tools.selected_row = index;
+                app.tools.scroll_to_selected = true;
+                app.tools.active_tool_seen = Some(current_tool);
+            }
+            None if current_tool == 0 || row_count > 0 => {
+                app.tools.active_tool_seen = Some(current_tool);
+            }
+            None => {}
+        }
+    }
     if app.tools.selected_row >= row_count.max(1) {
         app.tools.selected_row = row_count.saturating_sub(1);
     }
@@ -61,7 +85,15 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // The typed-number dialog lives over the table, not instead of it: the
     // table keeps drawing behind the window.
     draw_number_dialog(app, ui);
-    ui.add_space(4.0);
+    // The tool-position dialog is drawn over the table too: `Z` asks where the
+    // tool is and writes the offset, so the table keeps showing the row.
+    draw_position_dialog(app, ui);
+    // Above the table, where OFFSETS puts its DRO: the operator touches off a
+    // tool while watching where the head is, and the readout stays put while
+    // the table scrolls. Display only — the table owns the keyboard, and `Z`
+    // opens the tool-position dialog.
+    common::position_readout_row(app, ui);
+    ui.add_space(6.0);
     // No change/changer panes: the table is the page. Loading the selected tool
     // is the `T` shortcut below, and the manual-change prompt is drawn by the
     // shell when the controller asks for it.
@@ -235,9 +267,12 @@ fn cell_text(
             }
         }
         Cell::Number(field) => format_cell(&match field {
+            // `Z` and the length column are the same tool offset: LinuxCNC's
+            // `Z` word *is* the length. The draft keeps one string so editing
+            // either cell updates the one number both the file and G43 read.
+            Field::Axis("Z") | Field::Length => draft.length.clone(),
             Field::Axis(axis) => draft.axes.get(axis).cloned().unwrap_or_default(),
             Field::Diameter => draft.diameter.clone(),
-            Field::Length => draft.length.clone(),
             Field::NoseRadius => draft.nose_radius.clone(),
             Field::Orientation => draft.orientation.clone(),
             Field::Pocket => draft.pocket.clone(),
@@ -252,9 +287,10 @@ fn cell_field(draft: &mut ToolDraft, cell: Cell) -> Option<&mut String> {
         Cell::Kind => None,
         Cell::Description => Some(&mut draft.description),
         Cell::Number(field) => Some(match field {
+            // One value for the two names: see `cell_text`.
+            Field::Axis("Z") | Field::Length => &mut draft.length,
             Field::Axis(axis) => draft.axes.entry(axis.to_string()).or_default(),
             Field::Diameter => &mut draft.diameter,
-            Field::Length => &mut draft.length,
             Field::NoseRadius => &mut draft.nose_radius,
             Field::Orientation => &mut draft.orientation,
             Field::Pocket => &mut draft.pocket,
@@ -331,6 +367,12 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
         number_dialog_keys(app, ui);
         return;
     }
+    // The tool-position dialog owns the keyboard the same way: Enter writes,
+    // Escape cancels, and X/Y/Z pick the axis being entered.
+    if app.tools.position.is_some() {
+        position_dialog_keys(app, ui);
+        return;
+    }
     if app.overlay_open() {
         // The manual-change dialog owns the keyboard: no cursor movement, no
         // cell editor and no T underneath it.
@@ -366,6 +408,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     let mut edit = false;
     let mut load = false;
     let mut number = false;
+    let mut position = false;
     let mut new_tool = false;
     let mut delete_tool = false;
     ui.input_mut(|input| {
@@ -397,10 +440,18 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::T) {
             load = true;
         }
+        // Bare `Z`: touch off the tool in the spindle. Page-local like `T`, and
+        // taken before the table draws so no cell or scroll area sees it.
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Z) {
+            position = true;
+        }
         // The page-local typed tool number. `consume_key` matches the modifiers
         // exactly, so the bare `T` above is untouched; the chord comes from
         // `[keys] tool_number` and a profile can move it.
-        if input.consume_key(app.prefs.keymap.tool_number.modifiers, app.prefs.keymap.tool_number.key) {
+        if input.consume_key(
+            app.prefs.keymap.tool_number.modifiers,
+            app.prefs.keymap.tool_number.key,
+        ) {
             number = true;
         }
         if input.consume_key(egui::Modifiers::CTRL, egui::Key::N) {
@@ -429,6 +480,9 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     }
     if number {
         open_number_dialog(app);
+    }
+    if position {
+        open_position_dialog(app);
     }
     if new_tool {
         create_tool(app);
@@ -558,7 +612,10 @@ fn number_dialog_keys(app: &mut LincApp, ui: &mut Ui) {
         // a rebound back key does not leave the dialog with no way out.
         let cancel = input.consume_key(app.prefs.keymap.back.modifiers, app.prefs.keymap.back.key)
             || input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
-        let confirm = input.consume_key(app.prefs.keymap.activate.modifiers, app.prefs.keymap.activate.key);
+        let confirm = input.consume_key(
+            app.prefs.keymap.activate.modifiers,
+            app.prefs.keymap.activate.key,
+        );
         (confirm, cancel)
     });
     if cancel {
@@ -723,6 +780,323 @@ fn accepted_numbers(rows: &[ToolRow]) -> String {
     text.push_str("  ·  0 = NO TOOL");
     text
 }
+/// `Z` on the page: touch off the tool in the spindle.
+///
+/// The dialog writes the in-spindle tool's row, because the offset `G43`
+/// applies is that tool's, whichever row the table cursor is on. After a tool
+/// change the two are the same row: the selection follows the active tool.
+fn open_position_dialog(app: &mut LincApp) {
+    let tool = app.snapshot.tool_change.current_tool;
+    if tool == 0 {
+        app.tools.error = Some("no tool in the spindle — load a tool first".into());
+        return;
+    }
+    if !app
+        .snapshot
+        .tool_table
+        .rows
+        .iter()
+        .any(|row| row.tool == tool)
+    {
+        app.tools.error = Some(format!("T{tool} is not in the tool table"));
+        return;
+    }
+    app.tools.error = None;
+    seed_position_axis(app, position_axis(app));
+}
+
+/// The axis the `Z` shortcut opens on: Z where the machine has one.
+fn position_axis(app: &LincApp) -> &'static str {
+    let axes = app.axes();
+    if axes.iter().any(|axis| axis == "Z") {
+        "Z"
+    } else {
+        "X"
+    }
+}
+
+/// Point the dialog at `axis`, seeded with the work coordinate the controller
+/// reports now, in the units the DRO shows (the lathe's X may read a diameter).
+fn seed_position_axis(app: &mut LincApp, axis: &str) {
+    let work = app
+        .snapshot
+        .positions
+        .axes
+        .get(axis)
+        .map(|position| position.work)
+        .unwrap_or(0.0);
+    let shown = common::dro_value(axis, work, app.reads_x_as_diameter());
+    app.tools.position = Some(crate::state::ToolPositionEntry::new(
+        axis.to_string(),
+        shown,
+    ));
+}
+
+/// Close it and give the keyboard back: the field held it, and the panel has no
+/// Tab to walk out with.
+fn close_position_dialog(app: &mut LincApp, ui: &mut Ui) {
+    app.tools.position = None;
+    ui.memory_mut(|memory| memory.stop_text_input());
+}
+
+/// The dialog's own keys, taken before the field and the table draw.
+fn position_dialog_keys(app: &mut LincApp, ui: &mut Ui) {
+    let axes = app.axes();
+    let mut switch: Option<String> = None;
+    let (confirm, cancel) = ui.input_mut(|input| {
+        let cancel = input.consume_key(app.prefs.keymap.back.modifiers, app.prefs.keymap.back.key)
+            || input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+        let confirm = input.consume_key(
+            app.prefs.keymap.activate.modifiers,
+            app.prefs.keymap.activate.key,
+        );
+        // The axis letters pick which coordinate is being entered. They are
+        // taken even while the field holds the keyboard: a position entry never
+        // types a letter, and the panel has no Tab to reach the DRO cards with.
+        for (axis, key) in [
+            ("X", egui::Key::X),
+            ("Y", egui::Key::Y),
+            ("Z", egui::Key::Z),
+        ] {
+            if axes.iter().any(|present| present == axis)
+                && input.consume_key(egui::Modifiers::NONE, key)
+            {
+                switch = Some(axis.to_string());
+            }
+        }
+        (confirm, cancel)
+    });
+    if cancel {
+        close_position_dialog(app, ui);
+        return;
+    }
+    if let Some(axis) = switch {
+        seed_position_axis(app, &axis);
+        return;
+    }
+    if confirm {
+        confirm_position(app);
+    }
+}
+
+/// Confirm the entry: write the offset, or keep the dialog open and say why not.
+fn confirm_position(app: &mut LincApp) {
+    let Some(entry) = app.tools.position.clone() else {
+        return;
+    };
+    match position_write(app, &entry.axis, &entry.buffer) {
+        Ok(message) => {
+            app.tools.position = None;
+            app.tools.error = None;
+            app.toast(message, theme::ACCENT);
+        }
+        Err(reason) => {
+            if let Some(slot) = app.tools.position.as_mut() {
+                slot.error = Some(reason);
+                slot.fresh = false;
+            }
+        }
+    }
+}
+
+/// Parse the entry, compute the new offset and queue the tool-table write.
+///
+/// The typed value is in display units: the lathe's X readout can show a
+/// diameter, and the controller keeps a radius.
+fn position_write(app: &mut LincApp, axis: &str, text: &str) -> Result<String, String> {
+    let mut target = crate::state::eval_expression(text).ok_or("not a number or expression")?;
+    if axis == "X" && app.reads_x_as_diameter() {
+        target /= 2.0;
+    }
+    let work_now = app
+        .snapshot
+        .positions
+        .axes
+        .get(axis)
+        .map(|position| position.work)
+        .ok_or_else(|| format!("{axis} is not a machine axis"))?;
+    if !app.snapshot.writes_allowed() {
+        return Err(write_refusal(app));
+    }
+    let tool = app.snapshot.tool_change.current_tool;
+    if tool == 0 {
+        return Err("no tool in the spindle — load a tool first".into());
+    }
+    let Some(mut row) = app
+        .snapshot
+        .tool_table
+        .rows
+        .iter()
+        .find(|row| row.tool == tool)
+        .cloned()
+    else {
+        return Err(format!("T{tool} is not in the tool table"));
+    };
+    let old = tool_offset(&row, axis);
+    let new = offset_after_touch_off(old, work_now, target);
+    row.geometry.values.insert(axis.to_string(), new);
+    if axis == "Z" {
+        // The tool table keeps both: `Z` is the length column and `length` is
+        // the same value read by the rest of the HMI.
+        row.geometry.length = Some(new);
+    }
+    let revision = app.snapshot.tool_table.revision;
+    app.send(MachineCommand::SetToolTableRow {
+        row,
+        old_tool: None,
+        expected_revision: revision,
+    });
+    Ok(format!("T{tool} {axis} offset {new:.4} written"))
+}
+
+/// The tool offset the table carries for `axis`.
+///
+/// `Z` is read from `length` first, the same order the tool table writes it, so
+/// the preview cannot promise a value the file would not hold.
+fn tool_offset(row: &ToolRow, axis: &str) -> f64 {
+    let stored = if axis == "Z" {
+        row.geometry
+            .length
+            .or_else(|| row.geometry.values.get("Z").copied())
+    } else {
+        row.geometry.values.get(axis).copied()
+    };
+    stored.unwrap_or(0.0)
+}
+
+/// The offset a tool must carry for the work coordinate to read `target`.
+///
+/// The controller reports `work = machine - work_offset - tool_offset`, so the
+/// correction is the gap between that reading and the position the operator says
+/// the tool is at.
+fn offset_after_touch_off(current_offset: f64, work_now: f64, target: f64) -> f64 {
+    current_offset + (work_now - target)
+}
+
+/// What the confirm would write, under the entry: the offset now and the one it
+/// becomes. Static text, so the operator sees the correction before pressing
+/// Enter.
+fn position_preview(app: &LincApp, axis: &str, text: &str) -> String {
+    let Some(mut target) = crate::state::eval_expression(text) else {
+        return format!("{axis} OFFSET —");
+    };
+    if axis == "X" && app.reads_x_as_diameter() {
+        target /= 2.0;
+    }
+    let work_now = app
+        .snapshot
+        .positions
+        .axes
+        .get(axis)
+        .map(|position| position.work)
+        .unwrap_or(0.0);
+    let tool = app.snapshot.tool_change.current_tool;
+    let Some(row) = app
+        .snapshot
+        .tool_table
+        .rows
+        .iter()
+        .find(|row| row.tool == tool)
+    else {
+        return format!("{axis} OFFSET —");
+    };
+    let old = tool_offset(row, axis);
+    let new = offset_after_touch_off(old, work_now, target);
+    format!("{axis} OFFSET {old:.4} → {new:.4}")
+}
+
+/// The dialog: the position entry and the offset the confirm writes. It is
+/// drawn from the page because the page owns the command.
+fn draw_position_dialog(app: &mut LincApp, ui: &mut Ui) {
+    let Some(mut entry) = app.tools.position.take() else {
+        return;
+    };
+    let tool = app.snapshot.tool_change.current_tool;
+    let fresh = std::mem::replace(&mut entry.fresh, false);
+    let error = entry.error.clone();
+    let mut text = entry.buffer.clone();
+    let cancel_key = app.prefs.keymap.back.label();
+    let id = egui::Id::unique("linc-tool-position");
+    egui::Window::new("TOOL POSITION")
+        .id(egui::Id::unique("linc-tool-position-dialog"))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .default_width(420.0)
+        .show(ui.ctx(), |ui| {
+            ui.label(
+                RichText::new(format!("T{tool} IN SPINDLE"))
+                    .monospace()
+                    .size(theme::font_size(10.0))
+                    .color(theme::C3),
+            );
+            ui.label(
+                RichText::new(
+                    "Enter the position the tool is at now. The tool offset is rewritten so \
+                     the work coordinate reads it.",
+                )
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+            );
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!("SET {} POSITION", entry.axis))
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
+                );
+                let field = ui.add(
+                    egui::TextEdit::singleline(&mut text)
+                        .id(id)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(140.0)
+                        .hint_text("position"),
+                );
+                if fresh {
+                    // No click-to-focus and no Tab on this keyboard: the field
+                    // takes the ring on open and on every axis change, with the
+                    // whole value selected so typing replaces it.
+                    field.request_focus();
+                    if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(0),
+                                egui::text::CCursor::new(text.chars().count()),
+                            )));
+                        state.store(ui.ctx(), id);
+                    }
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(position_preview(app, &entry.axis, &text))
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(format!(
+                    "ENTER WRITES · {cancel_key} CANCELS · X/Y/Z PICKS THE AXIS"
+                ))
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+            );
+            if let Some(message) = &error {
+                ui.label(
+                    RichText::new(message)
+                        .size(theme::font_size(10.0))
+                        .color(theme::ERROR),
+                );
+            }
+        });
+    entry.buffer = text;
+    // Put it back: the key handler re-inserts it too when a confirm was
+    // refused, and this frame drew that same entry.
+    app.tools.position = Some(entry);
+}
+
 fn table_card(app: &mut LincApp, ui: &mut Ui) {
     let pocket = app.profile.changer.uses_pockets();
     let lathe = app.profile.variant == MachineVariant::Lathe;
@@ -970,7 +1344,8 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                                     }
                                 } else {
                                     let kind_override = app
-                                        .prefs.preferences
+                                        .prefs
+                                        .preferences
                                         .tool_kinds
                                         .get(&entry.tool.to_string())
                                         .cloned();
@@ -1093,7 +1468,7 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(format!(
-                    "ARROWS MOVE · ENTER EDITS · ESC CANCELS · T LOADS + G43 · {number_key} TYPES NUMBER · + - * / ACCEPTED"
+                    "ARROWS MOVE · ENTER EDITS · ESC CANCELS · T LOADS + G43 · Z TOOL POSITION · {number_key} TYPES NUMBER · + - * / ACCEPTED"
                 ))
                 .size(theme::font_size(9.0))
                 .color(theme::MUTED),
@@ -1124,7 +1499,8 @@ fn draw_kind_popup(app: &mut LincApp, ui: &mut Ui, opened_now: bool) {
     };
     let lathe = app.profile.variant == MachineVariant::Lathe;
     let current = app
-        .prefs.preferences
+        .prefs
+        .preferences
         .tool_kinds
         .get(&entry.tool.to_string())
         .cloned()
@@ -1183,7 +1559,8 @@ fn draw_kind_popup(app: &mut LincApp, ui: &mut Ui, opened_now: bool) {
                 });
         });
     if let Some(kind) = chosen {
-        app.prefs.preferences
+        app.prefs
+            .preferences
             .tool_kinds
             .insert(entry.tool.to_string(), kind.to_string());
         app.touch_preferences();
@@ -1286,14 +1663,36 @@ fn save_tool_row(app: &mut LincApp, tool: u16) {
         row.tool = renumbered;
         row.description = draft.description.clone();
         row.geometry.diameter = parse_number(&draft.diameter, "diameter")?;
-        row.geometry.length = parse_number(&draft.length, "length")?;
         row.geometry.nose_radius = parse_number(&draft.nose_radius, "nose radius")?;
         row.geometry.orientation = parse_number(&draft.orientation, "orientation")?
             .map(|value| value.clamp(0.0, 9.0) as u8);
         if uses_pockets {
             row.pocket = parse_number(&draft.pocket, "pocket")?.map(|value| value as u16);
         }
-        for axis in ["X", "Z", "I", "J"] {
+        // `Z` and the length column are one tool offset under two names: the
+        // file's `Z` word is the length, and the loader fills both. A row must
+        // carry both or the write is lost — the renderer writes the values map,
+        // so a cell that updated only `length` saved the old Z and the row came
+        // back unchanged on the reload. Write the one number to both, and drop
+        // both when the cell was cleared.
+        match parse_number(&draft.length, "length")? {
+            Some(value) => {
+                row.geometry.length = Some(value);
+                row.geometry.values.insert("Z".to_string(), value);
+            }
+            None => {
+                row.geometry.length = None;
+                let remaining = row
+                    .geometry
+                    .values
+                    .iter()
+                    .filter(|(name, _)| *name != "Z")
+                    .map(|(name, value)| (name.to_string(), *value))
+                    .collect::<Vec<_>>();
+                row.geometry.values = linc_core::model::AxisMap::from_entries(remaining);
+            }
+        }
+        for axis in ["X", "I", "J"] {
             let text = draft.axes.get(axis).cloned().unwrap_or_default();
             match parse_number(&text, axis)? {
                 Some(value) => {
@@ -1408,7 +1807,10 @@ pub fn issue_change(app: &mut LincApp) {
 
 #[cfg(test)]
 mod tests {
-    use super::{accepted_numbers, load_tool_message, parse_number, tool_number_verdict};
+    use super::{
+        accepted_numbers, load_tool_message, offset_after_touch_off, parse_number,
+        tool_number_verdict, tool_offset,
+    };
     use linc_core::model::ToolRow;
 
     fn table() -> Vec<ToolRow> {
@@ -1482,5 +1884,34 @@ mod tests {
         assert_eq!(parse_number("  ", "offset").unwrap(), None);
         assert!(parse_number("1/0", "offset").is_err());
         assert!(parse_number("12mm", "offset").is_err());
+    }
+
+    /// `work = machine - work_offset - tool_offset`, so the correction is the gap
+    /// between the work reading and the position the operator says the tool is
+    /// at. A negative gap means the offset must grow, and a correct entry leaves
+    /// it alone.
+    #[test]
+    fn a_touch_off_moves_the_offset_by_the_gap() {
+        assert_eq!(offset_after_touch_off(-56.0, 0.0, -1.5), -54.5);
+        assert_eq!(offset_after_touch_off(0.0, 2.0, 0.0), 2.0);
+        assert_eq!(
+            offset_after_touch_off(10.0, -3.0, -3.0),
+            10.0,
+            "an entry that already matches the reading changes nothing"
+        );
+    }
+
+    /// Z lives in two places in the row (`length` and `values["Z"]`), and a
+    /// write keeps them equal. When an older row carries only one of them, the
+    /// getter takes either; `length` is the canonical name, the same order the
+    /// tool table writes.
+    #[test]
+    fn the_tool_offset_reads_z_from_the_length_or_the_values() {
+        let mut row = ToolRow::new(1);
+        row.geometry.values.insert("Z".to_string(), -3.0);
+        assert_eq!(tool_offset(&row, "Z"), -3.0, "values only");
+        row.geometry.length = Some(-12.5);
+        assert_eq!(tool_offset(&row, "Z"), -12.5, "the length wins");
+        assert_eq!(tool_offset(&row, "X"), 0.0, "a missing axis is zero");
     }
 }

@@ -204,6 +204,7 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
             false,
             false,
             false,
+            false,
             None,
         );
         if let Some(header) = header {

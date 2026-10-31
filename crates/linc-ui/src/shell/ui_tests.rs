@@ -2965,6 +2965,164 @@ fn the_tool_number_dialog_reports_the_issue_gate_and_escapes_clean() {
     assert!(!harness.app.overlay_open());
 }
 
+/// The row follows the tool in the spindle: after a change, the operator is on
+/// the row they are about to touch off. Browsing by hand is not yanked back
+/// while that tool stays the same.
+#[test]
+fn a_tool_change_moves_the_table_selection_to_the_active_row() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Tools);
+    harness.frame(&[]);
+    harness.app.tools.selected_row = 0;
+
+    // The fixture's table is T1, T12: the second row is T12.
+    harness
+        .app
+        .send(MachineCommand::SetCurrentTool { tool: 12 });
+    harness.frame(&[]);
+    assert_eq!(harness.app.snapshot.tool_change.current_tool, 12);
+    assert_eq!(
+        harness.app.tools.selected_row, 1,
+        "the selection follows the tool in the spindle"
+    );
+
+    // A hand-moved cursor survives frames while the tool is unchanged.
+    harness.app.tools.selected_row = 0;
+    harness.frame(&[]);
+    assert_eq!(harness.app.tools.selected_row, 0);
+
+    // The next change moves it again, to the other row.
+    harness.app.send(MachineCommand::SetCurrentTool { tool: 1 });
+    harness.frame(&[]);
+    assert_eq!(harness.app.tools.selected_row, 0);
+}
+
+/// Editing the mill's OFFSET cell must write the Z the table loader reads back.
+/// The row carries the length in two places — `length` and `values["Z"]` — and
+/// the file is written from the values map, so a cell that updated only `length`
+/// saved the old Z and the row reverted on the next reload.
+#[test]
+fn editing_the_offset_cell_writes_the_z_the_table_reads() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Tools);
+    harness.frame(&[]);
+    harness.sent.borrow_mut().clear();
+
+    // The fixture's T1 is Z-56: OFFSET is column 2 on a mill (T, TYPE, OFFSET, Ø,
+    // DESCRIPTION).
+    harness.app.tools.selected_row = 0;
+    harness.app.tools.selected_column = 2;
+    harness.frame(&[egui::Key::Enter]);
+    assert!(harness.app.tools.editing, "Enter opens the cell editor");
+    harness.app.tools.edit_buffer = "-50".into();
+    harness.frame(&[egui::Key::Enter]);
+
+    let sent = harness.sent.borrow();
+    let row = match sent.as_slice() {
+        [MachineCommand::SetToolTableRow { row, .. }] => row.clone(),
+        other => panic!("expected one tool-table write: {other:?}"),
+    };
+    assert_eq!(row.geometry.length, Some(-50.0), "the length field");
+    assert_eq!(
+        row.geometry.values.get("Z").copied(),
+        Some(-50.0),
+        "the Z the tool table file and G43 read"
+    );
+}
+
+/// `Z` asks where the tool is and writes the in-spindle tool's offset so the
+/// work coordinate reads it: the fixture's T1 carries Z-56 and the work Z reads
+/// 0, so saying the tool is at -1.5 moves the offset to -54.5.
+#[test]
+fn the_tool_position_dialog_writes_the_offset_of_the_tool_in_the_spindle() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Tools);
+    harness.app.send(MachineCommand::SetCurrentTool { tool: 1 });
+    harness.frame(&[]);
+    harness.sent.borrow_mut().clear();
+
+    harness.frame(&[egui::Key::Z]);
+    let entry = harness
+        .app
+        .tools
+        .position
+        .as_ref()
+        .expect("Z opens the tool-position dialog");
+    assert_eq!(entry.axis, "Z", "the shortcut opens on the Z axis");
+    assert_eq!(entry.buffer, "0.000", "seeded with the work reading");
+    assert!(harness.app.overlay_open(), "the dialog owns the keyboard");
+
+    harness.app.tools.position.as_mut().unwrap().buffer = "-1.5".into();
+    harness.frame(&[egui::Key::Enter]);
+    assert!(
+        harness.app.tools.position.is_none(),
+        "a confirmed entry closes the dialog"
+    );
+    let sent = harness.sent.borrow();
+    let row = match sent.as_slice() {
+        [MachineCommand::SetToolTableRow { row, old_tool, .. }] => {
+            assert_eq!(*old_tool, None, "the tool number does not change");
+            row.clone()
+        }
+        other => panic!("expected one tool-table write: {other:?}"),
+    };
+    assert_eq!(row.tool, 1);
+    let z = row.geometry.values.get("Z").copied().unwrap_or_default();
+    assert!((z + 54.5).abs() < 1e-9, "Z offset {z} is -56 + 1.5");
+    assert_eq!(
+        row.geometry.length,
+        Some(z),
+        "length and the Z column stay the same value"
+    );
+}
+
+/// An `X`/`Y`/`Z` key picks the axis being entered. Escape cancels, and a
+/// blocked write keeps the dialog open with the reason instead of closing on a
+/// silent no-op.
+#[test]
+fn the_tool_position_dialog_switches_axis_and_reports_a_blocked_write() {
+    // Power off: the tool table is not writable.
+    let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::Off);
+    harness.app.set_page(Page::Tools);
+    harness.app.send(MachineCommand::SetCurrentTool { tool: 1 });
+    harness.frame(&[]);
+    harness.sent.borrow_mut().clear();
+
+    harness.frame(&[egui::Key::Z]);
+    assert!(harness.app.tools.position.is_some());
+    harness.frame(&[egui::Key::X]);
+    let entry = harness.app.tools.position.as_ref().expect("still open");
+    assert_eq!(entry.axis, "X", "X picks the axis under the cursor");
+
+    harness.frame(&[egui::Key::Enter]);
+    let entry = harness
+        .app
+        .tools
+        .position
+        .as_ref()
+        .expect("a blocked write keeps the dialog open");
+    assert!(
+        entry
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("must be ON")),
+        "the refusal is shown: {:?}",
+        entry.error
+    );
+    assert!(harness.sent.borrow().is_empty(), "nothing was written");
+
+    // Escape closes it and gives the keyboard back.
+    harness.frame(&[egui::Key::Escape]);
+    assert!(harness.app.tools.position.is_none());
+    assert!(!harness.app.overlay_open());
+    assert!(
+        !harness
+            .ctx
+            .memory(|memory| memory.has_focus(egui::Id::unique("linc-tool-position"))),
+        "the field gives the keyboard back"
+    );
+}
+
 struct RecordingBackend {
     inner: linc_core::sim::SimBackend,
     sent: std::rc::Rc<std::cell::RefCell<Vec<MachineCommand>>>,

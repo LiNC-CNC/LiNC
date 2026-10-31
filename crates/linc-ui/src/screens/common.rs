@@ -360,6 +360,41 @@ pub fn axis_cards(app: &LincApp, ui: &mut Ui) {
     }
 }
 
+/// Read-only axis readout row in the OFFSETS card style.
+///
+/// The Tools page draws it above the table: the operator touches off and
+/// watches where the head is, and the readout stays put while the table
+/// scrolls. It takes no clicks and no axis keys — the table owns the keyboard
+/// and `Z` opens the tool-position dialog.
+pub fn position_readout_row(app: &LincApp, ui: &mut Ui) {
+    let axes = app.axes();
+    if axes.is_empty() {
+        return;
+    }
+    let gap = 8.0;
+    let width =
+        ((ui.available_width() - gap * (axes.len() as f32 - 1.0)) / axes.len() as f32).max(120.0);
+    let height = theme::DRO_CARD_HEIGHT_OFFSETS;
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        for axis in &axes {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+            let (work, machine, _) = axis_display(app, axis).unwrap_or((0.0, 0.0, 0.0));
+            paint_dro_frame(ui, rect, false);
+            paint_dro_readout(
+                ui,
+                rect,
+                axis,
+                work,
+                machine,
+                false,
+                true,
+                app.reads_x_as_diameter(),
+            );
+        }
+    });
+}
+
 /// The card chrome shared by every axis readout.
 pub fn paint_dro_frame(ui: &Ui, rect: egui::Rect, accent: bool) {
     let painter = ui.painter_at(rect);
@@ -1629,6 +1664,9 @@ pub fn trajectory(
     show_legend: bool,
     // Frame the tool tip, trail and origin markers as well as the program.
     fit_all: bool,
+    // Frame the program and the live tool head, and nothing else. The manual
+    // views want the part and the head together without the trail.
+    fit_tool: bool,
     // Draw the machine-origin triad and the line to the work origin.
     origin_tether: bool,
     // Keep the machine envelope on regardless of the Ctrl+B cycle.
@@ -1667,6 +1705,7 @@ pub fn trajectory(
     view.fit = *fit;
     view.auto_fit = *auto_fit;
     view.fit_all = fit_all;
+    view.fit_tool = fit_tool;
     view.origin_tether = origin_tether;
     view.machine_bounds_always = machine_bounds_always;
     view.selected_line = selected_line;
@@ -2050,7 +2089,8 @@ pub fn live_split<R1, R2>(
 /// Live toolpath card for the manual modes.
 ///
 /// `FIT` and `CLEAR TRAIL` are keyboard commands, so the header carries no
-/// buttons.
+/// buttons. The fit frames the program and the tool head together, so the page
+/// opens (and `Ctrl+0` re-frames) with both the part and the head in view.
 pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), card_height.max(160.0)),
@@ -2085,7 +2125,9 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
             None,
             current_line,
             false,
+            // Frame the program and the live tool head together.
             false,
+            true,
             false,
             false,
             None,

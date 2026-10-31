@@ -353,10 +353,8 @@ fn render_row(row: &ToolRow, columns: &[ToolColumn]) -> String {
             ToolColumn::D => row.geometry.diameter,
             ToolColumn::Z => row
                 .geometry
-                .values
-                .get("Z")
-                .copied()
-                .or(row.geometry.length),
+                .length
+                .or_else(|| row.geometry.values.get("Z").copied()),
             ToolColumn::R => row.geometry.nose_radius,
             ToolColumn::Q => row.geometry.orientation.map(|value| value as f64),
             ToolColumn::I => row.geometry.front_angle,
@@ -494,5 +492,28 @@ mod tests {
         assert_eq!(table.rows[0].geometry.back_angle, Some(10.0));
         assert_eq!(table.rows[0].geometry.diameter, Some(0.0625));
         assert_eq!(table.rows[0].geometry.orientation, Some(2));
+    }
+
+    /// The `Z` column is written from the length, the field the HMI edits, so a
+    /// row that carries only the length cannot save the old Z from a stale
+    /// values map. A row that carries only `values["Z"]` still writes it.
+    #[test]
+    fn the_z_column_is_written_from_the_length() {
+        let columns = [ToolColumn::T, ToolColumn::Z];
+        let mut row = ToolRow::new(1);
+        row.geometry.length = Some(-50.0);
+        row.geometry.values.insert("Z".to_string(), -56.068);
+        assert!(
+            render_row(&row, &columns).contains("Z-50"),
+            "the length wins: {}",
+            render_row(&row, &columns)
+        );
+
+        row.geometry.length = None;
+        assert!(
+            render_row(&row, &columns).contains("Z-56.068"),
+            "values-only rows still write their Z: {}",
+            render_row(&row, &columns)
+        );
     }
 }

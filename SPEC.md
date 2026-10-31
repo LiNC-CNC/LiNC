@@ -112,7 +112,7 @@ else, so it cannot shadow another page's command.
 | Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Backspace` delete |
 | Help | `/` or `Ctrl+F` focus search, `Up`/`Down` select, `Enter` open the reference, `Backspace` back in the reference dialog |
 | Offsets | `Up`/`Down` select a row, `X`/`Y`/`Z` edit the DRO, `A` activate the selected work system |
-| Tools | Arrows select a row, `Enter` edit the selected cell, `T` load the selected row's tool (`Tn M6` + `G43 Hn`), `Ctrl+T` type a tool number and load it |
+| Tools | Arrows select a row, `Enter` edit the selected cell, `T` load the selected row's tool (`Tn M6` + `G43 Hn`), `Ctrl+T` type a tool number and load it, `Z` open the tool-position dialog |
 | Probe | Arrows select a row |
 
 Every page that draws a toolpath (Machine, Program, Manual, Homing and the
@@ -843,6 +843,29 @@ Primary quick tool-change surface; no MDI entry required.
 - The page is the table: there is no separate change pane and no changer
   pane. Current and prepared tool are shown above it as `CURRENT; Tn` and
   `PREPARED; Tn` (the numbers in the axis-label amber).
+- An axis DRO row sits above the table, at the same place and in the same
+  cards as the Offsets page: the work coordinate large, the machine coordinate
+  dimmed underneath, optional axes from the INI and the lathe's X in the
+  configured radius/diameter convention. It is display only — no click target
+  and no axis keys — because the table owns the keyboard on this page.
+- The table selection follows the tool in the spindle: when `tool_in_spindle`
+  changes to a tool the table carries, that row is selected and scrolled into
+  view. A cursor the operator moved by hand stays put while the tool in the
+  spindle is unchanged.
+- `Z` opens the tool-position dialog for the tool in the spindle. It asks where
+  the tool is now, seeded with the work coordinate the controller reports, and
+  writes the tool offset so the work coordinate reads the entered value. The
+  correction is the gap between the two: `work = machine - work offset - tool
+  offset`, so a tool that reads `+2.000` at a surface it should read `0` at gets
+  an offset 2 mm larger. A `Z` entry updates the tool's length (`Z` column and
+  the `length` field together); `X` and `Y` update the geometry offsets the same
+  way. The dialog is one line of chrome, not a second DRO: `SET <axis> POSITION`
+  with the entry, the offset the confirm would write, and the axis letter keys
+  that pick which coordinate is being entered. The field selects its whole value,
+  the entry accepts arithmetic, `Enter` writes, `Esc` cancels, and a refused
+  write (off, running, protect, panel offline) keeps the dialog open with the
+  reason. The write goes through the same `SetToolTableRow` command as an edited
+  cell, which re-applies `G43 Hn` because the row is the active tool.
 - Tool table: number, description, dimensions/geometry, optional
   pocket/station and type. The type is LiNC's label, not machine data: the
   LinuxCNC tool table has no type column, so it is inferred from the geometry
@@ -1290,6 +1313,15 @@ jog in JOG mode.
 - `CLEAR TRAIL` is a view-only, focusable action in the graph header; it clears
   only the past live trail and re-seeds at the current position. It never
   clears the loaded program or changes machine state.
+- The graph's default scale, and `Ctrl+0`, frame the program **and** the live
+  tool head, so the part and the head are both on screen when the page opens.
+  The live trail and the origin markers are not part of that fit: a probe
+  session can drag the trail across the envelope, and including it would shrink
+  the part to nothing. The head the fit framed is latched, so jogging does not
+  rescale the picture; the view pans to keep the head in sight instead, `Ctrl+0`
+  re-frames the head where it now is, and a late layout or a window resize still
+  refits to the program and that head. The operator's own zoom/pan is left
+  alone.
 - **Large, readable coordinates** are always visible beside the graph:
   work coordinates (primary), machine coordinates (secondary) and
   distance-to-go, with units and sign. Work coordinates use a large monospace

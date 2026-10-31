@@ -197,12 +197,19 @@ impl LincApp {
             || self.overlay.messages_dialog
             || self.help.dialog.is_some()
             || self.tools.number.is_some()
+            || self.tools.position.is_some()
             || self.snapshot.tool_change.status == linc_core::model::ToolChangeStatus::ManualPrompt
     }
 
     pub fn escape(&mut self) {
         if self.tools.number.is_some() {
             self.tools.number = None;
+            return;
+        }
+        // The tool-position dialog takes its own Escape in the page, where a
+        // refused entry keeps it open. This is the path for any other caller.
+        if self.tools.position.is_some() {
+            self.tools.position = None;
             return;
         }
         if self.overlay.messages_dialog {

@@ -310,10 +310,11 @@ impl LincApp {
                 self.tools.selected_column = 1;
             }
         } else {
-            // The tool-number dialog belongs to the page. Left open across a
-            // page change it would keep `overlay_open` true with nothing on
+            // The tool dialogs belong to the page. Left open across a page
+            // change they would keep `overlay_open` true with nothing on
             // screen, and every key would stay with a dialog that is not drawn.
             self.tools.number = None;
+            self.tools.position = None;
         }
         if page == Page::Help {
             self.help.ensure_loaded();

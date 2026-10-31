@@ -310,6 +310,7 @@ fn offset_preview(app: &mut LincApp, ui: &mut Ui, height: f32) {
         None,
         false,
         true,
+        false,
         true,
         true,
         highlight,

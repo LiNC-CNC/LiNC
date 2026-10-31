@@ -323,6 +323,7 @@ impl LincApp {
                 hints.push(("Enter".into(), "EDIT"));
                 hints.push(("T".into(), "LOAD + G43"));
                 hints.push((k.tool_number.label(), "TYPE NUMBER"));
+                hints.push(("Z".into(), "TOOL POSITION"));
                 hints.push(("Ctrl+N".into(), "NEW TOOL"));
                 hints.push(("Backspace".into(), "DELETE TOOL"));
             }
