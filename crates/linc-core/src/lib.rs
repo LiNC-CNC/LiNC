@@ -6,6 +6,7 @@ pub mod config;
 pub mod diag;
 pub mod editor;
 pub mod faults;
+pub mod g7x;
 pub mod gcode;
 pub mod help;
 pub mod homing;
