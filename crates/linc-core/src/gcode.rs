@@ -1123,6 +1123,9 @@ struct LatheProfileCycle {
     q: Option<u16>,
     /// G71/G72 remove material in passes first; G70 only finishes.
     roughing: bool,
+    /// G71 traverses in Z, so its layers are Z lines at one X. G72 traverses
+    /// in X instead, and its layers are not modelled.
+    z_passes: bool,
 }
 
 /// The `G70`/`G71`/`G72` family in a block, if one is there.
@@ -1139,10 +1142,11 @@ fn lathe_profile_cycle(tokens: &[Token]) -> Option<LatheProfileCycle> {
         let Some(value) = parse_number(&token.text[1..]) else {
             continue;
         };
-        let (roughing, finishing) = match value {
-            70.0 | 70.1 | 70.2 => (false, true),
-            71.0 | 71.1 | 71.2 | 72.0 | 72.1 | 72.2 => (true, true),
-            _ => (false, false),
+        let (roughing, finishing, z_passes) = match value {
+            70.0 | 70.1 | 70.2 => (false, true, false),
+            71.0 | 71.1 | 71.2 => (true, true, true),
+            72.0 | 72.1 | 72.2 => (true, true, false),
+            _ => (false, false, false),
         };
         if !finishing {
             continue;
@@ -1153,6 +1157,7 @@ fn lathe_profile_cycle(tokens: &[Token]) -> Option<LatheProfileCycle> {
                 .filter(|label| *label > 0)
                 .map(|l| l as u16),
             roughing,
+            z_passes,
         });
     }
     None
@@ -1658,6 +1663,171 @@ fn compensate(
         arc: None,
         junction: (exit, direction),
     })
+}
+
+/// The Z spans a tool at radius `x` still has metal to remove over.
+///
+/// A lathe profile is a radius against Z. At one X the tool cuts wherever the
+/// profile is at or inside that radius -- outside it, the profile is the surface
+/// and cutting there would gouge the part.
+fn layer_spans(profile: &[[f64; 3]], x: f64) -> Vec<(f64, f64)> {
+    let mut spans: Vec<(f64, f64)> = Vec::new();
+    for pair in profile.windows(2) {
+        let (x0, z0, x1, z1) = (pair[0][0], pair[0][2], pair[1][0], pair[1][2]);
+        let mut low: f64 = 0.0;
+        let mut high: f64 = 1.0;
+        let dx = x1 - x0;
+        if dx.abs() < 1e-12 {
+            if x0 > x + 1e-12 {
+                continue;
+            }
+        } else {
+            let cross = (x - x0) / dx;
+            if dx > 0.0 {
+                high = high.min(cross);
+            } else {
+                low = low.max(cross);
+            }
+        }
+        if low >= high {
+            continue;
+        }
+        let from = z0 + (z1 - z0) * low;
+        let to = z0 + (z1 - z0) * high;
+        let (from, to) = if from <= to { (from, to) } else { (to, from) };
+        match spans.last_mut() {
+            Some(last) if (from - last.1).abs() < 1e-9 => last.1 = to,
+            _ => spans.push((from, to)),
+        }
+    }
+    // The contour is walked in its own order, which need not be Z order: sort the
+    // spans and join the ones that touch, so one layer is one cut.
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut merged: Vec<(f64, f64)> = Vec::new();
+    for (from, to) in spans {
+        match merged.last_mut() {
+            Some(last) if from <= last.1 + 1e-9 => last.1 = last.1.max(to),
+            _ => merged.push((from, to)),
+        }
+    }
+    merged
+}
+
+/// Replace each G71 contour with the layers it removes, then the pass it leaves.
+///
+/// The planner expands a `G71 Q` into the profile body, which draws the finished
+/// contour once. The machine does not cut that contour first: it takes layers of
+/// `I` depth off the surface `X`, clearing `R` between them, and stops `D` short
+/// of the profile for the finishing pass. Drawing only the contour made the
+/// preview look nothing like the toolpath.
+fn apply_roughing(preview: &mut Preview, cycles: &[Roughing]) {
+    if cycles.is_empty() {
+        return;
+    }
+    for cycle in cycles {
+        let Some(start) = preview
+            .segments
+            .iter()
+            .position(|segment| segment.line == cycle.line)
+        else {
+            continue;
+        };
+        let mut end = start;
+        while end < preview.segments.len() && preview.segments[end].line == cycle.line {
+            end += 1;
+        }
+        let run = preview.segments[start..end].to_vec();
+        let tag = preview.segment_loop.get(start).copied().unwrap_or(0);
+        let tool = run[0].tool;
+        // The contour as a polyline, starting where the first move of the body
+        // lands: that first move is the rapid to the profile's start, so its own
+        // start point is wherever the tool happened to be.
+        let mut profile: Vec<[f64; 3]> = Vec::with_capacity(run.len());
+        profile.extend(run.iter().map(|segment| segment.end));
+        if profile.len() < 2 {
+            continue;
+        }
+        let inner = profile
+            .iter()
+            .map(|point| point[0])
+            .fold(f64::MAX, f64::min)
+            + cycle.allow;
+        let mut made: Vec<PathSegment> = Vec::new();
+        let level = profile[0][1];
+        let mut at = profile[0];
+        let add = |made: &mut Vec<PathSegment>, at: &mut [f64; 3], to: [f64; 3], kind| {
+            if (to[0] - at[0]).abs() < 1e-12 && (to[2] - at[2]).abs() < 1e-12 {
+                return;
+            }
+            made.push(PathSegment {
+                start: *at,
+                end: to,
+                kind,
+                line: cycle.line,
+                arc: None,
+                tool,
+            });
+            *at = to;
+        };
+        let mut x = cycle.from;
+        let mut layers = 0;
+        while x > inner + 1e-9 && layers < 256 {
+            for (from, to) in layer_spans(&profile, x) {
+                add(&mut made, &mut at, [x, level, from], SegmentKind::Rapid);
+                add(&mut made, &mut at, [x, level, to], SegmentKind::Feed);
+            }
+            // Clear the cut before stepping in.
+            let (clear, z) = (x + cycle.retract, at[2]);
+            add(&mut made, &mut at, [clear, level, z], SegmentKind::Rapid);
+            x -= cycle.increment;
+            layers += 1;
+        }
+        // The pass the cycle stops on: the profile, `D` short of the surface the
+        // finishing pass cuts. An arc keeps its radius and moves with the shift,
+        // which is the offset a single-axis shift gives.
+        for segment in &run {
+            let mut moved = segment.clone();
+            moved.start[0] += cycle.allow;
+            moved.end[0] += cycle.allow;
+            if let Some(arc) = moved.arc.as_mut() {
+                arc.center[0] += cycle.allow;
+            }
+            let kind = moved.kind;
+            let end_point = moved.end;
+            add(&mut made, &mut at, end_point, kind);
+            if moved.arc.is_some() {
+                // The drawn arc comes from its own spec, so keep the moved
+                // segment rather than the straight line `push` recorded.
+                if let Some(last) = made.last_mut() {
+                    *last = moved;
+                }
+            }
+        }
+        // Splice the layers in where the single contour was, re-tagged with the
+        // loop the contour ran in.
+        let count = made.len();
+        preview.segments.splice(start..end, made);
+        preview
+            .segment_loop
+            .splice(start..end, std::iter::repeat_n(tag, count));
+    }
+    // The counters and the per-line ranges are index based, so rebuild them.
+    preview.rapids = preview
+        .segments
+        .iter()
+        .filter(|segment| segment.kind == SegmentKind::Rapid)
+        .count();
+    preview.arcs = preview
+        .segments
+        .iter()
+        .filter(|segment| segment.kind == SegmentKind::Arc)
+        .count();
+    let mut bounds: BTreeMap<usize, (usize, usize)> = BTreeMap::new();
+    for (index, segment) in preview.segments.iter().enumerate() {
+        let entry = bounds.entry(segment.line).or_insert((index, index + 1));
+        entry.1 = index + 1;
+    }
+    preview.line_bounds = bounds;
 }
 
 /// Nested subroutine calls the preview follows before it gives up.
@@ -2889,6 +3059,25 @@ struct PlannedPreview {
     subroutines: Vec<SubroutineBody>,
     loops: Vec<LoopTrace>,
     loop_stacks: Vec<Vec<(u32, u32)>>,
+    /// The G71 cycles whose layers the preview draws in place of the one
+    /// contour pass the planner expands them into.
+    roughings: Vec<Roughing>,
+}
+
+/// A lathe roughing cycle's pass parameters, in machine (radius) units.
+#[derive(Clone, Copy, Debug)]
+struct Roughing {
+    /// The line the cycle is written on, which is also the line its contour is
+    /// tagged with.
+    line: usize,
+    /// `D`: material left on the profile for the finish pass.
+    allow: f64,
+    /// `I`: depth of each layer.
+    increment: f64,
+    /// `R`: clearance between layers.
+    retract: f64,
+    /// `X`: the surface the first layer starts from.
+    from: f64,
 }
 
 /// Split an o-word line into its label and the rest, as the interpreter reads
@@ -3711,6 +3900,17 @@ fn plan_statements(
     }
     let mut incomplete: Option<String> = None;
     let mut calls: Vec<(usize, Params)> = Vec::new();
+    // A profile cycle draws the contour of a body that lives elsewhere in the
+    // file, but at run time that contour is cut by the cycle's own block. So the
+    // blocks planned inside the body are tagged with the cycle's line, not with
+    // the body's lines: otherwise the live trail, which keeps the segments whose
+    // line the program has reached, would show the whole contour from the moment
+    // the program arrived at the subroutine -- a dozen lines before the cycle
+    // runs. Each entry is the call depth the expansion was entered at.
+    let mut profile_lines: Vec<(usize, usize)> = Vec::new();
+    // The G71 cycles met, so the drawing pass can replace each one's single
+    // contour with the layers of metal it actually removes.
+    let mut roughings: Vec<Roughing> = Vec::new();
     let mut repeats: Vec<(usize, i64)> = Vec::new();
     let mut pc = 0usize;
     let mut steps = 0usize;
@@ -3760,9 +3960,44 @@ fn plan_statements(
                                 .and_then(|label| subroutines.get(&label.to_string()).copied());
                             match profile {
                                 Some(start) if calls.len() < PREVIEW_DEPTH_LIMIT => {
-                                    if cycle.roughing && incomplete.is_none() {
+                                    if cycle.roughing && cycle.z_passes {
+                                        // A G71 removes its material in layers
+                                        // before the profile, and each layer is
+                                        // a Z traverse at one X. The drawing
+                                        // pass has the contour by then, so it
+                                        // draws the layers; record what it
+                                        // needs to place them.
+                                        //
+                                        // Its `X` is an axis word, so G7 halves
+                                        // it like any other X word. `D`, `I`
+                                        // and `R` are not axis words, and only
+                                        // G76 says its `I`, `J` and `K` are
+                                        // diameter measurements, so these stay
+                                        // machine units. Halving them too drew
+                                        // twice the layers this program cuts.
+                                        let unit = if live.metric_program { 1.0 } else { 25.4 };
+                                        let word = |letter: char, fallback: f64| {
+                                            word_value(&words, letter)
+                                                .map_or(fallback, |value| value * unit)
+                                        };
+                                        let from = word('x', 0.0);
+                                        roughings.push(Roughing {
+                                            line: *line,
+                                            allow: word('d', 0.0).abs(),
+                                            increment: word('i', 1.0).abs().max(1e-6),
+                                            retract: word('r', 0.5).abs(),
+                                            from: if live.lathe_diameter {
+                                                from * 0.5
+                                            } else {
+                                                from
+                                            },
+                                        });
+                                    } else if cycle.roughing && incomplete.is_none() {
+                                        // G72 faces in X instead of Z, so its
+                                        // layers are not the Z traverses above.
+                                        // Only its finishing contour is drawn.
                                         incomplete = Some(format!(
-                                            "line {}: the {} roughing passes are not drawn, only \
+                                            "line {}: the {} facing passes are not drawn, only \
                                              its profile",
                                             line, cycle.code
                                         ));
@@ -3776,6 +4011,7 @@ fn plan_statements(
                                         .map(|(key, value)| (key.clone(), *value))
                                         .collect();
                                     calls.push((pc, std::mem::replace(&mut params, frame)));
+                                    profile_lines.push((calls.len(), *line));
                                     pc = start + 1;
                                     continue;
                                 }
@@ -3803,7 +4039,11 @@ fn plan_statements(
                             }
                         }
                         blocks.push(PlannedBlock {
-                            line: *line,
+                            line: profile_lines
+                                .iter()
+                                .rev()
+                                .find(|(depth, _)| calls.len() >= *depth)
+                                .map_or(*line, |(_, cycle_line)| *cycle_line),
                             tokens: words,
                             loop_at: current_pass!(),
                         });
@@ -3880,6 +4120,13 @@ fn plan_statements(
                         }
                     }
                     params = saved;
+                    // Leaving that frame leaves its profile expansion too.
+                    while profile_lines
+                        .last()
+                        .is_some_and(|(depth, _)| calls.len() < *depth)
+                    {
+                        profile_lines.pop();
+                    }
                     pc = return_to + 1;
                 }
                 None => {
@@ -4123,6 +4370,7 @@ fn plan_statements(
         subroutines: bodies,
         loops: traces,
         loop_stacks: stacks,
+        roughings,
     }
 }
 
@@ -4225,6 +4473,7 @@ pub fn parse_preview_full(
         subroutines,
         loops,
         loop_stacks,
+        roughings,
     } = plan_preview(
         text,
         subs,
@@ -4475,11 +4724,25 @@ pub fn parse_preview_full(
             // A thread offset is a radius on the machine axis: in G7 diameter
             // mode the words are diameters, so they count half.
             let depth = if lathe_diameter { 0.5 } else { 1.0 };
-            let peak = mm(word_value(&tokens, 'i').unwrap_or(0.0));
-            let full = mm(word_value(&tokens, 'k').unwrap_or(0.0));
+            let Some(peak_word) = word_value(&tokens, 'i') else {
+                if incomplete.is_none() {
+                    incomplete = Some(format!(
+                        "line {line_no}: G76 needs an I word for the thread peak"
+                    ));
+                }
+                continue;
+            };
+            // `I` puts the peak against the drive line and `K` is the full depth
+            // measured from the peak, not from the drive line: the reference puts
+            // the last cut `K` "beyond the thread peak", which is further from the
+            // drive line in the direction the peak already sits. An external
+            // thread has a negative `I`, so its root is deeper into the material
+            // than the peak; adding `K` to the drive line instead put the root on
+            // the other side of the crest, where nothing is cut.
+            let peak = mm(peak_word) * depth;
+            let full = mm(word_value(&tokens, 'k').unwrap_or(0.0)) * depth;
             let drive_x = position[0];
             let start_z = position[2];
-            let root_x = drive_x + (peak + full) * depth;
             let end_z = if absolute {
                 mm(end_word) + offset_of(&offsets, "Z")
             } else {
@@ -4500,50 +4763,83 @@ pub fn parse_preview_full(
                 0.0
             };
             let y = position[1];
+            let crest_x = drive_x + peak;
             let mut at = [drive_x, y, start_z];
             let cut = |preview: &mut Preview, from: [f64; 3], to: [f64; 3], kind| {
                 if (to[2] - from[2]).abs() > 1e-12 || (to[0] - from[0]).abs() > 1e-12 {
                     push_cycle_segment(preview, from, to, kind, line_no, tool, pass);
                 }
             };
-            if entry > 0.0 {
-                let to = [root_x, y, start_z + direction * entry];
-                cut(&mut preview, at, to, SegmentKind::Feed);
-                at = to;
-            } else {
-                // No entry taper: the tool rapids in to the cut depth, then
-                // synchronises and starts cutting.
-                let to = [root_x, y, start_z];
-                cut(&mut preview, at, to, SegmentKind::Rapid);
-                at = to;
+            // The thread is cut in passes: `J` is the first cut's depth and `K`
+            // the last, with `R` the depth degression between them -- the depth
+            // of pass `n` is `J * n^(1/R)`, so R1 grows the depth evenly and R2
+            // grows it with the square root of the pass number, which keeps the
+            // area of each cut even. `Q` is the compound slide angle, so each
+            // deeper pass starts a little further along the drive line, which is
+            // what makes the band of lines a threading cycle leaves. Radius
+            // units, like `peak` and `full`.
+            let first = mm(word_value(&tokens, 'j').unwrap_or(full)).abs() * depth;
+            let degression = word_value(&tokens, 'r').unwrap_or(1.0).max(1.0);
+            let compound = word_value(&tokens, 'q')
+                .unwrap_or(0.0)
+                .to_radians()
+                .tan()
+                .abs();
+            let mut depths: Vec<f64> = Vec::new();
+            if first > 1e-9 && full > first {
+                let mut index = 1.0f64;
+                loop {
+                    let reach = first * index.powf(1.0 / degression);
+                    if !reach.is_finite() || reach >= full || index > 256.0 {
+                        break;
+                    }
+                    depths.push(reach);
+                    index += 1.0;
+                }
             }
-            let root_end = [root_x, y, end_z - direction * exit];
-            cut(&mut preview, at, root_end, SegmentKind::Feed);
-            at = root_end;
-            // The tool finishes at the end of the drive line, tapering out if `L`
-            // asked for it and rapiding clear if it did not.
-            let out = [drive_x, y, end_z];
-            cut(
-                &mut preview,
-                at,
-                out,
-                if exit > 0.0 {
-                    SegmentKind::Feed
+            depths.push(full);
+            for reach in depths {
+                let pass_x = crest_x + peak.signum() * reach;
+                // The compound offset pushes the deeper passes along the drive
+                // line, so the leading edge of the tool does the cutting.
+                let pass_start = start_z + direction * reach * compound;
+                if entry > 0.0 {
+                    // An entry taper feeds from the drive line down to the cut
+                    // over `E`, so the tool is at depth when the thread starts.
+                    let to = [pass_x, y, pass_start + direction * entry];
+                    cut(&mut preview, at, to, SegmentKind::Feed);
+                    at = to;
                 } else {
-                    SegmentKind::Rapid
-                },
-            );
+                    // No entry taper: the tool rapids to the cut depth, then
+                    // synchronises and starts cutting.
+                    let to = [pass_x, y, pass_start];
+                    cut(&mut preview, at, to, SegmentKind::Rapid);
+                    at = to;
+                }
+                let root_end = [pass_x, y, end_z - direction * exit];
+                cut(&mut preview, at, root_end, SegmentKind::Feed);
+                at = root_end;
+                if exit > 0.0 {
+                    // An exit taper climbs back to the crest over `E`, which is
+                    // the depth `K` above the root: `E` equal to `K` is the
+                    // reference's 45 degree taper.
+                    let to = [crest_x, y, end_z];
+                    cut(&mut preview, at, to, SegmentKind::Feed);
+                    at = to;
+                }
+                // Clear the thread before the next pass.
+                let out = [drive_x, y, at[2]];
+                cut(&mut preview, at, out, SegmentKind::Rapid);
+                at = out;
+            }
+            // The cycle leaves the tool at the end of the drive line.
+            let out = [drive_x, y, end_z];
+            cut(&mut preview, at, out, SegmentKind::Rapid);
             position = out;
             saw_motion = true;
             preview
                 .line_bounds
                 .insert(line_no, (line_start_segment, preview.segments.len()));
-            if incomplete.is_none() {
-                incomplete = Some(format!(
-                    "line {line_no}: the threading passes between the first cut and the root are \
-                     not drawn"
-                ));
-            }
             continue;
         }
 
@@ -4980,6 +5276,11 @@ pub fn parse_preview_full(
             .insert(line_no, (line_start_segment, preview.segments.len()));
         position = target;
     }
+
+    // The layers a G71 removes, drawn in place of the single contour the planner
+    // expanded it into. This runs before the bounds and the loop paths, which
+    // both read the segments.
+    apply_roughing(&mut preview, &roughings);
 
     // A loop whose passes draw the same path needs a counter the segment tags
     // cannot give it. Walk the drawn segments once and record one pass's seam,
@@ -5796,29 +6097,85 @@ mod tests {
 
     #[test]
     fn a_thread_cycle_draws_the_root_it_leaves() {
-        // g76.ngc's thread: the tool is on the drive line at X0.2, I-0.075 puts
-        // the peak 0.075 in and K0.045 the full depth beyond it, so the root the
-        // cycle cuts is at 0.2 - 0.075 + 0.045 = 0.17 inches. L2 with E0.05 tapers
-        // the exit.
+        // g76.ngc's 1/4-20 thread: the tool stands on the drive line at X0.2,
+        // which is the thread peak offset by I-0.075, and K0.045 is the depth
+        // below that peak, so the root is at 0.2 - 0.075 - 0.045 = 0.08 inches --
+        // which is diameter 0.16, the minor diameter of a 1/4-20 thread. L2 with
+        // E0.05 tapers the exit back up to the crest.
         let text =
             "G20 G90 G18\nG0 X0.2 Z0\nG76 P0.05 Z-.5 I-.075 J0.008 K0.045 Q29.5 L2 E0.05\nM2\n";
         let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
         assert!(preview.error.is_none(), "{:?}", preview.error);
-        let root = 0.17 * 25.4;
-        let cut = preview
+        let root = 0.08 * 25.4;
+        // The thread is cut in passes, so the deepest cut is the root and the
+        // others step down to it from `J`.
+        let cuts: Vec<f64> = preview
             .segments
             .iter()
-            .find(|segment| segment.kind == SegmentKind::Feed)
-            .expect("the threading cut");
-        assert!((cut.start[0] - root).abs() < 1e-6, "{cut:?}");
-        assert!((cut.end[2] + 0.45 * 25.4).abs() < 1e-6, "{cut:?}");
-        // The tool finishes at the end of the drive line, tapered out to X0.2.
+            .filter(|segment| segment.kind == SegmentKind::Feed)
+            .map(|segment| segment.start[0])
+            .collect();
+        let deepest = cuts.iter().copied().fold(f64::MAX, f64::min);
+        assert!((deepest - root).abs() < 1e-6, "{cuts:?}");
+        assert!(
+            cuts.iter().filter(|x| (**x - root).abs() < 1e-6).count() >= 2,
+            "the root is one of the passes: {cuts:?}"
+        );
+        let mut passes = cuts.clone();
+        passes.sort_by(f64::total_cmp);
+        passes.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        assert!(passes.len() > 4, "a 32 pass thread: {passes:?}");
+        // The last cut tapers from the root up to the crest, which is `I` away
+        // from the drive line, and the tool finishes on the drive line.
+        let taper = preview
+            .segments
+            .iter()
+            .filter(|segment| segment.kind == SegmentKind::Feed)
+            .last()
+            .expect("the exit taper");
+        assert!((taper.end[0] - 0.125 * 25.4).abs() < 1e-6, "{taper:?}");
+        assert!((taper.end[2] + 0.5 * 25.4).abs() < 1e-6, "{taper:?}");
         let end = ends(&preview);
         assert!((end[0] - 0.2 * 25.4).abs() < 1e-6, "{end:?}");
         assert!((end[2] + 0.5 * 25.4).abs() < 1e-6, "{end:?}");
-        assert!(preview.incomplete, "the passes between are not drawn");
-        let reason = preview.incomplete_reason.clone().unwrap_or_default();
-        assert!(reason.contains("threading passes"), "{reason}");
+    }
+
+    #[test]
+    fn a_thread_in_diameter_mode_measures_its_depth_from_the_peak() {
+        // The lathe screw demo: 18 mm stock, M12x1.75, G7 so I and K are
+        // diameters. Drive line X13 (dia), I-1 puts the peak at dia 12 and K2.147
+        // is the depth below it, so the root is dia 9.853. Adding K to the drive
+        // line instead -- the bug this pins -- put the root at dia 14.147, on the
+        // stock side of the crest, where the tool cuts nothing.
+        let text = "G21 G7 G18 G90\nG0 X13.0 Z50.0\n\
+                    G76 P1.75 Z2.54 I-1.0 J0.25 K2.147 R1.0 Q29.5 H0 E1.27 L2\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        // Diameter 9.853 is radius 4.9265, and it is the deepest of the passes.
+        let cuts: Vec<f64> = preview
+            .segments
+            .iter()
+            .filter(|segment| segment.kind == SegmentKind::Feed)
+            .map(|segment| segment.start[0])
+            .collect();
+        let deepest = cuts.iter().copied().fold(f64::MAX, f64::min);
+        assert!((deepest - 4.9265).abs() < 1e-6, "{cuts:?}");
+        // J0.25 with R1 steps evenly from diameter 12 to the root: nine passes.
+        let mut passes = cuts.clone();
+        passes.sort_by(f64::total_cmp);
+        passes.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        assert_eq!(passes.len(), 9, "{passes:?}");
+        // The crest is diameter 12, and the tool ends on the drive line at Z2.54.
+        let crest = preview
+            .segments
+            .iter()
+            .filter(|segment| segment.kind == SegmentKind::Feed)
+            .last()
+            .expect("the exit taper");
+        assert!((crest.end[0] - 6.0).abs() < 1e-6, "{crest:?}");
+        let end = ends(&preview);
+        assert!((end[0] - 6.5).abs() < 1e-6, "{end:?}");
+        assert!((end[2] - 2.54).abs() < 1e-6, "{end:?}");
     }
 
     #[test]
@@ -5831,28 +6188,109 @@ mod tests {
     }
 
     #[test]
-    fn a_profile_cycle_draws_the_contour_its_q_subroutine_names() {
-        // `G71 Q100 X2 Z-20` names a contour, not a point: X2 Z-20 are the limits
-        // the roughing passes work inside. Drawing the block's own words put a
-        // line where no cut happens; the cut is the profile in `o100 sub`.
+    fn a_profile_contour_is_tagged_with_the_cycle_that_cuts_it() {
+        // The contour lives in `o100 sub`, but the program never calls it: the
+        // cycle cuts it. Tagging the drawn blocks with the body's lines made the
+        // live trail, which keeps the segments whose line the program has
+        // reached, show the finished contour from the moment the program arrived
+        // at the subroutine -- a dozen lines before the cycle ran, which is what
+        // made the preview disagree with the machine on linc-lathe-screw.ngc.
         let text = "G21 G90 G18\nG0 X10 Z0\nG71 Q100 X2 Z-20 D0.5 I1 R0.3\nM2\n\
+                    o100 sub\nG1 X6 Z-10 F200\nG1 X2 Z-10\no100 endsub\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        // The cycle is line 3; the body it runs is lines 6 and 7.
+        let contour: Vec<usize> = preview
+            .segments
+            .iter()
+            .filter(|segment| segment.end[2] < -1.0)
+            .map(|segment| segment.line)
+            .collect();
+        assert!(!contour.is_empty(), "the contour must be drawn");
+        assert!(
+            contour.iter().all(|line| *line == 3),
+            "the contour belongs to the cycle's line, got {contour:?}"
+        );
+    }
+
+    #[test]
+    fn a_profile_cycle_draws_the_contour_its_q_subroutine_names() {
+        // `G71 Q100 X12 Z-20` names a contour, not a point: X12 and Z-20 are the
+        // limits the roughing passes work inside. Drawing the block's own words
+        // put a line where no cut happens; the cut is the profile in `o100 sub`,
+        // taken off in layers of `I` from the surface `X`.
+        let text = "G21 G90 G18\nG0 X10 Z0\nG71 Q100 X12 Z-20 D0.5 I1 R0.3\nM2\n\
                     o100 sub\nG0 X10 Z0\nG1 X6 Z-10 F200\nG1 X2 Z-10\no100 endsub\n";
         let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
         assert!(preview.error.is_none(), "{:?}", preview.error);
         let contour = segment_ends(&preview);
+        // The layers are Z traverses at one X each: from the surface 12 inward in
+        // steps of I. The profile narrows as it goes, so each layer cuts less.
+        let mut layers: Vec<f64> = preview
+            .segments
+            .iter()
+            .filter(|segment| segment.kind == SegmentKind::Feed)
+            .map(|segment| segment.start[0])
+            .collect();
+        layers.sort_by(f64::total_cmp);
+        layers.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        let expected = [6.5, 7.0, 8.0, 9.0, 10.0, 10.5, 11.0, 12.0];
+        assert_eq!(layers.len(), expected.len(), "{layers:?}");
+        for (got, want) in layers.iter().zip(expected) {
+            assert!((got - want).abs() < 1e-9, "{layers:?}");
+        }
+        // The pass the cycle leaves is the contour moved out by D, so it ends
+        // where the profile does rather than at the cycle's Z limit.
         assert!(
             contour
                 .iter()
-                .any(|end| (end[0] - 6.0).abs() < 1e-9 && (end[2] + 10.0).abs() < 1e-9),
-            "the profile's first cut: {contour:?}"
+                .any(|end| (end[0] - 2.5).abs() < 1e-9 && (end[2] + 10.0).abs() < 1e-9),
+            "the contour's last move: {contour:?}"
         );
         assert!(
             contour.iter().all(|end| (end[2] + 20.0).abs() > 1e-9),
             "nothing goes to the cycle's Z limit: {contour:?}"
         );
-        assert!(preview.incomplete, "the roughing passes are not drawn");
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+    }
+
+    #[test]
+    fn a_roughing_cycle_in_diameter_mode_steps_by_radius_increments() {
+        // linc-lathe-screw.ngc, cut down: G7 makes its `X` words diameters, but
+        // `D`, `I` and `R` are not axis words, and only G76 says its `I`, `J` and
+        // `K` are diameters. So `I1.0` is one machine unit per layer, which is
+        // two millimetres of diameter, and the passes land on 17, 15 and then the
+        // 13 the cycle leaves for the finish pass, which cuts 12. That is the
+        // 2:2:1 spacing the real toolpath shows; halving `I` as well drew seven
+        // levels instead of four.
+        let text = "G21 G7 G18 G90\nG0 X17 Z52\n\
+                    G71 Q100 X17 Z52 D0.5 I1.0 R0.5\nG70 Q100 X17 Z52 D0.5 P1\nM2\n\
+                    o100 sub\nG0 X12 Z50\nG1 Z1.5\nG1 X15 Z0\nG1 X18 Z0\no100 endsub\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        // A cutting line is a feed move along Z at one X.
+        let mut levels: Vec<f64> = preview
+            .segments
+            .iter()
+            .filter(|segment| segment.kind == SegmentKind::Feed)
+            .filter(|segment| (segment.start[0] - segment.end[0]).abs() < 1e-9)
+            .map(|segment| (segment.start[0] * 2.0 * 1e6).round() / 1e6)
+            .collect();
+        levels.sort_by(f64::total_cmp);
+        levels.dedup();
+        assert_eq!(levels, vec![12.0, 13.0, 15.0, 17.0], "{levels:?}");
+    }
+
+    #[test]
+    fn a_facing_cycle_is_reported_because_its_passes_are_not_modelled() {
+        // G72 removes material in X-direction passes; the preview draws its
+        // profile and says the facing passes are missing.
+        let text = "G21 G90 G18\nG0 X10 Z0\nG72 Q100 X2 Z-20 D0.5 I1 R0.3\nM2\n\
+                    o100 sub\nG1 X6 Z-10 F200\nG1 X2 Z-10\no100 endsub\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
         let reason = preview.incomplete_reason.clone().unwrap_or_default();
-        assert!(reason.contains("G71 roughing passes"), "{reason}");
+        assert!(reason.contains("G72 facing passes"), "{reason}");
     }
 
     #[test]

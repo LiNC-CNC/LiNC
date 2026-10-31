@@ -748,19 +748,21 @@ Program rules:
   drawn as separate moves. A polar `@`/`^` pair names the hole too, and `L`
   repeats the cycle once per pass, stepping the polar radius/angle in
   incremental mode and repeating the same hole in absolute mode.
-- The lathe cycles are previewed as the geometry they leave. `G70`/`G71`/`G72`
-  (and their `.1`/`.2` pocket forms) draw the contour of the subroutine their
-  `Q` word names, run once: their own `X` and `Z` are the limits the passes work
-  inside, not a point to move to, and drawing them put a line where no cut
-  happens. That contour is the finished surface, so a `G71` followed by a `G70`
-  draws one contour, and the stepped roughing passes in between are reported
-  rather than drawn. A `Q` that names no subroutine in the program is reported
-  too. `G76` draws the thread: an entry taper or a rapid plunge to the root at
-  `I + K` beyond the drive line, the root itself to the programmed `Z`, and the
-  exit taper (or a rapid out) back to the drive line, which is where the cycle
-  leaves the tool. The passes between the first cut and the root are reported
-  rather than drawn. A `G76` outside the ZX plane is the error the interpreter
-  raises.
+- The lathe cycles are previewed as the geometry they cut, not as the one line
+  their own words would draw. `G70`/`G71`/`G72` (and their `.1`/`.2` pocket
+  forms) take their contour from the subroutine their `Q` word names, run once;
+  their own `X` and `Z` are the limits the passes work inside. `G71` is drawn as
+  the layers it removes: from the surface `X` inward in steps of `I`, each layer
+  a Z traverse where the profile is still inside that radius and nothing over the
+  parts it is not, clearing `R` between layers, and stopping `D` short of the
+  profile for the finishing pass. `G72` faces in X, so its layers are not
+  modelled: only its contour is drawn and the missing facing passes are reported.
+  A `Q` that names no subroutine in the program is reported too. `G76` is drawn
+  as the thread it cuts: passes from `J` down to `K`, spaced by the depth
+  degression `R` as `J * n^(1/R)` and shifted along the drive line by the
+  compound angle `Q`, each with its entry taper or plunge (`L1`/`L3`), its root
+  cut, and its exit taper (`L2`/`L3`), leaving the tool on the drive line. A
+  `G76` outside the ZX plane is the error the interpreter raises.
 - Cutter compensation is previewed as the tool centre, not the programmed
   contour. G41 keeps the tool centre a tool radius to the left of the
   programmed direction and G42 to the right, in the G17/G18/G19 plane. The
