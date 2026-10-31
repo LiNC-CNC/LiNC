@@ -694,6 +694,78 @@ pub struct LoopProgress {
     pub stack: Vec<(usize, usize)>,
     /// The preview generation these belong to.
     pub generation: u64,
+    /// A return-to-seam counter per loop, for the loops whose passes draw one
+    /// path. Indexed like `Preview::loops`.
+    laps: Vec<LapCounter>,
+}
+
+/// Counts passes of a loop by the tool returning to the loop's seam.
+///
+/// The segment tags cannot do it when every pass draws the same path: the tag
+/// that matches is the first pass's, every time. The tool still has to come
+/// back round to the same point, and that crossing is the signal. `travel`
+/// keeps a path that crosses its own seam early from counting.
+#[derive(Clone, Copy, Debug, Default)]
+struct LapCounter {
+    /// Passes completed. The pass in progress, 0-based, is this value.
+    pass: usize,
+    /// Drawn distance since the last seam crossing.
+    travel: f64,
+    /// Previous tip while this loop was the one being cut.
+    last_tip: Option<[f64; 3]>,
+}
+
+impl LapCounter {
+    fn observe(&mut self, path: &linc_core::gcode::LoopPath, tip: [f64; 3]) {
+        let Some(previous) = self.last_tip else {
+            self.last_tip = Some(tip);
+            return;
+        };
+        let step = ((tip[0] - previous[0]).powi(2)
+            + (tip[1] - previous[1]).powi(2)
+            + (tip[2] - previous[2]).powi(2))
+        .sqrt();
+        // A jump - a restart, a RUN FROM LINE - is not travel around the body,
+        // and a sample that crossed half the body is too coarse to judge a
+        // seam against. Start the distance again and take the next sample from
+        // here.
+        let half = 0.5 * path.length.max(1e-9);
+        if step > half {
+            self.travel = 0.0;
+            self.last_tip = Some(tip);
+            return;
+        }
+        self.travel += step;
+        let before = (previous[0] - path.seam[0]) * path.heading[0]
+            + (previous[1] - path.seam[1]) * path.heading[1]
+            + (previous[2] - path.seam[2]) * path.heading[2];
+        let after = (tip[0] - path.seam[0]) * path.heading[0]
+            + (tip[1] - path.seam[1]) * path.heading[1]
+            + (tip[2] - path.seam[2]) * path.heading[2];
+        if before < -1e-9 && after >= -1e-9 {
+            let span = after - before;
+            let t = if span.abs() > 1e-12 {
+                (-before / span).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let crossing = [
+                previous[0] + (tip[0] - previous[0]) * t,
+                previous[1] + (tip[1] - previous[1]) * t,
+                previous[2] + (tip[2] - previous[2]) * t,
+            ];
+            let miss = ((crossing[0] - path.seam[0]).powi(2)
+                + (crossing[1] - path.seam[1]).powi(2)
+                + (crossing[2] - path.seam[2]).powi(2))
+            .sqrt();
+            let gate = (0.15 * path.reach).max(0.01);
+            if miss <= gate && self.travel >= 0.75 * path.length {
+                self.pass = self.pass.saturating_add(1);
+                self.travel = 0.0;
+            }
+        }
+        self.last_tip = Some(tip);
+    }
 }
 
 impl LoopProgress {
@@ -708,9 +780,22 @@ impl LoopProgress {
                 ..Self::default()
             };
         }
+        if self.laps.len() != preview.loops.len() {
+            self.laps.resize(preview.loops.len(), LapCounter::default());
+        }
         if motion == 0 || preview.segments.is_empty() {
             self.stack.clear();
+            // No program line means no run to count against.
+            self.laps.fill(LapCounter::default());
             return;
+        }
+        // A motion line outside a loop means the run has left it, so the next
+        // entry starts at pass 1 again. A line inside the body with no motion
+        // (an M1, the `endrepeat`) is a pause, not a departure.
+        for (trace, lap) in preview.loops.iter().zip(self.laps.iter_mut()) {
+            if motion < trace.line || motion > trace.end_line.max(trace.line) {
+                *lap = LapCounter::default();
+            }
         }
         let segments = &preview.segments;
         // A window around the cursor first: the cut moves forward, so the pass
@@ -718,30 +803,57 @@ impl LoopProgress {
         // window holds nothing, which is what a restart or a jump looks like.
         let from = self.cursor.saturating_sub(1024);
         let to = (self.cursor + 4096).min(segments.len());
-        let mut found = nearest_on_line(segments, motion, tip, from, to);
+        let mut found = nearest_on_line(segments, motion, tip, from, to, self.cursor);
         if found.is_none() {
-            found = nearest_on_line(segments, motion, tip, 0, segments.len());
+            found = nearest_on_line(segments, motion, tip, 0, segments.len(), self.cursor);
         }
         let Some(index) = found else {
             self.stack.clear();
             return;
         };
-        self.cursor = index;
+        // Count a repeated body by the tool's return to its seam. The tag that
+        // matched is the first pass's, so only the count can move the readout.
         self.stack = preview
             .segment_stack(index)
             .iter()
-            .map(|&(trace, pass)| (trace as usize, pass as usize))
+            .map(|&(trace, pass)| {
+                let trace = trace as usize;
+                let tag_pass = pass as usize;
+                if let (Some(path), Some(lap)) = (
+                    preview
+                        .loops
+                        .get(trace)
+                        .and_then(|loop_| loop_.repeated_path.as_ref()),
+                    self.laps.get_mut(trace),
+                ) {
+                    lap.observe(path, tip);
+                    // Geometry still leads where the line changes; the lap
+                    // counter leads where it does not. Take the further one.
+                    (trace, tag_pass.max(lap.pass))
+                } else {
+                    (trace, tag_pass)
+                }
+            })
             .collect();
+        self.cursor = index;
     }
 }
 
 /// The segment that runs `line` and ends nearest `tip`, within `from..to`.
+///
+/// Every pass of a loop runs the same source line, so the body line alone does
+/// not say which pass the planner is in. The tool's position says it when the
+/// paths differ. When they repeat, every candidate is equally far and this
+/// tie-break is what moves the cursor: forward, to the first candidate at or
+/// after where the cut already reached. Without it an identical next pass
+/// looks exactly like the pass just cut, and the cursor stays behind forever.
 fn nearest_on_line(
     segments: &[linc_core::gcode::PathSegment],
     line: usize,
     tip: [f64; 3],
     from: usize,
     to: usize,
+    cursor: usize,
 ) -> Option<usize> {
     let mut best: Option<(usize, f64)> = None;
     for (index, segment) in segments.iter().enumerate().take(to).skip(from) {
@@ -751,11 +863,42 @@ fn nearest_on_line(
         let end = segment.end;
         let distance =
             (end[0] - tip[0]).powi(2) + (end[1] - tip[1]).powi(2) + (end[2] - tip[2]).powi(2);
-        if best.is_none_or(|(_, found)| distance < found) {
+        if best.is_none_or(|(found_at, found)| {
+            let epsilon = 1e-12 * (1.0 + found);
+            if distance < found - epsilon {
+                true
+            } else if distance > found + epsilon {
+                false
+            } else if !same_shape(&segments[index], &segments[found_at]) {
+                // Ends can coincide while the moves between them differ. Keep
+                // the first one found; only a repeated pass is safe to move
+                // forward from.
+                false
+            } else {
+                // Equal distance on the same repeated shape: the cut moves
+                // forward, so a candidate at or after the cursor beats one
+                // behind it; among equals keep the first forward candidate and
+                // the last one behind, which are the nearest in run order.
+                let forward = index >= cursor;
+                let found_forward = found_at >= cursor;
+                match (forward, found_forward) {
+                    (true, false) => true,
+                    (false, true) => false,
+                    (true, true) => index < found_at,
+                    (false, false) => index > found_at,
+                }
+            }
+        }) {
             best = Some((index, distance));
         }
     }
     best.map(|(index, _)| index)
+}
+
+/// Do two segments draw the same move? Only the drawn shape matters: the
+/// line and the tool can differ without changing the toolpath.
+fn same_shape(a: &linc_core::gcode::PathSegment, b: &linc_core::gcode::PathSegment) -> bool {
+    a.start == b.start && a.end == b.end && a.kind == b.kind && a.arc == b.arc
 }
 
 /// One line of a loop readout: the loop, its test's parameters, and how far
@@ -3024,6 +3167,116 @@ mod loop_readout_tests {
             .expect("inside the loop");
         // `#<n>` is the count, not a counter: the loop does not walk it.
         assert_eq!(line(&readout), "REPEAT 1/3");
+    }
+
+    fn circle_repeat() -> Preview {
+        plan("G0 X10 Y0\no200 repeat [3]\nG3 X10 Y0 I-5 J0 F100\no200 endrepeat\n")
+    }
+
+    /// One turn of the circle, 30 degrees at a time. The last point is the
+    /// seam, where a pass ends and the next begins.
+    fn feed_circle(preview: &Preview, progress: &mut LoopProgress) {
+        for step in 1..=12 {
+            let angle = step as f64 * std::f64::consts::TAU / 12.0;
+            progress.follow(
+                preview,
+                3,
+                [5.0 + 5.0 * angle.cos(), 5.0 * angle.sin(), 0.0],
+                1,
+            );
+        }
+    }
+
+    #[test]
+    fn identical_two_line_passes_advance_though_the_paths_overlap() {
+        let preview = plan("o200 repeat [3]\nG0 X10\nG0 X0\no200 endrepeat\n");
+        let mut progress = LoopProgress::default();
+        for lap in 1..=3 {
+            progress.follow(&preview, 2, [10.0, 0.0, 0.0], 1);
+            progress.follow(&preview, 3, [0.0, 0.0, 0.0], 1);
+            let readout = LoopReadout::current(&preview, &progress).expect("inside the loop");
+            assert_eq!(line(&readout), format!("REPEAT {lap}/3"));
+        }
+    }
+
+    #[test]
+    fn a_repeat_of_one_circle_still_advances_the_pass() {
+        let preview = circle_repeat();
+        let mut progress = LoopProgress::default();
+        progress.follow(&preview, 3, [10.0, 0.0, 0.0], 1);
+        assert_eq!(
+            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            "REPEAT 1/3"
+        );
+        feed_circle(&preview, &mut progress);
+        assert_eq!(
+            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            "REPEAT 2/3"
+        );
+        feed_circle(&preview, &mut progress);
+        assert_eq!(
+            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            "REPEAT 3/3"
+        );
+    }
+
+    #[test]
+    fn a_circle_repeat_does_not_count_three_quarter_turns_as_a_pass() {
+        let preview = circle_repeat();
+        let mut progress = LoopProgress::default();
+        progress.follow(&preview, 3, [10.0, 0.0, 0.0], 1);
+        for step in 1..=3 {
+            let angle = step as f64 * std::f64::consts::FRAC_PI_2;
+            progress.follow(
+                &preview,
+                3,
+                [5.0 + 5.0 * angle.cos(), 5.0 * angle.sin(), 0.0],
+                1,
+            );
+        }
+        assert_eq!(
+            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            "REPEAT 1/3"
+        );
+    }
+
+    #[test]
+    fn a_while_loop_that_repeats_its_circle_advances_its_counter() {
+        let preview = plan(
+            "#<i> = 1\no100 while [#<i> le 3]\nG3 X10 Y0 I-5 J0 F100\n\
+             #<i> = [#<i> + 1]\no100 endwhile\n",
+        );
+        let mut progress = LoopProgress::default();
+        progress.follow(&preview, 3, [10.0, 0.0, 0.0], 1);
+        assert_eq!(
+            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            "#<i>=1 1/3"
+        );
+        feed_circle(&preview, &mut progress);
+        assert_eq!(
+            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            "#<i>=2 2/3"
+        );
+    }
+
+    #[test]
+    fn leaving_the_loop_restarts_its_pass_counter() {
+        let preview = circle_repeat();
+        let mut progress = LoopProgress::default();
+        progress.follow(&preview, 3, [10.0, 0.0, 0.0], 1);
+        feed_circle(&preview, &mut progress);
+        assert_eq!(
+            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            "REPEAT 2/3"
+        );
+        // A line past the loop ends this entry; the next one starts at pass 1.
+        progress.follow(&preview, 99, [0.0; 3], 1);
+        assert!(progress.stack.is_empty());
+        progress.follow(&preview, 3, [10.0, 0.0, 0.0], 1);
+        assert_eq!(
+            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            "REPEAT 1/3"
+        );
     }
 
     #[test]
