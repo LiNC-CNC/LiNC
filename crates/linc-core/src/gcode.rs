@@ -1816,11 +1816,15 @@ fn apply_roughing(preview: &mut Preview, cycles: &[Roughing], incomplete: &mut O
                 g7x::MoveKind::Feed => SegmentKind::Feed,
             };
             let arc = move_.arc.and_then(|(center, ccw)| {
+                // `g7x` reports the direction in the controller's ZX plane, the
+                // way the canonical `ARC_FEED` turn does. The drawing's XZ plane
+                // measures its angle from X toward Z, so the handedness carries
+                // straight over: a G3 stays clockwise in that frame.
                 apply_arc(
                     start,
                     end,
                     Plane::Xz,
-                    !ccw,
+                    ccw,
                     Some(center.x - start[0]),
                     None,
                     Some(center.z - start[2]),
@@ -6678,6 +6682,31 @@ mod tests {
             (last.end[0] - 0.5).abs() < 1e-9 && (last.end[2] - 4.0).abs() < 1e-9,
             "{last:?}"
         );
+        // The shoulder corner is rounded on the inside: the arc passes through
+        // (X4-D/sqrt2, Z-10+D/sqrt2), not through the square corner outside it.
+        let arc = preview
+            .segments
+            .iter()
+            .find_map(|segment| segment.arc.as_ref())
+            .expect("the shoulder arc");
+        let mut end = arc.end_angle;
+        if arc.clockwise {
+            while end >= arc.start_angle {
+                end -= std::f64::consts::TAU;
+            }
+        } else {
+            while end <= arc.start_angle {
+                end += std::f64::consts::TAU;
+            }
+        }
+        let mid = arc.start_angle + (end - arc.start_angle) * 0.5;
+        let (x, z) = (0usize, 2usize);
+        let mx = arc.center[x] + arc.radius * mid.cos();
+        let mz = arc.center[z] + arc.radius * mid.sin();
+        // This program's corner is the shoulder at X14, Z0.
+        let reach = arc.radius / std::f64::consts::SQRT_2;
+        assert!((mx - (14.0 + reach)).abs() < 1e-6, "arc mid X {mx}");
+        assert!((mz - reach).abs() < 1e-6, "arc mid Z {mz}");
     }
 
     #[test]
