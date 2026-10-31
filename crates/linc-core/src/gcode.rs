@@ -804,6 +804,28 @@ pub struct LoopTrace {
     pub iterations: Vec<Vec<f64>>,
     /// The test reads live machine state, so the values are the preview's model.
     pub live: bool,
+    /// Set when every pass after the first draws the same path. The controller
+    /// then reports the same body lines for all of them and the segment's pass
+    /// tag cannot tell two passes apart; the UI counts returns to
+    /// [LoopPath::seam] instead. `None` when the passes differ or there is only
+    /// one pass.
+    pub repeated_path: Option<LoopPath>,
+}
+
+/// One pass of a loop whose passes all draw the same path, reduced to what a
+/// pass counter needs: where a pass ends, which way the next one starts, and
+/// how big the path is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LoopPath {
+    /// The point a pass ends and the next begins.
+    pub seam: [f64; 3],
+    /// Unit direction the repeated body leaves the seam.
+    pub heading: [f64; 3],
+    /// Drawn length of one pass, in machine units.
+    pub length: f64,
+    /// How far the body reaches from the seam. The UI uses it to size the gate
+    /// that catches the tool returning to the seam.
+    pub reach: f64,
 }
 
 impl LoopTrace {
@@ -2960,6 +2982,7 @@ fn plan_statements(
             counters,
             iterations: Vec::new(),
             live,
+            repeated_path: None,
         });
     }
 
@@ -4005,6 +4028,11 @@ pub fn parse_preview_full(
         position = target;
     }
 
+    // A loop whose passes draw the same path needs a counter the segment tags
+    // cannot give it. Walk the drawn segments once and record one pass's seam,
+    // heading and size for each such loop.
+    attach_loop_paths(&mut preview);
+
     preview.line_count = total_lines;
     if preview.error.is_none() {
         preview.error = error;
@@ -4078,6 +4106,268 @@ pub fn parse_preview_full(
     };
     // Normalize program number to a percent program header if present.
     preview
+}
+
+/// Chain hash for one pass's segment shapes. A pass repeats when its hash and
+/// segment count match the reference pass's; a 64-bit collision is not a
+/// practical concern for deciding whether to count a seam.
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x100_0000_01b3;
+
+fn mix_u64(hash: &mut u64, value: u64) {
+    for byte in value.to_le_bytes() {
+        *hash ^= byte as u64;
+        *hash = hash.wrapping_mul(FNV_PRIME);
+    }
+}
+
+fn mix_f64(hash: &mut u64, value: f64) {
+    mix_u64(hash, value.to_bits());
+}
+
+/// One pass of a loop, accumulated in the order the preview runs it.
+#[derive(Clone, Debug)]
+struct PassShape {
+    hash: u64,
+    count: usize,
+    seam: [f64; 3],
+    heading: Option<[f64; 3]>,
+    length: f64,
+    min: [f64; 3],
+    max: [f64; 3],
+    reach: f64,
+}
+
+impl Default for PassShape {
+    fn default() -> Self {
+        Self {
+            hash: FNV_OFFSET,
+            count: 0,
+            seam: [0.0; 3],
+            heading: None,
+            length: 0.0,
+            min: [f64::INFINITY; 3],
+            max: [f64::NEG_INFINITY; 3],
+            reach: 0.0,
+        }
+    }
+}
+
+impl PassShape {
+    fn add(&mut self, segment: &PathSegment) {
+        mix_f64(&mut self.hash, segment.start[0]);
+        mix_f64(&mut self.hash, segment.start[1]);
+        mix_f64(&mut self.hash, segment.start[2]);
+        mix_f64(&mut self.hash, segment.end[0]);
+        mix_f64(&mut self.hash, segment.end[1]);
+        mix_f64(&mut self.hash, segment.end[2]);
+        mix_u64(&mut self.hash, segment.kind as u64);
+        if let Some(arc) = &segment.arc {
+            mix_f64(&mut self.hash, arc.center[0]);
+            mix_f64(&mut self.hash, arc.center[1]);
+            mix_f64(&mut self.hash, arc.center[2]);
+            mix_f64(&mut self.hash, arc.radius);
+            mix_f64(&mut self.hash, arc.start_angle);
+            mix_f64(&mut self.hash, arc.end_angle);
+            mix_u64(&mut self.hash, arc.clockwise as u64);
+            let (u, v) = arc.plane.axes();
+            mix_u64(&mut self.hash, u as u64);
+            mix_u64(&mut self.hash, v as u64);
+        } else {
+            mix_u64(&mut self.hash, 0);
+        }
+        self.count += 1;
+        self.seam = segment.end;
+        if self.heading.is_none() {
+            self.heading = segment_heading(segment);
+        }
+        self.length += segment_length(segment);
+        let mut include = |point: [f64; 3]| {
+            for (axis, coordinate) in point.iter().enumerate() {
+                self.min[axis] = self.min[axis].min(*coordinate);
+                self.max[axis] = self.max[axis].max(*coordinate);
+            }
+        };
+        include(segment.start);
+        include(segment.end);
+        if let Some(arc) = &segment.arc {
+            for point in arc.extent_points() {
+                include(point);
+            }
+        }
+    }
+
+    /// The farthest the pass reaches from its seam, as a scale for the gate.
+    /// The bounds are used rather than sampled points: an arc's ends can be the
+    /// same point while its sweep fills the whole circle.
+    fn finish(&mut self) {
+        if self.count == 0 || !self.min[0].is_finite() || !self.max[0].is_finite() {
+            return;
+        }
+        let seam = self.seam;
+        for corner in 0..8 {
+            let mut point = [0.0; 3];
+            for (axis, coordinate) in point.iter_mut().enumerate() {
+                *coordinate = if corner & (1 << axis) == 0 {
+                    self.min[axis]
+                } else {
+                    self.max[axis]
+                };
+            }
+            let distance = ((point[0] - seam[0]).powi(2)
+                + (point[1] - seam[1]).powi(2)
+                + (point[2] - seam[2]).powi(2))
+            .sqrt();
+            self.reach = self.reach.max(distance);
+        }
+    }
+
+    fn same(&self, other: &Self) -> bool {
+        self.hash == other.hash && self.count == other.count
+    }
+}
+
+/// The shape of one loop across the passes the preview ran.
+#[derive(Default)]
+struct LoopShape {
+    pass: u32,
+    started: bool,
+    current: PassShape,
+    first: Option<PassShape>,
+    reference: Option<PassShape>,
+    repeated: bool,
+}
+
+impl LoopShape {
+    fn observe(&mut self, pass: u32, segment: &PathSegment) {
+        if self.started && pass != self.pass {
+            self.finish();
+        }
+        if !self.started {
+            self.started = true;
+            self.pass = pass;
+            self.current = PassShape::default();
+        }
+        self.current.add(segment);
+    }
+
+    fn finish(&mut self) {
+        if !self.started || self.current.count == 0 {
+            self.started = false;
+            return;
+        }
+        self.current.finish();
+        let run = std::mem::take(&mut self.current);
+        self.started = false;
+        if self.pass == 0 {
+            self.first = Some(run);
+        } else if self.reference.is_none() {
+            self.reference = Some(run);
+            self.repeated = true;
+        } else if let Some(reference) = &self.reference {
+            if !reference.same(&run) {
+                self.repeated = false;
+            }
+        }
+    }
+}
+
+/// Unit heading at a segment's start. An arc uses its tangent because a full
+/// circle's start and end are the same point, so its chord is zero.
+fn segment_heading(segment: &PathSegment) -> Option<[f64; 3]> {
+    if let Some(arc) = &segment.arc {
+        let (u, v) = arc.plane.axes();
+        let sign = if arc.clockwise { -1.0 } else { 1.0 };
+        let mut heading = [0.0; 3];
+        heading[u] = -arc.start_angle.sin() * sign;
+        heading[v] = arc.start_angle.cos() * sign;
+        return Some(heading);
+    }
+    let delta = [
+        segment.end[0] - segment.start[0],
+        segment.end[1] - segment.start[1],
+        segment.end[2] - segment.start[2],
+    ];
+    let length = (delta[0].powi(2) + delta[1].powi(2) + delta[2].powi(2)).sqrt();
+    (length > 1e-9).then(|| [delta[0] / length, delta[1] / length, delta[2] / length])
+}
+
+fn segment_length(segment: &PathSegment) -> f64 {
+    let Some(arc) = &segment.arc else {
+        return ((segment.end[0] - segment.start[0]).powi(2)
+            + (segment.end[1] - segment.start[1]).powi(2)
+            + (segment.end[2] - segment.start[2]).powi(2))
+        .sqrt();
+    };
+    const TAU: f64 = std::f64::consts::TAU;
+    let travel = if arc.clockwise {
+        arc.start_angle - arc.end_angle
+    } else {
+        arc.end_angle - arc.start_angle
+    };
+    // A full turn is stored as a whole TAU, whose remainder is zero, so it is
+    // read before the sweep wraps; this is the same sweep `extent_points` uses.
+    let sweep = if travel >= TAU - 1e-9 {
+        TAU
+    } else {
+        travel.rem_euclid(TAU)
+    };
+    arc.radius * sweep
+}
+
+/// Fill in [LoopTrace::repeated_path] for the loops whose passes draw one path.
+///
+/// The body's line is the same on every pass, so when the paths repeat, the
+/// tool's position has no way to name the pass. The seam - the point every pass
+/// returns to - and the heading out of it give the UI something to count.
+fn attach_loop_paths(preview: &mut Preview) {
+    if preview.loops.is_empty() || preview.segments.is_empty() {
+        return;
+    }
+    let mut shapes: Vec<LoopShape> = (0..preview.loops.len())
+        .map(|_| LoopShape::default())
+        .collect();
+    for (index, segment) in preview.segments.iter().enumerate() {
+        let Some(stack) = preview
+            .segment_loop
+            .get(index)
+            .and_then(|id| preview.loop_stacks.get(*id as usize))
+        else {
+            continue;
+        };
+        for &(trace, pass) in stack {
+            if let Some(shape) = shapes.get_mut(trace as usize) {
+                shape.observe(pass, segment);
+            }
+        }
+    }
+    for shape in &mut shapes {
+        shape.finish();
+    }
+    for (trace, shape) in preview.loops.iter_mut().zip(shapes.iter()) {
+        if !shape.repeated {
+            continue;
+        }
+        let Some(reference) = &shape.reference else {
+            continue;
+        };
+        let Some(heading) = reference.heading else {
+            continue;
+        };
+        if reference.length <= 1e-9 || reference.reach <= 1e-9 {
+            continue;
+        }
+        let seam = shape
+            .first
+            .as_ref()
+            .map_or(reference.seam, |pass| pass.seam);
+        trace.repeated_path = Some(LoopPath {
+            seam,
+            heading,
+            length: reference.length,
+            reach: reference.reach,
+        });
+    }
 }
 
 pub fn normalize_search(text: &str) -> String {
@@ -5483,6 +5773,41 @@ mod tests {
         // Four passes, and the body's own line as the extent.
         assert_eq!(trace.iterations.len(), 4);
         assert_eq!(trace.end_line, 2);
+    }
+
+    #[test]
+    fn a_repeat_of_one_path_records_its_seam_and_heading() {
+        // One full circle per pass: the body line and the endpoint repeat, so
+        // the pass tag cannot tell the passes apart. The seam is where a pass
+        // ends, and the heading is the tangent out of it.
+        let preview = plan("G0 X10 Y0\no200 repeat [3]\nG3 X10 Y0 I-5 J0 F100\no200 endrepeat\n");
+        let path = preview.loops[0].repeated_path.expect("one repeated path");
+        assert!((path.seam[0] - 10.0).abs() < 1e-9, "{:?}", path.seam);
+        assert!(path.seam[1].abs() < 1e-9, "{:?}", path.seam);
+        // A full circle of radius 5: its drawn length is the circumference.
+        assert!((path.length - std::f64::consts::TAU * 5.0).abs() < 1e-6);
+        // The gate scale reaches the far side of the circle.
+        assert!(path.reach > 9.9, "{}", path.reach);
+        // Counter-clockwise from (10,0), the tangent points along +Y.
+        assert!(path.heading[1] > 0.99, "{:?}", path.heading);
+    }
+
+    #[test]
+    fn a_repeat_of_the_same_two_moves_records_the_second_passes_heading() {
+        let preview = plan("o200 repeat [3]\nG0 X10\nG0 X0\no200 endrepeat\n");
+        let path = preview.loops[0].repeated_path.expect("one repeated path");
+        // The first pass ends where the second starts, so the seam is X0; the
+        // second pass leaves it towards X10.
+        assert!(path.seam[0].abs() < 1e-9, "{:?}", path.seam);
+        assert!(path.heading[0] > 0.99, "{:?}", path.heading);
+        assert!((path.length - 20.0).abs() < 1e-9, "{}", path.length);
+    }
+
+    #[test]
+    fn a_loop_that_moves_each_pass_has_no_repeated_path() {
+        let preview =
+            plan("#<i> = 0\no10 while [#<i> lt 3]\nG0 X#<i>\n#<i> = [#<i> + 1]\no10 endwhile\n");
+        assert!(preview.loops[0].repeated_path.is_none());
     }
 
     #[test]
