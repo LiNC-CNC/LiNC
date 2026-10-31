@@ -737,6 +737,29 @@ Program rules:
   radius, a corner too sharp to join, a tool wider than the arc it must follow,
   or a D word naming a tool with no radius on file. The block is then drawn on
   the programmed line and compensation re-engages on the next move.
+- The read-only status parameters a program reads are live, not zero: they
+  follow the blocks the preview has already planned, in execution order, so a
+  macro that saves `#<_x>`/`#<_z>` and measures its cut from them draws the cut
+  where the machine would make it. The preview publishes `#<_x>`-`#<_w>` (the
+  work position, in the program's units) and `#<_abs_x>`-`#<_abs_w>` (the same
+  with the work offset left out) with their `#5420`-`#5428` and
+  `#5021`-`#5029` mirrors, the modal flags (`#<_metric>`, `#<_imperial>`,
+  `#<_absolute>`, `#<_incremental>`, `#<_plane>`, `#<_motion_mode>`,
+  `#<_ccomp>`, `#<_coord_system>`, `#<_tool_offset>`, `#<_retract_r_plane>`,
+  `#<_retract_old_z>`, the feed and speed modes, `#<_ijk_absolute_mode>`,
+  `#<_lathe_diameter_mode>`/`#<_lathe_radius_mode>`), the feed, speed, tool and
+  pocket parameters, the coolant and spindle flags and the override flags,
+  `#<_value>` and `#<_value_returned>` from the last `return`/`endsub`, plus
+  `#<_line>`, `#<_call_level>`, `#<_vmajor>`, `#<_vminor>` and
+  `#<_remap_level>`. `#<_task>` reads 0: the preview is the interpreter that is
+  not part of milltask, which is what probe macros test it for. A parameter this
+  preview cannot know, such as a probe result a remap names, still reads 0
+  rather than a guess. Four limits are stated rather than hidden: the live Z is
+  the retract plane across a canned cycle that names more than one hole, the
+  absolute position ignores a `G10` the same program wrote, `#<_metric_machine>`
+  answers with the program's units because the preview is given the program and
+  not the machine's setup, and `#<_current_tool>`/`#<_current_pocket>` follow the
+  last T word because the preview has no tool changer to ask.
 - On editor changes, wait for the debounce, run the preview syntax check, then
   replace the graph only if it succeeds. On failure, keep the last valid graph,
   mark the offending line and show a syntax error; never move the machine.

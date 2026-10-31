@@ -1329,6 +1329,7 @@ pub const PREVIEW_STEP_LIMIT: usize = 200_000;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Tools {
     radii: BTreeMap<u16, f64>,
+    pockets: BTreeMap<u16, u16>,
 }
 
 impl Tools {
@@ -1338,12 +1339,19 @@ impl Tools {
                 .into_iter()
                 .filter(|(_, radius)| radius.is_finite())
                 .collect(),
+            pockets: BTreeMap::new(),
         }
     }
 
     /// The radius of `tool`, when the table has one.
     pub fn radius(&self, tool: u16) -> Option<f64> {
         self.radii.get(&tool).copied()
+    }
+
+    /// The pocket `tool` sits in, for `#<_current_pocket>` and
+    /// `#<_selected_pocket>`.
+    pub fn pocket(&self, tool: u16) -> Option<u16> {
+        self.pockets.get(&tool).copied()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1355,10 +1363,16 @@ impl Tools {
     /// it; one with no diameter is left out, so `G41 D<n>` naming it is reported
     /// instead of silently drawn as an uncompensated path.
     pub fn from_rows(rows: &[crate::model::ToolRow]) -> Self {
-        Self::new(rows.iter().filter_map(|row| {
+        let mut tools = Self::new(rows.iter().filter_map(|row| {
             let diameter = row.geometry.diameter?;
             (diameter > 0.0).then_some((row.tool, diameter * 0.5))
-        }))
+        }));
+        for row in rows {
+            if let Some(pocket) = row.pocket {
+                tools.pockets.insert(row.tool, pocket);
+            }
+        }
+        tools
     }
 }
 
@@ -1580,10 +1594,560 @@ fn compensate(
 /// Nested subroutine calls the preview follows before it gives up.
 pub const PREVIEW_DEPTH_LIMIT: usize = 64;
 
+/// The read-only status parameters [`Live`] publishes, by the name an
+/// expression writes after `#<_`.
+///
+/// These are the ones the bundled reference documents that a preview can know:
+/// the ones about this interpreter rather than about a probe that has not run.
+const LIVE_NAMES: &[&str] = &[
+    "_x",
+    "_y",
+    "_z",
+    "_a",
+    "_b",
+    "_c",
+    "_u",
+    "_v",
+    "_w",
+    "_abs_x",
+    "_abs_y",
+    "_abs_z",
+    "_abs_a",
+    "_abs_b",
+    "_abs_c",
+    "_abs_u",
+    "_abs_v",
+    "_abs_w",
+    "_metric",
+    "_imperial",
+    "_metric_machine",
+    "_absolute",
+    "_incremental",
+    "_plane",
+    "_motion_mode",
+    "_ccomp",
+    "_coord_system",
+    "_feed",
+    "_rpm",
+    "_current_tool",
+    "_current_pocket",
+    "_selected_tool",
+    "_selected_pocket",
+    "_tool_offset",
+    "_retract_r_plane",
+    "_retract_old_z",
+    "_inverse_time",
+    "_units_per_minute",
+    "_units_per_rev",
+    "_ijk_absolute_mode",
+    "_lathe_diameter_mode",
+    "_lathe_radius_mode",
+    "_spindle_on",
+    "_spindle_cw",
+    "_mist",
+    "_flood",
+    "_speed_override",
+    "_feed_override",
+    "_adaptive_feed",
+    "_feed_hold",
+    "_value",
+    "_value_returned",
+    "_line",
+    "_call_level",
+    "_task",
+    "_remap_level",
+    "_vmajor",
+    "_vminor",
+];
+
+/// The numbered parameters that mirror part of [`LIVE_NAMES`].
+const NUMBERED_LIVE: &[(&str, &str)] = &[
+    ("5021", "_abs_x"),
+    ("5022", "_abs_y"),
+    ("5023", "_abs_z"),
+    ("5024", "_abs_a"),
+    ("5025", "_abs_b"),
+    ("5026", "_abs_c"),
+    ("5027", "_abs_u"),
+    ("5028", "_abs_v"),
+    ("5029", "_abs_w"),
+    ("5420", "_x"),
+    ("5421", "_y"),
+    ("5422", "_z"),
+    ("5423", "_a"),
+    ("5424", "_b"),
+    ("5425", "_c"),
+    ("5426", "_u"),
+    ("5427", "_v"),
+    ("5428", "_w"),
+];
+
+/// LinuxCNC's version as `#<_vmajor>` and `#<_vminor>` report it: the major and
+/// minor numbers as one number, then the patch number as a fraction. The
+/// preview reads the documentation bundle it ships, so it reports the version
+/// that documentation describes.
+const LINUXCNC_VERSION: (f64, f64) = (2.9, 0.0);
+
+/// The interpreter status `#<_name>` reads, as far as a preview can know it.
+///
+/// The planner resolves a block's expressions before the drawing pass runs, so
+/// it cannot ask the drawing pass where the tool is. It keeps this instead: the
+/// resolved words of every block pass through [`Live::observe`] for the modal
+/// flags and [`Live::advance`] for the position, in the order the interpreter
+/// runs them, and [`Live::update`] writes the result into the parameters a
+/// block's expressions read.
+///
+/// Positions are machine units throughout, as everywhere else in this file;
+/// [`Live::read`] converts to the units the program is written in.
+#[derive(Clone, Debug, PartialEq)]
+struct Live {
+    /// Machine position: what an absolute word lands on, which is
+    /// `#<_abs_x>`. `#<_x>` is this minus the work offset.
+    position: [f64; 3],
+    offset: [f64; 3],
+    metric_program: bool,
+    absolute: bool,
+    /// 17, 18, 19, or 17.1/18.1/19.1 for the UV-plane modes.
+    plane: f64,
+    /// G0-G3, or the canned cycle that is modal, or G80.
+    motion: f64,
+    /// 40 off, 41 left, 42 right.
+    comp: u8,
+    feed: Option<f64>,
+    speed: Option<f64>,
+    selected: Option<u16>,
+    selected_pocket: Option<u16>,
+    wcs: String,
+    lathe_diameter: bool,
+    retract_to_r: bool,
+    tool_offset: bool,
+    inverse_time: bool,
+    units_per_minute: bool,
+    units_per_rev: bool,
+    ijk_absolute: bool,
+    spindle_on: bool,
+    spindle_cw: bool,
+    mist: bool,
+    flood: bool,
+    speed_override: bool,
+    feed_override: bool,
+    adaptive_feed: bool,
+    feed_hold: bool,
+    /// The R plane of the canned cycle that is modal, in machine units.
+    cycle_r: Option<f64>,
+    /// From the planner: the block being resolved, how deep in subroutine
+    /// calls that is, and what the last `return` or `endsub` handed back.
+    line: usize,
+    call_level: usize,
+    value: f64,
+    value_returned: bool,
+}
+
+impl Default for Live {
+    fn default() -> Self {
+        Self {
+            position: [0.0; 3],
+            offset: [0.0; 3],
+            metric_program: true,
+            absolute: true,
+            plane: 17.0,
+            motion: 0.0,
+            comp: 40,
+            feed: None,
+            speed: None,
+            selected: None,
+            selected_pocket: None,
+            wcs: "G54".to_string(),
+            lathe_diameter: false,
+            retract_to_r: false,
+            tool_offset: false,
+            inverse_time: false,
+            units_per_minute: true,
+            units_per_rev: false,
+            ijk_absolute: false,
+            spindle_on: false,
+            spindle_cw: false,
+            mist: false,
+            flood: false,
+            // M48 is the start-up state: both overrides are on.
+            speed_override: true,
+            feed_override: true,
+            adaptive_feed: false,
+            feed_hold: false,
+            cycle_r: None,
+            line: 0,
+            call_level: 0,
+            value: 0.0,
+            value_returned: false,
+        }
+    }
+}
+
+impl Live {
+    fn at(position: [f64; 3], offset: AxisMap<f64>) -> Self {
+        Self {
+            position,
+            offset: [
+                offset_of(&offset, "X"),
+                offset_of(&offset, "Y"),
+                offset_of(&offset, "Z"),
+            ],
+            ..Self::default()
+        }
+    }
+
+    /// What `#<_name>` reads, in the program's units. `None` for a name the
+    /// preview does not publish, which then keeps whatever value it had.
+    fn read(&self, name: &str) -> Option<f64> {
+        let unit = if self.metric_program { 1.0 } else { 1.0 / 25.4 };
+        // `#<_x>` is the relative position, which includes the work offset;
+        // `#<_abs_x>` is the machine position, which includes none of it. The
+        // parser tracks the machine position, as the drawing pass does.
+        let relative = |axis: usize| (self.position[axis] - self.offset[axis]) * unit;
+        let machine = |axis: usize| self.position[axis] * unit;
+        let flag = |on: bool| if on { 1.0 } else { 0.0 };
+        Some(match name {
+            "_x" => relative(0),
+            "_y" => relative(1),
+            "_z" => relative(2),
+            "_a" | "_b" | "_c" | "_u" | "_v" | "_w" => 0.0,
+            "_abs_x" => machine(0),
+            "_abs_y" => machine(1),
+            "_abs_z" => machine(2),
+            "_abs_a" | "_abs_b" | "_abs_c" | "_abs_u" | "_abs_v" | "_abs_w" => 0.0,
+            "_metric" => flag(self.metric_program),
+            "_imperial" => flag(!self.metric_program),
+            // The preview is told the program, not how the machine is set up,
+            // so it answers with the program's units.
+            "_metric_machine" => flag(self.metric_program),
+            "_absolute" => flag(self.absolute),
+            "_incremental" => flag(!self.absolute),
+            "_plane" => self.plane,
+            "_motion_mode" => self.motion,
+            "_ccomp" => self.comp as f64,
+            "_coord_system" => coordinate_system(&self.wcs),
+            // F and S as written, in program units, as the reference says.
+            "_feed" => self.feed.unwrap_or(0.0),
+            "_rpm" => self.speed.unwrap_or(0.0),
+            "_current_tool" => f64::from(self.selected.unwrap_or(0)),
+            "_selected_tool" => match self.selected {
+                Some(tool) => f64::from(tool),
+                None => -1.0,
+            },
+            "_current_pocket" => f64::from(self.selected_pocket.unwrap_or(0)),
+            "_selected_pocket" => match self.selected_pocket {
+                Some(pocket) => f64::from(pocket),
+                None => -1.0,
+            },
+            "_tool_offset" => flag(self.tool_offset),
+            "_retract_r_plane" => flag(self.retract_to_r),
+            "_retract_old_z" => flag(!self.retract_to_r),
+            "_inverse_time" => flag(self.inverse_time),
+            "_units_per_minute" => flag(self.units_per_minute),
+            "_units_per_rev" => flag(self.units_per_rev),
+            "_ijk_absolute_mode" => flag(self.ijk_absolute),
+            // G7/G8 as they are modal; whether the machine is a lathe at all is
+            // not something the program text says.
+            "_lathe_diameter_mode" => flag(self.lathe_diameter),
+            "_lathe_radius_mode" => flag(!self.lathe_diameter),
+            "_spindle_on" => flag(self.spindle_on),
+            "_spindle_cw" => flag(self.spindle_cw),
+            "_mist" => flag(self.mist),
+            "_flood" => flag(self.flood),
+            "_speed_override" => flag(self.speed_override),
+            "_feed_override" => flag(self.feed_override),
+            "_adaptive_feed" => flag(self.adaptive_feed),
+            "_feed_hold" => flag(self.feed_hold),
+            "_value" => self.value,
+            "_value_returned" => flag(self.value_returned),
+            "_line" => self.line as f64,
+            "_call_level" => self.call_level as f64,
+            // The preview is the interpreter that is not part of milltask, and
+            // the reference says so for exactly this reason: a program can tell
+            // the two apart and skip the probe test that only the real one can
+            // answer.
+            "_task" => 0.0,
+            "_remap_level" => 0.0,
+            "_vmajor" => LINUXCNC_VERSION.0,
+            "_vminor" => LINUXCNC_VERSION.1,
+            _ => return None,
+        })
+    }
+
+    /// Write every published parameter into `params`, where an expression reads
+    /// it. The keys are seeded by [`new_params`], so this allocates nothing.
+    fn update(&self, params: &mut Params) {
+        for name in LIVE_NAMES {
+            let Some(value) = self.read(name) else {
+                continue;
+            };
+            if let Some(slot) = params.get_mut(*name) {
+                *slot = value;
+            }
+        }
+        for (number, name) in NUMBERED_LIVE {
+            let Some(value) = self.read(name) else {
+                continue;
+            };
+            if let Some(slot) = params.get_mut(*number) {
+                *slot = value;
+            }
+        }
+    }
+
+    /// The modal flags a block sets. Called before [`Live::advance`], because a
+    /// G20 in the block applies to the block's own words.
+    fn observe(&mut self, tokens: &[Token]) {
+        for token in tokens {
+            match token.kind {
+                TokenKind::GCode => {
+                    let Some(value) = parse_number(&token.text[1..]) else {
+                        continue;
+                    };
+                    match value {
+                        0.0 | 1.0 | 2.0 | 3.0 => self.motion = value,
+                        73.0 | 80.0 | 81.0 | 82.0 | 83.0 => self.motion = value,
+                        20.0 => self.metric_program = false,
+                        21.0 => self.metric_program = true,
+                        7.0 => self.lathe_diameter = true,
+                        8.0 => self.lathe_diameter = false,
+                        17.0 => self.plane = 17.0,
+                        18.0 => self.plane = 18.0,
+                        19.0 => self.plane = 19.0,
+                        17.1 => self.plane = 17.1,
+                        18.1 => self.plane = 18.1,
+                        19.1 => self.plane = 19.1,
+                        40.0 => self.comp = 40,
+                        41.0 | 41.1 => self.comp = 41,
+                        42.0 | 42.1 => self.comp = 42,
+                        43.0 | 43.1 => self.tool_offset = true,
+                        49.0 => self.tool_offset = false,
+                        90.0 => self.absolute = true,
+                        90.1 => self.ijk_absolute = true,
+                        91.0 => self.absolute = false,
+                        91.1 => self.ijk_absolute = false,
+                        93.0 => {
+                            self.inverse_time = true;
+                            self.units_per_minute = false;
+                            self.units_per_rev = false;
+                        }
+                        94.0 => {
+                            self.inverse_time = false;
+                            self.units_per_minute = true;
+                            self.units_per_rev = false;
+                        }
+                        95.0 => {
+                            self.inverse_time = false;
+                            self.units_per_minute = false;
+                            self.units_per_rev = true;
+                        }
+                        98.0 => self.retract_to_r = false,
+                        99.0 => self.retract_to_r = true,
+                        value if (54.0..=59.3).contains(&value) => self.wcs = format_g(value),
+                        _ => {}
+                    }
+                }
+                TokenKind::MCode => {
+                    let Some(value) = parse_number(&token.text[1..]) else {
+                        continue;
+                    };
+                    let on = word_int(tokens, 'p').unwrap_or(1) != 0;
+                    match value {
+                        3.0 => {
+                            self.spindle_on = true;
+                            self.spindle_cw = true;
+                        }
+                        4.0 => {
+                            self.spindle_on = true;
+                            self.spindle_cw = false;
+                        }
+                        5.0 => self.spindle_on = false,
+                        7.0 => self.mist = true,
+                        8.0 => self.flood = true,
+                        9.0 => {
+                            self.mist = false;
+                            self.flood = false;
+                        }
+                        48.0 => {
+                            self.speed_override = true;
+                            self.feed_override = true;
+                        }
+                        49.0 => {
+                            self.speed_override = false;
+                            self.feed_override = false;
+                        }
+                        50.0 => self.feed_override = on,
+                        51.0 => self.speed_override = on,
+                        52.0 => self.adaptive_feed = on,
+                        53.0 => self.feed_hold = on,
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(tool) = word_int(tokens, 't') {
+            if tool > 0 {
+                self.selected = Some(tool as u16);
+            }
+        }
+        if let Some(value) = word_value(tokens, 'f') {
+            self.feed = Some(value);
+        }
+        if let Some(value) = word_value(tokens, 's') {
+            self.speed = Some(value);
+        }
+    }
+
+    /// Where the block leaves the tool. Called after [`Live::observe`], so the
+    /// block's own G20/G90/G7 apply to its words the way the interpreter reads
+    /// them.
+    fn advance(&mut self, tokens: &[Token]) {
+        // Blocks that carry axis words without moving: G10 writes a coordinate
+        // system, G92 sets one, G28/G30 home, G43/G44 set and G49 clears the
+        // tool length. The offsets a G10 or G92 writes are not tracked here
+        // either, so a program that reads `#<_abs_*>` straight after one reads
+        // the offsets the preview started with.
+        let mut machine_coordinates = false;
+        for token in tokens {
+            if token.kind != TokenKind::GCode {
+                continue;
+            }
+            match parse_number(&token.text[1..]) {
+                Some(10.0 | 28.0 | 30.0 | 43.0 | 43.1 | 44.0 | 49.0 | 92.0 | 92.1) => return,
+                // G53 moves in machine coordinates, so its words name the
+                // machine position and no offset applies to them.
+                Some(53.0) => machine_coordinates = true,
+                _ => {}
+            }
+        }
+        let has_axis = tokens.iter().any(|token| {
+            token.kind == TokenKind::Axis
+                && token
+                    .text
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| "XYZUVW".contains(ch.to_ascii_uppercase()))
+        });
+        let polar = word_value(tokens, '@').or_else(|| word_value(tokens, '^'));
+        if !has_axis && polar.is_none() {
+            return;
+        }
+        if matches!(self.motion, 73.0 | 81.0 | 82.0 | 83.0) {
+            self.advance_cycle(tokens);
+            return;
+        }
+        if !matches!(self.motion, 0.0 | 1.0 | 2.0 | 3.0) {
+            return;
+        }
+        let unit = if self.metric_program { 1.0 } else { 25.4 };
+        let mm = |value: f64| value * unit;
+        let dia = |value: f64| {
+            if self.lathe_diameter {
+                value * 0.5
+            } else {
+                value
+            }
+        };
+        let mut target = self.position;
+        for (letter, axis) in [('x', 0usize), ('y', 1), ('z', 2)] {
+            let Some(value) = word_value(tokens, letter) else {
+                continue;
+            };
+            let value = if axis == 0 { dia(mm(value)) } else { mm(value) };
+            target[axis] = if self.absolute {
+                if machine_coordinates {
+                    value
+                } else {
+                    value + self.offset[axis]
+                }
+            } else {
+                self.position[axis] + value
+            };
+        }
+        let radius = word_value(tokens, '@');
+        let theta = word_value(tokens, '^');
+        if radius.is_some() || theta.is_some() {
+            // Polar words are read in program coordinates, so measure from the
+            // program origin and add the offset back afterwards.
+            let at = [
+                self.position[0] - self.offset[0],
+                self.position[1] - self.offset[1],
+            ];
+            if let Ok(next) = polar_target(at, radius.map(mm), theta, self.absolute) {
+                target[0] = next[0] + self.offset[0];
+                target[1] = next[1] + self.offset[1];
+            }
+        }
+        self.position = target;
+    }
+
+    /// A canned cycle ends clear of the part at the hole it drilled. `L` passes
+    /// and polar words name more than one hole; the preview keeps the first,
+    /// which is where the modal tool position is after the block.
+    fn advance_cycle(&mut self, tokens: &[Token]) {
+        let unit = if self.metric_program { 1.0 } else { 25.4 };
+        let mm = |value: f64| value * unit;
+        let dia = |value: f64| {
+            if self.lathe_diameter {
+                value * 0.5
+            } else {
+                value
+            }
+        };
+        let initial = self.position[2];
+        if let Some(value) = word_value(tokens, 'r') {
+            self.cycle_r = Some(if self.absolute {
+                mm(value) + self.offset[2]
+            } else {
+                initial + mm(value)
+            });
+        }
+        for (letter, axis) in [('x', 0usize), ('y', 1)] {
+            let Some(value) = word_value(tokens, letter) else {
+                continue;
+            };
+            let value = if axis == 0 { dia(mm(value)) } else { mm(value) };
+            self.position[axis] = if self.absolute {
+                value + self.offset[axis]
+            } else {
+                self.position[axis] + value
+            };
+        }
+        let r = self.cycle_r.unwrap_or(initial);
+        // G98 keeps the initial Z when it is clear of R; G99 clears to R.
+        self.position[2] = if self.retract_to_r { r } else { initial.max(r) };
+    }
+}
+
+/// The value `#<_coord_system>` reads: 540 for G54, 591 for G59.1.
+fn coordinate_system(wcs: &str) -> f64 {
+    let (major, minor) = wcs
+        .trim_start_matches('G')
+        .split_once('.')
+        .unwrap_or((wcs.trim_start_matches('G'), "0"));
+    let major = major.parse::<f64>().unwrap_or(0.0);
+    let minor = minor.parse::<f64>().unwrap_or(0.0);
+    major * 10.0 + minor
+}
+
 /// Interpreter parameters, keyed by [`named_key`] or the digits of a numbered
 /// parameter: "#<level>" is "level", "#1" is "1". An unset parameter reads as
 /// 0, as in the interpreter.
 type Params = BTreeMap<String, f64>;
+
+/// A parameter map with the read-only status names in it, so a block that reads
+/// `#<_x>` finds a value without [`Live::update`] having to allocate.
+fn new_params() -> Params {
+    let mut params = Params::new();
+    for name in LIVE_NAMES {
+        params.insert((*name).to_string(), 0.0);
+    }
+    for (number, _) in NUMBERED_LIVE {
+        params.insert((*number).to_string(), 0.0);
+    }
+    params
+}
 
 /// The map key a named parameter is stored under. LinuxCNC keeps named
 /// parameters in a `std::map` compared with `strcasecmp`, so `#<RADIUS>` and
@@ -2104,6 +2668,8 @@ enum Stmt {
     SubStart,
     SubEnd {
         line: usize,
+        /// `endsub [expr]`: the value the caller reads as `#<_value>`.
+        expr: Option<String>,
     },
     Call {
         line: usize,
@@ -2158,6 +2724,8 @@ enum Stmt {
     },
     Return {
         line: usize,
+        /// `return [expr]`: the value the caller reads as `#<_value>`.
+        expr: Option<String>,
     },
     /// An o-word with no keyword: a program label such as the "O1001" after a
     /// percent line. It names a place, it does nothing.
@@ -2322,11 +2890,21 @@ fn top_level_equals(text: &str) -> Option<usize> {
     None
 }
 
+/// The expression `return`/`endsub` carries, when it carries one. The caller
+/// reads the result as `#<_value>`.
+fn return_value(payload: &str) -> Option<String> {
+    let payload = payload.trim();
+    (!payload.is_empty()).then(|| payload.to_string())
+}
+
 fn o_word_statement(line: usize, label: &str, rest: &str) -> Stmt {
     let (keyword, payload) = keyword_and_payload(rest);
     match keyword.as_str() {
         "sub" => Stmt::SubStart,
-        "endsub" => Stmt::SubEnd { line },
+        "endsub" => Stmt::SubEnd {
+            line,
+            expr: return_value(&payload),
+        },
         "call" => Stmt::Call {
             line,
             label: label.to_string(),
@@ -2369,7 +2947,10 @@ fn o_word_statement(line: usize, label: &str, rest: &str) -> Stmt {
             line,
             target: payload,
         },
-        "return" => Stmt::Return { line },
+        "return" => Stmt::Return {
+            line,
+            expr: return_value(&payload),
+        },
         "" => Stmt::Label,
         other => Stmt::Unsupported {
             line,
@@ -2694,7 +3275,7 @@ fn statement_line(statement: &Stmt) -> Option<usize> {
     match statement {
         Stmt::Block { line, .. }
         | Stmt::Assign { line, .. }
-        | Stmt::SubEnd { line }
+        | Stmt::SubEnd { line, .. }
         | Stmt::Call { line, .. }
         | Stmt::If { line, .. }
         | Stmt::ElseIf { line, .. }
@@ -2704,7 +3285,7 @@ fn statement_line(statement: &Stmt) -> Option<usize> {
         | Stmt::Break { line, .. }
         | Stmt::Continue { line, .. }
         | Stmt::Goto { line, .. }
-        | Stmt::Return { line }
+        | Stmt::Return { line, .. }
         | Stmt::Unsupported { line, .. } => Some(*line),
         _ => None,
     }
@@ -2767,10 +3348,10 @@ fn parse_statements(text: &str) -> (Vec<Stmt>, Vec<Option<String>>, Option<Synta
 
 /// Plan the preview: the program's own statements plus the subroutine bodies its
 /// calls resolve to, then run them.
-fn plan_preview(text: &str, subs: &Subroutines) -> PlannedPreview {
+fn plan_preview(text: &str, subs: &Subroutines, live: &mut Live, tools: &Tools) -> PlannedPreview {
     let (mut statements, mut labels, error) = parse_statements(text);
     let bodies = import_subroutines(&mut statements, &mut labels, subs);
-    plan_statements(statements, labels, bodies, error)
+    plan_statements(statements, labels, bodies, error, live, tools)
 }
 
 fn plan_statements(
@@ -2778,6 +3359,8 @@ fn plan_statements(
     labels: Vec<Option<String>>,
     bodies: Vec<SubroutineBody>,
     mut error: Option<SyntaxIssue>,
+    live: &mut Live,
+    tools: &Tools,
 ) -> PlannedPreview {
     // A `while` that closes a `do` is that loop's bottom test, not a new loop.
     pair_do_loops(&mut statements);
@@ -2963,7 +3546,7 @@ fn plan_statements(
         });
     }
 
-    let mut params = Params::new();
+    let mut params = new_params();
     let mut blocks: Vec<PlannedBlock> = Vec::new();
     // The loops whose body the planner is inside, outermost first. A block's
     // tag is the whole nest, so the readout can stack every enclosing loop.
@@ -3014,6 +3597,13 @@ fn plan_statements(
             ));
             break;
         }
+        // What the block about to run reads from `#<_name>`: where the blocks
+        // before it left the tool, and how deep in a call it is.
+        if let Some(line) = statement_line(&statements[pc]) {
+            live.line = line;
+        }
+        live.call_level = calls.len();
+        live.update(&mut params);
         match &statements[pc] {
             Stmt::Block { line, raw, tokens } => {
                 let mut program_end = false;
@@ -3023,6 +3613,14 @@ fn plan_statements(
                         // no further line, so prose or a comment block after the
                         // end mark is not G-code.
                         program_end = words.iter().any(is_program_end);
+                        // The status parameters follow every block in the order
+                        // the interpreter runs them, so a later block reading
+                        // `#<_x>` sees where this one left the tool.
+                        live.observe(&words);
+                        live.advance(&words);
+                        if let Some(tool) = live.selected {
+                            live.selected_pocket = tools.pocket(tool);
+                        }
                         blocks.push(PlannedBlock {
                             line: *line,
                             tokens: words,
@@ -3064,8 +3662,35 @@ fn plan_statements(
                 pc += 1;
             }
             Stmt::SubStart => pc = after[pc],
-            Stmt::SubEnd { line } | Stmt::Return { line } => match calls.pop() {
+            Stmt::SubEnd { line, expr } | Stmt::Return { line, expr } => match calls.pop() {
                 Some((return_to, mut saved)) => {
+                    // What the block hands back, which the caller reads as
+                    // `#<_value>`; `#<_value_returned>` says whether it was
+                    // written or defaulted to zero. An expression the preview
+                    // cannot follow leaves the value at zero, as a bare return
+                    // does, and says so.
+                    match expr {
+                        Some(expr) => match Expression::evaluate(expr, &params) {
+                            Ok(value) => {
+                                live.value = value;
+                                live.value_returned = true;
+                            }
+                            Err(_) => {
+                                live.value = 0.0;
+                                live.value_returned = false;
+                                if incomplete.is_none() {
+                                    incomplete = Some(format!(
+                                        "line {}: could not evaluate the value returned to the caller",
+                                        line
+                                    ));
+                                }
+                            }
+                        },
+                        None => {
+                            live.value = 0.0;
+                            live.value_returned = false;
+                        }
+                    }
                     // The callee's locals vanish with its frame; what it wrote to
                     // a global parameter is the whole point of a global one.
                     for (key, value) in params.iter() {
@@ -3103,6 +3728,9 @@ fn plan_statements(
                 }
                 let mut values = Vec::with_capacity(args.len());
                 let mut failed = false;
+                // `#<_value_returned>` is about the last call, so a new one
+                // clears it before its callee runs.
+                live.value_returned = false;
                 for argument in args {
                     match Expression::evaluate(argument, &params) {
                         Ok(value) => values.push(value),
@@ -3416,7 +4044,12 @@ pub fn parse_preview_full(
         subroutines,
         loops,
         loop_stacks,
-    } = plan_preview(text, subs);
+    } = plan_preview(
+        text,
+        subs,
+        &mut Live::at(current_position, offsets.clone()),
+        tools,
+    );
     // The planner's own verdict on what it could not follow; the drawing pass
     // below adds to it when it meets a path it cannot compensate.
     let mut incomplete = incomplete;
@@ -4501,6 +5134,217 @@ mod tests {
                 (round(segment.start), round(segment.end))
             })
             .collect()
+    }
+
+    /// Parse with a work offset in force, so a test can tell the work position
+    /// `#<_x>` reads from the machine position `#<_abs_x>` reads.
+    fn parse_with_offset(text: &str, offset: [f64; 3]) -> Preview {
+        let mut values = AxisMap::default();
+        for (axis, value) in [("X", offset[0]), ("Y", offset[1]), ("Z", offset[2])] {
+            values.insert(axis, value);
+        }
+        parse_preview_full(
+            text,
+            &preview_axes(),
+            Some(&values),
+            [0.0; 3],
+            &Subroutines::default(),
+            &Tools::default(),
+        )
+    }
+
+    /// Where a program's last move ends.
+    fn ends(preview: &Preview) -> [f64; 3] {
+        preview
+            .segments
+            .last()
+            .map_or([0.0; 3], |segment| segment.end)
+    }
+
+    #[test]
+    fn a_live_position_parameter_reads_where_the_tool_is() {
+        // The lathe macros all open this way: save the position the tool is at
+        // when the macro is called, then measure the cut from it. Read as zero,
+        // every one of them drew its cut from the work origin.
+        let text = "G21 G90\nG0 X10 Y5\n#1 = [#<_x>]\nG1 X[#1 + 5] F100\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 15.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn the_absolute_position_leaves_the_work_offset_out() {
+        // The tool is at machine X110 with a 100 mm work offset, so the work
+        // position is 10: `#<_x>` reads 10 and `#<_abs_x>` reads 110. Each
+        // incremental move below adds the value it read, so the two land 100 mm
+        // apart, which is exactly the offset.
+        let relative = "G21 G90\nG0 X10\n#1 = [#<_x>]\nG91 G0 X[#1]\nM2\n";
+        let preview = parse_with_offset(relative, [100.0, 0.0, 0.0]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 120.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+
+        let absolute = "G21 G90\nG0 X10\n#1 = [#<_abs_x>]\nG91 G0 X[#1]\nM2\n";
+        let preview = parse_with_offset(absolute, [100.0, 0.0, 0.0]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 220.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn a_tool_length_block_does_not_move_the_live_position() {
+        // G43 states the tool length; its Z word is not a move, so the live Z
+        // stays where the block before it left the tool.
+        let text = "G21 G90\nG0 Z5\nG43 H1 Z10\n#1 = [#<_z>]\nG0 X[#1]\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 5.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn a_g53_move_names_the_machine_position() {
+        // G53 X20 puts the machine at 20 whatever the offset is, so the machine
+        // position reads 20 and the work position reads 20 - 100. The drawing
+        // pass still treats G53 as a work-system move, so this asserts the live
+        // value alone: asserted absolutely, X[20] lands on machine 120, while
+        // reading the work position instead would land on 220.
+        let text = "G21 G90\nG53 G0 X20\n#1 = [#<_abs_x>]\nG90 G0 X[#1]\nM2\n";
+        let preview = parse_with_offset(text, [100.0, 0.0, 0.0]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 120.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn a_subroutine_hands_its_return_value_back() {
+        let text = "G21 G90\no100 sub\no100 return [42]\no100 endsub\no100 call\nG1 X[#<_value>] Y[#<_value_returned>] F100\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let end = ends(&preview);
+        assert!((end[0] - 42.0).abs() < 1e-9, "{:?}", end);
+        assert!((end[1] - 1.0).abs() < 1e-9, "{:?}", end);
+    }
+
+    #[test]
+    fn a_recursive_subroutine_multiplies_through_its_return_values() {
+        // factorial.ngc, cut down: `return [#<_value> * #1]` reads the value the
+        // call it just made handed back, so 4! needs every frame's value kept.
+        let text = "G21 G90\no100 sub\no110 if [#1 EQ 0]\no100 return [1]\no110 else\no100 call [#1 - 1]\no100 return [#<_value> * #1]\no110 endif\no100 endsub\no100 call [4]\nG1 X[#<_value>] F100\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 24.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn a_subroutine_that_returns_nothing_reads_zero() {
+        let text = "G21 G90\no100 sub\no100 return\no100 endsub\no100 call\nG1 X[#<_value>] Y[#<_value_returned>] F100\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert_eq!(ends(&preview)[0], 0.0);
+        assert_eq!(ends(&preview)[1], 0.0);
+    }
+
+    #[test]
+    fn the_modal_status_parameters_follow_the_blocks_that_set_them() {
+        // G20 makes the program imperial, G91 incremental, G18 the XZ plane,
+        // G55 the work system, M3 the spindle clockwise. Each status parameter
+        // then says so, and the move adds them up: 1 + 10 + 18.
+        let text = "G20 G91 G18 G0 X1\nG55 M3\nG1 X[#<_imperial> + #<_incremental> * 10 + #<_plane>] F100\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        // 29 inches from where the first move left the tool at 1 inch.
+        assert!(
+            (ends(&preview)[0] - 30.0 * 25.4).abs() < 1e-6,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn the_live_position_is_written_in_the_program_units() {
+        let text = "G20 G90\nG0 X1\n#1 = [#<_x>]\nG1 X[#1 + 1] F100\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 2.0 * 25.4).abs() < 1e-6,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn the_numbered_mirror_of_a_live_position_reads_the_same() {
+        let text = "G21 G90\nG0 X10\n#1 = [#5420]\nG1 X[#1 + 5] F100\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 15.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn a_canned_cycle_leaves_the_live_z_clear_of_the_part() {
+        // G98: after the hole the tool is back at the Z it started the cycle at.
+        let text = "G21 G90\nG0 Z5\nG81 X10 Z-3 R1 F100\n#1 = [#<_z>]\nG0 X[#1]\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 5.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn the_preview_reports_itself_as_the_preview_interpreter() {
+        // #<_task> is 0 for the interpreter that is not milling, and the probe
+        // macros branch on it to keep the preview away from the probe test.
+        let text =
+            "G21 G90\no100 if [#<_task> EQ 0]\nG1 X10 F100\no100 else\nG1 X99\no100 endif\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 10.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn a_parameter_the_preview_cannot_know_still_reads_zero() {
+        // Probe results are named parameters a remap sets at run time; the
+        // preview has no probe to ask, and must not invent a value.
+        let text = "G21 G90\nG1 X[#<_distance> + 1] F100\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 1.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
     }
 
     #[test]
