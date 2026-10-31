@@ -898,9 +898,18 @@ Primary quick tool-change surface; no MDI entry required.
   nothing is deleted before confirmation.
 - Editing a cell selects the whole value (Home/End move inside it). Enter
   writes the row, reloads the tool table into the controller and re-applies
-  `G43` when the edited row is the tool in the spindle. Escape restores the
-  previous value. The open cell keeps the selection border's size and turns
-  red; the same applies to the OFFSETS table cells.
+  `G43` when the edited row is the tool in the spindle. `Z` and the length
+  column are one offset under two names, so either cell writes both the `Z`
+  word and the length the rest of the HMI reads. Escape restores the previous
+  value. The open cell keeps the selection border's size and turns red; the
+  same applies to the OFFSETS table cells.
+- The reload is an IO command, so the task echo the HMI waits for only proves
+  the command was accepted. Before `G43` (and before `T…M6`) the HMI polls the
+  controller's published tool table — the same `tooldata` the interpreter
+  reads — until the written row appears, so the compensation cannot run against
+  the table it is replacing. If the row is still stale after 1.5 s the command
+  fails with that reason instead of silently applying the old offset, and a
+  controller that cannot be polled keeps the previous behaviour.
 - `T0` unload and manual-change confirmation are supported.
 - Manual changer: after `M6` pauses for the manual change, a modal prompt
   appears on every page — not only on Tools — showing `INSTALL target`,

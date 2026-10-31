@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use linuxcnc_nml::{
     Command as NmlCommand, MessageKind, NmlClient, NmlError, Status as NmlStatus,
-    TaskMode as NmlTaskMode, TaskState as NmlTaskState,
+    TaskMode as NmlTaskMode, TaskState as NmlTaskState, Tool as NmlTool,
 };
 
 use linc_core::backend::MachineBackend;
@@ -90,6 +90,25 @@ pub struct NmlBackend {
     program_line_revision: u64,
     /// Said once per session: which source drives the displayed line.
     program_line_logged: bool,
+}
+
+/// How long the IO process may take to publish a reloaded tool table.
+///
+/// The load is a file read of a few kilobytes, so this only covers the io cycle
+/// and the NML round trip. A timeout is not "slow machine": it means the
+/// controller did not take the table, and a following `G43`/`M6` would be
+/// interpreted against the previous one.
+const TOOL_TABLE_LOAD_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// What the handshake after a `LoadToolTable` saw.
+enum ToolTableLoad {
+    /// The controller published the row the file holds.
+    Loaded,
+    /// Nothing to compare: the row is not in the file, or the controller does
+    /// not expose `tooldata`.
+    Unobservable,
+    /// The controller still holds a different entry after the timeout.
+    Stale,
 }
 
 impl NmlBackend {
@@ -563,6 +582,56 @@ impl NmlBackend {
         }
     }
 
+    /// Wait until the IO process has published the tool row the file now holds.
+    ///
+    /// `EMC_TOOL_LOAD_TOOL_TABLE` is an IO command: `nml_send` waits only for
+    /// the task to echo it, and the IO process reads the file into `tooldata`
+    /// afterwards. A `G43` or `M6` issued in between is interpreted against the
+    /// previous table, so the new offset is not in effect even though every
+    /// command reported success. `NmlClient::tool_table` reads that same
+    /// `tooldata` — the table the interpreter uses — so polling it until the
+    /// row appears is the handshake the task echo cannot give.
+    ///
+    /// The expected row is read back from the file, not from the HMI's copy:
+    /// the file is what the IO process loads, and the snapshot can lag it.
+    ///
+    /// Nothing here fails a command on its own: a read error or an empty table
+    /// means the controller cannot be observed, so the caller behaves as it did
+    /// before the handshake rather than refusing a write that probably landed.
+    fn await_loaded_tool(&mut self, tool: u16) -> ToolTableLoad {
+        let Ok(table) = ToolTable::load(
+            &self.profile.machine_ini.tool_table,
+            &self.profile.machine_ini.tool_table_columns,
+            self.profile.changer,
+        ) else {
+            return ToolTableLoad::Unobservable;
+        };
+        let Some(expected) = table.rows.iter().find(|row| row.tool == tool) else {
+            return ToolTableLoad::Unobservable;
+        };
+        let deadline = Instant::now() + TOOL_TABLE_LOAD_TIMEOUT;
+        loop {
+            let Ok(loaded) = self.client.tool_table() else {
+                return ToolTableLoad::Unobservable;
+            };
+            if loaded.is_empty() {
+                // A controller that does not expose `tooldata` has nothing to
+                // observe, and one that does returns its rows here.
+                return ToolTableLoad::Unobservable;
+            }
+            if loaded
+                .iter()
+                .any(|entry| tool_offsets_match(entry, expected))
+            {
+                return ToolTableLoad::Loaded;
+            }
+            if Instant::now() >= deadline {
+                return ToolTableLoad::Stale;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     fn issue_blocks(&mut self, blocks: &[String]) -> Result<(), MachineError> {
         let status = self.poll_status()?;
         let previous = status.task.mode;
@@ -947,6 +1016,15 @@ impl NmlBackend {
                 self.nml_send(&NmlCommand::LoadToolTable(Some(
                     self.profile.machine_ini.tool_table.clone(),
                 )))?;
+                // `T…M6` and the `G43` the shell issues after it read the
+                // controller's table; let the reload land first, or the change
+                // and the compensation run against the previous one.
+                if matches!(self.await_loaded_tool(tool), ToolTableLoad::Stale) {
+                    return Err(MachineError::Backend(format!(
+                        "the controller did not load T{tool} from the tool table; the tool \
+                         change was not issued"
+                    )));
+                }
                 self.issue_blocks(&[format!("T{tool} M6")])?;
                 self.pending_height_comp = Some((tool, Instant::now()));
                 Ok(())
@@ -1179,6 +1257,16 @@ impl NmlBackend {
                     self.profile.machine_ini.tool_table.clone(),
                 )))?;
                 if active_tool == tool {
+                    // The reload belongs to the IO process. Re-apply the height
+                    // compensation only after the row is loaded, or the G43
+                    // runs against the table it is replacing and the new offset
+                    // never takes effect.
+                    if matches!(self.await_loaded_tool(tool), ToolTableLoad::Stale) {
+                        return Err(MachineError::Backend(format!(
+                            "the controller did not load the new T{tool} offsets, so the \
+                             height compensation was not re-applied; load T{tool} again"
+                        )));
+                    }
                     self.issue_blocks(&[format!("G43 H{tool}")])?;
                 }
                 Ok(())
@@ -1651,6 +1739,40 @@ fn pose_component(pose: &linuxcnc_nml::Pose, index: usize) -> f64 {
     }
 }
 
+/// Does the loaded entry carry the offsets `row` states?
+///
+/// Only the axes are compared, because `G43` reads them: the tool number pins
+/// the row, and the rest of the entry (diameter, angles, pocket) is not what a
+/// height compensation uses. An axis the table leaves out is zero on both sides.
+fn tool_offsets_match(stored: &NmlTool, row: &ToolRow) -> bool {
+    if stored.toolno.max(0) as u16 != row.tool {
+        return false;
+    }
+    let written = |axis: &str| -> f64 {
+        if axis == "Z" {
+            row.geometry
+                .length
+                .or_else(|| row.geometry.values.get(axis).copied())
+                .unwrap_or(0.0)
+        } else {
+            row.geometry.values.get(axis).copied().unwrap_or(0.0)
+        }
+    };
+    let pose = [
+        ("X", stored.offset.x),
+        ("Y", stored.offset.y),
+        ("Z", stored.offset.z),
+        ("A", stored.offset.a),
+        ("B", stored.offset.b),
+        ("C", stored.offset.c),
+        ("U", stored.offset.u),
+        ("V", stored.offset.v),
+        ("W", stored.offset.w),
+    ];
+    pose.into_iter()
+        .all(|(axis, loaded)| (loaded - written(axis)).abs() <= 1e-6)
+}
+
 /// Does the file carry a `P` word on any tool line?
 fn tool_table_has_p(path: &Path) -> bool {
     std::fs::read_to_string(path)
@@ -1915,6 +2037,40 @@ mod tests {
             "/python/linc_bridge.py"
         ))
         .exists());
+    }
+
+    /// The reload handshake asks the one question `G43` asks: does the
+    /// controller's published entry carry this row's axes? Another Z is the
+    /// table the reload replaces; another tool number is another row.
+    #[test]
+    fn the_loaded_tool_matches_on_its_offsets() {
+        let mut row = ToolRow::new(1);
+        row.geometry.length = Some(-56.068);
+        row.geometry.values.insert("Z".to_string(), -56.068);
+        row.geometry.values.insert("X".to_string(), 12.5);
+        let mut tool = NmlTool {
+            toolno: 1,
+            offset: linuxcnc_nml::Pose {
+                x: 12.5,
+                z: -56.068,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(tool_offsets_match(&tool, &row));
+
+        tool.offset.z = -50.0;
+        assert!(
+            !tool_offsets_match(&tool, &row),
+            "a different Z is the table the reload replaces"
+        );
+
+        tool.offset.z = -56.068;
+        tool.toolno = 2;
+        assert!(
+            !tool_offsets_match(&tool, &row),
+            "another tool number is another row"
+        );
     }
 
     fn run_block(operation: &str, mode: linc_core::probe::ProbeMode) -> String {
