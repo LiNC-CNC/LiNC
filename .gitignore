@@ -22,4 +22,7 @@ configs/sim.var
 
 # Compound Engineering local scratch (ce-* skills)
 .context/compound-engineering/
-.compound-engineering/
+.compound-engineering/*.local.yaml
+
+# Local tool scratch
+/.ua/
