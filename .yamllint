@@ -1,0 +1,8 @@
+extends: default
+
+# .compound-engineering/ holds Compound Engineering's generated config
+# templates. Their aligned comment columns exceed 80 characters by design,
+# and setup rewrites them, so linting them would report the same findings
+# after every run. Everything else in the repo keeps the default rules.
+ignore: |
+  .compound-engineering/
