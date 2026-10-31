@@ -681,6 +681,13 @@ Program rules:
   error the interpreter would raise; a probe to the point the tool is already at
   is not, because the preview's own probe end is what would make it look that
   way.
+- A, B and C are tracked as angles in degrees, so `#<_a>`-`#<_c>`, their
+  absolute forms and `#5423`-`#5425` read what the program last commanded, but no
+  rotary geometry is drawn: every shipped profile is a three-axis `trivkins`
+  machine, and drawing a rotary move means swinging the part around the axis
+  rather than moving the tool. A block whose axis words include A, B or C is
+  therefore marked incomplete, naming the line and the axis, while its X/Y/Z
+  words are still drawn.
 - A leading rapid that only approaches the program from the live tool position
   is not drawn: the path starts at the program's first move, so no dotted
   connector crosses the part. A program whose only move is that rapid still

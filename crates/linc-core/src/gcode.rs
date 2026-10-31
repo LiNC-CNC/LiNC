@@ -1762,6 +1762,10 @@ struct Live {
     feed_hold: bool,
     /// The R plane of the canned cycle that is modal, in machine units.
     cycle_r: Option<f64>,
+    /// A, B and C in degrees. The preview draws no rotary geometry -- the shipped
+    /// profiles have no rotary axis -- but a program that computes from one gets
+    /// the value it programmed rather than zero.
+    rotary: [f64; 3],
     /// Where the last `G38.n` probe ended, in machine units. The reference says
     /// an unsuccessful probe reports the programmed point, which is where the
     /// preview's line ends, since it has no probe input to watch.
@@ -1806,6 +1810,7 @@ impl Default for Live {
             adaptive_feed: false,
             feed_hold: false,
             cycle_r: None,
+            rotary: [0.0; 3],
             probe: None,
             line: 0,
             call_level: 0,
@@ -1842,11 +1847,16 @@ impl Live {
             "_x" => relative(0),
             "_y" => relative(1),
             "_z" => relative(2),
-            "_a" | "_b" | "_c" | "_u" | "_v" | "_w" => 0.0,
+            // A rotary word is in degrees, so the program's length units do not
+            // scale it. Nothing tracks a rotary work offset, so the absolute and
+            // relative values are the one programmed position.
+            "_a" | "_abs_a" => self.rotary[0],
+            "_b" | "_abs_b" => self.rotary[1],
+            "_c" | "_abs_c" => self.rotary[2],
+            "_u" | "_v" | "_w" | "_abs_u" | "_abs_v" | "_abs_w" => 0.0,
             "_abs_x" => machine(0),
             "_abs_y" => machine(1),
             "_abs_z" => machine(2),
-            "_abs_a" | "_abs_b" | "_abs_c" | "_abs_u" | "_abs_v" | "_abs_w" => 0.0,
             "_metric" => flag(self.metric_program),
             "_imperial" => flag(!self.metric_program),
             // The preview is told the program, not how the machine is set up,
@@ -2079,6 +2089,18 @@ impl Live {
                     .is_some_and(|ch| "XYZUVW".contains(ch.to_ascii_uppercase()))
         });
         let polar = word_value(tokens, '@').or_else(|| word_value(tokens, '^'));
+        // Rotary words are in degrees and their absolute or incremental rule is
+        // the same one the linear axes use, so they are tracked even though the
+        // drawn geometry has no rotary axis.
+        for (letter, axis) in [('a', 0usize), ('b', 1), ('c', 2)] {
+            if let Some(value) = word_value(tokens, letter) {
+                self.rotary[axis] = if self.absolute {
+                    value
+                } else {
+                    self.rotary[axis] + value
+                };
+            }
+        }
         if !has_axis && polar.is_none() {
             return;
         }
@@ -4525,6 +4547,25 @@ pub fn parse_preview_full(
             continue;
         }
 
+        // A rotary axis is not drawn. No shipped profile has one, and drawing
+        // it would mean rotating the path with the table rather than moving the
+        // tool, which is a different job from a three-axis toolpath. The block's
+        // X/Y/Z words are still drawn; only the rotary part is missing, and the
+        // preview says so instead of dropping it.
+        for (letter, axis) in [('a', "A"), ('b', "B"), ('c', "C")] {
+            if word_value(&tokens, letter).is_none() {
+                continue;
+            }
+            if incomplete.is_none() {
+                incomplete = Some(format!(
+                    "line {}: the {axis} axis move is not drawn: the preview models no \
+                     rotary axis",
+                    line_no
+                ));
+            }
+            break;
+        }
+
         // A probe block moves whether or not a motion mode was in force: the
         // interpreter allows `G38.2` after a `G80`. Its own rules are the ones
         // the preview can check, so it checks them here and reports them rather
@@ -5547,6 +5588,64 @@ mod tests {
         assert!((machine.end[0] - 20.0).abs() < 1e-9, "{machine:?}");
         assert!(
             (ends(&preview)[0] - 110.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn a_rotary_word_reads_back_in_degrees() {
+        // `#<_a>` is the relative A position in degrees, so the program's own
+        // length units do not scale it. In a G20 program 45 degrees divided by
+        // 45 is one inch: reading it as 45/25.4 degrees instead would draw a
+        // hundredth of that.
+        let text = "G20 G90\nG0 A45\n#1 = [[#<_a>] / 45]\nG90 G0 X[#1]\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 25.4).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn a_rotary_move_adds_up_in_incremental_mode() {
+        let text = "G21 G91\nG0 A10\nG0 A10\n#1 = [#<_a>]\nG90 G0 X[#1]\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 20.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn a_rotary_move_is_reported_because_it_is_not_drawn() {
+        // The X move in the same block is still drawn; the A part is what the
+        // preview cannot show, so it says so instead of dropping it silently.
+        let text = "G21 G90\nG0 X10\nG1 X20 A90 F100\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(preview.incomplete, "the rotary move must be reported");
+        let reason = preview.incomplete_reason.clone().unwrap_or_default();
+        assert!(reason.contains("line 3"), "{reason}");
+        assert!(reason.contains("A axis move is not drawn"), "{reason}");
+        assert!(
+            (ends(&preview)[0] - 20.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn the_rotary_mirror_reads_the_same_as_the_named_parameter() {
+        let text = "G21 G90\nG0 A30\n#1 = [#5423]\nG0 X[#1]\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(
+            (ends(&preview)[0] - 30.0).abs() < 1e-9,
             "{:?}",
             ends(&preview)
         );
