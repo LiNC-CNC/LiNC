@@ -1,0 +1,15 @@
+(New Program)
+g21
+s3000 m3
+g90g54g0x63y35
+g0 z5
+g1 z0 f1000
+o123 repeat [30]
+g90 g1 y10 f1000
+x58
+y-35
+x63
+g91 g1 z1
+o123 endrepeat
+g90 g0 g53 z-5
+M30

@@ -1,0 +1,27 @@
+; Circular step-response tuning move around G54 origin.
+; 1cm radius (10mm) circle repeated in the XY plane at Z0.
+; Load in MDI/program after homing. Verify G54 / tool / spindle safety before running.
+
+G21 G90 G17 G40 G49 G80
+
+#1 = 1
+#<iterations> = 100
+#<RADIUS> = 5
+
+G0 Z5
+G0 X10 Y0
+G4 P0.5
+M1
+G1 Z0 F1000
+G4 P0.5
+M1
+O100 WHILE [#1 LE #<iterations>]
+G3 X10 Y0 I[-#<radius>] J0 F3000
+M1
+#1 =[ #1 + 1]
+O100 ENDWHILE
+G1 Z5 F1000
+
+G0 X0 Y0
+
+M2

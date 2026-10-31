@@ -1,0 +1,21 @@
+(LiNC new program)
+G21 G90 G54 G17 G40 G49 G80
+G94
+
+m3 s1000
+
+g0 x0 y0 z0
+g1 x10 f1000
+y10
+x-10
+y-10
+x10
+z8
+x-10
+y10
+x10
+z0
+x0 y0 z0
+
+M5
+M30
