@@ -528,8 +528,8 @@ mod tests {
     /// edge when the fault is reset.
     #[test]
     fn a_probe_trip_is_published_as_a_machine_off_level() {
-        use std::sync::{Arc, Mutex};
         use crate::faults::{ProbeTripFault, ProbeTripKind};
+        use std::sync::{Arc, Mutex};
         struct RecordingHal(Arc<Mutex<Vec<(LincOutput, HalValue)>>>);
         impl HalWriter for RecordingHal {
             fn write(&mut self, output: LincOutput, value: HalValue) -> Result<(), MachineError> {
@@ -561,7 +561,11 @@ mod tests {
                 .collect()
         }
         fn trip() -> ProbeTripFault {
-            ProbeTripFault::new(ProbeTripKind::JointJog, ProbeTripKind::JointJog.message(), 1)
+            ProbeTripFault::new(
+                ProbeTripKind::JointJog,
+                ProbeTripKind::JointJog.message(),
+                1,
+            )
         }
 
         let recording = Arc::new(Mutex::new(Vec::new()));
@@ -622,8 +626,8 @@ mod tests {
     /// off, including a paused program being jogged into the probe.
     #[test]
     fn a_paused_probe_trip_leaves_the_machine_on() {
-        use std::sync::{Arc, Mutex};
         use crate::faults::{ProbeTripFault, ProbeTripKind};
+        use std::sync::{Arc, Mutex};
         struct RecordingHal(Arc<Mutex<Vec<(LincOutput, HalValue)>>>);
         impl HalWriter for RecordingHal {
             fn write(&mut self, output: LincOutput, value: HalValue) -> Result<(), MachineError> {

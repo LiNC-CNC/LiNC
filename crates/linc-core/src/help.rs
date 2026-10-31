@@ -354,7 +354,9 @@ mod tests {
             .collect();
         assert!(spans.iter().any(|span| span.bold && !span.text.is_empty()));
         assert!(spans.iter().any(|span| span.code && !span.text.is_empty()));
-        assert!(spans.iter().any(|span| span.italic && !span.text.is_empty()));
+        assert!(spans
+            .iter()
+            .any(|span| span.italic && !span.text.is_empty()));
     }
 
     #[test]
@@ -420,7 +422,10 @@ mod tests {
                 assert!(!spans.is_empty());
                 let first = spans[0].text.trim().to_ascii_lowercase();
                 assert!(
-                    !matches!(first.as_str(), "warning" | "note" | "tip" | "important" | "caution"),
+                    !matches!(
+                        first.as_str(),
+                        "warning" | "note" | "tip" | "important" | "caution"
+                    ),
                     "the type label must not be part of the body"
                 );
             }
