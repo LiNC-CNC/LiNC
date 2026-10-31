@@ -1739,19 +1739,41 @@ fn compensate(
 /// profile is at or inside that radius -- outside it, the profile is the surface
 /// and cutting there would gouge the part.
 fn layer_spans(profile: &[[f64; 3]], x: f64) -> Vec<(f64, f64)> {
+    clipped_spans(profile, x, 0, 2)
+}
+
+/// The X spans a facing pass at one Z still has metal to remove over.
+///
+/// The mirror of `layer_spans`: at one Z the tool cuts wherever the profile is at
+/// or behind that plane, because what a facing pass removes is the material in
+/// front of the finished surface.
+fn facing_spans(profile: &[[f64; 3]], z: f64) -> Vec<(f64, f64)> {
+    clipped_spans(profile, z, 2, 0)
+}
+
+/// The intervals along `along` where the profile lies inside `limit` on `across`.
+///
+/// `across` is the axis the limit applies to and `along` the axis the spans run
+/// in: a radius for a turning layer, a Z plane for a facing one.
+fn clipped_spans(profile: &[[f64; 3]], limit: f64, across: usize, along: usize) -> Vec<(f64, f64)> {
     let mut spans: Vec<(f64, f64)> = Vec::new();
     for pair in profile.windows(2) {
-        let (x0, z0, x1, z1) = (pair[0][0], pair[0][2], pair[1][0], pair[1][2]);
+        let (a0, l0, a1, l1) = (
+            pair[0][across],
+            pair[0][along],
+            pair[1][across],
+            pair[1][along],
+        );
         let mut low: f64 = 0.0;
         let mut high: f64 = 1.0;
-        let dx = x1 - x0;
-        if dx.abs() < 1e-12 {
-            if x0 > x + 1e-12 {
+        let da = a1 - a0;
+        if da.abs() < 1e-12 {
+            if a0 > limit + 1e-12 {
                 continue;
             }
         } else {
-            let cross = (x - x0) / dx;
-            if dx > 0.0 {
+            let cross = (limit - a0) / da;
+            if da > 0.0 {
                 high = high.min(cross);
             } else {
                 low = low.max(cross);
@@ -1760,8 +1782,8 @@ fn layer_spans(profile: &[[f64; 3]], x: f64) -> Vec<(f64, f64)> {
         if low >= high {
             continue;
         }
-        let from = z0 + (z1 - z0) * low;
-        let to = z0 + (z1 - z0) * high;
+        let from = l0 + (l1 - l0) * low;
+        let to = l0 + (l1 - l0) * high;
         let (from, to) = if from <= to { (from, to) } else { (to, from) };
         match spans.last_mut() {
             Some(last) if (from - last.1).abs() < 1e-9 => last.1 = to,
@@ -1815,13 +1837,24 @@ fn apply_roughing(preview: &mut Preview, cycles: &[Roughing]) {
         if profile.len() < 2 {
             continue;
         }
-        let inner = profile
-            .iter()
-            .map(|point| point[0])
-            .fold(f64::MAX, f64::min)
-            + cycle.allow;
-        let mut made: Vec<PathSegment> = Vec::new();
+        // The axis the layers step along, and the axis they cut along. G71 turns:
+        // it steps in X and each layer is a Z traverse. G72 faces: it steps in Z
+        // and each layer is an X traverse. Everything below is written against
+        // those two axes, so one walk draws both.
+        let (axis, along) = if cycle.facing {
+            (2usize, 0usize)
+        } else {
+            (0usize, 2usize)
+        };
         let level = profile[0][1];
+        let point = |across: f64, depth: f64| {
+            let mut point = [0.0; 3];
+            point[along] = across;
+            point[1] = level;
+            point[axis] = depth;
+            point
+        };
+        let mut made: Vec<PathSegment> = Vec::new();
         let mut at = profile[0];
         let add = |made: &mut Vec<PathSegment>, at: &mut [f64; 3], to: [f64; 3], kind| {
             if (to[0] - at[0]).abs() < 1e-12 && (to[2] - at[2]).abs() < 1e-12 {
@@ -1837,17 +1870,77 @@ fn apply_roughing(preview: &mut Preview, cycles: &[Roughing]) {
             });
             *at = to;
         };
-        let mut x = cycle.from;
-        let mut layers = 0;
-        while x > inner + 1e-9 && layers < 256 {
-            for (from, to) in layer_spans(&profile, x) {
-                add(&mut made, &mut at, [x, level, from], SegmentKind::Rapid);
-                add(&mut made, &mut at, [x, level, to], SegmentKind::Feed);
+        let low = profile.iter().map(|p| p[axis]).fold(f64::MAX, f64::min);
+        let high = profile.iter().map(|p| p[axis]).fold(f64::MIN, f64::max);
+        // Which way the layers travel: from the surface the cycle names towards
+        // the profile. A turning cycle starts at the stock's radius and steps in,
+        // which is inward unless its `X` already sits inside the profile -- boring
+        // a bore opens outward instead. A facing cycle steps back from the face it
+        // names until it meets the front of the profile.
+        let step = if cycle.facing {
+            if cycle.from > high {
+                -cycle.increment
+            } else if cycle.from < low {
+                cycle.increment
+            } else {
+                0.0
             }
-            // Clear the cut before stepping in.
-            let (clear, z) = (x + cycle.retract, at[2]);
-            add(&mut made, &mut at, [clear, level, z], SegmentKind::Rapid);
-            x -= cycle.increment;
+        } else if cycle.from >= low {
+            -cycle.increment
+        } else {
+            cycle.increment
+        };
+        // Where they stop. A turning layer cuts inward through the whole depth of
+        // the profile, so it stops `D` short of the profile's inner surface. A
+        // facing pass only sweeps back to the frontmost surface, so it stops `D`
+        // short of that instead: the two cycles measure `D` from opposite ends.
+        let stop = if step > 0.0 {
+            if cycle.facing {
+                low - cycle.allow
+            } else {
+                high - cycle.allow
+            }
+        } else if cycle.facing {
+            high + cycle.allow
+        } else {
+            low + cycle.allow
+        };
+        let mut cut = cycle.from;
+        let mut layers = 0;
+        while step != 0.0 && (cut - stop) * step < -1e-9 && layers < 256 {
+            // A facing pass enters at the X the cycle names, so it starts outside
+            // the stock and cuts inward; a turning layer just drops onto its
+            // radius where the previous one left off.
+            if cycle.facing {
+                add(
+                    &mut made,
+                    &mut at,
+                    point(cycle.start_x, cut),
+                    SegmentKind::Rapid,
+                );
+            }
+            let spans = if cycle.facing {
+                facing_spans(&profile, cut)
+            } else {
+                layer_spans(&profile, cut)
+            };
+            for (from, to) in spans {
+                // Enter each span at the end the tool is nearest, so the feed is
+                // the traverse across the metal rather than a cut back over it.
+                let (entry, exit) =
+                    if cycle.facing && (to - cycle.start_x).abs() < (from - cycle.start_x).abs() {
+                        (to, from)
+                    } else {
+                        (from, to)
+                    };
+                add(&mut made, &mut at, point(entry, cut), SegmentKind::Rapid);
+                add(&mut made, &mut at, point(exit, cut), SegmentKind::Feed);
+            }
+            // Clear the surface before stepping in.
+            let clear = cut - step.signum() * cycle.retract;
+            let across = at[along];
+            add(&mut made, &mut at, point(across, clear), SegmentKind::Rapid);
+            cut += step;
             layers += 1;
         }
         // The pass the cycle stops on: the profile, `D` short of the surface the
@@ -1857,12 +1950,13 @@ fn apply_roughing(preview: &mut Preview, cycles: &[Roughing]) {
         // The reference reads the profile's `G0` as `G1`: a profile describes the
         // surface, and every move in it cuts. Only the first move keeps its kind,
         // because that is the rapid the cycle makes to the start of the profile.
+        let shift = -step.signum() * cycle.allow;
         for (index, segment) in run.iter().enumerate() {
             let mut moved = segment.clone();
-            moved.start[0] += cycle.allow;
-            moved.end[0] += cycle.allow;
+            moved.start[axis] += shift;
+            moved.end[axis] += shift;
             if let Some(arc) = moved.arc.as_mut() {
-                arc.center[0] += cycle.allow;
+                arc.center[axis] += shift;
             }
             let kind = if index == 0 {
                 moved.kind
@@ -3154,8 +3248,13 @@ struct Roughing {
     increment: f64,
     /// `R`: clearance between layers.
     retract: f64,
-    /// `X`: the surface the first layer starts from.
+    /// The surface the first layer starts from: `X` for G71, `Z` for G72.
     from: f64,
+    /// `X`: the radius a facing pass enters from. G72 only.
+    start_x: f64,
+    /// G72 faces: layers are X traverses at successive Z planes. G71 turns:
+    /// layers are Z traverses at successive radii.
+    facing: bool,
 }
 
 /// Split an o-word line into its label and the rest, as the interpreter reads
@@ -4038,47 +4137,48 @@ fn plan_statements(
                                 .and_then(|label| subroutines.get(&label.to_string()).copied());
                             match profile {
                                 Some(start) if calls.len() < PREVIEW_DEPTH_LIMIT => {
-                                    if cycle.roughing && cycle.z_passes {
-                                        // A G71 removes its material in layers
-                                        // before the profile, and each layer is
-                                        // a Z traverse at one X. The drawing
-                                        // pass has the contour by then, so it
-                                        // draws the layers; record what it
-                                        // needs to place them.
+                                    if cycle.roughing {
+                                        // A roughing cycle removes its material
+                                        // in layers before the profile: G71
+                                        // traverses in Z and steps in X, G72
+                                        // faces, traversing in X and stepping in
+                                        // Z. The drawing pass has the contour by
+                                        // then, so it draws the layers; record
+                                        // what it needs to place them.
                                         //
-                                        // Its `X` is an axis word, so G7 halves
-                                        // it like any other X word. `D`, `I`
-                                        // and `R` are not axis words, and only
-                                        // G76 says its `I`, `J` and `K` are
-                                        // diameter measurements, so these stay
-                                        // machine units. Halving them too drew
-                                        // twice the layers this program cuts.
+                                        // `X` and `Z` are axis words, so G7
+                                        // halves the X one like any other X
+                                        // word. `D`, `I` and `R` are not axis
+                                        // words, and only G76 says its `I`, `J`
+                                        // and `K` are diameter measurements, so
+                                        // these stay machine units. Halving
+                                        // them too drew twice the layers this
+                                        // program cuts.
                                         let unit = if live.metric_program { 1.0 } else { 25.4 };
+                                        // The words default to where the tool
+                                        // is, which lives in machine units.
                                         let word = |letter: char, fallback: f64| {
                                             word_value(&words, letter)
                                                 .map_or(fallback, |value| value * unit)
                                         };
-                                        let from = word('x', 0.0);
+                                        let at = |axis: usize| live.position[axis];
+                                        let x = word('x', at(0));
+                                        let z = word('z', at(2));
+                                        let x = if live.lathe_diameter { x * 0.5 } else { x };
+                                        let facing = !cycle.z_passes;
                                         roughings.push(Roughing {
                                             line: *line,
                                             allow: word('d', 0.0).abs(),
                                             increment: word('i', 1.0).abs().max(1e-6),
                                             retract: word('r', 0.5).abs(),
-                                            from: if live.lathe_diameter {
-                                                from * 0.5
-                                            } else {
-                                                from
-                                            },
+                                            // The surface the layers start from:
+                                            // the radius for G71, the face for
+                                            // G72.
+                                            from: if facing { z } else { x },
+                                            // The X a facing pass enters from.
+                                            start_x: x,
+                                            facing,
                                         });
-                                    } else if cycle.roughing && incomplete.is_none() {
-                                        // G72 faces in X instead of Z, so its
-                                        // layers are not the Z traverses above.
-                                        // Only its finishing contour is drawn.
-                                        incomplete = Some(format!(
-                                            "line {}: the {} facing passes are not drawn, only \
-                                             its profile",
-                                            line, cycle.code
-                                        ));
                                     }
                                     // The profile body runs as a call with no
                                     // arguments: it sees the program's globals and
@@ -6088,7 +6188,9 @@ mod tests {
             [0.0; 3],
         );
         assert!(preview.error.is_none(), "{:?}", preview.error);
-        let end = preview.segments.last().expect("a move").end;
+        let Some(end) = preview.segments.last().map(|segment| segment.end) else {
+            panic!("a move")
+        };
         let radius = (2.0 - 0.0025) * 25.4;
         let (sin, cos) = 4.5f64.to_radians().sin_cos();
         assert!((end[0] - radius * cos).abs() < 1e-9, "{end:?}");
@@ -6157,14 +6259,18 @@ mod tests {
         let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
         assert!(preview.error.is_none(), "{:?}", preview.error);
         assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
-        let feed = preview
+        let feeds: Vec<[f64; 3]> = preview
             .segments
             .iter()
-            .find(|segment| segment.kind == SegmentKind::Feed)
-            .expect("a feed move");
-        assert_eq!((feed.end[0], feed.end[1]), (7.0, 42.0));
-        let end = preview.segments.last().expect("a move").end;
-        assert_eq!(end[0], 3.0, "the global named parameter is visible");
+            .filter(|segment| segment.kind == SegmentKind::Feed)
+            .map(|segment| segment.end)
+            .collect();
+        assert_eq!(feeds.first().map(|end| (end[0], end[1])), Some((7.0, 42.0)));
+        assert_eq!(
+            preview.segments.last().map(|segment| segment.end[0]),
+            Some(3.0),
+            "the global named parameter is visible"
+        );
     }
 
     #[test]
@@ -6643,15 +6749,41 @@ mod tests {
     }
 
     #[test]
-    fn a_facing_cycle_is_reported_because_its_passes_are_not_modelled() {
-        // G72 removes material in X-direction passes; the preview draws its
-        // profile and says the facing passes are missing.
-        let text = "G21 G90 G18\nG0 X10 Z0\nG72 Q100 X2 Z-20 D0.5 I1 R0.3\nM2\n\
-                    o100 sub\nG1 X6 Z-10 F200\nG1 X2 Z-10\no100 endsub\n";
+    fn a_facing_cycle_steps_back_from_the_face_and_leaves_the_finish_allowance() {
+        // G72 faces: each layer is an X traverse at one Z, stepping back from the
+        // face the cycle names by `I` until `D` is all that is left in front of
+        // the profile. It used to draw only the contour, with the passes reported
+        // as missing.
+        let text = "G21 G90 G18\nG0 X14 Z4\nG72 Q100 X15 Z4 D0.5 I1 R0.3\nM2\n\
+                    o100 sub\nG0 X14 Z-10\nG1 X14 Z0 F200\nG1 X0 Z0\no100 endsub\n";
         let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
         assert!(preview.error.is_none(), "{:?}", preview.error);
-        let reason = preview.incomplete_reason.clone().unwrap_or_default();
-        assert!(reason.contains("G72 facing passes"), "{reason}");
+        assert!(!preview.incomplete, "{:?}", preview.incomplete_reason);
+        // Every feed that runs along X at one Z: the facing passes, and the face
+        // the cycle stops on.
+        let mut planes: Vec<f64> = preview
+            .segments
+            .iter()
+            .filter(|segment| segment.kind == SegmentKind::Feed)
+            .filter(|segment| (segment.start[2] - segment.end[2]).abs() < 1e-9)
+            .filter(|segment| (segment.start[0] - segment.end[0]).abs() > 1e-6)
+            .map(|segment| segment.start[2])
+            .collect();
+        planes.sort_by(f64::total_cmp);
+        planes.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        // Z4 to Z1 are the passes; Z0.5 is the profile, `D` in front of the
+        // finished face so the finishing pass has something to take off.
+        assert_eq!(planes, vec![0.5, 1.0, 2.0, 3.0, 4.0], "{planes:?}");
+        // A pass starts at the radius the cycle names and cuts across the face.
+        let layer = preview.segments.iter().find(|segment| {
+            segment.kind == SegmentKind::Feed
+                && (segment.start[2] - 4.0).abs() < 1e-9
+                && (segment.start[0] - segment.end[0]).abs() > 1e-6
+        });
+        assert_eq!(
+            layer.map(|segment| (segment.start[0], segment.end[0])),
+            Some((14.0, 0.0))
+        );
     }
 
     #[test]

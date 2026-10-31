@@ -777,9 +777,17 @@ Program rules:
   the layers it removes: from the surface `X` inward in steps of `I`, each layer
   a Z traverse where the profile is still inside that radius and nothing over the
   parts it is not, clearing `R` between layers, and stopping `D` short of the
-  profile for the finishing pass. `G72` faces in X, so its layers are not
-  modelled: only its contour is drawn and the missing facing passes are reported.
-  A `Q` that names no subroutine in the program is reported too. `G76` is drawn
+  profile for the finishing pass. `G72` faces, so its layers are X traverses at
+  successive Z planes stepping back from the face its `Z` names, each one
+  entering at the radius its `X` names and cutting across the metal the plane
+  still has over it, and stopping `D` in front of the profile. `G71` measures `D`
+  from the profile's inner surface and `G72` from its front one, because a turning
+  layer cuts through the whole depth of the profile and a facing pass only sweeps
+  back to the front of it. Either way the pass the cycle stops on is the profile
+  shifted out by that `D`, which is what the finishing pass has left to take off.
+  A roughing cycle whose `X` (or `Z`) starts inside the profile, boring outward
+  rather than in, steps the other way. A `Q` that names no subroutine in the
+  program is reported. `G76` is drawn
   as the thread it cuts: passes from `J` down to `K`, spaced by the depth
   degression `R` as `J * n^(1/R)` and shifted along the drive line by the
   compound angle `Q`, each with its entry taper or plunge (`L1`/`L3`), its root
