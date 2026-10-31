@@ -664,7 +664,23 @@ Program rules:
 - The program path is drawn in machine coordinates, the frame the tool marker
   and the live trail use: the work offset the program selects is applied, and in
   lathe `G7` diameter mode an X word is a diameter, halved exactly as the
-  interpreter halves it, so the path lands where the machine goes.
+  interpreter halves it, so the path lands where the machine goes. The live
+  tool tip the path starts from is that same point -- the work position plus the
+  active offset. Neither the DRO's work value (a whole offset short) nor the
+  machine position (a tool length long, since the preview draws the tip and not
+  the machine slide) is it.
+- `G53` makes its block's axis words machine positions, so the move ends there
+  and not an offset away from it. It is a one-block word: the block after it is
+  back in the work system. A `G38.2`/`G38.3`/`G38.4`/`G38.5` straight probe is
+  drawn as a feed-rate straight line in its own colour, not as the motion mode
+  it follows, and it does not replace that mode because a probe is not modal.
+  The preview has no probe input to watch, so the line ends at the programmed
+  point -- which is where the reference says an unsuccessful probe reports the
+  tool -- and `#5061`-`#5063` read that point with `#5070` left at 0. A probe
+  that names no axis, or that runs under cutter compensation, is reported as the
+  error the interpreter would raise; a probe to the point the tool is already at
+  is not, because the preview's own probe end is what would make it look that
+  way.
 - A leading rapid that only approaches the program from the live tool position
   is not drawn: the path starts at the program's first move, so no dotted
   connector crosses the part. A program whose only move is that rapid still

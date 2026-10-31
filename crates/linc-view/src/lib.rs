@@ -1401,6 +1401,10 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
                 Stroke::new(2.6, view.selected_line_color)
             } else if segment.kind == SegmentKind::Rapid {
                 Stroke::new(1.0, theme::MUTED)
+            } else if segment.kind == SegmentKind::Probe {
+                // A probe runs at feed rate but is not a cut: it stops wherever
+                // the part is, so it gets its own colour.
+                Stroke::new(1.4, theme::WARNING)
             } else {
                 Stroke::new(1.8, theme::ACCENT)
             };

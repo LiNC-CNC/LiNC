@@ -557,6 +557,11 @@ pub enum SegmentKind {
     Rapid,
     Feed,
     Arc,
+    /// A `G38.n` straight probe: a feed-rate move along a straight line that
+    /// ends where the probe trips. The preview has no probe input to watch, so
+    /// it draws the line to the programmed point, which is where the reference
+    /// says an unsuccessful probe leaves the reported position.
+    Probe,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1757,6 +1762,10 @@ struct Live {
     feed_hold: bool,
     /// The R plane of the canned cycle that is modal, in machine units.
     cycle_r: Option<f64>,
+    /// Where the last `G38.n` probe ended, in machine units. The reference says
+    /// an unsuccessful probe reports the programmed point, which is where the
+    /// preview's line ends, since it has no probe input to watch.
+    probe: Option<[f64; 3]>,
     /// From the planner: the block being resolved, how deep in subroutine
     /// calls that is, and what the last `return` or `endsub` handed back.
     line: usize,
@@ -1797,6 +1806,7 @@ impl Default for Live {
             adaptive_feed: false,
             feed_hold: false,
             cycle_r: None,
+            probe: None,
             line: 0,
             call_level: 0,
             value: 0.0,
@@ -1915,6 +1925,19 @@ impl Live {
                 *slot = value;
             }
         }
+        // #5061-#5069 are where a probe reports the point it stopped at. The
+        // preview's probe never trips, so it reports the programmed point, the
+        // way the reference says an unsuccessful probe does, and #5070 stays 0:
+        // the preview interpreter's probe always fails, which is why the probe
+        // macros branch on `#<_task>` before testing it.
+        if let Some(probe) = self.probe {
+            let unit = if self.metric_program { 1.0 } else { 1.0 / 25.4 };
+            for (index, number) in ["5061", "5062", "5063"].iter().enumerate() {
+                if let Some(slot) = params.get_mut(*number) {
+                    *slot = probe[index] * unit;
+                }
+            }
+        }
     }
 
     /// The modal flags a block sets. Called before [`Live::advance`], because a
@@ -2031,6 +2054,7 @@ impl Live {
         // either, so a program that reads `#<_abs_*>` straight after one reads
         // the offsets the preview started with.
         let mut machine_coordinates = false;
+        let mut probe = false;
         for token in tokens {
             if token.kind != TokenKind::GCode {
                 continue;
@@ -2040,6 +2064,9 @@ impl Live {
                 // G53 moves in machine coordinates, so its words name the
                 // machine position and no offset applies to them.
                 Some(53.0) => machine_coordinates = true,
+                // A straight probe is a feed-rate move that is not modal, so it
+                // moves wherever the motion mode was.
+                Some(38.2 | 38.3 | 38.4 | 38.5) => probe = true,
                 _ => {}
             }
         }
@@ -2055,11 +2082,11 @@ impl Live {
         if !has_axis && polar.is_none() {
             return;
         }
-        if matches!(self.motion, 73.0 | 81.0 | 82.0 | 83.0) {
+        if !probe && matches!(self.motion, 73.0 | 81.0 | 82.0 | 83.0) {
             self.advance_cycle(tokens);
             return;
         }
-        if !matches!(self.motion, 0.0 | 1.0 | 2.0 | 3.0) {
+        if !probe && !matches!(self.motion, 0.0 | 1.0 | 2.0 | 3.0) {
             return;
         }
         let unit = if self.metric_program { 1.0 } else { 25.4 };
@@ -2102,6 +2129,15 @@ impl Live {
             }
         }
         self.position = target;
+        if probe {
+            // Where an unsuccessful probe leaves the reported position, and the
+            // point the preview drew the line to.
+            self.probe = Some([
+                self.position[0] - self.offset[0],
+                self.position[1] - self.offset[1],
+                self.position[2] - self.offset[2],
+            ]);
+        }
     }
 
     /// A canned cycle ends clear of the part at the hole it drilled. `L` passes
@@ -2167,6 +2203,10 @@ fn new_params() -> Params {
     }
     for (number, _) in NUMBERED_LIVE {
         params.insert((*number).to_string(), 0.0);
+    }
+    // The straight-probe results (#5061-#5069) and its success flag (#5070).
+    for number in 5061..=5070 {
+        params.insert(number.to_string(), 0.0);
     }
     params
 }
@@ -4093,6 +4133,13 @@ pub fn parse_preview_full(
         let line_start_segment = preview.segments.len();
         // Set by a G10 in this block: the block writes an offset, it never moves.
         let mut g10 = false;
+        // Set by a G38.2/G38.3/G38.4/G38.5 in this block. A straight probe is
+        // not modal: the block moves at feed rate along a straight line and the
+        // motion mode it was in survives it.
+        let mut probe: Option<f64> = None;
+        // Set by a G53 in this block: its axis words name machine positions, so
+        // no work offset applies to them. Like G38.n it is a one-block word.
+        let mut machine_coordinates = false;
 
         // Modal words.
         for token in &tokens {
@@ -4173,6 +4220,10 @@ pub fn parse_preview_full(
                             }
                         }
                         comp_request = Some(Comp { left, radius });
+                    } else if value == 38.2 || value == 38.3 || value == 38.4 || value == 38.5 {
+                        probe = Some(value);
+                    } else if value == 53.0 {
+                        machine_coordinates = true;
                     }
                 }
             } else if token.kind == TokenKind::MCode {
@@ -4474,8 +4525,31 @@ pub fn parse_preview_full(
             continue;
         }
 
-        let is_motion = (motion == 0.0 || motion == 1.0 || motion == 2.0 || motion == 3.0)
-            && (has_axis_word || has_polar_word);
+        // A probe block moves whether or not a motion mode was in force: the
+        // interpreter allows `G38.2` after a `G80`. Its own rules are the ones
+        // the preview can check, so it checks them here and reports them rather
+        // than drawing a move the machine would refuse.
+        if let Some(kind) = probe {
+            let code = format_g(kind);
+            let refusal = if !has_axis_word {
+                Some(format!("{code} needs an axis word to probe towards"))
+            } else if comp.is_some() {
+                Some(format!("{code} cannot run while cutter compensation is on"))
+            } else {
+                None
+            };
+            if let Some(message) = refusal {
+                preview.error = Some(SyntaxIssue {
+                    line: line_no,
+                    message,
+                });
+                break;
+            }
+        }
+
+        let is_motion =
+            (motion == 0.0 || motion == 1.0 || motion == 2.0 || motion == 3.0 || probe.is_some())
+                && (has_axis_word || has_polar_word);
         if !is_motion || tokens.iter().any(|t| t.kind == TokenKind::OWord) {
             continue;
         }
@@ -4490,7 +4564,11 @@ pub fn parse_preview_full(
             };
             let value = if axis == 0 { dia(mm(value)) } else { mm(value) };
             let base = if absolute {
-                value + offset_of(&offsets, name)
+                if machine_coordinates {
+                    value
+                } else {
+                    value + offset_of(&offsets, name)
+                }
             } else {
                 position[axis] + value
             };
@@ -4501,10 +4579,12 @@ pub fn parse_preview_full(
         for (letter, axis) in [('x', 0usize), ('y', 1), ('z', 2)] {
             if let Some(value) = word_value(&tokens, letter) {
                 let value = if axis == 0 { dia(mm(value)) } else { mm(value) };
-                target[axis] = if absolute {
-                    value + offset_of(&offsets, &letter.to_ascii_uppercase().to_string())
-                } else {
+                target[axis] = if !absolute {
                     position[axis] + value
+                } else if machine_coordinates {
+                    value
+                } else {
+                    value + offset_of(&offsets, &letter.to_ascii_uppercase().to_string())
                 };
             }
         }
@@ -4558,7 +4638,9 @@ pub fn parse_preview_full(
         let mut segment = PathSegment {
             start,
             end: target,
-            kind: if motion == 0.0 {
+            kind: if probe.is_some() {
+                SegmentKind::Probe
+            } else if motion == 0.0 {
                 SegmentKind::Rapid
             } else if motion == 2.0 || motion == 3.0 {
                 SegmentKind::Arc
@@ -4569,7 +4651,9 @@ pub fn parse_preview_full(
             arc: None,
             tool,
         };
-        if motion == 2.0 || motion == 3.0 {
+        // A probe is a straight line, so a G2/G3 that is still modal cannot turn
+        // it into an arc.
+        if probe.is_none() && (motion == 2.0 || motion == 3.0) {
             let arc = apply_arc(
                 start,
                 target,
@@ -5449,6 +5533,109 @@ mod tests {
             .segments
             .last()
             .map_or([0.0; 3], |segment| segment.end)
+    }
+
+    #[test]
+    fn a_g53_block_draws_the_machine_point_it_names() {
+        // G53 X20 puts the machine at 20 whatever the work offset is, so the
+        // drawn move ends at 20 and not at 20 + 100. G53 is a one-block word:
+        // the next block is back in the work system.
+        let text = "G21 G90\nG53 G0 X20\nG0 X10\nM2\n";
+        let preview = parse_with_offset(text, [100.0, 0.0, 0.0]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let machine = preview.segments.first().expect("the G53 move");
+        assert!((machine.end[0] - 20.0).abs() < 1e-9, "{machine:?}");
+        assert!(
+            (ends(&preview)[0] - 110.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn a_probe_move_is_drawn_at_feed_rate_not_as_the_last_motion() {
+        // `G38.2` after a `G0` used to draw as a rapid, and after a `G1` the
+        // same line moved nothing at all until the next block. It is its own
+        // kind of move: a straight feed-rate line to the programmed point.
+        let text = "G21 G90\nG0 Z5\nG38.2 Z-10 F100\n#1 = [#<_motion_mode>]\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let probe = preview
+            .segments
+            .iter()
+            .find(|segment| segment.kind == SegmentKind::Probe)
+            .expect("a probe segment");
+        assert!((probe.end[2] + 10.0).abs() < 1e-9, "{probe:?}");
+        // A probe is not a cut, so it is not counted as one, and it is not a
+        // rapid either.
+        assert_eq!(preview.rapids, 1, "only the G0 is a rapid");
+    }
+
+    #[test]
+    fn a_probe_leaves_the_motion_mode_alone_because_it_is_not_modal() {
+        let text = "G21 G90\nG1 X0 F100\nG38.2 Z-10\nG1 X[#<_motion_mode> + 10]\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        // `#<_motion_mode>` is still G1, so the block after the probe feeds to
+        // X11 rather than rapiding there.
+        assert!(
+            (ends(&preview)[0] - 11.0).abs() < 1e-9,
+            "{:?}",
+            ends(&preview)
+        );
+    }
+
+    #[test]
+    fn a_probe_reports_the_programmed_point_it_drew_to() {
+        // An unsuccessful probe reports the programmed point; the preview's
+        // probe never trips, so that is the point it reports too, and #5070
+        // says the probe did not succeed.
+        let text =
+            "G21 G90\nG0 Z5\nG38.2 Z-10 F100\n#1 = [#5063]\n#2 = [#5070]\nG0 X[#1] Y[#2]\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let end = ends(&preview);
+        assert!((end[0] + 10.0).abs() < 1e-9, "{:?}", end);
+        assert_eq!(end[1], 0.0);
+    }
+
+    #[test]
+    fn a_probe_that_names_no_axis_is_reported() {
+        let text = "G21 G90\nG0 Z5\nG38.2 F100\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        let error = preview.error.expect("a reported error");
+        assert_eq!(error.line, 3);
+        assert!(error.message.contains("axis word"), "{}", error.message);
+    }
+
+    #[test]
+    fn a_probe_under_cutter_compensation_is_reported() {
+        // Cutters cannot probe: the reference lists compensation as an error.
+        let text = "G21 G90\nG0 X0 Y0 Z5\nG41 D1\nG1 X10\nG38.2 Z-10 F100\nM2\n";
+        let preview = parse_with_tool(text, 1, 10.0);
+        let error = preview.error.expect("a reported error");
+        assert_eq!(error.line, 5);
+        assert!(
+            error.message.contains("cutter compensation"),
+            "{}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn a_probe_to_the_point_it_is_already_at_draws_a_zero_length_move() {
+        // The interpreter refuses this, but the preview cannot: it puts every
+        // probe's end at the programmed point, so `smartprobe.ngc`'s
+        // `G38.5 z#7` retract looks zero-length on its second pass, while on the
+        // machine the probe stopped short of it the first time. Reporting it
+        // would fail a program that runs.
+        let text = "G21 G90\nG0 X0 Y0 Z5\nG38.2 Z5 F100\nG0 X10\nM2\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        assert!(preview
+            .segments
+            .iter()
+            .any(|segment| segment.kind == SegmentKind::Probe));
     }
 
     #[test]
