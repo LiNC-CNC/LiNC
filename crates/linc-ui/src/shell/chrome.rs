@@ -470,8 +470,4 @@ pub(crate) struct ChromeUi {
     pub alarm_id_seen: u64,
     pub last_connection: Option<bool>,
     pub last_protect: Option<bool>,
-    /// Lathe only: read the X position as a diameter (`2X`) instead of a
-    /// radius. A display factor — the controller keeps working in radius, and
-    /// no command is issued from it.
-    pub lathe_diameter: bool,
 }

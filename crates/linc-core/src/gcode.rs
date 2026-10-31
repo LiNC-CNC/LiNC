@@ -740,6 +740,11 @@ pub struct Preview {
     pub modal: ModalSummary,
     pub tools: Vec<u16>,
     pub program_number: Option<String>,
+    /// G7 lathe diameter mode was in force at the end of the program. The
+    /// interpreter's own state, which the DRO reads so the operator sees the
+    /// diameter the program is written in rather than the radius the machine
+    /// moves.
+    pub lathe_diameter: bool,
     pub uses_live_tool: bool,
     pub arcs: usize,
     pub rapids: usize,
@@ -979,6 +984,7 @@ impl Preview {
             },
             tools: Vec::new(),
             program_number: None,
+            lathe_diameter: false,
             uses_live_tool: false,
             arcs: 0,
             rapids: 0,
@@ -1785,14 +1791,24 @@ fn apply_roughing(preview: &mut Preview, cycles: &[Roughing]) {
         // The pass the cycle stops on: the profile, `D` short of the surface the
         // finishing pass cuts. An arc keeps its radius and moves with the shift,
         // which is the offset a single-axis shift gives.
-        for segment in &run {
+        //
+        // The reference reads the profile's `G0` as `G1`: a profile describes the
+        // surface, and every move in it cuts. Only the first move keeps its kind,
+        // because that is the rapid the cycle makes to the start of the profile.
+        for (index, segment) in run.iter().enumerate() {
             let mut moved = segment.clone();
             moved.start[0] += cycle.allow;
             moved.end[0] += cycle.allow;
             if let Some(arc) = moved.arc.as_mut() {
                 arc.center[0] += cycle.allow;
             }
-            let kind = moved.kind;
+            let kind = if index == 0 {
+                moved.kind
+            } else if moved.kind == SegmentKind::Rapid {
+                SegmentKind::Feed
+            } else {
+                moved.kind
+            };
             let end_point = moved.end;
             add(&mut made, &mut at, end_point, kind);
             if moved.arc.is_some() {
@@ -5358,6 +5374,9 @@ pub fn parse_preview_full(
         },
         distance_mode: if absolute { "G90".into() } else { "G91".into() },
     };
+    // The lathe diameter mode the last block left behind, which the DRO reads so
+    // a program written in diameters is shown in diameters.
+    preview.lathe_diameter = lathe_diameter;
     // Normalize program number to a percent program header if present.
     preview
 }
@@ -6279,6 +6298,26 @@ mod tests {
         levels.sort_by(f64::total_cmp);
         levels.dedup();
         assert_eq!(levels, vec![12.0, 13.0, 15.0, 17.0], "{levels:?}");
+    }
+
+    #[test]
+    fn a_g0_inside_a_profile_cuts_instead_of_rapiding() {
+        // The reference reads the profile's `G0` as `G1`: a profile describes a
+        // surface, and every move in it cuts. The first move keeps its kind
+        // because that is the rapid the cycle makes to the start of the profile.
+        let text = "G21 G90 G18\nG0 X10 Z0\nG71 Q100 X12 Z-20 D0.5 I1 R0.3\nM2\n\
+                    o100 sub\nG0 X10 Z0\nG1 X6 Z-10 F200\nG0 X2 Z-10\no100 endsub\n";
+        let preview = parse_preview(text, &preview_axes(), None, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        // The `G0 X2 Z-10` of the body, moved out by D: it has to be a cut.
+        let last = preview
+            .segments
+            .iter()
+            .find(|segment| {
+                (segment.end[0] - 2.5).abs() < 1e-9 && (segment.end[2] + 10.0).abs() < 1e-9
+            })
+            .expect("the profile's last move");
+        assert_eq!(last.kind, SegmentKind::Feed, "{last:?}");
     }
 
     #[test]

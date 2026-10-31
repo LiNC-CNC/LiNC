@@ -412,6 +412,9 @@ impl SimBackend {
         );
         self.snapshot.program.syntax_error = preview.error.clone();
         self.snapshot.program.modal = preview.modal.lines();
+        // The interpreter's lathe diameter mode, so the DRO reads the diameters
+        // the program is written in rather than the radius the machine moves.
+        self.snapshot.positions.lathe_diameter_mode = preview.lathe_diameter;
         self.snapshot.program.current_block = self
             .snapshot
             .program
@@ -847,6 +850,12 @@ impl SimBackend {
             &self.profile.subroutines(),
             &Tools::from_rows(&self.snapshot.tool_table.rows),
         );
+        // A G7 or G8 in the block itself changes the frame the DRO reads X in.
+        // A block that names neither keeps the mode it was in, which a one-line
+        // parse cannot know, so it is only written when the block selects one.
+        if let Some(diameter) = lathe_mode_word(&upper) {
+            self.snapshot.positions.lathe_diameter_mode = diameter;
+        }
         if let Some(segment) = preview.segments.last() {
             let start = segment.start;
             let end = segment.end;
@@ -908,6 +917,32 @@ fn task_mode_for(mode: PanelMode) -> TaskMode {
         | PanelMode::Home
         | PanelMode::ProgHome => TaskMode::Manual,
     }
+}
+
+/// `G7` or `G8` among a block's G words: lathe diameter mode and radius mode.
+/// `G70`, `G71`, `G76`, `G80` and the rest are different words, so the number
+/// after the letter has to be read whole.
+fn lathe_mode_word(line: &str) -> Option<bool> {
+    let bytes = line.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'G' {
+            index += 1;
+            continue;
+        }
+        let start = index + 1;
+        let mut end = start;
+        while end < bytes.len() && ((bytes[end] as char).is_ascii_digit() || bytes[end] == b'.') {
+            end += 1;
+        }
+        match line[start..end].parse::<f64>() {
+            Ok(7.0) => return Some(true),
+            Ok(8.0) => return Some(false),
+            _ => {}
+        }
+        index = end.max(index + 1);
+    }
+    None
 }
 
 fn word_number(text: &str, letter: char) -> Option<f64> {

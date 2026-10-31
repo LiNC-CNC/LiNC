@@ -556,6 +556,9 @@ impl SnapshotBuilder {
         let g92 = status.offsets.g92_offset;
         let tool_offset = status.offsets.tool_offset;
         let dtg = status.positions.dtg;
+        // G7 is 70 in the interpreter's scaled gcode numbering (G70/G71/G76 are
+        // 700/710/760), so this is the same number the modal readout shows.
+        snapshot.positions.lathe_diameter_mode = status.active_gcodes.contains(&70);
         snapshot.positions.axes = AxisMap::new();
         for (index, axis) in axes.iter().enumerate() {
             let pose_index = axis_pose_index(&axis.name).unwrap_or(index);
