@@ -681,6 +681,28 @@ Program rules:
   error the interpreter would raise; a probe to the point the tool is already at
   is not, because the preview's own probe end is what would make it look that
   way.
+- The frame the path is drawn in is the one the program asks for as it goes.
+  `G10 L2`/`L20` writes a coordinate system and `G92` shifts the frame on top of
+  whichever system is active, and neither moves the machine: drawing their axis
+  words as moves put a plunge to `Z0` in every probe macro that zeroed a
+  surface. `G92.1` takes the shift back off, `G92.2` suspends it and `G92.3`
+  restores it, so a program that zeroes a surface, cuts and cancels draws each
+  pass at the depth it is really cut at -- the five roughing windows of
+  `g76.ngc` stack instead of landing on top of each other. `G28`/`G30` pass
+  through the point their axis words name and then go to the machine's
+  reference position, which a program stores in `#5161`/`#5181` with
+  `G28.1` rather than writing it down. Both moves are drawn; the end point the
+  preview cannot know is drawn at the machine origin and reported, where before
+  the block drew one move to the axis words and said nothing. `G28.1`/`G30.1`
+  store that position and move nothing.
+- `G5`/`G5.1` are drawn as the curves they are, not as the straight line between
+  their end points. `I`/`J` place the first control point relative to the start
+  and `P`/`Q` the second relative to the end, and the curve those points define
+  is drawn as chords every 2 mm of control polygon, at feed rate, so a spline
+  does not read as a rapid. The reference's own example, `G5.1 X2 I2 J-8` from
+  `X-2 Y4`, draws a parabola through the origin. Cutter compensation would have
+  to offset the curve itself, so a spline under compensation is drawn on the
+  programmed line and reported.
 - A, B and C are tracked as angles in degrees, so `#<_a>`-`#<_c>`, their
   absolute forms and `#5423`-`#5425` read what the program last commanded, but no
   rotary geometry is drawn: every shipped profile is a three-axis `trivkins`
@@ -794,7 +816,9 @@ Program rules:
   preview cannot know, such as a probe result a remap names, still reads 0
   rather than a guess. Four limits are stated rather than hidden: the live Z is
   the retract plane across a canned cycle that names more than one hole, the
-  absolute position ignores a `G10` the same program wrote, `#<_metric_machine>`
+  work position `#<_x>`-`#<_w>` keeps the offset the program started with -- so a
+  `G10` or `G92` the same program writes shifts the drawn path but not the
+  parameters that read the frame -- `#<_metric_machine>`
   answers with the program's units because the preview is given the program and
   not the machine's setup, and `#<_current_tool>`/`#<_current_pocket>` follow the
   last T word because the preview has no tool changer to ask.

@@ -1096,6 +1096,17 @@ fn offset_of(offsets: &AxisMap<f64>, name: &str) -> f64 {
     offsets.get(name).copied().unwrap_or(0.0)
 }
 
+/// The frame the path is drawn in: the coordinate system with the G92 shift on
+/// top of it. The shift is added to each axis the block named, and an axis it
+/// did not name keeps the system's own offset.
+fn frame_of(wcs: &AxisMap<f64>, g92: &AxisMap<f64>) -> AxisMap<f64> {
+    let mut frame = wcs.clone();
+    for (name, shift) in g92.iter() {
+        frame.insert(name, offset_of(wcs, name) + shift);
+    }
+    frame
+}
+
 /// The system number a G5X name selects, as G10's P word spells it.
 fn wcs_index(name: &str) -> Option<u8> {
     match name {
@@ -1223,6 +1234,57 @@ fn format_m(value: f64) -> String {
     } else {
         format!("M{value}")
     }
+}
+
+/// The points a `G5`/`G5.1` spline runs through, starting at the current point.
+///
+/// `i`/`j` place the first control point relative to the start and `p`/`q` the
+/// second relative to the end; a quadratic spline (`G5.1`) has the first only.
+/// The curve passes through the start and the end and is pulled towards the
+/// control points between them, which is the B-spline the interpreter builds.
+fn spline_chords(
+    start: [f64; 3],
+    control: [f64; 2],
+    second: Option<[f64; 2]>,
+    end: [f64; 3],
+) -> Vec<[f64; 2]> {
+    let p0 = [start[0], start[1]];
+    let p1 = [p0[0] + control[0], p0[1] + control[1]];
+    let p2 = second.map(|offset| [end[0] + offset[0], end[1] + offset[1]]);
+    let p3 = [end[0], end[1]];
+    // One chord every 2 mm of control polygon: enough that a long spline stays
+    // smooth without turning into thousands of segments.
+    let span = |a: [f64; 2], b: [f64; 2]| (b[0] - a[0]).hypot(b[1] - a[1]);
+    let polygon = match p2 {
+        Some(p2) => span(p0, p1) + span(p1, p2) + span(p2, p3),
+        None => span(p0, p1) + span(p1, p3),
+    };
+    let count = ((polygon / 2.0).ceil() as usize).clamp(4, 128);
+    (0..=count)
+        .map(|step| {
+            let t = step as f64 / count as f64;
+            let s = 1.0 - t;
+            match p2 {
+                // Cubic: two control points between the ends.
+                Some(p2) => [
+                    s * s * s * p0[0]
+                        + 3.0 * s * s * t * p1[0]
+                        + 3.0 * s * t * t * p2[0]
+                        + t * t * t * p3[0],
+                    s * s * s * p0[1]
+                        + 3.0 * s * s * t * p1[1]
+                        + 3.0 * s * t * t * p2[1]
+                        + t * t * t * p3[1],
+                ],
+                // Quadratic: one control point, and the curve runs from the
+                // start to the end through neither of them.
+                None => [
+                    s * s * p0[0] + 2.0 * s * t * p1[0] + t * t * p3[0],
+                    s * s * p0[1] + 2.0 * s * t * p1[1] + t * t * p3[1],
+                ],
+            }
+        })
+        .collect()
 }
 
 fn apply_arc(
@@ -4445,9 +4507,16 @@ pub fn parse_preview_full(
             _ => None,
         }
     };
-    // The work offset the path is drawn against. It starts as the caller's and
-    // a G10 L2/L20 block changes it for the rest of the program.
-    let mut offsets: AxisMap<f64> = offset.cloned().unwrap_or_default();
+    // The work offset the path is drawn against. It starts as the caller's, a
+    // G10 L2/L20 block rewrites the coordinate system, and a G92 block shifts
+    // the frame on top of whichever system is active. The two are separate
+    // layers because G92.1 takes the shift back off without touching the
+    // system underneath it.
+    let mut system: AxisMap<f64> = offset.cloned().unwrap_or_default();
+    let mut g92: AxisMap<f64> = AxisMap::new();
+    // G92.2 suspends the shift and keeps it for G92.3; nothing else reads it.
+    let mut g92_suspended: Option<AxisMap<f64>> = None;
+    let mut offsets: AxisMap<f64> = frame_of(&system, &g92);
 
     let mut position = current_position;
     let mut absolute = true;
@@ -4516,6 +4585,12 @@ pub fn parse_preview_full(
         let line_start_segment = preview.segments.len();
         // Set by a G10 in this block: the block writes an offset, it never moves.
         let mut g10 = false;
+        // G92 shifts the frame the way a G10 L20 does, but into a layer of its
+        // own. The family is non-modal and none of it moves the machine.
+        let mut g92_set = false;
+        let mut g92_cancel = false;
+        let mut g92_suspend = false;
+        let mut g92_restore = false;
         // Set by a G38.2/G38.3/G38.4/G38.5 in this block. A straight probe is
         // not modal: the block moves at feed rate along a straight line and the
         // motion mode it was in survives it.
@@ -4523,6 +4598,15 @@ pub fn parse_preview_full(
         // Set by a G53 in this block: its axis words name machine positions, so
         // no work offset applies to them. Like G38.n it is a one-block word.
         let mut machine_coordinates = false;
+        // G28/G30 name a point the block passes through on its way to the
+        // machine's reference position. G28.1/G30.1 store that position and
+        // move nothing.
+        let mut home: Option<u16> = None;
+        let mut store_home = false;
+        // G5/G5.1: a spline through the control points the block gives, which
+        // is a curve, not the straight line to its end point.
+        let mut cubic_spline = false;
+        let mut quadratic_spline = false;
 
         // Modal words.
         for token in &tokens {
@@ -4566,8 +4650,28 @@ pub fn parse_preview_full(
                         lathe_diameter = false;
                     } else if (54.0..=59.3).contains(&value) {
                         wcs = format_g(value);
+                    } else if value == 5.0 {
+                        cubic_spline = true;
+                    } else if value == 5.1 {
+                        quadratic_spline = true;
+                    } else if value == 28.0 {
+                        home = Some(28);
+                    } else if value == 28.1 {
+                        store_home = true;
+                    } else if value == 30.0 {
+                        home = Some(30);
+                    } else if value == 30.1 {
+                        store_home = true;
                     } else if value == 10.0 {
                         g10 = true;
+                    } else if value == 92.0 {
+                        g92_set = true;
+                    } else if value == 92.1 {
+                        g92_cancel = true;
+                    } else if value == 92.2 {
+                        g92_suspend = true;
+                    } else if value == 92.3 {
+                        g92_restore = true;
                     } else if value == 40.0 {
                         // G40 ends compensation; the block's own move, if any,
                         // is the lead-out and runs on the programmed path.
@@ -4639,7 +4743,7 @@ pub fn parse_preview_full(
                 Some(index) => wcs_index(&wcs) == Some(index),
                 None => true,
             };
-            let mut row = offsets.clone();
+            let mut row = system.clone();
             for (letter, axis, axis_index) in [('x', "X", 0usize), ('y', "Y", 1), ('z', "Z", 2)] {
                 let Some(value) = word_value(&tokens, letter) else {
                     continue;
@@ -4663,8 +4767,50 @@ pub fn parse_preview_full(
                 row.insert(axis, value);
             }
             if applies && (mode == 2 || mode == 20) {
-                offsets = row;
+                system = row;
+                offsets = frame_of(&system, &g92);
             }
+            continue;
+        }
+
+        // G92 makes the current point read the coordinates given, which is the
+        // same arithmetic as G10 L20: the shift is the gap between where the
+        // tool is and what the program wants that to read. The machine does not
+        // move, so this block draws nothing -- and drawing its axis words as a
+        // move put a plunge to Z0 on every probe macro that zeroed the surface.
+        if g92_set {
+            for (letter, axis, axis_index) in [('x', "X", 0usize), ('y', "Y", 1), ('z', "Z", 2)] {
+                let Some(value) = word_value(&tokens, letter) else {
+                    continue;
+                };
+                let value = if axis_index == 0 {
+                    dia(mm(value))
+                } else {
+                    mm(value)
+                };
+                g92.insert(axis, position[axis_index] - value);
+            }
+            offsets = frame_of(&system, &g92);
+            continue;
+        }
+        if g92_cancel || g92_suspend || g92_restore {
+            if g92_restore {
+                g92 = g92_suspended.take().unwrap_or_default();
+            } else {
+                if g92_suspend {
+                    g92_suspended = Some(g92.clone());
+                } else {
+                    g92_suspended = None;
+                }
+                g92 = AxisMap::new();
+            }
+            offsets = frame_of(&system, &g92);
+            continue;
+        }
+
+        // G28.1/G30.1 write the reference position into #5161..#5186, which is
+        // a parameter the preview does not track. The block moves nothing.
+        if store_home {
             continue;
         }
 
@@ -5095,9 +5241,11 @@ pub fn parse_preview_full(
             }
         }
 
-        let is_motion =
-            (motion == 0.0 || motion == 1.0 || motion == 2.0 || motion == 3.0 || probe.is_some())
-                && (has_axis_word || has_polar_word);
+        let is_motion = ((motion == 0.0 || motion == 1.0 || motion == 2.0 || motion == 3.0 || probe.is_some())
+                && (has_axis_word || has_polar_word))
+                // A G28/G30 with no axis words moves every axis to the reference
+                // position, so it is motion without an axis word.
+                || home.is_some();
         if !is_motion || tokens.iter().any(|t| t.kind == TokenKind::OWord) {
             continue;
         }
@@ -5176,6 +5324,50 @@ pub fn parse_preview_full(
 
         saw_motion = true;
 
+        // G5/G5.1 bend through the control points the block gives instead of
+        // running straight to the end point, so the chords of the curve are what
+        // is drawn. `i`/`j` place the first control point relative to the start,
+        // `p`/`q` the second relative to the end (G5 only); the machine moves in
+        // a straight line between chords of its own making, which is why the
+        // curve is a path of straight segments and not an arc.
+        if cubic_spline || quadratic_spline {
+            let control = [
+                dia(mm(word_value(&tokens, 'i').unwrap_or(0.0))),
+                mm(word_value(&tokens, 'j').unwrap_or(0.0)),
+            ];
+            let second = if cubic_spline {
+                Some([
+                    dia(mm(word_value(&tokens, 'p').unwrap_or(0.0))),
+                    mm(word_value(&tokens, 'q').unwrap_or(0.0)),
+                ])
+            } else {
+                None
+            };
+            let chords = spline_chords(position, control, second, target);
+            // Cutter compensation would have to offset the curve itself, which
+            // is a different job from offsetting the lines around it.
+            if comp.is_some() {
+                if incomplete.is_none() {
+                    incomplete = Some(format!(
+                        "line {line_no}: the spline is drawn on the programmed line, \
+                         without the cutter compensation the rest of the path carries"
+                    ));
+                }
+                comp_exit = None;
+            }
+            let mut at = position;
+            for point in chords.into_iter().skip(1) {
+                let to = [point[0], point[1], target[2]];
+                push_cycle_segment(&mut preview, at, to, SegmentKind::Feed, line_no, tool, pass);
+                at = to;
+            }
+            preview
+                .line_bounds
+                .insert(line_no, (line_start_segment, preview.segments.len()));
+            position = target;
+            continue;
+        }
+
         // A G41/G42 in this block applies to its move, which is the lead-in.
         if let Some(requested) = comp_request.take() {
             comp = Some(requested);
@@ -5188,7 +5380,7 @@ pub fn parse_preview_full(
             end: target,
             kind: if probe.is_some() {
                 SegmentKind::Probe
-            } else if motion == 0.0 {
+            } else if motion == 0.0 || home.is_some() {
                 SegmentKind::Rapid
             } else if motion == 2.0 || motion == 3.0 {
                 SegmentKind::Arc
@@ -5285,12 +5477,62 @@ pub fn parse_preview_full(
             }
         }
 
-        preview.segments.push(segment);
-        preview.segment_loop.push(pass);
-        preview
-            .line_bounds
-            .insert(line_no, (line_start_segment, preview.segments.len()));
+        // A G28/G30 with no axis words moves straight to the reference position:
+        // it names no point of its own to pass through, so only the move to the
+        // reference position is drawn.
+        if home.is_none() || has_axis_word {
+            preview.segments.push(segment);
+            preview.segment_loop.push(pass);
+            preview
+                .line_bounds
+                .insert(line_no, (line_start_segment, preview.segments.len()));
+        }
         position = target;
+
+        // G28/G30 end at the machine's reference position for the axes they
+        // name. Where that is lives in #5161/#5181, which the program stores
+        // with G28.1 instead of writing down, so the move is drawn to the
+        // machine origin and reported rather than pretended to be known.
+        if let Some(code) = home {
+            let named: Vec<usize> = [('x', 0usize), ('y', 1), ('z', 2)]
+                .into_iter()
+                .filter(|(letter, _)| word_value(&tokens, *letter).is_some())
+                .map(|(_, axis)| axis)
+                .collect();
+            // No axis words: every configured axis goes.
+            let axes = if named.is_empty() {
+                vec![0, 1, 2]
+            } else {
+                named
+            };
+            let mut goal = position;
+            for axis in &axes {
+                goal[*axis] = 0.0;
+            }
+            let moved = (0..3).any(|axis| (goal[axis] - position[axis]).abs() > 1e-9);
+            if moved {
+                push_cycle_segment(
+                    &mut preview,
+                    position,
+                    goal,
+                    SegmentKind::Rapid,
+                    line_no,
+                    tool,
+                    pass,
+                );
+                preview
+                    .line_bounds
+                    .insert(line_no, (line_start_segment, preview.segments.len()));
+            }
+            position = goal;
+            if incomplete.is_none() {
+                let parameter = if code == 28 { 5161 } else { 5181 };
+                incomplete = Some(format!(
+                    "line {line_no}: G{code} ends at the reference position in #{parameter}, \
+                     which this preview does not track, so it is drawn at the machine origin"
+                ));
+            }
+        }
     }
 
     // The layers a G71 removes, drawn in place of the single contour the planner
@@ -5940,6 +6182,86 @@ mod tests {
         assert_eq!(preview.segments.len(), 2, "two G0 moves and no G10 move");
         let end = preview.segments.last().expect("a move").end;
         assert_eq!((end[0], end[1]), (11.0, 20.0));
+    }
+
+    #[test]
+    fn a_g92_block_shifts_the_frame_without_moving() {
+        // `G92 X10` makes the current point read X10. The machine does not move,
+        // so nothing is drawn, and the moves after it are drawn 10 further
+        // back. `G92.1` takes the shift back off. Drawing the axis words as a
+        // move put a plunge to Z0 in every probe macro that zeroed a surface.
+        let preview = parse_preview(
+            "G21 G90\nG0 X0 Y0\nG92 X10\nG0 X20\nG92.1\nG0 X0\nM2\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let ends: Vec<[f64; 3]> = preview.segments.iter().map(|segment| segment.end).collect();
+        assert_eq!(ends.len(), 3, "three moves and no G92 move: {ends:?}");
+        // Under the shift, program X20 is machine X10.
+        assert!((ends[1][0] - 10.0).abs() < 1e-9, "{ends:?}");
+        // With the shift cancelled, program X0 is machine X0 again.
+        assert!(ends[2][0].abs() < 1e-9, "{ends:?}");
+    }
+
+    #[test]
+    fn a_g28_passes_through_its_axis_words_then_goes_to_the_reference_point() {
+        // The axis words name a point to pass through, not the destination: the
+        // block ends at the machine's reference position, which is #5161 and
+        // unknown here, so it is drawn at the machine origin and reported.
+        let offsets = AxisMap::from_entries([
+            ("X".to_string(), 50.0),
+            ("Y".to_string(), 0.0),
+            ("Z".to_string(), 0.0),
+        ]);
+        let preview = parse_preview(
+            "G21 G90\nG0 X10\nG28 X0\nM2\n",
+            &preview_axes(),
+            Some(&offsets),
+            [60.0, 0.0, 0.0],
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let ends: Vec<[f64; 3]> = preview.segments.iter().map(|segment| segment.end).collect();
+        // The intermediate point is program X0, which this frame puts at
+        // machine 50. The reference point is the machine origin.
+        assert_eq!(ends.len(), 3, "{ends:?}");
+        assert!((ends[1][0] - 50.0).abs() < 1e-9, "{ends:?}");
+        assert!(ends[2][0].abs() < 1e-9, "{ends:?}");
+        let reason = preview.incomplete_reason.expect("a report");
+        assert!(reason.contains("G28"), "{reason}");
+        assert!(reason.contains("5161"), "{reason}");
+    }
+
+    #[test]
+    fn a_quadratic_spline_runs_through_the_point_its_control_point_bends_it_to() {
+        // The reference example: a parabola from X-2 Y4 to X2 Y4, through the
+        // origin. `G5.1` was drawn as the straight line between its ends, which
+        // cut the middle out of the curve.
+        let preview = parse_preview(
+            "G21 G90 G17\nG0 X-2 Y4\nG5.1 X2 I2 J-8\nM2\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let chords: Vec<&PathSegment> = preview
+            .segments
+            .iter()
+            .filter(|segment| segment.line == 3)
+            .collect();
+        assert!(chords.len() > 4, "the curve is a line: {chords:?}");
+        assert!(
+            chords.iter().all(|chord| chord.kind == SegmentKind::Feed),
+            "a spline moves at feed rate"
+        );
+        // The lowest chord straddles the origin the parabola passes through.
+        let trough = chords.iter().fold(f64::MAX, |low, chord| {
+            low.min(chord.start[1].min(chord.end[1]))
+        });
+        assert!(trough.abs() < 0.1, "the curve misses the origin: {trough}");
+        let end = chords.last().expect("an end").end;
+        assert_eq!((end[0], end[1]), (2.0, 4.0));
     }
 
     #[test]
