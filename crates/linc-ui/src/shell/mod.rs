@@ -313,7 +313,6 @@ impl LincApp {
             },
             chrome: ChromeUi {
                 quit_requested: false,
-                lathe_diameter: preferences.lathe_diameter.unwrap_or(false),
                 last_snapshot_ms: now_ms(),
                 alarm_id_seen: 0,
                 last_connection: Some(snapshot.panel.connected),

@@ -664,7 +664,30 @@ Program rules:
 - The program path is drawn in machine coordinates, the frame the tool marker
   and the live trail use: the work offset the program selects is applied, and in
   lathe `G7` diameter mode an X word is a diameter, halved exactly as the
-  interpreter halves it, so the path lands where the machine goes.
+  interpreter halves it, so the path lands where the machine goes. The live
+  tool tip the path starts from is that same point -- the work position plus the
+  active offset. Neither the DRO's work value (a whole offset short) nor the
+  machine position (a tool length long, since the preview draws the tip and not
+  the machine slide) is it.
+- `G53` makes its block's axis words machine positions, so the move ends there
+  and not an offset away from it. It is a one-block word: the block after it is
+  back in the work system. A `G38.2`/`G38.3`/`G38.4`/`G38.5` straight probe is
+  drawn as a feed-rate straight line in its own colour, not as the motion mode
+  it follows, and it does not replace that mode because a probe is not modal.
+  The preview has no probe input to watch, so the line ends at the programmed
+  point -- which is where the reference says an unsuccessful probe reports the
+  tool -- and `#5061`-`#5063` read that point with `#5070` left at 0. A probe
+  that names no axis, or that runs under cutter compensation, is reported as the
+  error the interpreter would raise; a probe to the point the tool is already at
+  is not, because the preview's own probe end is what would make it look that
+  way.
+- A, B and C are tracked as angles in degrees, so `#<_a>`-`#<_c>`, their
+  absolute forms and `#5423`-`#5425` read what the program last commanded, but no
+  rotary geometry is drawn: every shipped profile is a three-axis `trivkins`
+  machine, and drawing a rotary move means swinging the part around the axis
+  rather than moving the tool. A block whose axis words include A, B or C is
+  therefore marked incomplete, naming the line and the axis, while its X/Y/Z
+  words are still drawn.
 - A leading rapid that only approaches the program from the live tool position
   is not drawn: the path starts at the program's first move, so no dotted
   connector crosses the part. A program whose only move is that rapid still
@@ -725,6 +748,21 @@ Program rules:
   drawn as separate moves. A polar `@`/`^` pair names the hole too, and `L`
   repeats the cycle once per pass, stepping the polar radius/angle in
   incremental mode and repeating the same hole in absolute mode.
+- The lathe cycles are previewed as the geometry they cut, not as the one line
+  their own words would draw. `G70`/`G71`/`G72` (and their `.1`/`.2` pocket
+  forms) take their contour from the subroutine their `Q` word names, run once;
+  their own `X` and `Z` are the limits the passes work inside. `G71` is drawn as
+  the layers it removes: from the surface `X` inward in steps of `I`, each layer
+  a Z traverse where the profile is still inside that radius and nothing over the
+  parts it is not, clearing `R` between layers, and stopping `D` short of the
+  profile for the finishing pass. `G72` faces in X, so its layers are not
+  modelled: only its contour is drawn and the missing facing passes are reported.
+  A `Q` that names no subroutine in the program is reported too. `G76` is drawn
+  as the thread it cuts: passes from `J` down to `K`, spaced by the depth
+  degression `R` as `J * n^(1/R)` and shifted along the drive line by the
+  compound angle `Q`, each with its entry taper or plunge (`L1`/`L3`), its root
+  cut, and its exit taper (`L2`/`L3`), leaving the tool on the drive line. A
+  `G76` outside the ZX plane is the error the interpreter raises.
 - Cutter compensation is previewed as the tool centre, not the programmed
   contour. G41 keeps the tool centre a tool radius to the left of the
   programmed direction and G42 to the right, in the G17/G18/G19 plane. The

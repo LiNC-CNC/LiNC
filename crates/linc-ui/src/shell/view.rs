@@ -176,10 +176,10 @@ impl LincApp {
 
     /// `Ctrl+E`: read the lathe's X as a radius or a diameter. Presentation
     /// only: the X position the controller reports is a radius, and every
-    /// command still carries that number.
+    /// command still carries that number. This is the operator's own choice and
+    /// it outranks the program's `G7`/`G8` from then on.
     pub fn cycle_lathe_diameter(&mut self) {
-        let diameter = !self.chrome.lathe_diameter;
-        self.chrome.lathe_diameter = diameter;
+        let diameter = !self.reads_x_as_diameter();
         self.prefs.preferences.lathe_diameter = Some(diameter);
         self.prefs.dirty = true;
         self.toast(
@@ -192,10 +192,19 @@ impl LincApp {
         );
     }
 
-    /// Whether the X readouts show a diameter. A mill's X is a position, never
-    /// a diameter, so the flag only lives on a lathe.
+    /// Whether the X readouts show a diameter.
+    ///
+    /// A mill's X is a position, never a diameter, so the flag only lives on a
+    /// lathe. The program decides: `G7` puts a lathe interpreter in diameter
+    /// mode and `G8` back in radius, which is the frame the program is written
+    /// in and the one the operator reads. The `Ctrl+E` override wins once it has
+    /// been used.
     pub fn reads_x_as_diameter(&self) -> bool {
-        self.chrome.lathe_diameter && self.profile.variant == MachineVariant::Lathe
+        x_reads_as_diameter(
+            self.profile.variant == MachineVariant::Lathe,
+            self.prefs.preferences.lathe_diameter,
+            self.snapshot.positions.lathe_diameter_mode,
+        )
     }
 
     pub fn cycle_toolpath_view(&mut self) {
@@ -304,4 +313,33 @@ pub(crate) struct ViewState {
     /// 0..1 of the current move already travelled, per axis.
     pub move_progress: linc_core::model::AxisMap<f64>,
     pub preview_ticks: u64,
+}
+
+/// Whether the X readouts show a diameter.
+///
+/// The program is the default: `G7` puts a lathe interpreter in diameter mode
+/// and `G8` back in radius, and a program written in diameters should read that
+/// way. The operator's `Ctrl+E` choice outranks it once it exists, and a mill's
+/// X is a position, never a diameter.
+pub fn x_reads_as_diameter(lathe: bool, preference: Option<bool>, program: bool) -> bool {
+    lathe && preference.unwrap_or(program)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::x_reads_as_diameter;
+
+    #[test]
+    fn the_diameter_readout_follows_the_program_until_the_operator_chooses() {
+        // G7 in the program, no preference: diameters.
+        assert!(x_reads_as_diameter(true, None, true));
+        // G8 in the program, no preference: radius.
+        assert!(!x_reads_as_diameter(true, None, false));
+        // The operator's choice wins either way.
+        assert!(!x_reads_as_diameter(true, Some(false), true));
+        assert!(x_reads_as_diameter(true, Some(true), false));
+        // A mill has no diameter X, whatever the program or the preference say.
+        assert!(!x_reads_as_diameter(false, None, true));
+        assert!(!x_reads_as_diameter(false, Some(true), true));
+    }
 }

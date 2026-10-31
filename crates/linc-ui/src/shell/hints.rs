@@ -33,7 +33,7 @@ impl LincApp {
                     ),
                     (
                         k.toggle_lathe_diameter.label(),
-                        if self.chrome.lathe_diameter {
+                        if self.reads_x_as_diameter() {
                             "RADIUS"
                         } else {
                             "DIAMETER"
