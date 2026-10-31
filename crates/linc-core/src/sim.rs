@@ -432,16 +432,32 @@ impl SimBackend {
             .map(str::to_string);
     }
 
+    /// The tool tip in the frame the preview draws in: the work position plus
+    /// the active work offset. The path is parsed and drawn at `program +
+    /// offset`, and the machine position carries the tool length, which the
+    /// preview does not draw with -- so neither `work` alone (the program value,
+    /// a whole offset short) nor `machine` (a tool length long) is that point.
     fn current_tool_tip(&self) -> [f64; 3] {
-        let get = |axis: &str| {
+        let active = self.snapshot.offsets.active_index.and_then(|index| {
             self.snapshot
+                .offsets
+                .offsets
+                .iter()
+                .find(|offset| offset.index == index)
+        });
+        ["X", "Y", "Z"].map(|axis| {
+            let work = self
+                .snapshot
                 .positions
                 .axes
                 .get(axis)
                 .map(|position| position.work)
-                .unwrap_or(0.0)
-        };
-        [get("X"), get("Y"), get("Z")]
+                .unwrap_or(0.0);
+            let offset = active
+                .and_then(|offset| offset.values.get(axis).copied())
+                .unwrap_or(0.0);
+            work + offset
+        })
     }
 
     fn seed_trail_from_program(&mut self) {
@@ -1791,6 +1807,41 @@ enabled = true
             .find(|offset| offset.index == 9)
             .expect("G59.3 row");
         assert_eq!(g59_3.values.get("X").copied(), Some(-10.0));
+    }
+
+    #[test]
+    fn the_preview_starts_at_the_point_the_path_is_drawn_at() {
+        // The program is drawn at `program + offset`, so the approach line has
+        // to start there. The DRO's work value is a whole offset short of it and
+        // the machine position is a tool length long, which is what the preview
+        // was given before: G54 X-100, a 67.128 tool, and the tool standing at
+        // work 12.
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        backend.snapshot.offsets.offsets[0]
+            .values
+            .insert("X", -100.0);
+        let position = backend.snapshot.positions.axes.get_mut("X").expect("X");
+        position.work = 12.0;
+        position.machine = 12.0 - 100.0 - 67.128;
+
+        let tip = backend.current_tool_tip();
+        assert!((tip[0] + 88.0).abs() < 1e-9, "tip {tip:?}");
+
+        // And that is where the drawn path starts: the first block presses from
+        // it to program X0, which is machine -100.
+        let offset = backend.snapshot.offsets.offsets[0].values.clone();
+        let preview = crate::gcode::parse_preview_full(
+            "G21 G90\nG0 X0\nM2\n",
+            &["X".to_string(), "Y".to_string(), "Z".to_string()],
+            Some(&offset),
+            tip,
+            &backend.profile.subroutines(),
+            &Tools::from_rows(&backend.snapshot.tool_table.rows),
+        );
+        let first = preview.segments.first().expect("a move");
+        assert!((first.start[0] + 88.0).abs() < 1e-9, "{first:?}");
+        assert!((first.end[0] + 100.0).abs() < 1e-9, "{first:?}");
     }
 
     #[test]
