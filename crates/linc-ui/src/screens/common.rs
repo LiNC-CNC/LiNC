@@ -300,14 +300,17 @@ pub fn modal_pane_in(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str, 
 
 /// Height a MODAL pane needs for `codes` G-code cells at `columns` wide.
 ///
-/// Measured from the card: 26 px of chrome (margins plus title) and 41 px per
-/// row of cells — group label, code, mnemonic and half a line of clearance.
-/// Derived rather than observed so it cannot lag a frame and leave the column
-/// short.
+/// Measured from the card: 39 px of chrome (margins, title and one line of
+/// bottom clearance) and 41 px per row of cells — group label, code, mnemonic
+/// and half a line of clearance. Derived rather than observed so it cannot lag
+/// a frame and leave the column short.
 pub fn modal_height(codes: usize, columns: usize) -> f32 {
+    // One text line below the grid. The last mnemonic line was sitting on the
+    // card's bottom edge, so the MDI pane clipped it.
+    const BOTTOM_CLEARANCE: f32 = 13.0;
     let rows = codes.max(1).div_ceil(columns.max(1));
-    // 8 px frame, an 18 px title row, and 41 px per row of cells.
-    26.0 + rows as f32 * 41.0
+    // 8 px frame, an 18 px title row, 13 px of clearance, and 41 px per row.
+    26.0 + BOTTOM_CLEARANCE + rows as f32 * 41.0
 }
 
 /// Height of the two-line MODAL band the dashboard draws inside its own program

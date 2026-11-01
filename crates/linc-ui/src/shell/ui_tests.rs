@@ -899,9 +899,13 @@ fn the_override_readout_follows_the_panel_order() {
 fn the_navigation_rows_are_tight_and_the_pill_fills_them() {
     for (page, _, _) in NAV_ITEMS {
         let geometry = nav_row_geometry(page);
+        let expected_height = if geometry.icon {
+            theme::NAV_ROW_HEIGHT
+        } else {
+            theme::NAV_ROW_HEIGHT_SECONDARY
+        };
         assert_eq!(
-            geometry.height,
-            theme::NAV_ROW_HEIGHT,
+            geometry.height, expected_height,
             "{page:?} keeps the tight row height"
         );
         assert!(
@@ -914,20 +918,27 @@ fn the_navigation_rows_are_tight_and_the_pill_fills_them() {
     for page in [Page::Machine, Page::Program, Page::Tools, Page::Offsets] {
         assert!(nav_row_geometry(page).icon, "{page:?} keeps its icon");
         assert_eq!(nav_row_geometry(page).pill, theme::NAV_PILL_PRIMARY);
+        assert_eq!(nav_row_geometry(page).gap, theme::NAV_ROW_GAP);
     }
     for page in [Page::Diagnostics, Page::Help] {
         assert!(!nav_row_geometry(page).icon, "{page:?} is a one-line row");
         assert_eq!(nav_row_geometry(page).pill, theme::NAV_PILL_SECONDARY);
+        assert_eq!(nav_row_geometry(page).gap, theme::NAV_ROW_GAP_SECONDARY);
     }
     assert_eq!(theme::NAV_ROW_GAP, 2.0);
+    assert_eq!(theme::NAV_ROW_GAP_SECONDARY, theme::NAV_ROW_GAP / 2.0);
+    assert_eq!(theme::NAV_ROW_HEIGHT_SECONDARY, theme::NAV_PILL_SECONDARY);
+    assert!(theme::NAV_ROW_HEIGHT_SECONDARY < theme::NAV_ROW_HEIGHT);
+    assert!(theme::NAV_PILL_SECONDARY < theme::NAV_PILL_PRIMARY);
     // Seven rows now cost less than seven 44 px targets did.
     assert!(theme::NAV_ROW_HEIGHT < theme::MIN_TARGET);
 }
 
-/// Measured at 1280x720, from the frame's own shapes: six rows of 28 px with
-/// a 2 px gap, 26/24 px pills. DIAGNOSTICS and G-CODE HELP are one-line rows
-/// whose labels start where the pill does, with no icon and no keycap under
-/// them; SETTINGS has no row at all and is reached with its chord.
+/// Measured at 1280x720, from the frame's own shapes: six rows, four primary
+/// pills of 26 px and two one-line pills of 20 px. DIAGNOSTICS and G-CODE HELP
+/// are one-line rows whose labels start where the pill does, with no icon and
+/// no keycap under them; SETTINGS has no row at all and is reached with its
+/// chord.
 #[test]
 fn the_navigation_is_compact_and_lists_six_pages() {
     let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
@@ -976,21 +987,28 @@ fn the_navigation_is_compact_and_lists_six_pages() {
         .collect();
     heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
     assert_eq!(heights.len(), 6, "six painted rows, got {heights:?}");
-    // One list: every row paints the same pill height, so the list reads as a
-    // stack instead of alternating tall and short blocks. What differs between
-    // the kinds is the icon and whether a keycap is drawn beside the label.
+    // One list: the four primary rows paint one pill height and the two
+    // one-line rows a shorter pill, so the one-line labels do not sit in a
+    // 26 px band of empty space.
     assert_eq!(
         heights
             .iter()
             .filter(|height| (**height - theme::NAV_PILL_PRIMARY).abs() < 0.5)
             .count(),
-        6,
+        4,
         "{heights:?}"
     );
     assert_eq!(
-        theme::NAV_PILL_SECONDARY,
-        theme::NAV_PILL_PRIMARY,
-        "a one-line row paints the same pill as the others"
+        heights
+            .iter()
+            .filter(|height| (**height - theme::NAV_PILL_SECONDARY).abs() < 0.5)
+            .count(),
+        2,
+        "{heights:?}"
+    );
+    assert!(
+        theme::NAV_PILL_SECONDARY < theme::NAV_PILL_PRIMARY,
+        "a one-line row is shorter than a two-line row"
     );
     // Pitch: the target plus the gap, from the labels that sit in them.
     let pitch = in_nav("PROGRAM").center().y - in_nav("MACHINE").center().y;
@@ -5247,6 +5265,43 @@ fn the_mdi_pane_draws_the_modal_band_and_fills_its_slot() {
     assert!(
         modal.1.min.y > slot.center().y,
         "the band takes the bottom of the card, not the middle"
+    );
+}
+
+#[test]
+fn the_mdi_modal_band_leaves_a_line_below_its_last_row() {
+    let mut harness = mdi_harness();
+    harness.frame(&[]);
+    // Nine G groups fill two 8-column rows, the case that pushed the last
+    // mnemonic line onto the card's bottom edge.
+    harness.app.snapshot.program.modal.extend([
+        ("G94".into(), "".into()),
+        ("G40".into(), "".into()),
+        ("G80".into(), "".into()),
+        ("G43".into(), "".into()),
+    ]);
+    let slot = egui::Rect::from_min_size(egui::pos2(920.0, 90.0), egui::vec2(352.0, 560.0));
+    let (_, texts) = harness.draw_mdi_pane(slot);
+    let modal = texts
+        .iter()
+        .find(|(text, _)| text == "MODAL")
+        .expect("the MODAL band is drawn");
+    let max_bottom = texts
+        .iter()
+        .filter(|(_, rect)| {
+            rect.top() >= modal.1.top() - 1.0
+                && rect.left() >= modal.1.left() - 2.0
+                && rect.right() <= slot.right()
+        })
+        .map(|(_, rect)| rect.bottom())
+        .fold(modal.1.bottom(), f32::max);
+    // The card's content bottom, inside the pane's 12 px card inset.
+    let content_bottom = slot.bottom() - 12.0;
+    assert!(
+        content_bottom - max_bottom >= 12.0,
+        "the MODAL band must leave a line below its last row: {} of {}",
+        max_bottom,
+        content_bottom
     );
 }
 

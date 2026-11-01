@@ -163,6 +163,9 @@ pub struct NavRowGeometry {
     /// Painted pill. Shorter than `height`: what shrank is the padding, not
     /// the target.
     pub pill: f32,
+    /// Gap above this row. A one-line row uses half the primary gap so two
+    /// consecutive one-line rows do not pay the padding twice.
+    pub gap: f32,
     /// An icon beside a two-line label.
     pub icon: bool,
 }
@@ -172,12 +175,14 @@ pub fn nav_row_geometry(page: Page) -> NavRowGeometry {
         NavRowGeometry {
             height: theme::NAV_ROW_HEIGHT,
             pill: theme::NAV_PILL_PRIMARY,
+            gap: theme::NAV_ROW_GAP,
             icon: true,
         }
     } else {
         NavRowGeometry {
-            height: theme::NAV_ROW_HEIGHT,
+            height: theme::NAV_ROW_HEIGHT_SECONDARY,
             pill: theme::NAV_PILL_SECONDARY,
+            gap: theme::NAV_ROW_GAP_SECONDARY,
             icon: false,
         }
     }
@@ -506,6 +511,9 @@ impl LincApp {
                 *page == self.nav.page || (*page == Page::Offsets && self.nav.page == Page::Probe);
             let focused = self.nav.focus_region == FocusRegion::Nav && self.nav.nav_focus == index;
             let geometry = nav_row_geometry(*page);
+            // The gap belongs to the row being entered, so DIAG and G-CODE
+            // use their tighter gap without changing the primary rows above.
+            ui.spacing_mut().item_spacing.y = geometry.gap;
             // The target every row keeps, whatever it paints inside it.
             let (rect, response) = ui.allocate_exact_size(
                 Vec2::new(theme::NAV_WIDTH - 20.0, geometry.height),

@@ -51,18 +51,27 @@ pub const MIN_TARGET: f32 = 44.0;
 /// band of dead space around every entry. A third of it is enough to separate
 /// two pills.
 pub const NAV_ROW_GAP: f32 = 2.0;
+/// Gap above a one-line DIAG/G-CODE row. Half the primary gap: their pills
+/// carry one line, so the primary spacing reads as padding twice over between
+/// two consecutive one-line rows.
+pub const NAV_ROW_GAP_SECONDARY: f32 = 1.0;
 /// Painted pill of a row that carries an icon and a two-line label. It nearly
 /// fills the row, because a small pill inside a tall target reads as padding
 /// even when the target is not padding.
 pub const NAV_PILL_PRIMARY: f32 = 26.0;
-/// Painted pill of a one-line row: a label, no icon, no keycap.
-pub const NAV_PILL_SECONDARY: f32 = 26.0;
+/// Painted pill of a one-line row. Half the padding of the primary pill: one
+/// line does not fill 26 px, so the empty band above and below it read as
+/// padding.
+pub const NAV_PILL_SECONDARY: f32 = 20.0;
 /// Row height of the navigation list. Deliberately below the 44 px touch
 /// target the other controls keep: this is a mouse/trackball list driven by the
 /// keyboard, and the operator asked twice for the vertical space back.
 pub const NAV_ROW_HEIGHT: f32 = 28.0;
+/// Row height of a one-line row: the pill itself, so consecutive one-line rows
+/// do not pay the pill's padding twice.
+pub const NAV_ROW_HEIGHT_SECONDARY: f32 = NAV_PILL_SECONDARY;
 /// Air between the last row and the SHORTCUTS pane below it.
-pub const NAV_BOTTOM_GAP: f32 = 2.0;
+pub const NAV_BOTTOM_GAP: f32 = 1.0;
 /// Axis readout: one line carrying the axis name and the work coordinate,
 /// the dimmed machine coordinate at the right end of it, and (on the jog and
 /// MAIN cards) the DTG line and move bar under it.
