@@ -616,6 +616,33 @@ impl Default for ToolTableState {
     }
 }
 
+/// State of the optional Loobric tool-table sync.
+///
+/// Loobric has no Rust binding, so LiNC runs the official Python client as a
+/// subprocess. This is the operator-facing view of that run: the last result,
+/// when it ran, and whether a pulled table is still waiting for an idle
+/// interpreter before it can be reloaded.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct LoobricStatus {
+    pub enabled: bool,
+    pub running: bool,
+    /// Monotonic count of finished runs, so the backend wrapper can tell a
+    /// fresh result from one it has already handled.
+    pub completed_runs: u64,
+    pub last_ok: Option<bool>,
+    pub message: String,
+    pub last_attempt_ms: Option<u64>,
+    pub last_success_ms: Option<u64>,
+    /// The client wrote the tool table during the last run.
+    pub file_changed: bool,
+    /// Revision of the table the client left behind, when it could be read.
+    pub file_revision: Option<u64>,
+    /// A pulled table has not reached the controller yet because the
+    /// interpreter was not idle.
+    #[serde(default)]
+    pub reload_pending: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SpindleState {
     pub index: usize,
@@ -1336,6 +1363,9 @@ pub struct MachineSnapshot {
     pub positions: Positions,
     pub offsets: WorkOffsetSet,
     pub tool_table: ToolTableState,
+    /// Optional Loobric tool-table sync; `None` when the profile disables it.
+    #[serde(default)]
+    pub loobric: Option<LoobricStatus>,
     pub spindles: Vec<SpindleState>,
     pub feed: FeedState,
     pub program: ProgramState,
@@ -1374,6 +1404,7 @@ impl MachineSnapshot {
             positions: Positions::default(),
             offsets: WorkOffsetSet::default(),
             tool_table: ToolTableState::default(),
+            loobric: None,
             spindles: Vec::new(),
             feed: FeedState::default(),
             program: ProgramState::default(),

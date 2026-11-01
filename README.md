@@ -297,7 +297,10 @@ performance and limitations - is in [docs/sim3d.md](docs/sim3d.md).
   `issue_mdi` without MDI entry. Manual changes get an
   install/confirm prompt; ATC/turret support reuses the existing `M6` G-code
   and is optional. The tool table is the standard LinuxCNC format; its pocket
-  column exists only when a changer uses it.
+  column exists only when a changer uses it. An optional `[loobric]` section
+  syncs that table with a Loobric server through the official Python client;
+  it is off by default and shows its last result on the Tools page
+  (`CONFIGURATION.md`, `docs/loobric.md`).
 - **G-code is token-highlighted** with a rich but restrained palette:
   G-codes, M-codes, axis letters, numbers, feed/speed, tools, parameters,
   comments, and line numbers each have a distinct treatment.

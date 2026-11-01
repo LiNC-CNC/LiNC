@@ -81,6 +81,20 @@ changer = "manual"          # manual | atc | turret
 atc_pockets = "ini"         # derive from [ATC] POCKETS
 manual_confirm = true
 
+[loobric]
+# Optional tool-table sync with a Loobric server. Off by default: a machine
+# without the client starts and edits its table exactly as before.
+#
+# The official loobric-linuxcnc client owns the server URL, API key, machine
+# name and its three-way sync state. LiNC only enables it and passes the
+# LinuxCNC tool-table path, so no secret belongs in this profile. For the
+# single-file client, set interpreter = "python3" and client to the .py path.
+enabled = false
+client = "loobric-linuxcnc"
+sync_on_startup = true
+sync_after_tool_write = true
+timeout_secs = 60
+
 [manual]
 # Panel modes JOG/INC/MPG drive this read-only screen.
 auto_open = true

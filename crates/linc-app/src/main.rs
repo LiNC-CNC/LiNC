@@ -154,6 +154,9 @@ fn main() -> Result<()> {
             demo_mode,
         ))
     };
+    // The Loobric client is opt-in: a disabled profile gets the selected
+    // backend unchanged, with no worker thread and no snapshot status.
+    let backend = linc_core::loobric::wrap_backend(backend, &profile);
 
     let hal = if args.no_hal {
         None

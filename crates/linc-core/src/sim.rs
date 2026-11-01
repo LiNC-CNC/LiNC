@@ -1637,6 +1637,28 @@ impl MachineBackend for SimBackend {
                 self.snapshot.tool_table = self.tool_table.state();
                 Ok(())
             }
+            MachineCommand::SyncToolTable => Err(MachineError::Unsupported(
+                "tool table sync is not configured for this backend".into(),
+            )),
+            MachineCommand::ReloadToolTable => {
+                // A pull may write the table while a program is paused; the
+                // controller must not change under a running interpreter.
+                if self.snapshot.task.interp != InterpState::Idle || self.snapshot.task.running {
+                    return Err(MachineError::NotIdle);
+                }
+                match ToolTable::load(
+                    &self.profile.machine_ini.tool_table,
+                    &self.profile.machine_ini.tool_table_columns,
+                    self.profile.changer,
+                ) {
+                    Ok(table) => {
+                        self.tool_table = table;
+                        self.snapshot.tool_table = self.tool_table.state();
+                        Ok(())
+                    }
+                    Err(error) => Err(MachineError::Io(error.to_string())),
+                }
+            }
             MachineCommand::ApplyProbeResult { result, target } => {
                 if !self.snapshot.writes_allowed() {
                     if self.snapshot.panel.protect_effective() {
@@ -2137,6 +2159,35 @@ enabled = true
             ToolChangeStatus::Complete
         );
         assert_eq!(backend.snapshot().tool_change.current_tool, 1);
+    }
+
+    #[test]
+    fn reload_tool_table_rereads_the_file_when_idle() {
+        let (_dir, profile) = profile_fixture();
+        let table = profile.machine_ini.tool_table.clone();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        std::fs::write(&table, "T1 P0 Z1 D6 ; end mill\nT2 P0 Z2 D8 ; face mill\n").unwrap();
+        backend
+            .send(MachineCommand::ReloadToolTable)
+            .expect("reload");
+        assert_eq!(backend.snapshot().tool_table.rows.len(), 2);
+    }
+
+    #[test]
+    fn reload_tool_table_refuses_while_the_program_runs() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        backend.snapshot.task.running = true;
+        let error = backend.send(MachineCommand::ReloadToolTable).unwrap_err();
+        assert_eq!(error, MachineError::NotIdle);
+    }
+
+    #[test]
+    fn sync_tool_table_is_unsupported_without_the_loobric_wrapper() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        let error = backend.send(MachineCommand::SyncToolTable).unwrap_err();
+        assert!(matches!(error, MachineError::Unsupported(_)));
     }
 
     #[test]

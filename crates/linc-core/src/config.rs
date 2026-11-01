@@ -56,6 +56,11 @@ pub struct Config {
     pub files: FilesConfig,
     pub probe: ProbeConfig,
     pub tools: ToolsConfig,
+    /// Optional tool-table sync with a Loobric server. Disabled by default;
+    /// the official LinuxCNC client keeps the server URL and API key in its
+    /// own 0600 config file, never in this machine profile.
+    #[serde(default)]
+    pub loobric: LoobricConfig,
     pub manual: ManualConfig,
     pub homing: HomingConfig,
     pub mdi: MdiConfig,
@@ -204,6 +209,54 @@ pub struct ToolsConfig {
     pub changer: String,
     pub atc_pockets: String,
     pub manual_confirm: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoobricConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// The Loobric LinuxCNC client: a bare command on `PATH` or a path to the
+    /// single-file `loobric_linuxcnc.py`. Relative paths resolve against the
+    /// profile; `~` is expanded.
+    #[serde(default = "default_loobric_client")]
+    pub client: String,
+    /// Interpreter used to run `client`, for the single-file Python client.
+    /// Omit it when `client` is executable on its own.
+    #[serde(default)]
+    pub interpreter: Option<String>,
+    /// The client's own shell-style config file. Omit it to use the client
+    /// default, `~/.config/loobric/linuxcnc.conf`.
+    #[serde(default)]
+    pub config: Option<String>,
+    #[serde(default = "default_loobric_timeout")]
+    pub timeout_secs: u64,
+    #[serde(default = "default_true")]
+    pub sync_on_startup: bool,
+    #[serde(default = "default_true")]
+    pub sync_after_tool_write: bool,
+}
+
+impl Default for LoobricConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            client: default_loobric_client(),
+            interpreter: None,
+            config: None,
+            timeout_secs: default_loobric_timeout(),
+            sync_on_startup: true,
+            sync_after_tool_write: true,
+        }
+    }
+}
+
+fn default_loobric_client() -> String {
+    "loobric-linuxcnc".into()
+}
+
+fn default_loobric_timeout() -> u64 {
+    60
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -761,6 +814,7 @@ impl Profile {
             )));
         }
         let machine_ini = MachineIni::parse_file(&ini_path)?;
+        resolve_loobric_paths(&mut config.loobric, &base_dir);
         validate(&config, &machine_ini, &base_dir)?;
         let variant = if config.machine.gui == "lathe" {
             MachineVariant::Lathe
@@ -822,6 +876,14 @@ impl Profile {
             ),
             ("Panel driver".into(), self.config.panel.driver.clone()),
             ("Changer".into(), self.config.tools.changer.clone()),
+            (
+                "Loobric".into(),
+                if self.config.loobric.enabled {
+                    format!("enabled ({})", self.config.loobric.client)
+                } else {
+                    "off".into()
+                },
+            ),
         ]
     }
 }
@@ -832,6 +894,46 @@ fn resolve_path(base: &Path, value: &str) -> PathBuf {
         expanded
     } else {
         base.join(expanded)
+    }
+}
+
+/// Resolve the optional Loobric command and config paths.
+///
+/// A bare command name (`loobric-linuxcnc`, `python3`) stays a bare name so it
+/// is looked up on `PATH`; anything with a directory or an extension is a path
+/// and resolves against the profile.
+fn resolve_loobric_paths(config: &mut LoobricConfig, base: &Path) {
+    config.client = resolve_command(base, &config.client);
+    if let Some(interpreter) = config.interpreter.as_mut() {
+        if interpreter.trim().is_empty() {
+            config.interpreter = None;
+        } else {
+            *interpreter = resolve_command(base, interpreter);
+        }
+    }
+    if let Some(path) = config.config.as_mut() {
+        if path.trim().is_empty() {
+            config.config = None;
+        } else {
+            *path = resolve_path(base, path).to_string_lossy().into_owned();
+        }
+    }
+}
+
+fn resolve_command(base: &Path, value: &str) -> String {
+    let expanded = expand_tilde(value.trim());
+    let path_like = expanded.is_absolute()
+        || expanded.components().count() > 1
+        || expanded.extension().is_some();
+    if path_like {
+        let path = if expanded.is_absolute() {
+            expanded
+        } else {
+            base.join(expanded)
+        };
+        path.to_string_lossy().into_owned()
+    } else {
+        expanded.to_string_lossy().into_owned()
     }
 }
 
@@ -1117,6 +1219,46 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
         return Err(ConfigError::Invalid(
             "tools.atc_pockets must be ini or absent for manual changers".into(),
         ));
+    }
+
+    if config.loobric.timeout_secs == 0 || config.loobric.timeout_secs > 600 {
+        return Err(ConfigError::Invalid(
+            "loobric.timeout_secs must be 1..=600".into(),
+        ));
+    }
+    if config.loobric.enabled {
+        if config.loobric.client.trim().is_empty() {
+            return Err(ConfigError::Invalid(
+                "loobric.client must not be empty when loobric.enabled is true".into(),
+            ));
+        }
+        // A bare command name is looked up on PATH; only a resolved path can
+        // be checked before the machine starts.
+        let client = Path::new(&config.loobric.client);
+        if client.is_absolute() && !client.is_file() {
+            return Err(ConfigError::Invalid(format!(
+                "loobric.client does not exist: {}",
+                client.display()
+            )));
+        }
+        if let Some(interpreter) = &config.loobric.interpreter {
+            let interpreter = Path::new(interpreter);
+            if interpreter.is_absolute() && !interpreter.is_file() {
+                return Err(ConfigError::Invalid(format!(
+                    "loobric.interpreter does not exist: {}",
+                    interpreter.display()
+                )));
+            }
+        }
+        if let Some(path) = &config.loobric.config {
+            let path = Path::new(path);
+            if !path.is_file() {
+                return Err(ConfigError::Invalid(format!(
+                    "loobric.config does not exist: {}",
+                    path.display()
+                )));
+            }
+        }
     }
 
     if config.machine.gui == "lathe" && config.probe.enabled {
@@ -1866,6 +2008,57 @@ quick_commands = ["G0"]
         );
         let error = Profile::load(&profile, None).unwrap_err();
         assert!(error.to_string().contains("quick_commands"), "{error}");
+    }
+
+    #[test]
+    fn loobric_is_disabled_by_default_and_resolves_enabled_paths() {
+        let dir = temp_dir();
+        let profile = probe_profile(dir.path(), "sim", "");
+        let loaded = Profile::load(&profile, None).unwrap();
+        assert!(!loaded.config.loobric.enabled);
+        assert!(loaded
+            .summary()
+            .iter()
+            .any(|(key, value)| key == "Loobric" && value == "off"));
+
+        let mut text = std::fs::read_to_string(&profile).unwrap();
+        text.push_str(
+            "\n[loobric]\nenabled = true\nclient = \"client.py\"\ninterpreter = \"python3\"\nconfig = \"loobric.conf\"\n",
+        );
+        write(&profile, &text);
+        write(&dir.path().join("client.py"), "");
+        write(&dir.path().join("loobric.conf"), "");
+        let loaded = Profile::load(&profile, None).unwrap();
+        assert!(loaded.config.loobric.enabled);
+        assert_eq!(
+            Path::new(&loaded.config.loobric.client),
+            dir.path().join("client.py")
+        );
+        assert_eq!(
+            loaded.config.loobric.interpreter.as_deref(),
+            Some("python3")
+        );
+        assert_eq!(
+            loaded.config.loobric.config.as_deref().map(Path::new),
+            Some(dir.path().join("loobric.conf").as_path())
+        );
+    }
+
+    #[test]
+    fn loobric_rejects_invalid_enabled_settings() {
+        let dir = temp_dir();
+        let profile = probe_profile(dir.path(), "sim", "");
+        let mut text = std::fs::read_to_string(&profile).unwrap();
+        text.push_str("\n[loobric]\nenabled = true\ntimeout_secs = 0\n");
+        write(&profile, &text);
+        let error = Profile::load(&profile, None).unwrap_err();
+        assert!(error.to_string().contains("timeout_secs"), "{error}");
+
+        let mut text = std::fs::read_to_string(&profile).unwrap();
+        text = text.replace("timeout_secs = 0", "client = \"missing.py\"");
+        write(&profile, &text);
+        let error = Profile::load(&profile, None).unwrap_err();
+        assert!(error.to_string().contains("loobric.client"), "{error}");
     }
 
     fn repo_root() -> PathBuf {

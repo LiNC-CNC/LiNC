@@ -2,7 +2,7 @@
 
 use egui::{RichText, Ui};
 use linc_core::command::MachineCommand;
-use linc_core::model::{MachineVariant, ToolRow};
+use linc_core::model::{InterpState, MachineVariant, ToolRow};
 
 use crate::screens::common;
 use crate::shell::LincApp;
@@ -93,6 +93,10 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // the table scrolls. Display only — the table owns the keyboard, and `Z`
     // opens the tool-position dialog.
     common::position_readout_row(app, ui);
+    if app.snapshot.loobric.is_some() {
+        ui.add_space(4.0);
+        loobric_row(app, ui);
+    }
     ui.add_space(6.0);
     // No change/changer panes: the table is the page. Loading the selected tool
     // is the `T` shortcut below, and the manual-change prompt is drawn by the
@@ -129,6 +133,59 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                 escape: true,
             },
         );
+    });
+}
+
+/// Optional Loobric status: the last client result and a manual sync action.
+/// Disabled profiles have no status, so the row draws nothing.
+fn loobric_row(app: &mut LincApp, ui: &mut Ui) {
+    let Some(status) = app.snapshot.loobric.clone() else {
+        return;
+    };
+    let (message, colour) = if status.running {
+        ("syncing...".to_string(), theme::ACCENT)
+    } else if status.reload_pending {
+        (
+            "server changes waiting for idle".to_string(),
+            theme::WARNING,
+        )
+    } else {
+        match status.last_ok {
+            Some(true) => (status.message, theme::MUTED),
+            Some(false) => (status.message, theme::ERROR),
+            None => ("not synced yet".to_string(), theme::MUTED),
+        }
+    };
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let idle = app.snapshot.task.interp == InterpState::Idle && !app.snapshot.task.running;
+            let enabled = !status.running && idle;
+            if ui
+                .add_enabled(
+                    enabled,
+                    egui::Button::new(RichText::new("SYNC").size(theme::font_size(10.0)))
+                        .min_size(egui::vec2(72.0, 44.0)),
+                )
+                .clicked()
+            {
+                app.send(MachineCommand::SyncToolTable);
+            }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.label(
+                    RichText::new("LOOBRIC")
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
+                );
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(message)
+                            .size(theme::font_size(10.0))
+                            .color(colour),
+                    )
+                    .truncate(),
+                );
+            });
+        });
     });
 }
 

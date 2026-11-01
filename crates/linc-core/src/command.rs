@@ -206,6 +206,14 @@ pub enum MachineCommand {
         tool: u16,
         expected_revision: u64,
     },
+    /// Ask an optional external tool-table service to synchronize now. The
+    /// Loobric backend wrapper intercepts this; a backend without the service
+    /// refuses it.
+    SyncToolTable,
+    /// Reload the tool table file into the backend and controller. This is the
+    /// follow-up to an external sync that pulled changes; the UI never sends
+    /// it directly.
+    ReloadToolTable,
     ApplyProbeResult {
         result: ProbeResult,
         target: ProbeTarget,
@@ -250,6 +258,8 @@ impl MachineCommand {
             Self::RunFromLine { .. } => "Run from line",
             Self::SetToolTableRow { .. } => "Set tool table row",
             Self::DeleteToolTableRow { .. } => "Delete tool table row",
+            Self::SyncToolTable => "Sync tool table",
+            Self::ReloadToolTable => "Reload tool table",
             Self::ApplyProbeResult { .. } => "Apply probe result",
             Self::ResetProbeCalibration => "Reset probe calibration",
             Self::SetHalOutput { .. } => "Set HAL output",

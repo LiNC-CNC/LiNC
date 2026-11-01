@@ -1307,6 +1307,32 @@ impl NmlBackend {
                 )))?;
                 Ok(())
             }
+            MachineCommand::SyncToolTable => Err(MachineError::Unsupported(
+                "tool table sync is not configured for this backend".into(),
+            )),
+            MachineCommand::ReloadToolTable => {
+                let snapshot = self.refresh();
+                // A pulled table must not replace the controller's table under
+                // a running interpreter. The wrapper retries when it is idle.
+                if snapshot.task.interp != InterpState::Idle || snapshot.task.running {
+                    return Err(MachineError::NotIdle);
+                }
+                match ToolTable::load(
+                    &self.profile.machine_ini.tool_table,
+                    &self.profile.machine_ini.tool_table_columns,
+                    self.profile.changer,
+                ) {
+                    Ok(table) => {
+                        self.tool_table = table;
+                        self.builder.tool_table = self.tool_table.clone();
+                        self.nml_send(&NmlCommand::LoadToolTable(Some(
+                            self.profile.machine_ini.tool_table.clone(),
+                        )))?;
+                        Ok(())
+                    }
+                    Err(error) => Err(MachineError::Io(error.to_string())),
+                }
+            }
             MachineCommand::ApplyProbeResult { result, target } => {
                 self.validate_controller_write()?;
                 let ProbeTarget::WorkOffset(index) = target else {

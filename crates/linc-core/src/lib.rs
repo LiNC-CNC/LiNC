@@ -11,6 +11,7 @@ pub mod gcode;
 pub mod help;
 pub mod homing;
 pub mod ini;
+pub mod loobric;
 pub mod mdi_file;
 pub mod model;
 pub mod preferences;

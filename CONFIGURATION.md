@@ -602,6 +602,7 @@ names.
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running`, `show_parent_above_root` |
 | `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter` |
 | `[tools]` | `changer`, `atc_pockets`, `manual_confirm` |
+| `[loobric]` | `enabled`, `client`, optional `interpreter`, optional `config`, `timeout_secs`, `sync_on_startup`, `sync_after_tool_write` |
 | `[manual]` | `auto_open`, `close_on_mode_exit`, `show_machine_coordinates`, `show_dtg`, `trail` |
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
 | `[mdi]` | `execute_on_enter`, `auto_focus`, `history_limit`, `max_command_length`, `save_preamble`, `save_postamble` |
@@ -644,6 +645,45 @@ Enums:
 `turret_tab` only shows the Diagnostics TURRET / LIVE TOOL tab when the
 profile also declares a turret/ATC changer (`tools.changer = "atc"` or
 `"turret"`); with `changer = "manual"` the tab stays hidden.
+
+### `[loobric]`
+
+Optional tool-table sync with a [Loobric](https://github.com/loobric/) server.
+It is **off by default**: a profile that does not enable it starts and edits its
+table exactly as before. LiNC runs the official `loobric-linuxcnc` Python client
+as a subprocess, so it inherits the client's three-way sync, conflict handling,
+state file, timestamped backup and surgical table rewrite. The client keeps the
+server URL, API key and machine name in its own `~/.config/loobric/linuxcnc.conf`
+(0600); none of that belongs in the machine profile. LiNC passes the INI's
+`[EMCIO] TOOL_TABLE` path in `TOOL_TABLE`, so the two sides always agree on the
+file. See `docs/loobric.md` for the client bindings and the integration design.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Run the client for this profile. |
+| `client` | `loobric-linuxcnc` | Bare command on `PATH`, or a path to the single-file `loobric_linuxcnc.py`. Relative paths resolve against the profile; `~` is expanded. |
+| `interpreter` | unset | Runs `client` through this interpreter, for the single-file Python client (`interpreter = "python3"`). Omit it when the client is executable on its own. |
+| `config` | unset | The client's shell-style config file. Omit it to use the client default. |
+| `timeout_secs` | `60` | Kill a client run that has not finished after this many seconds (1-600). |
+| `sync_on_startup` | `true` | Run one `sync` as soon as the interpreter is idle. |
+| `sync_after_tool_write` | `true` | Run `sync` after a successful tool-table write changes the table revision. |
+
+Single-file client example:
+
+```toml
+[loobric]
+enabled = true
+client = "/home/cnc/.local/bin/loobric_linuxcnc.py"
+interpreter = "python3"
+config = "~/.config/loobric/linuxcnc.conf"
+```
+
+The first run creates/registers the machine on the server. The Tools page shows
+the last result and a `SYNC` button. A pull that changes the file is reloaded
+into the controller only when the interpreter is idle; otherwise the page says
+server changes are waiting for idle. The client never blocks the machine: a
+missing network is reported as a normal client result. `--check-config` checks
+that a path-like `client`, `interpreter` and an explicitly set `config` exist.
 
 ### `[files]`
 
