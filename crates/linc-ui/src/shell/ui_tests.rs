@@ -4039,6 +4039,44 @@ fn backspace_deletes_a_file_on_the_files_page() {
 }
 
 #[test]
+fn d_duplicates_the_selected_file_on_the_files_page() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    let path = harness.files_page_with_one_file("duplicate-test.ngc");
+
+    harness.frame(&[egui::Key::D]);
+
+    assert!(
+        harness.app.files.copy.is_some(),
+        "D starts a copy job for the duplicate"
+    );
+    let duplicate = harness.app.files.nc_root.join("duplicate-test-copy.ngc");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while harness.app.files.copy.is_some() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        harness.frame(&[]);
+    }
+    assert!(
+        harness.app.files.copy.is_none(),
+        "the duplicate job finished"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&duplicate).unwrap(),
+        "G0 X0\n",
+        "the duplicate carries the source bytes"
+    );
+    assert!(path.exists(), "the source is left alone");
+    assert!(
+        harness
+            .app
+            .files
+            .nc_entries
+            .iter()
+            .any(|entry| entry.path == duplicate),
+        "the refreshed list shows the duplicate"
+    );
+}
+
+#[test]
 fn the_cut_shortcut_does_nothing_on_the_files_page() {
     // Ctrl+X is reserved for text editing: the Files page deletes with
     // Backspace and must not react to the clipboard chord at all.

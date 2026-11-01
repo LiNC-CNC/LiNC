@@ -195,13 +195,15 @@ impl LincApp {
                         ("Enter".into(), enter),
                     ],
                 });
-                // Copy, rename and delete act on the focused pane's directory
-                // row; the recent list is not one, so only NEW is offered there.
+                // Copy, duplicate, rename and delete act on the focused pane's
+                // directory row; the recent list is not one, so only NEW is
+                // offered there.
                 let file_items: Vec<(String, &'static str)> = if recent_focus {
                     vec![("N".into(), "NEW")]
                 } else {
                     vec![
                         ("C".into(), "COPY"),
+                        ("D".into(), "DUPLICATE"),
                         ("R".into(), "RENAME"),
                         ("N".into(), "NEW"),
                         (format!("Bksp/{}", k.files_delete.label()), "DELETE"),

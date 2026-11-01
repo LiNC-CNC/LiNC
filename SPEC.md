@@ -109,7 +109,7 @@ else, so it cannot shadow another page's command.
 | Machine (MAIN) | `Ctrl+F10`/`Ctrl+▢` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+M` REMAINING view, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail, `Ctrl+R` run from line, `Ctrl+G` go to a line number |
 | Machine (MAIN), MDI pane | `Enter` issue and commit the block, `Up`/`Down` recall a buffer line into the input, `Ctrl+Up`/`Ctrl+Down` move the selected line in the buffer (`Ctrl` because the panel keyboard has no Shift), `Ctrl+G` go to a buffer line, `Ctrl+R` run the selected line, `Ctrl+Backspace` delete the selected line or clear the input, `Ctrl+S` save the buffer to a new `.ngc` file under `PROGRAM_PREFIX`, `Esc` clear the uncommitted input; while the pane is up these replace the Machine bindings in the row above |
 | Program | `FILE` open the file browser, `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+M` REMAINING view, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
-| Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Backspace` delete |
+| Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `D` duplicate in place, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Backspace` delete |
 | Help | `/` or `Ctrl+F` focus search, `Up`/`Down` select, `Enter` open the reference, `Backspace` back in the reference dialog |
 | Offsets | `Up`/`Down` select a row, `X`/`Y`/`Z` edit the DRO, `A` activate the selected work system |
 | Tools | Arrows select a row, `Enter` edit the selected cell, `T` load the selected row's tool (`Tn M6` + `G43 Hn`), `Ctrl+T` type a tool number and load it, `Z` open the tool-position dialog |
@@ -1091,8 +1091,8 @@ previous page.
   duplicated path in HMI config. The square (`F10`) key flips it to `RECENT`,
   the programs opened most recently, newest first, from
   `preferences.recent_files` (deduplicated, bounded by `[files]` history).
-  `Enter` loads a recent row. `C`, `R` and delete act on a directory row, so the
-  recent view does not offer them; the left pane is unaffected.
+  `Enter` loads a recent row. `C`, `D`, `R` and delete act on a directory row,
+  so the recent view does not offer them; the left pane is unaffected.
 - Show device label/capacity, free space and mount state (`MOUNTING`, `MOUNTED`,
   `NO USB`, `ERROR`). No button row: `E` ejects.
 - Mount removable filesystems with `nosuid,nodev,noexec`; never auto-run files
@@ -1105,7 +1105,8 @@ previous page.
   selection and `PageUp`/`PageDown` move a page, with the list scrolling the
   cursor into view; `Enter` opens a program from `NC_FILES` or copies a file from USB
   into `NC_FILES`; `C` copies the selected entry to
-  the other pane; `R` renames it in place (the NAME cell becomes a field with the
+  the other pane; `D` duplicates it in the same directory under the next free
+  `-copy` name; `R` renames it in place (the NAME cell becomes a field with the
   name without its extension selected; Enter commits, Escape restores);
   `Ctrl+R` refreshes; `E` ejects; `Delete` (or `Backspace`, since the CNC
   keyboard has no Delete key) deletes the selected file after a confirmation
@@ -1121,6 +1122,12 @@ previous page.
   file inside `NC_FILES`).
 - Copy and delete selected regular files with `C`: from `NC_FILES` to USB, from
   USB to `NC_FILES`. Folder navigation only; no recursive folder copy in v1.
+- `D` duplicates the selected file in its own directory: `part.ngc` becomes
+  `part-copy.ngc`, then `part-copy-2.ngc`, never an existing name. It uses the
+  same copy job, free-space check, temporary file and atomic rename as `C`, so
+  the source is untouched and a partial copy is never left behind. Duplicating
+  into `NC_FILES` is blocked by program protect and while a program runs;
+  duplicating on USB needs mounted media and no copy already running.
 - Copy requires free space, rejects symlinks/path escapes, confirms overwrite,
   writes to a temporary file in the destination and renames atomically.
 - Copy progress and errors are visible; `E` is refused while a copy is active.
@@ -1145,7 +1152,7 @@ previous page.
   show the error.
 - If the editor has unsaved changes, confirm discard before replacing the
   loaded program.
-- Delete, rename, format and folder-copy are intentionally out of scope for v1.
+- Format and folder-copy are intentionally out of scope for v1.
 
 ### 6.8 Touch Probe
 

@@ -150,6 +150,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     let mut load: Option<PathBuf> = None;
     let mut copy_enter = false;
     let mut copy_side = false;
+    let mut duplicate = false;
     let mut rename = false;
     let mut new_file = false;
     let mut eject_media = false;
@@ -159,6 +160,9 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::C) {
             copy_side = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::D) {
+            duplicate = true;
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::R) {
             rename = true;
@@ -293,6 +297,9 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     if copy_side && !on_parent && !recent {
         copy_selected(app);
     }
+    if duplicate && !on_parent && !recent {
+        duplicate_selected(app);
+    }
     if rename && !on_parent && !recent {
         begin_rename(app);
     }
@@ -333,6 +340,68 @@ fn copy_selected(app: &mut LincApp) {
     } else {
         app.toast("copy to USB is blocked", theme::WARNING);
     }
+}
+
+/// `D`: copy the focused pane's selected file to a free name in the same
+/// directory. It runs through the same temporary-file-and-rename job as `C`,
+/// so progress, free-space checks and errors are shared.
+fn duplicate_selected(app: &mut LincApp) {
+    let usb = app.files.usb_focused;
+    let on_parent = if usb {
+        app.files.usb_parent_selected
+    } else {
+        app.files.nc_parent_selected
+    };
+    if on_parent {
+        app.toast("select a file, not the parent row", theme::WARNING);
+        return;
+    }
+    if app.files.copy.is_some() {
+        app.toast("a copy is already running", theme::WARNING);
+        return;
+    }
+    let entry = if usb {
+        app.files.usb_entries.get(app.files.usb_selected).cloned()
+    } else {
+        app.files.nc_entries.get(app.files.nc_selected).cloned()
+    };
+    let Some(entry) = entry else {
+        app.toast("select a file to duplicate", theme::WARNING);
+        return;
+    };
+    if entry.is_dir {
+        app.toast(
+            "folder duplicate is out of scope; select a file",
+            theme::WARNING,
+        );
+        return;
+    }
+    if entry.is_symlink {
+        app.toast("symlink rejected", theme::ERROR);
+        return;
+    }
+    // A duplicate writes a new file, so the NC_FILES copy gates apply: program
+    // protect blocks it and a running program keeps it out of the way. USB
+    // only needs media that is still mounted.
+    if usb {
+        if !copy_to_usb_allowed(app) {
+            app.toast("no USB media mounted", theme::ERROR);
+            return;
+        }
+    } else if app.program_protected() {
+        app.toast("PROTECT ON — duplicate is locked", theme::WARNING);
+        return;
+    } else if app.snapshot.task.interp != InterpState::Idle || app.snapshot.task.running {
+        app.toast("cannot duplicate while running", theme::WARNING);
+        return;
+    }
+    let Some(directory) = entry.path.parent().map(Path::to_path_buf) else {
+        app.toast("cannot duplicate without a parent directory", theme::ERROR);
+        return;
+    };
+    let name = duplicate_name(&directory, &entry.name);
+    let destination = directory.join(&name);
+    start_copy_job(app, entry.path, directory, destination, false);
 }
 
 /// Open the NAME cell of `path` as a text field. The stem is selected so typing
@@ -457,16 +526,37 @@ fn program_skeleton(units: &str, wcs: &str) -> String {
 fn unique_name(directory: &Path, stem: &str, extension: &str) -> String {
     let mut index = 1;
     loop {
-        let name = if index == 1 {
-            format!("{stem}.{extension}")
+        let suffix = if index == 1 {
+            String::new()
         } else {
-            format!("{stem}-{index}.{extension}")
+            format!("-{index}")
+        };
+        let name = if extension.is_empty() {
+            format!("{stem}{suffix}")
+        } else {
+            format!("{stem}{suffix}.{extension}")
         };
         if !directory.join(&name).exists() {
             return name;
         }
         index += 1;
     }
+}
+
+/// The free name a duplicate takes: `part.ngc` becomes `part-copy.ngc`, then
+/// `part-copy-2.ngc`. The extension is kept; a name without one gets no
+/// trailing dot.
+fn duplicate_name(directory: &Path, name: &str) -> String {
+    let path = Path::new(name);
+    let stem = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| name.to_string());
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    unique_name(directory, &format!("{stem}-copy"), &extension)
 }
 
 /// `N`: create a skeleton program in the current NC_FILES directory and put its
@@ -1526,6 +1616,21 @@ mod tests {
             .page_buttons
             .borrow()
             .contains(&harness.focused().unwrap()));
+    }
+
+    #[test]
+    fn duplicate_name_keeps_the_extension_and_skips_existing_copies() {
+        let directory = tempfile::tempdir().unwrap();
+        assert_eq!(
+            duplicate_name(directory.path(), "part.ngc"),
+            "part-copy.ngc"
+        );
+        std::fs::write(directory.path().join("part-copy.ngc"), "").unwrap();
+        assert_eq!(
+            duplicate_name(directory.path(), "part.ngc"),
+            "part-copy-2.ngc"
+        );
+        assert_eq!(duplicate_name(directory.path(), "README"), "README-copy");
     }
 
     #[test]
