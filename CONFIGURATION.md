@@ -679,7 +679,7 @@ config = "~/.config/loobric/linuxcnc.conf"
 ```
 
 The first run creates/registers the machine on the server. The Tools page shows
-the last result and a `SYNC` button. A pull that changes the file is reloaded
+the last result; `S` syncs now. A pull that changes the file is reloaded
 into the controller only when the interpreter is idle; otherwise the page says
 server changes are waiting for idle. The client never blocks the machine: a
 missing network is reported as a normal client result. `--check-config` checks

@@ -328,6 +328,9 @@ impl LincApp {
                 hints.push(("Z".into(), "TOOL POSITION"));
                 hints.push(("Ctrl+N".into(), "NEW TOOL"));
                 hints.push(("D".into(), "DUPLICATE"));
+                if self.snapshot.loobric.is_some() {
+                    hints.push(("S".into(), "SYNC LOOBRIC"));
+                }
                 hints.push(("Backspace".into(), "DELETE TOOL"));
             }
         }

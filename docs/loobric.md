@@ -79,7 +79,7 @@ it.
   - folds a completed result into the snapshot;
   - when the client changed the file, sends the internal
     `ReloadToolTable` command, but only when idle;
-  - exposes `SyncToolTable` for the Tools page's `SYNC` button.
+  - exposes `SyncToolTable` for the Tools page's `S` shortcut.
 
 `linc-app` wraps the selected backend only when the profile enables Loobric.
 Both backends implement `ReloadToolTable`: the simulator reloads its in-memory
@@ -89,7 +89,7 @@ integration cannot trigger a process.
 
 The Tools page draws a compact Loobric row only when `snapshot.loobric` is
 present. It shows the last client message, a warning while a pulled table waits
-for idle, and a `SYNC` button. All other pages are unchanged.
+for idle. All other pages are unchanged.
 
 ## Configuration example
 
@@ -121,8 +121,8 @@ profile. The machine profile is normally readable by every operator.
 - The client's writes happen before LiNC reloads the table. If the interpreter
   starts a program during the network round trip, LiNC defers the reload until
   the interpreter is idle and says so on the Tools page.
-- `SYNC` is idle-only. The backend rechecks idle when the command arrives; it
-  does not trust the button's disabled state.
+- `S` is idle-only. The backend rechecks idle when the command arrives; it
+  does not trust the page's shortcut gate.
 - The integration does not add a server-side push/subscribe channel, does not
   read the client's `state-<machine>.json` health summary, and does not resolve
   conflicts in LiNC. Those remain the official client's and the server's job.

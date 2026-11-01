@@ -1,7 +1,7 @@
 //! Shell integration tests: a real `LincApp` driven through real egui frames.
 
 use super::*;
-use linc_core::model::{PanelModeValidity, ToolChangerKind};
+use linc_core::model::{LoobricStatus, PanelModeValidity, ToolChangerKind};
 
 fn fixture() -> (tempfile::TempDir, Profile) {
     let dir = tempfile::tempdir().unwrap();
@@ -2360,6 +2360,7 @@ struct ProbeHarness {
     ctx: egui::Context,
     app: LincApp,
     sent: std::rc::Rc<std::cell::RefCell<Vec<MachineCommand>>>,
+    loobric: std::rc::Rc<std::cell::RefCell<Option<LoobricStatus>>>,
 }
 
 impl ProbeHarness {
@@ -2371,6 +2372,7 @@ impl ProbeHarness {
         let (dir, profile) = fixture();
         let ctx = egui::Context::default();
         let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let loobric = std::rc::Rc::new(std::cell::RefCell::new(None));
         let mut sim = linc_core::sim::SimBackend::new(profile.clone(), mode);
         sim.set_power(power);
         sim.set_program_protect(protect, true);
@@ -2378,6 +2380,7 @@ impl ProbeHarness {
         let backend = Box::new(RecordingBackend {
             inner: sim,
             sent: sent.clone(),
+            loobric: loobric.clone(),
         });
         // Build the app inside a real 1280x720 pass: \`LincApp::new\` applies
         // the design zoom, and outside a pass egui reports no viewport.
@@ -2399,7 +2402,14 @@ impl ProbeHarness {
             ctx,
             app,
             sent,
+            loobric,
         }
+    }
+
+    /// Publish a Loobric status through the backend snapshot, the way an
+    /// enabled profile does.
+    fn set_loobric_status(&self, status: LoobricStatus) {
+        *self.loobric.borrow_mut() = Some(status);
     }
 
     /// Paint one frame at the 1280x720 baseline, with optional keys.
@@ -2711,6 +2721,44 @@ fn ctrl_n_creates_a_new_tool_table_row() {
         .expect("the new row");
     assert_eq!(new_row.geometry.length, Some(0.0));
     assert_eq!(new_row.geometry.diameter, Some(0.0));
+}
+
+#[test]
+fn s_requests_a_loobric_sync_only_when_enabled() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Tools);
+    harness.frame(&[]);
+
+    // A profile without Loobric leaves bare `S` free: nothing is sent.
+    harness.sent.borrow_mut().clear();
+    harness.frame(&[egui::Key::S]);
+    assert!(
+        !harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::SyncToolTable)),
+        "S must not start a sync without the Loobric wrapper"
+    );
+
+    harness.set_loobric_status(LoobricStatus {
+        enabled: true,
+        last_ok: Some(true),
+        message: "In sync".into(),
+        ..LoobricStatus::default()
+    });
+    harness.frame(&[]);
+    harness.sent.borrow_mut().clear();
+    harness.frame(&[egui::Key::S]);
+    assert!(
+        harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::SyncToolTable)),
+        "S sends one manual sync: {:?}",
+        harness.sent_debug()
+    );
 }
 
 #[test]
@@ -3207,11 +3255,14 @@ fn the_tool_position_dialog_switches_axis_and_reports_a_blocked_write() {
 struct RecordingBackend {
     inner: linc_core::sim::SimBackend,
     sent: std::rc::Rc<std::cell::RefCell<Vec<MachineCommand>>>,
+    loobric: std::rc::Rc<std::cell::RefCell<Option<LoobricStatus>>>,
 }
 
 impl UiBackend for RecordingBackend {
     fn snapshot(&mut self) -> MachineSnapshot {
-        linc_core::backend::MachineBackend::snapshot(&mut self.inner)
+        let mut snapshot = linc_core::backend::MachineBackend::snapshot(&mut self.inner);
+        snapshot.loobric = self.loobric.borrow().clone();
+        snapshot
     }
 
     fn send(&mut self, command: MachineCommand) -> Result<(), linc_core::command::MachineError> {

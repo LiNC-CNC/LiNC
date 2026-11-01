@@ -136,8 +136,8 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     });
 }
 
-/// Optional Loobric status: the last client result and a manual sync action.
-/// Disabled profiles have no status, so the row draws nothing.
+/// Optional Loobric status. The sync itself is the page-local `S` key, not a
+/// button: the tool table owns the keyboard and the panel has no mouse.
 fn loobric_row(app: &mut LincApp, ui: &mut Ui) {
     let Some(status) = app.snapshot.loobric.clone() else {
         return;
@@ -157,36 +157,38 @@ fn loobric_row(app: &mut LincApp, ui: &mut Ui) {
         }
     };
     ui.horizontal(|ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let idle = app.snapshot.task.interp == InterpState::Idle && !app.snapshot.task.running;
-            let enabled = !status.running && idle;
-            if ui
-                .add_enabled(
-                    enabled,
-                    egui::Button::new(RichText::new("SYNC").size(theme::font_size(10.0)))
-                        .min_size(egui::vec2(72.0, 44.0)),
-                )
-                .clicked()
-            {
-                app.send(MachineCommand::SyncToolTable);
-            }
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.label(
-                    RichText::new("LOOBRIC")
-                        .size(theme::font_size(10.0))
-                        .color(theme::MUTED),
-                );
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(message)
-                            .size(theme::font_size(10.0))
-                            .color(colour),
-                    )
-                    .truncate(),
-                );
-            });
-        });
+        ui.label(
+            RichText::new("LOOBRIC")
+                .size(theme::font_size(10.0))
+                .color(theme::MUTED),
+        );
+        ui.add(
+            egui::Label::new(
+                RichText::new(message)
+                    .size(theme::font_size(10.0))
+                    .color(colour),
+            )
+            .truncate(),
+        );
     });
+}
+
+/// `S`: run one Loobric sync now. Page-local like `T`, `Z` and `D`; the backend
+/// repeats both gates because a program can start between frame and command.
+fn request_loobric_sync(app: &mut LincApp) {
+    let Some(status) = app.snapshot.loobric.as_ref() else {
+        return;
+    };
+    if status.running {
+        app.tools.error = Some("Loobric sync is already running".into());
+        return;
+    }
+    if app.snapshot.task.interp != InterpState::Idle || app.snapshot.task.running {
+        app.tools.error = Some("Loobric sync waits for idle".into());
+        return;
+    }
+    app.tools.error = None;
+    app.send(MachineCommand::SyncToolTable);
 }
 
 /// What a table column holds.
@@ -468,6 +470,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     let mut position = false;
     let mut new_tool = false;
     let mut duplicate = false;
+    let mut sync_loobric = false;
     let mut delete_tool = false;
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
@@ -520,6 +523,13 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::D) {
             duplicate = true;
         }
+        // Bare `S`: sync the tool table now, only when the profile enables
+        // Loobric. The key is not consumed on a profile without it, so it is
+        // free for anything the page grows later.
+        if app.snapshot.loobric.is_some() && input.consume_key(egui::Modifiers::NONE, egui::Key::S)
+        {
+            sync_loobric = true;
+        }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace) {
             delete_tool = true;
         }
@@ -552,6 +562,9 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     }
     if duplicate {
         duplicate_tool(app);
+    }
+    if sync_loobric {
+        request_loobric_sync(app);
     }
     if delete_tool {
         request_delete_tool(app);
