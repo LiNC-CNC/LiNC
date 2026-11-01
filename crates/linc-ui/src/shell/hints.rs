@@ -327,6 +327,7 @@ impl LincApp {
                 hints.push((k.tool_number.label(), "TYPE NUMBER"));
                 hints.push(("Z".into(), "TOOL POSITION"));
                 hints.push(("Ctrl+N".into(), "NEW TOOL"));
+                hints.push(("D".into(), "DUPLICATE"));
                 hints.push(("Backspace".into(), "DELETE TOOL"));
             }
         }

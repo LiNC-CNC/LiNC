@@ -410,6 +410,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     let mut number = false;
     let mut position = false;
     let mut new_tool = false;
+    let mut duplicate = false;
     let mut delete_tool = false;
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
@@ -457,6 +458,11 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
         if input.consume_key(egui::Modifiers::CTRL, egui::Key::N) {
             new_tool = true;
         }
+        // Bare `D`: duplicate the selected row under the next free tool number
+        // after it. Page-local like `T`, and taken before the table draws.
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::D) {
+            duplicate = true;
+        }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace) {
             delete_tool = true;
         }
@@ -486,6 +492,9 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     }
     if new_tool {
         create_tool(app);
+    }
+    if duplicate {
+        duplicate_tool(app);
     }
     if delete_tool {
         request_delete_tool(app);
@@ -525,9 +534,7 @@ fn create_tool(app: &mut LincApp) {
         return;
     };
     let pocket = if app.profile.changer.uses_pockets() {
-        let Some(pocket) =
-            (1..=u16::MAX).find(|pocket| !rows.iter().any(|row| row.pocket == Some(*pocket)))
-        else {
+        let Some(pocket) = free_pocket(rows) else {
             app.tools.error = Some("no free pocket".into());
             return;
         };
@@ -547,6 +554,72 @@ fn create_tool(app: &mut LincApp) {
     app.tools.error = None;
     app.tools.pending_select_tool = Some(tool);
     app.toast(format!("T{tool} created"), theme::ACCENT);
+    app.send(MachineCommand::SetToolTableRow {
+        row,
+        old_tool: None,
+        expected_revision: app.snapshot.tool_table.revision,
+    });
+}
+
+/// The next free tool number strictly after `source`. The probe number is
+/// reserved, so it is skipped even when no row carries it.
+fn next_free_tool_after(source: u16, rows: &[ToolRow], probe_tool: u16) -> Option<u16> {
+    (source.saturating_add(1)..=u16::MAX)
+        .find(|tool| *tool != probe_tool && !rows.iter().any(|row| row.tool == *tool))
+}
+
+/// The lowest pocket no row uses. An ATC/turret table needs one per tool.
+fn free_pocket(rows: &[ToolRow]) -> Option<u16> {
+    (1..=u16::MAX).find(|pocket| !rows.iter().any(|row| row.pocket == Some(*pocket)))
+}
+
+/// `D`: copy the selected row under the next free tool number after it. The
+/// description, type and geometry are copied; an ATC/turret table gets the next
+/// free pocket, and a manual table stores no pocket. The probe tool number is
+/// skipped, and the duplicate is selected once the backend echoes the table.
+fn duplicate_tool(app: &mut LincApp) {
+    if !app.snapshot.writes_allowed() {
+        app.tools.error = Some(write_refusal(app));
+        return;
+    }
+    let Some(source) = app
+        .snapshot
+        .tool_table
+        .rows
+        .get(app.tools.selected_row)
+        .cloned()
+    else {
+        app.tools.error = Some("select a tool row".into());
+        return;
+    };
+    let probe_tool = app.profile.config.probe.tool_number;
+    let rows = &app.snapshot.tool_table.rows;
+    let Some(tool) = next_free_tool_after(source.tool, rows, probe_tool) else {
+        app.tools.error = Some(format!("no free tool number after T{}", source.tool));
+        return;
+    };
+    let pocket = if app.profile.changer.uses_pockets() {
+        let Some(pocket) = free_pocket(rows) else {
+            app.tools.error = Some("no free pocket".into());
+            return;
+        };
+        Some(pocket)
+    } else {
+        None
+    };
+    let source_tool = source.tool;
+    let mut row = source;
+    row.tool = tool;
+    row.pocket = pocket;
+    // A deleted row leaves its draft behind; without this the duplicate would
+    // paint that stale text over the values it just copied.
+    app.tools.drafts.remove(&tool);
+    app.tools.error = None;
+    app.tools.pending_select_tool = Some(tool);
+    app.toast(
+        format!("T{tool} duplicated from T{source_tool}"),
+        theme::ACCENT,
+    );
     app.send(MachineCommand::SetToolTableRow {
         row,
         old_tool: None,
@@ -1808,8 +1881,8 @@ pub fn issue_change(app: &mut LincApp) {
 #[cfg(test)]
 mod tests {
     use super::{
-        accepted_numbers, load_tool_message, offset_after_touch_off, parse_number,
-        tool_number_verdict, tool_offset,
+        accepted_numbers, load_tool_message, next_free_tool_after, offset_after_touch_off,
+        parse_number, tool_number_verdict, tool_offset,
     };
     use linc_core::model::ToolRow;
 
@@ -1874,6 +1947,35 @@ mod tests {
         // The toast names what the load does, and 0 has no length compensation.
         assert_eq!(load_tool_message(7), "T7 M6 + G43 H7 queued");
         assert!(load_tool_message(0).contains("no length compensation"));
+    }
+
+    #[test]
+    fn a_duplicate_takes_the_next_free_tool_after_its_source() {
+        assert_eq!(
+            next_free_tool_after(7, &table(), 0),
+            Some(8),
+            "the gap right after the source is used"
+        );
+        assert_eq!(
+            next_free_tool_after(1, &[ToolRow::new(1), ToolRow::new(2), ToolRow::new(3)], 0),
+            Some(4),
+            "used numbers are skipped"
+        );
+        assert_eq!(
+            next_free_tool_after(1, &[ToolRow::new(1), ToolRow::new(3)], 2),
+            Some(4),
+            "the probe tool number is reserved"
+        );
+        assert_eq!(
+            next_free_tool_after(99, &table(), 0),
+            Some(100),
+            "the search never wraps below the source"
+        );
+        assert_eq!(
+            next_free_tool_after(u16::MAX, &[ToolRow::new(u16::MAX)], 0),
+            None,
+            "there is nothing after the last number"
+        );
     }
 
     #[test]

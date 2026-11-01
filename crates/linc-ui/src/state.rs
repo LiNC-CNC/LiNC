@@ -1400,8 +1400,8 @@ pub struct ToolsUi {
     /// `LincApp::overlay_open`, so the table, the shell's global keys and the
     /// cell editor all stand down behind it.
     pub number: Option<ToolNumberEntry>,
-    /// Tool just created with Ctrl+N; the row is selected once the new table
-    /// arrives from the backend.
+    /// Tool just created with Ctrl+N or duplicated with D; the row is selected
+    /// once the new table arrives from the backend.
     pub pending_select_tool: Option<u16>,
     /// The tool-position dialog, while it is open. Part of
     /// `LincApp::overlay_open`, so the table, the cell editor and the shell's

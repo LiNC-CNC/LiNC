@@ -112,7 +112,7 @@ else, so it cannot shadow another page's command.
 | Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `D` duplicate in place, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Backspace` delete |
 | Help | `/` or `Ctrl+F` focus search, `Up`/`Down` select, `Enter` open the reference, `Backspace` back in the reference dialog |
 | Offsets | `Up`/`Down` select a row, `X`/`Y`/`Z` edit the DRO, `A` activate the selected work system |
-| Tools | Arrows select a row, `Enter` edit the selected cell, `T` load the selected row's tool (`Tn M6` + `G43 Hn`), `Ctrl+T` type a tool number and load it, `Z` open the tool-position dialog |
+| Tools | Arrows select a row, `Enter` edit the selected cell, `T` load the selected row's tool (`Tn M6` + `G43 Hn`), `Ctrl+T` type a tool number and load it, `Z` open the tool-position dialog, `D` duplicate the selected tool |
 | Probe | Arrows select a row |
 
 Every page that draws a toolpath (Machine, Program, Manual, Homing and the
@@ -963,9 +963,12 @@ Primary quick tool-change surface; no MDI entry required.
   global keys stand down while it is open.
 - `Ctrl+N` writes a new row with the next free tool number; the configured
   probe tool number is skipped, and an ATC/turret table gets the next free
-  pocket. `Backspace` asks for confirmation and then deletes the selected row.
-  The probe tool and the active tool (the one in the spindle) are refused, and
-  nothing is deleted before confirmation.
+  pocket. `D` duplicates the selected row under the next free tool number
+  after it, again skipping the probe number and the used numbers; the
+  description, type and geometry are copied, an ATC/turret table gets the next
+  free pocket, and the duplicate is selected. `Backspace` asks for confirmation
+  and then deletes the selected row. The probe tool and the active tool (the
+  one in the spindle) are refused, and nothing is deleted before confirmation.
 - Editing a cell selects the whole value (Home/End move inside it). Enter
   writes the row, reloads the tool table into the controller and re-applies
   `G43` when the edited row is the tool in the spindle. `Z` and the length

@@ -2714,6 +2714,87 @@ fn ctrl_n_creates_a_new_tool_table_row() {
 }
 
 #[test]
+fn d_duplicates_the_selected_tool_under_the_next_free_number() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Tools);
+    harness.frame(&[]);
+    let rows = harness.app.snapshot.tool_table.rows.clone();
+    let probe_tool = harness.app.profile.config.probe.tool_number;
+    // Pick a row that has a free number after it; the sim table has gaps.
+    let index = rows
+        .iter()
+        .position(|row| {
+            (row.tool.saturating_add(1)..=u16::MAX)
+                .any(|tool| tool != probe_tool && !rows.iter().any(|other| other.tool == tool))
+        })
+        .expect("a row with a free number after it");
+    let source = rows[index].clone();
+    let expected = (source.tool.saturating_add(1)..=u16::MAX)
+        .find(|tool| *tool != probe_tool && !rows.iter().any(|row| row.tool == *tool))
+        .expect("a free tool number");
+
+    harness.app.tools.selected_row = index;
+    harness.sent.borrow_mut().clear();
+    harness.frame(&[egui::Key::D]);
+    {
+        let sent = harness.sent.borrow();
+        let duplicate = sent
+            .iter()
+            .find_map(|command| match command {
+                MachineCommand::SetToolTableRow {
+                    row,
+                    old_tool: None,
+                    ..
+                } if row.tool == expected => Some(row.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected a duplicate: {:?}", harness.sent_debug()));
+        assert_eq!(duplicate.description, source.description);
+        assert_eq!(duplicate.kind, source.kind);
+        assert_eq!(duplicate.geometry, source.geometry);
+        if harness.app.profile.changer.uses_pockets() {
+            assert!(duplicate.pocket.is_some(), "an ATC row needs a pocket");
+            assert!(
+                !rows.iter().any(|row| row.pocket == duplicate.pocket),
+                "the pocket is free"
+            );
+        } else {
+            assert_eq!(duplicate.pocket, None, "a manual table stores no pocket");
+        }
+    }
+
+    harness.frame(&[]);
+    assert!(
+        harness
+            .app
+            .snapshot
+            .tool_table
+            .rows
+            .iter()
+            .any(|row| row.tool == expected),
+        "the duplicate is in the table"
+    );
+    assert!(
+        harness
+            .app
+            .snapshot
+            .tool_table
+            .rows
+            .iter()
+            .any(|row| row.tool == source.tool),
+        "the source row is unchanged"
+    );
+    let selected = harness
+        .app
+        .snapshot
+        .tool_table
+        .rows
+        .get(harness.app.tools.selected_row)
+        .map(|row| row.tool);
+    assert_eq!(selected, Some(expected), "the duplicate is selected");
+}
+
+#[test]
 fn delete_tool_command_removes_the_row() {
     let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
     harness.app.set_page(Page::Tools);
