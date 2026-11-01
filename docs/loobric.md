@@ -87,9 +87,11 @@ table, and the NML backend reloads the file and issues an IO `LoadToolTable`.
 `SyncToolTable` is refused by an unwrapped backend, so a profile without the
 integration cannot trigger a process.
 
-The Tools page draws a compact Loobric row only when `snapshot.loobric` is
-present. It shows the last client message, a warning while a pulled table waits
-for idle. All other pages are unchanged.
+The Tools page shows the Loobric status in the TOOL TABLE header only when
+`snapshot.loobric` is present: the last client message, or a warning while a
+pulled table waits for idle. `S` starts a manual sync. The status shares the
+existing header row, so it costs no extra vertical space. All other pages are
+unchanged.
 
 ## Configuration example
 

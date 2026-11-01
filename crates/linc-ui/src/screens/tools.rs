@@ -93,10 +93,6 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // the table scrolls. Display only — the table owns the keyboard, and `Z`
     // opens the tool-position dialog.
     common::position_readout_row(app, ui);
-    if app.snapshot.loobric.is_some() {
-        ui.add_space(4.0);
-        loobric_row(app, ui);
-    }
     ui.add_space(6.0);
     // No change/changer panes: the table is the page. Loading the selected tool
     // is the `T` shortcut below, and the manual-change prompt is drawn by the
@@ -136,13 +132,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     });
 }
 
-/// Optional Loobric status. The sync itself is the page-local `S` key, not a
-/// button: the tool table owns the keyboard and the panel has no mouse.
-fn loobric_row(app: &mut LincApp, ui: &mut Ui) {
-    let Some(status) = app.snapshot.loobric.clone() else {
-        return;
-    };
-    let (message, colour) = if status.running {
+/// Optional Loobric status, shown in the tool table's own header so it costs
+/// no extra vertical row. The sync itself is the page-local `S` key.
+fn loobric_status(app: &LincApp) -> Option<(String, egui::Color32)> {
+    let status = app.snapshot.loobric.as_ref()?;
+    Some(if status.running {
         ("syncing...".to_string(), theme::ACCENT)
     } else if status.reload_pending {
         (
@@ -151,26 +145,11 @@ fn loobric_row(app: &mut LincApp, ui: &mut Ui) {
         )
     } else {
         match status.last_ok {
-            Some(true) => (status.message, theme::MUTED),
-            Some(false) => (status.message, theme::ERROR),
+            Some(true) => (status.message.clone(), theme::MUTED),
+            Some(false) => (status.message.clone(), theme::ERROR),
             None => ("not synced yet".to_string(), theme::MUTED),
         }
-    };
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("LOOBRIC")
-                .size(theme::font_size(10.0))
-                .color(theme::MUTED),
-        );
-        ui.add(
-            egui::Label::new(
-                RichText::new(message)
-                    .size(theme::font_size(10.0))
-                    .color(colour),
-            )
-            .truncate(),
-        );
-    });
+    })
 }
 
 /// `S`: run one Loobric sync now. Page-local like `T`, `Z` and `D`; the backend
@@ -1261,6 +1240,18 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                     .size(theme::font_size(9.0))
                     .color(theme::MUTED),
                 );
+                if let Some((message, colour)) = loobric_status(app) {
+                    ui.add_space(12.0);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("LOOBRIC: {message}"))
+                                .monospace()
+                                .size(theme::font_size(9.0))
+                                .color(colour),
+                        )
+                        .truncate(),
+                    );
+                }
             });
         });
         if let Some(error) = &app.snapshot.tool_table.error {
