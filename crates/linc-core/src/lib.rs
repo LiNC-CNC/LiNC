@@ -18,4 +18,5 @@ pub mod preferences;
 pub mod probe;
 pub mod sim;
 pub mod sim_ipc;
+pub mod tool_state;
 pub mod tooltable;

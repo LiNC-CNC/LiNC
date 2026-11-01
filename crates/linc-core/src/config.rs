@@ -644,6 +644,12 @@ impl Profile {
     pub fn subroutines(&self) -> crate::gcode::Subroutines {
         crate::gcode::Subroutines::new(self.machine_ini.subroutine_paths.iter().cloned())
     }
+
+    /// Machine state that must outlive a session, beside the preferences file.
+    /// `sim.preferences.toml` resolves to `sim.state.toml`.
+    pub fn state_path(&self) -> PathBuf {
+        crate::tool_state::state_path(&self.preferences_path)
+    }
 }
 
 impl UiConfig {

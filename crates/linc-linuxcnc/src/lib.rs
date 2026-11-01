@@ -30,6 +30,7 @@ use linc_core::config::Profile;
 use linc_core::diag::BridgeInfo;
 use linc_core::gcode::parse_preview;
 use linc_core::model::*;
+use linc_core::tool_state::ToolState;
 use linc_core::tooltable::ToolTable;
 use linc_hal::HalReader;
 use thiserror::Error;
@@ -82,6 +83,11 @@ pub struct NmlBackend {
     proghome_prev: Vec<bool>,
     confirm_seq: u64,
     tool_table: ToolTable,
+    /// The last tool the controller reported, kept beside the preferences so a
+    /// power cycle does not pretend the spindle was emptied.
+    tool_state: ToolState,
+    /// A remembered tool waiting for a fresh controller to be ready for `M61`.
+    tool_restore: Option<ToolRestore>,
     /// The last nonzero `motion.program-line`: the line the trajectory planner
     /// is cutting. The pin reads 0 for a cycle whenever the queue drains, so the
     /// last value is kept until the cut moves on - and dropped when a different
@@ -109,6 +115,18 @@ enum ToolTableLoad {
     Unobservable,
     /// The controller still holds a different entry after the timeout.
     Stale,
+}
+
+/// A tool remembered from the previous session. It is restored with `M61`,
+/// which sets the current tool without moving the changer, and then `G43`.
+#[derive(Clone, Copy, Debug)]
+struct ToolRestore {
+    tool: u16,
+    /// The `M61` block has been sent; wait for the controller to publish it
+    /// before trying again.
+    issued: bool,
+    next_attempt: Instant,
+    warned_missing: bool,
 }
 
 impl NmlBackend {
@@ -145,6 +163,16 @@ impl NmlBackend {
         initial.tool_table = tool_table_state;
         let parameters = ParameterFile::load(profile.machine_ini.parameter_file.clone());
         let builder = SnapshotBuilder::new(profile.clone(), tool_table.clone());
+        let tool_state = ToolState::load(profile.state_path());
+        let tool_restore = tool_state
+            .tool()
+            .filter(|tool| *tool > 0)
+            .map(|tool| ToolRestore {
+                tool,
+                issued: false,
+                next_attempt: Instant::now(),
+                warned_missing: false,
+            });
         let bridge = BridgeInfo {
             kind: "nml".into(),
             pid: std::process::id(),
@@ -176,6 +204,8 @@ impl NmlBackend {
             program_line_revision: 0,
             program_line_logged: false,
             tool_table,
+            tool_state,
+            tool_restore,
         })
     }
 
@@ -261,8 +291,94 @@ impl NmlBackend {
         snapshot.hal.tool_change_confirm_seq = self.confirm_seq;
         snapshot.machine.hal_thread_ok = self.hal.is_some();
         snapshot.bridge = Some(self.bridge_info());
+        self.service_tool_state(&snapshot);
         self.last_snapshot = Some(snapshot.clone());
         snapshot
+    }
+
+    /// Remember the controller's tool, or restore the one the last session
+    /// left in the spindle.
+    ///
+    /// LinuxCNC starts a fresh interpreter at `tool_in_spindle = 0` even when
+    /// the physical spindle still holds the tool. The state file is the only
+    /// memory of that tool. The controller wins whenever it reports a
+    /// nonzero tool (an operator may have changed it before the HMI started);
+    /// `M61` is issued only for an empty spindle, and only once the machine is
+    /// on, homed, idle and unprotected, so the restore never fights a real
+    /// tool change or a safety gate. `M61` does not move the changer; the
+    /// following `G43` applies the remembered tool's length.
+    fn service_tool_state(&mut self, snapshot: &MachineSnapshot) {
+        let current = snapshot.tool_change.current_tool;
+        if let Some(mut restore) = self.tool_restore {
+            if current != 0 {
+                // The controller has a tool: an operator change, or the
+                // restore landed. Trust it over a remembered number.
+                self.tool_restore = None;
+                self.tool_state.record(current);
+                return;
+            }
+            let now = Instant::now();
+            if now < restore.next_attempt {
+                return;
+            }
+            if restore.issued {
+                // The block was accepted but never reached the status pin.
+                // Ask again rather than leaving the spindle remembered as T0.
+                restore.issued = false;
+            }
+            if snapshot.tool_table.error.is_some() {
+                restore.next_attempt = now + Duration::from_secs(1);
+                self.tool_restore = Some(restore);
+                return;
+            }
+            if !snapshot
+                .tool_table
+                .rows
+                .iter()
+                .any(|row| row.tool == restore.tool)
+            {
+                if !restore.warned_missing {
+                    log::warn!(
+                        "remembered tool T{} is not in the tool table; not restoring it",
+                        restore.tool
+                    );
+                    restore.warned_missing = true;
+                }
+                restore.next_attempt = now + Duration::from_secs(5);
+                self.tool_restore = Some(restore);
+                return;
+            }
+            if snapshot.issue_allowed().is_err()
+                || snapshot.panel.protect_effective()
+                || snapshot.machine.tool_change_active
+            {
+                restore.next_attempt = now + Duration::from_secs(1);
+                self.tool_restore = Some(restore);
+                return;
+            }
+            restore.issued = true;
+            restore.next_attempt = now + Duration::from_secs(5);
+            self.tool_restore = Some(restore);
+            match self.issue_blocks(&[format!("M61 Q{}", restore.tool)]) {
+                Ok(()) => {
+                    log::info!(
+                        "restoring T{} in the spindle (M61; no tool change)",
+                        restore.tool
+                    );
+                    self.pending_height_comp = Some((restore.tool, Instant::now()));
+                }
+                Err(error) => {
+                    log::warn!("could not restore tool T{}: {error}", restore.tool);
+                }
+            }
+            return;
+        }
+
+        // No restore pending: the controller is the source of truth. Save T0
+        // too, so an explicit unload is remembered as an empty spindle.
+        if current != 0 || self.tool_state.tool().is_some_and(|tool| tool != current) {
+            self.tool_state.record(current);
+        }
     }
 
     fn lost_status(&mut self, error: NmlError) -> MachineSnapshot {

@@ -913,6 +913,15 @@ Primary quick tool-change surface; no MDI entry required.
 - The page is the table: there is no separate change pane and no changer
   pane. Current and prepared tool are shown above it as `CURRENT; Tn` and
   `PREPARED; Tn` (the numbers in the axis-label amber).
+- The in-spindle tool outlives a restart. The backend records the tool the
+  controller reports in a LiNC machine-state file beside the preferences
+  (`<profile>.state.toml`), including `0` after an explicit unload. On a fresh
+  session, when the controller reports an empty spindle, it restores the
+  remembered tool with `M61 Qn` (which sets the current tool without moving the
+  changer) and then `G43 Hn`, once the machine is ON, homed, idle and
+  unprotected and the tool is in the table. A controller that already reports a
+  tool wins. This keeps the `CURRENT` row, delete/renumber protection and the
+  probe-tool gate aligned with the physical spindle after a power cycle.
 - An axis DRO row sits above the table, at the same place and in the same
   cards as the Offsets page: the work coordinate large, the machine coordinate
   dimmed underneath, optional axes from the INI and the lathe's X in the

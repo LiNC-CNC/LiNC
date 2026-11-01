@@ -13,6 +13,7 @@ use crate::command::{HalValue, LincOutput, MachineCommand, MachineError, MdiOrig
 use crate::config::Profile;
 use crate::gcode::{parse_preview_full, SegmentKind, Tools};
 use crate::model::*;
+use crate::tool_state::ToolState;
 use crate::tooltable::ToolTable;
 
 const DEMO_MILL: &str = include_str!("../assets/demo_mill.ngc");
@@ -34,6 +35,9 @@ pub struct SimBackend {
     /// simulated machine off until the probe trip is reset, the way a held
     /// `halui.machine.off` does on the real machine.
     machine_off: bool,
+    /// The last tool in the spindle, so a simulator restart does not pretend
+    /// the spindle was emptied when the power was cut.
+    tool_state: ToolState,
 }
 
 impl SimBackend {
@@ -57,6 +61,7 @@ impl SimBackend {
         panel_ipc: Option<crate::sim_ipc::SimPanelIpc>,
     ) -> Self {
         let ini = &profile.machine_ini;
+        let tool_state = ToolState::load(profile.state_path());
         let mut snapshot = MachineSnapshot::empty(profile.variant);
         snapshot.machine_name = profile.config.machine.name.clone();
         snapshot.simulated = profile.is_sim();
@@ -236,10 +241,16 @@ impl SimBackend {
             revision: 0,
             changer: profile.changer,
         });
-        let initial_tool = if profile.variant == MachineVariant::Lathe {
-            4
-        } else {
-            1
+        let initial_tool = match tool_state.tool() {
+            Some(tool)
+                if tool == 0
+                    || snapshot.tool_table.error.is_some()
+                    || snapshot.tool_table.rows.iter().any(|row| row.tool == tool) =>
+            {
+                tool
+            }
+            _ if profile.variant == MachineVariant::Lathe => 4,
+            _ => 1,
         };
         snapshot.tool_change.current_tool = initial_tool;
         snapshot.tool_change.prepared_tool = 0;
@@ -305,6 +316,7 @@ impl SimBackend {
             panel_ipc,
             panel_seen: Instant::now(),
             machine_off: false,
+            tool_state,
         };
         backend.trail_limit = backend.profile.config.toolpath.trail_max_points;
         backend.initialize_program();
@@ -789,6 +801,7 @@ impl SimBackend {
             if let Ok(tool) = digits.parse::<u16>() {
                 self.snapshot.tool_change.current_tool = tool;
                 self.snapshot.panel.current_tool = tool;
+                self.tool_state.record(tool);
             }
         }
         // G10 L2 Pn X.. Y.. Z.. R..
@@ -904,6 +917,7 @@ impl SimBackend {
         self.snapshot.panel.current_tool = tool;
         self.snapshot.tool_change.message = format!("Tool T{tool} changed");
         self.snapshot.tool_change.status = ToolChangeStatus::Complete;
+        self.tool_state.record(tool);
     }
 }
 
@@ -1017,6 +1031,8 @@ fn canonical_write_under(root: &Path, candidate: &Path) -> Result<PathBuf, Machi
 impl MachineBackend for SimBackend {
     fn snapshot(&mut self) -> MachineSnapshot {
         self.sync_panel();
+        self.tool_state
+            .record(self.snapshot.tool_change.current_tool);
         self.snapshot.clone()
     }
 
@@ -1280,6 +1296,7 @@ impl MachineBackend for SimBackend {
                 self.snapshot.panel.current_tool = tool;
                 self.snapshot.tool_change.message =
                     format!("Current tool set to T{tool} (M61, not a tool change)");
+                self.tool_state.record(tool);
                 Ok(())
             }
             MachineCommand::LoadProgram {
@@ -1811,7 +1828,10 @@ enabled = true
 "#,
         )
         .unwrap();
-        let profile = Profile::load(&root.join("sim.toml"), None).unwrap();
+        let mut profile = Profile::load(&root.join("sim.toml"), None).unwrap();
+        // Keep machine-state writes inside the fixture; a test must never
+        // touch the operator's real ~/.config/linc state file.
+        profile.preferences_path = root.join("prefs/sim.preferences.toml");
         (dir, profile)
     }
 
@@ -1826,6 +1846,36 @@ enabled = true
         assert!(snapshot.program.content.is_some());
         assert!(snapshot.program.line_count > 10);
         assert!(!snapshot.live_trail.is_empty());
+    }
+
+    #[test]
+    fn a_simulated_tool_survives_a_backend_restart() {
+        use crate::command::MachineCommand;
+        let (_dir, profile) = profile_fixture();
+        {
+            let mut first = SimBackend::new(profile.clone(), PanelMode::Auto);
+            first
+                .send(MachineCommand::SetCurrentTool { tool: 12 })
+                .unwrap();
+            assert_eq!(first.snapshot().tool_change.current_tool, 12);
+        }
+        let mut second = SimBackend::new(profile.clone(), PanelMode::Auto);
+        assert_eq!(
+            second.snapshot().tool_change.current_tool,
+            12,
+            "the last tool in the spindle is remembered"
+        );
+
+        second
+            .send(MachineCommand::SetCurrentTool { tool: 0 })
+            .unwrap();
+        drop(second);
+        let mut third = SimBackend::new(profile, PanelMode::Auto);
+        assert_eq!(
+            third.snapshot().tool_change.current_tool,
+            0,
+            "an explicit unload is remembered too"
+        );
     }
 
     #[test]

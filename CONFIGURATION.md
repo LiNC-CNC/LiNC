@@ -181,6 +181,7 @@ Required profile fields:
 | Units | INI `[TRAJ] LINEAR_UNITS`, `ANGULAR_UNITS` |
 | Spindle count / maximum speed | INI `[TRAJ] SPINDLES`, `[DISPLAY] MAX_SPINDLE_SPEED` |
 | Tool table | Standard LinuxCNC file at INI `[EMCIO] TOOL_TABLE`; columns from `TOOL_TABLE_COLUMNS` |
+| Tool in spindle | LiNC machine-state file beside the preferences; restored with `M61` + `G43` |
 | Tool pocket/station | Standard `P` column; required only for ATC/turret |
 | ATC pockets / tool-change heights | INI `[ATC]`; `[tools] atc_pockets = "ini"` |
 | Tool-change motion | Existing `M6` remap / `toolchange.ngc`; HMI issues `Tn M6` via `issue_mdi` |
@@ -502,6 +503,23 @@ Probe enablement and tool identity remain profile-owned; the measured `#3032`
 calibration offset remains controller-owned and is synchronized after a run.
 Machine identity, HAL pins, safety flags and the LinuxCNC INI path are never
 read from preferences.
+
+### Machine state
+
+Machine state that is not a UI preference lives in a separate file beside it:
+
+```text
+~/.config/linc/<profile>.state.toml
+```
+
+It currently holds `tool`, the last tool the backend saw in the spindle (`0`
+after an explicit unload). On startup the backend restores a remembered
+nonzero tool with `M61 Qn`, which sets the current tool without moving the
+changer, and then `G43 Hn`, once the machine is ON, homed, idle and
+unprotected and the tool is in the tool table. A controller that already
+reports a tool wins over the stored one. The file is written atomically on
+each observed change; deleting it makes the next session trust the controller,
+with no other effect.
 
 `--config`/machine profile changes require a restart. Preferences may be
 written while running.
