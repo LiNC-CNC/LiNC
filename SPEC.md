@@ -833,7 +833,8 @@ Program rules:
   last T word because the preview has no tool changer to ask.
 - On editor changes, wait for the debounce, run the preview syntax check, then
   replace the graph only if it succeeds. On failure, keep the last valid graph,
-  mark the offending line and show a syntax error; never move the machine.
+  underlay the offending line in a dim transparent red and show a syntax error;
+  never move the machine.
 - While running, the editor is read-only and auto-scrolls to the current line,
   centring its whole wrapped block rather than its first row. The MAIN program
   card does the same, measured in the rows the lines really take, so wrapped

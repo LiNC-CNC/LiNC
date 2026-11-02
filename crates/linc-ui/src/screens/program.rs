@@ -879,6 +879,22 @@ mod tests {
         assert_eq!(job.text, text);
     }
 
+    #[test]
+    fn the_error_line_is_underlaid_in_dim_red() {
+        let job = highlight_job("G0 X0\nG1 X\n", Some(2), "", &[]);
+        let first = job.text.find("G0 X0").expect("the first line lays out");
+        let second = job.text.find("G1 X").expect("the error line lays out");
+        assert_eq!(
+            job.format_at_byte(egui::text::ByteIndex(first)).background,
+            Color32::TRANSPARENT
+        );
+        assert_eq!(
+            job.format_at_byte(egui::text::ByteIndex(second)).background,
+            theme::tint(theme::ERROR, 0x2b),
+            "the rejected line carries a dim red wash behind its glyphs"
+        );
+    }
+
     /// The follow scroll centres the logical line, not its first row: a line
     /// that soft-wraps covers several rows, and centring only the first one
     /// left the rest of the line hanging below the middle of the pane.
@@ -936,7 +952,9 @@ fn highlight_job(
         let mut format = base.clone();
         if let Some(error) = error_line {
             if error == line_no {
-                format.background = Color32::from_rgba_premultiplied(0xff, 0xb0, 0x20, 0x2b);
+                // Behind the glyphs, so the text keeps its syntax colours: a
+                // dim transparent red wash marks the line the parser rejected.
+                format.background = theme::tint(theme::ERROR, 0x2b);
             }
         }
         if !search.is_empty() && matches.contains(&line_no) {
