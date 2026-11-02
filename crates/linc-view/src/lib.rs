@@ -1149,7 +1149,12 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
     let reference = view.machine_bounds.unwrap_or(bounds);
     if response.hovered() {
         let scroll = ui.input(|input| input.smooth_scroll_delta.y);
-        if scroll.abs() > 0.0 {
+        // A touchpad pinch and a touchscreen pinch arrive the same way: the
+        // integration emits `Event::Zoom` (touch devices) or wheel with Ctrl
+        // (touchpads), and egui's `zoom_delta()` is 1.0 on either with no
+        // gesture in progress.
+        let pinch = ui.input(|input| input.zoom_delta());
+        if scroll.abs() > 0.0 || pinch != 1.0 {
             let drawn = rect.shrink(12.0);
             let scale = Projection::new(
                 reference,
@@ -1161,14 +1166,15 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
                 Vec2::ZERO,
             )
             .scale;
-            view.zoom = (view.zoom * (1.0 + scroll * 0.002))
+            view.zoom = (view.zoom * (1.0 + scroll * 0.002) * pinch)
                 .clamp(MIN_ZOOM, max_zoom(scale, drawn.width()));
             view.auto_fit = false;
         }
     }
     // Blender-style navigation: the middle button orbits, Shift+middle pans, and
     // the wheel zooms. The primary button still pans, which is what a touch
-    // screen and a left-handed operator have.
+    // screen and a left-handed operator have. A pinch on the touch screen is
+    // the wheel's replacement and is handled above.
     if response.dragged_by(egui::PointerButton::Middle) {
         let delta = response.drag_delta();
         let shift = ui.input(|input| input.modifiers.shift);
@@ -4006,6 +4012,79 @@ mod tests {
         assert_eq!(
             fitted.project([-54.35, -49.3, -27.15]),
             unchanged.project([-54.35, -49.3, -27.15])
+        );
+    }
+
+    #[test]
+    fn a_pinch_zooms_the_hovered_card_and_drops_the_fit() {
+        let bounds = Bounds3 {
+            min: [0.0, 0.0, 0.0],
+            max: [100.0, 50.0, 20.0],
+        };
+        let preview = Preview {
+            bounds: Some(bounds),
+            ..Preview::empty()
+        };
+        let mut view = TrajectoryView::new(&preview, &[], MachineVariant::Mill);
+        view.view = ViewMode::Iso3d;
+        view.machine_bounds = Some(bounds);
+        view.height = 400.0;
+        view.show_grid = false;
+        view.show_legend = false;
+        view.show_program_bounds = false;
+        view.show_stock = false;
+        view.show_selected_line = false;
+        view.show_live_trail = false;
+        view.fit = false;
+        view.auto_fit = false;
+        view.zoom = 1.0;
+        let ctx = egui::Context::default();
+        let input = |events| egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            events,
+            ..Default::default()
+        };
+        // A frame with no gesture answers 1.0: the factor must be neutral
+        // outside a pinch.
+        let mut output = ctx.run_ui(input(Vec::new()), |ui| {
+            draw_trajectory(ui, &mut view);
+        });
+        output.textures_delta.clear();
+        assert!((view.zoom - 1.0).abs() < 1e-6, "zoom {}", view.zoom);
+
+        // The card answers a zoom only under the pointer, the same rule the
+        // wheel keeps, so the event carries a cursor position over the card.
+        let mut output = ctx.run_ui(
+            input(vec![
+                egui::Event::PointerMoved(egui::pos2(400.0, 200.0)),
+                egui::Event::Zoom(1.5),
+            ]),
+            |ui| {
+                draw_trajectory(ui, &mut view);
+            },
+        );
+        output.textures_delta.clear();
+        assert!(
+            (view.zoom - 1.5).abs() < 1e-3,
+            "a pinch out zooms in: {}",
+            view.zoom
+        );
+        assert!(!view.auto_fit, "the gesture hands the view to the operator");
+
+        let mut output = ctx.run_ui(
+            input(vec![
+                egui::Event::PointerMoved(egui::pos2(400.0, 200.0)),
+                egui::Event::Zoom(0.5),
+            ]),
+            |ui| {
+                draw_trajectory(ui, &mut view);
+            },
+        );
+        output.textures_delta.clear();
+        assert!(
+            (view.zoom - 0.75).abs() < 1e-3,
+            "a pinch in zooms out: {}",
+            view.zoom
         );
     }
 }
