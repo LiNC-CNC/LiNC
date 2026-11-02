@@ -9,7 +9,7 @@
 G21 G7 G18 G90 G95
 G40 G49 G80
 G54
-F0.2
+F1
 
 (Profile for G71/G70: finish contour, free end at +Z, head at Z0.)
 O100 SUB

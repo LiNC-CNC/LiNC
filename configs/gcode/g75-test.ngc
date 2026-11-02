@@ -1,0 +1,36 @@
+(G75 groove peck cycle - test program)
+(G18 ZX plane, G7 diameter mode, metric)
+G18 G7 G90 G21 G94
+
+(--- case 1: single panel plunge, full retract ---)
+G0 X44 Z-6
+F0.1
+G75 X38 Z-6 P1.2 F0.1
+(expect: 5 pecks, X 44->38 step 1.2, full retract to 44 each time)
+
+(--- case 2: four Z panels, Q stepover 4, partial retract 0.8 ---)
+G0 X44 Z-6
+G75 X38 Z-16 P1.5 Q4 R0.8 F0.1
+(expect: panels Z-6 -10 -14 -16, pecks of 1.5, retract 0.8)
+
+(--- case 3: Fanuc two-block style, R preset in its own block ---)
+G0 X44 Z-6
+G75 R1.0
+G75 X39 Z-10 P2.0 Q4.0 F0.1
+(expect: preset message, then pecks of 2.0 with retract 1.0)
+
+(--- case 4: internal groove, X increases ---)
+G0 X20 Z-4
+G75 X26 Z-12 P1.5 Q4 F0.1
+(expect: pecks up from 20 to 26)
+
+(--- case 5: G1 stays modal after the cycle ---)
+G0 X44 Z-6
+G1 X43 F0.1
+G75 X40 Z-6 P1.5 F0.1
+X42
+(expect: the bare X42 is a feed move, G1 was modal before G75)
+
+(back to a safe position)
+G0 X80 Z40
+M2
