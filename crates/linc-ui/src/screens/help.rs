@@ -62,6 +62,9 @@ const DOC_CELL_PAD: f32 = 6.0;
 const CODE_BG: Color32 = Color32::from_rgb(0x0f, 0x11, 0x13);
 const INLINE_CODE_BG: Color32 = Color32::from_rgb(0x24, 0x28, 0x2e);
 
+/// Index rows a PageUp/PageDown moves in the main table.
+pub(crate) const HELP_PAGE: i32 = 10;
+
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
     app.help.ensure_loaded();
     let Some(bundle) = app.help.bundle.clone() else {
@@ -143,6 +146,12 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             }
             if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
                 delta = -1;
+            }
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+                delta = HELP_PAGE;
+            }
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+                delta = -HELP_PAGE;
             }
             if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
                 read = true;

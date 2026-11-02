@@ -1944,6 +1944,29 @@ fn a_manual_line_pick_survives_the_running_follow() {
 }
 
 #[test]
+fn page_keys_page_the_gcode_help_index() {
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Help);
+    harness.frame(&[]);
+    assert_eq!(harness.app.help.selected_row, 0);
+
+    harness.frame(&[egui::Key::PageDown]);
+    assert_eq!(
+        harness.app.help.selected_row,
+        crate::screens::help::HELP_PAGE as usize
+    );
+    assert_eq!(
+        harness.app.nav.page,
+        Page::Help,
+        "PageDown pages the Help index instead of the navigation"
+    );
+
+    harness.frame(&[egui::Key::PageUp]);
+    assert_eq!(harness.app.help.selected_row, 0);
+    assert_eq!(harness.app.nav.page, Page::Help);
+}
+
+#[test]
 fn escape_leaves_the_help_page_before_it_resets_a_running_program() {
     let (_dir, mut app) = make_app(PanelMode::Auto);
     app.poll_backend();

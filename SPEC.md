@@ -1063,7 +1063,8 @@ stopping a running program.
 - One quick-reference table grouped by Motion, Canned cycles, M-codes, O-words
   and Other codes, with Probe Basic's columns: Code, Parameters, Description,
   Meaning. Group rows span the table; the focused row carries the selection band
-  and rim bar.
+  and rim bar. Up/Down move the selection; PageUp/PageDown move it by a
+  screenful and scroll the selected row into view.
 - Search matches code, parameters, description and meaning. Code matching
   ignores spaces and commas, so `g2g3` finds `G2, G3`.
 - `Enter` or a double-click opens the full section in a near-fullscreen dialog:
@@ -1531,7 +1532,8 @@ Implementation:
 - `ESC`: back/cancel; on Help, clear search or return from detail history.
 - Arrows: focus/list/scroll.
 - `/`: focus G-code Help search when Help is active.
-- `PageUp`/`PageDown`: tabs/pages; a page in the tool table and file lists.
+- `PageUp`/`PageDown`: tabs/pages; a page in the tool table, file lists and
+  G-code Help index.
 - `Home`/`End`: first/last item.
 - `Enter`: select/apply/MDI execute; on Help, open the selected code; in Files,
   open a folder or load an `NC_FILES` file.

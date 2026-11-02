@@ -558,12 +558,14 @@ impl LincApp {
             {
                 toggle_lathe_diameter = true;
             }
-            // The tool table pages its own cursor with these keys, so they must
-            // reach the page instead of being consumed for tab navigation.
-            let page_keys_belong_to_page = matches!(self.nav.page, Page::Tools | Page::Files)
-                || self.help.dialog.is_some()
-                || (self.nav.page == Page::Probe
-                    && (self.probe.param_editing || self.probe.dro_edit.is_some()));
+            // The tool table, file lists and G-code Help index page their own
+            // cursor with these keys, so they must reach the page instead of
+            // being consumed for tab navigation.
+            let page_keys_belong_to_page =
+                matches!(self.nav.page, Page::Tools | Page::Files | Page::Help)
+                    || self.help.dialog.is_some()
+                    || (self.nav.page == Page::Probe
+                        && (self.probe.param_editing || self.probe.dro_edit.is_some()));
             if !text_focused
                 && !page_keys_belong_to_page
                 && input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp)
