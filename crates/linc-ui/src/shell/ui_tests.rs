@@ -5830,6 +5830,29 @@ fn ctrl_r_issues_the_selected_block_with_no_dialog() {
 }
 
 #[test]
+fn mdi_shortcuts_name_the_buffer_and_word_moves_not_the_toolpath_pan() {
+    let mut harness = mdi_harness();
+    harness.frame(&[]);
+    let hints: Vec<(String, &'static str)> = harness
+        .app
+        .key_hints()
+        .into_iter()
+        .flat_map(|group| group.items)
+        .collect();
+    let has = |key: &str, label: &str| {
+        hints
+            .iter()
+            .any(|(hint_key, hint_label)| hint_key == key && *hint_label == label)
+    };
+    assert!(has("Ctrl+Up/Down", "MOVE"), "{hints:?}");
+    assert!(has("Ctrl+Left/Right", "WORD"), "{hints:?}");
+    assert!(
+        !hints.iter().any(|(_, label)| *label == "PAN"),
+        "the MDI input owns the Ctrl+arrow chords: {hints:?}"
+    );
+}
+
+#[test]
 fn a_blocked_run_puts_the_reason_in_the_strip_and_sends_nothing() {
     let mut harness = mdi_harness();
     harness.frame(&[]);

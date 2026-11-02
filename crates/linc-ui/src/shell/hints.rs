@@ -96,32 +96,35 @@ impl LincApp {
                 // MAIN shows the same toolpath, so it carries the same view
                 // commands, plus the two program actions that do not need the
                 // editor in front (run from line and go to line).
+                let mut view_items = vec![
+                    (format!("Ctrl+{square}"), "VIEW"),
+                    (k.graph_fit.label(), "FIT"),
+                    (k.graph_clear.label(), "CLEAR TRAIL"),
+                    (k.toggle_bounds.label(), "BOUNDS"),
+                    (k.remaining.label(), "REMAINING"),
+                    // The square swaps the feed/servo pair below the graph for
+                    // the following-error traces, and names what the next press
+                    // brings back.
+                    (
+                        square.to_string(),
+                        if self.following.active {
+                            "FEED"
+                        } else {
+                            "F.ERROR"
+                        },
+                    ),
+                ];
+                // The MDI input owns Ctrl+Up/Down for its buffer-line move and
+                // Ctrl+Left/Right for word moves, so the toolpath's pan hint
+                // would be false while the pane is up.
+                if !self.mdi_pane_visible() {
+                    view_items.push((k.view_pan_hint(), "PAN"));
+                }
+                view_items.push((k.view_zoom_hint(), "ZOOM"));
+                view_items.extend(lathe_hints.clone());
                 groups.push(ShortcutGroup {
                     title: "VIEW",
-                    items: [
-                        vec![
-                            (format!("Ctrl+{square}"), "VIEW"),
-                            (k.graph_fit.label(), "FIT"),
-                            (k.graph_clear.label(), "CLEAR TRAIL"),
-                            (k.toggle_bounds.label(), "BOUNDS"),
-                            (k.remaining.label(), "REMAINING"),
-                            // The square swaps the feed/servo pair below the
-                            // graph for the following-error traces, and names
-                            // what the next press brings back.
-                            (
-                                square.to_string(),
-                                if self.following.active {
-                                    "FEED"
-                                } else {
-                                    "F.ERROR"
-                                },
-                            ),
-                            (k.view_pan_hint(), "PAN"),
-                            (k.view_zoom_hint(), "ZOOM"),
-                        ],
-                        lathe_hints.clone(),
-                    ]
-                    .concat(),
+                    items: view_items,
                 });
                 if self.mdi_pane_visible() {
                     // While the pane is up its keys replace the MAIN ones:
@@ -132,6 +135,8 @@ impl LincApp {
                         items: vec![
                             (k.mdi_issue.label(), "ISSUE"),
                             ("Up/Down".into(), "BUFFER"),
+                            ("Ctrl+Up/Down".into(), "MOVE"),
+                            ("Ctrl+Left/Right".into(), "WORD"),
                             (k.goto_line.label(), "GOTO"),
                             (k.program_run_from_line.label(), "RUN LINE"),
                             (k.mdi_buffer_delete.label(), "DELETE"),
