@@ -777,14 +777,18 @@ Program rules:
   the layers it removes: from the surface `X` inward in steps of `I`, each layer
   a Z traverse where the profile is still inside that radius and nothing over the
   parts it is not, clearing `R` between layers, and stopping `D` short of the
-  profile for the finishing pass. `G72` faces, so its layers are X traverses at
-  successive Z planes stepping back from the face its `Z` names, each one
-  entering at the radius its `X` names and cutting across the metal the plane
-  still has over it, and stopping `D` in front of the profile. `G71` measures `D`
-  from the profile's inner surface and `G72` from its front one, because a turning
-  layer cuts through the whole depth of the profile and a facing pass only sweeps
-  back to the front of it. Either way the pass the cycle stops on is the profile
-  shifted out by that `D`, which is what the finishing pass has left to take off.
+  profile for the finishing pass. `G72` faces, so its passes are X traverses at
+  successive Z planes stepping back from the `Z` the block names, `I` apart,
+  until `D` is all that is left in front of the profile. Each pass runs from the
+  part's inner radius out to the surface that plane meets, and stops there; a
+  plane still in front of the profile has no surface to meet, so its pass reaches
+  the part's outermost radius instead. Successive planes end at different radii,
+  which is what gives the facing cycle its stepped look. Either cycle measures
+  `D` from the profile's deepest surface on the side its passes come from,
+  because a turning layer cuts through the whole depth of the profile and a
+  facing pass only sweeps back to the front of it. Either way the passes are laid
+  against the profile shifted out by `D`, and the pass the cycle stops on is that
+  same shifted profile, which is what the finishing pass has left to take off.
   A roughing cycle whose `X` (or `Z`) starts inside the profile, boring outward
   rather than in, steps the other way. A `Q` that names no subroutine in the
   program is reported. `G76` is drawn

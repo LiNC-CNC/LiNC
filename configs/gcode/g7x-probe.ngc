@@ -1,0 +1,48 @@
+; g7x-probe.ngc -- a G72 facing cycle and a G71 turning cycle, for comparing
+; LiNC's preview against what the controller really cuts.
+;
+; Every coordinate is a literal. There is no loop and no #<_x>/#<_z> anywhere,
+; so both pictures should agree: anything they disagree on is the cycle's own
+; geometry (where it puts its passes, how deep, how far apart), not the
+; preview's expression evaluation.
+;
+; Part 1 faces a stepped profile at Z-10..-2. Part 2 turns the same shape 20
+; further out in Z. They sit apart so the two cycles cannot be confused.
+
+G21 G54 G18 G90 G8
+F400
+G0 X0 Z2
+m3 s1000
+
+; ---- part 1: G72 facing -------------------------------------------------
+; Profile, in the order the cycle reads it: (X0 Z-10), (X4 Z-10), (X4 Z-6),
+; (X8 Z-6), (X8 Z-2). X never decreases, which G72 requires.
+; The cycle's X1 Z1 replace the profile's first point, so part 1 starts at
+; (X1 Z1) and the face it steps back from is Z1.
+O100 SUB
+G0 X0 Z-10
+G1 X4 Z-10
+G1 X4 Z-6
+G1 X8 Z-6
+G1 X8 Z-2
+O100 ENDSUB
+
+G72 Q100 X1 Z1 D0.5 I1 R0.3
+G70 Q100 X1 Z1 D0.5 P1
+
+; ---- part 2: G71 turning ------------------------------------------------
+; Same shape, 20 further out. Z never decreases, which G71 requires.
+; X10 starts above the profile, so the layers step inward.
+O101 SUB
+G0 X0 Z10
+G1 X4 Z10
+G1 X4 Z14
+G1 X8 Z14
+G1 X8 Z18
+O101 ENDSUB
+
+G71 Q101 X10 Z9 D0.5 I1 R0.3
+G70 Q101 X10 Z9 D0.5 P1
+
+G0 X0 Z30
+M2
