@@ -53,43 +53,53 @@ impl LincApp {
         let mut hints: Vec<(String, &'static str)> = Vec::new();
         match self.nav.page {
             Page::Program => {
+                let mut view_items = vec![
+                    (
+                        square.to_string(),
+                        if self.program.view == ProgramView::Split {
+                            "CODE"
+                        } else {
+                            "SPLIT"
+                        },
+                    ),
+                    (format!("Ctrl+{square}"), "VIEW"),
+                    (k.graph_fit.label(), "FIT"),
+                    (k.graph_clear.label(), "CLEAR TRAIL"),
+                    (k.toggle_bounds.label(), "BOUNDS"),
+                    (k.remaining.label(), "REMAINING"),
+                ];
+                // An editable editor owns Ctrl+Up/Down for its line move and
+                // Ctrl+Left/Right for word moves, like the MDI input, so the
+                // toolpath's pan hint would be false while it holds the
+                // keyboard.
+                if !self.editing_allowed() {
+                    view_items.push((k.view_pan_hint(), "PAN"));
+                }
+                view_items.push((k.view_zoom_hint(), "ZOOM"));
+                view_items.extend(lathe_hints.clone());
                 groups.push(ShortcutGroup {
                     title: "VIEW",
-                    items: [
-                        vec![
-                            (
-                                square.to_string(),
-                                if self.program.view == ProgramView::Split {
-                                    "CODE"
-                                } else {
-                                    "SPLIT"
-                                },
-                            ),
-                            (format!("Ctrl+{square}"), "VIEW"),
-                            (k.graph_fit.label(), "FIT"),
-                            (k.graph_clear.label(), "CLEAR TRAIL"),
-                            (k.toggle_bounds.label(), "BOUNDS"),
-                            (k.remaining.label(), "REMAINING"),
-                            (k.view_pan_hint(), "PAN"),
-                            (k.view_zoom_hint(), "ZOOM"),
-                        ],
-                        lathe_hints.clone(),
-                    ]
-                    .concat(),
+                    items: view_items,
                 });
+                let mut program_items: Vec<(String, &'static str)> = Vec::new();
+                if self.editing_allowed() {
+                    program_items.push(("Ctrl+↑/↓".into(), "MOVE LINE"));
+                    program_items.push(("Ctrl+←/→".into(), "WORD"));
+                }
+                program_items.extend([
+                    ("FILE".into(), "BROWSER"),
+                    (k.program_run_from_line.label(), "RUN LINE"),
+                    (k.goto_line.label(), "GOTO"),
+                    // No MESSAGES key here: while the editor has the
+                    // keyboard a plain letter is text, so the shortcut
+                    // advertised a key that types an M into the program.
+                    (k.save.label(), "SAVE"),
+                    (k.undo.label(), "UNDO"),
+                    (k.redo.label(), "REDO"),
+                ]);
                 groups.push(ShortcutGroup {
                     title: "PROGRAM",
-                    items: vec![
-                        ("FILE".into(), "BROWSER"),
-                        (k.program_run_from_line.label(), "RUN LINE"),
-                        (k.goto_line.label(), "GOTO"),
-                        // No MESSAGES key here: while the editor has the
-                        // keyboard a plain letter is text, so the shortcut
-                        // advertised a key that types an M into the program.
-                        (k.save.label(), "SAVE"),
-                        (k.undo.label(), "UNDO"),
-                        (k.redo.label(), "REDO"),
-                    ],
+                    items: program_items,
                 });
             }
             Page::Machine => {
@@ -134,9 +144,9 @@ impl LincApp {
                         title: "MDI",
                         items: vec![
                             (k.mdi_issue.label(), "ISSUE"),
-                            ("Up/Down".into(), "BUFFER"),
-                            ("Ctrl+Up/Down".into(), "MOVE"),
-                            ("Ctrl+Left/Right".into(), "WORD"),
+                            ("↑/↓".into(), "BUFFER"),
+                            ("Ctrl+↑/↓".into(), "MOVE"),
+                            ("Ctrl+←/→".into(), "WORD"),
                             (k.goto_line.label(), "GOTO"),
                             (k.program_run_from_line.label(), "RUN LINE"),
                             (k.mdi_buffer_delete.label(), "DELETE"),

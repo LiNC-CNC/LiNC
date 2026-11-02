@@ -236,7 +236,7 @@ impl LincApp {
 
     /// Pan and zoom the toolpath on the page in front.
     ///
-    /// The chords are hover-scoped, so the page decides which view state they
+    /// The chords are page-scoped, so the page decides which view state they
     /// move. A view the operator has moved stops auto-fitting: while it is on,
     /// the fit is recomputed every frame and would undo the press.
     pub(super) fn pan_view(&mut self, pan: Vec2, zoom: f32) {

@@ -3591,20 +3591,12 @@ fn the_cut_shortcut_still_cuts_text_in_the_gcode_editor() {
 }
 
 #[test]
-fn a_hovered_toolpath_takes_the_pan_and_zoom_chords() {
+fn the_toolpath_takes_the_pan_and_zoom_chords_without_hovering() {
     let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
     harness.app.set_page(Page::Machine);
-    // The widget records hover at the end of a frame; the shell reads it at
-    // the top of the next one, which is the frame under test here.
-    harness.ctx.data_mut(|data| {
-        data.insert_temp(egui::Id::unique(linc_view::TOOLPATH_HOVER_ID), true);
-    });
     // Let the first frame auto-fit, so the pan under test is the key's own.
     harness.frame(&[]);
     let before = harness.app.program.graph_pan;
-    harness.ctx.data_mut(|data| {
-        data.insert_temp(egui::Id::unique(linc_view::TOOLPATH_HOVER_ID), true);
-    });
     harness.frame_with(&[(egui::Key::ArrowLeft, ctrl())]);
     assert!(
         (harness.app.program.graph_pan.x - (before.x - VIEW_PAN_STEP)).abs() < 1e-3,
@@ -3615,7 +3607,7 @@ fn a_hovered_toolpath_takes_the_pan_and_zoom_chords() {
     assert_eq!(
         harness.app.nav.focus_region,
         FocusRegion::Page,
-        "the hovered view keeps Ctrl+Left from moving the focus ring"
+        "the pan keeps Ctrl+Left from moving the focus ring"
     );
     assert!(
         !harness.app.program.graph_auto_fit,
@@ -3624,9 +3616,6 @@ fn a_hovered_toolpath_takes_the_pan_and_zoom_chords() {
 
     let zoom_before = harness.app.program.graph_zoom;
     let pan_before = harness.app.program.graph_pan;
-    harness.ctx.data_mut(|data| {
-        data.insert_temp(egui::Id::unique(linc_view::TOOLPATH_HOVER_ID), true);
-    });
     harness.frame_with(&[(egui::Key::Plus, ctrl())]);
     assert!(
         (harness.app.program.graph_zoom - zoom_before * VIEW_ZOOM_STEP).abs() < 1e-6,
@@ -4142,11 +4131,9 @@ fn a_navigation_click_releases_the_keyboard_from_the_gcode_editor() {
     );
     assert_eq!(harness.app.nav.focus_region, FocusRegion::Nav);
 
-    // Back over the toolpath — the row cycled SPLIT to CODE, so it is the
-    // thumbnail beside the editor now — the pan chord is live again.
-    let output = harness.frame_full(Vec::new());
-    let card = toolpath_card_point(&output);
-    harness.frame_events(vec![egui::Event::PointerMoved(card)]);
+    // The row cycled SPLIT to CODE; with the editor released, the pan chord
+    // is live again on the thumbnail without needing the pointer on it.
+    harness.frame_full(Vec::new());
     let before = harness.app.program.graph_pan;
     harness.frame_with(&[(egui::Key::ArrowLeft, ctrl())]);
     assert!(
@@ -4158,20 +4145,38 @@ fn a_navigation_click_releases_the_keyboard_from_the_gcode_editor() {
 }
 
 #[test]
-fn ctrl_left_still_moves_region_focus_away_from_the_toolpath() {
-    let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
-    harness.app.set_page(Page::Machine);
-    harness.ctx.data_mut(|data| {
-        data.insert_temp(egui::Id::unique(linc_view::TOOLPATH_HOVER_ID), false);
-    });
-    harness.frame(&[]);
-    let before = harness.app.program.graph_pan;
-    harness.frame_with(&[(egui::Key::ArrowLeft, egui::Modifiers::CTRL)]);
-    assert_eq!(harness.app.nav.focus_region, FocusRegion::Nav);
-    assert_eq!(
-        harness.app.program.graph_pan, before,
-        "no pan without the pointer on the toolpath"
-    );
+fn the_pan_chords_work_on_every_toolpath_page_without_hovering() {
+    for (page, mode) in [
+        (Page::Machine, PanelMode::Auto),
+        (Page::Program, PanelMode::Auto),
+        (Page::Manual, PanelMode::Jog),
+        (Page::Homing, PanelMode::Home),
+        (Page::Offsets, PanelMode::Auto),
+    ] {
+        // Each page opens in a mode that keeps it in front; no text field is
+        // given the keyboard, so the chord belongs to the view.
+        let mut harness = ProbeHarness::new(mode, false, true);
+        harness.app.set_page(page);
+        assert_eq!(harness.app.nav.page, page);
+        harness.frame(&[]);
+        let pan_of = |app: &LincApp| match page {
+            Page::Manual | Page::Homing => app.manual.pan,
+            Page::Offsets => app.offsets.preview_pan,
+            _ => app.program.graph_pan,
+        };
+        let before = pan_of(&harness.app);
+        harness.frame_with(&[(egui::Key::ArrowLeft, ctrl())]);
+        let after = pan_of(&harness.app);
+        assert!(
+            (after.x - (before.x - VIEW_PAN_STEP)).abs() < 1e-3,
+            "{page:?}: Ctrl+Left pans without a pointer on the card: {before:?} -> {after:?}"
+        );
+        assert_eq!(
+            harness.app.nav.focus_region,
+            FocusRegion::Page,
+            "{page:?}: the pan does not move the focus ring"
+        );
+    }
 }
 
 #[test]
@@ -5830,6 +5835,29 @@ fn ctrl_r_issues_the_selected_block_with_no_dialog() {
 }
 
 #[test]
+fn program_shortcuts_name_the_editor_moves_not_the_toolpath_pan() {
+    let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+    harness.app.set_page(Page::Program);
+    let hints: Vec<(String, &'static str)> = harness
+        .app
+        .key_hints()
+        .into_iter()
+        .flat_map(|group| group.items)
+        .collect();
+    let has = |key: &str, label: &str| {
+        hints
+            .iter()
+            .any(|(hint_key, hint_label)| hint_key == key && *hint_label == label)
+    };
+    assert!(has("Ctrl+↑/↓", "MOVE LINE"), "{hints:?}");
+    assert!(has("Ctrl+←/→", "WORD"), "{hints:?}");
+    assert!(
+        !hints.iter().any(|(_, label)| *label == "PAN"),
+        "the editor owns the Ctrl+arrow chords: {hints:?}"
+    );
+}
+
+#[test]
 fn mdi_shortcuts_name_the_buffer_and_word_moves_not_the_toolpath_pan() {
     let mut harness = mdi_harness();
     harness.frame(&[]);
@@ -5844,8 +5872,9 @@ fn mdi_shortcuts_name_the_buffer_and_word_moves_not_the_toolpath_pan() {
             .iter()
             .any(|(hint_key, hint_label)| hint_key == key && *hint_label == label)
     };
-    assert!(has("Ctrl+Up/Down", "MOVE"), "{hints:?}");
-    assert!(has("Ctrl+Left/Right", "WORD"), "{hints:?}");
+    assert!(has("↑/↓", "BUFFER"), "{hints:?}");
+    assert!(has("Ctrl+↑/↓", "MOVE"), "{hints:?}");
+    assert!(has("Ctrl+←/→", "WORD"), "{hints:?}");
     assert!(
         !hints.iter().any(|(_, label)| *label == "PAN"),
         "the MDI input owns the Ctrl+arrow chords: {hints:?}"

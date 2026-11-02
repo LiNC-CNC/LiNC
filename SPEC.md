@@ -117,11 +117,10 @@ else, so it cannot shadow another page's command.
 
 Every page that draws a toolpath (Machine, Program, Manual, Homing and the
 Offsets preview) pans with `Ctrl+Left`/`Ctrl+Right`/`Ctrl+Up`/`Ctrl+Down` and
-zooms with `Ctrl++`/`Ctrl+-` while the pointer is over the toolpath card. The
-chords are hover-scoped because they already belong to something else away from
-the graph: `Ctrl+Left`/`Ctrl+Right` moves region focus and `Ctrl+Up`/`Ctrl+Down`
-moves the selected line in the G-code editor and the MDI buffer. Wheel zoom
-works the same way, and a pinch gesture on a touch screen zooms the card
+zooms with `Ctrl++`/`Ctrl+-` without needing the pointer on the card. Text
+fields still own their chords: `Ctrl+Left`/`Ctrl+Right` moves by word and
+`Ctrl+Up`/`Ctrl+Down` moves the selected line in the G-code editor and the MDI
+buffer. Wheel zoom and a pinch gesture on a touch screen still act on the card
 under the fingers. Zooming in stops when the card's width spans 0.01 mm, so a
 feature at the display's resolution can still be inspected; zooming out stops
 where the fitted machine envelope is a few pixels across. `Ctrl+M` toggles

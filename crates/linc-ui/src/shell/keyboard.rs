@@ -147,7 +147,6 @@ impl LincApp {
         let mut mdi_goto = false;
         let mut mdi_save = false;
         let text_editing = ui.ctx().text_edit_focused();
-        let toolpath_hovered = linc_view::toolpath_hovered(ui.ctx());
         let mdi_pane = self.mdi_pane_visible();
 
         ui.input_mut(|input| {
@@ -290,27 +289,17 @@ impl LincApp {
                     run_from_line = true;
                 }
             }
-            // Hover-scoped like the wheel: the view takes the pan and zoom
-            // chords only where it is the thing under the pointer. Ctrl+Left/
-            // Right stays region focus everywhere else, and the G-code editor
-            // and MDI buffer keep Ctrl+Up/Down for their line moves.
-            //
-            // The two groups are gated separately. Ctrl+Plus/Minus collide with
-            // nothing a text field uses, so the zoom works while the editor
-            // holds the keyboard — that is where the operator is when they want
-            // a closer look at the path. The pan chords can only be the view's
-            // where no text field needs them: Ctrl+Left/Right is the editor's
-            // word move and Ctrl+Up/Down its line move (and the MDI buffer's
-            // block move). Clicking the toolpath itself hands it the keyboard,
-            // so the pan is one click away instead of unreachable.
+            // Page-scoped: a touch panel has no pointer to hover over the
+            // card, so requiring hover made the chords depend on where the
+            // trackball happened to be. Text fields still win: Ctrl+Left/Right
+            // is the editor's word move and Ctrl+Up/Down its line move (and the
+            // MDI buffer's block move).
             let view_page = matches!(
                 self.nav.page,
                 Page::Machine | Page::Program | Page::Manual | Page::Homing | Page::Offsets
             );
-            // Zoom is page-scoped, not hover-scoped: it collides with nothing a
-            // text field uses, and requiring the pointer over the card made the
-            // chord work only when the trackball happened to be there - the
-            // reported sometimes. Ctrl+0 was always page-scoped, so the two agree
+            // Zoom is page-scoped like the pan: it collides with nothing a text
+            // field uses, and Ctrl+0 was always page-scoped, so the two agree
             // now.
             if view_page {
                 let k = &self.prefs.keymap;
@@ -339,8 +328,7 @@ impl LincApp {
                     remaining = true;
                 }
             }
-            let view_hovered = view_page && toolpath_hovered;
-            let view_pan_keys = view_hovered && !text_focused;
+            let view_pan_keys = view_page && !text_focused;
             if view_pan_keys {
                 let k = &self.prefs.keymap;
                 if input.consume_key(k.view_pan_left.modifiers, k.view_pan_left.key) {
@@ -587,8 +575,9 @@ impl LincApp {
             if !text_focused && input.consume_key(egui::Modifiers::NONE, egui::Key::End) {
                 end = true;
             }
-            // A hovered toolpath has taken these for panning above: the view
-            // under the pointer wins over moving the focus ring.
+            // On pages without a toolpath card, Ctrl+Left/Right still moves
+            // the region focus. On a view page the pan above took the chords,
+            // so the focus ring is never what these keys move there.
             if !text_focused
                 && !view_pan_keys
                 && input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowLeft)
