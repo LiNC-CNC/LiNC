@@ -766,11 +766,11 @@ impl LincApp {
         if mdi_issue {
             screens::mdi::issue(self);
         }
-        if mdi_line_up {
-            self.mdi.move_selected(true);
+        if mdi_line_up && self.mdi.move_selected(true) {
+            self.remember_mdi_history();
         }
-        if mdi_line_down {
-            self.mdi.move_selected(false);
+        if mdi_line_down && self.mdi.move_selected(false) {
+            self.remember_mdi_history();
         }
         if mdi_up {
             self.mdi.recall_older();
@@ -778,8 +778,8 @@ impl LincApp {
         if mdi_down {
             self.mdi.recall_newer();
         }
-        if mdi_delete {
-            self.mdi.delete_selected();
+        if mdi_delete && self.mdi.delete_selected().is_some() {
+            self.remember_mdi_history();
         }
         if mdi_clear {
             self.mdi.clear_input();

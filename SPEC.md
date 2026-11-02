@@ -1306,7 +1306,7 @@ Rules:
   program. A syntax error issues nothing and marks the input.
 - The command may temporarily select MDI and restores the previous task mode
   when the interpreter returns idle. No physical CYCLE START is involved.
-- The buffer lives for the app session: leaving MDI keeps it, and returning to
+- The buffer is kept across restarts: leaving MDI keeps it, and returning to
   the pane shows the same blocks. Only `Esc` clears state, and it clears the
   uncommitted input alone; no command already issued is cancelled.
 - MAIN's toolpath draws the block being edited as an overlay over the loaded
@@ -1316,9 +1316,10 @@ Rules:
   block draws nothing extra — the strip carries the error and the pane would
   refuse the block. The overlay is parsed once per change of the input, the
   current position or the modal state, not once per frame.
-- The buffer is a temporary HMI-local working list, bounded by
-  `mdi.history_limit`, and not a machine log. It reaches disk only through
-  `Ctrl+S`.
+- The buffer is an HMI-local working list, not a machine log. It is stored in
+  preferences as `mdi_history`, bounded by `mdi.history_limit`; issuing,
+  deleting or moving a line updates the stored copy. `Ctrl+S` writes a program
+  file.
 - No on-screen jog, override, spindle, coolant or E-stop controls.
 
 ### 6.10 Homing

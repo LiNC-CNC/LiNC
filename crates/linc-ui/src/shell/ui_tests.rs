@@ -5642,6 +5642,11 @@ fn the_moved_block_is_the_one_run_delete_and_save_act_on() {
     harness.frame_with(&[(egui::Key::ArrowUp, ctrl())]);
     assert_eq!(blocks(&harness.app), ["G0 X1", "G1 X3", "G1 X2"]);
     assert_eq!(harness.app.mdi.selection, Some(1));
+    assert_eq!(
+        harness.app.prefs.preferences.mdi_history,
+        ["G0 X1", "G1 X3", "G1 X2"].map(str::to_string),
+        "moving a line updates the persisted history"
+    );
 
     // Ctrl+R runs the moved block, not the one that was in that slot.
     harness.frame_with(&[(egui::Key::R, ctrl())]);
@@ -5797,6 +5802,14 @@ fn ctrl_backspace_deletes_the_selected_block_and_otherwise_clears_the_input() {
         "the band stays on a line"
     );
     assert!(harness.mdi_sent().is_empty(), "deleting issues nothing");
+    assert_eq!(
+        harness.app.prefs.preferences.mdi_history,
+        vec!["G0 X1".to_string()],
+        "the deletion updates the persisted history"
+    );
+    harness.app.save_preferences(true);
+    let saved = linc_core::preferences::Preferences::load(&harness.app.profile.preferences_path);
+    assert_eq!(saved.mdi_history, vec!["G0 X1".to_string()]);
 }
 
 #[test]

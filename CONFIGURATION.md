@@ -715,7 +715,7 @@ directory below it carries a `..` row that is selectable and opens the parent.
 
 ### `[mdi]`
 
-The MDI pane on the MAIN page: the temporary block buffer, the input and the
+The MDI pane on the MAIN page: the persistent block buffer, the input and the
 `Ctrl+S` save. There is no MDI page and no quick-command button row.
 
 | Key | Default | Meaning |
@@ -730,6 +730,10 @@ The MDI pane on the MAIN page: the temporary block buffer, the input and the
 `quick_commands` is removed. It configured the old MDI page's quick-command
 button row, which no longer exists; the config structs reject unknown keys, so a
 profile that still sets it fails to load instead of ignoring it.
+
+The buffer is stored in the preferences file as `mdi_history`, not in machine
+state. Issuing a block, deleting a line and moving a line all update the stored
+copy with the normal preference save, so the next start shows the edited list.
 
 ### `[keys]` MDI bindings
 
