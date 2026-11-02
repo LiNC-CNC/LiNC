@@ -75,8 +75,68 @@ impl LincApp {
                 linc_core::diag::UiAction::Fit => self.fit_graph(),
                 linc_core::diag::UiAction::ClearTrail => self.clear_trail(),
                 linc_core::diag::UiAction::SelectLine { line } => self.jump_to_line(line),
+                linc_core::diag::UiAction::SetOffset {
+                    system,
+                    axis,
+                    value,
+                } => self.diag_set_offset(&system, &axis, value),
             }
         }
+    }
+
+    /// Write one axis of a work offset row, on behalf of an agent.
+    ///
+    /// The gates are the OFFSETS screen's own, in the same order: a blocked write
+    /// is refused with the reason the operator would see, never queued for later.
+    /// Only the named axis changes; the row's other axes and its rotation are
+    /// carried over as they are.
+    fn diag_set_offset(&mut self, system: &str, axis: &str, value: f64) {
+        // The row the name refers to, so a typo is refused instead of writing G54
+        // by accident.
+        let Some(row) = self
+            .snapshot
+            .offsets
+            .offsets
+            .iter()
+            .find(|row| linc_core::model::wcs_name(row.index).eq_ignore_ascii_case(system))
+        else {
+            self.toast(format!("no work offset named {system}"), theme::WARNING);
+            return;
+        };
+        if !self.snapshot.writes_allowed() {
+            let reason = if self.snapshot.panel.protect_effective() {
+                "PROTECT ON — offset writes blocked"
+            } else if self.snapshot.task.running {
+                "PROGRAM RUNNING — offsets are read-only"
+            } else if self.panel_offline() {
+                "PANEL OFFLINE — offset writes blocked"
+            } else {
+                "Machine must be ON and idle to write offsets"
+            };
+            self.toast(reason, theme::WARNING);
+            return;
+        }
+        let axis = axis.to_ascii_uppercase();
+        if let Err(error) = self.profile.machine_ini.validate_axis_value(&axis, value) {
+            self.toast(error, theme::WARNING);
+            return;
+        }
+        let mut values = row.values.clone();
+        values.insert(axis.clone(), value);
+        let rotation = row.rotation;
+        let index = row.index;
+        self.send(MachineCommand::SetWorkOffset {
+            index,
+            values,
+            rotation,
+        });
+        self.toast(
+            format!(
+                "{} {axis} offset written",
+                linc_core::model::wcs_name(index)
+            ),
+            theme::ACCENT,
+        );
     }
 
     /// Answer a pending `diag.screenshot`.

@@ -143,8 +143,11 @@ impl ScreenRegion {
 /// An HMI intent an agent may trigger through the diagnostic socket.
 ///
 /// These are view/state operations, not machine commands: pressing a page key or
-/// showing the bounds cannot move an axis. Anything that can is a separate
-/// command with its own gate.
+/// showing the bounds cannot move an axis. The one that writes machine state is
+/// [`UiAction::SetOffset`], and it goes through the same gates the OFFSETS screen
+/// does -- machine on, idle, program protect off, panel online -- so an agent
+/// cannot do what the operator is forbidden from doing. Anything that moves an
+/// axis is a separate command with its own gate.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiAction {
@@ -162,6 +165,14 @@ pub enum UiAction {
     ClearTrail,
     /// Select and reveal a program line (1-based).
     SelectLine { line: usize },
+    /// Write one axis of a work offset row, the way typing it into the OFFSETS
+    /// screen would. `system` is a WCS name (`G54`, `G59.3`); the row's other
+    /// axes and its rotation keep the values they already have.
+    SetOffset {
+        system: String,
+        axis: String,
+        value: f64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1475,6 +1486,40 @@ pub mod gates {
                 bus.request_ui_action(UiAction::CycleView);
             }
             assert_eq!(bus.take_ui_actions().len(), 32, "the queue is capped");
+        }
+
+        #[test]
+        fn a_set_offset_intent_carries_the_axis_it_writes() {
+            // The wire form an agent sends: tagged by action, denying fields the
+            // enum does not have, so a typo is an error rather than a silent write
+            // to the wrong axis.
+            let Ok(action) = serde_json::from_value::<UiAction>(serde_json::json!({
+                "action": "set_offset",
+                "system": "G54",
+                "axis": "Z",
+                "value": 50.0
+            })) else {
+                panic!("a set_offset intent should decode");
+            };
+            assert_eq!(
+                action,
+                UiAction::SetOffset {
+                    system: "G54".into(),
+                    axis: "Z".into(),
+                    value: 50.0
+                }
+            );
+            assert!(
+                serde_json::from_value::<UiAction>(serde_json::json!({
+                    "action": "set_offset",
+                    "system": "G54",
+                    "axis": "Z",
+                    "value": 50.0,
+                    "rotation": 90.0
+                }))
+                .is_err(),
+                "an unknown field is refused"
+            );
         }
 
         #[test]

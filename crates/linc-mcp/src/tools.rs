@@ -415,6 +415,24 @@ pub fn catalog() -> Vec<ToolDef> {
             class: ToolClass::Export,
         },
         ToolDef {
+            name: "linc_set_offset",
+            title: "Write a work offset",
+            description: "Write one axis of a work offset row, exactly as typing it into the OFFSETS screen would. \
+                          The row's other axes and its rotation are left alone. Refused unless the machine is on, \
+                          idle, program protect is off and the panel is online -- the same gates the operator has.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "system": { "type": "string", "description": "Work offset name: G54, G55, ... G59.3" },
+                    "axis": { "type": "string", "description": "Axis letter, e.g. X or Z" },
+                    "value": { "type": "number", "description": "Offset in machine units" }
+                },
+                "required": ["system", "axis", "value"],
+                "additionalProperties": false
+            }),
+            class: ToolClass::Write,
+        },
+        ToolDef {
             name: "linc_get_motion_history",
             title: "Motion history",
             description: "10 Hz samples of positions, following error, servo load, spindle, feed and program lines.",
@@ -708,6 +726,24 @@ pub fn call(
             client.call("diag.ui_action", params)
         }
         "linc_screenshot" => client.call("diag.screenshot", Value::Null),
+        "linc_set_offset" => {
+            let system = args
+                .get("system")
+                .and_then(Value::as_str)
+                .ok_or_else(|| DiagError::invalid_argument("system is required, e.g. \"G54\""))?;
+            let axis = args
+                .get("axis")
+                .and_then(Value::as_str)
+                .ok_or_else(|| DiagError::invalid_argument("axis is required, e.g. \"Z\""))?;
+            let value = args
+                .get("value")
+                .and_then(Value::as_f64)
+                .ok_or_else(|| DiagError::invalid_argument("value is required"))?;
+            client.call(
+                "diag.ui_action",
+                json!({ "action": "set_offset", "system": system, "axis": axis, "value": value }),
+            )
+        }
         "linc_get_panel_state" | "linc_get_panel_frames" | "linc_get_panel_events" => {
             let panel = panel_client(panel)?;
             match name {

@@ -8,18 +8,10 @@
 
 use serde_json::json;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Policy {
     /// Simulator panel control. Reads are always allowed.
     pub allow_sim_control: bool,
-}
-
-impl Default for Policy {
-    fn default() -> Self {
-        Self {
-            allow_sim_control: false,
-        }
-    }
 }
 
 impl Policy {
