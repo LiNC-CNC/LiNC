@@ -29,3 +29,4 @@ configs/sim.var
 
 # pi agent session state (todos, scratch), not project source
 /.pi/
+/crates/linc-core/tests/scratch_dump.rs
