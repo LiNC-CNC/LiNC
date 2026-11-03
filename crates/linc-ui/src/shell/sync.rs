@@ -75,6 +75,20 @@ impl LincApp {
                 self.refresh_preview();
                 self.program.selected_line = self.snapshot.program.current_line.max(1);
             } else {
+                // The controller has no program any more: it was unloaded (or
+                // closed from another HMI). Clear LiNC's own copy, or the editor
+                // and the 3D view keep showing a program the machine cannot run -
+                // text that is still editable and saveable over nothing. The
+                // unsaved-buffer case is left alone: with no `loaded_path` there
+                // is no file to have been unloaded.
+                if self.program.loaded_path.is_some() {
+                    self.program.editor = Default::default();
+                    self.program.loaded_path = None;
+                    self.program.selected_line = 1;
+                    self.program.external_change = false;
+                    self.program.follow_current = false;
+                    self.refresh_preview();
+                }
                 self.program.program_revision_seen = revision;
             }
         }
