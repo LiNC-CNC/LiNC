@@ -265,11 +265,9 @@ impl LincApp {
         // The upper bound belongs to the view, which knows how wide the card is
         // and stops when the screen spans 0.01 mm (`linc_view::max_zoom`).
         // Clamping to the old fixed ceiling here would keep the keyboard at a
-        // shallower limit than the wheel.
-        let before = (*zoom_out).max(linc_view::MIN_ZOOM);
-        let after = (before * zoom).max(linc_view::MIN_ZOOM);
-        *pan_out *= after / before;
-        *zoom_out = after;
+        // shallower limit than the wheel. The zoom/pan rule itself lives in
+        // `linc_view::zoom_to` so a pinch cannot drift from these keys.
+        linc_view::zoom_to(zoom_out, pan_out, (*zoom_out).max(linc_view::MIN_ZOOM) * zoom);
         *pan_out += pan;
         *auto_fit = false;
     }

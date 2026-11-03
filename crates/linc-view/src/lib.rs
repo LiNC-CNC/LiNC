@@ -822,6 +822,26 @@ pub fn max_zoom(scale: f32, width: f32) -> f32 {
     width / (MIN_VIEW_SPAN_MM * scale.max(1e-6))
 }
 
+/// The one zoom rule: move the zoom to `target` and carry the pan by the same
+/// factor.
+///
+/// `project` adds the pan *after* the scale, so the model centre always lands on
+/// `rect.center() + pan`. Scaling the pan with the zoom keeps the screen point at
+/// `rect.center()` fixed, i.e. every zoom - a pinch, the wheel, the middle-button
+/// wheel and the Ctrl +/- keys - zooms about the middle of the card. Leaving the
+/// pan alone pins `rect.center() + pan` instead, which is a different point the
+/// moment the operator has panned, so the gesture and the keys disagreed about
+/// where the centre was.
+///
+/// The caller clamps `target` to its own ceiling first: the upper bound depends
+/// on the card's width and the fitted scale, which this has no way to know.
+pub fn zoom_to(zoom: &mut f32, pan: &mut Vec2, target: f32) {
+    let before = (*zoom).max(MIN_ZOOM);
+    let after = target.max(MIN_ZOOM);
+    *pan *= after / before;
+    *zoom = after;
+}
+
 /// Widest clearance kept between the tool marker and the card's edge when the
 /// view follows a moving tool: 75 px, reached at the main toolpath card's size.
 const TOOL_MARGIN: f32 = 75.0;
@@ -1166,8 +1186,11 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
                 Vec2::ZERO,
             )
             .scale;
-            view.zoom = (view.zoom * (1.0 + scroll * 0.002) * pinch)
+            // The same rule as the Ctrl +/- keys, so a pinch and the keys zoom
+            // about the same point on a card the operator has panned.
+            let target = (view.zoom * (1.0 + scroll * 0.002) * pinch)
                 .clamp(MIN_ZOOM, max_zoom(scale, drawn.width()));
+            zoom_to(&mut view.zoom, &mut view.pan, target);
             view.auto_fit = false;
         }
     }
@@ -4085,6 +4108,66 @@ mod tests {
             (view.zoom - 0.75).abs() < 1e-3,
             "a pinch in zooms out: {}",
             view.zoom
+        );
+    }
+
+    /// A pinch on a card the operator has panned uses the same centre as the
+    /// Ctrl +/- keys. They carry the pan with the zoom, which pins
+    /// `rect.center()`; the gesture used to move the zoom alone and pin
+    /// `rect.center() + pan` instead, so the part drifted sideways under a pinch
+    /// and stayed put under the keys.
+    #[test]
+    fn a_pinch_zooms_about_the_same_centre_as_the_keys_on_a_panned_card() {
+        let bounds = Bounds3 {
+            min: [0.0, 0.0, 0.0],
+            max: [100.0, 50.0, 20.0],
+        };
+        let preview = Preview {
+            bounds: Some(bounds),
+            ..Preview::empty()
+        };
+        let mut view = TrajectoryView::new(&preview, &[], MachineVariant::Mill);
+        view.view = ViewMode::Iso3d;
+        view.machine_bounds = Some(bounds);
+        view.height = 400.0;
+        view.show_grid = false;
+        view.show_legend = false;
+        view.show_program_bounds = false;
+        view.show_stock = false;
+        view.show_selected_line = false;
+        view.show_live_trail = false;
+        view.fit = false;
+        view.auto_fit = false;
+        view.zoom = 1.0;
+        // Panned off the card's centre: the two centres are now different
+        // points, which is what made the divergence visible.
+        view.pan = Vec2::new(30.0, -20.0);
+        let ctx = egui::Context::default();
+        let input = |events| egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input(Vec::new()), |ui| {
+            draw_trajectory(ui, &mut view);
+        });
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(
+            input(vec![
+                egui::Event::PointerMoved(egui::pos2(400.0, 200.0)),
+                egui::Event::Zoom(2.0),
+            ]),
+            |ui| {
+                draw_trajectory(ui, &mut view);
+            },
+        );
+        output.textures_delta.clear();
+        assert!((view.zoom - 2.0).abs() < 1e-3, "zoom {}", view.zoom);
+        let expected = Vec2::new(60.0, -40.0);
+        assert!(
+            (view.pan - expected).length() < 0.5,
+            "the pan carries the zoom factor: {:?}",
+            view.pan
         );
     }
 }
