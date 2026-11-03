@@ -842,54 +842,17 @@ impl Profile {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
 
-        let raw_text =
-            std::fs::read_to_string(&profile_path).map_err(|source| ConfigError::Read {
-                path: profile_path.clone(),
-                source,
-            })?;
-        let profile_value: toml::Value =
-            toml::from_str(&raw_text).map_err(|source| ConfigError::Toml {
-                path: profile_path.clone(),
-                source,
-            })?;
-        let table = profile_value
-            .as_table()
-            .ok_or_else(|| ConfigError::Invalid("profile root must be a TOML table".into()))?;
-
-        if let Some(extends) = table.get("extends").and_then(toml::Value::as_str) {
-            let base_path = resolve_path(&base_dir, extends);
-            if !base_path.exists() {
-                return Err(ConfigError::MissingBase { path: base_path });
-            }
-            let base_text =
-                std::fs::read_to_string(&base_path).map_err(|source| ConfigError::Read {
-                    path: base_path.clone(),
-                    source,
-                })?;
-            let base_value: toml::Value =
-                toml::from_str(&base_text).map_err(|source| ConfigError::Toml {
-                    path: base_path,
-                    source,
-                })?;
-            let mut merged = base_value;
-            deep_merge(&mut merged, profile_value);
-            let config: Config = merged.try_into().map_err(|source| ConfigError::Toml {
-                path: profile_path.clone(),
-                source,
-            })?;
-            Self::finish(config, profile_path, base_dir, ini_override)
-        } else {
-            let config: Config = profile_value
-                .try_into()
-                .map_err(|source| ConfigError::Toml {
-                    path: profile_path.clone(),
-                    source,
-                })?;
-            if config.extends.is_some() {
-                return Err(ConfigError::Invalid("extends must be a string path".into()));
-            }
-            Self::finish(config, profile_path, base_dir, ini_override)
-        }
+        // `extends` is followed all the way down. A machine profile already
+        // extends `base.toml`, so resolving one level only would drop everything
+        // the middle file inherited, and the usual override profile - "this
+        // machine, with one thing changed" - would fail to load.
+        let mut chain = vec![canonical(&profile_path)];
+        let merged = load_merged(&profile_path, &mut chain)?;
+        let config: Config = merged.try_into().map_err(|source| ConfigError::Toml {
+            path: profile_path.clone(),
+            source,
+        })?;
+        Self::finish(config, profile_path, base_dir, ini_override)
     }
 
     fn finish(
@@ -992,6 +955,55 @@ impl Profile {
             ),
         ]
     }
+}
+
+/// A profile path that survives symlinks, for cycle detection: a machine profile
+/// whose `base.toml` is a symlink must compare equal to whichever spelling the
+/// chain used to reach it.
+fn canonical(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Read one profile and merge its `extends` chain from the root down.
+///
+/// `chain` carries the files already on the path so a cycle is reported as one
+/// instead of recursing until the stack dies. Every file resolves its own
+/// `extends` against its own directory, which is what makes a copied profile
+/// work wherever it sits beside its base.
+fn load_merged(path: &Path, chain: &mut Vec<PathBuf>) -> Result<toml::Value, ConfigError> {
+    let raw_text = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let value: toml::Value = toml::from_str(&raw_text).map_err(|source| ConfigError::Toml {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let table = value
+        .as_table()
+        .ok_or_else(|| ConfigError::Invalid("profile root must be a TOML table".into()))?;
+    let Some(extends) = table.get("extends") else {
+        return Ok(value);
+    };
+    let Some(extends) = extends.as_str() else {
+        return Err(ConfigError::Invalid("extends must be a string path".into()));
+    };
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let base_path = resolve_path(dir, extends);
+    if !base_path.exists() {
+        return Err(ConfigError::MissingBase { path: base_path });
+    }
+    let key = canonical(&base_path);
+    if chain.contains(&key) {
+        return Err(ConfigError::Invalid(format!(
+            "extends cycle: {} is already in the chain",
+            base_path.display()
+        )));
+    }
+    chain.push(key);
+    let mut merged = load_merged(&base_path, chain)?;
+    deep_merge(&mut merged, value);
+    Ok(merged)
 }
 
 fn resolve_path(base: &Path, value: &str) -> PathBuf {
@@ -1728,6 +1740,80 @@ panel_scale = 1.0
         assert_eq!(profile.machine_ini.coordinates, ["X", "Y", "Z"]);
         assert_eq!(profile.config.tools.changer, "manual");
         assert!(profile.is_sim());
+    }
+
+    /// A machine profile already extends `base.toml`, so an override profile
+    /// extends a profile that extends another. One level of resolution dropped
+    /// everything the middle file inherited and failed to load.
+    #[test]
+    fn extends_resolves_a_chain_of_profiles() {
+        let dir = temp_dir();
+        let leaf = probe_profile(dir.path(), "sim", "");
+        write(
+            &dir.path().join("middle.toml"),
+            "schema_version = 1\nprofile = \"middle\"\nextends = \"base.toml\"\n\
+             [network]\nsettle_ms = 4321\n",
+        );
+        let text = std::fs::read_to_string(&leaf)
+            .unwrap()
+            .replace("extends = \"base.toml\"", "extends = \"middle.toml\"");
+        write(&leaf, &text);
+
+        let loaded = Profile::load(&leaf, None).unwrap();
+        assert_eq!(
+            loaded.config.network.settle_ms, 4321,
+            "the middle file's value reaches the leaf"
+        );
+        assert_eq!(
+            loaded.config.files.nc_files, "ini",
+            "base.toml reaches the leaf through the middle file"
+        );
+        assert_eq!(
+            loaded.config.panel.driver, "cnc-panel-sim",
+            "the leaf keeps its own table"
+        );
+        assert_eq!(loaded.config.machine.name, "Test", "the middle machine");
+    }
+
+    #[test]
+    fn extends_cycle_is_rejected_instead_of_recursing() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let a = dir.path().join("a.toml");
+        let b = dir.path().join("b.toml");
+        write(
+            &a,
+            "schema_version = 1\nprofile = \"a\"\nextends = \"b.toml\"\n",
+        );
+        write(
+            &b,
+            "schema_version = 1\nprofile = \"b\"\nextends = \"a.toml\"\n",
+        );
+        let error = Profile::load(&a, None).unwrap_err();
+        assert!(error.to_string().contains("cycle"), "{error}");
+    }
+
+    #[test]
+    fn a_missing_base_is_named_in_the_chain() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let middle = dir.path().join("middle.toml");
+        let leaf = dir.path().join("leaf.toml");
+        write(
+            &middle,
+            "schema_version = 1\nprofile = \"middle\"\nextends = \"gone.toml\"\n",
+        );
+        write(
+            &leaf,
+            "schema_version = 1\nprofile = \"leaf\"\nextends = \"middle.toml\"\n",
+        );
+        let error = Profile::load(&leaf, None).unwrap_err();
+        assert!(
+            error.to_string().contains("gone.toml"),
+            "the missing file is named, not the leaf: {error}"
+        );
     }
 
     #[test]
