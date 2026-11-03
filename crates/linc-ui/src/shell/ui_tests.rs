@@ -98,12 +98,12 @@ fn diagnostics_navigation_and_body_skip_a_hidden_turret_tab() {
     harness.app.profile.changer = ToolChangerKind::Turret;
     harness.app.set_page(Page::Diagnostics);
 
-    harness.app.diagnostics.tab = DiagnosticsTab::Motion;
+    harness.app.diagnostics.tab = DiagnosticsTab::Overview;
     harness.app.page_down();
-    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Io);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::HalNml);
     harness.app.page_up();
-    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Motion);
-    harness.app.page_up();
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Overview);
+    harness.app.page_down();
     assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::HalNml);
 
     // Wrapping stays inside the visible list.
@@ -130,9 +130,64 @@ fn diagnostics_navigation_and_body_skip_a_hidden_turret_tab() {
         .iter()
         .any(|(text, _)| text == "TURRET / LIVE TOOL"));
     harness.app.page_down();
-    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Io);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Logs);
     harness.app.page_up();
     assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Turret);
+}
+
+/// Every remaining tab draws its own body and no removed one comes back.
+#[test]
+fn diagnostics_tabs_draw_text_strips_and_their_own_bodies() {
+    let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::On);
+    harness.app.profile.config.diagnostics.turret_tab = true;
+    harness.app.profile.changer = ToolChangerKind::Turret;
+    harness.app.set_page(Page::Diagnostics);
+    for (tab, marker) in [
+        (DiagnosticsTab::Overview, "ACTIVE ALARMS & MESSAGES"),
+        (DiagnosticsTab::HalNml, "HAL BROWSER"),
+        (DiagnosticsTab::Turret, "TURRET / LIVE TOOL"),
+        (DiagnosticsTab::Logs, "SEVERITY"),
+    ] {
+        harness.app.diagnostics.tab = tab;
+        let texts = painted_text(&harness.frame_full(Vec::new()));
+        // The strip names every tab, whichever one is drawn.
+        for label in ["OVERVIEW", "HAL / NML", "TURRET / LIVE TOOL", "LOGS"] {
+            assert!(
+                texts.iter().any(|(text, _)| text == label),
+                "{label} missing from the strip on {tab:?}"
+            );
+        }
+        assert!(
+            texts.iter().any(|(text, _)| text == marker),
+            "{marker} missing from the {tab:?} body"
+        );
+        // The removed tabs never come back into the strip. The scan is banded
+        // to the strip's own line: health cards and log filters still carry the
+        // words PANEL LINK, MOTION and I/O by design.
+        let strip_top = texts
+            .iter()
+            .find(|(text, _)| text == "OVERVIEW")
+            .expect("strip label")
+            .1
+            .top();
+        for gone in ["PANEL LINK", "MOTION", "I/O"] {
+            assert!(
+                !texts
+                    .iter()
+                    .any(|(text, rect)| text == gone && (rect.top() - strip_top).abs() < 6.0),
+                "{gone} still drawn in the strip on {tab:?}"
+            );
+        }
+    }
+    // OVERVIEW keeps the concise live link pane and loses the removed panes.
+    harness.app.diagnostics.tab = DiagnosticsTab::Overview;
+    let texts = painted_text(&harness.frame_full(Vec::new()));
+    assert!(texts
+        .iter()
+        .any(|(text, _)| text == "RS-485 / VIRTUAL LINK"));
+    for gone in ["PANEL SUMMARY", "MOTION HEALTH"] {
+        assert!(!texts.iter().any(|(text, _)| text == gone));
+    }
 }
 
 fn make_app(mode: PanelMode) -> (tempfile::TempDir, LincApp) {

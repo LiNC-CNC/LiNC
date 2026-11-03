@@ -269,6 +269,7 @@ impl LincApp {
             },
             diagnostics: DiagnosticsUi {
                 tab: DiagnosticsTab::Overview,
+                hal: None,
                 search: String::new(),
                 severity: None,
                 source: None,

@@ -92,22 +92,16 @@ impl ProgramView {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiagnosticsTab {
     Overview,
-    PanelLink,
     HalNml,
-    Motion,
     Turret,
-    Io,
     Logs,
 }
 
 impl DiagnosticsTab {
-    pub const ALL: [DiagnosticsTab; 7] = [
+    pub const ALL: [DiagnosticsTab; 4] = [
         DiagnosticsTab::Overview,
-        DiagnosticsTab::PanelLink,
         DiagnosticsTab::HalNml,
-        DiagnosticsTab::Motion,
         DiagnosticsTab::Turret,
-        DiagnosticsTab::Io,
         DiagnosticsTab::Logs,
     ];
 
@@ -124,11 +118,8 @@ impl DiagnosticsTab {
     pub fn label(self) -> &'static str {
         match self {
             Self::Overview => "OVERVIEW",
-            Self::PanelLink => "PANEL LINK",
             Self::HalNml => "HAL / NML",
-            Self::Motion => "MOTION",
             Self::Turret => "TURRET / LIVE TOOL",
-            Self::Io => "I/O",
             Self::Logs => "LOGS",
         }
     }

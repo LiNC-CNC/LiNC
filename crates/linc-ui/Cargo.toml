@@ -13,6 +13,7 @@ libc.workspace = true
 tempfile.workspace = true
 log.workspace = true
 linc-core = { path = "../linc-core" }
+linc-hal = { path = "../linc-hal" }
 linc-view = { path = "../linc-view" }
 image.workspace = true
 zbus = "4.4"
