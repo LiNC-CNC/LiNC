@@ -1,7 +1,7 @@
 //! Shell integration tests: a real `LincApp` driven through real egui frames.
 
 use super::*;
-use linc_core::model::{LoobricStatus, PanelModeValidity, ToolChangerKind};
+use linc_core::model::{LoobricStatus, NetworkStatus, PanelModeValidity, ToolChangerKind};
 
 fn fixture() -> (tempfile::TempDir, Profile) {
     let dir = tempfile::tempdir().unwrap();
@@ -263,6 +263,19 @@ fn bottom_bar_texts(app: &mut LincApp, ctx: &egui::Context) -> Vec<String> {
         .collect()
 }
 
+/// One pass of the top bar alone. The link metric is a label and a value, so
+/// its presence is a pair of text shapes and its absence is no shape at all.
+fn top_bar_texts(app: &mut LincApp, ctx: &egui::Context) -> Vec<String> {
+    let mut output = ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+        app.top_bar(ui);
+    });
+    output.textures_delta.clear();
+    painted_text(&output)
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect()
+}
+
 /// The field is drawn only while the probe tool is the one in the spindle:
 /// fitted, not fitted, and no probe configured at all. Absent means absent -
 /// no placeholder, no dimmed row.
@@ -343,6 +356,104 @@ fn the_probe_field_reads_ready_tripped_or_asks() {
             "stale data asks, whatever the last poll said: {tripped:?}"
         );
     }
+}
+
+/// The link metric is absent on a machine without a supervisor, and its colour
+/// is about the machine rather than the link: up on a running interpreter is the
+/// one state worth warning about.
+#[test]
+fn the_network_metric_reports_the_link_and_warns_only_when_the_machine_runs() {
+    let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+    snapshot.task.interp = linc_core::model::InterpState::Idle;
+    assert_eq!(network_metric(&snapshot), None, "no supervisor, no metric");
+
+    let status = |link_up: Option<bool>, measuring: bool| NetworkStatus {
+        enabled: true,
+        kind: "wifi".into(),
+        interface: "wlp0s20f3".into(),
+        link_up,
+        measuring,
+        ..NetworkStatus::default()
+    };
+
+    snapshot.network = Some(status(Some(false), false));
+    assert_eq!(
+        network_metric(&snapshot),
+        Some(("DOWN", theme::SUCCESS)),
+        "the link down is the quiet state, not a fault"
+    );
+
+    snapshot.network = Some(status(Some(true), false));
+    assert_eq!(
+        network_metric(&snapshot),
+        Some(("UP", theme::MUTED)),
+        "idle with the link up is harmless"
+    );
+
+    snapshot.task.running = true;
+    assert_eq!(
+        network_metric(&snapshot),
+        Some(("UP", theme::WARNING)),
+        "a link up while the interpreter runs is the latency risk"
+    );
+    snapshot.task.running = false;
+
+    // An unknown interpreter state is not evidence of motion: the metric stays
+    // neutral rather than warning on a snapshot that has not reported yet.
+    snapshot.task.interp = linc_core::model::InterpState::Unknown;
+    assert_eq!(
+        network_metric(&snapshot),
+        Some(("UP", theme::MUTED)),
+        "an unreported interpreter state does not raise a false alarm"
+    );
+    snapshot.task.interp = linc_core::model::InterpState::Idle;
+
+    snapshot.network = Some(status(Some(true), true));
+    assert_eq!(network_metric(&snapshot), Some(("MEAS", theme::ACCENT)));
+
+    snapshot.network = Some(status(None, false));
+    assert_eq!(
+        network_metric(&snapshot),
+        Some(("?", theme::WARNING)),
+        "an unread state asks"
+    );
+
+    snapshot.network = Some(status(Some(true), false));
+    snapshot.meta.stale = true;
+    assert_eq!(
+        network_metric(&snapshot),
+        Some(("?", theme::WARNING)),
+        "stale data asks instead of repeating a state that may have moved"
+    );
+}
+
+/// The metric is absent, not blank, on a machine without a supervisor.
+#[test]
+fn the_top_bar_carries_the_network_metric_only_with_a_supervisor() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.snapshot.meta.stale = false;
+    let absent = top_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(
+        !absent.iter().any(|text| text == "NET"),
+        "a profile without [network] gets no metric: {absent:?}"
+    );
+
+    harness.app.snapshot.network = Some(NetworkStatus {
+        enabled: true,
+        kind: "wifi".into(),
+        interface: "wlp0s20f3".into(),
+        link_up: Some(false),
+        ..NetworkStatus::default()
+    });
+    let shown = top_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(
+        shown.iter().any(|text| text == "NET"),
+        "the bar carries the metric label: {shown:?}"
+    );
+    assert!(
+        shown.iter().any(|text| text == "DOWN"),
+        "the bar carries the link state: {shown:?}"
+    );
 }
 
 /// The probe field is the newest tenant of the bottom bar, and the row has to

@@ -59,6 +59,43 @@ pub(super) fn probe_input_field(
     }
 }
 
+/// The top bar's external-link metric, for a profile that enabled `[network]`.
+/// No supervisor means no metric at all: a dead `NET` on every machine without
+/// one would be a placeholder, the same rule as the probe field.
+///
+/// The colour is about the machine, not the link. A link down is the quiet
+/// state this measurement pass exists to find (`SUCCESS`); a link up on an idle
+/// machine costs nothing (`MUTED`); a link up while the interpreter is running
+/// is the latency risk the whole section exists for, and is the one state that
+/// warns. Stale data asks rather than repeating a state that may have moved.
+///
+/// It lives in the top bar because the bottom bar is at its width limit: the
+/// read-only group already fills the 1280 px baseline once the limits override
+/// is shown (`the_bottom_bar_readout_fits_the_minimum_window`).
+pub(super) fn network_metric(snapshot: &MachineSnapshot) -> Option<(&'static str, egui::Color32)> {
+    let status = snapshot.network.as_ref()?;
+    if snapshot.meta.stale {
+        return Some(("?", theme::WARNING));
+    }
+    if status.measuring {
+        return Some(("MEAS", theme::ACCENT));
+    }
+    let busy = snapshot.task.running
+        || snapshot.task.motion_active
+        || matches!(
+            snapshot.task.interp,
+            linc_core::model::InterpState::Reading
+                | linc_core::model::InterpState::Paused
+                | linc_core::model::InterpState::Waiting
+        );
+    Some(match status.link_up {
+        Some(true) if busy => ("UP", theme::WARNING),
+        Some(true) => ("UP", theme::MUTED),
+        Some(false) => ("DOWN", theme::SUCCESS),
+        None => ("?", theme::WARNING),
+    })
+}
+
 /// True on the bright half of the bottom bar's fault blink.
 ///
 /// Two alternations a second: half a second bright, half a second dim. The

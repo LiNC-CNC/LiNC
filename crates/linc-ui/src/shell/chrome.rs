@@ -102,6 +102,13 @@ impl LincApp {
                 13.0,
             );
             metric(ui, "WORK", self.active_wcs_label(), 13.0);
+            // The external link rides with the other machine metrics. It is
+            // absent for a profile without `[network]`, and the top bar is the
+            // bar with room: the read-only bottom group is already at the
+            // 1280 px limit once the limits override is shown.
+            if let Some((network_word, network_color)) = network_metric(&self.snapshot) {
+                metric_colored(ui, "NET", network_word.to_string(), 13.0, network_color);
+            }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
                     RichText::new(format_clock(now_ms()))
