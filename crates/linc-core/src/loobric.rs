@@ -434,18 +434,6 @@ impl<B: MachineBackend> MachineBackend for LoobricBackend<B> {
     }
 }
 
-/// `Box<dyn MachineBackend>` is the type the app carries, so the wrapper needs
-/// the trait for it before it can forward to the selected backend.
-impl MachineBackend for Box<dyn MachineBackend> {
-    fn snapshot(&mut self) -> MachineSnapshot {
-        self.as_mut().snapshot()
-    }
-
-    fn send(&mut self, command: MachineCommand) -> Result<(), MachineError> {
-        self.as_mut().send(command)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

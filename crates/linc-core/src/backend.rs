@@ -21,6 +21,18 @@ pub trait MachineBackend: Send + 'static {
     fn send(&mut self, command: MachineCommand) -> Result<(), MachineError>;
 }
 
+/// `Box<dyn MachineBackend>` is the type the app carries, so every wrapper
+/// needs the trait for it before it can forward to the selected backend.
+impl MachineBackend for Box<dyn MachineBackend> {
+    fn snapshot(&mut self) -> MachineSnapshot {
+        self.as_mut().snapshot()
+    }
+
+    fn send(&mut self, command: MachineCommand) -> Result<(), MachineError> {
+        self.as_mut().send(command)
+    }
+}
+
 /// Typed HAL writer. Only [`LincOutput`] values can reach it.
 pub trait HalWriter: Send + 'static {
     fn write(&mut self, output: LincOutput, value: HalValue) -> Result<(), MachineError>;
