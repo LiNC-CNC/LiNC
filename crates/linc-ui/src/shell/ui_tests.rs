@@ -365,7 +365,11 @@ fn the_probe_field_reads_ready_tripped_or_asks() {
 fn the_network_metric_reports_the_link_and_warns_only_when_the_machine_runs() {
     let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
     snapshot.task.interp = linc_core::model::InterpState::Idle;
-    assert_eq!(network_metric(&snapshot), None, "no supervisor, no metric");
+    assert_eq!(
+        network_metric(&snapshot),
+        Some(("OFF", theme::MUTED)),
+        "a profile without supervision says so: the interlock is not armed"
+    );
 
     let status = |link_up: Option<bool>, measuring: bool| NetworkStatus {
         enabled: true,
@@ -429,13 +433,17 @@ fn the_network_metric_reports_the_link_and_warns_only_when_the_machine_runs() {
 
 /// The metric is absent, not blank, on a machine without a supervisor.
 #[test]
-fn the_top_bar_carries_the_network_metric_only_with_a_supervisor() {
+fn the_top_bar_always_carries_the_network_metric() {
     let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
     harness.app.snapshot.meta.stale = false;
-    let absent = top_bar_texts(&mut harness.app, &harness.ctx);
+    let unsupervised = top_bar_texts(&mut harness.app, &harness.ctx);
     assert!(
-        !absent.iter().any(|text| text == "NET"),
-        "a profile without [network] gets no metric: {absent:?}"
+        unsupervised.iter().any(|text| text == "NET"),
+        "the metric is on every profile: {unsupervised:?}"
+    );
+    assert!(
+        unsupervised.iter().any(|text| text == "OFF"),
+        "no supervision is stated, not hidden: {unsupervised:?}"
     );
 
     harness.app.snapshot.network = Some(NetworkStatus {
