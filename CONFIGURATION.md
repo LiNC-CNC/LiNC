@@ -621,6 +621,7 @@ names.
 | `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter` |
 | `[tools]` | `changer`, `atc_pockets`, `manual_confirm` |
 | `[loobric]` | `enabled`, `client`, optional `interpreter`, optional `config`, `timeout_secs`, `sync_on_startup`, `sync_after_tool_write` |
+| `[network]` | `enabled`, `kind`, `interface`, optional `connection`, `settle_ms`, `verify_timeout_ms`, `measure_on_startup`, `keep_up`, optional `irq_match`, optional `down_cmd`, `up_cmd`, `state_cmd` |
 | `[manual]` | `auto_open`, `close_on_mode_exit`, `show_machine_coordinates`, `show_dtg`, `trail` |
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
 | `[mdi]` | `execute_on_enter`, `auto_focus`, `history_limit`, `max_command_length`, `save_preamble`, `save_postamble` |
@@ -702,6 +703,93 @@ into the controller only when the interpreter is idle; otherwise the page says
 server changes are waiting for idle. The client never blocks the machine: a
 missing network is reported as a normal client result. `--check-config` checks
 that a path-like `client`, `interpreter` and an explicitly set `config` exist.
+
+### `[network]`
+
+The machine's link to the internet: the WiFi radio on a controller that has one,
+or a second NIC (PCIe or USB) that carries external traffic. It is **never** the
+machine's fieldbus or I/O network; that link is internal and must keep running.
+Every default here acts on one named device, and validation rejects an override
+that reaches for system-wide networking (`nmcli networking off`) or chains a
+second command, so a profile cannot switch the controller's own link off.
+
+This section is measurement-only. With `enabled = true`, LiNC waits for an idle
+interpreter, runs one down/verify/settle/up cycle, and publishes the phase
+durations plus the device's interrupt and packet rates before and after the
+link went down. It does not refuse a command or block motion, and an operator
+sees no gate. The measurement exists to choose `settle_ms` from evidence: how
+long the radio keeps working after `nmcli` returns is a property of the driver,
+and the interrupt rate is the number that predicts realtime jitter.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Run one measurement cycle per session. A disabled profile starts no worker and publishes no status. |
+| `kind` | `wifi` | `wifi` tears the radio down; `ethernet` disconnects a second NIC. The kind selects the default commands and the state parser. |
+| `interface` | unset | The external device: `wlp0s20f3`, `usb0`, or a second `enp*`. Required when enabled. |
+| `connection` | unset | NetworkManager profile id brought up after the radio is enabled, for `kind = "wifi"`. |
+| `settle_ms` | `1500` | Window waited after the link reads down before sampling quiet (0-10000). |
+| `verify_timeout_ms` | `3000` | Deadline for the link state to change after a command (100-30000). |
+| `measure_on_startup` | `true` | Run the cycle when the machine first goes idle. |
+| `keep_up` | `false` | Probe the state and leave the link alone: bring-up and remote log reading, the profile-level form of `linc-session.sh --keep-wifi`. |
+| `irq_match` | the interface name | Substring matched against `/proc/interrupts`. WiFi IRQ lines usually carry the driver name (`iwlwifi`), not the interface. |
+| `down_cmd` | per kind | Override, split on whitespace. No shell; validation rejects shell metacharacters and the token `networking`. |
+| `up_cmd` | per kind | The same for bring-up. |
+| `state_cmd` | per kind | The same for the state probe. Its last output word must be one of `enabled`/`disabled`/`up`/`down`/`on`/`off`/`1`/`0`. |
+
+Default commands:
+
+| `kind` | down | up | state |
+|---|---|---|---|
+| `wifi` | `nmcli radio wifi off` | `nmcli radio wifi on`, then `nmcli connection up <connection>` | `nmcli --terse --fields WIFI radio` |
+| `ethernet` | `nmcli device disconnect <interface>` | `nmcli device connect <interface>` | `/sys/class/net/<interface>/operstate` |
+
+`ethernet` reads carrier state rather than removing the default route: a
+removed route leaves the PHY, the driver and its interrupt work running, so the
+measurement would claim quiet the machine does not have.
+
+Behaviour:
+
+- The link is never left down. A failing command, a link that never reads down
+  and a link that does not come back are recorded as notes and reported in the
+  cycle summary; the up commands run regardless, and a link that stays down is
+  logged at error level.
+- When `[loobric] enabled` and `sync_on_startup` are both set, the cycle waits
+  for the first client run to finish. Pulling the link under a running client is
+  the one interruption worth avoiding even in a measurement pass.
+- If the configured interface is not the device carrying the default route, the
+  worker logs a warning and sets `route_mismatch`. Taking that interface down
+  would not stop internet traffic, so the numbers would understate the cost.
+- A counters sample that cannot read its source reports no rate. A missing
+  sample is not zero, and reporting it as zero would fake the result.
+- The cycle takes a few seconds. Killing LiNC inside that window can leave the
+  link down, because the worker cannot run its up commands after the process
+  is gone; the next start's probe reports the state and `nmcli` or a reboot
+  restores it. The window is why the cycle waits for an idle machine.
+
+The cycle is published as `network` in the machine snapshot, so `linc-mcp` and
+the diagnostic socket can read it. The top bar carries it as a `NET` metric:
+`DOWN` in the success colour (the quiet state this pass measures for), `UP` in
+the muted colour on an idle machine, `UP` in the warning colour while the
+interpreter runs or motion is active (the latency risk), `MEAS` while the cycle
+runs, and `?` for stale or unread data. A profile without `[network]` has no
+metric. It sits in the top bar rather than the bottom one because the bottom
+bar's read-only group is already at the 1280 px baseline width once the limits
+override is shown.
+
+Motion gating is not implemented. The intended later pass takes the link down
+before MDI, program, tool-change and probe execution, and blocks cycle start,
+jog and homing through a HAL interlock, because those come from the panel and
+never pass through LiNC's command set. `settle_ms` for that gate is chosen from
+these measurements.
+
+```toml
+[network]
+enabled = true
+kind = "wifi"
+interface = "wlp0s20f3"
+connection = "OpenWrt"
+settle_ms = 1500
+```
 
 ### `[files]`
 

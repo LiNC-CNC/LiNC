@@ -643,6 +643,46 @@ pub struct LoobricStatus {
     pub reload_pending: bool,
 }
 
+/// State of the optional `[network]` external-link supervisor.
+///
+/// The link is the machine's internet path (WiFi radio, or a second NIC). This
+/// pass measures what a toggle costs: the phase durations and the device's own
+/// interrupt and packet rates before and after the link goes down. Nothing here
+/// gates motion; a value of `None` means "not measured yet", never "zero".
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NetworkStatus {
+    pub enabled: bool,
+    /// `wifi` or `ethernet`, as declared in the profile.
+    pub kind: String,
+    pub interface: String,
+    /// Last observed state of the external link. `None` before the first probe.
+    pub link_up: Option<bool>,
+    /// A measurement cycle is running right now.
+    pub measuring: bool,
+    /// When the last completed cycle started, in epoch milliseconds.
+    pub last_measure_ms: Option<u64>,
+    /// How long the down command took to return.
+    pub down_ms: Option<u64>,
+    /// How long the link took to read down after that command returned.
+    pub verify_ms: Option<u64>,
+    /// The settle window used before sampling quiet.
+    pub settle_ms: Option<u64>,
+    /// How long the up command took to return.
+    pub up_ms: Option<u64>,
+    /// Device interrupts per second, sampled while the link was up and after it
+    /// went down. The pair is the evidence that the toggle bought quiet.
+    pub irq_per_s_up: Option<f64>,
+    pub irq_per_s_down: Option<f64>,
+    /// Received packets per second, same two samples.
+    pub rx_per_s_up: Option<f64>,
+    pub rx_per_s_down: Option<f64>,
+    pub message: String,
+    /// The configured interface is not the one carrying the default route, so
+    /// taking it down would not actually stop internet traffic.
+    #[serde(default)]
+    pub route_mismatch: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SpindleState {
     pub index: usize,
@@ -1366,6 +1406,9 @@ pub struct MachineSnapshot {
     /// Optional Loobric tool-table sync; `None` when the profile disables it.
     #[serde(default)]
     pub loobric: Option<LoobricStatus>,
+    /// Optional external-link supervisor; `None` when the profile disables it.
+    #[serde(default)]
+    pub network: Option<NetworkStatus>,
     pub spindles: Vec<SpindleState>,
     pub feed: FeedState,
     pub program: ProgramState,
@@ -1405,6 +1448,7 @@ impl MachineSnapshot {
             offsets: WorkOffsetSet::default(),
             tool_table: ToolTableState::default(),
             loobric: None,
+            network: None,
             spindles: Vec::new(),
             feed: FeedState::default(),
             program: ProgramState::default(),

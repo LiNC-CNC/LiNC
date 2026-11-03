@@ -95,6 +95,24 @@ sync_on_startup = true
 sync_after_tool_write = true
 timeout_secs = 60
 
+[network]
+# The machine's link to the internet, and only that: WiFi on the controller, or
+# a second NIC (PCIe or USB) that carries external traffic. The fieldbus and
+# I/O network inside the machine is not this interface and is never touched.
+#
+# Measurement only in this pass. With enabled = true LiNC times one
+# down/verify/settle/up cycle on an idle machine and logs the phase durations
+# plus the device's interrupt and packet rates, so settle_ms is chosen from
+# evidence. It does not gate motion, a cycle or any command yet.
+enabled = false
+kind = "wifi"                 # wifi | ethernet
+interface = ""                # e.g. wlp0s20f3, usb0, a second enp*
+settle_ms = 1500               # radio teardown outlives nmcli returning
+verify_timeout_ms = 3000       # deadline for the link state to change
+measure_on_startup = true      # one measurement, when the machine is idle
+keep_up = false                # like linc-session.sh --keep-wifi
+# irq_match = "iwlwifi"        # default: the interface name
+
 [manual]
 # Panel modes JOG/INC/MPG drive this read-only screen.
 auto_open = true

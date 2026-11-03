@@ -61,6 +61,10 @@ pub struct Config {
     /// own 0600 config file, never in this machine profile.
     #[serde(default)]
     pub loobric: LoobricConfig,
+    /// Optional supervision of the machine's internet link. Off by default and
+    /// measurement-only in this pass; it never gates motion or a command.
+    #[serde(default)]
+    pub network: NetworkConfig,
     pub manual: ManualConfig,
     pub homing: HomingConfig,
     pub mdi: MdiConfig,
@@ -257,6 +261,91 @@ fn default_loobric_client() -> String {
 
 fn default_loobric_timeout() -> u64 {
     60
+}
+
+/// The machine's link to the outside world: the internet path Loobric syncs
+/// over. It is never the controller's own fieldbus link; the machine's drive
+/// and I/O network is internal and must keep running.
+///
+/// This section is measurement-only today: LiNC times a down/verify/settle/up
+/// cycle and samples the device's interrupt and packet rates, so `settle_ms`
+/// can be chosen from evidence instead of a guess. Motion gating is not
+/// implemented; nothing here blocks a cycle, jog or command.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NetworkConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// `wifi` tears the radio down; `ethernet` disconnects a second NIC. The
+    /// kind only selects the default commands and the state parser.
+    #[serde(default = "default_network_kind")]
+    pub kind: String,
+    /// The external device, for example `wlp0s20f3`, `usb0` or a second
+    /// `enp*`. Required when enabled.
+    #[serde(default)]
+    pub interface: String,
+    /// NetworkManager profile id to bring up after the radio is enabled, for
+    /// `kind = "wifi"`.
+    #[serde(default)]
+    pub connection: Option<String>,
+    /// How long to wait after the link reads down before sampling quiet. The
+    /// radio's own teardown outlives `nmcli` returning.
+    #[serde(default = "default_network_settle_ms")]
+    pub settle_ms: u64,
+    /// Deadline for the link state to change after a command.
+    #[serde(default = "default_network_verify_timeout_ms")]
+    pub verify_timeout_ms: u64,
+    #[serde(default = "default_true")]
+    pub measure_on_startup: bool,
+    /// Leave the link alone: bring-up and remote log reading, the same escape
+    /// hatch as `linc-session.sh --keep-wifi`.
+    #[serde(default)]
+    pub keep_up: bool,
+    /// Substring matched against `/proc/interrupts` lines to find the device's
+    /// interrupt: the interface name, or the driver name (`iwlwifi`) when the
+    /// IRQ line carries the driver instead.
+    #[serde(default)]
+    pub irq_match: Option<String>,
+    /// Command overrides. Whitespace-split, no shell. Validation rejects shell
+    /// metacharacters and anything that mentions `networking`, so an override
+    /// cannot down the machine's own link.
+    #[serde(default)]
+    pub down_cmd: Option<String>,
+    #[serde(default)]
+    pub up_cmd: Option<String>,
+    #[serde(default)]
+    pub state_cmd: Option<String>,
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            kind: default_network_kind(),
+            interface: String::new(),
+            connection: None,
+            settle_ms: default_network_settle_ms(),
+            verify_timeout_ms: default_network_verify_timeout_ms(),
+            measure_on_startup: true,
+            keep_up: false,
+            irq_match: None,
+            down_cmd: None,
+            up_cmd: None,
+            state_cmd: None,
+        }
+    }
+}
+
+fn default_network_kind() -> String {
+    "wifi".into()
+}
+
+fn default_network_settle_ms() -> u64 {
+    1500
+}
+
+fn default_network_verify_timeout_ms() -> u64 {
+    3000
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -890,6 +979,17 @@ impl Profile {
                     "off".into()
                 },
             ),
+            (
+                "Network".into(),
+                if self.config.network.enabled {
+                    format!(
+                        "{} {} (measure only)",
+                        self.config.network.kind, self.config.network.interface
+                    )
+                } else {
+                    "off".into()
+                },
+            ),
         ]
     }
 }
@@ -1267,6 +1367,8 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
         }
     }
 
+    validate_network(&config.network)?;
+
     if config.machine.gui == "lathe" && config.probe.enabled {
         return Err(ConfigError::Invalid(
             "the mill-oriented touch probe must be disabled for lathe profiles".into(),
@@ -1345,6 +1447,69 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
         )));
     }
     validate_probe_bundle(config, ini, profile_dir)?;
+    Ok(())
+}
+
+/// Characters that let an override run a second command or reach the
+/// network-wide switches this section exists to avoid.
+const FORBIDDEN_COMMAND_CHARS: [char; 12] =
+    [';', '&', '|', '`', '$', '(', ')', '>', '<', '\n', '\r', '{'];
+
+/// Validate `[network]` without touching the machine's runtime state.
+///
+/// Everything here is static: the interface name is not resolved, because a
+/// profile is often checked on a different host than the one that runs it. The
+/// runtime overlap and default-route checks live in `crate::network`, which
+/// runs on the machine.
+fn validate_network(config: &NetworkConfig) -> Result<(), ConfigError> {
+    if config.kind != "wifi" && config.kind != "ethernet" {
+        return Err(ConfigError::Invalid(
+            "network.kind must be wifi or ethernet".into(),
+        ));
+    }
+    if config.settle_ms > 10_000 {
+        return Err(ConfigError::Invalid(
+            "network.settle_ms must be 0..=10000".into(),
+        ));
+    }
+    if config.verify_timeout_ms < 100 || config.verify_timeout_ms > 30_000 {
+        return Err(ConfigError::Invalid(
+            "network.verify_timeout_ms must be 100..=30000".into(),
+        ));
+    }
+    if !config.enabled {
+        return Ok(());
+    }
+    if config.interface.trim().is_empty() {
+        return Err(ConfigError::Invalid(
+            "network.interface must not be empty when network.enabled is true".into(),
+        ));
+    }
+    for (key, value) in [
+        ("down_cmd", config.down_cmd.as_deref()),
+        ("up_cmd", config.up_cmd.as_deref()),
+        ("state_cmd", config.state_cmd.as_deref()),
+    ] {
+        let Some(value) = value else { continue };
+        if value.trim().is_empty() {
+            return Err(ConfigError::Invalid(format!(
+                "network.{key} must not be empty"
+            )));
+        }
+        if let Some(bad) = value.chars().find(|c| FORBIDDEN_COMMAND_CHARS.contains(c)) {
+            return Err(ConfigError::Invalid(format!(
+                "network.{key} must not contain the shell metacharacter {bad:?}"
+            )));
+        }
+        // The whole section is scoped to one external device. `networking`
+        // switches the controller's own fieldbus link off with it.
+        let lowered = value.to_ascii_lowercase();
+        if lowered.contains("networking") || lowered.contains("systemctl") {
+            return Err(ConfigError::Invalid(format!(
+                "network.{key} must act on one device, not on system networking"
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -2065,6 +2230,78 @@ quick_commands = ["G0"]
         write(&profile, &text);
         let error = Profile::load(&profile, None).unwrap_err();
         assert!(error.to_string().contains("loobric.client"), "{error}");
+    }
+
+    #[test]
+    fn network_is_off_by_default_and_carries_its_defaults() {
+        let dir = temp_dir();
+        let profile = probe_profile(dir.path(), "sim", "");
+        let loaded = Profile::load(&profile, None).unwrap();
+        let network = &loaded.config.network;
+        assert!(!network.enabled);
+        assert_eq!(network.kind, "wifi");
+        assert_eq!(network.settle_ms, 1500);
+        assert_eq!(network.verify_timeout_ms, 3000);
+        assert!(network.measure_on_startup);
+        assert!(!network.keep_up);
+        assert!(loaded
+            .summary()
+            .iter()
+            .any(|(key, value)| key == "Network" && value == "off"));
+    }
+
+    #[test]
+    fn network_accepts_a_scoped_override_and_reports_it_in_the_summary() {
+        let dir = temp_dir();
+        let profile = probe_profile(dir.path(), "sim", "");
+        let mut text = std::fs::read_to_string(&profile).unwrap();
+        text.push_str(
+            "\n[network]\nenabled = true\nkind = \"ethernet\"\ninterface = \"usb0\"\n\
+             down_cmd = \"nmcli device disconnect usb0\"\nsettle_ms = 120\n",
+        );
+        write(&profile, &text);
+        let loaded = Profile::load(&profile, None).unwrap();
+        assert!(loaded.config.network.enabled);
+        assert_eq!(loaded.config.network.interface, "usb0");
+        assert_eq!(loaded.config.network.settle_ms, 120);
+        assert!(loaded
+            .summary()
+            .iter()
+            .any(|(key, value)| key == "Network" && value.contains("ethernet usb0")));
+    }
+
+    #[test]
+    fn network_rejects_settings_that_would_reach_the_machine_link() {
+        let dir = temp_dir();
+        let profile = probe_profile(dir.path(), "sim", "");
+        let base = std::fs::read_to_string(&profile).unwrap();
+        let cases = [
+            (
+                "network.kind",
+                "\n[network]\nenabled = true\ninterface = \"usb0\"\nkind = \"modem\"\n",
+            ),
+            (
+                "network.down_cmd",
+                "\n[network]\nenabled = true\ninterface = \"usb0\"\nkind = \"ethernet\"\ndown_cmd = \"nmcli networking off\"\n",
+            ),
+            (
+                "metacharacter",
+                "\n[network]\nenabled = true\ninterface = \"usb0\"\nkind = \"ethernet\"\ndown_cmd = \"nmcli device disconnect usb0; poweroff\"\n",
+            ),
+            (
+                "network.interface",
+                "\n[network]\nenabled = true\nkind = \"ethernet\"\n",
+            ),
+        ];
+        for (expected, section) in cases {
+            write(&profile, &format!("{base}{section}"));
+            let error = Profile::load(&profile, None)
+                .expect_err("a rejected network section must not load");
+            assert!(
+                error.to_string().contains(expected),
+                "{expected} missing from {error}"
+            );
+        }
     }
 
     fn repo_root() -> PathBuf {

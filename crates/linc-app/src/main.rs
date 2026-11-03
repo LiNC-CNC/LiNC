@@ -157,6 +157,10 @@ fn main() -> Result<()> {
     // The Loobric client is opt-in: a disabled profile gets the selected
     // backend unchanged, with no worker thread and no snapshot status.
     let backend = linc_core::loobric::wrap_backend(backend, &profile);
+    // The external-link supervisor is opt-in and measurement-only: it publishes
+    // what a wifi/NIC toggle costs and never gates a command. It wraps outside
+    // Loobric so its measurement can wait for a startup sync to finish.
+    let backend = linc_core::network::wrap_backend(backend, &profile);
 
     let hal = if args.no_hal {
         None
