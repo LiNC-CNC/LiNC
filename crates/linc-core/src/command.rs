@@ -126,6 +126,10 @@ pub enum HalValue {
 }
 
 impl HalValue {
+    /// Which value type each output accepts. This is a `matches!` list rather
+    /// than three `match output` arms, so a new output that is missing here
+    /// compiles and then fails at runtime with `does not accept` - the reason
+    /// `every_declared_output_accepts_a_value_type` exists below.
     pub fn matches(self, output: LincOutput) -> bool {
         matches!(
             (self, output),
@@ -135,6 +139,7 @@ impl HalValue {
                 | (HalValue::Float(_), LincOutput::JogIncrement)
                 | (HalValue::Float(_), LincOutput::JogSpeed)
                 | (HalValue::Bit(_), LincOutput::MachineOff)
+                | (HalValue::Bit(_), LincOutput::NetworkSafe)
         )
     }
 }
@@ -403,6 +408,24 @@ mod tests {
         assert!(HalValue::Bit(true).matches(LincOutput::ToolChangeConfirm));
         assert!(HalValue::S32(54).matches(LincOutput::StatusDisplay));
         assert!(!HalValue::Float(1.0).matches(LincOutput::StatusDisplay));
+        // The interlock is a bit. Added after a deployed build rejected it with
+        // `linc.net-safe does not accept Bit(true)` and left the gate shut.
+        assert!(HalValue::Bit(true).matches(LincOutput::NetworkSafe));
+        assert!(!HalValue::S32(1).matches(LincOutput::NetworkSafe));
+    }
+
+    /// Every declared output must accept some value type. A new variant that is
+    /// missing from `HalValue::matches` compiles (that list is a `matches!`
+    /// macro, not an exhaustive match) and only fails at runtime, which is how
+    /// `net-safe` reached a machine without a working writer.
+    #[test]
+    fn every_declared_output_accepts_a_value_type() {
+        for output in LincOutput::ALLOWED {
+            let accepted = HalValue::Bit(false).matches(output)
+                || HalValue::S32(0).matches(output)
+                || HalValue::Float(0.0).matches(output);
+            assert!(accepted, "{output:?} accepts no value type");
+        }
     }
 
     /// The probe trip's machine-off response is a HAL bit under its own name.
