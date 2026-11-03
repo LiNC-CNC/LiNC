@@ -31,6 +31,12 @@ window_mode = "auto"
 # driving toward, the default) or "actual" (the feedback position, which is
 # what an operator compares against a cut).
 dro_position = "commanded"
+# How the keyboard legends name the keys: "panel" (the default) prints the CNC
+# panel's keycaps (MAIN, FILE, TOOL, PROBE, ▢). "pc" names the key a normal
+# keyboard sends in every legend; the navigation pairs it with the panel name
+# (MAIN · F5, FILE · F6, TOOL · F7, OFFS · F8), the other legends name just the
+# key (F6, F8, F10). The [keys] bindings do not change.
+keyboard = "panel"
 # Window-manager decorations. The control-panel setup is a borderless maximised
 # window: window_mode = "maximized" with decorations = false.
 decorations = true

@@ -10,14 +10,43 @@ pub(super) struct ShortcutGroup {
 }
 
 impl LincApp {
+    /// `[ui] keyboard = "pc"` asks for legends a normal keyboard can follow:
+    /// `F5`..`F8` on the navigation and `F10` for the view toggles, instead of
+    /// the CNC panel's printed keycaps (`MAIN`, `FILE`, `TOOL`, `PROBE`, `▢`).
+    /// The bindings are the same either way; only the labels change.
+    pub(crate) fn pc_keyboard(&self) -> bool {
+        self.profile.config.ui.keyboard == "pc"
+    }
+
     /// Keyboard commands available on the current page, grouped and titled for
     /// the sidebar. Rendered as hints only — they are not buttons.
     pub(super) fn key_hints(&self) -> Vec<ShortcutGroup> {
         let k = &self.prefs.keymap;
-        // The square is the key glyph for the view toggles: F10 alone flips
-        // SPLIT/CODE, Ctrl+F10 cycles the toolpath view. Both sit at the top of
-        // the pane so the display commands are the first things in reach.
-        let square = "\u{25a2}";
+        // The view toggles sit at the top of the pane so the display commands
+        // are the first things in reach: one key flips SPLIT/CODE and its Ctrl
+        // chord cycles the toolpath view. A panel prints both as the square
+        // glyph; a normal keyboard legend names the F-keys instead.
+        let pc = self.pc_keyboard();
+        let square = if pc {
+            k.program_cycle_view.label()
+        } else {
+            "\u{25a2}".to_string()
+        };
+        let view_cycle = if pc {
+            k.view_cycle.label()
+        } else {
+            format!("Ctrl+{square}")
+        };
+        let file_key = if pc {
+            k.program.label()
+        } else {
+            "FILE".to_string()
+        };
+        let offset_key = if pc {
+            k.offsets.label()
+        } else {
+            "OFFSET".to_string()
+        };
         // The lathe display toggles: the label names what the key does next, so
         // the pane reads as an action rather than as the current state.
         let lathe_hints: Vec<(String, &'static str)> =
@@ -55,14 +84,14 @@ impl LincApp {
             Page::Program => {
                 let mut view_items = vec![
                     (
-                        square.to_string(),
+                        square.clone(),
                         if self.program.view == ProgramView::Split {
                             "CODE"
                         } else {
                             "SPLIT"
                         },
                     ),
-                    (format!("Ctrl+{square}"), "VIEW"),
+                    (view_cycle.clone(), "VIEW"),
                     (k.graph_fit.label(), "FIT"),
                     (k.graph_clear.label(), "CLEAR TRAIL"),
                     (k.toggle_bounds.label(), "BOUNDS"),
@@ -87,7 +116,7 @@ impl LincApp {
                     program_items.push(("Ctrl+←/→".into(), "WORD"));
                 }
                 program_items.extend([
-                    ("FILE".into(), "BROWSER"),
+                    (file_key.clone(), "BROWSER"),
                     (k.program_run_from_line.label(), "RUN LINE"),
                     (k.goto_line.label(), "GOTO"),
                     // No MESSAGES key here: while the editor has the
@@ -110,7 +139,7 @@ impl LincApp {
                 // commands, plus the two program actions that do not need the
                 // editor in front (run from line and go to line).
                 let mut view_items = vec![
-                    (format!("Ctrl+{square}"), "VIEW"),
+                    (view_cycle.clone(), "VIEW"),
                     (k.graph_fit.label(), "FIT"),
                     (k.graph_clear.label(), "CLEAR TRAIL"),
                     (k.toggle_bounds.label(), "BOUNDS"),
@@ -119,7 +148,7 @@ impl LincApp {
                     // the following-error traces, and names what the next press
                     // brings back.
                     (
-                        square.to_string(),
+                        square.clone(),
                         if self.following.active {
                             "FEED"
                         } else {
@@ -161,7 +190,7 @@ impl LincApp {
                     groups.push(ShortcutGroup {
                         title: "PROGRAM",
                         items: vec![
-                            ("FILE".into(), "BROWSER"),
+                            (file_key.clone(), "BROWSER"),
                             (k.program_run_from_line.label(), "RUN LINE"),
                             (k.goto_line.label(), "GOTO"),
                             (k.messages.label(), "MESSAGES"),
@@ -209,7 +238,7 @@ impl LincApp {
                     title: "BROWSE",
                     items: vec![
                         ("\u{2190}/\u{2192}".into(), "PANE"),
-                        (square.to_string(), right_pane),
+                        (square.clone(), right_pane),
                         ("Enter".into(), enter),
                     ],
                 });
@@ -313,7 +342,7 @@ impl LincApp {
             },
             Page::Manual | Page::Homing => {
                 hints.push((k.graph_fit.label(), "FIT"));
-                hints.push((format!("Ctrl+{square}"), "VIEW"));
+                hints.push((view_cycle.clone(), "VIEW"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
                 hints.push((k.graph_clear.label(), "CLEAR TRAIL"));
                 hints.push((k.remaining.label(), "REMAINING"));
@@ -337,7 +366,7 @@ impl LincApp {
                 hints.push(("Arrows".into(), "SELECT"));
                 hints.push(("A".into(), "ACTIVATE"));
                 hints.push(("X/Y/Z".into(), "EDIT DRO"));
-                hints.push(("OFFSET".into(), "PROBE"));
+                hints.push((offset_key.clone(), "PROBE"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
                 hints.push((k.remaining.label(), "REMAINING"));
                 hints.push((k.view_pan_hint(), "PAN"));
@@ -354,7 +383,7 @@ impl LincApp {
                             ("Up/Down".into(), "TOPIC"),
                             ("Left/Right".into(), "PAGE"),
                             ("PgUp/PgDn".into(), "TABS"),
-                            ("OFFSET".into(), "NEXT TAB"),
+                            (offset_key.clone(), "NEXT TAB"),
                             (k.back.label(), "OFFSETS"),
                         ],
                     }),
@@ -367,7 +396,7 @@ impl LincApp {
                             ("Ctrl+P".into(), "DIMENSIONS"),
                             ("Ctrl+R".into(), "RESET CAL"),
                             ("PgUp/PgDn".into(), "TABS"),
-                            ("OFFSET".into(), "NEXT TAB"),
+                            (offset_key.clone(), "NEXT TAB"),
                             (k.back.label(), "OFFSETS"),
                         ],
                     }),
@@ -385,7 +414,7 @@ impl LincApp {
                         items.extend([
                             ("X/Y/Z".into(), "EDIT VISIBLE DRO"),
                             ("PgUp/PgDn".into(), "TABS"),
-                            ("OFFSET".into(), "NEXT TAB"),
+                            (offset_key.clone(), "NEXT TAB"),
                             (k.back.label(), "OFFSETS"),
                         ]);
                         groups.push(ShortcutGroup {

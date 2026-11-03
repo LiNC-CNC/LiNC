@@ -137,6 +137,9 @@ pub fn page_from_name(name: &str) -> Option<Page> {
 /// seven, so the operator can reach the diagnostics and help pages with the
 /// arrows and Enter as well as with their `[keys]` chords (Ctrl+D, Ctrl+H).
 /// They draw as one-line rows without an icon (see [`NAV_PRIMARY`]).
+///
+/// The keycap is the panel's printed label; [`nav_keycap`] swaps it for the
+/// binding a normal keyboard sends when the profile asks for PC legends.
 pub const NAV_ITEMS: [(Page, &str, &str); 6] = [
     (Page::Machine, "MACHINE", "MAIN"),
     (Page::Program, "PROGRAM", "FILE"),
@@ -145,6 +148,28 @@ pub const NAV_ITEMS: [(Page, &str, &str); 6] = [
     (Page::Diagnostics, "DIAG", "Ctrl+D"),
     (Page::Help, "G-CODE", "Ctrl+H"),
 ];
+
+/// The key hint a navigation row prints.
+///
+/// `[ui] keyboard = "panel"` keeps the CNC panel's printed keycaps; `"pc"`
+/// pairs the panel name with the binding a normal keyboard sends
+/// (`MAIN · F5`), so an operator on an ordinary keyboard can read both. The
+/// OFFSETS row prints `PROBE` on the panel, but `PROBE · F8` is too wide for
+/// the pill, so its PC legend abbreviates to `OFFS · F8`. DIAG and G-CODE
+/// already print their chords and are left alone either way.
+fn nav_keycap(app: &LincApp, page: Page, panel: &str) -> String {
+    if !app.pc_keyboard() {
+        return panel.to_string();
+    }
+    let (name, binding) = match page {
+        Page::Machine => (panel, app.prefs.keymap.machine.label()),
+        Page::Program => (panel, app.prefs.keymap.program.label()),
+        Page::Tools => (panel, app.prefs.keymap.tools.label()),
+        Page::Offsets => ("OFFS", app.prefs.keymap.offsets.label()),
+        _ => return panel.to_string(),
+    };
+    format!("{name} · {binding}")
+}
 
 /// The navigation rows that carry an icon and a two-line label.
 ///
@@ -505,6 +530,9 @@ impl LincApp {
             else {
                 continue;
             };
+            // Copied out of the const: the row prints either the panel keycap
+            // or the binding a normal keyboard sends.
+            let keycap = nav_keycap(self, *page, keycap);
             // TOUCH PROBE is a subpage of OFFSETS; keep the parent marked in
             // the sidebar instead of leaving no entry highlighted.
             let selected =
@@ -585,7 +613,7 @@ impl LincApp {
                 painter.text(
                     egui::pos2(label_x, rect.center().y + 7.0),
                     Align2::LEFT_CENTER,
-                    *keycap,
+                    keycap.as_str(),
                     FontId::monospace(theme::font_size(8.5)),
                     if selected {
                         Color32::from_rgb(0x0b, 0x17, 0x22)
@@ -600,7 +628,7 @@ impl LincApp {
                 painter.text(
                     egui::pos2(rect.right() - 12.0, rect.center().y),
                     Align2::RIGHT_CENTER,
-                    *keycap,
+                    keycap.as_str(),
                     FontId::monospace(theme::font_size(8.5)),
                     if selected {
                         Color32::from_rgb(0x0b, 0x17, 0x22)

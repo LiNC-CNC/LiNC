@@ -195,9 +195,7 @@ fn diagnostics_tabs_draw_text_strips_and_their_own_bodies() {
     // OVERVIEW keeps the concise live link pane and loses the removed panes.
     harness.app.diagnostics.tab = DiagnosticsTab::Overview;
     let texts = painted_text(&harness.frame_full(Vec::new()));
-    assert!(texts
-        .iter()
-        .any(|(text, _)| text == "RS-485 / VIRTUAL LINK"));
+    assert!(texts.iter().any(|(text, _)| text == "PANEL"));
     for gone in ["PANEL SUMMARY", "MOTION HEALTH"] {
         assert!(!texts.iter().any(|(text, _)| text == gone));
     }
@@ -1255,6 +1253,89 @@ fn the_navigation_is_compact_and_lists_six_pages() {
     assert_eq!(harness.app.nav.page, Page::Diagnostics);
     harness.frame_with(&[(egui::Key::H, ctrl())]);
     assert_eq!(harness.app.nav.page, Page::Help);
+}
+
+/// `[ui] keyboard = "pc"` names the F-keys in the navigation and in every
+/// keyboard legend; the default keeps the panel's printed keycaps and square.
+#[test]
+fn pc_keyboard_legends_name_f_keys_and_panel_legends_stay_default() {
+    let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::On);
+    harness.app.set_page(Page::Machine);
+    let texts = painted_text(&harness.frame_full(Vec::new()));
+    // Panel legends: the four nav keycaps, the FILE hint and the view toggles.
+    for label in ["MAIN", "FILE", "TOOL", "PROBE", "\u{25a2}", "Ctrl+\u{25a2}"] {
+        assert!(
+            texts.iter().any(|(text, _)| text == label),
+            "{label} missing from the panel legends"
+        );
+    }
+
+    harness.app.profile.config.ui.keyboard = "pc".to_string();
+    let texts = painted_text(&harness.frame_full(Vec::new()));
+    // The same hints, with the panel name and the key a normal keyboard sends.
+    for label in [
+        "MAIN · F5",
+        "FILE · F6",
+        "TOOL · F7",
+        "OFFS · F8",
+        "F10",
+        "Ctrl+F10",
+    ] {
+        assert!(
+            texts.iter().any(|(text, _)| text == label),
+            "{label} missing from the PC legends"
+        );
+    }
+    for gone in ["MAIN", "FILE", "TOOL", "PROBE"] {
+        assert!(
+            !texts
+                .iter()
+                .any(|(text, rect)| text == gone && rect.left() < theme::NAV_WIDTH),
+            "{gone} still painted in the navigation with [ui] keyboard = \"pc\""
+        );
+    }
+    // Only the navigation pairs a panel name with its key, because the name is
+    // what makes the row self-documenting. Every other legend names just the
+    // key: the shortcut list reads `F6`, not `FILE · F6`.
+    for paired in ["MAIN · F5", "FILE · F6", "TOOL · F7", "OFFS · F8"] {
+        assert!(
+            texts
+                .iter()
+                .any(|(text, rect)| text == paired && rect.left() < theme::NAV_WIDTH),
+            "{paired} missing from the navigation"
+        );
+        assert!(
+            !texts
+                .iter()
+                .any(|(text, rect)| text == paired && rect.left() >= theme::NAV_WIDTH),
+            "{paired} is a navigation legend, not a keyboard one"
+        );
+    }
+    // The shortcut list renames the panel key, not the legend: it reads `F6`
+    // where the panel keycap says FILE. The list can sit below the pane's
+    // scroll, so ask the hints rather than the painted frame.
+    let keys: Vec<String> = harness
+        .app
+        .key_hints()
+        .iter()
+        .flat_map(|group| group.items.iter().map(|(key, _)| key.clone()))
+        .collect();
+    assert!(keys.iter().any(|key| key == "F6"), "{keys:?}");
+    assert!(!keys.iter().any(|key| key == "FILE"), "{keys:?}");
+    assert!(!texts.iter().any(|(text, _)| text == "FILE"));
+    assert!(
+        !texts.iter().any(|(text, _)| text == "\u{25a2}"),
+        "the square glyph is still painted with [ui] keyboard = \"pc\""
+    );
+
+    // The probe page's own next-tab pill follows the same legend.
+    harness.app.set_page(Page::Probe);
+    let texts = painted_text(&harness.frame_full(Vec::new()));
+    assert!(texts.iter().any(|(text, _)| text == "NEXT TAB"));
+    assert!(!texts.iter().any(|(text, _)| text == "OFFSET NEXT"));
+    harness.app.profile.config.ui.keyboard = "panel".to_string();
+    let texts = painted_text(&harness.frame_full(Vec::new()));
+    assert!(texts.iter().any(|(text, _)| text == "OFFSET NEXT"));
 }
 
 /// INC shows the steps and takes their numbers; JOG is continuous and MPG

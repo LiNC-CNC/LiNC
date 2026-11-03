@@ -21,6 +21,10 @@ max_axes = 5
 window_title = "LiNC - BaierMill Simulation"
 scale = "1.0"
 servo_load = ["X", "Y", "Z", "S"]
+# Pair the navigation keycaps with the keys a normal keyboard sends
+# (MAIN · F5 .. OFFS · F8, F10 for the view toggle) instead of the simulated
+# panel's printed keycaps alone.
+keyboard = "pc"
 
 [panel]
 kind = "simulated"

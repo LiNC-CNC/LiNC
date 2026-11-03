@@ -145,6 +145,12 @@ pub struct UiConfig {
     /// operator compares against a cut). Defaults to `"commanded"`.
     #[serde(default = "default_dro_position")]
     pub dro_position: String,
+    /// How the keyboard legends name the keys: `"panel"` (the default) prints
+    /// the CNC panel's keycaps (`MAIN`, `FILE`, `TOOL`, `PROBE`, `▢`), `"pc"`
+    /// prints what a normal keyboard sends (`F5`..`F8`, `F10`). The bindings
+    /// themselves do not change.
+    #[serde(default = "default_keyboard")]
+    pub keyboard: String,
 }
 
 fn default_window_mode() -> String {
@@ -153,6 +159,10 @@ fn default_window_mode() -> String {
 
 fn default_dro_position() -> String {
     "commanded".to_string()
+}
+
+fn default_keyboard() -> String {
+    "panel".to_string()
 }
 
 fn default_true() -> bool {
@@ -1098,6 +1108,12 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
             config.ui.dro_position
         )));
     }
+    if !matches!(config.ui.keyboard.as_str(), "panel" | "pc") {
+        return Err(ConfigError::Invalid(format!(
+            "ui.keyboard must be panel or pc (got {:?})",
+            config.ui.keyboard
+        )));
+    }
     if config.machine.name.trim().is_empty() {
         return Err(ConfigError::Invalid(
             "machine.name must not be empty".into(),
@@ -2029,6 +2045,47 @@ enabled = true
         write(&profile, &profile_text("feedback"));
         let error = Profile::load(&profile, None).unwrap_err();
         assert!(error.to_string().contains("ui.dro_position"), "{error}");
+    }
+
+    #[test]
+    fn keyboard_accepts_panel_or_pc() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let profile = dir.path().join("sim.toml");
+        let profile_text = |keyboard: &str| {
+            format!(
+                r#"schema_version = 1
+profile = "sim"
+extends = "base.toml"
+[machine]
+name = "Test"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[ui]
+keyboard = "{keyboard}"
+[panel]
+kind = "simulated"
+driver = "cnc-panel-sim"
+[panel.link]
+kind = "virtual"
+[simulation]
+enabled = true
+"#
+            )
+        };
+        // The two accepted names load; anything else fails validation naming
+        // the key.
+        write(&profile, &profile_text("panel"));
+        let loaded = Profile::load(&profile, None).unwrap();
+        assert_eq!(loaded.config.ui.keyboard, "panel");
+        write(&profile, &profile_text("pc"));
+        let loaded = Profile::load(&profile, None).unwrap();
+        assert_eq!(loaded.config.ui.keyboard, "pc");
+        write(&profile, &profile_text("qwerty"));
+        let error = Profile::load(&profile, None).unwrap_err();
+        assert!(error.to_string().contains("ui.keyboard"), "{error}");
     }
 
     #[test]

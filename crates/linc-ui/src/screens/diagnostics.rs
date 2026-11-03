@@ -262,7 +262,7 @@ fn link_strip(app: &LincApp, ui: &mut Ui) {
     compact_rows(ui);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 14.0;
-        theme::section_header(ui, "RS-485 / VIRTUAL LINK");
+        theme::section_header(ui, "PANEL");
         pair(ui, "TRANSPORT", transport.clone());
         // A virtual or HAL transport names itself twice; one field is enough.
         let port = link.port.trim();

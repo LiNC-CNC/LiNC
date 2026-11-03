@@ -612,6 +612,27 @@ offset to it, so the two frames stay consistent. Distance-to-go always stays the
 controller's own value. `--check-config` rejects any value other than the two
 names.
 
+### Keyboard legends
+
+`[ui] keyboard` chooses how the legends name the keys. `"panel"` (the default)
+prints the CNC panel's keycaps: `MAIN`, `FILE`, `TOOL`, `PROBE` on the navigation
+rows and `▢` / `Ctrl+▢` for the view toggles in the `SHORTCUTS` pane. `"pc"`
+names the key a normal keyboard sends in every legend. On the navigation rows
+that is paired with the panel name (`MAIN · F5`, `FILE · F6`, `TOOL · F7`,
+`OFFS · F8`), because the name is what makes the row self-documenting; every
+other legend names just the key (`F6`, `F8`, `F10` / `Ctrl+F10`). `OFFS` is
+the short form of the row's panel label `PROBE`, which is too wide beside the
+key:
+
+```toml
+[ui]
+keyboard = "pc"
+```
+
+The bindings do not change: the panel's navigation keys already send `F5` to
+`F10`, and `[keys]` still rebinds them. Only the printed labels follow this key.
+`--check-config` rejects any value other than the two names.
+
 ## 10. Schema reference
 
 | Table | Keys |
@@ -620,7 +641,7 @@ names.
 | `[machine]` | `name`, `kind`, `gui`, `linuxcnc_ini` |
 | `[mill]` | optional `max_axes` |
 | `[lathe]` | optional `turret_stations`, `power_turret`, `live_tooling`, `live_tool_max_rpm`, `c_axis`, `y_axis`, `sub_spindle` |
-| `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages`, `servo_load`, `window_mode`, `decorations`, `dro_position` |
+| `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages`, `servo_load`, `window_mode`, `decorations`, `dro_position`, `keyboard` |
 | `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width` |
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running`, `show_parent_above_root` |
 | `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter` |

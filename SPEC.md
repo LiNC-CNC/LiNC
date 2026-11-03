@@ -47,7 +47,7 @@ Available navigation keys:
 | `FILE` | `F6` | Program page; press again for the Files browser, and again to return |
 | `TOOL` | `F7` | Tools page |
 | `OFFSET` | `F8` | Offsets page |
-| `WIN` | `F10` | Toggle `SPLIT`/`CODE` on the Program page, shown as `▢` in the sidebar shortcuts; `Ctrl+▢` cycles the toolpath view |
+| `WIN` | `F10` | Toggle `SPLIT`/`CODE` on the Program page, shown as `▢` in the sidebar shortcuts on a panel legend, or `F10` when `[ui] keyboard = "pc"`; `Ctrl+▢` / `Ctrl+F10` cycles the toolpath view |
 | `ESC` | `Esc` | Back / cancel / close detail |
 | `Ctrl+D` | `Ctrl+D` | Diagnostics (unless the editable Program editor uses it for duplicate line) |
 | `Ctrl+H` | `Ctrl+H` | G-code Help |
@@ -131,7 +131,13 @@ A page-local binding is only listed in the sidebar's `SHORTCUTS` pane while its
 page is in front (the pane scrolls when a page has more commands than the
 sidebar holds); nav keys are never listed. The list is grouped by purpose
 (`VIEW`, `PROGRAM`) with half a text line between entries; the view toggles read
-`▢` and `Ctrl+▢`. The bottom bar carries only live machine state.
+`▢` and `Ctrl+▢` on a panel, or `F10` and `Ctrl+F10` when `[ui] keyboard =
+"pc"` names the keys a normal keyboard sends (see CONFIGURATION §9). Only the
+navigation pairs a name with its key, `MAIN · F5`, `FILE · F6`, `TOOL · F7`,
+`OFFS · F8`, because the name is what makes the row self-documenting; every
+other legend names just the key. The bindings never change: the panel's keys
+already send those function keys. The bottom bar carries only live machine
+state.
 
 While a dialog or the manual tool-change prompt is open it owns the keyboard:
 its focused buttons and fields handle Enter, arrows and typing, the shell keeps
@@ -1031,7 +1037,7 @@ Read-only detail view. Tabs:
 
 | Tab | Content |
 |---|---|
-| Overview | Health cards, active alarms/messages, RS-485 / virtual link summary with live counters |
+| Overview | Health cards, active alarms/messages, panel link summary with live counters |
 | Logs | Searchable event history, severity/source filters, export/copy |
 | HAL / NML | NML channel status line, HAL browser: pins grouped by component with type, direction, value and signal, signal list, filter |
 | Turret / Live Tool | Turret station, clamp/index state, live-tool drive, RPM/direction, axial/radial, C-axis |

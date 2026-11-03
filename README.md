@@ -1,160 +1,183 @@
 # LiNC
 
-LiNC is a Rust `egui` HMI for LinuxCNC, designed for a machine with:
+LiNC is a control station for LinuxCNC machines, written in Rust with the
+`egui` toolkit. It is built for a mill or lathe that has a real CNC control
+panel, and it treats that panel as the machine's controls: the software shows
+you what the machine is doing and lets you load, edit and check work, while
+starting and stopping the spindle stays where an operator's hand expects it.
 
-- a **CNC control panel** connected over RS-485, driven by LiNC's
-  `linc-panel` service
-- a **QMK Syntec-style CNC keyboard** defined in
-  `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/keymap.c`
-- an **on-screen panel alternative**: when a machine has no physical CNC
-  panel, `linc-panel`'s simulator driver presents the same panel in its own
-  window; it is a panel surface, never an HMI page
-- FANUC / SYNTEC / Siemens-inspired information architecture, without copying
-  any vendor's proprietary artwork
+It runs on the machine controller itself. There is no helper process, no Python
+runtime and no web service between the screen and LinuxCNC; the HMI talks to
+LinuxCNC through its NML channels in the same process.
 
-The product name is **LiNC**; the executable, Rust workspace crates and HAL
-component use the lowercase identifier `linc`. The specification and accepted
-SVG mockups are in this directory; the Rust implementation is in `crates/`.
+The project is unusual in one more way: it is developed against a BaierMill
+milling machine and its panel, so the screens are exercised on a real machine
+rather than only in the simulator.
+
+## What makes it different
+
+**The panel is the control surface, and LiNC respects that.** There is no
+software E-stop, no software jog button, no feed override slider and no mode
+switch on screen. Those belong to the panel, so a second copy on a touch screen
+cannot drift out of agreement with the hardware. Where the software must send a
+machine command — a tool change, an MDI block, a probing cycle — it says so
+explicitly instead of pretending to be a jog button.
+
+**MDI is a working area, not a text box.** The MDI pane keeps a list of the
+blocks you have issued, holds focus in the input, and draws the block you are
+typing on the machine's toolpath before you send it. The preview understands
+`G91`, so a relative move is drawn where it will go. If the block would
+leave the machine's travel envelope, the frame turns red and the limit is named
+in the result line: the block is refused rather than sent and clipped.
+
+**The toolpath tells you what the machine will do.** The loaded program is drawn
+in program colours, and the part of it that runs outside the machine's travel
+limits is drawn solid red. The live trail is a separate green line, so "where the
+tool has been" and "what the program says" never get mixed up. While the head
+moves, the view follows it; when the head is still, the view stays where you put
+it, so you can zoom into another part of the program without being pulled back.
+
+**Touch probing is a guided workflow.** Choose a category, pick an illustrated
+operation, adjust clearance, feed and tip values, then run it. The probing math
+is not reinvented: the Probe Basic G-code routines are shipped with LiNC and
+called as they are, and the results come back into the screen.
+
+**Tool changes do not need MDI.** Select a row in the tool table and press
+change; LiNC issues the tool change for you, and the manual case asks you to
+install the tool and confirm it.
+
+**The editor checks work before the machine sees it.** The Program page doubles
+as a G-code editor with syntax highlighting, undo and redo, find, unsaved-change
+state and a live preview. An edit updates the drawing only after it parses, and
+saving is refused while a program runs or the machine is in program protect.
+
+**G-code help is on the machine, offline.** A searchable reference for LinuxCNC
+G-codes, M-codes, parameters and units, with per-code detail pages. It works
+with no network and stays readable while a program runs.
+
+**The network can be taken away from the machine while it cuts.** On a machine
+whose only network link is WiFi, LiNC can hold that link down whenever a program
+is loaded or MDI is selected, and hand it back when you unload. This keeps WiFi
+latency and driver interrupt storms out of the realtime path. The `NET` field in
+the top bar always says what the link is doing, and `Ctrl+U` on the Program page
+unloads the program and gives the link back. Machines without this configured
+behave exactly as before, with the interlock switched off.
+
+**One shell for a mill and a lathe.** Axis count comes from the LinuxCNC INI
+file, so a 3-axis mill, a 4-axis mill and an X/Z lathe with live tooling and a
+turret are the same program with different profiles.
+
+**It is a keyboard machine.** LiNC is designed for a QMK keyboard with labelled
+keys: `MAIN`, `FILE`, `TOOL`, `OFFSET`, arrows, `Enter`, `Esc`. There are no
+F-softkeys to memorise, and every on-screen action can also be reached with the
+arrow keys and `Enter`.
+
+## Rules the software keeps
+
+These are not preferences; they are the behaviours the screens are built
+around, and each one exists to keep the software and the machine in agreement.
+
+- **No software machine controls.** No jog, no cycle start, no override slider,
+  no software E-stop. The panel owns them. The exceptions are explicit commands
+  the operator asks for by name: an MDI block, a tool change, a probe cycle.
+- **Program protect is a lock.** While the panel's protect switch is on, LiNC
+  cannot save G-code, write offsets or the tool table, import files or apply
+  probe results. Unsaved edits are kept, read-only, instead of being thrown
+  away. If the switch state is unknown or stale, the software assumes it is on.
+- **Homing belongs to the panel.** HOME mode shows what each axis is doing, and
+  the panel's rapid and axis keys do the homing. PROG.HOME sends the
+  `G0 X0 Y0 Z0` style move that LinuxCNC already defines; the HMI does not
+  intercept either.
+- **The pendant only jogs.** A WHB04B-6 handwheel moves the machine in JOG mode;
+  its mode, cycle, spindle, coolant, override, program and macro controls are
+  ignored.
+- **Red means outside the machine.** Any part of the loaded path outside the
+  travel envelope from the INI file is drawn solid red, and an MDI block that
+  would leave it is refused before it is sent.
 
 ## Screenshots
 
-Live captures from the simulator at 1600×1000, with the demo mill part loaded.
-Click any image for the full-size PNG.
+These are captures of the current build in the simulator, at 1600×1000, with the
+demonstration part loaded. Click any image to open the full-size PNG.
 
-| **CNC Control Panel** (separate window) | **MDI** |
+| **CNC control panel** (separate window) | **MDI** |
 |:---:|:---:|
-| [![Simulator CNC control panel: power, E-stop, mode and override dials, status lamps and 7-segment displays](docs/screenshots/panel.png)](docs/screenshots/panel.png) | [![MDI pane: issued blocks, the block being edited and its toolpath preview](docs/screenshots/mdi.png)](docs/screenshots/mdi.png) |
+| [![The simulated control panel: power keys, E-stop, mode and override dials, status lamps and 7-segment displays](docs/screenshots/panel.png)](docs/screenshots/panel.png) | [![The MDI pane: issued blocks in the buffer, the block being edited and its toolpath preview on the machine page](docs/screenshots/mdi.png)](docs/screenshots/mdi.png) |
 | **Machine** | **Program** |
-| [![Machine dashboard: DRO, toolpath and program preview](docs/screenshots/machine.png)](docs/screenshots/machine.png) | [![Program page: G-code and live toolpath preview](docs/screenshots/program.png)](docs/screenshots/program.png) |
+| [![The machine page: digital readout, toolpath with the live trail, program listing, feed and spindle, servo load](docs/screenshots/machine.png)](docs/screenshots/machine.png) | [![The program page: G-code beside the toolpath preview](docs/screenshots/program.png)](docs/screenshots/program.png) |
 | **Tools** | **Offsets** |
-| [![Tool table](docs/screenshots/tools.png)](docs/screenshots/tools.png) | [![Work offsets](docs/screenshots/offsets.png)](docs/screenshots/offsets.png) |
-| **Diagnostics** | **G-code Help** |
-| [![Diagnostics overview](docs/screenshots/diagnostics.png)](docs/screenshots/diagnostics.png) | [![G-code help index](docs/screenshots/help.png)](docs/screenshots/help.png) |
-| **Touch Probe** | **Files** |
-| [![Touch probe: illustrated routines, parameters and results](docs/screenshots/probe.png)](docs/screenshots/probe.png) | [![Files: USB media beside NC_FILES](docs/screenshots/files.png)](docs/screenshots/files.png) |
+| [![The tool table with offsets, diameters and descriptions](docs/screenshots/tools.png)](docs/screenshots/tools.png) | [![Work offsets: coordinate systems, rotation and the part preview](docs/screenshots/offsets.png)](docs/screenshots/offsets.png) |
+| **Diagnostics** | **G-code help** |
+| [![The diagnostics page: control, panel link, NML and motion health, with active alarms and messages](docs/screenshots/diagnostics.png)](docs/screenshots/diagnostics.png) | [![The G-code help index, with a code selected and its parameters listed](docs/screenshots/help.png)](docs/screenshots/help.png) |
+| **Touch probe** | **Files** |
+| [![The touch probe page: probing parameters, illustrated routines and results](docs/screenshots/probe.png)](docs/screenshots/probe.png) | [![The files page: removable USB media beside the NC files directory](docs/screenshots/files.png)](docs/screenshots/files.png) |
 
-## Build and run
+## Try it
+
+The simulator needs LinuxCNC's development files and a C++ compiler, because the
+native backend is linked even when the simulator is selected.
 
 ```sh
 cargo build --release
 ./scripts/start-sim.sh          # foreground; Ctrl+C stops the session
 ./scripts/start-sim.sh --detach # background
 ./scripts/stop-sim.sh
+```
 
-# ready to run: released E-stop, powered on, homed, demo part loaded, window
-# floated at 1280x720 for Hyprland
+A session starts the way a real cabinet is found: emergency stop latched and
+power off. Ask for the rest in steps:
+
+```sh
+# released E-stop, powered on, homed, demo part loaded, window floated
 ./scripts/start-sim.sh --detach --release-estop --power-on --home --load --float
 
 # lathe simulation: same lifecycle and flags, its own profile and INI
 ./scripts/start-lathe-sim.sh --detach --release-estop --power-on --home
 ```
 
-The native LinuxCNC backend links `liblinuxcnc`/`libnml` and the sibling
-`../linuxcnc-nml` crate, so `cargo build` needs the LinuxCNC development files
-and a C++ compiler. The simulator uses `SimBackend` at runtime but the binary
-still links NML.
+Each flag implies the step before it, because the mushroom and POWER ON belong
+to the panel and the software must not press them behind its back. If a step
+does not happen, `scripts/sim-ready.py` prints the HAL pins holding it.
 
-`start-sim.sh` launches a real LinuxCNC process with the in-repo simulation
-HAL (`hal/rio_sim.hal`) and the LiNC HMI/panel pair. `start-lathe-sim.sh` is
-the lathe sibling: it runs `configs/lathe-sim.ini` against Probe Basic's
-simulated lathe HAL (a `../probe_basic_dev` checkout) and shares the mill
-script's lifecycle, so `stop-sim.sh` stops either. The lathe session loads
-the simulator panel (`[simulation] panel_window`) with the lathe face, and
-`hal/linc-lathe.hal` wires the lathe-relevant controls — power, E-stop,
-AUTO/MDI/JOG, cycle start/pause, X/Z jog, the spindle (the SPD.2.*
-second-spindle column appears only with `[lathe] sub_spindle = true`), the
-feed brake and their lamps; the remaining machine I/O is unwired and greyed. The cabinet
-still boots the
-way a real one is found — E-stop latched, power off — unless you ask for more:
-`--release-estop`, `--power-on`, `--home`, `--load [FILE]` and `--float` each
-imply the step before, because the E-stop mushroom and POWER ON belong to the
-panel and cannot be pressed behind its back. The panel releases the mushroom
-itself; the controller's reset is queued on LinuxCNC's command channel after a
-short settle, since the panel's HAL pulse at boot can arrive before the task is
-ready to take it (which left the panel showing the mushroom out and the HMI
-still showing E-STOP). If a step does not happen, `sim-ready` prints the HAL
-pins that are holding it. The HMI enforces a minimum 1280×720 window,
-scales proportionally above it, and preserves the SVG font ratios. `linc --check-config --config configs/baiermill-pb.toml`
-validates a profile, its LinuxCNC INI, the probe bundle it resolves and the
-safety policy without opening the display or HAL.
+To check a profile without opening a window or touching HAL:
 
-## Simulation AppImage
+```sh
+linc --config configs/baiermill-pb.toml --check-config
+```
+
+## Demo AppImage
 
 `scripts/build-appimage.sh` builds a self-contained demo for a desktop with no
-LinuxCNC, HAL or serial panel. It starts the HMI and the simulated control panel
-as two windows and uses the embedded `SimBackend` and demo program.
+LinuxCNC, no HAL and no panel. It starts the HMI and the simulated panel as two
+windows and uses the built-in simulator and demo program.
 
 ```sh
 scripts/build-appimage.sh
 ./target/appimage/LiNC-0.1.0-x86_64.AppImage
 ```
 
-The HMI is built with `--no-default-features`, which drops the native NML client,
-so the archive needs only glibc. When `zig` is installed the script links against
-glibc 2.36; `--native` builds against the host instead. `appimagetool` is
-downloaded on first use. This is the demo build: it does not connect to a
-machine, a real LinuxCNC session or the panel's RS-485 link.
+The HMI is built here without the native NML client, so the archive needs only
+glibc. With `zig` installed the script links against glibc 2.36; `--native` uses
+the host toolchain instead. This build is a demonstration: it does not connect to
+a machine, a real LinuxCNC session or the panel's serial link.
 
-## Configuration
+## Installing on a machine
 
-The HMI is configured per machine, with explicit profile selection:
+LiNC is configured per machine, and the profile is chosen explicitly — nothing
+is discovered by looking around the filesystem.
 
 | Profile | File |
 |---|---|
 | Shared defaults | `configs/base.toml` |
-| BaierMill mill simulation | `configs/sim.toml` |
-| BaierMill physical mill | `configs/baiermill-pb.toml` (LiNC's reviewed machine configuration) |
-| BaierMill physical mill, machine's own INI | `configs/baiermill.toml` (fails `--check-config`: no probe bundle) |
+| Mill simulation | `configs/sim.toml` |
+| BaierMill physical mill | `configs/baiermill-pb.toml` |
 | Lathe simulation | `configs/lathe-sim.toml` |
 
-The machine profile points at the LinuxCNC INI, which remains authoritative for
-travel, velocities, units, spindle/ATC data and the tool table. The panel
-driver code is part of LiNC and runs as the supervised `linc-panel` service; the
-egui HMI never opens the serial port. `linc-panel` exposes `cnc_panel.*`, and
-LiNC writes only its declared `linc.*` HAL outputs.
+The profile points at the LinuxCNC INI file, which stays authoritative for
+travel, velocities, units, spindle and ATC data and the tool table. LiNC reads
+the INI; it does not replace it.
 
-```sh
-./scripts/start-sim.sh                       # real LinuxCNC + sim HAL
-linc --config configs/baiermill-pb.toml      # physical machine / its display entry
-```
-
-See [`CONFIGURATION.md`](CONFIGURATION.md) for the merge rules, schema, safety
-policy and launch integration.
-
-`[ui] scale` is a multiplier on the 1280×720 baseline: `"auto"`/`"1.0"` is the
-design size, and `"0.8"`, `"80%"` or `"1.25x"` force a factor in `0.5..3.0`.
-The shell scales itself from the physical viewport, so desktop HiDPI scaling
-does not shrink the text. Settings shows the configured value and offers a
-temporary runtime override. The HMI enforces a 1280×720 minimum window size.
-The standalone simulation panel uses `[simulation] panel_scale` independently.
-
-## Architecture
-
-The LinuxCNC backend runs behind the typed `MachineBackend` boundary. The
-current HMI is an in-process `NmlBackend`: `linuxcnc-nml` owns `emcStatus`,
-`emcCommand` and `emcError`, and the read-only `HalReader` reads panel and
-spindle pins. There is no helper process, JSON protocol or Python runtime on the
-control path. See [`docs/architecture.md`](docs/architecture.md) for the
-implemented path, the removed Python helper, and the alternatives that were
-rejected. For a visual walkthrough, open the self-contained
-[HTML architecture guide](docs/architecture.html).
-
-The native NML client links `liblinuxcnc`/`libnml`, so a build needs the
-LinuxCNC development files and the sibling `../linuxcnc-nml` checkout. The
-panel service remains a separate process and the only owner of
-`/dev/ttyUSB0`.
-
-## HAL integration
-
-The HAL wiring is included:
-
-| File | Purpose |
-|---|---|
-| `hal/linc.hal` | Core pre-GUI wiring: panel service, modes, cycle, jog, spindle, coolant, homing, overrides and panel LEDs |
-| `hal/linc-postgui.hal` | Post-GUI wiring for `linc.status-display`, `linc.tool-change-confirm` and `linc.hmi-alive` |
-| `hal/linc-pendant.hal` | Optional real-machine WHB04B-6 jog-only wiring |
-
-Use:
+Three files wire LiNC into LinuxCNC:
 
 ```ini
 [HAL]
@@ -163,159 +186,73 @@ HALFILE = /home/jack/CNC/LiNC/hal/linc-pendant.hal   ; real machine only
 POSTGUI_HALFILE = /home/jack/CNC/LiNC/hal/linc-postgui.hal
 ```
 
-`LINC_CONFIG` must name the same profile used by the `linc` display:
+`LINC_CONFIG` must name the same profile that the `linc` display uses:
 
 ```sh
 export LINC_CONFIG=/home/jack/CNC/LiNC/configs/baiermill-pb.toml
 linc --config "$LINC_CONFIG"
 ```
 
-The core HAL expects the generic `cnc_panel` component and pins. The live
-machine HAL must rename or alias the legacy panel component before using this
-file unchanged.
+The HMI writes only the HAL outputs it declares: `linc.hmi-alive`,
+`linc.tool-change-confirm`, `linc.status-display`, `linc.jog-increment`,
+`linc.jog-speed`, `linc.machine-off` and `linc.net-safe`. There is no API for
+writing an arbitrary pin.
 
-## 3D machine simulator (`linc-sim3d`)
+The machine's LinuxCNC HAL must provide the `cnc_panel` component that
+`hal/linc.hal` expects, or alias its own panel component to that name.
 
-`crates/linc-sim3d` is a small 3D simulator that stands in for the BaierMill so
-touch probing can be tested without a machine. It models the body, the probe and
-the cutters, loads STEP workpieces, and publishes probe contact on the
-`linc-sim3d` HAL component; `hal/linc-sim3d.hal` ORs it with the panel's PROBE
-key into `motion.probe-input`. Cutting material is **not** simulated.
+## Configuration
+
+`CONFIGURATION.md` documents the profile format, the merge rules (`extends`
+resolves the whole chain), the safety policy and the launch integration. The
+short version:
+
+- `[ui] scale` multiplies the 1280×720 design size. `"auto"` and `"1.0"` are the
+  design size; `"0.8"`, `"80%"` and `"1.25x"` force a factor between 0.5 and 3.0.
+  The shell scales from the physical viewport, so desktop HiDPI settings do not
+  shrink the text. The window never goes below 1280×720.
+- `[network]` is optional. It names one external interface — the WiFi radio or a
+  second network card, never the machine's fieldbus — and holds it down while
+  the machine can move. The section is off unless a profile enables it.
+- `[loobric]` is optional. It syncs the tool table with a Loobric server using
+  the official Python client, waits for an idle machine and reports its result
+  on the Tools page. See [`docs/loobric.md`](docs/loobric.md).
+
+## Testing probes without a machine
+
+`crates/linc-sim3d` models the machine body, the probe and the cutters, loads
+STEP workpieces and publishes probe contact on its own HAL component. Cutting
+material is not simulated.
 
 ```sh
-./target/debug/linc-sim3d --config configs/sim3d.toml   # the 3D window, jogged from the panel
-./target/debug/linc-sim3d --hal                         # HAL component + the window
+./target/debug/linc-sim3d --config configs/sim3d.toml   # window, jogged from the panel
+./target/debug/linc-sim3d --hal                         # HAL component and window
 ./target/debug/linc-sim3d --selftest                    # probe sweep, PASS/FAIL lines
 ```
 
-`--hal` is the mode `scripts/start-sim.sh --sim3d` starts: one process owns the HAL component and the view, and closing the window (Esc) keeps sampling, so a probe move in progress is never interrupted. The launcher leaves the simulator out by default (`configs/sim-no3d.ini`), so a session that should model the probe asks for it with `--sim3d`. A headless rig sets `LINC_SIM3D_WINDOW=0` or passes `--no-window`; `--window` forces the window even when no display is detected.
+`scripts/start-sim.sh --sim3d` starts the HAL mode, where one process owns the
+HAL component and the view. The details — pins, probe wiring, coordinates,
+workpiece formats and limits — are in [`docs/sim3d.md`](docs/sim3d.md).
 
-Full documentation - pins, probe wiring, coordinates, STEP workpieces,
-performance and limitations - is in [docs/sim3d.md](docs/sim3d.md).
+## How it is put together
 
-## Design decisions locked in
+The HMI runs behind a typed `MachineBackend` interface, with the LinuxCNC
+implementation reading and writing NML directly. `linuxcnc-nml` owns the status,
+command and error channels; a read-only HAL reader handles panel and spindle
+pins. [`docs/architecture.md`](docs/architecture.md) describes the implemented
+path, the Python helper that was removed, and the alternatives that were
+rejected. [`docs/architecture.html`](docs/architecture.html) is the same walk
+through with diagrams.
 
-- **Dark graphite + cool-blue optics**, with blue used for interaction,
-  active state, toolpath, and live data. Green/amber/red are reserved for
-  machine state and alarms.
-- **The physical panel is the primary machine-control surface.** The GUI has no
-  general mode buttons, cycle start/hold/stop, jog buttons, spindle/coolant
-  controls, override sliders, or software E-stop. Specific MDI, probe and
-  tool-change commands are explicit exceptions. **When a machine has no
-  physical panel, the simulator panel driver stands in for it**: `linc-panel`
-  shows the same controls in its own window (`[simulation] panel_window`) and
-  publishes the same `cnc_panel.*` pins, so the HMI and HAL see a panel either
-  way. That window is a separate process, not an HMI page; the HMI itself
-  still offers no machine controls.
-- **The panel driver is LiNC-owned and modular.** `linc-panel` runs as a
-  supervised process, decodes steady one-hot modes and steady overrides, and
-  hides panel technology behind a driver/capability trait. Only it owns RS-485.
-- **The WHB04B-6 pendant is jog-only.** Its wheel/axis select work only in JOG
-  mode; pendant mode, cycle, spindle, coolant, override, program and macro
-  controls are ignored.
-- **LiNC writes only declared HAL outputs.** `linc.hmi-alive`,
-  `linc.tool-change-confirm`, `linc.status-display`, `linc.jog-increment`,
-  `linc.jog-speed` and `linc.machine-off`; there is no generic arbitrary-pin
-  write API.
-- **The QMK keyboard is the only text/navigation device.** There are no
-  F1–F8 softkeys. `MAIN`, `FILE`, `OFFSET`, `TOOL`, `WIN`, `ESC`, arrows,
-  PageUp/PageDown, Home/End, and Enter drive the UI. Standard Ctrl editing
-  shortcuts work; on-screen actions are focusable with arrows/Enter.
-- **Program has two layouts**: `SPLIT` (G-code + graph) and `CODE`
-  (G-code dominant + mini graph). `FILE` enters Program and cycles the layout.
-- **Program `CODE` is also the G-code editor.** The physical panel's `EDIT`
-  position opens it with focus, dirty/save state, undo/redo, find and a
-  debounced live preview. Edits and saves are gated by idle state and program
-  protect; running programs stay read-only.
-- **Graph overlays program and machine bounds** and highlights the selected
-  line. Edits update the graph only after the preview syntax check succeeds;
-  invalid input keeps the last valid graph and never moves the machine.
-- **Two machine variants share one shell.** Mill is 3-axis by default and
-  expands to 4/5 axes from the INI; lathe is X/Z with optional C/Y, live
-  tooling and power-turret stations. Variant-specific screens are Machine,
-  Program graph, Offsets, Tools and Diagnostics; Files and Help are shared.
-- **The simulator panel is a separate companion window**, not part of the HMI.
-  It reproduces the panel controls and HAL pin surface; the real HMI never
-  exposes those controls. Its momentary `PROBE` key closes the simulated probe
-  contact (`rio.sim-probe`) while held, so a Probe Basic routine can be tripped
-  and released from the panel.
-- **Touch Probe follows Probe Basic's category-first workflow**, reached from
-  Offsets: choose a routine group, pick an illustrated operation, adjust
-  WCS/clearance/feed/tip parameters, then press `Enter` to run it. The Probe Basic probing
-  subroutines are vendored verbatim under `subroutines/probe_basic`; LiNC builds
-  the `#3014`–`#3036` parameter block and issues the selected `o<probe_...>`
-  call via Probe Basic `issue_mdi` after validation. Results come from
-  `#1001`–`#1012`. The results panel carries no buttons: `U` updates the
-  parameter block and `Ctrl+R`/`Ctrl+X`/`Ctrl+Y` reset all, X and Y data, all
-  listed on the shortcuts rail. Rotary-axis probing is not offered.
-- **MDI is a pane on the Machine page**: the panel's MDI position opens MAIN
-  with the `PROGRAM` card replaced by the block listing, a syntax-highlighted
-  input that holds focus, a one-line result strip and the MODAL band AUTO shows.
-  `Enter` issues one block via `issue_mdi` and commits it to the buffer, `Ctrl+R`
-  re-runs the selected line, `Ctrl+Up`/`Ctrl+Down` move it in the buffer and
-  `Ctrl+S` saves the buffer to a new `.ngc`. A value word typed against a digit
-  gets its space (`G1X10` becomes `G1 X10`). The block being edited is drawn on
-  MAIN's toolpath in yellow, and whatever part of it would run past an INI travel
-  limit is red: a block that leaves the envelope is refused before it is sent,
-  the input's frame turning red while `Enter` names the limit in the result
-  strip. The preview reads the block in the machine's modal groups, so a block
-  typed in `G91` is drawn as the relative move it is. The input has no
-  placeholder and grows upward — the listing above gives way — and that listing
-  scrolls, staying on the newest block until the operator scrolls away. The
-  buffer lasts the app session; leaving MDI keeps it, and `Esc` clears
-  uncommitted input only. AUTO on the panel brings MAIN up from any page.
-- **JOG, INC and MPG open a shared read-only Manual screen.** A large live
-  graph dominates, with large work coordinates plus machine coordinates and
-  DTG. Jog/increment/handwheel input remains on the panel; the screen never
-  offers jog or mode controls.
-- **The toolpath graph has two distinct layers.** The loaded program path is
-  drawn in program colours; the live toolpath is a separate green trail.
-  `CLEAR TRAIL` clears only the live trail and re-seeds it at the current
-  position. Any part of the loaded path outside the machine's INI travel
-  envelope is solid red, split at the crossing, so red means outside the
-  machine boundary; the inside keeps the cut, rapid or selected-line colour.
-  The view follows the head while it moves: when a zoomed or panned card would
-  leave the marker outside it, the pan shifts by the least amount that brings
-  it back. A still head is never pulled back, so panning or zooming to inspect
-  another part of the program stays possible.
-- **The panel status 7-segment shows the active work offset** (`54`–`59`),
-  because two digits fit exactly and the coordinate frame matters during
-  setup. It shows `--` when unknown; spindle load or units are optional
-  configured alternatives.
-- **The panel's PROGRAM PROTECT switch is a hard editing lock.** While on, the
-  HMI cannot edit/save G-code, write offsets/tools, import files or apply probe
-  results. Protect fails closed when unknown or stale; a dirty buffer is
-  preserved read-only rather than discarded.
-- **Homing is panel-only, exactly like the current machine.** HOME mode shows
-  per-axis/sequence state; `RAPID` homes all and the axis jog keys home their
-  axis through the panel's `home-*` pins. PROG.HOME keeps the existing
-  `issue_mdi` behavior: `RAPID` sends `G0 X0Y0Z0`, axis keys send `G0 X0/Y0/Z0`
-  in the current WCS, X/Y/Z only. The HMI does not intercept these panel
-  actions.
-- **Tools is the quick-change surface.** Select a table row or type a target
-  tool and `CHANGE TOOL`; the HMI issues `Tn M6` through Probe Basic
-  `issue_mdi` without MDI entry. Manual changes get an
-  install/confirm prompt; ATC/turret support reuses the existing `M6` G-code
-  and is optional. The tool table is the standard LinuxCNC format; its pocket
-  column exists only when a changer uses it. An optional `[loobric]` section
-  syncs that table with a Loobric server through the official Python client;
-  it is off by default and shows its last result on the Tools page
-  (`CONFIGURATION.md`, `docs/loobric.md`).
-- **G-code is token-highlighted** with a rich but restrained palette:
-  G-codes, M-codes, axis letters, numbers, feed/speed, tools, parameters,
-  comments, and line numbers each have a distinct treatment.
-- **Diagnostics is the detailed, read-only view** for panel link, NML/HAL,
-  motion health, I/O, and event logs. It does not expose machine controls.
-- **G-code Help is an offline reference page**, not a modal popup: searchable
-  LinuxCNC index, per-code detail, parameter tables and figures. It remains
-  available while a program is running and exposes no machine controls.
-- **Files is a simple two-pane browser** opened from `LOAD`: removable USB on
-  the left, `NC_FILES` on the right. USB drives auto-mount on insert through
-  `udisks2`; copy and eject are explicit actions. Opening an `NC_FILES` file
-  loads it and returns to Program in `SPLIT` view, fitted and not started. No
-  shell commands, no auto-run, no machine controls.
-- **Spindle load is explicit** and must come from real drive feedback, not
-  spindle override or commanded speed.
+The panel is a LiNC-owned process, not part of the HMI. It decodes steady
+one-hot modes and overrides, hides the panel technology behind a driver
+interface, and is the only process that opens the serial port. When a machine
+has no panel, the same process draws the panel in its own window and publishes
+the same pins, so the HMI and HAL cannot tell the difference.
+
+The 3D view and the toolpath renderer in `crates/linc-view` are used by every
+page that draws a path, so the program, the live trail, the tool marker and the
+work-zero cross move together under pan, zoom and orbit.
 
 ## Repository layout
 
@@ -325,143 +262,62 @@ LiNC/
 ├── README.md
 ├── CONFIGURATION.md
 ├── SPEC.md
-├── configs/
-│   ├── base.toml
-│   ├── sim.toml
-│   ├── lathe-sim.toml
-│   ├── baiermill.toml
-│   ├── baiermill-pb.toml  # reviewed machine profile
-│   └── baiermill-pb.ini   # LiNC's copy of the machine INI
+├── configs/              # profiles, demo INI files, tool tables, G-code
 ├── subroutines/
 │   └── probe_basic/      # Probe Basic probing G-code, vendored verbatim
-├── docs/                 # architecture guide, diagrams and README screenshots
+├── docs/                 # architecture, diagrams, README screenshots
 ├── crates/
-│   ├── linc-app/         # CLI, backend selection, window and event loop
-│   ├── linc-core/        # config, INI, model, commands, HAL, sim, IPC
+│   ├── linc-app/         # command line, backend selection, window, event loop
+│   ├── linc-core/        # config, INI, model, commands, HAL, simulator, network
 │   ├── linc-hal/         # typed linc.* HAL output component
 │   ├── linc-linuxcnc/    # native LinuxCNC NML backend
-│   ├── linc-panel/       # RS-485 panel service and simulator panel
+│   ├── linc-panel/       # RS-485 panel service and simulated panel
 │   ├── linc-ui/          # egui shell, pages, keyboard model
 │   └── linc-view/        # toolpath and lathe graph rendering
-├── hal/
-│   ├── linc.hal
-│   ├── linc-postgui.hal
-│   └── linc-pendant.hal
-├── scripts/
-│   ├── start-sim.sh
-│   ├── start-panel-sim.sh
-│   ├── sim-ready.py       # start-up steps the launcher waits for
-│   └── stop-sim.sh
-├── tools/
-│   └── generate_help.py
-└── svg/
-    ├── machine-dashboard.svg
-    ├── program-split.svg
-    ├── program-code.svg
-    ├── diagnostics.svg
-    ├── gcode-help.svg
-    ├── files.svg
-    ├── lathe-dashboard.svg
-    ├── probe.svg
-    ├── mdi.svg
-    ├── manual.svg
-    ├── homing.svg
-    ├── tools.svg
-    └── sim-panel.svg
-```
-
-## Viewing the SVGs
-
-Any browser or SVG viewer can open the files. For command-line rendering:
-
-```sh
-rsvg-convert -o /tmp/machine.png svg/machine-dashboard.svg
+├── hal/                  # linc.hal, linc-postgui.hal, linc-pendant.hal
+├── scripts/              # start-sim.sh, start-lathe-sim.sh, stop-sim.sh, ...
+├── tools/                # G-code help generator
+└── svg/                  # accepted mockups for every screen
 ```
 
 ## Probe Basic routines
 
-The touch-probe screen does not reimplement Probe Basic's probing math.
-`subroutines/probe_basic/` vendors the upstream `.ngc` routines verbatim:
-outside/inside corners, boss and pocket, ridge and valley, edge angle,
-calibration, the `#3014`–`#3036` parameter update, the result resets and
-`on_abort`. `configs/sim.ini` puts that directory first in `SUBROUTINE_PATH` and
-sets `ON_ABORT_COMMAND = O<on_abort> CALL`, so an aborted probe restores feed
-override instead of leaving it cancelled.
+The probe screen does not reimplement the probing math. `subroutines/probe_basic/`
+holds the upstream `.ngc` routines as they are, with their license, the upstream
+commit and checksums. A profile whose INI does not put that directory first in
+`SUBROUTINE_PATH` cannot run a probe cycle, and `--check-config` says so before
+the machine tries. `configs/sim.ini` also sets
+`ON_ABORT_COMMAND = O<on_abort> CALL`, so an aborted probe restores feed override
+instead of leaving it cancelled; whether the machine does the same is the machine
+owner's decision.
 
-The directory keeps its own `LICENSE` (GPLv3), `SOURCE.md` with the upstream
-commit and import list, and `SHA256SUMS` for the verbatim files. Upstream also
-states GPLv2 in its README; `SOURCE.md` records that conflict. LiNC itself is
-GPL-2.0-or-later, which is compatible with distributing the combined work under
-GPLv3.
+LiNC is GPL-2.0-or-later, which is compatible with shipping the Probe Basic
+routines under GPLv3 next to it. The directory keeps its own `LICENSE`,
+`SOURCE.md` and `SHA256SUMS`.
 
-A machine profile whose own LinuxCNC INI does not put this directory first in
-`SUBROUTINE_PATH` cannot run a Probe Run: every generated Run starts with
-`o<touch_probe_param_update> call` and `o<linc_probe_context> call`, and the
-machine's copy has neither the context helper nor LiNC's angle anchors and
-traverse-feed corrections.
+## Status and verification
 
-`configs/baiermill-pb.ini` is LiNC's reviewed BaierMill configuration: a copy
-of the machine's `probe_basic.ini` with identical axes, limits, homing, PID,
-ATC, tool table, parameter file and HAL composition (except two LiNC-owned
-files: the panel helper `hal/baiermill-pb-szgh-panel.hal` and the post-GUI
-`hal/baiermill-pb-postgui.hal`, which keeps every machine net and drops only
-the nets that fed the Probe Basic window), but LiNC's display,
-`SUBROUTINE_PATH = ../subroutines/probe_basic:../../baiermill_pb/subroutines:...`
-and paths relative to `configs/`. `baiermill_pb` itself stays untouched;
-`configs/baiermill-pb.toml` selects the copy. Deploy the whole bundle (not one
-file), then confirm it with
-`linc --config configs/baiermill-pb.toml --check-config`, which fails when a
-routine a Probe Run needs is missing or a resolved routine is not LiNC's
-reviewed copy. That check reads no HAL file contents and starts no LinuxCNC,
-so it is not a start-readiness check. The profile is still not start-ready:
-`hal/linc.hal` (LiNC's `cnc_panel.*` wiring), a profile-aware post-GUI
-choice in `scripts/linc-display.sh` and a real HAL start are all missing —
-CONFIGURATION.md §7 lists them. `configs/baiermill.toml` keeps pointing at the machine's own
-INI and now fails that check, which is the deployment defect surfaced before a
-Run instead of during one. Adding `ON_ABORT_COMMAND = O<on_abort> CALL` (as
-`configs/sim.ini` does) is still the machine owner's decision: without it an
-aborted probe leaves feed override cancelled.
+The workspace implements the specification in simulation. The mill profile runs
+end to end on the machine it was written for, and the lathe profile validates
+and runs with `configs/lathe-sim.ini`. The screens implemented are Machine,
+Program (both `SPLIT` and `CODE` layouts), Offsets, Tools, Diagnostics, G-code
+Help, Files, Touch Probe, Manual and Homing; MDI is a pane on the Machine page.
 
-## Implementation status
+`cargo test --workspace` covers profile merging, INI parsing, command validation,
+the editor and preview behaviour, graph bounds, the panel protocol, the HAL
+output allowlist and the simulator backend.
 
-The workspace implements the specification in simulation. The shipped mill
-profile runs end to end; the lathe UI is implemented and `lathe-sim.toml`
-validates, with `configs/lathe-sim.ini` and `configs/lathe-sim.tbl` carrying
-the standard `P` turret column. The panel window draws a lathe layout of its
-own: the profile's `machine.gui = "lathe"` / `[panel] driver = "lathe-sim"`
-selects the lathe key matrix, alarm lamps and TOOL / TOOL COMP. / STATUS
-windows, and `hal/linc-lathe.hal` wires the spindle(s), the feed brake, power,
-E-stop, AUTO/MDI/JOG, cycle, X/Z jog and the lamps. The second-spindle column
-is capability-gated: `[lathe] sub_spindle = true` shows SPD.2.*, false hides it. The remaining machine I/O —
-tailstock, chip conveyor, turret (`TOOL CHG.`), worklamp, MST, C/S, the C-axis
-jog keys and `SPD. JOG` — is unwired and greyed until the machine's PLC pins
-are commissioned (see `CONFIGURATION.md`).
-
-- `linc` loads and validates a machine profile, renders the fixed shell, and
-  switches pages from the panel mode and keyboard.
-- The mill and lathe Machine, Program `SPLIT`/`CODE`, Offsets, Tools,
-  Diagnostics, Settings, G-code Help, Files, Touch Probe, Manual and Homing
-  screens are implemented; the MDI pane is part of Machine.
-- The Program editor has syntax highlighting, undo/redo/find, dirty/save
-  state, a debounced live preview, program-protect locking and the live trail.
-- `linc-panel` owns the panel driver, HAL pins and the standalone simulator
-  panel. Simulation HMI and panel exchange state over two atomic JSON files so
-  panel modes, power, E-stop, overrides and protect drive the HMI, while the
-  HMI drives the panel status and tool displays.
-- The typed `linc.*` HAL component, the native LinuxCNC backend, the WHB04B-6 pendant
-  wiring and the generated G-code help index are present.
-- `linc-mcp` exposes the HMI and panel diagnostic sockets to an agent: state,
-  gates, logs, events, panel frames and transitions, motion history, crash
-  records, a screen model, a diagnostic bundle, and an opt-in simulator control
-  surface (`--allow-sim-control` on both processes). It never opens the panel
-  serial port, and no tool can reach a real panel.
-
-`cargo test --workspace` covers config merging, INI parsing, command
-validation, editor/preview behavior, graph bounds, panel protocol, HAL output
-allowlisting and the simulator backend.
-
-## Remaining hardware verification
-
-The software paths are implemented; the items that still need a real machine
-or commissioned LinuxCNC session are listed in
+The items that still need a real machine or a commissioned LinuxCNC session are
+listed in
 [`CONFIGURATION.md`](CONFIGURATION.md#12-remaining-hardware-verification).
+
+`linc-mcp` exposes the HMI and panel diagnostic sockets to an agent — state,
+gates, logs, events, panel frames, motion history, crash records, a screen model
+and a diagnostic bundle — with an opt-in simulator control surface. It never
+opens the panel's serial port.
+
+## License
+
+GPL-2.0-or-later, as declared in `Cargo.toml`. `debian/copyright` records the
+packaging details, including the GPLv3 text that the vendored Probe Basic
+routines carry.

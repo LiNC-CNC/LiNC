@@ -505,6 +505,13 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 }
 
 fn category_tabs(app: &mut LincApp, ui: &mut Ui) {
+    // The subpage key: the panel's printed OFFSET keycap, or the binding a
+    // normal keyboard sends when the profile asks for PC legends.
+    let (next_label, next_key) = if app.pc_keyboard() {
+        ("NEXT TAB".to_string(), app.prefs.keymap.offsets.label())
+    } else {
+        ("OFFSET NEXT".to_string(), "OFFSET".to_string())
+    };
     ui.spacing_mut().item_spacing.x = 16.0;
     ui.horizontal(|ui| {
         for category in ProbeCategory::ALL {
@@ -537,7 +544,7 @@ fn category_tabs(app: &mut LincApp, ui: &mut Ui) {
                     .color(theme::MUTED),
             );
             ui.label(
-                RichText::new("OFFSET NEXT")
+                RichText::new(next_label.clone())
                     .size(theme::font_size(8.0))
                     .color(theme::MUTED),
             );
@@ -553,7 +560,7 @@ fn category_tabs(app: &mut LincApp, ui: &mut Ui) {
             ui.painter().text(
                 rect.center(),
                 Align2::CENTER_CENTER,
-                "OFFSET",
+                next_key.as_str(),
                 FontId::monospace(theme::font_size(8.0)),
                 theme::FG,
             );
@@ -2618,7 +2625,8 @@ fn calibration_panel(app: &mut LincApp, ui: &mut Ui) {
                 let calibrate = theme::accent_button(ui, "CAL ON AVG XY ERROR", true);
                 #[cfg(test)]
                 {
-                    app.probe.layout
+                    app.probe
+                        .layout
                         .calibrate_action
                         .get_or_insert(calibrate.rect);
                 }
