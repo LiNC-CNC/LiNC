@@ -848,6 +848,13 @@ fn up_cycle(
         }
     };
     let (restored, verify) = verify_until(settings, true, &mut notes);
+    // `radio enabled` is not `network up`: association, the DHCP lease and the
+    // default route all arrive seconds later, and a client started inside that
+    // window fails with a network error. Wait for the route to actually move to
+    // this interface before the lease is granted. A profile whose link is not the
+    // default route (a second NIC used only for the server) times out here and
+    // falls back to the settle window, so nothing can regress to "never up".
+    let routed = wait_for_default_route(settings);
     thread::sleep(settings.settle);
     {
         let mut status = lock(status);
@@ -870,13 +877,33 @@ fn up_cycle(
         log::warn!("network: {note}");
     }
     log::info!(
-        "network: {} {} up for {reason} in {}ms (verify {})",
+        "network: {} {} up for {reason} in {}ms (verify {}, route {})",
         settings.kind.as_str(),
         settings.interface,
         up.as_millis(),
-        if restored { "ok" } else { "not reached" }
+        if restored { "ok" } else { "not reached" },
+        routed
+            .map(|wait| format!("after {}ms", wait.as_millis()))
+            .unwrap_or_else(|| "did not move here".into())
     );
     restored
+}
+
+/// Wait for the default route to be carried by this interface, which is what
+/// "the internet works" means for a client that is about to run. `None` on
+/// timeout: the caller then relies on the settle window alone.
+fn wait_for_default_route(settings: &NetworkSettings) -> Option<Duration> {
+    let started = Instant::now();
+    let deadline = started + settings.verify_timeout;
+    loop {
+        if default_route_device().as_deref() == Some(settings.interface.as_str()) {
+            return Some(started.elapsed());
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 /// Poll the state command until it reads `want`, or the deadline passes.
