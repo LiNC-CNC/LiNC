@@ -6,13 +6,33 @@ panel, and it treats that panel as the machine's controls: the software shows
 you what the machine is doing and lets you load, edit and check work, while
 starting and stopping the spindle stays where an operator's hand expects it.
 
+It is modelled on the industry-standard machine controllers that people in a
+factory already know, so the layout, the paging and the key handling follow the
+conventions of a conventional CNC control. Every action can be reached from a
+keyboard and a control panel: nothing needs a touchscreen, a mouse or a gesture
+that has to be learned. That is what makes it comfortable to an operator who
+spends the day on an industrial controller — the new software does not ask them
+to unlearn their habits.
+
+A machine without a physical panel is not locked out. The simulated control
+panel runs in its own window with the same keys, dials and lamps, and publishes
+the same HAL pins, so a touchscreen or a mouse can stand in for the hardware
+when there is none. It is a replacement for a panel, not a second way to drive
+the machine.
+
+Keeping the controls off the screen also buys display space. There is no soft
+E-stop, no jog pad and no override slider taking a corner of every page, so that
+room goes to the digital readout, the toolpath, the program listing, the modal
+state and the servo load. An operator can see what the machine is doing and
+where the program is at the same time, which is what supervising a running job
+needs.
+
 It runs on the machine controller itself. There is no helper process, no Python
 runtime and no web service between the screen and LinuxCNC; the HMI talks to
 LinuxCNC through its NML channels in the same process.
 
-The project is unusual in one more way: it is developed against a BaierMill
-milling machine and its panel, so the screens are exercised on a real machine
-rather than only in the simulator.
+The project is also developed against a working machine and its control panel,
+so the screens are exercised on real hardware rather than only in the simulator.
 
 ## What makes it different
 
@@ -88,9 +108,6 @@ around, and each one exists to keep the software and the machine in agreement.
   the panel's rapid and axis keys do the homing. PROG.HOME sends the
   `G0 X0 Y0 Z0` style move that LinuxCNC already defines; the HMI does not
   intercept either.
-- **The pendant only jogs.** A WHB04B-6 handwheel moves the machine in JOG mode;
-  its mode, cycle, spindle, coolant, override, program and macro controls are
-  ignored.
 - **Red means outside the machine.** Any part of the loaded path outside the
   travel envelope from the INI file is drawn solid red, and an MDI block that
   would leave it is refused before it is sent.
@@ -142,7 +159,7 @@ does not happen, `scripts/sim-ready.py` prints the HAL pins holding it.
 To check a profile without opening a window or touching HAL:
 
 ```sh
-linc --config configs/baiermill-pb.toml --check-config
+linc --config configs/sim.toml --check-config
 ```
 
 ## Demo AppImage
@@ -170,26 +187,25 @@ is discovered by looking around the filesystem.
 |---|---|
 | Shared defaults | `configs/base.toml` |
 | Mill simulation | `configs/sim.toml` |
-| BaierMill physical mill | `configs/baiermill-pb.toml` |
+| Physical machine | the machine's own profile, next to its LinuxCNC INI |
 | Lathe simulation | `configs/lathe-sim.toml` |
 
 The profile points at the LinuxCNC INI file, which stays authoritative for
 travel, velocities, units, spindle and ATC data and the tool table. LiNC reads
 the INI; it does not replace it.
 
-Three files wire LiNC into LinuxCNC:
+Two HAL files wire LiNC into LinuxCNC:
 
 ```ini
 [HAL]
-HALFILE = /home/jack/CNC/LiNC/hal/linc.hal
-HALFILE = /home/jack/CNC/LiNC/hal/linc-pendant.hal   ; real machine only
-POSTGUI_HALFILE = /home/jack/CNC/LiNC/hal/linc-postgui.hal
+HALFILE = /path/to/LiNC/hal/linc.hal
+POSTGUI_HALFILE = /path/to/LiNC/hal/linc-postgui.hal
 ```
 
 `LINC_CONFIG` must name the same profile that the `linc` display uses:
 
 ```sh
-export LINC_CONFIG=/home/jack/CNC/LiNC/configs/baiermill-pb.toml
+export LINC_CONFIG=/path/to/LiNC/configs/machine.toml
 linc --config "$LINC_CONFIG"
 ```
 
@@ -274,7 +290,7 @@ LiNC/
 │   ├── linc-panel/       # RS-485 panel service and simulated panel
 │   ├── linc-ui/          # egui shell, pages, keyboard model
 │   └── linc-view/        # toolpath and lathe graph rendering
-├── hal/                  # linc.hal, linc-postgui.hal, linc-pendant.hal
+├── hal/                  # linc.hal, linc-postgui.hal
 ├── scripts/              # start-sim.sh, start-lathe-sim.sh, stop-sim.sh, ...
 ├── tools/                # G-code help generator
 └── svg/                  # accepted mockups for every screen
