@@ -1031,13 +1031,15 @@ Read-only detail view. Tabs:
 
 | Tab | Content |
 |---|---|
-| Overview | Health cards, active alarms/messages, panel summary, motion health, event log |
-| Panel Link | RS-485 transport, cycle time, last RX, RX/TX counts, CRC errors, timeouts, reconnects, mode/overrides, raw button/LED bitmaps, 7-segment values |
-| HAL / NML | NML command/status/error channel state, ages, echo serial, HAL components/pins, thread health |
-| Motion | Following error, commanded vs actual, servo load, spindle load/speed, limits/homing |
+| Overview | Health cards, active alarms/messages, RS-485 / virtual link summary with live counters |
+| HAL / NML | NML channel status line, HAL browser: pins grouped by component with type, direction, value and signal, signal list, filter |
 | Turret / Live Tool | Turret station, clamp/index state, live-tool drive, RPM/direction, axial/radial, C-axis |
-| I/O | Panel LEDs, machine inputs, coolant/lube/door/ATC/turret states, HAL pin browser |
 | Logs | Searchable event history, severity/source filters, export/copy |
+
+The HAL browser runs `halcmd -s show pin` and `halcmd -s show sig` on a
+background thread and shows the age of the rows it drew. Without a running
+LinuxCNC session or `halcmd` on `PATH` it says so and shows no pins; it never
+fills the tree in from the machine snapshot. Nothing here writes to HAL.
 
 The Turret / Live Tool tab appears only with `[diagnostics] turret_tab = true`
 on a profile whose `[tools] changer` is `atc` or `turret`; for every other

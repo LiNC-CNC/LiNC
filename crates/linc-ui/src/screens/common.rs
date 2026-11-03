@@ -1987,6 +1987,32 @@ pub fn page_tab(ui: &mut Ui, label: &str, active: bool) -> egui::Response {
     response
 }
 
+/// A page tab drawn as PROBE draws one: a word, no button chrome, accent and
+/// an underline while active. Callers lay the words out themselves; the
+/// response is the click target.
+pub fn text_tab(ui: &mut Ui, label: &str, active: bool) -> egui::Response {
+    let response = ui.add(
+        egui::Label::new(
+            RichText::new(label)
+                .size(theme::font_size(9.0))
+                .strong()
+                .color(if active { theme::ACCENT } else { theme::MUTED }),
+        )
+        .sense(Sense::click()),
+    );
+    if active {
+        ui.painter().line_segment(
+            [
+                egui::Pos2::new(response.rect.left(), response.rect.bottom() + 2.0),
+                egui::Pos2::new(response.rect.right(), response.rect.bottom() + 2.0),
+            ],
+            egui::Stroke::new(2.0, theme::ACCENT),
+        );
+    }
+    theme::focus_ring(ui, &response);
+    response
+}
+
 pub fn big_position(ui: &mut Ui, label: &str, value: f64, unit: &str) {
     ui.vertical(|ui| {
         ui.label(

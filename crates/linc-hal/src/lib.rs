@@ -7,7 +7,10 @@
 //! There is deliberately no arbitrary pin-name write API. The only outputs
 //! exposed by [`LincHal`] are the five declared `linc.*` pins. [`HalReader`]
 //! is the separate, read-only side: it can read any pin but has no write
-//! method.
+//! method. [`browser`] adds the read-only enumeration HAL itself does not
+//! expose here, by parsing `halcmd` show output.
+
+pub mod browser;
 
 use std::ffi::{c_char, c_void, CString};
 use std::ptr;

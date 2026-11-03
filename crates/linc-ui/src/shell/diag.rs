@@ -231,6 +231,9 @@ pub(crate) struct DiagnosticsUi {
     /// Backend sample stamp of the last published machine snapshot.
     pub(super) last_sample: u64,
     pub tab: DiagnosticsTab,
+    /// `halcmd` poller behind the HAL browser. Started on the first HAL / NML
+    /// draw, so no thread runs until somebody looks at HAL.
+    pub hal: Option<linc_hal::browser::HalBrowser>,
     pub search: String,
     pub severity: Option<AlarmSeverity>,
     pub source: Option<AlarmSource>,
