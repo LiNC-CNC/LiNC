@@ -400,6 +400,10 @@ pub struct LincHal {
     /// Latched-probe-trip response: a level that holds `halui.machine.off` high
     /// while the trip stands.
     machine_off: HalPin,
+    /// External-link interlock: high only while the link is verified down, settled
+    /// and no client run holds a lease. The machine HAL ANDs it into cycle start,
+    /// resume, jog enables and homing.
+    net_safe: HalPin,
     /// Cabinet machine-on switch, wired through the post-GUI HAL. A falling
     /// edge is a switch-off request that ends the session, except while a probe
     /// trip's machine-off level stands: that edge is the off half of the toggle
@@ -424,6 +428,10 @@ impl LincHal {
         let jog_increment = component.float_out("jog-increment")?;
         let jog_speed = component.float_out("jog-speed")?;
         let machine_off = component.bit_out("machine-off")?;
+        // The interlock. It starts low, which blocks motion in the machine HAL
+        // until the HMI has decided: fail closed on the one output that gates a
+        // move. A profile without `[network]` writes it true on the first frame.
+        let net_safe = component.bit_out("net-safe")?;
         // Input pin: HAL owns the value. Nothing nets it in a simulation, where
         // it stays low and no edge is ever seen.
         let machine_on = component.bit_in("machine-on")?;
@@ -434,10 +442,11 @@ impl LincHal {
             *jog_increment.float() = 0.0;
             *jog_speed.float() = 0.0;
             *machine_off.bit() = 0;
+            *net_safe.bit() = 0;
         }
         component.ready()?;
         log::info!(
-            "created linc.* HAL pins (hmi-alive, tool-change-confirm, status-display, jog-increment, jog-speed, machine-off outputs; machine-on input)"
+            "created linc.* HAL pins (hmi-alive, tool-change-confirm, status-display, jog-increment, jog-speed, machine-off, net-safe outputs; machine-on input)"
         );
         Ok(Self {
             component,
@@ -447,6 +456,7 @@ impl LincHal {
             jog_increment,
             jog_speed,
             machine_off,
+            net_safe,
             machine_on,
             last_confirm: false,
         })
@@ -469,7 +479,7 @@ impl LincHal {
         unsafe { *self.machine_on.bit() != 0 }
     }
 
-    pub fn output_names(&self) -> [&'static str; 6] {
+    pub fn output_names(&self) -> [&'static str; 7] {
         [
             LincOutput::HmiAlive.pin_name(),
             LincOutput::ToolChangeConfirm.pin_name(),
@@ -477,6 +487,7 @@ impl LincHal {
             LincOutput::JogIncrement.pin_name(),
             LincOutput::JogSpeed.pin_name(),
             LincOutput::MachineOff.pin_name(),
+            LincOutput::NetworkSafe.pin_name(),
         ]
     }
 
@@ -520,6 +531,12 @@ impl HalWriter for LincHal {
                     // A level, not a pulse: the trip's machine-off response
                     // stands for as long as the fault does.
                     *self.machine_off.bit() = value as u8;
+                }
+                (LincOutput::NetworkSafe, HalValue::Bit(value)) => {
+                    // A level: the gate is open while the link is down. Written
+                    // on change by the backend loop, so a stale value is never
+                    // left holding the machine.
+                    *self.net_safe.bit() = value as u8;
                 }
                 _ => {
                     return Err(MachineError::Hal("wrong HAL value type".into()));

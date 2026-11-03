@@ -219,13 +219,18 @@ fn main() -> Result<()> {
             demo_mode,
         ))
     };
+    // The external-link supervisor is opt-in: a profile without `[network]`
+    // starts no worker, publishes no status and leaves `linc.net-safe` true, so
+    // motion stays ungated. When it exists it is created once and shared: the
+    // Loobric client borrows the link from it, and it keeps the link down while
+    // the machine can move.
+    let supervisor = linc_core::network::supervisor_for(&profile);
+    let lease: Option<std::sync::Arc<dyn linc_core::network::NetworkLease>> =
+        supervisor.clone().map(|supervisor| supervisor as _);
     // The Loobric client is opt-in: a disabled profile gets the selected
     // backend unchanged, with no worker thread and no snapshot status.
-    let backend = linc_core::loobric::wrap_backend(backend, &profile);
-    // The external-link supervisor is opt-in and measurement-only: it publishes
-    // what a wifi/NIC toggle costs and never gates a command. It wraps outside
-    // Loobric so its measurement can wait for a startup sync to finish.
-    let backend = linc_core::network::wrap_backend(backend, &profile);
+    let backend = linc_core::loobric::wrap_backend(backend, &profile, lease);
+    let backend = linc_core::network::wrap_backend(backend, supervisor);
 
     let hal = if args.no_hal {
         None

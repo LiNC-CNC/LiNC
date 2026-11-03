@@ -197,6 +197,9 @@ fn run_worker(
     let mut last_jog_increment = f64::NAN;
     let mut last_jog_speed = f64::NAN;
     let mut last_machine_off = false;
+    // False so the first publish always opens the gate explicitly instead of
+    // relying on the HAL pin's initial value.
+    let mut last_net_safe = false;
 
     while !shared.shutdown.load(Ordering::Relaxed) {
         let request = rx.recv_timeout(Duration::from_millis(10));
@@ -331,6 +334,23 @@ fn run_worker(
                         writer.write(LincOutput::MachineOff, HalValue::Bit(machine_off))
                     {
                         log::warn!("HAL machine-off write failed: {error}");
+                    }
+                }
+            }
+
+            let net_safe = snapshot
+                .network
+                .as_ref()
+                .map(|net| net.safe)
+                .unwrap_or(true);
+            snapshot.hal.net_safe = net_safe;
+            if net_safe != last_net_safe {
+                last_net_safe = net_safe;
+                if let Some(writer) = hal.as_mut() {
+                    if let Err(error) =
+                        writer.write(LincOutput::NetworkSafe, HalValue::Bit(net_safe))
+                    {
+                        log::warn!("HAL net-safe write failed: {error}");
                     }
                 }
             }

@@ -1779,6 +1779,13 @@ impl MachineBackend for SimBackend {
                             }
                         }
                     }
+                    LincOutput::NetworkSafe => {
+                        // No HAL here: record the level so the simulation shows
+                        // what the machine's interlock would see.
+                        if let HalValue::Bit(value) = value {
+                            self.snapshot.hal.net_safe = value;
+                        }
+                    }
                 }
                 Ok(())
             }

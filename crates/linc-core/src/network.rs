@@ -28,6 +28,8 @@
 
 use std::fs;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -545,17 +547,42 @@ fn shorten(text: &str) -> String {
 #[derive(Clone, Copy, Debug, Default)]
 struct Observation {
     idle: bool,
-    loobric_running: bool,
-    loobric_started: bool,
 }
 
-struct SupervisorHandle {
+/// How long a client waits for the link to come up before it runs anyway: the
+/// client reports its own network error, so a stuck link must not become a stuck
+/// machine.
+const LEASE_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// A claim on the link, or the release of one.
+enum GateRequest {
+    Up {
+        reason: String,
+        done: mpsc::Sender<bool>,
+    },
+    Down,
+}
+
+/// The half of the supervisor a client sees. The Loobric wrapper holds a lease
+/// around each client run, which is the only reason the link is ever up once the
+/// interlock is armed.
+pub trait NetworkLease: Send + Sync {
+    /// Bring the link up and hold it until [`NetworkLease::release`]. Returns
+    /// false when it could not be verified up before [`LEASE_TIMEOUT`].
+    fn acquire(&self, reason: &str) -> bool;
+    /// Drop this reason's claim. The link goes down when none is left.
+    fn release(&self, reason: &str);
+}
+
+pub struct SupervisorHandle {
     status: Arc<Mutex<NetworkStatus>>,
     observation: Arc<Mutex<Observation>>,
+    safe: Arc<AtomicBool>,
+    requests: mpsc::Sender<GateRequest>,
 }
 
 impl SupervisorHandle {
-    fn start(settings: NetworkSettings) -> Self {
+    fn start(settings: NetworkSettings) -> Arc<Self> {
         let status = Arc::new(Mutex::new(NetworkStatus {
             enabled: true,
             kind: settings.kind.as_str().to_string(),
@@ -564,35 +591,65 @@ impl SupervisorHandle {
             ..NetworkStatus::default()
         }));
         let observation = Arc::new(Mutex::new(Observation::default()));
+        let safe = Arc::new(AtomicBool::new(false));
+        let (requests, receiver) = mpsc::channel();
         let worker_status = Arc::clone(&status);
         let worker_observation = Arc::clone(&observation);
+        let worker_safe = Arc::clone(&safe);
         thread::Builder::new()
             .name("linc-network".into())
             .spawn(move || {
-                run_worker(settings, &worker_status, &worker_observation);
+                run_worker(
+                    settings,
+                    &worker_status,
+                    &worker_observation,
+                    &worker_safe,
+                    receiver,
+                );
             })
             .expect("spawn network worker");
-        Self {
+        Arc::new(Self {
             status,
             observation,
-        }
+            safe,
+            requests,
+        })
     }
 
     fn observe(&self, snapshot: &MachineSnapshot) {
-        let idle = snapshot.task.interp == InterpState::Idle && !snapshot.task.running;
-        let (running, started) = match &snapshot.loobric {
-            Some(loobric) => (loobric.running, loobric.completed_runs >= 1),
-            None => (false, true),
-        };
         *lock(&self.observation) = Observation {
-            idle,
-            loobric_running: running,
-            loobric_started: started,
+            idle: snapshot.task.interp == InterpState::Idle && !snapshot.task.running,
         };
     }
 
     fn status(&self) -> NetworkStatus {
         lock(&self.status).clone()
+    }
+
+    /// The interlock reading: motion may happen while this is true.
+    pub fn safe(&self) -> bool {
+        self.safe.load(Ordering::SeqCst)
+    }
+}
+
+impl NetworkLease for SupervisorHandle {
+    fn acquire(&self, reason: &str) -> bool {
+        let (done, wait) = mpsc::channel();
+        if self
+            .requests
+            .send(GateRequest::Up {
+                reason: reason.to_string(),
+                done,
+            })
+            .is_err()
+        {
+            return false;
+        }
+        wait.recv_timeout(LEASE_TIMEOUT).unwrap_or(false)
+    }
+
+    fn release(&self, _reason: &str) {
+        let _ = self.requests.send(GateRequest::Down);
     }
 }
 
@@ -604,6 +661,8 @@ fn run_worker(
     settings: NetworkSettings,
     status: &Arc<Mutex<NetworkStatus>>,
     observation: &Arc<Mutex<Observation>>,
+    safe: &Arc<AtomicBool>,
+    requests: Receiver<GateRequest>,
 ) {
     let route = default_route_device();
     let mismatch = route
@@ -640,47 +699,174 @@ fn run_worker(
 
     if settings.keep_up {
         lock(status).message = "kept up (network.keep_up)".into();
+        lock(status).safe = true;
+        safe.store(true, Ordering::SeqCst);
         log::info!("network: keep_up set, leaving the link alone");
         return;
     }
-    if !settings.measure_on_startup {
-        lock(status).message = "measurement disabled".into();
-        return;
-    }
 
+    // The startup down cycle is the measurement and the interlock's first safe
+    // state. It waits for an idle machine, but the loop keeps serving lease
+    // requests while it waits: a client that needs the link must not deadlock
+    // behind a machine that has not reported idle.
+    let mut startup_done = false;
+    let mut leases = 0usize;
     loop {
-        let observation = *lock(observation);
-        let loobric_ready = !observation.loobric_running
-            && (observation.loobric_started || !settings.expect_loobric_startup);
-        if observation.idle && loobric_ready {
-            break;
+        if !startup_done && lock(observation).idle {
+            if settings.measure_on_startup {
+                lock(status).measuring = true;
+                lock(status).last_measure_ms = Some(now_ms());
+                let (irq, rx) = sample_rates(&settings);
+                let mut status = lock(status);
+                status.irq_per_s_up = irq;
+                status.rx_per_s_up = rx;
+            }
+            down_cycle(&settings, status, safe, settings.measure_on_startup);
+            startup_done = true;
+            continue;
         }
-        thread::sleep(TICK);
+
+        match requests.recv_timeout(TICK) {
+            Ok(GateRequest::Up { reason, done }) => {
+                safe.store(false, Ordering::SeqCst);
+                lock(status).safe = false;
+                leases += 1;
+                let verified = up_cycle(&settings, status, &reason);
+                let _ = done.send(verified);
+            }
+            Ok(GateRequest::Down) => {
+                leases = leases.saturating_sub(1);
+                if leases == 0 {
+                    down_cycle(&settings, status, safe, false);
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+        }
     }
+}
 
-    lock(status).measuring = true;
-    lock(status).last_measure_ms = Some(now_ms());
-    let measurement = measure(&settings);
-
-    let fresh = status_from(&settings, &measurement);
+/// Take the link down, verify it, wait out the settle window, and (optionally)
+/// sample the device. Sets `safe` only when the down state was verified: an
+/// unverified down is exactly the state that must block motion.
+fn down_cycle(
+    settings: &NetworkSettings,
+    status: &Arc<Mutex<NetworkStatus>>,
+    safe: &Arc<AtomicBool>,
+    sample: bool,
+) -> bool {
+    let mut notes = Vec::new();
+    let down = match run_steps(&settings.down) {
+        Ok(elapsed) => elapsed,
+        Err(error) => {
+            notes.push(format!("down command failed: {error}"));
+            Duration::ZERO
+        }
+    };
+    let (link_down, verify) = verify_until(settings, false, &mut notes);
+    // The radio's own teardown outlives `nmcli` returning, and the measurement
+    // on the BaierMill showed a burst after the state reads down; nothing may
+    // move until the window has passed.
+    thread::sleep(settings.settle);
+    let measured = sample.then(|| sample_rates(settings));
+    if link_down {
+        safe.store(true, Ordering::SeqCst);
+    }
     {
         let mut status = lock(status);
-        // The route check belongs to this machine, not to the cycle; keep it.
-        let route_mismatch = status.route_mismatch;
-        *status = NetworkStatus {
-            route_mismatch,
-            ..fresh
+        status.link_up = Some(!link_down);
+        status.safe = link_down;
+        status.settle_ms = Some(settings.settle.as_millis() as u64);
+        status.down_ms = Some(down.as_millis() as u64);
+        status.verify_ms = verify.map(|value| value.as_millis() as u64);
+        status.measuring = false;
+        status.lease = None;
+        if let Some((irq, rx)) = measured {
+            status.irq_per_s_down = irq;
+            status.rx_per_s_down = rx;
+        }
+        status.message = if link_down {
+            "link down, motion allowed".into()
+        } else {
+            "link did not read down, motion blocked".into()
         };
     }
-    for note in &measurement.notes {
+    for note in &notes {
         log::warn!("network: {note}");
     }
     log::info!(
-        "network: measured {} {}: {}",
+        "network: {} {} down in {}ms, verify {}, settle {}",
         settings.kind.as_str(),
         settings.interface,
-        measurement.summary()
+        down.as_millis(),
+        verify
+            .map(|value| format!("{}ms", value.as_millis()))
+            .unwrap_or_else(|| "not reached".into()),
+        settings.settle.as_millis()
     );
+    link_down
+}
+
+/// Bring the link up for a lease, verify it and give the connection the settle
+/// window: radio on is not association, and the client runs the moment this
+/// returns.
+fn up_cycle(settings: &NetworkSettings, status: &Arc<Mutex<NetworkStatus>>, reason: &str) -> bool {
+    let mut notes = Vec::new();
+    let up = match run_steps(&settings.up) {
+        Ok(elapsed) => elapsed,
+        Err(error) => {
+            notes.push(format!("up command failed: {error}"));
+            Duration::ZERO
+        }
+    };
+    let (restored, verify) = verify_until(settings, true, &mut notes);
+    thread::sleep(settings.settle);
+    {
+        let mut status = lock(status);
+        status.link_up = Some(restored);
+        status.up_ms = Some(up.as_millis() as u64);
+        status.verify_ms = verify.map(|value| value.as_millis() as u64);
+        status.lease = Some(reason.to_string());
+        status.message = format!("link up for {reason}");
+    }
+    for note in &notes {
+        log::warn!("network: {note}");
+    }
+    log::info!(
+        "network: {} {} up for {reason} in {}ms (verify {})",
+        settings.kind.as_str(),
+        settings.interface,
+        up.as_millis(),
+        if restored { "ok" } else { "not reached" }
+    );
+    restored
+}
+
+/// Poll the state command until it reads `want`, or the deadline passes.
+fn verify_until(
+    settings: &NetworkSettings,
+    want: bool,
+    notes: &mut Vec<String>,
+) -> (bool, Option<Duration>) {
+    let started = Instant::now();
+    let deadline = started + settings.verify_timeout;
+    loop {
+        match probe_link(settings) {
+            Ok(state) if state == want => return (true, Some(started.elapsed())),
+            Ok(_) => {}
+            Err(error) => note_in(notes, error),
+        }
+        if Instant::now() >= deadline {
+            return (false, None);
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn note_in(notes: &mut Vec<String>, message: String) {
+    if !notes.iter().any(|existing| existing == &message) {
+        notes.push(message);
+    }
 }
 
 /// One measurement without a supervisor, for commissioning:
@@ -713,6 +899,10 @@ fn status_from(settings: &NetworkSettings, measurement: &Measurement) -> Network
         // The cycle ends by bringing the link back, so that is the state it
         // leaves behind; a failed restore is recorded in the summary.
         link_up: Some(measurement.up_restored),
+        // The commissioning cycle ends with the link back up, so it is not a
+        // safe state: this status is not the interlock.
+        safe: false,
+        lease: None,
         measuring: false,
         last_measure_ms: Some(now_ms()),
         down_ms: Some(measurement.down.as_millis() as u64),
@@ -728,31 +918,48 @@ fn status_from(settings: &NetworkSettings, measurement: &Measurement) -> Network
     }
 }
 
-/// Wrap the selected backend when `[network] enabled` is true. A disabled
-/// profile returns the backend untouched: no worker, no status, no measurement.
-pub fn wrap_backend(
-    backend: Box<dyn MachineBackend>,
-    profile: &Profile,
-) -> Box<dyn MachineBackend> {
-    let Some(settings) = NetworkSettings::from_profile(profile) else {
-        return backend;
-    };
-    Box::new(NetworkBackend::new(backend, settings))
+/// Start the supervisor for an enabled profile. `None` when `[network]` is off,
+/// so a machine without it starts no worker and publishes no status - and its
+/// `linc.net-safe` output stays true, keeping motion ungated.
+pub fn supervisor_for(profile: &Profile) -> Option<Arc<SupervisorHandle>> {
+    NetworkSettings::from_profile(profile).map(SupervisorHandle::start)
 }
 
-/// Backend wrapper that publishes [`NetworkStatus`]. It is deliberately a
-/// pass-through: no command is inspected, refused or delayed.
+/// Wrap the backend when a supervisor exists. A profile without one gets the
+/// backend untouched.
+pub fn wrap_backend(
+    backend: Box<dyn MachineBackend>,
+    supervisor: Option<Arc<SupervisorHandle>>,
+) -> Box<dyn MachineBackend> {
+    match supervisor {
+        Some(supervisor) => Box::new(NetworkBackend::new(backend, supervisor)),
+        None => backend,
+    }
+}
+
+/// The commands that start motion: MDI (which is also the probe and the tool
+/// change), run-from-line, and a conversational tool change. Jog, cycle start
+/// and homing never reach here - the panel drives those straight into halui,
+/// which is why the HAL interlock exists as well as this check.
+fn starts_motion(command: &MachineCommand) -> bool {
+    matches!(
+        command,
+        MachineCommand::IssueMdi { .. }
+            | MachineCommand::RunFromLine { .. }
+            | MachineCommand::IssueToolChange { .. }
+    )
+}
+
+/// Backend wrapper that publishes [`NetworkStatus`] and refuses the commands
+/// that start motion while the link is up.
 pub struct NetworkBackend<B> {
     inner: B,
-    supervisor: SupervisorHandle,
+    supervisor: Arc<SupervisorHandle>,
 }
 
 impl<B: MachineBackend> NetworkBackend<B> {
-    pub fn new(inner: B, settings: NetworkSettings) -> Self {
-        Self {
-            inner,
-            supervisor: SupervisorHandle::start(settings),
-        }
+    pub fn new(inner: B, supervisor: Arc<SupervisorHandle>) -> Self {
+        Self { inner, supervisor }
     }
 }
 
@@ -765,6 +972,13 @@ impl<B: MachineBackend> MachineBackend for NetworkBackend<B> {
     }
 
     fn send(&mut self, command: MachineCommand) -> Result<(), MachineError> {
+        // The interlock, in the one place LiNC can see: a command that starts
+        // motion is refused while the link is up for a client run. The panel's
+        // own paths are gated in HAL instead, because they never come through
+        // here.
+        if starts_motion(&command) && !self.supervisor.safe() {
+            return Err(MachineError::NetworkBusy);
+        }
         self.inner.send(command)
     }
 }
@@ -949,42 +1163,35 @@ mod tests {
     }
 
     #[test]
-    fn the_wrapper_measures_only_when_idle_and_after_loobric() {
+    fn the_supervisor_takes_the_link_down_only_once_the_machine_is_idle() {
         let dir = tempfile::tempdir().unwrap();
-        let (mut settings, state_file) = fixture(dir.path());
-        settings.expect_loobric_startup = true;
+        let (settings, state_file) = fixture(dir.path());
         let supervisor = SupervisorHandle::start(settings);
         let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
-        snapshot.task = TaskState::default();
-        snapshot.task.interp = InterpState::Idle;
-        // A sync is still to come: the measurement must not pull the link down
-        // under it.
-        snapshot.loobric = Some(crate::model::LoobricStatus {
-            enabled: true,
-            ..Default::default()
-        });
+        snapshot.task.running = true;
+        snapshot.task.interp = InterpState::Reading;
         supervisor.observe(&snapshot);
+
+        // Running: nothing is toggled and motion is not claimed safe.
         thread::sleep(Duration::from_millis(300));
         assert!(supervisor.status().last_measure_ms.is_none());
+        assert!(!supervisor.safe());
         assert_eq!(fs::read_to_string(&state_file).unwrap().trim(), "up");
 
-        snapshot.loobric = Some(crate::model::LoobricStatus {
-            enabled: true,
-            completed_runs: 1,
-            ..Default::default()
-        });
+        // Idle: the down cycle runs, and that is the interlock's safe state.
+        snapshot.task.running = false;
+        snapshot.task.interp = InterpState::Idle;
         supervisor.observe(&snapshot);
         let deadline = Instant::now() + Duration::from_secs(2);
-        while Instant::now() < deadline {
-            if supervisor.status().down_ms.is_some() {
-                break;
-            }
+        while Instant::now() < deadline && !supervisor.safe() {
             thread::sleep(Duration::from_millis(10));
         }
         let status = supervisor.status();
         assert!(status.last_measure_ms.is_some(), "{status:?}");
         assert!(status.down_ms.is_some(), "{status:?}");
-        assert!(status.up_ms.is_some(), "{status:?}");
+        assert!(status.safe, "{status:?}");
+        assert!(supervisor.safe());
+        assert_eq!(fs::read_to_string(&state_file).unwrap().trim(), "down");
     }
 
     struct FakeBackend {
@@ -1004,7 +1211,7 @@ mod tests {
     }
 
     #[test]
-    fn the_wrapper_never_blocks_a_command_and_publishes_status() {
+    fn the_wrapper_publishes_status_and_refuses_motion_until_safe() {
         let dir = tempfile::tempdir().unwrap();
         let (mut settings, _) = fixture(dir.path());
         settings.keep_up = true;
@@ -1013,11 +1220,65 @@ mod tests {
             sends: Arc::clone(&sends),
             snapshot: MachineSnapshot::empty(MachineVariant::Mill),
         };
-        let mut backend = NetworkBackend::new(backend, settings);
+        let supervisor = SupervisorHandle::start(settings);
+        let mut backend = NetworkBackend::new(backend, Arc::clone(&supervisor));
         let snapshot = backend.snapshot();
         assert!(snapshot.network.is_some(), "status must be published");
+
+        // `keep_up` leaves the link alone, which also leaves motion ungated: an
+        // operator who opted out of supervision did not ask for a locked machine.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline && !supervisor.safe() {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(supervisor.safe(), "kept-up link counts as safe");
+
         backend.send(MachineCommand::ReloadToolTable).unwrap();
-        assert_eq!(*lock(&sends), 1, "the command must pass straight through");
+        assert_eq!(*lock(&sends), 1, "a non-motion command passes through");
+        backend
+            .send(MachineCommand::IssueMdi {
+                block: "G0 X0".into(),
+                origin: crate::command::MdiOrigin::Mdi,
+            })
+            .unwrap();
+        assert_eq!(*lock(&sends), 2, "safe means MDI is allowed");
+    }
+
+    #[test]
+    fn motion_is_refused_while_the_link_is_up_for_a_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        let (settings, _) = fixture(dir.path());
+        let sends = Arc::new(Mutex::new(0));
+        let backend = FakeBackend {
+            sends: Arc::clone(&sends),
+            snapshot: MachineSnapshot::empty(MachineVariant::Mill),
+        };
+        let supervisor = SupervisorHandle::start(settings);
+        let mut backend = NetworkBackend::new(backend, Arc::clone(&supervisor));
+
+        // Take a lease: the link goes up and motion is refused until it is
+        // released and the down cycle has verified.
+        assert!(supervisor.acquire("test"), "the fake link comes up");
+        let error = backend
+            .send(MachineCommand::RunFromLine { line: 1 })
+            .unwrap_err();
+        assert_eq!(error, MachineError::NetworkBusy);
+        assert_eq!(
+            *lock(&sends),
+            0,
+            "the refused command never reached the machine"
+        );
+
+        supervisor.release("test");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline && !supervisor.safe() {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(supervisor.safe(), "the release takes the link back down");
+        backend
+            .send(MachineCommand::RunFromLine { line: 1 })
+            .unwrap();
+        assert_eq!(*lock(&sends), 1);
     }
 
     #[test]

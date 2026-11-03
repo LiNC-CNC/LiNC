@@ -17,7 +17,7 @@ safety validation without connecting to LinuxCNC or HAL.
    the serial port and `cnc_panel.*` pins. The egui HMI never opens the serial
    device. LiNC may write only its declared `linc.*` HAL outputs
    (`hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`,
-   `jog-speed`, `machine-off`).
+   `jog-speed`, `machine-off`, `net-safe`).
 5. **Safety policy is not a preference.** A profile cannot enable software
    E-stop, cycle control, jog, spindle, coolant or overrides; MDI issue is an
    explicit operator action, not a cycle-start substitute; pendant is jog-only.
@@ -119,7 +119,7 @@ after the GUI has created the `linc.*` component and wires
 `linc.machine-off` into the machine's machine-off request.
 `linc-pendant.hal` is real-machine only and wires jog/handwheel inputs.
 
-`allowed_outputs` is the whole writable surface: the sixth key, `machine-off`,
+`allowed_outputs` is the whole writable surface. The sixth key, `machine-off`,
 is the `linc.machine-off` bit. It is true for as long as a probe trip is
 latched and false once it is reset, and it must reach `halui.machine.off`.
 That pin takes one signal, so the simulation ORs it with the panel's POWER OFF
@@ -131,6 +131,11 @@ switch is the only writer, so recovery is toggling that switch. While the trip's
 `linc.machine-off` level stands, the off half of that toggle does not end the
 LiNC session: the HMI stays up with the latched fault so the operator can reset
 it. A switch-off after the reset ends the session as usual.
+
+The seventh key, `net-safe`, is the external-link interlock described under
+`[network]`: high while the link is down and settled, so the machine HAL can AND
+it into cycle start, resume, jog and homing. A profile without `[network]`
+writes it high on the first frame and its motion stays ungated.
 
 `LINC_CONFIG` must select the same profile as `--config`:
 
@@ -767,14 +772,40 @@ Behaviour:
   restores it. The window is why the cycle waits for an idle machine.
 
 The cycle is published as `network` in the machine snapshot, so `linc-mcp` and
-the diagnostic socket can read it. The top bar carries it as a `NET` metric:
-`DOWN` in the success colour (the quiet state this pass measures for), `UP` in
-the muted colour on an idle machine, `UP` in the warning colour while the
-interpreter runs or motion is active (the latency risk), `MEAS` while the cycle
-runs, and `?` for stale or unread data. A profile without `[network]` has no
-metric. It sits in the top bar rather than the bottom one because the bottom
-bar's read-only group is already at the 1280 px baseline width once the limits
-override is shown.
+the diagnostic socket can read it. The top bar always carries it as a `NET`
+metric: `DOWN` in the success colour (the link is quiet and motion is allowed),
+`UP` in the muted colour on an idle machine, `UP` in the warning colour while
+the interpreter runs or motion is active (the latency risk), `MEAS` while a
+cycle runs, `?` for stale or unread data, and `OFF` when the profile does not
+supervise the link at all - which also means the interlock is not armed. It sits
+in the top bar rather than the bottom one because the bottom bar's read-only
+group is already at the 1280 px baseline width once the limits override is
+shown.
+
+### The interlock
+
+With `[network] enabled = true` the supervisor also gates motion, on one rule:
+**move only while the link is verified down and settled.**
+
+- `linc.net-safe` is that rule as a level: high while the link is down, the
+  settle window has elapsed and no client run holds a lease. A profile without
+  `[network]` writes it high on the first frame, so a machine that is not
+  supervised keeps moving.
+- The machine HAL ANDs it into cycle start, resume, jog enables and homing,
+  because those reach `halui` from the panel and never pass through LiNC's
+  command set.
+- LiNC refuses `IssueMdi`, `RunFromLine` and `IssueToolChange` with
+  `NETWORK BUSY` while the link is up, which is the layer a HAL interlock cannot
+  cover for an NML-issued command.
+- A sync borrows the link: the Loobric client takes a lease, the link comes up
+  and motion is blocked for that window, then the lease is released and the
+  down cycle runs again before motion returns. The Tools page shows
+  `waiting for the network` while the lease is being taken.
+
+On the BaierMill Pi 5 the numbers behind `settle_ms` are: `down` ~640 ms,
+`verify` +20 ms, `up` ~40 ms, and the radio keeps working for 250-500 ms after
+it reads down - inside `settle 250` the SDIO line carried 379 irq/s, more than
+while connected. `settle_ms = 1000` is the value measured for that machine.
 
 Motion gating is not implemented. The intended later pass takes the link down
 before MDI, program, tool-change and probe execution, and blocks cycle start,

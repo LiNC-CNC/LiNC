@@ -651,10 +651,10 @@ pub struct LoobricStatus {
 
 /// State of the optional `[network]` external-link supervisor.
 ///
-/// The link is the machine's internet path (WiFi radio, or a second NIC). This
-/// pass measures what a toggle costs: the phase durations and the device's own
-/// interrupt and packet rates before and after the link goes down. Nothing here
-/// gates motion; a value of `None` means "not measured yet", never "zero".
+/// The link is the machine's internet path (WiFi radio, or a second NIC). The
+/// supervisor keeps it down while the machine can move (see [`Self::safe`]),
+/// brings it up only for a client run that needs it, and publishes what each
+/// transition cost. A value of `None` means "not measured yet", never "zero".
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct NetworkStatus {
     pub enabled: bool,
@@ -663,6 +663,13 @@ pub struct NetworkStatus {
     pub interface: String,
     /// Last observed state of the external link. `None` before the first probe.
     pub link_up: Option<bool>,
+    /// The interlock reading: the link is verified down, the settle window has
+    /// elapsed and no run holds a lease. Motion is gated on this, so it stays
+    /// `false` until the first down cycle completes and whenever a client run
+    /// needs the link.
+    pub safe: bool,
+    /// Why the link is up, when a lease holds it (`loobric`).
+    pub lease: Option<String>,
     /// A measurement cycle is running right now.
     pub measuring: bool,
     /// When the last completed cycle started, in epoch milliseconds.
@@ -1272,6 +1279,11 @@ pub struct HalOutputs {
     /// `linc.machine-off`: the level the backend last published for a latched
     /// probe trip. True while the trip stands, false once it is reset.
     pub machine_off: bool,
+    /// `linc.net-safe`: the level the backend last published for the external
+    /// link interlock. True while motion is allowed; true as well on a profile
+    /// that does not supervise the link.
+    #[serde(default)]
+    pub net_safe: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

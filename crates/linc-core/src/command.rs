@@ -61,16 +61,23 @@ pub enum LincOutput {
     /// is the whole response and the operator can power back on without being
     /// switched off again.
     MachineOff,
+    /// The external link is down, settled and no client run holds a lease; the
+    /// machine may move. The machine HAL ANDs this into cycle start, resume, jog
+    /// enables and homing, because those reach halui from the panel and never
+    /// pass through LiNC's command set. `true` when the profile does not manage
+    /// the link, so a machine without `[network]` keeps moving.
+    NetworkSafe,
 }
 
 impl LincOutput {
-    pub const ALLOWED: [LincOutput; 6] = [
+    pub const ALLOWED: [LincOutput; 7] = [
         LincOutput::HmiAlive,
         LincOutput::ToolChangeConfirm,
         LincOutput::StatusDisplay,
         LincOutput::JogIncrement,
         LincOutput::JogSpeed,
         LincOutput::MachineOff,
+        LincOutput::NetworkSafe,
     ];
 
     pub fn pin_name(self) -> &'static str {
@@ -81,6 +88,7 @@ impl LincOutput {
             Self::JogIncrement => "linc.jog-increment",
             Self::JogSpeed => "linc.jog-speed",
             Self::MachineOff => "linc.machine-off",
+            Self::NetworkSafe => "linc.net-safe",
         }
     }
 
@@ -92,6 +100,7 @@ impl LincOutput {
             Self::JogIncrement => "jog-increment",
             Self::JogSpeed => "jog-speed",
             Self::MachineOff => "machine-off",
+            Self::NetworkSafe => "net-safe",
         }
     }
 
@@ -103,6 +112,7 @@ impl LincOutput {
             "jog-increment" | "linc.jog-increment" => Some(Self::JogIncrement),
             "jog-speed" | "linc.jog-speed" => Some(Self::JogSpeed),
             "machine-off" | "linc.machine-off" => Some(Self::MachineOff),
+            "net-safe" | "linc.net-safe" => Some(Self::NetworkSafe),
             _ => None,
         }
     }
@@ -307,6 +317,8 @@ pub enum MachineError {
     StaleToolChangeToken,
     #[error("tool table revision conflict")]
     RevisionConflict,
+    #[error("external link is up for a sync; motion waits for it to be down")]
+    NetworkBusy,
     #[error("path is outside NC_FILES or is not a regular file")]
     UnsafePath,
 }
@@ -338,6 +350,7 @@ impl MachineError {
             Self::NoPendingToolChange => "NO PENDING CHANGE",
             Self::StaleToolChangeToken => "STALE TOKEN",
             Self::RevisionConflict => "REVISION CONFLICT",
+            Self::NetworkBusy => "NETWORK BUSY",
             Self::UnsafePath => "UNSAFE PATH",
         }
     }
@@ -365,7 +378,7 @@ mod tests {
 
     #[test]
     fn only_declared_hal_outputs_are_representable() {
-        assert_eq!(LincOutput::ALLOWED.len(), 6);
+        assert_eq!(LincOutput::ALLOWED.len(), 7);
         assert!(LincOutput::from_name("linc.hmi-alive").is_some());
         assert!(LincOutput::from_name("linc.status-display").is_some());
         assert!(LincOutput::from_name("linc.tool-change-confirm").is_some());
@@ -374,6 +387,11 @@ mod tests {
         assert_eq!(
             LincOutput::from_name("linc.machine-off"),
             Some(LincOutput::MachineOff)
+        );
+        assert_eq!(
+            LincOutput::from_name("linc.net-safe"),
+            Some(LincOutput::NetworkSafe),
+            "the interlock is a declared output, not a generic write"
         );
         assert!(LincOutput::from_name("motion.spindle-on").is_none());
         assert!(LincOutput::from_name("cnc_panel.cycle_start").is_none());

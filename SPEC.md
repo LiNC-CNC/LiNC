@@ -188,9 +188,9 @@ Panel ownership rules:
   port. The HMI **must not** duplicate panel controls as on-screen buttons.
 - LiNC **may write declared HAL outputs** through its `linc` HAL component.
   The allowlist is `linc.hmi-alive`, `linc.tool-change-confirm`,
-  `linc.status-display`, `linc.jog-increment`, `linc.jog-speed` and
-  `linc.machine-off`. It never writes arbitrary `cnc_panel.*` or
-  machine-motion pins.
+  `linc.status-display`, `linc.jog-increment`, `linc.jog-speed`,
+  `linc.machine-off` and `linc.net-safe`. It never writes arbitrary
+  `cnc_panel.*` or machine-motion pins.
 - The panel driver is modular: a `PanelDriver` trait plus a capabilities
   descriptor (buttons, LEDs, displays, mode encoding, override encoding,
   pendant support) lets future panel types and transports replace the panel
@@ -291,7 +291,8 @@ cnc_panel.* HAL pins <--------------------------> linc-panel
 - `linc`: Rust `egui` application and machine backend. Owns no motion hardware.
   Loads the `linc` HAL component and writes only its declared outputs:
   `linc.hmi-alive`, `linc.tool-change-confirm`, `linc.status-display`,
-  `linc.jog-increment`, `linc.jog-speed` and `linc.machine-off`.
+  `linc.jog-increment`, `linc.jog-speed`, `linc.machine-off` and
+  `linc.net-safe`.
 - `linuxcnc`: task/motion/IO. Authoritative machine state.
 - HAL glue: standard `halui`, the `linc` component, and `linc-panel`.
 
@@ -1756,7 +1757,8 @@ HAL pins is still open.
 - No blocking file/serial/NML I/O on the UI thread.
 - HAL outputs: `hmi-alive` 2 Hz heartbeat, `status-display` on WCS change or
   5 Hz, `tool-change-confirm` edge-driven only, `machine-off` on the rising and
-  falling edge of a latched probe trip.
+  falling edge of a latched probe trip, `net-safe` on every change of the
+  external-link interlock.
 - Cache text layout and visible-line tokens.
 - Event log in a ring buffer; persist asynchronously, not on every event.
 
@@ -1766,8 +1768,8 @@ HAL pins is still open.
 - A software E-stop button is forbidden.
 - LiNC may write only the declared `linc.*` HAL outputs
   (`hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`,
-  `jog-speed`, `machine-off`). It never writes arbitrary HAL pins or machine
-  motion/spindle/coolant/cycle pins.
+  `jog-speed`, `machine-off`, `net-safe`). It never writes arbitrary HAL pins or
+  machine motion/spindle/coolant/cycle pins.
 - Validate machine ON, homed, idle, program protect and no active program
   before MDI, probe, tool-change and program/offset/tool writes.
 - MDI, probe and tool-change commands use Probe Basic `issue_mdi` semantics:
@@ -2039,7 +2041,7 @@ For the future implementation:
     unknown/stale or extended offsets.
 34. Implement the `linc` HAL component and typed output allowlist:
     `hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`,
-    `jog-speed`, `machine-off`. Verify ownership,
+    `jog-speed`, `machine-off`, `net-safe`. Verify ownership,
     startup/shutdown, heartbeat expiry and that no arbitrary pin writes exist.
 35. Rename or alias the existing branded panel HAL component/pins to
     `cnc_panel` and update the machine HAL, or provide compatibility nets.

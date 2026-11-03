@@ -25,6 +25,7 @@ use crate::backend::MachineBackend;
 use crate::command::{MachineCommand, MachineError};
 use crate::config::Profile;
 use crate::model::{now_ms, InterpState, LoobricStatus, MachineSnapshot};
+use crate::network::NetworkLease;
 use crate::tooltable::revision_for;
 
 /// How often the wrapper checks a running client, and how often the client
@@ -75,7 +76,7 @@ struct LoobricRunner {
 }
 
 impl LoobricRunner {
-    fn new(settings: LoobricSettings) -> Self {
+    fn new(settings: LoobricSettings, lease: Option<Arc<dyn NetworkLease>>) -> Self {
         let status = Arc::new(Mutex::new(LoobricStatus {
             enabled: true,
             message: "not synced yet".into(),
@@ -88,7 +89,24 @@ impl LoobricRunner {
             .spawn(move || {
                 while receiver.recv().is_ok() {
                     loop {
+                        // The client needs the internet, which the supervisor
+                        // keeps down while the machine can move. Take the link
+                        // for the run and give it back afterwards, so motion is
+                        // blocked for the shortest window that is honest.
+                        if let Some(lease) = &lease {
+                            update(&worker_status, |status| {
+                                status.message = "waiting for the network".into();
+                            });
+                            if !lease.acquire("loobric") {
+                                log::warn!(
+                                    "loobric: external link did not come up; running anyway"
+                                );
+                            }
+                        }
                         run_once(&settings, &worker_status);
+                        if let Some(lease) = &lease {
+                            lease.release("loobric");
+                        }
                         // A request that arrived during the run may describe a
                         // table the run never saw (an operator edit landed
                         // after it read the file). Run once more; several
@@ -282,14 +300,19 @@ fn idle(snapshot: &MachineSnapshot) -> bool {
 
 /// Wrap the selected backend when `[loobric] enabled` is true. A disabled
 /// profile returns the backend untouched, so no worker, status or UI exists.
+///
+/// `lease` is the external-link supervisor, when the profile has one: each
+/// client run borrows the link and gives it back, because the supervisor keeps
+/// it down while the machine can move.
 pub fn wrap_backend(
     backend: Box<dyn MachineBackend>,
     profile: &Profile,
+    lease: Option<Arc<dyn NetworkLease>>,
 ) -> Box<dyn MachineBackend> {
     let Some(settings) = LoobricSettings::from_profile(profile) else {
         return backend;
     };
-    Box::new(LoobricBackend::new(backend, settings))
+    Box::new(LoobricBackend::new(backend, settings, lease))
 }
 
 /// Backend wrapper that owns the Loobric client and its status.
@@ -314,12 +337,12 @@ pub struct LoobricBackend<B> {
 }
 
 impl<B: MachineBackend> LoobricBackend<B> {
-    pub fn new(inner: B, settings: LoobricSettings) -> Self {
+    pub fn new(inner: B, settings: LoobricSettings, lease: Option<Arc<dyn NetworkLease>>) -> Self {
         let startup_pending = settings.sync_on_startup;
         let sync_after_tool_write = settings.sync_after_tool_write;
         Self {
             inner,
-            runner: LoobricRunner::new(settings),
+            runner: LoobricRunner::new(settings, lease),
             last_revision: None,
             controller_revision: None,
             last_completed_runs: 0,
@@ -496,7 +519,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let table = table(dir.path());
         let client = script(dir.path(), "echo pushed; echo 'In sync - nothing to do'");
-        let runner = LoobricRunner::new(settings(client, table));
+        let runner = LoobricRunner::new(settings(client, table), None);
         runner.request();
         wait_for(|| runner.status().completed_runs == 1);
         let status = runner.status();
@@ -511,7 +534,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let table = table(dir.path());
         let client = script(dir.path(), "echo 'cannot read config' >&2; exit 2");
-        let runner = LoobricRunner::new(settings(client, table));
+        let runner = LoobricRunner::new(settings(client, table), None);
         runner.request();
         wait_for(|| runner.status().completed_runs == 1);
         let status = runner.status();
@@ -526,7 +549,7 @@ mod tests {
         let client = script(dir.path(), "exec sleep 5");
         let mut settings = settings(client, table);
         settings.timeout = Duration::from_millis(150);
-        let runner = LoobricRunner::new(settings);
+        let runner = LoobricRunner::new(settings, None);
         runner.request();
         wait_for(|| runner.status().completed_runs == 1);
         let status = runner.status();
@@ -551,7 +574,7 @@ mod tests {
         let config = dir.path().join("linuxcnc.conf");
         std::fs::write(&config, "MACHINE_NAME=\"test\"\n").unwrap();
         settings.config = Some(config.clone());
-        let runner = LoobricRunner::new(settings);
+        let runner = LoobricRunner::new(settings, None);
         runner.request();
         wait_for(|| runner.status().completed_runs == 1);
         let text = std::fs::read_to_string(&args).unwrap();
@@ -570,7 +593,7 @@ mod tests {
             dir.path(),
             &format!("echo run >> {}; echo ok", counter.display()),
         );
-        let runner = LoobricRunner::new(settings(client, table));
+        let runner = LoobricRunner::new(settings(client, table), None);
         runner.request();
         runner.request();
         wait_for(|| runner.status().completed_runs >= 2);
@@ -586,7 +609,7 @@ mod tests {
             dir.path(),
             "printf 'T2 P0 Z1 D6 ; pulled\\n' >> \"$TOOL_TABLE\"; echo pulled",
         );
-        let runner = LoobricRunner::new(settings(client, table));
+        let runner = LoobricRunner::new(settings(client, table), None);
         runner.request();
         wait_for(|| runner.status().completed_runs == 1);
         let status = runner.status();
@@ -643,7 +666,7 @@ mod tests {
             "sleep 0.3; printf 'T2 P0 Z1 D6\\n' >> \"$TOOL_TABLE\"; echo pulled",
         );
         settings.sync_on_startup = true;
-        let mut backend = LoobricBackend::new(backend, settings);
+        let mut backend = LoobricBackend::new(backend, settings, None);
 
         // The first snapshot starts the run while the interpreter is idle.
         // Then keep it busy so the collected pull has to wait for a reload.
@@ -670,7 +693,7 @@ mod tests {
         );
         settings.sync_on_startup = false;
         settings.sync_after_tool_write = true;
-        let mut backend = LoobricBackend::new(backend, settings);
+        let mut backend = LoobricBackend::new(backend, settings, None);
         let _ = backend.snapshot();
         backend.inner.snapshot.tool_table.revision = revision_for("operator edit");
         let _ = backend.snapshot();
@@ -687,7 +710,7 @@ mod tests {
             dir.path(),
             &format!("echo run >> {}; echo synced", counter.display()),
         );
-        let mut backend = LoobricBackend::new(backend, settings);
+        let mut backend = LoobricBackend::new(backend, settings, None);
         backend.inner.snapshot.task.running = true;
         let error = backend.send(MachineCommand::SyncToolTable).unwrap_err();
         assert_eq!(error, MachineError::NotIdle);
@@ -709,7 +732,7 @@ mod tests {
         );
         settings.sync_on_startup = false;
         settings.sync_after_tool_write = true;
-        let mut backend = LoobricBackend::new(backend, settings);
+        let mut backend = LoobricBackend::new(backend, settings, None);
         // Seed the observed revision; nothing is owed yet.
         let _ = backend.snapshot();
         assert!(!counter.exists(), "no client run before the table changes");
@@ -745,7 +768,7 @@ mod tests {
         );
         settings.sync_on_startup = false;
         settings.sync_after_tool_write = false;
-        let mut backend = LoobricBackend::new(backend, settings);
+        let mut backend = LoobricBackend::new(backend, settings, None);
         let _ = backend.snapshot();
         backend.inner.snapshot.tool_table.revision = revision_for("operator edit");
         let snapshot = backend.snapshot();
@@ -765,7 +788,7 @@ mod tests {
         );
         settings.sync_on_startup = true;
         settings.sync_after_tool_write = true;
-        let mut backend = LoobricBackend::new(backend, settings);
+        let mut backend = LoobricBackend::new(backend, settings, None);
         // The startup sync is owed, and a write lands before the machine is
         // idle: both are still owed when idle arrives.
         backend.inner.snapshot.task.running = true;

@@ -570,6 +570,9 @@ fn hal_nml(app: &mut LincApp, ui: &mut Ui) {
                             linc_core::command::LincOutput::MachineOff => {
                                 app.snapshot.hal.machine_off.to_string()
                             }
+                            linc_core::command::LincOutput::NetworkSafe => {
+                                app.snapshot.hal.net_safe.to_string()
+                            }
                         };
                         theme::kv_row(ui, output.pin_name(), value);
                     }
@@ -1044,11 +1047,13 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
             .logs()
             .into_iter()
             .filter(|alarm| {
-                app.diagnostics.severity
+                app.diagnostics
+                    .severity
                     .map(|severity| alarm.severity == severity)
                     .unwrap_or(true)
                     && app
-                        .diagnostics.source
+                        .diagnostics
+                        .source
                         .map(|source| alarm.source == source)
                         .unwrap_or(true)
                     && {
