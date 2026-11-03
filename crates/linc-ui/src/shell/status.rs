@@ -67,9 +67,14 @@ pub(super) fn probe_input_field(
 /// a missing feature and hid an unarmed interlock at the same time.
 ///
 /// The colour is about the machine, not the link. A link down is the quiet
-/// state the interlock wants (`SUCCESS`); a link up on an idle machine costs
-/// nothing (`MUTED`); a link up while the interpreter is running is the latency
-/// risk the whole section exists for, and is the one state that warns. Stale
+/// state the interlock wants (`SUCCESS`); a link up with nothing cutting costs
+/// nothing (`MUTED`); a link up while a *program* runs is the latency risk the
+/// whole section exists for, and is the one state that warns.
+///
+/// Jogging and homing are deliberately excluded from that warning: they happen
+/// with nothing loaded, attended, slow and short, and the interlock is not armed
+/// for them by design - so the link is legitimately up. Warning on every setup
+/// jog would train the operator to ignore the one colour that matters. Stale
 /// data asks rather than repeating a state that may have moved.
 ///
 /// It lives in the top bar because the bottom bar is at its width limit: the
@@ -85,8 +90,9 @@ pub(super) fn network_metric(snapshot: &MachineSnapshot) -> Option<(&'static str
     if status.measuring {
         return Some(("MEAS", theme::ACCENT));
     }
-    let busy = snapshot.task.running
-        || snapshot.task.motion_active
+    // Program motion only. `motion_active` is jog or homing, which runs with the
+    // link up on purpose; it belongs in the muted state, not the warning one.
+    let program_motion = snapshot.task.running
         || matches!(
             snapshot.task.interp,
             linc_core::model::InterpState::Reading
@@ -94,7 +100,7 @@ pub(super) fn network_metric(snapshot: &MachineSnapshot) -> Option<(&'static str
                 | linc_core::model::InterpState::Waiting
         );
     Some(match status.link_up {
-        Some(true) if busy => ("UP", theme::WARNING),
+        Some(true) if program_motion => ("UP", theme::WARNING),
         Some(true) => ("UP", theme::MUTED),
         Some(false) => ("DOWN", theme::SUCCESS),
         None => ("?", theme::WARNING),

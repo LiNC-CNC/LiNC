@@ -474,6 +474,26 @@ fn the_network_metric_reports_the_link_and_warns_only_when_the_machine_runs() {
     );
     snapshot.task.running = false;
 
+    // A paused program is still program motion: resuming it moves the machine.
+    snapshot.task.interp = linc_core::model::InterpState::Paused;
+    assert_eq!(
+        network_metric(&snapshot),
+        Some(("UP", theme::WARNING)),
+        "a paused program can resume, so it warns like a running one"
+    );
+    snapshot.task.interp = linc_core::model::InterpState::Idle;
+
+    // Jog and homing are not program motion. They run with nothing loaded, so
+    // the link is up by design; warning on every setup jog would teach the
+    // operator to ignore the one colour that matters.
+    snapshot.task.motion_active = true;
+    assert_eq!(
+        network_metric(&snapshot),
+        Some(("UP", theme::MUTED)),
+        "a jog with the link up is the accepted trade, not an alarm"
+    );
+    snapshot.task.motion_active = false;
+
     // An unknown interpreter state is not evidence of motion: the metric stays
     // neutral rather than warning on a snapshot that has not reported yet.
     snapshot.task.interp = linc_core::model::InterpState::Unknown;

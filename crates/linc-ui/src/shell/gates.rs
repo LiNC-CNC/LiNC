@@ -327,6 +327,34 @@ impl LincApp {
         self.toast("PROGRAM RESET", theme::WARNING);
     }
 
+    /// Unload the program (`Ctrl+U` on the Program page).
+    ///
+    /// This is the operator's "done cutting" action, and it is also what releases
+    /// the external-link interlock: with a program loaded the link is held down
+    /// so a panel cycle start cannot run into WiFi jitter, and unloading lets it
+    /// come back so the machine is reachable again. Refused while running -
+    /// stop first - and while the buffer has unsaved edits, because unloading is
+    /// not a way to discard them.
+    pub fn unload_program(&mut self) {
+        if self.snapshot.task.running {
+            self.toast("PROGRAM RUNNING — STOP FIRST", theme::ERROR);
+            return;
+        }
+        if self.snapshot.program.dirty {
+            self.toast("UNSAVED CHANGES — SAVE OR REVERT FIRST", theme::WARNING);
+            return;
+        }
+        if self.snapshot.program.path.is_none() {
+            self.toast("NO PROGRAM LOADED", theme::MUTED);
+            return;
+        }
+        self.send(linc_core::command::MachineCommand::UnloadProgram);
+        // The command is queued, so the outcome is not known here: the controller
+        // may refuse or keep the file, and this toast used to promise success
+        // either way. The `NET` metric and the program name show what happened.
+        self.toast("UNLOAD REQUESTED — WATCH NET", theme::WARNING);
+    }
+
     pub fn program_editing_allowed(&self) -> bool {
         self.editing_allowed()
     }

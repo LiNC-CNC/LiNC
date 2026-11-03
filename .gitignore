@@ -26,3 +26,7 @@ configs/sim.var
 
 # Local tool scratch
 /.ua/
+
+# pi agent session state (todos, scratch), not project source
+/.pi/
+/crates/linc-core/tests/scratch_dump.rs

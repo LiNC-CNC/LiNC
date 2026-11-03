@@ -172,6 +172,13 @@ pub enum MachineCommand {
         path: PathBuf,
         expected_revision: Option<u64>,
     },
+    /// Unload the program: the controller closes it (`EMC_TASK_PLAN_CLOSE`) and
+    /// starts holding nothing, so AUTO has nothing to run.
+    ///
+    /// This is what disarms the external-link interlock: with a program loaded
+    /// the link stays down (armed), and unloading is the operator's deliberate
+    /// "done cutting" signal that lets it come back up.
+    UnloadProgram,
     /// Write `content` to `path` and make that file the loaded program.
     ///
     /// The write alone is not enough: LinuxCNC keeps the program it opened in
@@ -264,6 +271,7 @@ impl MachineCommand {
             Self::SetCurrentTool { .. } => "Set current tool",
             Self::ToggleLimitsOverride => "Toggle limits override",
             Self::LoadProgram { .. } => "Load program",
+            Self::UnloadProgram => "Unload program",
             Self::SaveProgram { .. } => "Save program",
             Self::SetWorkOffset { .. } => "Set work offset",
             Self::ActivateWorkOffset { .. } => "Activate work offset",

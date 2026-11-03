@@ -1730,6 +1730,19 @@ impl MachineBackend for SimBackend {
                 self.snapshot.program.paused = false;
                 Ok(())
             }
+            MachineCommand::UnloadProgram => {
+                if self.snapshot.task.running {
+                    return Err(MachineError::ProgramRunning);
+                }
+                // Clearing `path` is what disarms the external-link interlock:
+                // nothing is loaded, so AUTO has nothing to start.
+                self.program_revision += 1;
+                self.snapshot.program = ProgramState {
+                    revision: self.program_revision,
+                    ..ProgramState::default()
+                };
+                Ok(())
+            }
             MachineCommand::ClearTrail => {
                 self.clear_trail();
                 Ok(())

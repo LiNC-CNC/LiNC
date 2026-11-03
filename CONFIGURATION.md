@@ -721,10 +721,10 @@ second command, so a profile cannot switch the controller's own link off.
 This section is measurement-only. With `enabled = true`, LiNC waits for an idle
 interpreter, runs one down/verify/settle/up cycle, and publishes the phase
 durations plus the device's interrupt and packet rates before and after the
-link went down. It does not refuse a command or block motion, and an operator
-sees no gate. The measurement exists to choose `settle_ms` from evidence: how
+link went down. The measurement exists to choose `settle_ms` from evidence: how
 long the radio keeps working after `nmcli` returns is a property of the driver,
-and the interrupt rate is the number that predicts realtime jitter.
+and the interrupt rate is the number that predicts realtime jitter. It is also
+the first down cycle of the interlock described below.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -773,45 +773,60 @@ Behaviour:
 
 The cycle is published as `network` in the machine snapshot, so `linc-mcp` and
 the diagnostic socket can read it. The top bar always carries it as a `NET`
-metric: `DOWN` in the success colour (the link is quiet and motion is allowed),
-`UP` in the muted colour on an idle machine, `UP` in the warning colour while
-the interpreter runs or motion is active (the latency risk), `MEAS` while a
-cycle runs, `?` for stale or unread data, and `OFF` when the profile does not
-supervise the link at all - which also means the interlock is not armed. It sits
-in the top bar rather than the bottom one because the bottom bar's read-only
-group is already at the 1280 px baseline width once the limits override is
-shown.
+metric:
+
+| Value | Colour | Meaning |
+|---|---|---|
+| `DOWN` | success | link verified down and settled: motion is gated open |
+| `UP` | muted | link up with nothing cutting - no program loaded (also jog and homing, which run unarmed on purpose) |
+| `UP` | warning | link up while a **program** runs or is paused: the latency risk |
+| `MEAS` | accent | a down/up cycle is running |
+| `?` | warning | stale or unread state |
+| `OFF` | muted | the profile does not supervise the link, so the interlock is not armed |
+
+Amber is deliberately not raised for jog or homing: they happen with nothing
+loaded, attended and short, and the interlock is not armed for them - a warning
+on every setup jog would train the operator to ignore the colour that matters.
+The metric sits in the top bar rather than the bottom one because the bottom
+bar's read-only group is already at the 1280 px baseline width once the limits
+override is shown.
 
 ### The interlock
 
-With `[network] enabled = true` the supervisor also gates motion, on one rule:
-**move only while the link is verified down and settled.**
+With `[network] enabled = true` the supervisor holds the link down whenever the
+machine can be asked to cut, and hands it back when the operator says so:
 
-- `linc.net-safe` is that rule as a level: high while the link is down, the
+- **Armed** means a program is loaded, or MDI is selected. Either way the panel
+  can start a move without LiNC seeing the press, so the down cycle runs then -
+  before anything can start - and the link stays down through the job.
+- **Released** means nothing is loaded. The link comes back up, so SSH, logs and
+  a Loobric sync all work between jobs. `Ctrl+U` on the Program page unloads the
+  program and is what releases it: `EMC_TASK_PLAN_CLOSE` followed by the
+  interpreter reset, refused while a program runs or the buffer has unsaved
+  edits. The controller is re-read afterwards, and if it still names a program
+  the command fails loudly rather than reporting a release that did not happen.
+- `linc.net-safe` is that state as a level: high while the link is down, the
   settle window has elapsed and no client run holds a lease. A profile without
   `[network]` writes it high on the first frame, so a machine that is not
   supervised keeps moving.
-- The machine HAL ANDs it into cycle start, resume, jog enables and homing,
-  because those reach `halui` from the panel and never pass through LiNC's
-  command set.
+- The machine HAL ANDs it into **cycle start and resume** only, because those
+  reach `halui` from the panel and never pass through LiNC's command set. Jog
+  and homing are left ungated on purpose: the link is up when nothing is loaded,
+  and gating them would make ordinary setup work wait for a link it does not
+  need.
 - LiNC refuses `IssueMdi`, `RunFromLine` and `IssueToolChange` with
-  `NETWORK BUSY` while the link is up, which is the layer a HAL interlock cannot
-  cover for an NML-issued command.
+  `NETWORK BUSY` while the link is up, which covers the NML-issued commands a
+  HAL gate cannot reach. A refused command is retried once the down cycle has
+  finished, which the `NET` metric shows.
 - A sync borrows the link: the Loobric client takes a lease, the link comes up
-  and motion is blocked for that window, then the lease is released and the
-  down cycle runs again before motion returns. The Tools page shows
+  and cycle start waits for that window, then the lease is released and the down
+  cycle runs again before motion returns. The Tools page shows
   `waiting for the network` while the lease is being taken.
 
 On the BaierMill Pi 5 the numbers behind `settle_ms` are: `down` ~640 ms,
 `verify` +20 ms, `up` ~40 ms, and the radio keeps working for 250-500 ms after
 it reads down - inside `settle 250` the SDIO line carried 379 irq/s, more than
 while connected. `settle_ms = 1000` is the value measured for that machine.
-
-Motion gating is not implemented. The intended later pass takes the link down
-before MDI, program, tool-change and probe execution, and blocks cycle start,
-jog and homing through a HAL interlock, because those come from the panel and
-never pass through LiNC's command set. `settle_ms` for that gate is chosen from
-these measurements.
 
 ```toml
 [network]

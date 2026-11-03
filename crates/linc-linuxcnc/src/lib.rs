@@ -1548,6 +1548,28 @@ impl NmlBackend {
                 self.pending_height_comp = None;
                 Ok(())
             }
+            MachineCommand::UnloadProgram => {
+                if self.refresh().task.running {
+                    return Err(MachineError::ProgramRunning);
+                }
+                // Close the file, then reset the interpreter. On this controller
+                // `EMC_TASK_PLAN_CLOSE` alone is acknowledged and the file stays
+                // loaded (`task.file` still names it), which left the interlock
+                // armed after the operator asked to unload. The interpreter
+                // reset is what actually drops it.
+                self.nml_send(&NmlCommand::ProgramClose)?;
+                self.nml_send(&NmlCommand::ResetInterpreter)?;
+                self.wait_complete(Duration::from_secs(2))?;
+                // Never claim a program is gone when the controller still names
+                // one: the operator would be told the link is released while the
+                // gate stays shut.
+                if self.refresh().program.path.is_some() {
+                    return Err(MachineError::Backend(
+                        "the controller kept the program after close".into(),
+                    ));
+                }
+                Ok(())
+            }
             MachineCommand::ClearTrail => {
                 self.builder.clear_trail();
                 Ok(())

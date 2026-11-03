@@ -554,10 +554,18 @@ impl HalWriter for LincHal {
 mod tests {
     use super::*;
 
+    /// The HAL C library holds one global state per process. Two tests creating
+    /// components concurrently corrupt it - this suite died with SIGSEGV in
+    /// parallel and passed with `--test-threads=1`, and a second `linc`
+    /// component in one process is refused outright. Tests that touch the real
+    /// library take this lock; the pure ones do not need it.
+    static HAL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn opens_harmlessly_without_a_hal_environment() {
         // On a developer box this returns an error; inside LinuxCNC it
         // succeeds. Either outcome must not panic.
+        let _hal = HAL_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         let result = LincHal::new();
         if let Ok(mut hal) = result {
             assert_eq!(
@@ -578,6 +586,7 @@ mod tests {
     fn read_only_hal_reader_is_harmless_without_hal() {
         // Inside LinuxCNC this initializes a pinless reader component; on a
         // developer box it returns an error. Neither may panic or segfault.
+        let _hal = HAL_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         if let Ok(reader) = HalReader::new() {
             let _ = reader.read("cnc_panel.panel_connected");
             let _ = reader.bit("cnc_panel.estop");

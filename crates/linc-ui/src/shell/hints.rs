@@ -96,6 +96,9 @@ impl LincApp {
                     (k.save.label(), "SAVE"),
                     (k.undo.label(), "UNDO"),
                     (k.redo.label(), "REDO"),
+                    // Unload closes the controller's program, which is also what
+                    // releases the external-link interlock.
+                    ("Ctrl+U".into(), "UNLOAD"),
                 ]);
                 groups.push(ShortcutGroup {
                     title: "PROGRAM",
