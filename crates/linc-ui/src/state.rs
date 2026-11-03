@@ -11,6 +11,7 @@ use linc_core::editor::Editor;
 use linc_core::gcode::Preview;
 use linc_core::help::HelpBundle;
 use linc_core::model::MachineSnapshot;
+use linc_core::model::{AlarmSeverity, AlarmSource};
 use linc_core::probe::{ProbeCategory, ProbeOperation, ProbeParameters};
 use linc_view::{theme as view_theme, TrajectoryView, ViewMode};
 
@@ -95,6 +96,85 @@ pub enum DiagnosticsTab {
     HalNml,
     Turret,
     Logs,
+}
+
+/// The LOGS tab's key toggles.
+///
+/// A group with no bit set shows every value in it, so an untouched filter is
+/// the whole log and `A` (clear all) returns to it. Bits, not a single choice,
+/// because the interesting reading is usually a combination: errors and
+/// warnings from the panel and NML, with the UI chatter turned off.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LogFilter {
+    pub severities: u8,
+    pub sources: u16,
+}
+
+impl LogFilter {
+    /// Nothing selected: the whole log.
+    pub fn is_clear(self) -> bool {
+        self.severities == 0 && self.sources == 0
+    }
+
+    pub fn clear(&mut self) {
+        self.severities = 0;
+        self.sources = 0;
+    }
+
+    /// Flip one severity bit and report the new state.
+    pub fn toggle_severity(&mut self, severity: AlarmSeverity) -> bool {
+        let bit = 1u8 << severity_index(severity);
+        self.severities ^= bit;
+        self.severities & bit != 0
+    }
+
+    /// Flip one source bit and report the new state.
+    pub fn toggle_source(&mut self, source: AlarmSource) -> bool {
+        let bit = 1u16 << source_index(source);
+        self.sources ^= bit;
+        self.sources & bit != 0
+    }
+
+    pub fn shows_severity(self, severity: AlarmSeverity) -> bool {
+        self.severities == 0 || self.severities & (1u8 << severity_index(severity)) != 0
+    }
+
+    pub fn shows_source(self, source: AlarmSource) -> bool {
+        self.sources == 0 || self.sources & (1u16 << source_index(source)) != 0
+    }
+
+    /// Whether any entry is selected in a group, for the status line.
+    pub fn any_severity(self) -> bool {
+        self.severities != 0
+    }
+
+    pub fn any_source(self) -> bool {
+        self.sources != 0
+    }
+}
+
+pub fn severity_index(severity: AlarmSeverity) -> u8 {
+    match severity {
+        AlarmSeverity::Info => 0,
+        AlarmSeverity::Warning => 1,
+        AlarmSeverity::Error => 2,
+        AlarmSeverity::Critical => 3,
+    }
+}
+
+pub fn source_index(source: AlarmSource) -> u8 {
+    match source {
+        AlarmSource::Panel => 0,
+        AlarmSource::Program => 1,
+        AlarmSource::Probe => 2,
+        AlarmSource::Tool => 3,
+        AlarmSource::Hal => 4,
+        AlarmSource::Nml => 5,
+        AlarmSource::Motion => 6,
+        AlarmSource::Io => 7,
+        AlarmSource::Ui => 8,
+        AlarmSource::System => 9,
+    }
 }
 
 /// Which HAL browser pane holds the keyboard once Enter leaves the filter.

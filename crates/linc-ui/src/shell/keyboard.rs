@@ -404,8 +404,12 @@ impl LincApp {
             if input.consume_key(self.prefs.keymap.help.modifiers, self.prefs.keymap.help.key) {
                 nav_page = Some(Page::Help);
             }
+            // Not on DIAGNOSTICS: that page shows the same log inline, and on
+            // the LOGS tab `M` is the MOTION source toggle, so the global
+            // dialog would open over the filter it just changed.
             if !text_editing
                 && !self.overlay_open()
+                && self.nav.page != Page::Diagnostics
                 && input.consume_key(
                     self.prefs.keymap.messages.modifiers,
                     self.prefs.keymap.messages.key,

@@ -246,10 +246,23 @@ impl LincApp {
                 hints.push(("PgUp/PgDn".into(), "PAGE"));
             }
             Page::Diagnostics => match self.diagnostics.tab {
+                DiagnosticsTab::Overview => {
+                    hints.push(("PgUp/PgDn".into(), "TABS"));
+                    groups.push(ShortcutGroup {
+                        title: "LOG VIEW",
+                        items: vec![("C".into(), "CLEAR")],
+                    });
+                }
                 DiagnosticsTab::HalNml => {
+                    // The page keys scroll only a pane that overflows; on one
+                    // that fits they fall through to the tabs.
+                    let scrollable = match self.diagnostics.hal_pane {
+                        crate::state::HalPane::Pins => self.diagnostics.hal_pins_scrollable,
+                        crate::state::HalPane::Signals => self.diagnostics.hal_signals_scrollable,
+                    };
                     hints.push((
                         "PgUp/PgDn".into(),
-                        if self.diagnostics.list_focused {
+                        if self.diagnostics.list_focused && scrollable {
                             "SCROLL"
                         } else {
                             "TABS"
@@ -258,6 +271,7 @@ impl LincApp {
                     groups.push(ShortcutGroup {
                         title: "HAL BROWSER",
                         items: vec![
+                            ("/".into(), "SEARCH"),
                             ("Enter".into(), "LIST"),
                             ("\u{2190}/\u{2192}".into(), "PANE"),
                             ("F".into(), "FASTER"),
@@ -269,7 +283,7 @@ impl LincApp {
                 DiagnosticsTab::Logs => {
                     hints.push((
                         "PgUp/PgDn".into(),
-                        if self.diagnostics.list_focused {
+                        if self.diagnostics.list_focused && self.diagnostics.logs_scrollable {
                             "SCROLL"
                         } else {
                             "TABS"
@@ -277,7 +291,22 @@ impl LincApp {
                     ));
                     groups.push(ShortcutGroup {
                         title: "LOG LIST",
-                        items: vec![("Enter".into(), "LIST"), (k.back.label(), "SEARCH")],
+                        items: vec![
+                            ("/".into(), "SEARCH"),
+                            ("Enter".into(), "LIST"),
+                            (k.back.label(), "SEARCH"),
+                        ],
+                    });
+                    // One letter per toggle, read only while the list holds the
+                    // keyboard: in the search line they are text.
+                    groups.push(ShortcutGroup {
+                        title: "LOG FILTER",
+                        items: vec![
+                            ("I W E C".into(), "SEVERITY"),
+                            ("P G B T H".into(), "PANEL..HAL"),
+                            ("N M O U Y".into(), "NML..SYSTEM"),
+                            ("A".into(), "CLEAR ALL"),
+                        ],
                     });
                 }
                 _ => hints.push(("PgUp/PgDn".into(), "TABS")),

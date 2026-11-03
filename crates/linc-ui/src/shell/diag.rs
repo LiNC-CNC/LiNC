@@ -233,7 +233,9 @@ pub(crate) struct DiagnosticsUi {
     pub tab: DiagnosticsTab,
     /// The tab drawn last frame, so entering HAL / NML can focus its filter.
     pub last_tab: DiagnosticsTab,
-    /// Set when a tab's search line should take focus on the next draw.
+    /// Set when a tab's list should take the keyboard on the next draw.
+    pub focus_list: bool,
+    /// Set when Esc cleared the search line and the caret must stay in it.
     pub focus_search: bool,
     /// True while a search tab's list, not its search line, holds the keyboard.
     pub list_focused: bool,
@@ -247,17 +249,55 @@ pub(crate) struct DiagnosticsUi {
     pub hal_signals_scroll: Option<f32>,
     pub logs_offset: f32,
     pub logs_scroll: Option<f32>,
+    /// Whether each list had something to scroll last frame. A page key over a
+    /// list that cannot scroll cycles the tabs instead of doing nothing.
+    pub logs_scrollable: bool,
+    pub hal_pins_scrollable: bool,
+    pub hal_signals_scrollable: bool,
     /// `halcmd` poller behind the HAL browser. Started on the first HAL / NML
     /// draw, so no thread runs until somebody looks at HAL.
     pub hal: Option<linc_hal::browser::HalBrowser>,
-    pub search: String,
-    pub severity: Option<AlarmSeverity>,
-    pub source: Option<AlarmSource>,
-    pub clear_view: bool,
+    /// The HAL browser's filter and the log search are separate buffers: a pin
+    /// filter is not a message query, and carrying one into the other tab read
+    /// as a bug.
+    pub search_hal: String,
+    pub search_logs: String,
+    /// The LOGS tab's key toggles; see [`LogFilter`].
+    pub filter: LogFilter,
+    /// Log entries at or before this stamp are hidden: `CLEAR` on the overview
+    /// moves it to now, which zeroes the counters without touching a fault the
+    /// controller still holds.
+    pub cleared_before_ms: u64,
     pub log: VecDeque<Alarm>,
     /// Window size and scale of the last frame, for `linc_get_screen_model`.
     pub viewport: linc_core::diag::ViewportInfo,
     /// Named shell rectangles from the last frame.
     pub regions: Vec<linc_core::diag::ScreenRegion>,
     pub frame_time_ms: f32,
+}
+
+impl DiagnosticsUi {
+    /// The search buffer the given tab draws.
+    pub fn search_for(&self, tab: DiagnosticsTab) -> &String {
+        match tab {
+            DiagnosticsTab::HalNml => &self.search_hal,
+            _ => &self.search_logs,
+        }
+    }
+
+    pub fn search_for_mut(&mut self, tab: DiagnosticsTab) -> &mut String {
+        match tab {
+            DiagnosticsTab::HalNml => &mut self.search_hal,
+            _ => &mut self.search_logs,
+        }
+    }
+
+    /// The search buffer of the tab on screen.
+    pub fn search(&self) -> &String {
+        self.search_for(self.tab)
+    }
+
+    pub fn search_mut(&mut self) -> &mut String {
+        self.search_for_mut(self.tab)
+    }
 }

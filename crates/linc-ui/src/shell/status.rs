@@ -363,8 +363,21 @@ impl LincApp {
     /// notices, newest first. Diagnostics and the status bars share this list
     /// so one of them cannot report messages the other shows as zero.
     pub fn logs(&self) -> Vec<Alarm> {
-        let mut logs: Vec<Alarm> = self.snapshot.alarms.iter().cloned().collect();
-        logs.extend(self.diagnostics.log.iter().cloned());
+        let cleared = self.diagnostics.cleared_before_ms;
+        let mut logs: Vec<Alarm> = self
+            .snapshot
+            .alarms
+            .iter()
+            .filter(|alarm| alarm.timestamp_ms > cleared)
+            .cloned()
+            .collect();
+        logs.extend(
+            self.diagnostics
+                .log
+                .iter()
+                .filter(|alarm| alarm.timestamp_ms > cleared)
+                .cloned(),
+        );
         logs.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
         logs
     }
@@ -422,11 +435,13 @@ impl LincApp {
     pub fn log_counts(&self) -> (usize, usize) {
         let mut alarms = 0;
         let mut messages = 0;
+        let cleared = self.diagnostics.cleared_before_ms;
         for entry in self
             .snapshot
             .alarms
             .iter()
             .chain(self.diagnostics.log.iter())
+            .filter(|entry| entry.timestamp_ms > cleared)
         {
             if entry.severity.is_alarm() {
                 alarms += 1;

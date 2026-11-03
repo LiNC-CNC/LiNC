@@ -255,11 +255,11 @@ impl LincApp {
                 self.diagnostics.tab,
                 DiagnosticsTab::HalNml | DiagnosticsTab::Logs
             )
-            && !self.diagnostics.search.is_empty()
+            && !self.diagnostics.search().is_empty()
         {
-            self.diagnostics.search.clear();
-            // The clear is not a dismissal: ask for the caret back, so the next
-            // keystroke narrows the list instead of going nowhere.
+            self.diagnostics.search_mut().clear();
+            // egui drops the focus on Escape; the clear is not a dismissal, so
+            // ask for the caret back on the next draw.
             self.diagnostics.focus_search = true;
             return;
         }
@@ -297,6 +297,21 @@ impl LincApp {
             Page::Diagnostics => self.set_page(Page::Machine),
             _ => self.set_page(Page::Machine),
         }
+    }
+
+    /// Clear the diagnostics view: the log rows and the counters that count
+    /// them start again from now.
+    ///
+    /// This is a view command. It acknowledges nothing and resets nothing on
+    /// the controller: a fault the machine still holds stays in the snapshot
+    /// and comes back on the next entry the controller reports.
+    pub fn clear_log_view(&mut self) {
+        self.diagnostics.cleared_before_ms = linc_core::model::now_ms();
+        self.diagnostics.log.clear();
+        // The list starts at its top again: the rows the reader was looking at
+        // are the rows they just cleared.
+        self.diagnostics.logs_scroll = Some(0.0);
+        self.toast("LOG VIEW CLEARED", theme::MUTED);
     }
 
     /// Clear a latched probe trip with the controller reset.

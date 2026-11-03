@@ -6,7 +6,7 @@ use linc_hal::browser::{HalBrowser, HalPin, HalSignal, HalSnapshot};
 
 use crate::screens::common;
 use crate::shell::LincApp;
-use crate::state::{DiagnosticsTab, HalPane};
+use crate::state::{severity_index, source_index, DiagnosticsTab, HalPane};
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
@@ -18,9 +18,6 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     }
     // No page title: the navigation names the page.
     common::focus_anchor(ui, "diagnostics-page-focus");
-    if app.diagnostics.clear_view {
-        app.diagnostics.clear_view = false;
-    }
     ui.horizontal(|ui| {
         // PROBE's strip: words, not buttons. The active tab is the accent one
         // with a rule under it.
@@ -50,10 +47,10 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         egui::Stroke::new(1.0, theme::BORDER),
     );
     ui.add_space(4.0);
-    // Entering HAL / NML or LOGS puts the caret in its search line, so the
-    // first keystroke narrows what is on the page instead of going nowhere.
-    // The same happens when the page opens on one of those tabs: a first frame
-    // on the page counts as entering it.
+    // Entering HAL / NML or LOGS puts the keyboard on the list, not in the
+    // search line: the single-letter toggles are the point of those tabs, and a
+    // focused field swallows every one of them. `/` goes to the search line
+    // from there. A first frame on the page counts as entering it.
     // The frame number is read before the store is locked: asking the context
     // inside `data_mut` re-enters the same lock.
     let frame = ui.ctx().cumulative_frame_nr();
@@ -67,10 +64,12 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         opened
     });
     if page_opened || app.diagnostics.tab != app.diagnostics.last_tab {
-        app.diagnostics.focus_search = matches!(
+        let searchable = matches!(
             app.diagnostics.tab,
             DiagnosticsTab::HalNml | DiagnosticsTab::Logs
         );
+        app.diagnostics.list_focused = searchable;
+        app.diagnostics.focus_list = searchable;
         app.diagnostics.last_tab = app.diagnostics.tab;
     }
     egui::ScrollArea::vertical()
@@ -120,6 +119,13 @@ fn sized_card(ui: &mut Ui, width: f32, height: f32, add: impl FnOnce(&mut Ui)) {
 }
 
 fn overview(app: &mut LincApp, ui: &mut Ui) {
+    // `C` clears the view: the counters go to zero and the rows below start
+    // after this moment. Nothing is acknowledged or reset on the controller.
+    if !ui.ctx().text_edit_focused()
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::C))
+    {
+        app.clear_log_view();
+    }
     // The page's card rhythm: 12 px between the cards across a row.
     const COLUMN_GAP: f32 = 12.0;
     let available = ui.available_width();
@@ -495,7 +501,8 @@ fn hal_browser(app: &mut LincApp, ui: &mut Ui) {
     // One keyboard target for both panes: the cursors choose the pane, the
     // page keys scroll it. Two focusable panes fought egui's own arrow focus
     // walk, which runs before the page can claim the key.
-    list_anchor(ui, "linc-hal-list");
+    let anchor = list_anchor(ui, "linc-hal-list");
+    take_entry_focus(app, &anchor);
 
     ui.horizontal(|ui| {
         // One line: the theme's 44 pt touch target would make the filter box
@@ -504,15 +511,12 @@ fn hal_browser(app: &mut LincApp, ui: &mut Ui) {
         theme::section_header(ui, "HAL BROWSER");
         ui.add_space(6.0);
         let search = ui.add(
-            egui::TextEdit::singleline(&mut app.diagnostics.search)
+            egui::TextEdit::singleline(app.diagnostics.search_for_mut(DiagnosticsTab::HalNml))
                 .id(egui::Id::unique("linc-diagnostics-hal-search"))
                 .hint_text("filter component, pin or signal")
                 .desired_width(260.0),
         );
-        if app.diagnostics.focus_search {
-            search.request_focus();
-            app.diagnostics.focus_search = false;
-        }
+        take_clear_focus(app, &search);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let (text, color) = match (snapshot.available, age) {
                 (false, _) => ("HALCMD UNAVAILABLE".to_string(), theme::ERROR),
@@ -563,11 +567,16 @@ fn hal_browser(app: &mut LincApp, ui: &mut Ui) {
             .size(theme::font_size(10.0))
             .color(theme::MUTED),
         );
-        app.diagnostics.list_focused = false;
+        // The list stays the keyboard's owner: an empty browser is still the
+        // pane Esc returns from, and a focus model that disagreed with the
+        // widget holding the caret would lose the next key.
         return;
     }
 
-    let filter = app.diagnostics.search.to_ascii_lowercase();
+    let filter = app
+        .diagnostics
+        .search_for(DiagnosticsTab::HalNml)
+        .to_ascii_lowercase();
     let rows = hal_rows(&snapshot, &filter);
     let signals: Vec<&HalSignal> = snapshot
         .signals
@@ -643,6 +652,8 @@ fn hal_browser(app: &mut LincApp, ui: &mut Ui) {
                             });
                         });
                     app.diagnostics.hal_pins_offset = out.state.clamped_offset().y;
+                    app.diagnostics.hal_pins_scrollable =
+                        out.content_size.y > out.inner_rect.height() + 1.0;
                 });
             },
         );
@@ -719,6 +730,8 @@ fn hal_browser(app: &mut LincApp, ui: &mut Ui) {
                         });
                     });
                     app.diagnostics.hal_signals_offset = out.state.clamped_offset().y;
+                    app.diagnostics.hal_signals_scrollable =
+                        out.content_size.y > out.inner_rect.height() + 1.0;
                 });
             },
         );
@@ -773,6 +786,11 @@ fn hal_list_keys(app: &mut LincApp, ui: &mut Ui, height: f32) {
         return;
     }
     if !app.diagnostics.list_focused {
+        return;
+    }
+    if search_key(ui) {
+        app.diagnostics.list_focused = false;
+        ui.memory_mut(|memory| memory.request_focus(search_id));
         return;
     }
     // A click into the filter is the operator leaving the list.
@@ -830,19 +848,65 @@ fn hal_list_keys(app: &mut LincApp, ui: &mut Ui, height: f32) {
         };
     }
     if page_up || page_down {
-        let step = page_step(height);
-        let delta = if page_down { step } else { -step };
-        match app.diagnostics.hal_pane {
-            HalPane::Pins => {
-                let target = (app.diagnostics.hal_pins_offset + delta).max(0.0);
-                app.diagnostics.hal_pins_scroll = Some(target);
+        let (offset, scrollable) = match app.diagnostics.hal_pane {
+            HalPane::Pins => (
+                app.diagnostics.hal_pins_offset,
+                app.diagnostics.hal_pins_scrollable,
+            ),
+            HalPane::Signals => (
+                app.diagnostics.hal_signals_offset,
+                app.diagnostics.hal_signals_scrollable,
+            ),
+        };
+        // A pane that fits has nothing to scroll: the key keeps its page
+        // meaning there instead of doing nothing.
+        if scrollable {
+            let step = page_step(height);
+            let delta = if page_down { step } else { -step };
+            let target = (offset + delta).max(0.0);
+            match app.diagnostics.hal_pane {
+                HalPane::Pins => app.diagnostics.hal_pins_scroll = Some(target),
+                HalPane::Signals => app.diagnostics.hal_signals_scroll = Some(target),
             }
-            HalPane::Signals => {
-                let target = (app.diagnostics.hal_signals_offset + delta).max(0.0);
-                app.diagnostics.hal_signals_scroll = Some(target);
-            }
+        } else if page_down {
+            app.page_down();
+        } else {
+            app.page_up();
         }
     }
+}
+
+/// After Esc cleared the search text, put the caret back in the field.
+fn take_clear_focus(app: &mut LincApp, field: &egui::Response) {
+    if app.diagnostics.focus_search {
+        field.request_focus();
+        app.diagnostics.focus_search = false;
+    }
+}
+
+/// Take the keyboard into the list when its tab was just entered.
+fn take_entry_focus(app: &mut LincApp, anchor: &egui::Response) {
+    if app.diagnostics.focus_list {
+        anchor.request_focus();
+        app.diagnostics.focus_list = false;
+    }
+}
+
+/// `/` moves the keyboard from the list to the search line — the same key the
+/// Help page uses — and reports whether it did.
+///
+/// The key's own text event is dropped with it: the caret moves in this frame,
+/// so a surviving `Text("/")` would be typed into the field that just took it.
+fn search_key(ui: &mut Ui) -> bool {
+    let hit = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Slash));
+    if hit {
+        ui.input_mut(|input| {
+            input
+                .events
+                .retain(|event| !matches!(event, egui::Event::Text(text) if text == "/"))
+        });
+    }
+    hit
 }
 
 /// A 2 px accent rule on the pane the cursors act on.
@@ -872,6 +936,11 @@ fn logs_list_keys(app: &mut LincApp, ui: &mut Ui, height: f32) {
     if !app.diagnostics.list_focused {
         return;
     }
+    if search_key(ui) {
+        app.diagnostics.list_focused = false;
+        ui.memory_mut(|memory| memory.request_focus(search_id));
+        return;
+    }
     if search_focused {
         app.diagnostics.list_focused = false;
         return;
@@ -891,11 +960,20 @@ fn logs_list_keys(app: &mut LincApp, ui: &mut Ui, height: f32) {
     if !ui.memory(|memory| memory.has_focus(list_id)) {
         ui.memory_mut(|memory| memory.request_focus(list_id));
     }
+    log_toggle_keys(app, ui);
     if page_up || page_down {
-        let step = page_step(height);
-        let delta = if page_down { step } else { -step };
-        let target = (app.diagnostics.logs_offset + delta).max(0.0);
-        app.diagnostics.logs_scroll = Some(target);
+        // A short log fits the card: the page keys fall through to the tabs
+        // rather than doing nothing.
+        if app.diagnostics.logs_scrollable {
+            let step = page_step(height);
+            let delta = if page_down { step } else { -step };
+            let target = (app.diagnostics.logs_offset + delta).max(0.0);
+            app.diagnostics.logs_scroll = Some(target);
+        } else if page_down {
+            app.page_down();
+        } else {
+            app.page_up();
+        }
     }
 }
 
@@ -1071,9 +1149,35 @@ fn turret(app: &mut LincApp, ui: &mut Ui) {
     });
 }
 
+/// The severity toggles, in the order their keys follow.
+const LOG_SEVERITIES: [(AlarmSeverity, &str, &str); 4] = [
+    (AlarmSeverity::Info, "I", "INFO"),
+    (AlarmSeverity::Warning, "W", "WARN"),
+    (AlarmSeverity::Error, "E", "ERROR"),
+    (AlarmSeverity::Critical, "C", "CRIT"),
+];
+
+/// The source toggles and the key that flips each one. Every letter is free on
+/// this page: the shell's single-letter commands are page-local.
+const LOG_SOURCES: [(AlarmSource, &str, &str); 10] = [
+    (AlarmSource::Panel, "P", "PANEL"),
+    (AlarmSource::Program, "G", "PROGRAM"),
+    (AlarmSource::Probe, "B", "PROBE"),
+    (AlarmSource::Tool, "T", "TOOL"),
+    (AlarmSource::Hal, "H", "HAL"),
+    (AlarmSource::Nml, "N", "NML"),
+    (AlarmSource::Motion, "M", "MOTION"),
+    (AlarmSource::Io, "O", "I/O"),
+    (AlarmSource::Ui, "U", "UI"),
+    (AlarmSource::System, "Y", "SYSTEM"),
+];
+
 fn logs(app: &mut LincApp, ui: &mut Ui) {
     // Before the search line: the field takes Enter for itself.
     logs_list_keys(app, ui, (ui.available_height() - 40.0).max(120.0));
+    ui.spacing_mut().interact_size.y = 18.0;
+    // Wrapped: a narrow window drops the status line to its own row instead of
+    // clipping the source names off the right edge.
     ui.horizontal_wrapped(|ui| {
         ui.label(
             RichText::new("SEARCH")
@@ -1081,75 +1185,58 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
                 .color(theme::MUTED),
         );
         let search = ui.add(
-            egui::TextEdit::singleline(&mut app.diagnostics.search)
+            egui::TextEdit::singleline(app.diagnostics.search_for_mut(DiagnosticsTab::Logs))
                 .id(egui::Id::unique("linc-diagnostics-search"))
                 .hint_text("message, code, source")
                 .desired_width(240.0),
         );
-        if app.diagnostics.focus_search {
-            search.request_focus();
-            app.diagnostics.focus_search = false;
-        }
-        ui.add_space(6.0);
-        for severity in [
-            AlarmSeverity::Info,
-            AlarmSeverity::Warning,
-            AlarmSeverity::Error,
-            AlarmSeverity::Critical,
-        ] {
-            let active = app.diagnostics.severity == Some(severity);
-            if common::page_tab(ui, severity.label(), active).clicked() {
-                app.diagnostics.severity = if active { None } else { Some(severity) };
-            }
-        }
-        ui.add_space(6.0);
-        for source in [
-            AlarmSource::Panel,
-            AlarmSource::Program,
-            AlarmSource::Probe,
-            AlarmSource::Tool,
-            AlarmSource::Hal,
-            AlarmSource::Nml,
-            AlarmSource::Motion,
-            AlarmSource::Io,
-        ] {
-            let active = app.diagnostics.source == Some(source);
-            if common::page_tab(ui, source.label(), active).clicked() {
-                app.diagnostics.source = if active { None } else { Some(source) };
-            }
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                RichText::new(format!("{} EVENTS", app.logs().len()))
-                    .monospace()
-                    .size(theme::font_size(10.0))
-                    .color(theme::MUTED),
-            );
-        });
+        take_clear_focus(app, &search);
+        ui.add_space(10.0);
+        // The toggles are state, not buttons: the status line reports which
+        // ones are on, and the legend names the keys that flip them.
+        // The bits, not `shows_*`: an empty group means "no filter", and the
+        // strip reports that as ALL rather than as every value selected.
+        let severities: Vec<(&str, bool)> = LOG_SEVERITIES
+            .iter()
+            .map(|(severity, _, label)| {
+                (
+                    *label,
+                    app.diagnostics.filter.severities & (1 << severity_index(*severity)) != 0,
+                )
+            })
+            .collect();
+        log_toggle_group(ui, "SEV", &severities);
+        ui.add_space(10.0);
+        let sources: Vec<(&str, bool)> = LOG_SOURCES
+            .iter()
+            .map(|(source, _, label)| {
+                (
+                    *label,
+                    app.diagnostics.filter.sources & (1 << source_index(*source)) != 0,
+                )
+            })
+            .collect();
+        log_toggle_group(ui, "SRC", &sources);
     });
     ui.add_space(4.0);
     theme::card(ui, |ui| {
-        list_anchor(ui, "linc-logs-list");
-        let logs: Vec<Alarm> = app
-            .logs()
+        let anchor = list_anchor(ui, "linc-logs-list");
+        take_entry_focus(app, &anchor);
+        let all = app.logs();
+        let total = all.len();
+        let logs: Vec<Alarm> = all
             .into_iter()
+            .filter(|alarm| app.diagnostics.filter.shows_severity(alarm.severity))
+            .filter(|alarm| app.diagnostics.filter.shows_source(alarm.source))
             .filter(|alarm| {
-                app.diagnostics
-                    .severity
-                    .map(|severity| alarm.severity == severity)
-                    .unwrap_or(true)
-                    && app
-                        .diagnostics
-                        .source
-                        .map(|source| alarm.source == source)
-                        .unwrap_or(true)
-                    && {
-                        let query = app.diagnostics.search.to_ascii_lowercase();
-                        query.is_empty()
-                            || alarm.message.to_ascii_lowercase().contains(&query)
-                            || alarm.code.to_ascii_lowercase().contains(&query)
-                            || alarm.source.label().to_ascii_lowercase().contains(&query)
-                    }
+                let query = app
+                    .diagnostics
+                    .search_for(DiagnosticsTab::Logs)
+                    .to_ascii_lowercase();
+                query.is_empty()
+                    || alarm.message.to_ascii_lowercase().contains(&query)
+                    || alarm.code.to_ascii_lowercase().contains(&query)
+                    || alarm.source.label().to_ascii_lowercase().contains(&query)
             })
             .collect();
         // Solid bars: a list longer than the card must show it, not fade out
@@ -1163,6 +1250,110 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
         }
         let out = area.show(ui, |ui| log_table(ui, "log-grid", &logs, usize::MAX));
         app.diagnostics.logs_offset = out.state.clamped_offset().y;
+        app.diagnostics.logs_scrollable = out.content_size.y > out.inner_rect.height() + 1.0;
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                RichText::new(format!("{} / {} EVENTS", logs.len(), total))
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+        });
+    });
+}
+
+/// The letter toggles: one per severity, one per source, and `A` for none.
+///
+/// They are read only while the list holds the keyboard, so a letter typed in
+/// the search line stays text.
+fn log_toggle_keys(app: &mut LincApp, ui: &mut Ui) {
+    let mut changed = false;
+    let mut cleared = false;
+    ui.input_mut(|input| {
+        for (severity, key, label) in LOG_SEVERITIES {
+            if input.consume_key(egui::Modifiers::NONE, letter_key(key)) {
+                let on = app.diagnostics.filter.toggle_severity(severity);
+                changed = true;
+                app.toast(
+                    format!("{} {label}", if on { "FILTER ON" } else { "FILTER OFF" }),
+                    if on { theme::ACCENT } else { theme::MUTED },
+                );
+            }
+        }
+        for (source, key, label) in LOG_SOURCES {
+            if input.consume_key(egui::Modifiers::NONE, letter_key(key)) {
+                let on = app.diagnostics.filter.toggle_source(source);
+                changed = true;
+                app.toast(
+                    format!("{} {label}", if on { "FILTER ON" } else { "FILTER OFF" }),
+                    if on { theme::ACCENT } else { theme::MUTED },
+                );
+            }
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::A) {
+            cleared = true;
+        }
+    });
+    if cleared {
+        app.diagnostics.filter.clear();
+        app.toast("FILTERS CLEARED", theme::MUTED);
+    } else if !changed {
+        return;
+    }
+    // A new filter starts at the top of the list: the rows the reader was
+    // looking at are not the rows they asked for.
+    app.diagnostics.logs_scroll = Some(0.0);
+}
+
+/// The `egui::Key` for one of the toggle letters.
+fn letter_key(letter: &str) -> egui::Key {
+    match letter {
+        "I" => egui::Key::I,
+        "W" => egui::Key::W,
+        "E" => egui::Key::E,
+        "C" => egui::Key::C,
+        "P" => egui::Key::P,
+        "G" => egui::Key::G,
+        "B" => egui::Key::B,
+        "T" => egui::Key::T,
+        "H" => egui::Key::H,
+        "N" => egui::Key::N,
+        "M" => egui::Key::M,
+        "O" => egui::Key::O,
+        "U" => egui::Key::U,
+        "Y" => egui::Key::Y,
+        _ => egui::Key::A,
+    }
+}
+
+/// One group of the status line: its name, then every value either accented
+/// (its toggle is on) or dimmed (off). A group with nothing on shows `ALL`,
+/// which is what an empty filter means.
+fn log_toggle_group(ui: &mut Ui, name: &str, entries: &[(&str, bool)]) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        ui.label(
+            RichText::new(name)
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
+        if !entries.iter().any(|(_, on)| *on) {
+            ui.label(
+                RichText::new("ALL")
+                    .monospace()
+                    .size(theme::font_size(10.0))
+                    .color(theme::ACCENT),
+            );
+            return;
+        }
+        for (label, on) in entries {
+            ui.label(
+                RichText::new(*label)
+                    .monospace()
+                    .size(theme::font_size(10.0))
+                    .color(if *on { theme::ACCENT } else { theme::MUTED }),
+            );
+        }
     });
 }
 
