@@ -424,7 +424,7 @@ fn rx_packets(interface: &str) -> Option<u64> {
 /// claiming to control. A mismatch means taking the configured interface down
 /// would not stop internet traffic, so the measurement would understate the
 /// cost.
-fn default_route_device() -> Option<String> {
+pub fn default_route_device() -> Option<String> {
     let text = fs::read_to_string("/proc/net/route").ok()?;
     for line in text.lines().skip(1) {
         let mut fields = line.split_whitespace();
@@ -662,28 +662,70 @@ fn run_worker(
     lock(status).last_measure_ms = Some(now_ms());
     let measurement = measure(&settings);
 
-    let summary = measurement.summary();
+    let fresh = status_from(&settings, &measurement);
     {
         let mut status = lock(status);
-        status.measuring = false;
-        status.down_ms = Some(measurement.down.as_millis() as u64);
-        status.verify_ms = measurement.verify.map(|value| value.as_millis() as u64);
-        status.settle_ms = Some(measurement.settle.as_millis() as u64);
-        status.up_ms = Some(measurement.up.as_millis() as u64);
-        status.irq_per_s_up = measurement.irq_up;
-        status.irq_per_s_down = measurement.irq_down;
-        status.rx_per_s_up = measurement.rx_up;
-        status.rx_per_s_down = measurement.rx_down;
-        status.message = summary.clone();
+        // The route check belongs to this machine, not to the cycle; keep it.
+        let route_mismatch = status.route_mismatch;
+        *status = NetworkStatus {
+            route_mismatch,
+            ..fresh
+        };
     }
     for note in &measurement.notes {
         log::warn!("network: {note}");
     }
     log::info!(
-        "network: measured {} {}: {summary}",
+        "network: measured {} {}: {}",
         settings.kind.as_str(),
-        settings.interface
+        settings.interface,
+        measurement.summary()
     );
+}
+
+/// One measurement without a supervisor, for commissioning:
+/// `linc --network-measure`. It runs the same cycle the supervisor would run
+/// once the machine is idle, and returns the status that cycle would publish, so
+/// the numbers can be collected before a profile enables the section at all.
+///
+/// The caller is responsible for the machine being idle: that is the whole point
+/// of the check the supervisor performs, and a commissioning run is an explicit
+/// operator action.
+pub fn measure_now(settings: &NetworkSettings) -> NetworkStatus {
+    let measurement = measure(settings);
+    for note in &measurement.notes {
+        log::warn!("network: {note}");
+    }
+    log::info!(
+        "network: measured {} {}: {}",
+        settings.kind.as_str(),
+        settings.interface,
+        measurement.summary()
+    );
+    status_from(settings, &measurement)
+}
+
+fn status_from(settings: &NetworkSettings, measurement: &Measurement) -> NetworkStatus {
+    NetworkStatus {
+        enabled: true,
+        kind: settings.kind.as_str().to_string(),
+        interface: settings.interface.clone(),
+        // The cycle ends by bringing the link back, so that is the state it
+        // leaves behind; a failed restore is recorded in the summary.
+        link_up: Some(measurement.up_restored),
+        measuring: false,
+        last_measure_ms: Some(now_ms()),
+        down_ms: Some(measurement.down.as_millis() as u64),
+        verify_ms: measurement.verify.map(|value| value.as_millis() as u64),
+        settle_ms: Some(measurement.settle.as_millis() as u64),
+        up_ms: Some(measurement.up.as_millis() as u64),
+        irq_per_s_up: measurement.irq_up,
+        irq_per_s_down: measurement.irq_down,
+        rx_per_s_up: measurement.rx_up,
+        rx_per_s_down: measurement.rx_down,
+        message: measurement.summary(),
+        route_mismatch: false,
+    }
 }
 
 /// Wrap the selected backend when `[network] enabled` is true. A disabled
@@ -869,6 +911,20 @@ mod tests {
                 .any(|note| note.contains("down command failed")),
             "{measurement:?}"
         );
+    }
+
+    #[test]
+    fn measure_now_publishes_the_cycle_without_a_supervisor() {
+        let dir = tempfile::tempdir().unwrap();
+        let (settings, state_file) = fixture(dir.path());
+        let status = measure_now(&settings);
+        assert!(status.enabled, "{status:?}");
+        assert_eq!(status.interface, "test0");
+        assert_eq!(status.link_up, Some(true), "the cycle restores the link");
+        assert!(status.down_ms.is_some() && status.up_ms.is_some());
+        assert!(status.verify_ms.is_some(), "{status:?}");
+        assert!(status.message.starts_with("down "), "{}", status.message);
+        assert_eq!(fs::read_to_string(&state_file).unwrap().trim(), "up");
     }
 
     #[test]

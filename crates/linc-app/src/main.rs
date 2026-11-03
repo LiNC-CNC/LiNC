@@ -52,6 +52,14 @@ struct Args {
     /// Do not create the diagnostic socket for linc-mcp.
     #[arg(long)]
     no_diag: bool,
+    /// Commissioning: run one `[network]` link measurement and exit.
+    ///
+    /// Needs no window, no HAL and no LinuxCNC session, which is what makes it
+    /// usable before the supervisor is enabled in a profile. The operator is
+    /// responsible for the machine being idle; the run takes the external link
+    /// down for a few seconds.
+    #[arg(long)]
+    network_measure: bool,
 }
 
 /// Install logging. `RUST_LOG` wins; without it LiNC's own crates log at info
@@ -101,6 +109,56 @@ fn main() -> Result<()> {
         for (key, value) in profile.summary() {
             println!("{key:16} {value}");
         }
+        return Ok(());
+    }
+
+    if args.network_measure {
+        let settings = linc_core::network::NetworkSettings::from_profile(&profile)
+            .context("[network] enabled = false in this profile; nothing to measure")?;
+        if let (Some(route), interface) = (
+            linc_core::network::default_route_device(),
+            settings.interface.as_str(),
+        ) {
+            if route != interface {
+                eprintln!(
+                    "warning: {interface} is not the default-route device {route}; \
+                     taking it down will not stop internet traffic"
+                );
+            }
+        }
+        println!(
+            "measuring {} {} for {}",
+            settings.kind.as_str(),
+            settings.interface,
+            profile.config.machine.name
+        );
+        let status = linc_core::network::measure_now(&settings);
+        let ms = |value: Option<u64>| {
+            value
+                .map(|value| format!("{value} ms"))
+                .unwrap_or_else(|| "not reached".into())
+        };
+        let per_s = |value: Option<f64>| {
+            value
+                .map(|value| format!("{value:.0}/s"))
+                .unwrap_or_else(|| "not sampled".into())
+        };
+        println!("link     {}", if status.link_up == Some(true) { "back up" } else { "NOT restored" });
+        println!("down     {}", ms(status.down_ms));
+        println!("verify   {}", ms(status.verify_ms));
+        println!("settle   {}", ms(status.settle_ms));
+        println!("up       {}", ms(status.up_ms));
+        println!(
+            "irq      {} -> {}",
+            per_s(status.irq_per_s_up),
+            per_s(status.irq_per_s_down)
+        );
+        println!(
+            "rx       {} -> {}",
+            per_s(status.rx_per_s_up),
+            per_s(status.rx_per_s_down)
+        );
+        println!("summary  {}", status.message);
         return Ok(());
     }
 
