@@ -276,17 +276,23 @@ impl LincApp {
                     machine_following = true;
                 }
             }
-            // Page-local to the pages that draw a toolpath.
+            // Page-local to the pages that draw a toolpath. FIT is a view
+            // command the OFFSETS preview shares; CLEAR TRAIL and RUN LINE stay
+            // off that page, where the trail has no meaning and there is no
+            // program line to run.
+            if matches!(
+                self.nav.page,
+                Page::Machine | Page::Program | Page::Manual | Page::Homing | Page::Offsets
+            ) && input.consume_key(
+                self.prefs.keymap.graph_fit.modifiers,
+                self.prefs.keymap.graph_fit.key,
+            ) {
+                graph_fit = true;
+            }
             if matches!(
                 self.nav.page,
                 Page::Machine | Page::Program | Page::Manual | Page::Homing
             ) {
-                if input.consume_key(
-                    self.prefs.keymap.graph_fit.modifiers,
-                    self.prefs.keymap.graph_fit.key,
-                ) {
-                    graph_fit = true;
-                }
                 if input.consume_key(
                     self.prefs.keymap.graph_clear.modifiers,
                     self.prefs.keymap.graph_clear.key,
@@ -527,7 +533,7 @@ impl LincApp {
             // already toggles SPLIT/CODE on the Program page.
             if matches!(
                 self.nav.page,
-                Page::Machine | Page::Program | Page::Manual | Page::Homing
+                Page::Machine | Page::Program | Page::Manual | Page::Homing | Page::Offsets
             ) && input.consume_key(
                 self.prefs.keymap.view_cycle.modifiers,
                 self.prefs.keymap.view_cycle.key,

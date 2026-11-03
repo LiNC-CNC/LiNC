@@ -4832,10 +4832,11 @@ fn a_focused_editor_keeps_ctrl_up_down_and_ctrl_left_right() {
 /// A nav click is the operator leaving the text field behind, so the row
 /// that draws its focus border also takes the keyboard back.
 ///
-/// The row of the page already in front is the case that matters: it
-/// navigates nowhere, so nothing else would have released the editor, and
-/// the pan chords stayed dead while the row drew its focus border. The
-/// panel keyboard has no Tab key to move focus with.
+/// The row of the page already in front is the case that matters: with a
+/// clean buffer it opens the file browser, and with unsaved edits it asks
+/// first. Either way nothing else released the editor, and the pan chords
+/// stayed dead while the row drew its focus border. The panel keyboard has no
+/// Tab key to move focus with.
 #[test]
 fn a_navigation_click_releases_the_keyboard_from_the_gcode_editor() {
     let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
@@ -4857,27 +4858,61 @@ fn a_navigation_click_releases_the_keyboard_from_the_gcode_editor() {
     harness.frame_events(vec![egui::Event::PointerMoved(row)]);
     harness.frame_events(vec![press_at(row, true)]);
     harness.frame_events(vec![press_at(row, false)]);
+    // The row is the FILE key. The unsaved buffer keeps the page in front and
+    // asks before opening the browser; the view itself never flips.
     assert_eq!(
         harness.app.nav.page,
         Page::Program,
-        "the same page, so nothing navigated"
+        "the unsaved buffer holds the page"
+    );
+    assert!(matches!(
+        harness.app.overlay.modal,
+        Some(Modal::ConfirmDiscard(PendingAction::OpenFiles))
+    ));
+    assert_eq!(
+        harness.app.program.view,
+        ProgramView::Split,
+        "the row no longer cycles SPLIT/CODE"
     );
     assert!(
         !harness.ctx.memory(|memory| memory.has_focus(id)),
         "the nav click left the editor holding the keyboard"
     );
     assert_eq!(harness.app.nav.focus_region, FocusRegion::Nav);
+}
 
-    // The row cycled SPLIT to CODE; with the editor released, the pan chord
-    // is live again on the thumbnail without needing the pointer on it.
-    harness.frame_full(Vec::new());
-    let before = harness.app.program.graph_pan;
-    harness.frame_with(&[(egui::Key::ArrowLeft, ctrl())]);
-    assert!(
-        (harness.app.program.graph_pan.x - (before.x - VIEW_PAN_STEP)).abs() < 1e-3,
-        "Ctrl+Left pans after the nav click, {:?} -> {:?}",
-        before,
-        harness.app.program.graph_pan
+/// The PROGRAM row is the FILE key: it opens the browser when the program is
+/// in front, and the same row brings the program back from the Files page.
+#[test]
+fn the_program_navigation_row_toggles_the_files_browser() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Program);
+    harness.app.program.view = ProgramView::Split;
+    let output = harness.frame_full(Vec::new());
+    let row = nav_row_center(&output, "PROGRAM");
+    harness.frame_events(vec![egui::Event::PointerMoved(row)]);
+    harness.frame_events(vec![press_at(row, true)]);
+    harness.frame_events(vec![press_at(row, false)]);
+    assert_eq!(
+        harness.app.nav.page,
+        Page::Files,
+        "the second press opens the file browser"
+    );
+    assert_eq!(
+        harness.app.program.view,
+        ProgramView::Split,
+        "the row never changes the layout"
+    );
+
+    let output = harness.frame_full(Vec::new());
+    let row = nav_row_center(&output, "PROGRAM");
+    harness.frame_events(vec![egui::Event::PointerMoved(row)]);
+    harness.frame_events(vec![press_at(row, true)]);
+    harness.frame_events(vec![press_at(row, false)]);
+    assert_eq!(
+        harness.app.nav.page,
+        Page::Program,
+        "and the same row brings the program back"
     );
 }
 
@@ -4914,6 +4949,55 @@ fn the_pan_chords_work_on_every_toolpath_page_without_hovering() {
             "{page:?}: the pan does not move the focus ring"
         );
     }
+}
+
+/// The OFFSETS preview answers the same view keys as MAIN: the ISO/X/Y/Z
+/// cycle and FIT act on the preview beside the table, and the page's own keys
+/// keep their meaning.
+#[test]
+fn the_offsets_preview_answers_the_view_keys() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Offsets);
+    assert_eq!(harness.app.nav.page, Page::Offsets);
+    harness.frame(&[]);
+
+    let before = harness.app.program.graph_view;
+    harness.frame_with(&[(egui::Key::F10, ctrl())]);
+    assert_ne!(
+        harness.app.program.graph_view, before,
+        "Ctrl+F10 cycles the view on the OFFSETS preview"
+    );
+    // The preview keeps its own fit state: the cycle asks it to reframe.
+    harness.app.offsets.preview_fit = false;
+    harness.app.cycle_toolpath_view();
+    assert!(
+        harness.app.offsets.preview_fit,
+        "the cycle reframes the preview"
+    );
+
+    harness.app.offsets.preview_auto_fit = false;
+    harness.app.offsets.preview_fit = false;
+    harness.app.offsets.preview_zoom = 2.5;
+    harness.frame(&[]);
+    assert_eq!(harness.app.offsets.preview_zoom, 2.5, "the pan sticks");
+    harness.frame_with(&[(egui::Key::Num0, ctrl())]);
+    assert_ne!(
+        harness.app.offsets.preview_zoom, 2.5,
+        "Ctrl+0 refits the preview"
+    );
+
+    harness.app.offsets.preview_zoom = 2.5;
+    harness.app.offsets.preview_pan = egui::Vec2::new(40.0, 40.0);
+    harness.app.offsets.preview_fit = false;
+    harness.app.fit_graph();
+    assert_eq!(harness.app.offsets.preview_zoom, 1.0);
+    assert_eq!(harness.app.offsets.preview_pan, egui::Vec2::ZERO);
+    assert!(harness.app.offsets.preview_fit);
+
+    // The offset table's own keys still belong to the page.
+    let selected = harness.app.offsets.selected;
+    harness.frame_with(&[(egui::Key::ArrowDown, egui::Modifiers::NONE)]);
+    assert_ne!(harness.app.offsets.selected, selected);
 }
 
 #[test]

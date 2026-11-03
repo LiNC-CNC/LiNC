@@ -367,6 +367,10 @@ impl LincApp {
                 hints.push(("A".into(), "ACTIVATE"));
                 hints.push(("X/Y/Z".into(), "EDIT DRO"));
                 hints.push((offset_key.clone(), "PROBE"));
+                // The preview beside the table is the same toolpath view as
+                // MAIN's, so the view keys work here too.
+                hints.push((view_cycle.clone(), "VIEW"));
+                hints.push((k.graph_fit.label(), "FIT"));
                 hints.push((k.toggle_bounds.label(), "BOUNDS"));
                 hints.push((k.remaining.label(), "REMAINING"));
                 hints.push((k.view_pan_hint(), "PAN"));

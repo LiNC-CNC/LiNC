@@ -111,7 +111,7 @@ else, so it cannot shadow another page's command.
 | Program | `FILE` open the file browser, `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+M` REMAINING view, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
 | Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `D` duplicate in place, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Backspace` delete |
 | Help | `/` or `Ctrl+F` focus search, `Up`/`Down` select, `Enter` open the reference, `Backspace` back in the reference dialog |
-| Offsets | `Up`/`Down` select a row, `X`/`Y`/`Z` edit the DRO, `A` activate the selected work system |
+| Offsets | `Up`/`Down` select a row, `X`/`Y`/`Z` edit the DRO, `A` activate the selected work system; the preview answers the same view keys as MAIN (`Ctrl+F10`/`Ctrl+▢` cycle ISO/X/Y/Z, `Ctrl+0` fit, `Ctrl+B` bounds, `Ctrl+M` REMAINING) |
 | Tools | Arrows select a row, `Enter` edit the selected cell, `T` load the selected row's tool (`Tn M6` + `G43 Hn`), `Ctrl+T` type a tool number and load it, `Z` open the tool-position dialog, `D` duplicate the selected tool |
 | Probe | Arrows select a row |
 
@@ -861,8 +861,9 @@ Program rules:
 - If protect turns on with unsaved changes, keep the buffer and dirty marker,
   do not discard or auto-revert, and keep it read-only until the switch is off.
 - Program load remains readable; program protect blocks writing, not viewing.
-- `FILE` enters Program; outside EDIT it cycles `SPLIT`/`CODE`; in EDIT it
-  selects CODE.
+- `FILE` enters Program; when Program is already in front it opens the Files
+  browser (asking first when the buffer has unsaved edits). The program layout
+  is the square key's command, not `FILE`'s.
 - `LOAD` or `Ctrl+O` opens Files; `ESC` returns to Program. `FILE` (`F6`)
   toggles between Program and Files.
 - A successful file load always returns to Program, in `SPLIT` view when the

@@ -278,8 +278,9 @@ impl LincApp {
         mode_page(&self.snapshot.panel.mode).unwrap_or(Page::Machine)
     }
 
-    /// `MAIN` (F5): go to the mode's page, without the Program page's
-    /// second meaning of "flip SPLIT/CODE" when it is already in front.
+    /// `MAIN` (F5): go to the mode's page, without the Program row's
+    /// second meaning of "open the file browser" when Program is already in
+    /// front.
     pub fn request_mode_page(&mut self) {
         let page = self.mode_screen();
         if page == self.nav.page {
@@ -363,8 +364,11 @@ impl LincApp {
     }
 
     pub fn request_page(&mut self, page: Page) {
+        // The PROGRAM row is the FILE key: on the page already in front it
+        // opens the file browser, and the row on the Files page brings the
+        // program back. CODE/SPLIT is the square key's command, not this row's.
         if page == Page::Program && self.nav.page == Page::Program {
-            self.cycle_program_view();
+            self.request_files();
             return;
         }
         if self.program.editor.dirty && self.nav.page == Page::Program && page != Page::Program {

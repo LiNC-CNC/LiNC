@@ -215,6 +215,9 @@ impl LincApp {
         // so the key does the same thing wherever a toolpath is on screen.
         self.manual.view = next;
         self.manual.fit = true;
+        // The OFFSETS preview reads the program's view mode but frames itself,
+        // so it needs its own fit request to turn with the key.
+        self.offsets.preview_fit = true;
     }
 
     /// Fit the program toolpath: reset zoom/pan and ask the view to reframe.
@@ -224,6 +227,12 @@ impl LincApp {
             self.manual.zoom = 1.0;
             self.manual.pan = Vec2::ZERO;
             self.manual.fit = true;
+        } else if self.nav.page == Page::Offsets {
+            // The preview beside the offset table has its own zoom, pan and
+            // fit, so Ctrl+0 frames the view the operator is looking at.
+            self.offsets.preview_zoom = 1.0;
+            self.offsets.preview_pan = Vec2::ZERO;
+            self.offsets.preview_fit = true;
         } else {
             // No placeholder zoom or pan here: the fit recomputes both from the
             // card's rect, and writing the old defaults first only painted a
