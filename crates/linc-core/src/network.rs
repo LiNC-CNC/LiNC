@@ -725,7 +725,13 @@ fn run_worker(
     loop {
         let observation = *lock(observation);
         if leases == 0 && !observation.busy {
-            if observation.armed && !safe.load(Ordering::SeqCst) {
+            // Decide from the link's reported state, not from `safe` alone: at
+            // startup the flag is false while the radio may already be off
+            // (`linc-session.sh` used to turn it off, and anything else on the
+            // machine can too). Reading the state self-heals that instead of
+            // leaving the machine unreachable until a lease happens.
+            let link_down = lock(status).link_up == Some(false);
+            if observation.armed && !link_down {
                 let sample = settings.measure_on_startup && !sampled;
                 if sample {
                     lock(status).measuring = true;
@@ -737,7 +743,7 @@ fn run_worker(
                 }
                 down_cycle(&settings, status, safe, sample);
                 sampled = true;
-            } else if !observation.armed && safe.load(Ordering::SeqCst) {
+            } else if !observation.armed && link_down {
                 up_cycle(&settings, status, safe, "idle");
             }
         }
@@ -1020,7 +1026,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
-    use crate::model::{MachineVariant, TaskState};
+    use crate::model::MachineVariant;
 
     fn script(dir: &Path, name: &str, body: &str) -> String {
         let path = dir.join(name);
