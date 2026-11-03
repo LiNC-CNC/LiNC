@@ -153,13 +153,13 @@ impl LincApp {
                         }),
                 );
                 ui.add_space(14.0);
-                // The dot alone carries the link state: green online, red
-                // offline. The word repeated the colour, and the offline banner
-                // already names the failure, so it stays a hover tooltip.
+                // `PANEL ●`: the word names what the dot watches, the colour
+                // carries the state, the tooltip spells it out.
                 let online = !self.panel_offline();
                 theme::status_dot(
                     ui,
                     if online { theme::SUCCESS } else { theme::ERROR },
+                    "PANEL",
                     if online {
                         "PANEL ONLINE"
                     } else {
