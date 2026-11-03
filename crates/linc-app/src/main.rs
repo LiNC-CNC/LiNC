@@ -143,7 +143,14 @@ fn main() -> Result<()> {
                 .map(|value| format!("{value:.0}/s"))
                 .unwrap_or_else(|| "not sampled".into())
         };
-        println!("link     {}", if status.link_up == Some(true) { "back up" } else { "NOT restored" });
+        println!(
+            "link     {}",
+            if status.link_up == Some(true) {
+                "back up"
+            } else {
+                "NOT restored"
+            }
+        );
         println!("down     {}", ms(status.down_ms));
         println!("verify   {}", ms(status.verify_ms));
         println!("settle   {}", ms(status.settle_ms));
