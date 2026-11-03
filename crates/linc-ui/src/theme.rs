@@ -391,12 +391,12 @@ pub fn focus_ring(ui: &Ui, response: &Response) {
     }
 }
 
+/// Status dot. The colour carries the state; `text` is only the hover
+/// tooltip, so the bar spends no width on a word the colour already says.
 pub fn status_dot(ui: &mut Ui, color: Color32, text: &str) {
-    ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
-        ui.painter().circle_filled(rect.center(), 4.0, color);
-        ui.label(RichText::new(text).size(font_size(11.0)).color(FG));
-    });
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
+    ui.painter().circle_filled(rect.center(), 4.0, color);
+    response.on_hover_text(text);
 }
 
 /// Horizontal gauge with a numeric value.
