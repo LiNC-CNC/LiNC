@@ -1032,9 +1032,9 @@ Read-only detail view. Tabs:
 | Tab | Content |
 |---|---|
 | Overview | Health cards, active alarms/messages, RS-485 / virtual link summary with live counters |
+| Logs | Searchable event history, severity/source filters, export/copy |
 | HAL / NML | NML channel status line, HAL browser: pins grouped by component with type, direction, value and signal, signal list, filter |
 | Turret / Live Tool | Turret station, clamp/index state, live-tool drive, RPM/direction, axial/radial, C-axis |
-| Logs | Searchable event history, severity/source filters, export/copy |
 
 The HAL browser runs `halcmd -s show pin` and `halcmd -s show sig` on a
 background thread and shows the age of the rows it drew. Without a running

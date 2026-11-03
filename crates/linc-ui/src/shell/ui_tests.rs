@@ -87,6 +87,15 @@ fn diagnostics_turret_tab_needs_the_profile_key_and_stations() {
     // is the same list minus the turret entry.
     assert_eq!(
         DiagnosticsTab::visible(&diagnostics_profile(true, ToolChangerKind::Turret)),
+        vec![
+            DiagnosticsTab::Overview,
+            DiagnosticsTab::Logs,
+            DiagnosticsTab::HalNml,
+            DiagnosticsTab::Turret,
+        ]
+    );
+    assert_eq!(
+        DiagnosticsTab::visible(&diagnostics_profile(true, ToolChangerKind::Turret)),
         DiagnosticsTab::ALL.to_vec()
     );
     let hidden = DiagnosticsTab::visible(&diagnostics_profile(false, ToolChangerKind::Atc));
@@ -103,18 +112,18 @@ fn diagnostics_navigation_and_body_skip_a_hidden_turret_tab() {
 
     harness.app.diagnostics.tab = DiagnosticsTab::Overview;
     harness.app.page_down();
-    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::HalNml);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Logs);
     harness.app.page_up();
     assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Overview);
     harness.app.page_down();
-    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::HalNml);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Logs);
 
     // Wrapping stays inside the visible list.
-    harness.app.diagnostics.tab = DiagnosticsTab::Logs;
+    harness.app.diagnostics.tab = DiagnosticsTab::HalNml;
     harness.app.page_down();
     assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Overview);
     harness.app.page_up();
-    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Logs);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::HalNml);
 
     // A remembered or restored turret tab never reaches the body.
     harness.app.diagnostics.tab = DiagnosticsTab::Turret;
@@ -124,7 +133,8 @@ fn diagnostics_navigation_and_body_skip_a_hidden_turret_tab() {
     assert!(!texts.iter().any(|(text, _)| text == "TURRET / LIVE TOOL"));
     assert!(texts.iter().any(|(text, _)| text == "OVERVIEW"));
 
-    // Visible, the same tab is kept, drawn and navigated like any other.
+    // Visible, the same tab is kept, drawn and navigated like any other. It
+    // trails the requested OVERVIEW, LOGS, HAL / NML order.
     harness.app.profile.config.diagnostics.turret_tab = true;
     harness.app.diagnostics.tab = DiagnosticsTab::Turret;
     let output = harness.frame_full(Vec::new());
@@ -133,7 +143,7 @@ fn diagnostics_navigation_and_body_skip_a_hidden_turret_tab() {
         .iter()
         .any(|(text, _)| text == "TURRET / LIVE TOOL"));
     harness.app.page_down();
-    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Logs);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Overview);
     harness.app.page_up();
     assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Turret);
 }
@@ -2415,7 +2425,7 @@ fn page_keys_cycle_tabs_from_the_search_line() {
         .ctx
         .memory(|m| m.has_focus(egui::Id::unique("linc-diagnostics-hal-search"))));
 
-    harness.frame(&[egui::Key::PageDown]);
+    harness.frame(&[egui::Key::PageUp]);
     assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Logs);
     // The new tab opens on its list, where the page keys scroll; `/` puts the
     // caret back in the search line, and there they cycle the tabs again.
@@ -2424,7 +2434,9 @@ fn page_keys_cycle_tabs_from_the_search_line() {
         .ctx
         .memory(|m| m.has_focus(egui::Id::unique("linc-diagnostics-search"))));
     harness.frame(&[egui::Key::PageUp]);
-    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::HalNml);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Overview);
+    harness.frame(&[egui::Key::PageDown]);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Logs);
 }
 
 /// F and S change the live HAL poll period once the list holds the keyboard.
@@ -2571,7 +2583,7 @@ fn page_keys_cycle_tabs_when_the_log_cannot_scroll() {
     harness.frame(&[egui::Key::PageDown]);
     assert_eq!(
         harness.app.diagnostics.tab,
-        DiagnosticsTab::Overview,
+        DiagnosticsTab::HalNml,
         "a page key over a short log still changes the tab"
     );
 

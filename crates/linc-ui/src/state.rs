@@ -187,9 +187,9 @@ pub enum HalPane {
 impl DiagnosticsTab {
     pub const ALL: [DiagnosticsTab; 4] = [
         DiagnosticsTab::Overview,
+        DiagnosticsTab::Logs,
         DiagnosticsTab::HalNml,
         DiagnosticsTab::Turret,
-        DiagnosticsTab::Logs,
     ];
 
     /// The tabs `profile` can show, in `ALL` order: the turret tab needs both

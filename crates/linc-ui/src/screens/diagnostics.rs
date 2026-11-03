@@ -1,4 +1,4 @@
-//! Read-only diagnostics: overview, HAL/NML, turret, logs.
+//! Read-only diagnostics: overview, logs, HAL/NML, turret.
 
 use egui::{RichText, Ui};
 use linc_core::model::{format_clock, format_elapsed, Alarm, AlarmSeverity, AlarmSource};
