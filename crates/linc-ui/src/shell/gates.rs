@@ -332,7 +332,10 @@ impl LincApp {
             return;
         }
         self.send(linc_core::command::MachineCommand::UnloadProgram);
-        self.toast("PROGRAM UNLOADED — LINK RELEASED", theme::WARNING);
+        // The command is queued, so the outcome is not known here: the controller
+        // may refuse or keep the file, and this toast used to promise success
+        // either way. The `NET` metric and the program name show what happened.
+        self.toast("UNLOAD REQUESTED — WATCH NET", theme::WARNING);
     }
 
     pub fn program_editing_allowed(&self) -> bool {
