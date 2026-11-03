@@ -267,7 +267,11 @@ impl LincApp {
         // Clamping to the old fixed ceiling here would keep the keyboard at a
         // shallower limit than the wheel. The zoom/pan rule itself lives in
         // `linc_view::zoom_to` so a pinch cannot drift from these keys.
-        linc_view::zoom_to(zoom_out, pan_out, (*zoom_out).max(linc_view::MIN_ZOOM) * zoom);
+        linc_view::zoom_to(
+            zoom_out,
+            pan_out,
+            (*zoom_out).max(linc_view::MIN_ZOOM) * zoom,
+        );
         *pan_out += pan;
         *auto_fit = false;
     }
