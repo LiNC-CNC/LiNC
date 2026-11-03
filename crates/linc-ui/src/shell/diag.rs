@@ -231,6 +231,22 @@ pub(crate) struct DiagnosticsUi {
     /// Backend sample stamp of the last published machine snapshot.
     pub(super) last_sample: u64,
     pub tab: DiagnosticsTab,
+    /// The tab drawn last frame, so entering HAL / NML can focus its filter.
+    pub last_tab: DiagnosticsTab,
+    /// Set when a tab's search line should take focus on the next draw.
+    pub focus_search: bool,
+    /// True while a search tab's list, not its search line, holds the keyboard.
+    pub list_focused: bool,
+    /// The HAL pane the cursors move between once the list holds the keyboard.
+    pub hal_pane: HalPane,
+    /// Where each list is scrolled to in points, and a key-set target for the
+    /// next draw. `None` leaves the scroll bar alone, so the wheel still works.
+    pub hal_pins_offset: f32,
+    pub hal_pins_scroll: Option<f32>,
+    pub hal_signals_offset: f32,
+    pub hal_signals_scroll: Option<f32>,
+    pub logs_offset: f32,
+    pub logs_scroll: Option<f32>,
     /// `halcmd` poller behind the HAL browser. Started on the first HAL / NML
     /// draw, so no thread runs until somebody looks at HAL.
     pub hal: Option<linc_hal::browser::HalBrowser>,

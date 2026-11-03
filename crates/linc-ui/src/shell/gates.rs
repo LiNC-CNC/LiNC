@@ -246,6 +246,23 @@ impl LincApp {
             self.set_page(self.nav.help_return_page);
             return;
         }
+        // The HAL browser's filter and the log search are fields, not pages:
+        // Esc clears one while it holds text, and only an empty line falls
+        // through to leaving the page. Clearing keeps the caret, so the next
+        // keystroke narrows again instead of going nowhere.
+        if self.nav.page == Page::Diagnostics
+            && matches!(
+                self.diagnostics.tab,
+                DiagnosticsTab::HalNml | DiagnosticsTab::Logs
+            )
+            && !self.diagnostics.search.is_empty()
+        {
+            self.diagnostics.search.clear();
+            // The clear is not a dismissal: ask for the caret back, so the next
+            // keystroke narrows the list instead of going nowhere.
+            self.diagnostics.focus_search = true;
+            return;
+        }
         // The Diagnostics page is a view too: Esc leaves it for the page it came
         // from, so an operator who opened it to look at a log does not stop the
         // program that is cutting behind it. The next Esc, on that page, is the

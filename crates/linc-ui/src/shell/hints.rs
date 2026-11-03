@@ -245,7 +245,43 @@ impl LincApp {
                 hints.push(("Bksp".into(), "BACK"));
                 hints.push(("PgUp/PgDn".into(), "PAGE"));
             }
-            Page::Diagnostics => hints.push(("PgUp/PgDn".into(), "TABS")),
+            Page::Diagnostics => match self.diagnostics.tab {
+                DiagnosticsTab::HalNml => {
+                    hints.push((
+                        "PgUp/PgDn".into(),
+                        if self.diagnostics.list_focused {
+                            "SCROLL"
+                        } else {
+                            "TABS"
+                        },
+                    ));
+                    groups.push(ShortcutGroup {
+                        title: "HAL BROWSER",
+                        items: vec![
+                            ("Enter".into(), "LIST"),
+                            ("\u{2190}/\u{2192}".into(), "PANE"),
+                            ("F".into(), "FASTER"),
+                            ("S".into(), "SLOWER"),
+                            (k.back.label(), "SEARCH"),
+                        ],
+                    });
+                }
+                DiagnosticsTab::Logs => {
+                    hints.push((
+                        "PgUp/PgDn".into(),
+                        if self.diagnostics.list_focused {
+                            "SCROLL"
+                        } else {
+                            "TABS"
+                        },
+                    ));
+                    groups.push(ShortcutGroup {
+                        title: "LOG LIST",
+                        items: vec![("Enter".into(), "LIST"), (k.back.label(), "SEARCH")],
+                    });
+                }
+                _ => hints.push(("PgUp/PgDn".into(), "TABS")),
+            },
             Page::Manual | Page::Homing => {
                 hints.push((k.graph_fit.label(), "FIT"));
                 hints.push((format!("Ctrl+{square}"), "VIEW"));
