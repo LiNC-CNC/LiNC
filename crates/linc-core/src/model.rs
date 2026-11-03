@@ -626,6 +626,12 @@ impl Default for ToolTableState {
 pub struct LoobricStatus {
     pub enabled: bool,
     pub running: bool,
+    /// A sync is owed (a startup sync, or a tool-table write) but waits for an
+    /// idle interpreter. A client run rewrites `tool.tbl`, and a table that
+    /// changes under a running program changes the offsets the next tool change
+    /// reads, so the wrapper defers it instead of racing the program.
+    #[serde(default)]
+    pub sync_pending: bool,
     /// Monotonic count of finished runs, so the backend wrapper can tell a
     /// fresh result from one it has already handled.
     pub completed_runs: u64,

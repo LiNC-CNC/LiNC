@@ -123,6 +123,12 @@ profile. The machine profile is normally readable by every operator.
 - The client's writes happen before LiNC reloads the table. If the interpreter
   starts a program during the network round trip, LiNC defers the reload until
   the interpreter is idle and says so on the Tools page.
+- A sync owed by a tool-table write also waits for idle. The write itself has
+  already landed on disk; the client run is held back because it rewrites
+  `tool.tbl`, and a table that changes under a running program changes the
+  offsets the next tool change reads. The Tools page says
+  `tool write waiting for idle`. A sync owed by the startup setting at the same
+  time collapses into the same single client run.
 - `S` is idle-only. The backend rechecks idle when the command arrives; it
   does not trust the page's shortcut gate.
 - The integration does not add a server-side push/subscribe channel, does not

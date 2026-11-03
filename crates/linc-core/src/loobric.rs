@@ -306,6 +306,10 @@ pub struct LoobricBackend<B> {
     suppress_revision: Option<u64>,
     startup_pending: bool,
     sync_after_tool_write: bool,
+    /// A tool-table write owed a sync while the interpreter was busy. The write
+    /// itself already happened; this only holds the client run back so it does
+    /// not rewrite the table under a running program.
+    sync_pending: bool,
     pending_reload: bool,
 }
 
@@ -322,6 +326,7 @@ impl<B: MachineBackend> LoobricBackend<B> {
             suppress_revision: None,
             startup_pending,
             sync_after_tool_write,
+            sync_pending: false,
             pending_reload: false,
         }
     }
@@ -399,21 +404,31 @@ impl<B: MachineBackend> MachineBackend for LoobricBackend<B> {
                 } else {
                     self.suppress_revision = None;
                     if self.sync_after_tool_write {
-                        log::info!("loobric: tool table changed, syncing");
-                        self.request();
+                        // Owed, not started: the idle gate below decides when.
+                        self.sync_pending = true;
                     }
                 }
             }
         }
         self.last_revision = Some(snapshot.tool_table.revision);
 
-        if self.startup_pending && idle(&snapshot) {
+        // A startup sync and a tool-table write both wait for an idle
+        // interpreter. A client run rewrites `tool.tbl`, and a table that
+        // changes under a running program changes the offsets the next tool
+        // change reads. One run covers both, so two owed syncs collapse into a
+        // single request instead of queueing two client runs back to back.
+        if (self.startup_pending || self.sync_pending) && idle(&snapshot) {
+            if self.sync_pending && !self.startup_pending {
+                log::info!("loobric: tool table changed, syncing");
+            }
             self.startup_pending = false;
+            self.sync_pending = false;
             self.request();
         }
 
         let mut status = self.runner.status();
         status.reload_pending = self.pending_reload;
+        status.sync_pending = self.sync_pending || self.startup_pending;
         snapshot.loobric = Some(status);
         snapshot
     }
@@ -682,5 +697,89 @@ mod tests {
         wait_for(|| backend.runner.status().completed_runs == 1);
         let text = std::fs::read_to_string(&counter).unwrap();
         assert_eq!(text.lines().count(), 1);
+    }
+
+    #[test]
+    fn a_tool_write_while_running_waits_for_idle() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter = dir.path().join("runs.txt");
+        let (backend, _reloads, mut settings) = fake(
+            dir.path(),
+            &format!("echo run >> {}; echo synced", counter.display()),
+        );
+        settings.sync_on_startup = false;
+        settings.sync_after_tool_write = true;
+        let mut backend = LoobricBackend::new(backend, settings);
+        // Seed the observed revision; nothing is owed yet.
+        let _ = backend.snapshot();
+        assert!(!counter.exists(), "no client run before the table changes");
+
+        // The write lands while a program runs. The client must not rewrite the
+        // table under it, so the sync is owed, not started.
+        backend.inner.snapshot.task.running = true;
+        backend.inner.snapshot.tool_table.revision = revision_for("operator edit");
+        let snapshot = backend.snapshot();
+        assert!(
+            snapshot.loobric.as_ref().unwrap().sync_pending,
+            "the page must be able to say it is waiting for idle"
+        );
+        thread::sleep(Duration::from_millis(150));
+        assert!(!counter.exists(), "the client ran under a running program");
+
+        // The program ends: the owed sync runs once.
+        backend.inner.snapshot.task.running = false;
+        let snapshot = backend.snapshot();
+        assert!(!snapshot.loobric.as_ref().unwrap().sync_pending);
+        wait_for(|| backend.runner.status().completed_runs == 1);
+        let text = std::fs::read_to_string(&counter).unwrap();
+        assert_eq!(text.lines().count(), 1);
+    }
+
+    #[test]
+    fn a_tool_write_is_ignored_when_the_sync_is_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter = dir.path().join("runs.txt");
+        let (backend, _reloads, mut settings) = fake(
+            dir.path(),
+            &format!("echo run >> {}; echo synced", counter.display()),
+        );
+        settings.sync_on_startup = false;
+        settings.sync_after_tool_write = false;
+        let mut backend = LoobricBackend::new(backend, settings);
+        let _ = backend.snapshot();
+        backend.inner.snapshot.tool_table.revision = revision_for("operator edit");
+        let snapshot = backend.snapshot();
+        assert!(!snapshot.loobric.as_ref().unwrap().sync_pending);
+        thread::sleep(Duration::from_millis(150));
+        assert!(!counter.exists(), "no sync was asked for");
+        assert_eq!(backend.runner.status().completed_runs, 0);
+    }
+
+    #[test]
+    fn a_startup_sync_and_a_tool_write_collapse_into_one_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter = dir.path().join("runs.txt");
+        let (backend, _reloads, mut settings) = fake(
+            dir.path(),
+            &format!("sleep 0.2; echo run >> {}; echo synced", counter.display()),
+        );
+        settings.sync_on_startup = true;
+        settings.sync_after_tool_write = true;
+        let mut backend = LoobricBackend::new(backend, settings);
+        // The startup sync is owed, and a write lands before the machine is
+        // idle: both are still owed when idle arrives.
+        backend.inner.snapshot.task.running = true;
+        backend.inner.snapshot.tool_table.revision = revision_for("operator edit");
+        let snapshot = backend.snapshot();
+        assert!(snapshot.loobric.as_ref().unwrap().sync_pending);
+
+        backend.inner.snapshot.task.running = false;
+        let _ = backend.snapshot();
+        wait_for(|| backend.runner.status().completed_runs == 1);
+        // A second request would have queued a second client run; one run
+        // covers both debts.
+        thread::sleep(Duration::from_millis(300));
+        let text = std::fs::read_to_string(&counter).unwrap();
+        assert_eq!(text.lines().count(), 1, "{text}");
     }
 }

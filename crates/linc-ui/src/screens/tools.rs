@@ -143,6 +143,8 @@ fn loobric_status(app: &LincApp) -> Option<(String, egui::Color32)> {
             "server changes waiting for idle".to_string(),
             theme::WARNING,
         )
+    } else if status.sync_pending {
+        ("tool write waiting for idle".to_string(), theme::WARNING)
     } else {
         match status.last_ok {
             Some(true) => (status.message.clone(), theme::MUTED),

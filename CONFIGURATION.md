@@ -685,7 +685,7 @@ file. See `docs/loobric.md` for the client bindings and the integration design.
 | `config` | unset | The client's shell-style config file. Omit it to use the client default. |
 | `timeout_secs` | `60` | Kill a client run that has not finished after this many seconds (1-600). |
 | `sync_on_startup` | `true` | Run one `sync` as soon as the interpreter is idle. |
-| `sync_after_tool_write` | `true` | Run `sync` after a successful tool-table write changes the table revision. |
+| `sync_after_tool_write` | `true` | Run `sync` after a successful tool-table write changes the table revision. Deferred until the interpreter is idle: the client rewrites `tool.tbl`, and a table that changes under a running program changes the offsets the next tool change reads. A deferred sync is shown on the Tools page, and it collapses with a startup sync into one client run. |
 
 Single-file client example:
 
