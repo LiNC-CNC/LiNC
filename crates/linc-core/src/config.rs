@@ -946,8 +946,10 @@ impl Profile {
                 "Network".into(),
                 if self.config.network.enabled {
                     format!(
-                        "{} {} (measure only)",
-                        self.config.network.kind, self.config.network.interface
+                        "{} {} (interlocked, settle {}ms)",
+                        self.config.network.kind,
+                        self.config.network.interface,
+                        self.config.network.settle_ms
                     )
                 } else {
                     "off".into()
@@ -2354,6 +2356,16 @@ quick_commands = ["G0"]
             .summary()
             .iter()
             .any(|(key, value)| key == "Network" && value.contains("ethernet usb0")));
+        let summary = loaded
+            .summary()
+            .into_iter()
+            .find(|(key, _)| key == "Network")
+            .map(|(_, value)| value)
+            .unwrap_or_default();
+        assert!(
+            summary.contains("interlocked") && summary.contains("120"),
+            "the summary names the interlock and the settle window: {summary}"
+        );
     }
 
     #[test]

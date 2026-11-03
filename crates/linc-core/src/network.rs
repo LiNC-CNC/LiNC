@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 use crate::backend::MachineBackend;
 use crate::command::{MachineCommand, MachineError};
 use crate::config::{NetworkConfig, Profile};
-use crate::model::{now_ms, InterpState, MachineSnapshot, NetworkStatus};
+use crate::model::{now_ms, InterpState, MachineSnapshot, NetworkStatus, TaskMode};
 
 /// How often the worker re-reads the observation before it starts measuring.
 const TICK: Duration = Duration::from_millis(100);
@@ -543,10 +543,17 @@ fn shorten(text: &str) -> String {
 }
 
 /// What the backend wrapper tells the worker each frame: the two facts that
-/// decide whether a measurement may start.
+/// decide whether the link may come up.
 #[derive(Clone, Copy, Debug, Default)]
 struct Observation {
-    idle: bool,
+    /// A program is loaded, or MDI is selected: the machine can be asked to
+    /// move without the operator doing anything else. This is what arms the
+    /// interlock, instead of "idle", so the link can stay up while nobody is
+    /// cutting and remote access survives.
+    armed: bool,
+    /// Motion or a program is executing. The link never comes up here, whatever
+    /// else is true.
+    busy: bool,
 }
 
 /// How long a client waits for the link to come up before it runs anyway: the
@@ -617,9 +624,12 @@ impl SupervisorHandle {
     }
 
     fn observe(&self, snapshot: &MachineSnapshot) {
-        *lock(&self.observation) = Observation {
-            idle: snapshot.task.interp == InterpState::Idle && !snapshot.task.running,
-        };
+        // `armed`: a loaded program means the panel can start a cut without LiNC
+        // seeing the press, and MDI mode means the next command can move the
+        // axes. Both need the link down in advance; nothing else does.
+        let armed = snapshot.program.path.is_some() || matches!(snapshot.task.mode, TaskMode::Mdi);
+        let busy = snapshot.task.running || snapshot.task.interp != InterpState::Idle;
+        *lock(&self.observation) = Observation { armed, busy };
     }
 
     fn status(&self) -> NetworkStatus {
@@ -705,33 +715,37 @@ fn run_worker(
         return;
     }
 
-    // The startup down cycle is the measurement and the interlock's first safe
-    // state. It waits for an idle machine, but the loop keeps serving lease
-    // requests while it waits: a client that needs the link must not deadlock
-    // behind a machine that has not reported idle.
-    let mut startup_done = false;
+    // The link follows two facts, not the clock. `armed` (a program is loaded
+    // or MDI is selected) means it must be down before the panel can start
+    // anything; `!armed && !busy` means it can come back up, which is what keeps
+    // SSH and log reading working between jobs. The first down cycle is also the
+    // measurement, so the numbers still come from a real toggle on this machine.
+    let mut sampled = false;
     let mut leases = 0usize;
     loop {
-        if !startup_done && lock(observation).idle {
-            if settings.measure_on_startup {
-                lock(status).measuring = true;
-                lock(status).last_measure_ms = Some(now_ms());
-                let (irq, rx) = sample_rates(&settings);
-                let mut status = lock(status);
-                status.irq_per_s_up = irq;
-                status.rx_per_s_up = rx;
+        let observation = *lock(observation);
+        if leases == 0 && !observation.busy {
+            if observation.armed && !safe.load(Ordering::SeqCst) {
+                let sample = settings.measure_on_startup && !sampled;
+                if sample {
+                    lock(status).measuring = true;
+                    lock(status).last_measure_ms = Some(now_ms());
+                    let (irq, rx) = sample_rates(&settings);
+                    let mut status = lock(status);
+                    status.irq_per_s_up = irq;
+                    status.rx_per_s_up = rx;
+                }
+                down_cycle(&settings, status, safe, sample);
+                sampled = true;
+            } else if !observation.armed && safe.load(Ordering::SeqCst) {
+                up_cycle(&settings, status, safe, "idle");
             }
-            down_cycle(&settings, status, safe, settings.measure_on_startup);
-            startup_done = true;
-            continue;
         }
 
         match requests.recv_timeout(TICK) {
             Ok(GateRequest::Up { reason, done }) => {
-                safe.store(false, Ordering::SeqCst);
-                lock(status).safe = false;
                 leases += 1;
-                let verified = up_cycle(&settings, status, &reason);
+                let verified = up_cycle(&settings, status, safe, &reason);
                 let _ = done.send(verified);
             }
             Ok(GateRequest::Down) => {
@@ -810,7 +824,15 @@ fn down_cycle(
 /// Bring the link up for a lease, verify it and give the connection the settle
 /// window: radio on is not association, and the client runs the moment this
 /// returns.
-fn up_cycle(settings: &NetworkSettings, status: &Arc<Mutex<NetworkStatus>>, reason: &str) -> bool {
+fn up_cycle(
+    settings: &NetworkSettings,
+    status: &Arc<Mutex<NetworkStatus>>,
+    safe: &Arc<AtomicBool>,
+    reason: &str,
+) -> bool {
+    // The link is up from here on, whatever the command does: motion must stay
+    // gated until a down cycle has verified again.
+    safe.store(false, Ordering::SeqCst);
     let mut notes = Vec::new();
     let up = match run_steps(&settings.up) {
         Ok(elapsed) => elapsed,
@@ -824,10 +846,19 @@ fn up_cycle(settings: &NetworkSettings, status: &Arc<Mutex<NetworkStatus>>, reas
     {
         let mut status = lock(status);
         status.link_up = Some(restored);
+        status.safe = false;
         status.up_ms = Some(up.as_millis() as u64);
         status.verify_ms = verify.map(|value| value.as_millis() as u64);
-        status.lease = Some(reason.to_string());
-        status.message = format!("link up for {reason}");
+        status.lease = if reason == "idle" {
+            None
+        } else {
+            Some(reason.to_string())
+        };
+        status.message = if reason == "idle" {
+            "link up, nothing loaded".into()
+        } else {
+            format!("link up for {reason}")
+        };
     }
     for note in &notes {
         log::warn!("network: {note}");
@@ -1163,35 +1194,47 @@ mod tests {
     }
 
     #[test]
-    fn the_supervisor_takes_the_link_down_only_once_the_machine_is_idle() {
+    fn the_link_follows_a_loaded_program() {
         let dir = tempfile::tempdir().unwrap();
         let (settings, state_file) = fixture(dir.path());
         let supervisor = SupervisorHandle::start(settings);
         let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
-        snapshot.task.running = true;
-        snapshot.task.interp = InterpState::Reading;
+        snapshot.task.interp = InterpState::Idle;
         supervisor.observe(&snapshot);
 
-        // Running: nothing is toggled and motion is not claimed safe.
+        // Nothing loaded, no MDI: the link stays up, so the machine is reachable
+        // and motion is not claimed safe. Nothing can be started anyway.
         thread::sleep(Duration::from_millis(300));
-        assert!(supervisor.status().last_measure_ms.is_none());
         assert!(!supervisor.safe());
         assert_eq!(fs::read_to_string(&state_file).unwrap().trim(), "up");
 
-        // Idle: the down cycle runs, and that is the interlock's safe state.
-        snapshot.task.running = false;
-        snapshot.task.interp = InterpState::Idle;
+        // A program is loaded: armed, so the down cycle runs before the panel can
+        // start anything, and the first one is also the measurement.
+        snapshot.program.path = Some(std::path::PathBuf::from("/nc_files/x.ngc"));
         supervisor.observe(&snapshot);
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline && !supervisor.safe() {
             thread::sleep(Duration::from_millis(10));
         }
         let status = supervisor.status();
-        assert!(status.last_measure_ms.is_some(), "{status:?}");
+        assert!(supervisor.safe(), "{status:?}");
         assert!(status.down_ms.is_some(), "{status:?}");
-        assert!(status.safe, "{status:?}");
-        assert!(supervisor.safe());
+        assert!(
+            status.last_measure_ms.is_some(),
+            "the first down is sampled"
+        );
         assert_eq!(fs::read_to_string(&state_file).unwrap().trim(), "down");
+
+        // Unloaded: the operator is done cutting, so the link comes back and
+        // remote access returns.
+        snapshot.program.path = None;
+        supervisor.observe(&snapshot);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline && supervisor.safe() {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!supervisor.safe(), "unloading releases the link");
+        assert_eq!(fs::read_to_string(&state_file).unwrap().trim(), "up");
     }
 
     struct FakeBackend {
@@ -1256,8 +1299,18 @@ mod tests {
         let supervisor = SupervisorHandle::start(settings);
         let mut backend = NetworkBackend::new(backend, Arc::clone(&supervisor));
 
-        // Take a lease: the link goes up and motion is refused until it is
-        // released and the down cycle has verified.
+        // Armed: a program is loaded, so the link is down and motion is allowed.
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.task.interp = InterpState::Idle;
+        snapshot.program.path = Some(std::path::PathBuf::from("/nc_files/x.ngc"));
+        supervisor.observe(&snapshot);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline && !supervisor.safe() {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(supervisor.safe(), "armed means the link is down");
+
+        // A client takes the link for a run: motion is refused while it is up.
         assert!(supervisor.acquire("test"), "the fake link comes up");
         let error = backend
             .send(MachineCommand::RunFromLine { line: 1 })
@@ -1269,6 +1322,7 @@ mod tests {
             "the refused command never reached the machine"
         );
 
+        // Release: the down cycle verifies again, and motion returns.
         supervisor.release("test");
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline && !supervisor.safe() {

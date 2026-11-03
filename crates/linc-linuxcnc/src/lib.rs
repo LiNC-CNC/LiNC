@@ -1548,6 +1548,18 @@ impl NmlBackend {
                 self.pending_height_comp = None;
                 Ok(())
             }
+            MachineCommand::UnloadProgram => {
+                if self.refresh().task.running {
+                    return Err(MachineError::ProgramRunning);
+                }
+                // `EMC_TASK_PLAN_CLOSE`: the controller stops holding a file, so
+                // AUTO has nothing to run. This is what disarms the external-link
+                // interlock, so it must be a real close and not the interpreter
+                // reset, which leaves the file loaded.
+                self.nml_send(&NmlCommand::ProgramClose)?;
+                self.wait_complete(Duration::from_secs(2))?;
+                Ok(())
+            }
             MachineCommand::ClearTrail => {
                 self.builder.clear_trail();
                 Ok(())

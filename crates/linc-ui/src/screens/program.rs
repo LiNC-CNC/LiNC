@@ -21,6 +21,15 @@ fn line_height() -> f32 {
 }
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
+    // `Ctrl+U`: unload the program. This is also the external-link release -
+    // while a program is loaded the link is held down (armed), so unloading is
+    // the operator's deliberate "done cutting" action that lets it come back and
+    // with it SSH and log reading. Page-local, like `S` on Tools.
+    //
+    // Consumed before the panes draw: a focused text edit would otherwise be free
+    // to take the chord for its own purposes.
+    let unload = ui.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::U));
+
     if !app.snapshot.probe.enabled && app.profile.variant == linc_core::model::MachineVariant::Lathe
     {
         // The lathe profile may disable the probe; Program is unaffected.
@@ -32,6 +41,9 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     match app.program.view {
         ProgramView::Split => split(app, ui),
         ProgramView::Code => code(app, ui),
+    }
+    if unload {
+        app.unload_program();
     }
 }
 
