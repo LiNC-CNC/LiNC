@@ -6,7 +6,7 @@ use linc_hal::browser::{HalBrowser, HalPin, HalSignal, HalSnapshot};
 
 use crate::screens::common;
 use crate::shell::LincApp;
-use crate::state::DiagnosticsTab;
+use crate::state::{DiagnosticsTab, HalPane};
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
@@ -50,6 +50,29 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         egui::Stroke::new(1.0, theme::BORDER),
     );
     ui.add_space(4.0);
+    // Entering HAL / NML or LOGS puts the caret in its search line, so the
+    // first keystroke narrows what is on the page instead of going nowhere.
+    // The same happens when the page opens on one of those tabs: a first frame
+    // on the page counts as entering it.
+    // The frame number is read before the store is locked: asking the context
+    // inside `data_mut` re-enters the same lock.
+    let frame = ui.ctx().cumulative_frame_nr();
+    let page_opened = ui.data_mut(|data| {
+        let key = egui::Id::unique("linc-diagnostics-last-frame");
+        let opened = data
+            .get_temp::<u64>(key)
+            .map(|last| last + 1 != frame)
+            .unwrap_or(true);
+        data.insert_temp(key, frame);
+        opened
+    });
+    if page_opened || app.diagnostics.tab != app.diagnostics.last_tab {
+        app.diagnostics.focus_search = matches!(
+            app.diagnostics.tab,
+            DiagnosticsTab::HalNml | DiagnosticsTab::Logs
+        );
+        app.diagnostics.last_tab = app.diagnostics.tab;
+    }
     egui::ScrollArea::vertical()
         .id_salt("diagnostics-body")
         .max_height(ui.available_height())
@@ -232,7 +255,7 @@ fn link_strip(app: &LincApp, ui: &mut Ui) {
     let transport = app.snapshot.panel.capabilities.transport.to_uppercase();
     compact_rows(ui);
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 18.0;
+        ui.spacing_mut().item_spacing.x = 14.0;
         theme::section_header(ui, "RS-485 / VIRTUAL LINK");
         pair(ui, "TRANSPORT", transport.clone());
         // A virtual or HAL transport names itself twice; one field is enough.
@@ -251,19 +274,14 @@ fn link_strip(app: &LincApp, ui: &mut Ui) {
                 .map(format_elapsed)
                 .unwrap_or_else(|| "—".into()),
         );
-        pair(ui, "PANEL AGE", panel_age(app));
+        pair(ui, "AGE", panel_age(app));
         if link.available {
             pair(
                 ui,
                 "RX / TX",
                 format!("{} / {}", link.rx_bytes, link.tx_bytes),
             );
-            pair(
-                ui,
-                "CRC / TIMEOUTS",
-                format!("{} / {}", link.crc_errors, link.timeouts),
-            );
-            pair(ui, "RECONNECTS", link.reconnects.to_string());
+            pair(ui, "RECONN", link.reconnects.to_string());
         }
     });
     if !link.available {
@@ -338,8 +356,10 @@ fn health_card(ui: &mut Ui, width: f32, title: &str, value: &str, fault: bool, d
     });
 }
 
-/// How old a HAL snapshot may be before the browser calls it stale.
-const HAL_STALE_MS: u64 = 3_000;
+/// How old a HAL snapshot may be before the browser calls it stale, as a
+/// multiple of the poll period: a slow poll is not a dead one, so the threshold
+/// has to follow the interval the operator chose.
+const HAL_STALE_POLLS: u64 = 3;
 
 /// The NML channels as one line.
 ///
@@ -348,72 +368,77 @@ const HAL_STALE_MS: u64 = 3_000;
 /// browser lists below.
 fn nml_status_line(app: &LincApp, ui: &mut Ui) {
     let machine = &app.snapshot.machine;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 10.0;
-        theme::status_dot(
-            ui,
-            if machine.nml_command_connected {
-                theme::SUCCESS
-            } else {
-                theme::ERROR
-            },
-            "CMD",
-            if machine.nml_command_connected {
-                "command channel connected"
-            } else {
-                "command channel lost"
-            },
-        );
-        theme::status_dot(
-            ui,
-            if machine.nml_status_connected {
-                theme::SUCCESS
-            } else {
-                theme::ERROR
-            },
-            "STATUS",
-            if machine.nml_status_connected {
-                "status channel connected"
-            } else {
-                "status channel lost"
-            },
-        );
-        for (text, color) in [
-            (
-                format!("STATUS {}", format_elapsed(machine.status_age_ms)),
-                theme::MUTED,
-            ),
-            (
-                format!("COMMAND {}", format_elapsed(machine.command_age_ms)),
-                theme::MUTED,
-            ),
-            (format!("ECHO {}", machine.echo_serial), theme::MUTED),
-            (
-                if machine.hal_thread_ok {
-                    "HAL THREAD OK".to_string()
-                } else {
-                    "HAL THREAD FAULT".to_string()
-                },
-                if machine.hal_thread_ok {
-                    theme::MUTED
+    // One text line, not the 44 pt touch-target row the theme reserves: the
+    // strip is a readout, and the reserved height pushed the browser down.
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = 16.0;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            theme::status_dot(
+                ui,
+                if machine.nml_command_connected {
+                    theme::SUCCESS
                 } else {
                     theme::ERROR
                 },
-            ),
-        ] {
-            ui.label(
-                RichText::new(text)
-                    .monospace()
-                    .size(theme::font_size(10.0))
-                    .color(color),
+                "CMD",
+                if machine.nml_command_connected {
+                    "command channel connected"
+                } else {
+                    "command channel lost"
+                },
             );
-        }
+            theme::status_dot(
+                ui,
+                if machine.nml_status_connected {
+                    theme::SUCCESS
+                } else {
+                    theme::ERROR
+                },
+                "STATUS",
+                if machine.nml_status_connected {
+                    "status channel connected"
+                } else {
+                    "status channel lost"
+                },
+            );
+            for (text, color) in [
+                (
+                    format!("STATUS {}", format_elapsed(machine.status_age_ms)),
+                    theme::MUTED,
+                ),
+                (
+                    format!("COMMAND {}", format_elapsed(machine.command_age_ms)),
+                    theme::MUTED,
+                ),
+                (format!("ECHO {}", machine.echo_serial), theme::MUTED),
+                (
+                    if machine.hal_thread_ok {
+                        "HAL THREAD OK".to_string()
+                    } else {
+                        "HAL THREAD FAULT".to_string()
+                    },
+                    if machine.hal_thread_ok {
+                        theme::MUTED
+                    } else {
+                        theme::ERROR
+                    },
+                ),
+            ] {
+                ui.label(
+                    RichText::new(text)
+                        .monospace()
+                        .size(theme::font_size(10.0))
+                        .color(color),
+                );
+            }
+        });
     });
 }
 
 fn hal_nml(app: &mut LincApp, ui: &mut Ui) {
     nml_status_line(app, ui);
-    ui.add_space(6.0);
+    ui.add_space(4.0);
     hal_browser(app, ui);
 }
 
@@ -460,20 +485,38 @@ fn hal_browser(app: &mut LincApp, ui: &mut Ui) {
     let browser = app.diagnostics.hal.get_or_insert_with(HalBrowser::default);
     let snapshot = browser.snapshot();
     let age = snapshot.age_ms();
+    // Three missed polls, and never less than three seconds: a 10 s period must
+    // not read as stale while it is on schedule.
+    let stale_ms = (browser.interval().as_millis() as u64 * HAL_STALE_POLLS).max(3_000);
+
+    // Keys are read before the filter is drawn: a singleline `TextEdit` takes
+    // Enter for itself, so a handler after it would never see the key.
+    hal_list_keys(app, ui, (ui.available_height() - 8.0).max(240.0));
+    // One keyboard target for both panes: the cursors choose the pane, the
+    // page keys scroll it. Two focusable panes fought egui's own arrow focus
+    // walk, which runs before the page can claim the key.
+    list_anchor(ui, "linc-hal-list");
 
     ui.horizontal(|ui| {
+        // One line: the theme's 44 pt touch target would make the filter box
+        // two text lines tall on a strip that holds a single one.
+        ui.spacing_mut().interact_size.y = 20.0;
         theme::section_header(ui, "HAL BROWSER");
         ui.add_space(6.0);
-        ui.add(
+        let search = ui.add(
             egui::TextEdit::singleline(&mut app.diagnostics.search)
-                .id(egui::Id::unique("linc-diagnostics-search"))
+                .id(egui::Id::unique("linc-diagnostics-hal-search"))
                 .hint_text("filter component, pin or signal")
                 .desired_width(260.0),
         );
+        if app.diagnostics.focus_search {
+            search.request_focus();
+            app.diagnostics.focus_search = false;
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let (text, color) = match (snapshot.available, age) {
                 (false, _) => ("HALCMD UNAVAILABLE".to_string(), theme::ERROR),
-                (true, Some(age)) if age > HAL_STALE_MS => (
+                (true, Some(age)) if age > stale_ms => (
                     format!(
                         "{:.1} s · {} PINS · {} SIGNALS · STALE",
                         age as f64 / 1000.0,
@@ -520,6 +563,7 @@ fn hal_browser(app: &mut LincApp, ui: &mut Ui) {
             .size(theme::font_size(10.0))
             .color(theme::MUTED),
         );
+        app.diagnostics.list_focused = false;
         return;
     }
 
@@ -547,15 +591,32 @@ fn hal_browser(app: &mut LincApp, ui: &mut Ui) {
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 theme::card(ui, |ui| {
+                    pane_marker(
+                        ui,
+                        app.diagnostics.list_focused && app.diagnostics.hal_pane == HalPane::Pins,
+                    );
                     if rows.is_empty() {
+                        // `halcmd` exits 0 with no rows when no HAL session is
+                        // running, so an empty tree is a different report from
+                        // a filter that matched nothing.
+                        let text = if snapshot.pins.is_empty() {
+                            "HAL reports no pins: no LinuxCNC session is running"
+                        } else {
+                            "no pin matches the filter"
+                        };
                         ui.label(
-                            RichText::new("no pin matches the filter")
+                            RichText::new(text)
                                 .size(theme::font_size(10.0))
                                 .color(theme::MUTED),
                         );
                         return;
                     }
-                    hal_table(ui, "hal-pins-table", height - 32.0)
+                    ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
+                    let mut table = hal_table(ui, "hal-pins-table", height - 32.0);
+                    if let Some(offset) = app.diagnostics.hal_pins_scroll.take() {
+                        table = table.vertical_scroll_offset(offset);
+                    }
+                    let out = table
                         .header(browser_row_height(), |mut header| {
                             for label in ["PIN", "TYPE", "DIR", "VALUE", "SIGNAL"] {
                                 header.col(|ui| browser_header(ui, label));
@@ -581,6 +642,7 @@ fn hal_browser(app: &mut LincApp, ui: &mut Ui) {
                                 }
                             });
                         });
+                    app.diagnostics.hal_pins_offset = out.state.clamped_offset().y;
                 });
             },
         );
@@ -591,16 +653,31 @@ fn hal_browser(app: &mut LincApp, ui: &mut Ui) {
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 theme::card(ui, |ui| {
+                    pane_marker(
+                        ui,
+                        app.diagnostics.list_focused
+                            && app.diagnostics.hal_pane == HalPane::Signals,
+                    );
                     theme::section_header(ui, "SIGNALS");
                     if signals.is_empty() {
+                        let text = if snapshot.signals.is_empty() {
+                            "HAL reports no signals"
+                        } else {
+                            "no signal matches the filter"
+                        };
                         ui.label(
-                            RichText::new("no signal matches the filter")
+                            RichText::new(text)
                                 .size(theme::font_size(10.0))
                                 .color(theme::MUTED),
                         );
                         return;
                     }
-                    signal_table(ui, height - 56.0).body(|body| {
+                    ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
+                    let mut table = signal_table(ui, height - 56.0);
+                    if let Some(offset) = app.diagnostics.hal_signals_scroll.take() {
+                        table = table.vertical_scroll_offset(offset);
+                    }
+                    let out = table.body(|body| {
                         body.rows(browser_row_height(), signals.len(), |mut row| {
                             let signal = signals[row.index()];
                             row.col(|ui| {
@@ -641,13 +718,188 @@ fn hal_browser(app: &mut LincApp, ui: &mut Ui) {
                             });
                         });
                     });
+                    app.diagnostics.hal_signals_offset = out.state.clamped_offset().y;
                 });
             },
         );
     });
 }
 
-/// The pins table, so both halves of the browser share one column rhythm.
+/// A focusable 1 px strip: the keyboard target of a list.
+///
+/// The arrows stay on the list, so egui does not walk the focus into another
+/// widget when the operator is moving between the panes or scrolling them.
+fn list_anchor(ui: &mut Ui, salt: &str) -> egui::Response {
+    let (rect, _) = ui.allocate_exact_size(
+        egui::Vec2::new(ui.available_width(), 1.0),
+        egui::Sense::hover(),
+    );
+    let response = ui.interact(
+        rect,
+        egui::Id::unique(salt),
+        egui::Sense::focusable_noninteractive(),
+    );
+    ui.memory_mut(|memory| {
+        memory.set_focus_lock_filter(
+            response.id,
+            egui::EventFilter {
+                tab: true,
+                horizontal_arrows: true,
+                vertical_arrows: true,
+                escape: false,
+            },
+        )
+    });
+    response
+}
+
+/// A page step in points: what one PageUp/PageDown moves a list by.
+fn page_step(height: f32) -> f32 {
+    (height - 40.0).max(browser_row_height() * 3.0)
+}
+
+/// The keys that walk the HAL browser: Enter leaves the filter for the list,
+/// the cursors choose the pane, the page keys scroll it, and Esc goes back to
+/// the filter.
+fn hal_list_keys(app: &mut LincApp, ui: &mut Ui, height: f32) {
+    let search_id = egui::Id::unique("linc-diagnostics-hal-search");
+    let list_id = egui::Id::unique("linc-hal-list");
+    let search_focused = ui.memory(|memory| memory.has_focus(search_id));
+    let enter = search_focused
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    if enter {
+        app.diagnostics.list_focused = true;
+        ui.memory_mut(|memory| memory.request_focus(list_id));
+        return;
+    }
+    if !app.diagnostics.list_focused {
+        return;
+    }
+    // A click into the filter is the operator leaving the list.
+    if search_focused {
+        app.diagnostics.list_focused = false;
+        return;
+    }
+    let (escape, left, right, page_up, page_down, faster, slower) = ui.input_mut(|input| {
+        (
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::F),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::S),
+        )
+    });
+    if escape {
+        app.diagnostics.list_focused = false;
+        ui.memory_mut(|memory| memory.request_focus(search_id));
+        return;
+    }
+    // egui walks the focus on an arrow key before the page can claim it, when
+    // the lock filter is not yet on the widget. Take the anchor back: the keys
+    // are the list's either way.
+    if !ui.memory(|memory| memory.has_focus(list_id)) {
+        ui.memory_mut(|memory| memory.request_focus(list_id));
+    }
+    if faster || slower {
+        // The poll rate is live: halcmd is asked again on the next turn.
+        let current = app
+            .diagnostics
+            .hal
+            .as_ref()
+            .map(|browser| browser.interval())
+            .unwrap_or(linc_hal::browser::MIN_INTERVAL);
+        let doubled = if faster { current / 2 } else { current * 2 };
+        let next = doubled
+            .max(linc_hal::browser::MIN_INTERVAL)
+            .min(linc_hal::browser::MAX_INTERVAL);
+        if let Some(browser) = &app.diagnostics.hal {
+            browser.set_interval(next);
+        }
+        app.toast(
+            format!("HAL POLL {:.1} s", next.as_secs_f32()),
+            theme::SUCCESS,
+        );
+    }
+    if left || right {
+        app.diagnostics.hal_pane = if left {
+            HalPane::Pins
+        } else {
+            HalPane::Signals
+        };
+    }
+    if page_up || page_down {
+        let step = page_step(height);
+        let delta = if page_down { step } else { -step };
+        match app.diagnostics.hal_pane {
+            HalPane::Pins => {
+                let target = (app.diagnostics.hal_pins_offset + delta).max(0.0);
+                app.diagnostics.hal_pins_scroll = Some(target);
+            }
+            HalPane::Signals => {
+                let target = (app.diagnostics.hal_signals_offset + delta).max(0.0);
+                app.diagnostics.hal_signals_scroll = Some(target);
+            }
+        }
+    }
+}
+
+/// A 2 px accent rule on the pane the cursors act on.
+fn pane_marker(ui: &mut Ui, active: bool) {
+    let (rect, _) = ui.allocate_exact_size(
+        egui::Vec2::new(ui.available_width(), 2.0),
+        egui::Sense::hover(),
+    );
+    if active {
+        ui.painter().rect_filled(rect, 1.0, theme::ACCENT);
+    }
+}
+
+/// The same walk for the log list:/// The same walk for the log list: Enter leaves the search line for the table,
+/// the page keys scroll it, Esc returns to the search line.
+fn logs_list_keys(app: &mut LincApp, ui: &mut Ui, height: f32) {
+    let search_id = egui::Id::unique("linc-diagnostics-search");
+    let list_id = egui::Id::unique("linc-logs-list");
+    let search_focused = ui.memory(|memory| memory.has_focus(search_id));
+    let enter = search_focused
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    if enter {
+        app.diagnostics.list_focused = true;
+        ui.memory_mut(|memory| memory.request_focus(list_id));
+        return;
+    }
+    if !app.diagnostics.list_focused {
+        return;
+    }
+    if search_focused {
+        app.diagnostics.list_focused = false;
+        return;
+    }
+    let (escape, page_up, page_down) = ui.input_mut(|input| {
+        (
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown),
+        )
+    });
+    if escape {
+        app.diagnostics.list_focused = false;
+        ui.memory_mut(|memory| memory.request_focus(search_id));
+        return;
+    }
+    if !ui.memory(|memory| memory.has_focus(list_id)) {
+        ui.memory_mut(|memory| memory.request_focus(list_id));
+    }
+    if page_up || page_down {
+        let step = page_step(height);
+        let delta = if page_down { step } else { -step };
+        let target = (app.diagnostics.logs_offset + delta).max(0.0);
+        app.diagnostics.logs_scroll = Some(target);
+    }
+}
+
+/// The pins table, so both halves of the browser share one column rhythm./// The pins table, so both halves of the browser share one column rhythm.
 fn hal_table<'a>(ui: &'a mut Ui, id: &str, max_height: f32) -> egui_extras::TableBuilder<'a> {
     egui_extras::TableBuilder::new(ui)
         .id_salt(id)
@@ -820,18 +1072,24 @@ fn turret(app: &mut LincApp, ui: &mut Ui) {
 }
 
 fn logs(app: &mut LincApp, ui: &mut Ui) {
+    // Before the search line: the field takes Enter for itself.
+    logs_list_keys(app, ui, (ui.available_height() - 40.0).max(120.0));
     ui.horizontal_wrapped(|ui| {
         ui.label(
             RichText::new("SEARCH")
                 .size(theme::font_size(9.0))
                 .color(theme::MUTED),
         );
-        ui.add(
+        let search = ui.add(
             egui::TextEdit::singleline(&mut app.diagnostics.search)
                 .id(egui::Id::unique("linc-diagnostics-search"))
                 .hint_text("message, code, source")
                 .desired_width(240.0),
         );
+        if app.diagnostics.focus_search {
+            search.request_focus();
+            app.diagnostics.focus_search = false;
+        }
         ui.add_space(6.0);
         for severity in [
             AlarmSeverity::Info,
@@ -871,6 +1129,7 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
     });
     ui.add_space(4.0);
     theme::card(ui, |ui| {
+        list_anchor(ui, "linc-logs-list");
         let logs: Vec<Alarm> = app
             .logs()
             .into_iter()
@@ -893,10 +1152,17 @@ fn logs(app: &mut LincApp, ui: &mut Ui) {
                     }
             })
             .collect();
-        egui::ScrollArea::vertical()
+        // Solid bars: a list longer than the card must show it, not fade out
+        // the bar until the pointer happens to pass over it.
+        ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
+        let mut area = egui::ScrollArea::vertical()
             .id_salt("log-scroll")
-            .max_height(480.0)
-            .show(ui, |ui| log_table(ui, "log-grid", &logs, usize::MAX));
+            .max_height(480.0);
+        if let Some(offset) = app.diagnostics.logs_scroll.take() {
+            area = area.vertical_scroll_offset(offset);
+        }
+        let out = area.show(ui, |ui| log_table(ui, "log-grid", &logs, usize::MAX));
+        app.diagnostics.logs_offset = out.state.clamped_offset().y;
     });
 }
 

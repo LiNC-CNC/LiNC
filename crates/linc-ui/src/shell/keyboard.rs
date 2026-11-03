@@ -96,6 +96,17 @@ impl LincApp {
                 || memory.has_focus(egui::Id::unique("linc-goto-line-input"))
                 || memory.has_focus(egui::Id::unique("linc-mdi-input"))
                 || memory.has_focus(egui::Id::unique("linc-diagnostics-search"))
+                || memory.has_focus(egui::Id::unique("linc-diagnostics-hal-search"))
+                // A diagnostics list that holds the keyboard keeps the page
+                // keys for its own scrolling.
+                || (self.nav.page == Page::Diagnostics && self.diagnostics.list_focused)
+        });
+        // The diagnostics search lines are single-line fields: the page keys
+        // have nothing to do inside them, so they keep cycling the tabs. The
+        // list above them is different: it scrolls with those keys.
+        let single_line_page_keys = ui.memory(|memory| {
+            memory.has_focus(egui::Id::unique("linc-diagnostics-search"))
+                || memory.has_focus(egui::Id::unique("linc-diagnostics-hal-search"))
         });
         let mut nav_page = None;
         let mut mode_nav = false;
@@ -471,6 +482,9 @@ impl LincApp {
                     && (self.probe.param_editing
                         || self.probe.param_focused
                         || self.probe.dro_edit.is_some()))
+                // A diagnostics list owns Esc while it holds the keyboard: the
+                // page puts the caret back in the search line.
+                || (self.nav.page == Page::Diagnostics && self.diagnostics.list_focused)
                 || self.help.dialog.is_some();
             if !editing_in_place
                 && input.consume_key(self.prefs.keymap.back.modifiers, self.prefs.keymap.back.key)
@@ -554,13 +568,13 @@ impl LincApp {
                     || self.help.dialog.is_some()
                     || (self.nav.page == Page::Probe
                         && (self.probe.param_editing || self.probe.dro_edit.is_some()));
-            if !text_focused
+            if (!text_focused || single_line_page_keys)
                 && !page_keys_belong_to_page
                 && input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp)
             {
                 page_up = true;
             }
-            if !text_focused
+            if (!text_focused || single_line_page_keys)
                 && !page_keys_belong_to_page
                 && input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown)
             {

@@ -11,7 +11,7 @@
 //! with pinned-over values from the machine snapshot.
 
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -224,8 +224,15 @@ fn show(what: &[&str]) -> Result<String, String> {
 pub struct HalBrowser {
     snapshot: Arc<RwLock<Arc<HalSnapshot>>>,
     stop: Arc<AtomicBool>,
+    /// Poll period in milliseconds, read by the thread on every turn so the
+    /// operator can speed the browser up from the page.
+    interval_ms: Arc<AtomicU64>,
     thread: Option<JoinHandle<()>>,
 }
+
+/// The range the poll period may be set to from the page.
+pub const MIN_INTERVAL: Duration = Duration::from_millis(100);
+pub const MAX_INTERVAL: Duration = Duration::from_secs(10);
 
 impl HalBrowser {
     /// Start polling every `interval`. The thread exits when the browser is
@@ -234,9 +241,11 @@ impl HalBrowser {
     pub fn spawn(interval: Duration) -> Self {
         let snapshot = Arc::new(RwLock::new(Arc::new(HalSnapshot::default())));
         let stop = Arc::new(AtomicBool::new(false));
+        let interval_ms = Arc::new(AtomicU64::new(clamp_interval(interval).as_millis() as u64));
         let thread = {
             let snapshot = Arc::clone(&snapshot);
             let stop = Arc::clone(&stop);
+            let interval_ms = Arc::clone(&interval_ms);
             std::thread::Builder::new()
                 .name("linc-hal-browser".into())
                 .spawn(move || {
@@ -245,12 +254,16 @@ impl HalBrowser {
                         if let Ok(mut slot) = snapshot.write() {
                             *slot = fresh;
                         }
-                        let deadline = Instant::now() + interval;
-                        while Instant::now() < deadline {
+                        // Sleep in slices, so a new period and a stop both take
+                        // effect without waiting out the old one.
+                        let started = Instant::now();
+                        while started.elapsed()
+                            < Duration::from_millis(interval_ms.load(Ordering::Relaxed))
+                        {
                             if stop.load(Ordering::Relaxed) {
                                 return;
                             }
-                            std::thread::sleep(Duration::from_millis(50));
+                            std::thread::sleep(Duration::from_millis(25));
                         }
                     }
                 })
@@ -259,8 +272,22 @@ impl HalBrowser {
         Self {
             snapshot,
             stop,
+            interval_ms,
             thread,
         }
+    }
+
+    /// The period the thread is polling at.
+    pub fn interval(&self) -> Duration {
+        Duration::from_millis(self.interval_ms.load(Ordering::Relaxed))
+    }
+
+    /// Change the poll period. The thread picks it up on its next turn.
+    pub fn set_interval(&self, interval: Duration) {
+        self.interval_ms.store(
+            clamp_interval(interval).as_millis() as u64,
+            Ordering::Relaxed,
+        );
     }
 
     /// The latest snapshot. Cheap: this clones one `Arc`.
@@ -276,6 +303,11 @@ impl Default for HalBrowser {
     fn default() -> Self {
         Self::spawn(Duration::from_secs(1))
     }
+}
+
+/// Keep a requested period inside what the browser and `halcmd` can serve.
+fn clamp_interval(interval: Duration) -> Duration {
+    interval.clamp(MIN_INTERVAL, MAX_INTERVAL)
 }
 
 impl Drop for HalBrowser {

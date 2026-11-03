@@ -135,6 +135,23 @@ fn diagnostics_navigation_and_body_skip_a_hidden_turret_tab() {
     assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Turret);
 }
 
+/// Opening HAL / NML puts the caret in the filter, so the first keystroke
+/// narrows the tree instead of going nowhere.
+#[test]
+fn entering_the_hal_tab_focuses_its_filter() {
+    let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::On);
+    harness.app.set_page(Page::Diagnostics);
+    harness.app.diagnostics.tab = DiagnosticsTab::Overview;
+    let _ = harness.frame_full(Vec::new());
+    let filter = egui::Id::unique("linc-diagnostics-hal-search");
+    assert!(!harness.ctx.memory(|memory| memory.has_focus(filter)));
+
+    harness.app.page_down();
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::HalNml);
+    let _ = harness.frame_full(Vec::new());
+    assert!(harness.ctx.memory(|memory| memory.has_focus(filter)));
+}
+
 /// Every remaining tab draws its own body and no removed one comes back.
 #[test]
 fn diagnostics_tabs_draw_text_strips_and_their_own_bodies() {
@@ -2220,6 +2237,220 @@ fn escape_leaves_the_diagnostics_page_before_it_resets_a_running_program() {
             .any(|toast| toast.text == "PROGRAM RESET"),
         "Esc still resets once the operator is back on the page"
     );
+}
+
+#[test]
+fn escape_clears_the_hal_filter_before_it_leaves_diagnostics() {
+    let (_dir, mut app) = make_app(PanelMode::Auto);
+    app.poll_backend();
+    app.set_page(Page::Diagnostics);
+    app.diagnostics.tab = DiagnosticsTab::HalNml;
+    app.diagnostics.search = "spind".into();
+    app.escape();
+    assert_eq!(app.diagnostics.search, "", "Esc clears the filter first");
+    assert_eq!(
+        app.nav.page,
+        Page::Diagnostics,
+        "a cleared filter does not also leave the page"
+    );
+    // Empty, the same key is the page's own Esc again.
+    app.escape();
+    assert_eq!(app.nav.page, Page::Machine);
+
+    // LOGS behaves the same way: clear first, leave on the next Esc.
+    app.set_page(Page::Diagnostics);
+    app.diagnostics.tab = DiagnosticsTab::Logs;
+    app.diagnostics.search = "spind".into();
+    app.escape();
+    assert_eq!(app.diagnostics.search, "");
+    assert_eq!(app.nav.page, Page::Diagnostics);
+    app.escape();
+    assert_eq!(app.nav.page, Page::Machine);
+
+    // The other tabs have no search line: their Esc leaves as before.
+    app.set_page(Page::Diagnostics);
+    app.diagnostics.tab = DiagnosticsTab::Overview;
+    app.diagnostics.search = "spind".into();
+    app.escape();
+    assert_eq!(app.nav.page, Page::Machine);
+    assert_eq!(app.diagnostics.search, "spind");
+}
+
+/// The same clear-through a real key event, not only through `escape()`: the
+/// focused field must not swallow the key before the shell sees it.
+#[test]
+fn the_escape_key_clears_the_search_line_on_both_tabs() {
+    for (tab, id) in [
+        (DiagnosticsTab::HalNml, "linc-diagnostics-hal-search"),
+        (DiagnosticsTab::Logs, "linc-diagnostics-search"),
+    ] {
+        let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::On);
+        harness.app.set_page(Page::Diagnostics);
+        harness.app.diagnostics.tab = tab;
+        harness.app.diagnostics.search = "spind".into();
+        harness.frame(&[egui::Key::Escape]);
+        assert_eq!(harness.app.diagnostics.search, "", "{tab:?}");
+        assert_eq!(harness.app.nav.page, Page::Diagnostics, "{tab:?}");
+        // The caret stays in the line: the next keystroke narrows the list
+        // again, it does not start nowhere.
+        let search = egui::Id::unique(id);
+        for frame in 0..3 {
+            assert!(
+                harness.ctx.memory(|memory| memory.has_focus(search)),
+                "{tab:?} lost the caret on frame {frame} after Esc"
+            );
+            let _ = harness.frame_full(Vec::new());
+        }
+    }
+}
+
+/// Enter in the HAL filter hands the keyboard to the list; the cursors choose
+/// the pane; Esc hands the keyboard back to the filter.
+#[test]
+fn hal_search_enter_cursors_and_esc_walk_the_panes() {
+    let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::On);
+    harness.app.set_page(Page::Diagnostics);
+    harness.app.diagnostics.tab = DiagnosticsTab::HalNml;
+    let _ = harness.frame_full(Vec::new());
+
+    let search = egui::Id::unique("linc-diagnostics-hal-search");
+    let list = egui::Id::unique("linc-hal-list");
+    assert!(harness.ctx.memory(|m| m.has_focus(search)));
+
+    harness.frame(&[egui::Key::Enter]);
+    assert!(harness.app.diagnostics.list_focused);
+    assert_eq!(harness.app.diagnostics.hal_pane, HalPane::Pins);
+    assert!(
+        harness.ctx.memory(|m| m.has_focus(list)),
+        "Enter lands on the list"
+    );
+
+    harness.frame(&[egui::Key::ArrowRight]);
+    assert_eq!(harness.app.diagnostics.hal_pane, HalPane::Signals);
+    harness.frame(&[egui::Key::ArrowLeft]);
+    assert_eq!(harness.app.diagnostics.hal_pane, HalPane::Pins);
+    // The keys are the list's on the next frame too: a leaked walk is taken back.
+    let _ = harness.frame_full(Vec::new());
+    assert!(harness.ctx.memory(|m| m.has_focus(list)));
+
+    harness.frame(&[egui::Key::Escape]);
+    assert!(!harness.app.diagnostics.list_focused);
+    assert!(
+        harness.ctx.memory(|m| m.has_focus(search)),
+        "Esc returns to the filter"
+    );
+    assert_eq!(harness.app.nav.page, Page::Diagnostics);
+}
+
+/// The log list takes the keyboard the same way: Enter from the search line,
+/// page keys scroll it, Esc returns to the search line.
+#[test]
+fn logs_search_enter_and_esc_walk_the_list() {
+    let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::On);
+    harness.app.set_page(Page::Diagnostics);
+    harness.app.diagnostics.tab = DiagnosticsTab::Logs;
+    let _ = harness.frame_full(Vec::new());
+
+    let search = egui::Id::unique("linc-diagnostics-search");
+    let list = egui::Id::unique("linc-logs-list");
+    assert!(harness.ctx.memory(|m| m.has_focus(search)));
+
+    harness.frame(&[egui::Key::Enter]);
+    assert!(harness.app.diagnostics.list_focused);
+    assert!(
+        harness.ctx.memory(|m| m.has_focus(list)),
+        "Enter lands on the list"
+    );
+
+    // The page keys stay with the list instead of cycling tabs.
+    harness.frame(&[egui::Key::PageDown]);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Logs);
+    let _ = harness.frame_full(Vec::new());
+    assert!(harness.ctx.memory(|m| m.has_focus(list)));
+
+    harness.frame(&[egui::Key::Escape]);
+    assert!(!harness.app.diagnostics.list_focused);
+    assert!(
+        harness.ctx.memory(|m| m.has_focus(search)),
+        "Esc returns to the search"
+    );
+    assert_eq!(harness.app.nav.page, Page::Diagnostics);
+}
+
+/// A single-line search takes no page keys: PgUp/PgDn keep cycling the tabs
+/// while the caret sits in it.
+#[test]
+fn page_keys_cycle_tabs_from_the_search_line() {
+    let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::On);
+    harness.app.profile.config.diagnostics.turret_tab = false;
+    harness.app.set_page(Page::Diagnostics);
+    harness.app.diagnostics.tab = DiagnosticsTab::HalNml;
+    let _ = harness.frame_full(Vec::new());
+    assert!(harness
+        .ctx
+        .memory(|m| m.has_focus(egui::Id::unique("linc-diagnostics-hal-search"))));
+
+    harness.frame(&[egui::Key::PageDown]);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::Logs);
+    harness.frame(&[egui::Key::PageUp]);
+    assert_eq!(harness.app.diagnostics.tab, DiagnosticsTab::HalNml);
+}
+
+/// F and S change the live HAL poll period once the list holds the keyboard.
+#[test]
+fn hal_list_keys_change_the_poll_interval() {
+    let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::On);
+    harness.app.set_page(Page::Diagnostics);
+    harness.app.diagnostics.tab = DiagnosticsTab::HalNml;
+    let _ = harness.frame_full(Vec::new());
+    harness.frame(&[egui::Key::Enter]);
+    assert!(harness.app.diagnostics.list_focused);
+
+    fn interval(harness: &ProbeHarness) -> std::time::Duration {
+        harness
+            .app
+            .diagnostics
+            .hal
+            .as_ref()
+            .expect("poller")
+            .interval()
+    }
+    let start = interval(&harness);
+    harness.frame(&[egui::Key::F]);
+    assert!(interval(&harness) < start, "F polls faster");
+    harness.frame(&[egui::Key::S]);
+    assert_eq!(interval(&harness), start, "S undoes one step");
+
+    // The period is clamped: fifty steps faster stop at the floor.
+    for _ in 0..50 {
+        harness.frame(&[egui::Key::F]);
+    }
+    assert_eq!(interval(&harness), linc_hal::browser::MIN_INTERVAL);
+    for _ in 0..50 {
+        harness.frame(&[egui::Key::S]);
+    }
+    assert_eq!(interval(&harness), linc_hal::browser::MAX_INTERVAL);
+}
+
+/// Both tabs open with the caret already in their search line./// Both tabs open with the caret already in their search line.
+#[test]
+fn hal_and_logs_tabs_open_with_their_search_focused() {
+    for (tab, id) in [
+        (DiagnosticsTab::HalNml, "linc-diagnostics-hal-search"),
+        (DiagnosticsTab::Logs, "linc-diagnostics-search"),
+    ] {
+        let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::On);
+        harness.app.set_page(Page::Diagnostics);
+        harness.app.diagnostics.tab = DiagnosticsTab::Overview;
+        let _ = harness.frame_full(Vec::new());
+        harness.app.diagnostics.tab = tab;
+        let _ = harness.frame_full(Vec::new());
+        let search = egui::Id::unique(id);
+        assert!(
+            harness.ctx.memory(|memory| memory.has_focus(search)),
+            "{tab:?} opens with its search focused"
+        );
+    }
 }
 
 #[test]

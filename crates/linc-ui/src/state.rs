@@ -97,6 +97,13 @@ pub enum DiagnosticsTab {
     Logs,
 }
 
+/// Which HAL browser pane holds the keyboard once Enter leaves the filter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HalPane {
+    Pins,
+    Signals,
+}
+
 impl DiagnosticsTab {
     pub const ALL: [DiagnosticsTab; 4] = [
         DiagnosticsTab::Overview,
