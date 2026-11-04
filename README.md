@@ -44,6 +44,64 @@ so the screens are exercised on real hardware rather than only in the simulator.
 - The design reasoning is in [`SPEC.md`](SPEC.md), the profile format in
   [`CONFIGURATION.md`](CONFIGURATION.md).
 
+## What makes it different
+
+**The panel is the control surface, and LiNC respects that.** There is no
+software E-stop, no software jog button, no feed override slider and no mode
+switch on screen. Those belong to the panel, so a second copy on a touch screen
+cannot drift out of agreement with the hardware. Where the software must send a
+machine command — a tool change, an MDI block, a probing cycle — it says so
+explicitly instead of pretending to be a jog button.
+
+**MDI is a working area, not a text box.** The MDI pane keeps a list of the
+blocks you have issued, holds focus in the input, and draws the block you are
+typing on the machine's toolpath before you send it. The preview understands
+`G91`, so a relative move is drawn where it will go. If the block would
+leave the machine's travel envelope, the frame turns red and the limit is named
+in the result line: the block is refused rather than sent and clipped.
+
+**The toolpath tells you what the machine will do.** The loaded program is drawn
+in program colours, and the part of it that runs outside the machine's travel
+limits is drawn solid red. The live trail is a separate green line, so "where the
+tool has been" and "what the program says" never get mixed up. While the head
+moves, the view follows it; when the head is still, the view stays where you put
+it, so you can zoom into another part of the program without being pulled back.
+
+**Touch probing is a guided workflow.** Choose a category, pick an illustrated
+operation, adjust clearance, feed and tip values, then run it. The probing math
+is not reinvented: the Probe Basic G-code routines are shipped with LiNC and
+called as they are, and the results come back into the screen.
+
+**Tool changes do not need MDI.** Select a row in the tool table and press
+change; LiNC issues the tool change for you, and the manual case asks you to
+install the tool and confirm it.
+
+**The editor checks work before the machine sees it.** The Program page doubles
+as a G-code editor with syntax highlighting, undo and redo, unsaved-change
+state and a live preview. An edit updates the drawing only after it parses, and
+saving is refused while a program runs or the machine is in program protect.
+
+**G-code help is on the machine, offline.** A searchable reference for LinuxCNC
+G-codes, M-codes, parameters and units, with per-code detail pages. It works
+with no network and stays readable while a program runs.
+
+**The network can be taken away from the machine while it cuts.** On a machine
+whose only network link is WiFi, LiNC can hold that link down whenever a program
+is loaded or MDI is selected, and hand it back when you unload. This keeps WiFi
+latency and driver interrupt storms out of the realtime path. The `NET` field in
+the top bar always says what the link is doing, and `Ctrl+U` on the Program page
+unloads the program and gives the link back. Machines without this configured
+behave exactly as before, with the interlock switched off.
+
+**One shell for a mill and a lathe.** Axis count comes from the LinuxCNC INI
+file, so a 3-axis mill, a 4-axis mill and an X/Z lathe with live tooling and a
+turret are the same program with different profiles.
+
+**It is a keyboard machine.** LiNC is designed for a QMK keyboard with labelled
+keys: `MAIN`, `FILE`, `TOOL`, `OFFSET`, arrows, `Enter`, `Esc`. There are no
+F-softkeys to memorise, and every on-screen action can also be reached with the
+arrow keys and `Enter`.
+
 ## ⚠️ Safety and Liability Disclaimer
 
 **Read this before you use LiNC on a machine.** The full notice is also printed
@@ -136,64 +194,6 @@ The licence is GPL-2.0-or-later: the text is in [`LICENSE`](LICENSE), declared
 in `Cargo.toml` and recorded in `debian/copyright`. This notice is not legal
 advice; have the terms reviewed before a commercial or safety-relevant
 deployment.
-
-## What makes it different
-
-**The panel is the control surface, and LiNC respects that.** There is no
-software E-stop, no software jog button, no feed override slider and no mode
-switch on screen. Those belong to the panel, so a second copy on a touch screen
-cannot drift out of agreement with the hardware. Where the software must send a
-machine command — a tool change, an MDI block, a probing cycle — it says so
-explicitly instead of pretending to be a jog button.
-
-**MDI is a working area, not a text box.** The MDI pane keeps a list of the
-blocks you have issued, holds focus in the input, and draws the block you are
-typing on the machine's toolpath before you send it. The preview understands
-`G91`, so a relative move is drawn where it will go. If the block would
-leave the machine's travel envelope, the frame turns red and the limit is named
-in the result line: the block is refused rather than sent and clipped.
-
-**The toolpath tells you what the machine will do.** The loaded program is drawn
-in program colours, and the part of it that runs outside the machine's travel
-limits is drawn solid red. The live trail is a separate green line, so "where the
-tool has been" and "what the program says" never get mixed up. While the head
-moves, the view follows it; when the head is still, the view stays where you put
-it, so you can zoom into another part of the program without being pulled back.
-
-**Touch probing is a guided workflow.** Choose a category, pick an illustrated
-operation, adjust clearance, feed and tip values, then run it. The probing math
-is not reinvented: the Probe Basic G-code routines are shipped with LiNC and
-called as they are, and the results come back into the screen.
-
-**Tool changes do not need MDI.** Select a row in the tool table and press
-change; LiNC issues the tool change for you, and the manual case asks you to
-install the tool and confirm it.
-
-**The editor checks work before the machine sees it.** The Program page doubles
-as a G-code editor with syntax highlighting, undo and redo, unsaved-change
-state and a live preview. An edit updates the drawing only after it parses, and
-saving is refused while a program runs or the machine is in program protect.
-
-**G-code help is on the machine, offline.** A searchable reference for LinuxCNC
-G-codes, M-codes, parameters and units, with per-code detail pages. It works
-with no network and stays readable while a program runs.
-
-**The network can be taken away from the machine while it cuts.** On a machine
-whose only network link is WiFi, LiNC can hold that link down whenever a program
-is loaded or MDI is selected, and hand it back when you unload. This keeps WiFi
-latency and driver interrupt storms out of the realtime path. The `NET` field in
-the top bar always says what the link is doing, and `Ctrl+U` on the Program page
-unloads the program and gives the link back. Machines without this configured
-behave exactly as before, with the interlock switched off.
-
-**One shell for a mill and a lathe.** Axis count comes from the LinuxCNC INI
-file, so a 3-axis mill, a 4-axis mill and an X/Z lathe with live tooling and a
-turret are the same program with different profiles.
-
-**It is a keyboard machine.** LiNC is designed for a QMK keyboard with labelled
-keys: `MAIN`, `FILE`, `TOOL`, `OFFSET`, arrows, `Enter`, `Esc`. There are no
-F-softkeys to memorise, and every on-screen action can also be reached with the
-arrow keys and `Enter`.
 
 ## Rules the software keeps
 
