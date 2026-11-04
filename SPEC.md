@@ -1052,6 +1052,10 @@ The Turret / Live Tool tab appears only with `[diagnostics] turret_tab = true`
 on a profile whose `[tools] changer` is `atc` or `turret`; for every other
 profile it is absent from the strip and from the PgUp/PgDn cycle.
 
+Clicking the `DIAG` navigation row, or pressing `Ctrl+D` while the page is already
+in front, selects the next visible tab and wraps after the last. `PgUp`/`PgDn`
+step the same list in either direction.
+
 No fault reset, acknowledge, cycle, jog, override, or E-stop controls here.
 `CLEAR VIEW` clears only the UI log view, never machine faults.
 
@@ -1194,8 +1198,10 @@ choose a routine group, then pick the operation card.
   Probe Help. Rotary-axis probing is not offered. The tabs are passive
   indicators: they are not buttons and take no keyboard focus.
 - `OFFSET` (F8) cycles Offsets → Outside → Inside → Boss + Pocket → Ridge +
-  Valley → Edge Angle → Calibrate → Help → Offsets. `Esc` returns to Offsets
-  from any probe tab. `PgUp`/`PgDn` also cycle the probe tabs.
+  Valley → Edge Angle → Calibrate → Help → Offsets. Clicking the `OFFSET`
+  navigation row walks the same route, so repeated clicks reach every tab and
+  come back to the table. `Esc` returns to Offsets from any probe tab.
+  `PgUp`/`PgDn` also cycle the probe tabs.
 - An editable X/Y/Z DRO sits above the parameter card, spanning the same left
   and right edges. Its work value is edited in place; the machine coordinate is
   shown underneath. `X`/`Y`/`Z` open the matching DRO, `Enter` writes the work
@@ -1531,11 +1537,12 @@ Implementation:
 - `TOOL`: Tools.
 - `OFFSET`: Offsets.
 - `WIN`: cycle `SPLIT`/`CODE`, page-local to Program (see 3.1 shortcut scope).
-- `Ctrl+D`: Diagnostics (the editable Program editor owns `Ctrl+D` for duplicate line); `Ctrl+H`: G-code Help.
+- `Ctrl+D`: Diagnostics (the editable Program editor owns `Ctrl+D` for duplicate line); on the page already in front it advances to the next visible tab. `Ctrl+H`: G-code Help.
 - `HELP` action: G-code Help; no dedicated function key.
 - `LOAD` / `Ctrl+O`: Files, when idle and allowed.
-- `OFFSET`: cycles Offsets → probe tabs → Offsets. `Enter` runs the selected
-  routine; there is no separate Touch Probe action.
+- `OFFSET`: cycles Offsets → probe tabs → Offsets; clicking the `OFFSET` row
+  does the same. `Enter` runs the selected routine; there is no separate Touch
+  Probe action.
 - MDI mode: the panel position opens the MAIN page with the MDI pane in place
   of the `PROGRAM` card. `Enter` issues and commits the block, `Up`/`Down`
   recall a buffer line into the input, `Ctrl+Up`/`Ctrl+Down` move the selected

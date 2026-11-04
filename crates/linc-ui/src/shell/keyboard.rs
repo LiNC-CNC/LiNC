@@ -138,9 +138,6 @@ impl LincApp {
         let mut help_search = false;
         let mut page_up = false;
         let mut page_down = false;
-        let mut probe_enter = false;
-        let mut probe_next = false;
-        let mut probe_exit = false;
         let mut home = false;
         let mut end = false;
         let mut focus_left = false;
@@ -393,22 +390,9 @@ impl LincApp {
                 self.prefs.keymap.offsets.modifiers,
                 self.prefs.keymap.offsets.key,
             ) {
-                if self.nav.page == Page::Probe {
-                    if linc_core::probe::ProbeCategory::ALL.last().copied()
-                        == Some(self.probe.category)
-                    {
-                        probe_exit = true;
-                    } else {
-                        probe_next = true;
-                    }
-                } else if self.nav.page == Page::Offsets
-                    && self.snapshot.probe.enabled
-                    && self.profile.variant == linc_core::model::MachineVariant::Mill
-                {
-                    probe_enter = true;
-                } else {
-                    nav_page = Some(Page::Offsets);
-                }
+                // The OFFSETS row and this key share one route: table, probe
+                // tabs in order, table again.
+                self.request_offsets();
             }
             // Ctrl+D duplicates a line in the editable program; that page-local
             // command shadows the global Diagnostics key there.
@@ -746,24 +730,14 @@ impl LincApp {
             let view = self.program.view;
             self.remember_program_view(view);
         }
-        if probe_exit {
-            nav_page = Some(Page::Offsets);
-        }
         if mode_nav {
             self.request_mode_page();
         }
         if let Some(page) = nav_page {
-            self.request_page(page);
+            self.request_nav_page(page);
         }
         if (help_search || find) && self.nav.page == Page::Help && !self.overlay_open() {
             self.help.focus_search = true;
-        }
-        if probe_enter {
-            screens::probe::enter_first(self);
-            self.set_page(Page::Probe);
-        }
-        if probe_next {
-            screens::probe::category_step(self, true);
         }
         if page_up {
             self.page_up();
@@ -848,7 +822,7 @@ impl LincApp {
                     .get(self.nav.nav_focus)
                     .copied()
                     .unwrap_or(Page::Machine);
-                self.request_page(page);
+                self.request_nav_page(page);
             }
         }
     }

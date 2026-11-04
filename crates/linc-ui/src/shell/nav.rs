@@ -378,6 +378,60 @@ impl LincApp {
         }
     }
 
+    /// The OFFSETS row and `F8` share one route: the offset table first, then
+    /// the probe tabs, then back to the table. On the last tab the next press
+    /// returns to the table, so repeating the command walks every tab and
+    /// arrives where it started.
+    pub fn request_offsets(&mut self) {
+        if self.nav.page == Page::Probe {
+            if linc_core::probe::ProbeCategory::ALL.last().copied() == Some(self.probe.category) {
+                self.set_page(Page::Offsets);
+            } else {
+                screens::probe::category_step(self, true);
+            }
+            return;
+        }
+        if self.nav.page == Page::Offsets
+            && self.snapshot.probe.enabled
+            && self.profile.variant == MachineVariant::Mill
+        {
+            screens::probe::enter_first(self);
+            self.set_page(Page::Probe);
+            return;
+        }
+        self.request_page(Page::Offsets);
+    }
+
+    /// The DIAG row and `Ctrl+D` share one route: the page first, then the
+    /// visible tabs in strip order, wrapping back to the first. The strip the
+    /// operator sees is the cycle, so a profile without the turret tab never
+    /// lands on it.
+    pub fn request_diagnostics(&mut self) {
+        if self.nav.page == Page::Diagnostics {
+            let tabs = DiagnosticsTab::visible(&self.profile);
+            let index = tabs
+                .iter()
+                .position(|tab| *tab == self.diagnostics.tab)
+                .unwrap_or(0);
+            self.diagnostics.tab = tabs[(index + 1) % tabs.len()];
+            return;
+        }
+        self.request_page(Page::Diagnostics);
+    }
+
+    /// A row activated from the sidebar (click or Enter) has the row's own
+    /// meaning, which for OFFSETS is the probe route above and for DIAG is the
+    /// tab cycle.
+    pub(super) fn request_nav_page(&mut self, page: Page) {
+        if page == Page::Offsets {
+            self.request_offsets();
+        } else if page == Page::Diagnostics {
+            self.request_diagnostics();
+        } else {
+            self.request_page(page);
+        }
+    }
+
     pub fn request_files(&mut self) {
         if self.program.editor.dirty && self.nav.page == Page::Program {
             self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::OpenFiles));
@@ -650,7 +704,7 @@ impl LincApp {
                 // drew its focus border and looked ready for the arrows.
                 self.nav.nav_focus = index;
                 self.nav.focus_region = FocusRegion::Nav;
-                self.request_page(*page);
+                self.request_nav_page(*page);
             }
         }
         // Minimal: the list ends where the rows do, and the SHORTCUTS frame

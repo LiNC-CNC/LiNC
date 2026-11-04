@@ -5003,6 +5003,74 @@ fn a_navigation_click_releases_the_keyboard_from_the_gcode_editor() {
     assert_eq!(harness.app.nav.focus_region, FocusRegion::Nav);
 }
 
+/// The OFFSETS row is the probe key too: from the table it enters the probe
+/// tabs, each further press steps one tab, and the press after the last one
+/// returns to the table.
+#[test]
+fn the_offsets_navigation_row_cycles_the_probe_tabs() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    let mut click_offsets = |harness: &mut ProbeHarness| {
+        let output = harness.frame_full(Vec::new());
+        let row = nav_row_center(&output, "OFFSETS");
+        harness.frame_events(vec![egui::Event::PointerMoved(row)]);
+        harness.frame_events(vec![press_at(row, true)]);
+        harness.frame_events(vec![press_at(row, false)]);
+    };
+
+    click_offsets(&mut harness);
+    assert_eq!(harness.app.nav.page, Page::Offsets);
+
+    click_offsets(&mut harness);
+    assert_eq!(harness.app.nav.page, Page::Probe);
+    assert_eq!(harness.app.probe.category, ProbeCategory::OutsideCorners);
+
+    for expected in &ProbeCategory::ALL[1..] {
+        click_offsets(&mut harness);
+        assert_eq!(harness.app.nav.page, Page::Probe);
+        assert_eq!(
+            harness.app.probe.category, *expected,
+            "the row steps through every probe tab"
+        );
+    }
+
+    click_offsets(&mut harness);
+    assert_eq!(
+        harness.app.nav.page,
+        Page::Offsets,
+        "the press after the last tab returns to the table"
+    );
+}
+
+/// The DIAG row is the page key plus a tab walk: the first press opens
+/// DIAGNOSTICS, each further press selects the next visible tab, and the
+/// press after the last one wraps to the first.
+#[test]
+fn the_diag_navigation_row_cycles_the_visible_tabs() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    let tabs = DiagnosticsTab::visible(&harness.app.profile);
+    harness.app.diagnostics.tab = tabs[0];
+    let mut click_diag = |harness: &mut ProbeHarness| {
+        let output = harness.frame_full(Vec::new());
+        let row = nav_row_center(&output, "DIAG");
+        harness.frame_events(vec![egui::Event::PointerMoved(row)]);
+        harness.frame_events(vec![press_at(row, true)]);
+        harness.frame_events(vec![press_at(row, false)]);
+    };
+
+    click_diag(&mut harness);
+    assert_eq!(harness.app.nav.page, Page::Diagnostics);
+    assert_eq!(harness.app.diagnostics.tab, tabs[0]);
+
+    for expected in tabs[1..].iter().chain(std::iter::once(&tabs[0])) {
+        click_diag(&mut harness);
+        assert_eq!(harness.app.nav.page, Page::Diagnostics);
+        assert_eq!(
+            harness.app.diagnostics.tab, *expected,
+            "the row walks the visible tabs and wraps"
+        );
+    }
+}
+
 /// The PROGRAM row is the FILE key: it opens the browser when the program is
 /// in front, and the same row brings the program back from the Files page.
 #[test]
