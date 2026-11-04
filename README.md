@@ -7,12 +7,15 @@ you what the machine is doing and lets you load, edit and check work, while
 starting and stopping the spindle stays where an operator's hand expects it.
 
 It is modelled on the industry-standard machine controllers that people in a
-factory already know, so the layout, the paging and the key handling follow the
-conventions of a conventional CNC control. Every action can be reached from a
-keyboard and a control panel: nothing needs a touchscreen, a mouse or a gesture
-that has to be learned. That is what makes it comfortable to an operator who
-spends the day on an industrial controller — the new software does not ask them
-to unlearn their habits.
+factory already know, and on probe_basic's operator workflow. The aim is a
+modern, graphically and feature-rich interface: familiar to industry users,
+usable in industrial education, and optimised for physical control — a CNC
+control panel and an industrial-style custom keyboard. The layout, the paging
+and the key handling follow the conventions of a conventional CNC control, so
+every action can be reached from the keyboard and the panel: nothing needs a
+touchscreen, a mouse or a gesture that has to be learned. That is what makes it
+comfortable to an operator who spends the day on an industrial controller — the
+new software does not ask them to unlearn their habits.
 
 A machine without a physical panel is not locked out. The simulated control
 panel runs in its own window with the same keys, dials and lamps, and publishes
@@ -27,9 +30,14 @@ state and the servo load. An operator can see what the machine is doing and
 where the program is at the same time, which is what supervising a running job
 needs.
 
-It runs on the machine controller itself. There is no helper process, no Python
-runtime and no web service between the screen and LinuxCNC; the HMI talks to
-LinuxCNC through its NML channels in the same process.
+It runs on the machine controller itself, written from the ground up in Rust
+and `egui`. There is no helper process, no Python runtime and no web service
+between the screen and LinuxCNC; the HMI talks to LinuxCNC through its NML
+channels in the same process. That is also why it starts quickly and stays
+responsive while showing more than a file listing: syntax highlighting, a
+context-aware 3D toolpath that highlights the block being executed, the loop
+iteration counter, the live trail and the following-error traces all draw in the
+same frame.
 
 The project is also developed against a working machine and its control panel,
 so the screens are exercised on real hardware rather than only in the simulator.
