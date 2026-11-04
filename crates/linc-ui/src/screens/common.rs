@@ -3008,6 +3008,14 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         )
         .unwrap();
         let profile = linc_core::config::Profile::load(&root.join("sim.toml"), None).unwrap();
+        // The safety notice is accepted in the fixture: these tests drive the
+        // shell, not the first-run gate. The gate itself has its own tests.
+        let preferences = linc_core::preferences::Preferences {
+            safety_notice_version: linc_core::preferences::SAFETY_NOTICE_VERSION,
+            ..Default::default()
+        };
+        std::fs::create_dir_all(root.join("prefs")).unwrap();
+        preferences.save(&profile.preferences_path).unwrap();
         (dir, profile)
     }
 

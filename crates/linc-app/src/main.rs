@@ -52,6 +52,14 @@ struct Args {
     /// Do not create the diagnostic socket for linc-mcp.
     #[arg(long)]
     no_diag: bool,
+    /// Record acceptance of the safety notice and start without asking.
+    ///
+    /// For provisioning, kiosks and demonstrations: the operator accepts the
+    /// notice once here instead of at the first window. The acceptance is
+    /// stored in the profile's preferences file, exactly as the dialog stores
+    /// it, and is versioned with the notice text.
+    #[arg(long)]
+    accept_safety_notice: bool,
     /// Commissioning: run one `[network]` link measurement and exit.
     ///
     /// Needs no window, no HAL and no LinuxCNC session, which is what makes it
@@ -167,6 +175,25 @@ fn main() -> Result<()> {
         );
         println!("summary  {}", status.message);
         return Ok(());
+    }
+
+    // Record the acceptance before the window exists, so a kiosk or an
+    // automated session never sees the dialog. Failure to write is logged, not
+    // fatal: the dialog then asks again, which is the safe direction.
+    if args.accept_safety_notice {
+        let mut preferences =
+            linc_core::preferences::Preferences::load(&profile.preferences_path);
+        preferences.accept_safety_notice(linc_core::model::now_ms() / 1000);
+        match preferences.save(&profile.preferences_path) {
+            Ok(()) => log::info!(
+                "safety notice acceptance recorded in {}",
+                profile.preferences_path.display()
+            ),
+            Err(error) => log::warn!(
+                "cannot record the safety notice acceptance in {}: {error}",
+                profile.preferences_path.display()
+            ),
+        }
     }
 
     let backend_choice = if args.sim {

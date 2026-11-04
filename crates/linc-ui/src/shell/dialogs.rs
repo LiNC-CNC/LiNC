@@ -800,6 +800,120 @@ impl LincApp {
         }
     }
 
+    /// The first-run safety and liability notice.
+    ///
+    /// A real modal, like every other dialog here: the page behind it receives
+    /// neither a key nor a click until the operator answers. The dialog carries
+    /// the substance in the same order as the printed notice, so consent is
+    /// given against a text the operator can read, not a checkbox beside a
+    /// link.
+    pub(super) fn draw_safety_notice(&mut self, ctx: &egui::Context) {
+        if !self.safety_gate {
+            return;
+        }
+        let mut accept = false;
+        let mut quit = false;
+        egui::Modal::new(egui::Id::unique("linc-safety-notice"))
+            .frame(
+                Frame::new()
+                    .fill(theme::PANEL_RAISED)
+                    .stroke(Stroke::new(1.0, theme::WARNING))
+                    .inner_margin(Margin::same(20)),
+            )
+            .show(ctx, |ui| {
+                ui.set_max_width(580.0);
+                ui.label(
+                    RichText::new("SAFETY AND LIABILITY DISCLAIMER")
+                        .size(theme::font_size(17.0))
+                        .strong()
+                        .color(theme::WARNING),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(
+                        "LiNC controls a CNC machine. It is provided as is, without warranty \
+                         of any kind. To the extent permitted by law, the authors and \
+                         contributors are not liable for personal injury or loss of life, for \
+                         damage to the machine, tooling, workpiece or other property, for lost \
+                         data or production, or for any direct or consequential damage.",
+                    )
+                    .size(theme::font_size(12.0)),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(
+                        "A CNC machine moves rapidly and with great force. It can crush and \
+                         trap, throws broken tools and workpiece fragments, a spindle can \
+                         start a fire, its electrical installation is hazardous, and cutting \
+                         produces noise and dust. Do not operate it unless you are trained and \
+                         qualified.",
+                    )
+                    .size(theme::font_size(12.0)),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(
+                        "The emergency stop, guards, door interlocks and limit switches are \
+                         hardware. They must stay functional and independent of this software \
+                         and must never be bypassed. No function of LiNC, including the network \
+                         interlock, is a safety function.",
+                    )
+                    .size(theme::font_size(12.0)),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(
+                        "You are solely responsible for the safety measures, for testing a \
+                         program before it runs, for supervising the machine, and for \
+                         compliance with the applicable standards.",
+                    )
+                    .size(theme::font_size(12.0)),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(
+                        "Nothing here excludes liability that cannot be excluded by applicable \
+                         law, in particular for intent, gross negligence, injury to life, body \
+                         or health, or under mandatory product liability law.",
+                    )
+                    .size(theme::font_size(11.0))
+                    .color(theme::MUTED),
+                );
+                ui.add_space(10.0);
+                ui.label(
+                    RichText::new(
+                        "By accepting you confirm that you have read this notice and that you \
+                         use the software at your own risk and responsibility.",
+                    )
+                    .size(theme::font_size(11.0))
+                    .color(theme::MUTED),
+                );
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    let accept_button = theme::accent_button(ui, "I ACCEPT", true);
+                    if accept_button.clicked() {
+                        accept = true;
+                    }
+                    if theme::action_button(ui, "QUIT", true).clicked() {
+                        quit = true;
+                    }
+                    accept_button.request_focus();
+                });
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new("Enter accepts  \u{00b7}  Esc quits  \u{00b7}  the full notice is printed in the manual")
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
+                );
+            });
+        if accept {
+            self.accept_safety_notice();
+        }
+        if quit {
+            self.decline_safety_notice();
+        }
+    }
+
     pub(super) fn draw_toasts(&mut self, ctx: &egui::Context) {
         #[allow(deprecated)]
         let area = egui::Area::new(egui::Id::new("linc-toasts"))

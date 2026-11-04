@@ -72,3 +72,6 @@ before each capture — an obscured window captures black.
 3. Re-capture the screenshots if a screen changed, then `make` twice.
 4. Diff the prose against the shipped behaviour — the manual must describe what the
    software does, not what it was designed to do.
+5. If the safety notice in `chapters/00-disclaimer.tex` or the HMI dialog changes in a way
+   that matters legally, bump `SAFETY_NOTICE_VERSION` in
+   `crates/linc-core/src/preferences.rs`; every installation is then asked once more.

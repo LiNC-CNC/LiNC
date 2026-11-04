@@ -24,6 +24,15 @@ pub struct WindowGeometry {
     pub height: f32,
 }
 
+/// Version of the safety notice the operator has to accept.
+///
+/// Bump this when the notice in the manual or the README changes in a way that
+/// matters legally or for machine safety. A preferences file with an older
+/// version asks again on the next start. The version is stored next to the
+/// acceptance time, so "accepted" is never a bare boolean: a tightened notice
+/// is not covered by an older consent.
+pub const SAFETY_NOTICE_VERSION: u32 = 1;
+
 /// The complete set of persisted UI preferences. Anything not listed here is
 /// deliberately not persistable.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -93,9 +102,37 @@ pub struct Preferences {
     /// tool identity and measured calibration remain profile/controller-owned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe: Option<crate::probe::ProbeParameters>,
+    /// Version of the safety notice the operator accepted, `0` when none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub safety_notice_version: u32,
+    /// When the acceptance was recorded, in unix seconds.
+    ///
+    /// A timestamp, not a boolean: a file copied to another machine still says
+    /// when the notice was accepted, and a future audit can tell a fresh
+    /// installation from one that was commissioned months ago.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safety_notice_accepted_at: Option<u64>,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 impl Preferences {
+    /// True when the current safety notice has been accepted.
+    ///
+    /// An older accepted version is not enough: the notice is versioned so a
+    /// changed text asks once more.
+    pub fn safety_notice_accepted(&self) -> bool {
+        self.safety_notice_version >= SAFETY_NOTICE_VERSION
+    }
+
+    /// Record acceptance of the current notice at `at` (unix seconds).
+    pub fn accept_safety_notice(&mut self, at: u64) {
+        self.safety_notice_version = SAFETY_NOTICE_VERSION;
+        self.safety_notice_accepted_at = Some(at);
+    }
+
     pub fn load(path: &Path) -> Self {
         let Ok(text) = fs::read_to_string(path) else {
             return Self::default();
@@ -249,6 +286,30 @@ mod tests {
         preferences.remember_file("/nc/8.nc", 5);
         assert_eq!(preferences.recent_files[0], "/nc/8.nc");
         assert_eq!(preferences.recent_files.len(), 5);
+    }
+
+    #[test]
+    fn accepting_the_safety_notice_is_versioned_and_survives_a_reload() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("notice.preferences.toml");
+        let mut preferences = Preferences::default();
+        assert!(!preferences.safety_notice_accepted());
+        preferences.accept_safety_notice(1_700_000_000);
+        assert!(preferences.safety_notice_accepted());
+        assert_eq!(preferences.safety_notice_version, SAFETY_NOTICE_VERSION);
+        preferences.save(&path).expect("save");
+        let loaded = Preferences::load(&path);
+        assert!(loaded.safety_notice_accepted());
+        assert_eq!(loaded.safety_notice_accepted_at, Some(1_700_000_000));
+
+        // An acceptance of an older notice is not consent to this one.
+        let mut older = Preferences {
+            safety_notice_version: SAFETY_NOTICE_VERSION - 1,
+            ..Default::default()
+        };
+        assert!(!older.safety_notice_accepted());
+        older.accept_safety_notice(1);
+        assert!(older.safety_notice_accepted());
     }
 
     #[test]

@@ -34,37 +34,97 @@ LinuxCNC through its NML channels in the same process.
 The project is also developed against a working machine and its control panel,
 so the screens are exercised on real hardware rather than only in the simulator.
 
-## Safety, warranty and liability
+## ⚠️ Safety and Liability Disclaimer
 
-LiNC is control software, not a safety device. It is provided "as is", without
-warranty of any kind, express or implied, including merchantability and fitness
-for a particular purpose. To the extent permitted by law, the authors and
-contributors accept no liability for damage arising from its use or misuse --
-in particular damage to the machine, tooling, workpiece or other property,
-lost production, or injury to persons.
+**Read this before you use LiNC on a machine.**
 
-Running a CNC machine is dangerous. The emergency stop, guards, limit switches,
-door interlocks and the machine's own safety circuits are hardware: they must
-stay functional and independent of this software, and they must never be
-bypassed. LiNC cannot see everything the machine does, cannot prevent every
-programming error, and its interlocks (including the network interlock) are
-convenience features, not safety functions. You are responsible for the
-programs you run, the offsets, tool and limit data you set, and for the safe
-operation of the machine.
+LiNC controls CNC machines and other potentially dangerous equipment. By using
+it you acknowledge and agree to the following.
 
-By installing or using LiNC you accept this notice and the licence terms. If
-you do not accept them, do not use the software.
+### No warranty
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NON-INFRINGEMENT. THE SOFTWARE MAY CONTAIN BUGS, ERRORS OR DEFECTS
+THAT COULD CAUSE EQUIPMENT MALFUNCTION, PROPERTY DAMAGE, PERSONAL INJURY OR
+DEATH.
+
+### No liability
+
+IN NO EVENT SHALL THE AUTHORS, COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF
+THE SOFTWARE, INCLUDING BUT NOT LIMITED TO:
+
+- personal injury or loss of life;
+- damage to the machine, tooling, workpiece or other property;
+- loss of data or work product;
+- loss of business or profits;
+- any direct, indirect, incidental, special, exemplary or consequential damage.
+
+### Your responsibility
+
+YOU ARE SOLELY RESPONSIBLE FOR:
+
+1. **Safety measures** — the emergency stop, guards, interlocks and protective
+   equipment required by the applicable safety standards.
+2. **Testing and validation** — proving a program in a safe place before it runs
+   on production equipment.
+3. **Supervision** — never leaving a CNC machine running unattended.
+4. **Compliance** — the laws, regulations and standards that apply where the
+   machine is installed.
+5. **Professional review** — having the installation reviewed by qualified
+   engineers or safety professionals before it is used in a critical
+   application.
+6. **Risk assessment** — understanding the risks of the machine and taking the
+   precautions they require.
+7. **Maintenance** — keeping the machine and its safety devices in safe working
+   order.
+
+### CNC-specific warnings
+
+A CNC machine moves rapidly and with great force. It can crush and trap, it
+throws broken tools and workpiece fragments, a spindle can start a fire, its
+electrical installation is hazardous, and cutting produces noise and dust.
+
+**Do not operate CNC equipment unless you are trained and qualified to do so.**
+
+### Hardware, not software
+
+The emergency stop, the guards, the door interlocks, the limit switches and the
+machine's own safety circuits are hardware. They must stay functional and
+independent of this software, and they must never be bypassed. LiNC cannot see
+everything the machine does, cannot prevent every programming error, and its
+interlocks (including the network interlock) are convenience features, not
+safety functions.
+
+### No support guarantee
+
+LiNC is provided on a voluntary basis. The authors are under no obligation to
+provide support, updates, bug fixes or any assistance.
+
+### Assumption of risk
+
+BY USING THIS SOFTWARE YOU EXPRESSLY ACKNOWLEDGE AND ASSUME ALL RISKS ASSOCIATED
+WITH ITS USE. If you do not agree to these terms, do not use the software.
+
+### Effect, acceptance and limits
+
+The first start shows this notice and asks for acceptance. The answer is
+recorded, with the version of the notice, in the profile's preferences file;
+`linc --accept-safety-notice` records the same acceptance without the dialog,
+for provisioning and kiosks. When the notice changes, its version changes with
+it and the dialog asks once more.
 
 Nothing here excludes or limits liability that cannot be excluded or limited by
-applicable law -- in particular liability for intent, gross negligence, injury
-to life, body or health, or liability under mandatory product liability law.
+applicable law: liability for intent, for gross negligence, for injury to life,
+body or health, and liability under mandatory product liability law remain
+unaffected.
 
-The licence is GPL-2.0-or-later (declared in `Cargo.toml`, recorded in
-`debian/copyright`). Sections 11, 12 and 15 to 17 of that licence already carry
-a warranty and liability disclaimer; this notice states the same for the
-machine context and adds the safety warning. It is not legal advice: if you
-deploy LiNC commercially or in a safety-relevant setting, have the terms
-reviewed.
+The licence is GPL-2.0-or-later: the text is in [`LICENSE`](LICENSE), declared
+in `Cargo.toml` and recorded in `debian/copyright`. This notice is not legal
+advice; have the terms reviewed before a commercial or safety-relevant
+deployment.
 
 ## What makes it different
 
@@ -366,7 +426,7 @@ opens the panel's serial port.
 
 ## License
 
-GPL-2.0-or-later, as declared in `Cargo.toml`. `debian/copyright` records the
-packaging details, including the GPLv3 text that the vendored Probe Basic
+GPL-2.0-or-later. The full text is in [`LICENSE`](LICENSE); `Cargo.toml` declares
+it and `debian/copyright` records the packaging details, including the GPLv3 text that the vendored Probe Basic
 routines carry. The warranty and liability disclaimer that applies to using the
-software is in [Safety, warranty and liability](#safety-warranty-and-liability).
+software is in [Safety and Liability Disclaimer](#%EF%B8%8F-safety-and-liability-disclaimer).

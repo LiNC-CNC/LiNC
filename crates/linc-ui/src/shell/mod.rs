@@ -107,6 +107,8 @@ pub struct LincApp {
     pub(super) nav: NavUi,
     pub(super) diagnostics: DiagnosticsUi,
     pub(super) overlay: OverlayUi,
+    /// The first-run safety notice is on screen and nothing else is allowed.
+    pub(super) safety_gate: bool,
     pub(super) jog: JogUi,
     pub(super) prefs: PrefsUi,
     pub(super) view: ViewState,
@@ -210,6 +212,10 @@ impl LincApp {
             .as_deref()
             .map(|value| view_from_config(value, profile.variant == MachineVariant::Lathe));
         let graph_zoom = preferences.toolpath_zoom;
+        // A fresh preferences file, or one written for an older notice, asks
+        // once before the first machine action. The full text is in the
+        // manual; the dialog carries the substance and the two answers.
+        let safety_gate = !preferences.safety_notice_accepted();
         let mut app = Self {
             snapshot: snapshot.clone(),
             graph_style,
@@ -304,6 +310,7 @@ impl LincApp {
                 messages_scroll: 0.0,
                 confirm_token: None,
             },
+            safety_gate,
             jog: JogUi {
                 increments: crate::state::finite_increments(&profile.machine_ini.increments),
                 index: preferences.jog_increment.unwrap_or(0),
@@ -515,6 +522,7 @@ impl LincApp {
         self.draw_tool_change_prompt(ui.ctx());
         crate::screens::help::draw_dialog(self, ui.ctx());
         crate::screens::common::messages_dialog(self, ui.ctx());
+        self.draw_safety_notice(ui.ctx());
         // Every dialog is drawn by now, so the set of overlays is final for
         // this frame. egui drops the focus together with the widget that held
         // it, and none of the pages asks for it again: without this the

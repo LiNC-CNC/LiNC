@@ -50,6 +50,14 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     )
     .unwrap();
     let profile = Profile::load(&root.join("sim.toml"), None).unwrap();
+        // The safety notice is accepted in the fixture: these tests drive the
+        // shell, not the first-run gate. The gate itself has its own tests.
+        let preferences = linc_core::preferences::Preferences {
+            safety_notice_version: linc_core::preferences::SAFETY_NOTICE_VERSION,
+            ..Default::default()
+        };
+        std::fs::create_dir_all(root.join("prefs")).unwrap();
+        preferences.save(&profile.preferences_path).unwrap();
     (dir, profile)
 }
 
@@ -207,6 +215,111 @@ fn make_app(mode: PanelMode) -> (tempfile::TempDir, LincApp) {
     let backend = Box::new(LocalBackend::new(profile.clone(), mode));
     let app = LincApp::new(profile, backend, &ctx);
     (dir, app)
+}
+
+
+/// A fresh installation has no acceptance in its preferences file, so the shell
+/// must ask before it does anything, and a page key must not get past it.
+#[test]
+fn the_first_start_asks_for_the_safety_notice_before_any_page_key() {
+    let (dir, profile) = fixture();
+    // A fresh installation: the fixture pre-accepts, this test removes it.
+    std::fs::remove_file(&profile.preferences_path).unwrap();
+    let ctx = egui::Context::default();
+    let backend = Box::new(LocalBackend::new(profile.clone(), PanelMode::Auto));
+    let mut app_slot = None;
+    let mut profile_slot = Some(profile.clone());
+    let mut backend_slot = Some(backend);
+    let mut output = ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+        let profile = profile_slot.take().expect("one pass");
+        let backend = backend_slot.take().expect("one pass");
+        app_slot = Some(LincApp::new(profile, backend, ui.ctx()));
+    });
+    output.textures_delta.clear();
+    let mut app = app_slot.unwrap();
+    assert!(app.safety_gate, "a fresh installation starts at the notice");
+    assert!(app.overlay_open(), "the notice is an overlay like any other");
+
+    // The notice is on screen with its two answers.
+    let frame = |app: &mut LincApp, events: Vec<egui::Event>| {
+        let mut out = ctx.run_ui(probe_raw_input(events), |ui| {
+            app.handle_keyboard(ui);
+            app.draw(ui);
+        });
+        out.textures_delta.clear();
+        out
+    };
+    let texts = painted_text(&frame(&mut app, Vec::new()));
+    for expected in ["SAFETY AND LIABILITY DISCLAIMER", "I ACCEPT", "QUIT"] {
+        assert!(
+            texts.iter().any(|(text, _)| text.contains(expected)),
+            "{expected} missing from the notice"
+        );
+    }
+
+    // A page key does nothing while the notice is open.
+    let f6 = vec![egui::Event::Key {
+        key: egui::Key::F6,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }];
+    frame(&mut app, f6);
+    assert_eq!(app.nav.page, Page::Machine, "F6 must not get past the notice");
+    assert!(app.safety_gate);
+
+    // Enter accepts, and the acceptance is on disk immediately.
+    let enter = vec![egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }];
+    frame(&mut app, enter);
+    assert!(!app.safety_gate, "Enter accepts the notice");
+    let saved = linc_core::preferences::Preferences::load(&profile.preferences_path);
+    assert!(saved.safety_notice_accepted());
+    assert!(saved.safety_notice_accepted_at.is_some());
+    drop(dir);
+}
+
+#[test]
+fn escaping_the_safety_notice_quits_without_accepting() {
+    let (dir, profile) = fixture();
+    std::fs::remove_file(&profile.preferences_path).unwrap();
+    let ctx = egui::Context::default();
+    let backend = Box::new(LocalBackend::new(profile.clone(), PanelMode::Auto));
+    let mut app_slot = None;
+    let mut profile_slot = Some(profile.clone());
+    let mut backend_slot = Some(backend);
+    let mut output = ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+        let profile = profile_slot.take().expect("one pass");
+        let backend = backend_slot.take().expect("one pass");
+        app_slot = Some(LincApp::new(profile, backend, ui.ctx()));
+    });
+    output.textures_delta.clear();
+    let mut app = app_slot.unwrap();
+    let escape = vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }];
+    let mut out = ctx.run_ui(probe_raw_input(escape), |ui| {
+        app.handle_keyboard(ui);
+        app.draw(ui);
+    });
+    out.textures_delta.clear();
+    assert!(app.chrome.quit_requested, "Esc declines and ends the session");
+    let saved = linc_core::preferences::Preferences::load(&profile.preferences_path);
+    assert!(
+        !saved.safety_notice_accepted(),
+        "declining must not record an acceptance"
+    );
+    drop(dir);
 }
 
 /// The sidebar SHORTCUTS frame: the only 4 px-corner pane in the nav

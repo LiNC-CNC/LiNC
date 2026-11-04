@@ -21,6 +21,20 @@ pub(super) const CUT_SHORTCUT: Binding = Binding::new(egui::Key::X, egui::Modifi
 
 impl LincApp {
     pub fn handle_keyboard(&mut self, ui: &mut egui::Ui) {
+        // The safety notice is the only thing on screen until it is answered.
+        // Enter accepts, Esc quits, everything else is swallowed.
+        if self.safety_gate {
+            let k = &self.prefs.keymap;
+            let accept = ui
+                .input_mut(|input| input.consume_key(k.activate.modifiers, k.activate.key));
+            let quit = ui.input_mut(|input| input.consume_key(k.back.modifiers, k.back.key));
+            if accept {
+                self.accept_safety_notice();
+            } else if quit {
+                self.decline_safety_notice();
+            }
+            return;
+        }
         self.hand_cut_to_page(ui);
         // A modal messages dialog owns the keyboard: Enter/Escape close it and
         // the page keys scroll it. Nothing behind it may react to a key.

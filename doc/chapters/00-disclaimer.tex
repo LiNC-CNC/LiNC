@@ -1,58 +1,100 @@
-\chapter*{Safety Notice and Disclaimer}
-\markboth{Safety Notice and Disclaimer}{}
+\chapter*{Safety and Liability Disclaimer}
+\markboth{Safety and Liability Disclaimer}{}
 
-This manual describes software. The software is not a safety device.
+\textbf{Read this before you use LiNC on a machine.}
+
+LiNC controls CNC machines and other potentially dangerous equipment. By using it you
+acknowledge and agree to the following.
 
 \begin{safetybox}
-  A CNC machine is dangerous. The emergency stop, the guards, the door interlocks, the limit
-  switches and the machine's own safety circuits are hardware. They must stay functional and
-  independent of this software, and they must never be bypassed. No function of LiNC --
-  including the network interlock -- is a safety function.
+  A CNC machine moves rapidly and with great force. It can crush and trap, it throws broken
+  tools and workpiece fragments, a spindle can start a fire, its electrical installation is
+  hazardous, and cutting produces noise and dust. Do not operate CNC equipment unless you
+  are trained and qualified to do so.
 \end{safetybox}
 
 \section*{No warranty}
 
-LiNC is provided \emph{as is}, without warranty of any kind, express or implied, including
-the implied warranties of merchantability, fitness for a particular purpose and
-non-infringement. No author, contributor or distributor warrants that the software is free
-of errors, that it matches the machine it is used on, or that a program, offset, tool value
-or probe result is correct.
+THIS SOFTWARE IS PROVIDED ``AS IS'', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NON-INFRINGEMENT. THE SOFTWARE MAY CONTAIN BUGS, ERRORS OR DEFECTS THAT COULD CAUSE
+EQUIPMENT MALFUNCTION, PROPERTY DAMAGE, PERSONAL INJURY OR DEATH.
 
 \section*{No liability}
 
-To the extent permitted by applicable law, no author, contributor or distributor accepts
-liability for any damage arising from the use or misuse of this software or from anything
-this manual states. This includes, without limitation:
+IN NO EVENT SHALL THE AUTHORS, COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF THE SOFTWARE, INCLUDING
+BUT NOT LIMITED TO:
 
 \begin{itemize}
-  \item damage to the machine, its tooling, the workpiece, fixtures or other property;
-  \item lost production, lost data or the cost of replacement work;
-  \item personal injury, up to and including injury to life, body or health.
+  \item personal injury or loss of life;
+  \item damage to the machine, tooling, workpiece or other property;
+  \item loss of data or work product;
+  \item loss of business or profits;
+  \item any direct, indirect, incidental, special, exemplary or consequential damage.
 \end{itemize}
 
-The software cannot see everything the machine does, cannot prevent every programming error,
-and cannot replace an operator's judgement. You are responsible for the programs you run, for
-the offsets, tool data and limits you set, and for the safe operation of the machine.
+\section*{Your responsibility}
 
-\section*{Acceptance}
+YOU ARE SOLELY RESPONSIBLE FOR:
 
-By installing, commissioning or operating LiNC you accept this notice and the licence terms.
-If you do not accept them, do not use the software.
+\begin{enumerate}
+  \item \textbf{Safety measures}: the emergency stop, guards, interlocks and protective
+        equipment required by the applicable safety standards.
+  \item \textbf{Testing and validation}: proving a program in a safe place before it runs
+        on production equipment.
+  \item \textbf{Supervision}: never leaving a CNC machine running unattended.
+  \item \textbf{Compliance}: the laws, regulations and standards that apply where the
+        machine is installed.
+  \item \textbf{Professional review}: having the installation reviewed by qualified
+        engineers or safety professionals before it is used in a critical application.
+  \item \textbf{Risk assessment}: understanding the risks of the machine and taking the
+        precautions they require.
+  \item \textbf{Maintenance}: keeping the machine and its safety devices in safe working
+        order.
+\end{enumerate}
 
-Nothing in this notice excludes or limits liability that cannot be excluded or limited by
-applicable law. In particular, liability for intent, for gross negligence, for injury to
-life, body or health, and liability under mandatory product liability law remain unaffected.
+\section*{Hardware, not software}
+
+The emergency stop, the guards, the door interlocks, the limit switches and the machine's
+own safety circuits are hardware. They must stay functional and independent of this
+software, and they must never be bypassed. LiNC cannot see everything the machine does,
+cannot prevent every programming error, and its interlocks (including the network
+interlock) are convenience features, not safety functions.
+
+\section*{No support guarantee}
+
+LiNC is provided on a voluntary basis. The authors are under no obligation to provide
+support, updates, bug fixes or any assistance.
+
+\section*{Assumption of risk}
+
+BY USING THIS SOFTWARE YOU EXPRESSLY ACKNOWLEDGE AND ASSUME ALL RISKS ASSOCIATED WITH ITS
+USE. If you do not agree to these terms, do not use the software.
+
+\section*{Effect, acceptance and limits}
+
+The first start shows this notice and asks for acceptance. The answer is recorded, with
+the version of the notice, in the profile's preferences file
+(\texttt{\textasciitilde/.config/linc/<profile>.preferences.toml}). The command-line option
+\texttt{--accept-safety-notice} records the same acceptance without the dialog, for
+provisioning and kiosks. When the notice changes, its version changes with it and the
+dialog asks once more.
+
+Nothing here excludes or limits liability that cannot be excluded or limited by applicable
+law. In particular, liability for intent, for gross negligence, for injury to life, body or
+health, and liability under mandatory product liability law remain unaffected.
 
 \section*{Licence}
 
 LiNC is licensed under the GNU General Public Licence, version 2 or later
-(\texttt{GPL-2.0-or-later}). The declaration is in \texttt{Cargo.toml}; the packaging record
-is in \texttt{debian/copyright}. Sections 11, 12 and 15 to 17 of that licence contain a
-warranty and liability disclaimer; this notice states the same for the machine context and
-adds the safety warning.
+(\texttt{GPL-2.0-or-later}). The full text is in the \texttt{LICENSE} file at the root of
+the repository; the declaration is in \texttt{Cargo.toml} and the packaging record is in
+\texttt{debian/copyright}.
 
 \begin{notebox}
   This notice is not legal advice. If you deploy LiNC commercially, in a regulated
-  environment, or in a setting where its failure could injure someone, have the terms
-  reviewed before commissioning.
+  environment, or where its failure could injure someone, have the terms reviewed before
+  commissioning.
 \end{notebox}

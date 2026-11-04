@@ -193,12 +193,37 @@ impl LincApp {
     /// Page-local key handlers must not move, edit or load the control
     /// underneath it: the dialog's button holds focus and takes Enter.
     pub fn overlay_open(&self) -> bool {
-        self.overlay.modal.is_some()
+        // The safety notice is the first overlay of a fresh installation: it
+        // owns the keyboard and the pointer until it is accepted or declined.
+        self.safety_gate
+            || self.overlay.modal.is_some()
             || self.overlay.messages_dialog
             || self.help.dialog.is_some()
             || self.tools.number.is_some()
             || self.tools.position.is_some()
             || self.snapshot.tool_change.status == linc_core::model::ToolChangeStatus::ManualPrompt
+    }
+
+    /// Accept the safety notice and keep the session running.
+    ///
+    /// The acceptance is written immediately: a crash or a power cut on the
+    /// first frame after the click must not ask the operator to consent again.
+    pub fn accept_safety_notice(&mut self) {
+        let at = linc_core::model::now_ms() / 1000;
+        self.prefs.preferences.accept_safety_notice(at);
+        self.prefs.dirty = true;
+        self.save_preferences(true);
+        self.safety_gate = false;
+        log::info!(
+            "safety notice version {} accepted",
+            linc_core::preferences::SAFETY_NOTICE_VERSION
+        );
+    }
+
+    /// Decline the safety notice: the session ends without accepting.
+    pub fn decline_safety_notice(&mut self) {
+        log::info!("safety notice declined; quitting");
+        self.chrome.quit_requested = true;
     }
 
     pub fn escape(&mut self) {
