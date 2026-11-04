@@ -110,6 +110,28 @@ keys: `MAIN`, `FILE`, `TOOL`, `OFFSET`, arrows, `Enter`, `Esc`. There are no
 F-softkeys to memorise, and every on-screen action can also be reached with the
 arrow keys and `Enter`.
 
+## Status and verification
+
+The workspace implements the specification in simulation. LiNC is already
+running on the author's physical mill, in trial use: the mill profile runs end
+to end on the machine it was written for, and the lathe profile validates and
+runs with `configs/lathe-sim.ini`. The screens implemented are Machine, Program
+(both `SPLIT` and `CODE` layouts), Offsets, Tools, Diagnostics, G-code Help,
+Files, Touch Probe, Manual and Homing; MDI is a pane on the Machine page.
+
+`cargo test --workspace` covers profile merging, INI parsing, command validation,
+the editor and preview behaviour, graph bounds, the panel protocol, the HAL
+output allowlist and the simulator backend.
+
+The items that still need a real machine or a commissioned LinuxCNC session are
+listed in
+[`CONFIGURATION.md`](CONFIGURATION.md#12-remaining-hardware-verification).
+
+`linc-mcp` exposes the HMI and panel diagnostic sockets to an agent — state,
+gates, logs, events, panel frames, motion history, crash records, a screen model
+and a diagnostic bundle — with an opt-in simulator control surface. It never
+opens the panel's serial port.
+
 ## ⚠️ Safety and Liability Disclaimer
 
 **Read this before you use LiNC on a machine.** The full notice is also printed
@@ -421,27 +443,6 @@ owner's decision.
 LiNC is GPL-2.0-or-later, which is compatible with shipping the Probe Basic
 routines under GPLv3 next to it. The directory keeps its own `LICENSE`,
 `SOURCE.md` and `SHA256SUMS`.
-
-## Status and verification
-
-The workspace implements the specification in simulation. The mill profile runs
-end to end on the machine it was written for, and the lathe profile validates
-and runs with `configs/lathe-sim.ini`. The screens implemented are Machine,
-Program (both `SPLIT` and `CODE` layouts), Offsets, Tools, Diagnostics, G-code
-Help, Files, Touch Probe, Manual and Homing; MDI is a pane on the Machine page.
-
-`cargo test --workspace` covers profile merging, INI parsing, command validation,
-the editor and preview behaviour, graph bounds, the panel protocol, the HAL
-output allowlist and the simulator backend.
-
-The items that still need a real machine or a commissioned LinuxCNC session are
-listed in
-[`CONFIGURATION.md`](CONFIGURATION.md#12-remaining-hardware-verification).
-
-`linc-mcp` exposes the HMI and panel diagnostic sockets to an agent — state,
-gates, logs, events, panel frames, motion history, crash records, a screen model
-and a diagnostic bundle — with an opt-in simulator control surface. It never
-opens the panel's serial port.
 
 ## License
 
