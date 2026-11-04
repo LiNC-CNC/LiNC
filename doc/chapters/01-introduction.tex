@@ -1,0 +1,149 @@
+\chapter{Introduction}
+\label{ch:intro}
+
+LiNC is the operator interface of a LinuxCNC machine. It shows what the machine is
+doing, it loads and edits G-code, and it holds the tool, offset and probing pages.
+It runs on the control PC as a single program: there is no helper process, no Python
+layer and no web service between the screen and the controller.
+
+LiNC is operated from three surfaces, and none of them is a touch screen:
+
+\begin{enumerate}
+  \item The \textbf{operator panel} -- power, emergency stop, mode selector, override
+        knobs, jog keys, cycle keys and the machine function keys. This is where the
+        machine is controlled.
+  \item The \textbf{CNC keyboard} -- navigation, G-code entry, MDI, tool and offset
+        values, file handling. Every action on the screen has a key.
+  \item The \textbf{screen} -- readouts, the toolpath, the program, the tables and the
+        diagnostics. It reports; it does not control motion.
+\end{enumerate}
+
+The layout and the key handling follow the conventions of an industrial machine
+controller, so an operator who knows a conventional control can work without learning
+a new interaction model. A mouse is not required, and a touch screen is not required.
+
+The panel and the interface can also run on one computer without a machine cabinet: the
+\emph{simulated panel} is a second window that carries the same keys, knobs, lamps and
+displays, and publishes the same interface to the controller. On a machine without a
+physical panel it stands in for one; a touch screen or a mouse then works as a
+replacement for the panel keys. It is a replacement for a panel, not a second way to
+drive the machine.
+
+Because the machine controls stay off the screen, the screen is free for machine state.
+The digital readout, the toolpath, the program listing, the modal codes and the servo
+load are visible at the same time, which is what supervising a running job needs.
+
+\shot{img/ui/machine.png}{The Machine page with a program loaded: readout, toolpath,
+program listing, feed and spindle, servo load.}{fig:intro-machine}
+
+\section{What makes LiNC different}
+
+\begin{description}[font=\normalfont\sffamily\bfseries, leftmargin=4.6cm, style=nextline]
+  \item[The panel stays the panel] There is no on-screen jog, no on-screen cycle start,
+        no override slider and no software emergency stop. A second copy of a control
+        drifts out of agreement with the hardware, so there is no second copy.
+  \item[MDI is a working area] The MDI pane keeps the blocks you have issued and draws
+        the block you are typing on the toolpath before it is sent. A block that would
+        leave the machine's travel is refused by name.
+  \item[The toolpath explains itself] The loaded program, the live tool trail, the
+        machine envelope and the part bounds are separate layers with separate colours.
+        Anything outside the machine's travel is drawn solid red.
+  \item[Tool changes without MDI] Select a row in the tool table and press \keycap{T}.
+        The change and its length compensation are issued for you.
+  \item[The editor checks the work] The Program page is a G-code editor with syntax
+        highlighting, undo, redo and a live preview. An edit reaches the drawing only
+        after it parses.
+  \item[Probing is guided] Categories, illustrated operations, parameters and results,
+        using the Probe Basic G-code routines that ship with LiNC.
+  \item[Help is on the machine] A searchable G-code reference, offline, readable while a
+        program runs.
+  \item[The network can be taken away] When a program is loaded or MDI is selected, LiNC
+        can hold the machine's external network link down, so WiFi latency cannot reach
+        the realtime path. \chordtwo{Ctrl}{U} unloads the program and releases it.
+\end{description}
+
+\section{What the software will not do}
+
+These are design rules, not preferences. Each one exists so that the screen and the
+machine cannot disagree.
+
+\begin{itemize}
+  \item It will not jog, home, start the spindle, change coolant or start a cycle.
+        Those are panel actions, wired through the machine's HAL.
+  \item It will not write an arbitrary HAL pin. It writes seven declared outputs, and
+        the list is fixed in the profile and in the program.
+  \item It will not save G-code, write a table, import a file or apply a probe result
+        while the panel's \pbtn{PROGRAM PROTECT} switch is on.
+  \item It will not home an axis. It reports homing and explains the sequence.
+  \item It will not guess. A stale or invalid panel state is shown as unknown and fails
+        closed.
+\end{itemize}
+
+\section{How to read this manual}
+
+\begin{description}[font=\normalfont\sffamily\bfseries, leftmargin=4.2cm, style=nextline]
+  \item[Chapter \ref{ch:power}] Powering up and down, emergency stop, protect switch,
+        the network interlock.
+  \item[Chapter \ref{ch:panel}] Every control on the operator panel.
+  \item[Chapter \ref{ch:keyboard}] The keyboard, the navigation column and every
+        shortcut.
+  \item[Chapter \ref{ch:screen}] The fixed shell: top bar, bottom bar, banners,
+        messages.
+  \item[Chapter \ref{ch:modes}] Panel modes, jogging, homing and program zero.
+  \item[Chapter \ref{ch:running}] Loading, checking and running a program.
+  \item[Chapter \ref{ch:mdi}] MDI and the G-code editor.
+  \item[Chapter \ref{ch:tools}] Tool table, tool changes, offsets.
+  \item[Chapter \ref{ch:probing}] Touch probing.
+  \item[Chapter \ref{ch:diagnostics}] Diagnostics, logs and troubleshooting.
+  \item[Chapter \ref{ch:quickref}] Key tables and reference data.
+\end{description}
+
+Boxes used throughout the manual:
+
+\begin{safetybox}
+  Instructions that prevent injury. Read them before operating the machine.
+\end{safetybox}
+\begin{cautionbox}
+  Instructions that prevent damage to the machine, the tooling or the workpiece.
+\end{cautionbox}
+\begin{notebox}
+  Context and cross references.
+\end{notebox}
+\begin{tipbox}
+  Practical hints from the shop floor.
+\end{tipbox}
+
+\section{Notation}
+
+Panel keys are drawn as \pbtn{CYCLE START}, screen actions and labels as \sbtn{SAVE},
+keyboard keys as \keycap{F6} and key chords as \chordtwo{Ctrl}{S}. Lit panel
+lamps are drawn as \ledlit{ledgreen} (lit) against \leddim{ledgreen} (dark). A state
+word the screen paints is written as \state{NOT HOMED}.
+
+Positions on the millimetre machine are in millimetres, speeds in millimetres per
+minute, spindle speed in revolutions per minute. A lathe profile shows X in the
+radius or diameter convention its INI selects.
+
+\section{Terms used in this manual}
+
+\begin{longtable}{L{3.4cm}L{9.6cm}}
+  \toprule
+  \textbf{Term} & \textbf{Meaning} \\
+  \midrule
+  \endhead
+  HMI & Human-machine interface: this program. \\
+  Panel & The operator panel, physical or simulated. It owns the machine controls. \\
+  Controller & LinuxCNC: task, motion and I/O. It is authoritative for machine state. \\
+  Task mode & LinuxCNC's own mode (MANUAL, MDI, AUTO). The panel requests it; LiNC
+              displays it. \\
+  Panel mode & The position of the mode selector on the panel. LiNC reads it as one-hot
+              signals and fails closed if it is invalid. \\
+  WCS & Work coordinate system, \texttt{G54} to \texttt{G59.3}. \\
+  DTG & Distance to go: how far the tool still has to move. \\
+  MDI & Manual data input: one block, issued immediately. \\
+  HAL & LinuxCNC's hardware abstraction layer. \\
+  Protect & The panel's \pbtn{PROGRAM PROTECT} key switch. It locks every write. \\
+  Interlock & The rule that holds the external network link down while the machine can
+              move. \\
+  \bottomrule
+\end{longtable}

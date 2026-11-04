@@ -1,0 +1,216 @@
+\chapter{Quick Reference}
+\label{ch:quickref}
+
+\section{Keys}
+
+\begin{longtable}{L{4.7cm}L{8.1cm}}
+  \toprule
+  \textbf{Keys} & \textbf{Action} \\
+  \midrule
+  \endhead
+  \multicolumn{2}{l}{\textbf{Navigation}} \\
+  \keycap{F5} & Machine page, or the page belonging to the panel mode \\
+  \keycap{F6} & Program; again for Files; in Files, back to Program \\
+  \keycap{F7} & Tools \\
+  \keycap{F8} & Offsets; again for the probe tabs, cyclically \\
+  \chordtwo{Ctrl}{D} & Diagnostics; duplicate line while the editor has the keyboard \\
+  \chordtwo{Ctrl}{H} & G-code help \\
+  \chordtwo{Ctrl}{F} & Search inside the help article (Help page only) \\
+  \chordtwo{Ctrl}{O} & Files (not on Program; \keycap{F6} there) \\
+  \keycap{M} & Messages \\
+  \keycap{Esc} & Back, cancel, or reset the program \\
+  \chordtwo{Ctrl}{Q} & Quit (refused while running or moving) \\
+  \midrule
+  \multicolumn{2}{l}{\textbf{Toolpath view, on every page that draws one}} \\
+  \chordtwo{Ctrl}{F10} & Cycle ISO, X, Y, Z \\
+  \chordtwo{Ctrl}{0} & Fit \\
+  \chordtwo{Ctrl}{L} & Clear the live trail \\
+  \chordtwo{Ctrl}{B} & Cycle bounds \\
+  \chordtwo{Ctrl}{M} & REMAINING \\
+  \keycap{Ctrl}+arrows & Pan \\
+  \chordtwo{Ctrl}{+} / \chordtwo{Ctrl}{-} & Zoom \\
+  \midrule
+  \multicolumn{2}{l}{\textbf{Program and editor}} \\
+  \keycap{F10} & SPLIT / CODE layout \\
+  \chordtwo{Ctrl}{R} & Run from line \\
+  \chordtwo{Ctrl}{G} & Go to line \\
+  \chordtwo{Ctrl}{U} & Unload the program and release the link \\
+  \chordtwo{Ctrl}{S} & Save \\
+  \chordtwo{Ctrl}{Z} / \chordtwo{Ctrl}{Y} & Undo / redo \\
+  \chordtwo{Ctrl}{A} / \keycap{C} / \keycap{X} / \keycap{V} & Select all, copy, cut, paste \\
+  \chordtwo{Ctrl}{K} & Delete the current line \\
+  \chordtwo{Ctrl}{\textuparrow} / \keycap{\textdownarrow} & Move the current line \\
+  \chordtwo{Ctrl}{\textleftarrow} / \keycap{\textrightarrow} & Move by word \\
+  \midrule
+  \multicolumn{2}{l}{\textbf{MDI pane}} \\
+  \keycap{Enter} & Issue the block \\
+  \keycap{\textuparrow} / \keycap{\textdownarrow} & Recall a buffer line \\
+  \chordtwo{Ctrl}{\textuparrow} / \keycap{\textdownarrow} & Move the selected buffer line \\
+  \chordtwo{Ctrl}{G} & Go to a buffer line \\
+  \chordtwo{Ctrl}{R} & Issue the selected buffer line \\
+  \chordtwo{Ctrl}{Backspace} & Delete the selected buffer line \\
+  \chordtwo{Ctrl}{S} & Save the buffer as a program \\
+  \keycap{Esc} & Clear the input \\
+  \midrule
+  \multicolumn{2}{l}{\textbf{Manual and homing pages}} \\
+  \keycap{1} \dots \keycap{9} & Select the INC step (INC only) \\
+  \keycap{X} / \keycap{Y} / \keycap{Z} & Zero that work axis \\
+  \keycap{A} & Zero every axis \\
+  \keycap{O} & Toggle the limit-switch override \\
+  \midrule
+  \multicolumn{2}{l}{\textbf{Tools}} \\
+  \keycap{T} & Load the selected tool with \texttt{G43} \\
+  \chordtwo{Ctrl}{T} & Type a tool number \\
+  \keycap{Z} & Tool position dialog \\
+  \chordtwo{Ctrl}{N} & New tool \\
+  \keycap{D} & Duplicate tool \\
+  \keycap{Backspace} & Delete tool \\
+  \keycap{S} & Loobric sync (when configured) \\
+  \midrule
+  \multicolumn{2}{l}{\textbf{Files}} \\
+  \keycap{Enter} & Open a folder, copy from USB, load a program \\
+  \keycap{C} / \keycap{D} / \keycap{R} / \keycap{N} & Copy, duplicate, rename, new \\
+  \keycap{Backspace} & Delete (also \keycap{Delete}) \\
+  \keycap{E} & Eject \\
+  \chordtwo{Ctrl}{R} & Refresh \\
+  \midrule
+  \multicolumn{2}{l}{\textbf{Probe}} \\
+  \keycap{1} \dots \keycap{9} & Select a routine \\
+  \keycap{Enter} & Run the routine \\
+  \keycap{W} & Position / direct work-offset mode \\
+  \keycap{A} & Apply the last result \\
+  \keycap{U} & Update the parameters \\
+  \chordtwo{Ctrl}{P} & Edit the parameters \\
+  \chordtwo{Ctrl}{R} & Reset the probe data \\
+  \chordtwo{Ctrl}{X} / \keycap{Y} & Reset X / Y data \\
+  \keycap{R} & Apply the edge angle as a rotation \\
+  \midrule
+  \multicolumn{2}{l}{\textbf{Diagnostics}} \\
+  \keycap{/} & Search \\
+  \keycap{I} \keycap{W} \keycap{E} \keycap{C} & Severity filters \\
+  \keycap{P} \keycap{G} \keycap{B} \keycap{T} \keycap{H} & Panel, program, probe, tool, HAL
+        filters \\
+  \keycap{N} \keycap{M} \keycap{O} \keycap{U} \keycap{Y} & NML, motion, I/O, UI, system filters \\
+  \keycap{A} & Clear the filters \\
+  \keycap{C} & Clear the log view (OVERVIEW) \\
+  \keycap{F} / \keycap{S} & HAL browser: refresh faster / slower \\
+  \bottomrule
+\end{longtable}
+
+\section{One key, several meanings}
+
+These keys are page-local. The shortcut pane always shows the meaning that applies now.
+
+\begin{center}
+\begin{tabular}{lp{9.0cm}}
+  \toprule
+  \textbf{Key} & \textbf{Where it means something else} \\
+  \midrule
+  \keycap{A} & Offsets: activate the row. Probe: apply the result. Manual/homing: zero all axes.
+        Diagnostics: clear the log filters. \\
+  \keycap{O} & Manual/homing: limits override. Elsewhere: \chordtwo{Ctrl}{O} opens
+        Files. \\
+  \chordthree{Ctrl}{Shift}{O} & Limit-switch override, on every page. \\
+  \keycap{T} & Tools: load the selected tool. \\
+  \keycap{D} & Editor: duplicate line. Files: duplicate file. Tools: duplicate tool. \\
+  \keycap{S} & Tools: Loobric sync. Editor: save (with \keycap{Ctrl}). \\
+  \keycap{C} & Diagnostics: clear the filter or the view. \\
+  \keycap{R} & Program: run from line (with \keycap{Ctrl}). Files: refresh. Probe: apply
+        rotation. Diagnostics: reset the view. \\
+  \keycap{U} & Program: unload (with \keycap{Ctrl}). \\
+  \keycap{W} & Probe: position / direct mode. \\
+  \keycap{X} / \keycap{Y} / \keycap{Z} & Offsets and probe: edit the DRO. Manual/homing: zero
+        the axis. Tools: tool position. \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\section{The panel, in short}
+
+\begin{center}
+\begin{tabular}{lp{9.0cm}}
+  \toprule
+  \textbf{Control} & \textbf{Owns} \\
+  \midrule
+  \pbtn{ON} / \pbtn{OFF} & Machine power \\
+  EMERGENCY STOP & Latching stop; release clears, power-on is separate \\
+  MODE & EDIT, AUTO, MDI, JOG, INC, MPG, HOME, PROG.HOME \\
+  FEEDRATE / RAPID / SPINDLE OVERRIDE & Three override percentages \\
+  CYCLE START / CYCLE STOP & Program start and stop \\
+  Axis keys and \pbtn{RAPID} & Jog, home, and program zero, by mode \\
+  Machine function keys & Spindle, coolant, chuck, lube, chip, lamp, changer, K1--K4 \\
+  PROGRAM PROTECT & Locks every write \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\section{Link states}
+
+\begin{center}
+\begin{tabular}{lp{9.0cm}}
+  \toprule
+  \textbf{\state{NET}} & \textbf{Meaning} \\
+  \midrule
+  \state{DOWN} (green) & Link down, as the interlock wants while armed \\
+  \state{UP} (muted) & Link up with no program motion \\
+  \state{UP} (amber) & Link up while program motion runs: look at this one \\
+  \state{MEAS} & A link measurement is running \\
+  \state{?} (amber) & Unknown or stale; fails closed \\
+  \state{OFF} (muted) & No interlock in this profile \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\section{Status words}
+
+\begin{center}
+\begin{tabular}{L{4.6cm}L{8.6cm}}
+  \toprule
+  \textbf{Word} & \textbf{Meaning} \\
+  \midrule
+  \state{IDLE} / \state{RUNNING} / \state{PAUSED} & Program state in the top bar \\
+  \state{HOMED} / \state{HOMED X} / \state{NOT HOMED} & Homing state in the bottom bar \\
+  \state{TC Tn PENDING} & Manual tool change waiting for confirmation \\
+  \state{PROTECT ON} & Program protect is on \\
+  \state{PROBE READY} / \state{PROBE TRIPPED} / \state{PROBE ?} & Probe input, when the probe is
+        in the spindle \\
+  \state{E-STOP ACTIVE} / \state{E-STOP OK} / \state{E-STOP ?} & Emergency stop, or stale data \\
+  \state{MACHINE ON} / \state{MACHINE OFF} & Machine power; OFF blinks \\
+  \state{LIMITS OVERRIDE ON} & Blinking; switches are ignored \\
+  \state{PANEL ONLINE} / \state{PANEL OFFLINE} & Panel link \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\section{Where things live}
+
+\begin{center}
+\begin{tabular}{lp{9.0cm}}
+  \toprule
+  \textbf{Item} & \textbf{Location} \\
+  \midrule
+  Machine profile & chosen at start-up with \texttt{--config} or \texttt{LINC\_CONFIG} \\
+  Shared defaults & \texttt{configs/base.toml} \\
+  Machine INI & named by the profile; authoritative for travel, speed, units, homing \\
+  Tool table & \texttt{[EMCIO] TOOL\_TABLE}, relative to the INI \\
+  Program directory & \texttt{[DISPLAY] PROGRAM\_PREFIX}, relative to the INI \\
+  Probing routines & \texttt{[RS274NGC] SUBROUTINE\_PATH} \\
+  Preferences & \texttt{\textasciitilde/.config/linc/}, as \texttt{<profile>} \\% 
+  Remembered tool & \texttt{<profile>.state.toml}, beside the preferences \\
+  Session log & the profile's log directory, written by the launcher \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\section{Safety rules, in short}
+
+\begin{safetybox}
+  \begin{itemize}
+    \item The panel is the only place motion starts.
+    \item Release the emergency stop, then press \pbtn{ON}: two actions.
+    \item Never leave the limits override on.
+    \item Red path means outside the machine: find out why before running.
+    \item Unload the program before you rely on the network link.
+    \item Confirm a manual tool change only when the tool is seated and clamped.
+  \end{itemize}
+\end{safetybox}

@@ -1,0 +1,185 @@
+\chapter{The Screen}
+\label{ch:screen}
+
+The screen has a fixed shell. Every page keeps the same frame, so the numbers an operator
+watches are always in the same place.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{img/crops/topbar.png}
+  \caption{The top bar. Left: program identity and the panel and task modes. Centre: the
+           machine metrics. Right: panel link, message and alarm counters, frame rate and
+           clock.}
+  \label{fig:topbar}
+\end{figure}
+
+\shot{img/ui/machine.png}{The Machine page. The shell around it -- top bar, navigation
+column, shortcut pane, bottom bar -- is present on every page.}{fig:screen-main}
+
+\section{The top bar}
+
+\begin{description}[font=\normalfont\sffamily\bfseries, leftmargin=3.0cm, style=nextline]
+  \item[LiNC] The program name, and a \state{SIM} badge when the session is a simulation.
+        The machine name comes from the profile.
+  \item[PANEL] The panel's mode selector position. Accent-coloured when valid, red when the
+        mode is unknown or invalid.
+  \item[TASK] The controller's own task mode. It follows the panel, but it is the
+        controller that decides.
+  \item[PROGRAM] The loaded program's file name, or \state{-{}-} when none is loaded.
+  \item[STATE] \state{IDLE}, \state{RUNNING} or \state{PAUSED}, with the colour that
+        belongs to it.
+  \item[TOOL] The tool in the spindle as the controller reports it.
+  \item[SPINDLE] The measured spindle speed in revolutions per minute.
+  \item[FEED] The programmed feed rate.
+  \item[WORK] The active work coordinate system.
+  \item[NET] The external link state (chapter~\ref{ch:power}).
+\end{description}
+
+On the right: the \state{PANEL} status dot with its link state, the message and alarm
+counters, the render rate and the clock. A frame rate below 30 is amber: it is the first
+number to ask about when the interface feels slow.
+
+\begin{notebox}
+  The counters are read-only. \state{MSG} counts the entries in the message log, \state{ALARM}
+  counts the errors among them. Neither is a button.
+\end{notebox}
+
+\section{The bottom bar}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{img/crops/bottombar.png}
+  \caption{The bottom bar: machine state on the left in the flow, the read-only safety and
+           override group on the right.}
+  \label{fig:bottombar}
+\end{figure}
+
+Fields appear only when they have something to say:
+
+\begin{longtable}{L{3.6cm}L{9.2cm}}
+  \toprule
+  \textbf{Field} & \textbf{Meaning} \\
+  \midrule
+  \endhead
+  \state{LN 12/340 34\%} & The executing line, the line count and the program progress. \\
+  \state{HOMED} & Every axis is homed. A partly homed machine says \state{HOMED X} and
+        names the axes it already trusts. \\
+  \state{NOT HOMED} & No axis is homed. Motion commands are refused. \\
+  \state{LIMIT X} & A limit switch is held. Motion is blocked and the axis is named. \\
+  \state{TC T7 PENDING} & A manual tool change is waiting for confirmation. \\
+  \state{DTG Z +1.234} & Distance still to go on the axis that is moving. On the Program page
+        this becomes a full coordinate line for every axis. \\
+  \state{E-STOP ACTIVE} / \state{E-STOP OK} / \state{E-STOP ?} & The emergency-stop state, or
+        a question mark when the data is stale. \\
+  \state{MACHINE ON} / \state{MACHINE OFF} & Machine power. \state{MACHINE OFF} blinks: it is
+        a fault, not a normal idle. \\
+  \state{PROBE READY} / \state{PROBE TRIPPED} / \state{PROBE ?} & The wired probe input. The
+        field is drawn only while the probe tool is in the spindle. \\
+  \state{PROTECT ON} & The panel's program-protect switch is on. \\
+  \state{OVR F100 R100 S100} & Feed, rapid and spindle override. \\
+  \state{LIMITS OVERRIDE ON} & Blinking. The limit switches are being ignored. \\
+  \state{AUTO} & The panel mode, repeated here for a glance. \\
+  \bottomrule
+\end{longtable}
+
+The bar carries no buttons. It is the one line that stays visible while a program runs, so
+every action on it is an action the operator did not intend.
+
+\section{Banners}
+
+Banners sit under the top bar and cannot be dismissed by changing page. Each one is a state
+that must not be hidden:
+
+\begin{itemize}
+  \item \state{EMERGENCY STOP ACTIVE — MOTION AND MACHINE ACTIONS BLOCKED}
+  \item \state{LIMITS OVERRIDE ACTIVE — LIMIT SWITCHES ARE IGNORED}
+  \item \state{PANEL OFFLINE — MACHINE ACTIONS BLOCKED}
+  \item \state{PANEL MODE INVALID — FAILS CLOSED}
+  \item \state{PROBE TRIPPED — …} with the \sbtn{RESET (ESC)} action
+  \item \state{PROTECT ON — EDITING LOCKED} on the pages that write
+  \item an external-change warning on Program when the file on disk changed under the
+        buffer
+\end{itemize}
+
+\section{Messages}
+
+The controller is the only thing that can say why a program stopped. Its operator errors
+arrive on the controller's error queue and become alarms: a row in the message list, an entry
+in the messages dialog, a count in the top bar and a red toast.
+
+\begin{itemize}
+  \item A one-line strip above the bottom bar shows the newest entries, newest first. It
+        disappears when the controller has said nothing.
+  \item \keycap{M} opens every message, full screen, with the time, severity, source, code
+        and text. \keycap{PgUp}/\keycap{PgDn} scroll, \keycap{Enter} and \keycap{Esc} close.
+  \item A status note lives for five seconds; an error lives for twelve, because the operator
+        is still reading the console when it appears.
+  \item Identical texts inside a one-second burst are one entry. A repeat after that window
+        is the operator trying again and is reported again.
+\end{itemize}
+
+\begin{tipbox}
+  When something behaves unexpectedly, press \keycap{M} before touching anything. The last
+  controller error usually names the block, the axis or the missing homing reference.
+\end{tipbox}
+
+\section{The pages}
+
+\begin{longtable}{L{3.0cm}L{4.6cm}L{5.2cm}}
+  \toprule
+  \textbf{Page} & \textbf{Opened by} & \textbf{Contents} \\
+  \midrule
+  \endhead
+  Machine & \keycap{F5}, or AUTO & Readout, toolpath, program card, feed and spindle, servo
+        load; the MDI pane in MDI mode. \\
+  Program & \keycap{F6}, or EDIT & G-code editor and toolpath in SPLIT or CODE. \\
+  Files & \keycap{F6} again, or \chordtwo{Ctrl}{O} & USB media and the program
+        directory. \\
+  Tools & \keycap{F7} & Tool table, tool changes, tool length, optional Loobric sync. \\
+  Offsets & \keycap{F8} & Work offsets and their preview. \\
+  Touch probe & \keycap{F8} again & Probing categories, parameters, results. \\
+  Manual & JOG, INC, MPG & Live toolpath and coordinates; the panel does the jogging. \\
+  Homing & HOME, PROG.HOME & Homing state and sequence; the panel does the homing. \\
+  Diagnostics & \chordtwo{Ctrl}{D} & Health, logs, HAL and NML detail. \\
+  G-code help & \chordtwo{Ctrl}{H} & Offline G-code reference. \\
+  \bottomrule
+\end{longtable}
+
+The manual page and the homing page are \emph{mode-driven}: the panel selector opens them
+and leaving the selector position closes them again. They are not navigation rows.
+
+\section{The G-code help}
+
+\shot{img/ui/help.png}{The G-code help: the quick-reference table with a code selected, and its
+parameters in the columns the reference uses.}{fig:help}
+
+\keycap{Ctrl}+\keycap{H} opens an offline LinuxCNC G-code reference: one table grouped by
+motion, canned cycles, M-codes, O-words and other codes, with the parameters, a description
+and the meaning of each code.
+
+\begin{itemize}
+  \item \keycap{/} or \keycap{Ctrl}+\keycap{F} focuses the search. Matching ignores spaces and
+        commas, so \texttt{g2g3} finds \texttt{G2, G3}.
+  \item \keycap{Enter} opens the full entry in a near-fullscreen dialog: description,
+        parameter table and notes. Arrows and page keys scroll it.
+  \item \keycap{Backspace} returns through the links you followed; \keycap{Esc} closes the
+        entry, or clears the search when no entry is open.
+  \item The dialog has its own warning, note, tip and caution blocks, so a caution does not
+        read like a footnote.
+\end{itemize}
+
+The reference ships with the program. It works with no network, and it stays readable while a
+program runs.
+
+\section{Things the screen will not show}
+
+There is no on-screen jog, no cycle start, no feed-hold, no override slider, no spindle key
+and no software emergency stop. If a page appears to offer one of them, it is a readout:
+
+\begin{itemize}
+  \item The Machine page's \state{RUNNING} / \state{PAUSED} / \state{STOP} word is the
+        program card's status line, not a stop button.
+  \item The progress bar has no click target.
+  \item The DRO cards print values; the editing fields that do accept numbers are on the
+        Tool and Offset pages and the probe parameter card.
+\end{itemize}

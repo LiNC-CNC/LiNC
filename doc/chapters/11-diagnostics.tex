@@ -1,0 +1,149 @@
+\chapter{Diagnostics and Troubleshooting}
+\label{ch:diagnostics}
+
+\chordtwo{Ctrl}{D} opens Diagnostics. The page is read-only: nothing here jogs, cycles,
+resets or acknowledges. It exists to answer three questions -- is the controller healthy, what
+did it say, and what is the machine actually doing -- and to let you read the answer without a
+terminal.
+
+\shot{img/ui/diagnostics.png}{Diagnostics, OVERVIEW tab: four health cards, the panel link
+strip, and the active alarms and messages.}{fig:diagnostics}
+
+\section{OVERVIEW}
+
+\begin{center}
+\begin{tabular}{L{3.0cm}L{5.0cm}L{5.0cm}}
+  \toprule
+  \textbf{Card} & \textbf{Values} & \textbf{Detail line} \\
+  \midrule
+  \state{CONTROL} & \state{HEALTHY} or \state{E-STOP} & task mode / interpreter state \\
+  \state{PANEL LINK} & \state{ONLINE} or \state{OFFLINE} & transport, port, CRC errors,
+        timeouts \\
+  \state{NML / COMMAND} & \state{CONNECTED} or \state{LOST} & status age, echo serial \\
+  \state{MOTION} & \state{NOMINAL} or \state{ELEVATED} & largest following error in µm,
+        largest servo load in percent \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\state{ELEVATED} means a following error above 50\,µm. It is a warning threshold, not a fault:
+look at the axes and the load, and at the machine's own limits.
+
+Below the cards, the \textbf{panel link strip} shows the transport, the last receive time and
+its age. A transport that keeps no byte counters says so instead of showing invented ones.
+
+\section{LOGS}
+
+The event history, newest entries first, with the time, severity, source, code and message.
+The severity and source filters are toggles; the status line reports which are on, and shows
+\state{ALL} for a group with nothing selected.
+
+\begin{longtable}{L{4.7cm}L{8.1cm}}
+  \toprule
+  \textbf{Keys} & \textbf{Action} \\
+  \midrule
+  \endhead
+  \keycap{/} & Focus the search line. Matches message, code and source. \\
+  \keycap{Enter} & Leave the search line and take the list. \\
+  \keycap{Esc} & Leave the list and return to the search line. \\
+  \keycap{I} \keycap{W} \keycap{E} \keycap{C} & Toggle INFO, WARN, ERROR and CRIT severity
+        filters. \\
+  \keycap{P} \keycap{G} \keycap{B} \keycap{T} \keycap{H} & Toggle PANEL, PROGRAM, PROBE, TOOL
+        and HAL sources. \\
+  \keycap{N} \keycap{M} \keycap{O} \keycap{U} \keycap{Y} & Toggle NML, MOTION, I/O, UI and
+        SYSTEM sources. \\
+  \keycap{A} & Clear all filters. \\
+  \keycap{PgUp} / \keycap{PgDn} & Scroll a list that overflows, otherwise change tab. \\
+  \bottomrule
+\end{longtable}
+
+\begin{notebox}
+  The letter toggles act only while the list holds the keyboard. In the search line the same
+  letters are text -- which is how you search for a word containing an \texttt{e}.
+\end{notebox}
+
+\section{HAL / NML}
+
+The \textbf{NML / COMMAND} status line at the top, then the HAL browser: pins grouped by
+component, each with its type, direction, value and signal, and a separate signal list.
+
+\begin{itemize}
+  \item \keycap{/} focuses the search, \keycap{Enter} takes the list, \keycap{Left} and
+        \keycap{Right} switch between pins and signals, and \keycap{Esc} returns to the search.
+  \item \keycap{F} and \keycap{S} refresh faster or slower. The header shows the age of the
+        rows it drew.
+  \item The browser shells out to \halpin{halcmd show pin} and \halpin{halcmd show sig} on a
+        background thread. Without a running controller or without \halpin{halcmd} it says so
+        and shows nothing; it never fills the tree in from the machine snapshot.
+  \item Nothing on this tab writes to HAL.
+\end{itemize}
+
+\begin{tipbox}
+  The HAL browser is the fastest way to see whether a panel key or a limit switch actually
+  reaches the controller: search for the pin, press the key, watch the value change.
+\end{tipbox}
+
+\section{Messages}
+
+\keycap{M} opens the full-screen message list from any page. It carries the same rows as the
+LOGS tab, without filters, and closes with \keycap{Enter} or \keycap{Esc}.
+
+\section{Where the session log goes}
+
+The interface writes its own log (errors, warnings, the start-up line naming the profile and
+the loaded program) to standard error. The machine's launcher redirects it into the profile's
+log directory, for example \texttt{logs/linc.log}. Read it when the interface closed with a
+message but the screen is gone.
+
+\section{Troubleshooting}
+
+\begin{longtable}{L{4.4cm}L{4.4cm}L{4.0cm}}
+  \toprule
+  \textbf{Symptom} & \textbf{Cause} & \textbf{Action} \\
+  \midrule
+  \endhead
+  \state{PANEL OFFLINE} banner & Panel service not running, or the serial link is down & Start
+        the panel service; check the cable. The emergency stop still works. \\
+  \state{PANEL MODE INVALID} & Selector between detents, or a wiring fault & Turn the selector
+        to a definite position. LiNC refuses mode-dependent actions until it is valid. \\
+  \state{MACHINE OFF} blinks & Machine power is off & Press \pbtn{ON}. The blink marks a fault,
+        not an idle machine. \\
+  \state{NOT HOMED} & No reference & Home the axes. Programs and MDI refuse to run. \\
+  \state{LIMIT X} & An axis is on a limit switch & Jog off the switch; use
+        \chordthree{Ctrl}{Shift}{O} if the switch blocks the jog, then switch the
+        override off. \\
+  \state{PROTECT ON} & The key switch is on & Turn it off. Writing, importing and applying are
+        blocked while it is on. \\
+  \state{TC T7 PENDING} & A manual tool change is waiting & Install the tool and confirm the
+        prompt. \\
+  Save refused & Not in EDIT, program running, or protect on & The unsaved-changes dialog names
+        the blocking condition. \\
+  \state{NETWORK BUSY} & The external link is up while a program is loaded & Wait for the
+        interlock to settle, or unload with \chordtwo{Ctrl}{U} if you are finished. \\
+  \state{NET} stays \state{UP} with a program loaded & The interlock is disabled or set to
+        \texttt{keep\_up} & Check \texttt{[network]} in the profile. \\
+  Remote access is dead & A program is loaded, so the link is down & That is the design.
+        Unload at the machine, or use a profile without the interlock. \\
+  Unload refused & Program running, buffer dirty, or nothing loaded & Stop first, save or
+        revert, or check the program name. \\
+  \state{the controller kept the program after close} & The controller did not release the
+        program & Stop the session at the panel and restart it; report the message with the
+        log. \\
+  \state{PROBE TRIPPED} & The probe input rose during a non-probe move & \keycap{Esc} clears the
+        latch. Find out what hit the probe before powering on again. \\
+  \state{?} in a status field & The data is stale & The interface fails closed on stale data.
+        Wait for the next poll; if it stays, the controller connection is the problem. \\
+  Frame rate below 30 FPS & The interface is doing too much & Look at Diagnostics; close the
+        help article or the HAL browser if they are open. \\
+  \state{HALCMD UNAVAILABLE} & No \halpin{halcmd} on the machine, or no session & The browser has
+        nothing to read. The rest of the page still works. \\
+  \state{Loobric sync waits for idle} & A program is running & Sync happens when the machine is
+        idle. \\
+  \bottomrule
+\end{longtable}
+
+\begin{cautionbox}
+  A screenshot or a log is worth more than a memory. Before restarting a session after a
+  fault, open Diagnostics and read the last error entries; they name the block, the axis or the
+  condition.
+\end{cautionbox}

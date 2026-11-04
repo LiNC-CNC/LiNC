@@ -1,0 +1,250 @@
+% !TeX program = pdflatex
+% LiNC - Operator Manual
+\documentclass[
+  11pt,
+  oneside,
+  openany,
+  DIV=13,
+  headings=small,
+  parskip=half-,
+  chapterprefix=false,
+]{scrbook}
+
+\usepackage[T1]{fontenc}
+\usepackage{textcomp}
+\usepackage[default]{sourcesanspro}
+\usepackage{sourcecodepro}
+\usepackage{microtype}
+\usepackage[svgnames,table]{xcolor}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning,calc,fit,backgrounds,matrix,arrows.meta,shapes.misc,shapes.geometric,shadings,shadows,decorations.markings}
+\usepackage[most]{tcolorbox}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{scrlayer-scrpage}
+\pagestyle{scrheadings}
+\clearpairofpagestyles
+\ohead{\headmark}
+\ifoot{LiNC Operator Manual}
+\ofoot{\pagemark}
+\setkomafont{pageheadfoot}{\sffamily\small\color{steel}}
+\setkomafont{pagenumber}{\sffamily\small\color{machineblack}}
+\setheadsepline{0.6pt}[\color{steel}]
+\usepackage[hidelinks]{hyperref}
+
+% ------------------------------------------------------------------ colors
+\definecolor{machineblack}{RGB}{24,26,28}
+\definecolor{panelgray}{RGB}{52,56,60}
+\definecolor{steel}{RGB}{110,120,130}
+\definecolor{safetyyellow}{RGB}{247,197,12}
+\definecolor{estopred}{RGB}{205,20,45}
+\definecolor{ledgreen}{RGB}{70,220,60}
+\definecolor{leddamber}{RGB}{255,180,40}
+\definecolor{ledred}{RGB}{255,70,70}
+\definecolor{screenteal}{RGB}{0,170,160}
+\definecolor{drocyan}{RGB}{120,200,250}
+\definecolor{backlight}{RGB}{40,70,255}
+\definecolor{chapblue}{RGB}{30,80,180}
+\definecolor{papergray}{RGB}{245,246,248}
+
+% ------------------------------------------------------------- chapter head
+\renewcommand*{\chapterformat}{%
+  \mbox{%
+    \tikz[baseline=(n.base)]{%
+      \node[fill=chapblue, text=white, font=\sffamily\bfseries\fontsize{34}{34}\selectfont,
+            inner xsep=10pt, inner ysep=4pt, rounded corners=3pt] (n) {\thechapter};
+      \draw[chapblue, line width=1.2pt] ([yshift=1.2ex]n.east) -- ++(2.5cm,0);
+      \draw[safetyyellow, line width=1.2pt] ([yshift=0.7ex]n.east) -- ++(2.5cm,0);
+    }%
+    \hspace{0.6cm}%
+  }%
+}
+\setkomafont{chapter}{\sffamily\bfseries\color{machineblack}\fontsize{26}{30}\selectfont}
+\setkomafont{section}{\sffamily\bfseries\color{chapblue}\fontsize{15}{18}\selectfont}
+\setkomafont{subsection}{\sffamily\bfseries\color{machineblack}\fontsize{12.5}{15}\selectfont}
+\setkomafont{subsubsection}{\sffamily\bfseries\color{panelgray}}
+
+% ------------------------------------------------------------- info boxes
+\newcommand{\boxicon}[2]{%
+  \tikz[baseline=(i.base)]{%
+    \node[#1, inner sep=0pt, minimum size=1.5em] (i) {#2};%
+  }%
+}
+\tikzset{
+  warntri/.style={draw=estopred, fill=estopred!10, regular polygon, regular polygon sides=3,
+                  rounded corners=2pt, text=estopred, font=\sffamily\bfseries},
+  cauttri/.style={draw=safetyyellow!80!black, fill=safetyyellow!15, regular polygon,
+                  regular polygon sides=3, rounded corners=2pt, text=safetyyellow!60!black,
+                  font=\sffamily\bfseries},
+  infocirc/.style={circle, draw=chapblue, fill=chapblue!10, text=chapblue, font=\sffamily\bfseries},
+  tipcirc/.style={circle, draw=ledgreen!60!black, fill=ledgreen!15, text=ledgreen!50!black, font=\sffamily\bfseries},
+}
+\newcommand{\warnsign}{\boxicon{warntri}{!}}
+\newcommand{\cautsign}{\boxicon{cauttri}{!}}
+\newcommand{\infosign}{\boxicon{infocirc}{i}}
+\newcommand{\tipsign}{\boxicon{tipcirc}{\textbullet}}
+
+\tcbset{
+  manualbox/.style={
+    enhanced, breakable, boxrule=0.4pt, colback=papergray, colframe=#1,
+    arc=2pt, left=8pt, right=8pt, top=6pt, bottom=6pt,
+    before upper={\parindent=0pt},
+  },
+}
+\newtcolorbox{safetybox}{
+  manualbox=estopred, colback=estopred!6,
+  title={\warnsign\ \ \textbf{SAFETY}},
+  coltitle=estopred, colbacktitle=estopred!10, fonttitle=\sffamily,
+  toptitle=4pt, bottomtitle=4pt,
+}
+\newtcolorbox{cautionbox}{
+  manualbox=safetyyellow!70!black, colback=safetyyellow!8,
+  title={\cautsign\ \ \textbf{CAUTION}},
+  coltitle=safetyyellow!50!black, colbacktitle=safetyyellow!15, fonttitle=\sffamily,
+  toptitle=4pt, bottomtitle=4pt,
+}
+\newtcolorbox{notebox}{
+  manualbox=chapblue, colback=chapblue!5,
+  title={\infosign\ \ \textbf{NOTE}},
+  coltitle=chapblue, colbacktitle=chapblue!10, fonttitle=\sffamily,
+  toptitle=4pt, bottomtitle=4pt,
+}
+\newtcolorbox{tipbox}{
+  manualbox=ledgreen!50!black, colback=ledgreen!7,
+  title={\tipsign\ \ \textbf{TIP}},
+  coltitle=ledgreen!40!black, colbacktitle=ledgreen!12, fonttitle=\sffamily,
+  toptitle=4pt, bottomtitle=4pt,
+}
+\newtcolorbox{panelbox}[1]{
+  manualbox=machineblack, colback=machineblack, colupper=white,
+  title={#1}, coltitle=safetyyellow, colbacktitle=panelgray,
+  fonttitle=\sffamily\bfseries, toptitle=4pt, bottomtitle=4pt,
+}
+
+% ------------------------------------------------------- small UI commands
+\tikzset{
+  kc/.style={
+    rounded corners=2.2pt, draw=machineblack!80, top color=panelgray, bottom color=machineblack,
+    text=white, font=\sffamily\bfseries\small, inner xsep=5pt, inner ysep=2.5pt,
+    minimum height=1.7em, drop shadow={shadow xshift=0.4pt, shadow yshift=-0.6pt, opacity=0.5},
+  },
+  sc/.style={ % screen action / label
+    rounded corners=1.5pt, draw=steel, top color=white, bottom color=steel!50,
+    text=machineblack, font=\sffamily\bfseries\small, inner xsep=5pt, inner ysep=2pt,
+    minimum height=1.6em,
+  },
+}
+\newcommand{\keycap}[1]{\tikz[baseline=(k.base)]{\node[kc] (k) {#1};}}
+\newcommand{\sbtn}[1]{\tikz[baseline=(k.base)]{\node[sc] (k) {#1};}}
+% ------------------------------------------------------- keyboard figure
+\tikzset{
+  kbcap/.style={
+    rounded corners=2.5pt, draw=black!75, top color=backlight!85!white,
+    middle color=backlight!55!black, bottom color=machineblack,
+    minimum width=1.32cm, minimum height=1.22cm, inner sep=0pt,
+  },
+  kprim/.style={text=white, font=\sffamily\bfseries\scriptsize},
+  ksec/.style={text=drocyan, font=\sffamily\tiny},
+}
+\newcommand{\kbkey}[4]{%
+  \node[kbcap] (k#1-#2) at (#1*1.34, -#2*1.24) {};
+  \node[kprim] at (k#1-#2.center) {#3};
+  \node[ksec, anchor=south] at ([yshift=2pt]k#1-#2.south) {#4};
+}
+
+% Key chords: one unbreakable unit, so "Ctrl + F10" never wraps between caps.
+\newcommand{\chordtwo}[2]{\mbox{\keycap{#1}+\keycap{#2}}}
+\newcommand{\chordthree}[3]{\mbox{\keycap{#1}+\keycap{#2}+\keycap{#3}}}
+\newcommand{\pbtn}[1]{\keycap{#1}} % physical panel button alias
+\newcommand{\ledlit}[1]{%
+  \tikz[baseline=(l.base)]{%
+    \node[circle, fill=#1, draw=#1!60!black, minimum size=1.6ex, inner sep=0pt,
+          drop shadow={shadow xshift=0pt, shadow yshift=0pt, opacity=0.8, color=#1}] (l) {};%
+  }%
+}
+\newcommand{\leddim}[1]{%
+  \tikz[baseline=(l.base)]{%
+    \node[circle, fill=#1!25, draw=#1!50!black, minimum size=1.6ex, inner sep=0pt] (l) {};%
+  }%
+}
+\newcommand{\dro}[1]{\textcolor{drocyan}{\texttt{\bfseries #1}}}
+\newcommand{\menu}[1]{\textsf{\small #1}}
+\newcommand{\halpin}[1]{\texttt{\small #1}}
+\newcommand{\ui}[1]{\textsf{\textbf{#1}}}
+
+% Screenshot: full width inside the text block, thin frame.
+\newcommand{\shot}[3]{%
+  \begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{#1}
+    \caption{#2}
+    \label{#3}
+  \end{figure}
+}
+% Screenshot at reduced width.
+% Left-aligned paragraph column: table text must not be justified.
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcommand{\shotn}[4]{%
+  \begin{figure}[H]
+    \centering
+    \includegraphics[width=#4\textwidth]{#1}
+    \caption{#2}
+    \label{#3}
+  \end{figure}
+}
+% Inline state word as the screen paints it.
+\newcommand{\state}[1]{\texttt{\small\textbf{#1}}}
+
+\setcounter{tocdepth}{2}
+
+\begin{document}
+
+% ------------------------------------------------------------------ cover
+\begin{titlepage}
+  \pagecolor{machineblack}
+  \color{white}
+  \begin{tikzpicture}[remember picture, overlay]
+    \node[anchor=north east, inner sep=0pt, xshift=-0.6cm, yshift=-0.9cm, opacity=0.95]
+      at (current page.north east)
+      {\includegraphics[width=0.86\textwidth]{img/ui/panel.png}};
+    \draw[safetyyellow, line width=2pt] ([xshift=1.5cm,yshift=9.6cm]current page.south west) -- ++(9cm,0);
+    \node[anchor=north west, text width=17cm, align=left] at ([xshift=1.5cm,yshift=9.2cm]current page.south west) {%
+      {\sffamily\bfseries\fontsize{40}{44}\selectfont LiNC}\\[0.6ex]
+      {\sffamily\color{safetyyellow}\fontsize{17}{20}\selectfont Operator Manual}\\[1.6ex]
+      {\sffamily\color{steel}\small
+       LinuxCNC HMI \textbullet{} operator panel \textbullet{} CNC keyboard \textbullet{}
+       toolpath \textbullet{} MDI \textbullet{} touch probe \textbullet{} tool table}%
+    };
+    \node[anchor=south west, text width=16cm, align=left] at ([xshift=1.5cm,yshift=1.2cm]current page.south west) {%
+      {\sffamily\color{steel}\small
+       End-user documentation for the LiNC controller interface and the panel that
+       drives it.\hfill Edition 1.0}%
+    };
+  \end{tikzpicture}
+\end{titlepage}
+\pagecolor{white}
+
+\frontmatter
+\input{chapters/00-disclaimer}
+\tableofcontents
+
+\mainmatter
+\include{chapters/01-introduction}
+\include{chapters/02-power}
+\include{chapters/03-panel}
+\include{chapters/04-keyboard}
+\include{chapters/05-screen}
+\include{chapters/06-modes}
+\include{chapters/07-running}
+\include{chapters/08-mdi-editor}
+\include{chapters/09-tools-offsets}
+\include{chapters/10-probing}
+\include{chapters/11-diagnostics}
+\include{chapters/12-quickref}
+
+\end{document}

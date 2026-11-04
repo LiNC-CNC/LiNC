@@ -1,0 +1,58 @@
+\chapter*{Safety Notice and Disclaimer}
+\markboth{Safety Notice and Disclaimer}{}
+
+This manual describes software. The software is not a safety device.
+
+\begin{safetybox}
+  A CNC machine is dangerous. The emergency stop, the guards, the door interlocks, the limit
+  switches and the machine's own safety circuits are hardware. They must stay functional and
+  independent of this software, and they must never be bypassed. No function of LiNC --
+  including the network interlock -- is a safety function.
+\end{safetybox}
+
+\section*{No warranty}
+
+LiNC is provided \emph{as is}, without warranty of any kind, express or implied, including
+the implied warranties of merchantability, fitness for a particular purpose and
+non-infringement. No author, contributor or distributor warrants that the software is free
+of errors, that it matches the machine it is used on, or that a program, offset, tool value
+or probe result is correct.
+
+\section*{No liability}
+
+To the extent permitted by applicable law, no author, contributor or distributor accepts
+liability for any damage arising from the use or misuse of this software or from anything
+this manual states. This includes, without limitation:
+
+\begin{itemize}
+  \item damage to the machine, its tooling, the workpiece, fixtures or other property;
+  \item lost production, lost data or the cost of replacement work;
+  \item personal injury, up to and including injury to life, body or health.
+\end{itemize}
+
+The software cannot see everything the machine does, cannot prevent every programming error,
+and cannot replace an operator's judgement. You are responsible for the programs you run, for
+the offsets, tool data and limits you set, and for the safe operation of the machine.
+
+\section*{Acceptance}
+
+By installing, commissioning or operating LiNC you accept this notice and the licence terms.
+If you do not accept them, do not use the software.
+
+Nothing in this notice excludes or limits liability that cannot be excluded or limited by
+applicable law. In particular, liability for intent, for gross negligence, for injury to
+life, body or health, and liability under mandatory product liability law remain unaffected.
+
+\section*{Licence}
+
+LiNC is licensed under the GNU General Public Licence, version 2 or later
+(\texttt{GPL-2.0-or-later}). The declaration is in \texttt{Cargo.toml}; the packaging record
+is in \texttt{debian/copyright}. Sections 11, 12 and 15 to 17 of that licence contain a
+warranty and liability disclaimer; this notice states the same for the machine context and
+adds the safety warning.
+
+\begin{notebox}
+  This notice is not legal advice. If you deploy LiNC commercially, in a regulated
+  environment, or in a setting where its failure could injure someone, have the terms
+  reviewed before commissioning.
+\end{notebox}

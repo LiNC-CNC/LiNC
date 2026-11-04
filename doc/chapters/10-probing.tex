@@ -1,0 +1,147 @@
+\chapter{Touch Probing}
+\label{ch:probing}
+
+The probe page turns the touch probe into a guided measuring tool: choose a category, pick an
+illustrated operation, set the parameters, run it, read the result. The probing math is not
+reimplemented -- the Probe Basic G-code routines ship with LiNC and run as they are.
+
+Probing is available on a mill profile with a probe configured. On the Offsets page, \keycap{F8}
+moves into the probe tabs.
+
+\shot{img/ui/probe.png}{The probe page: editable DRO and parameters on the left, the routine
+matrix in the centre, the probe and results on the right.}{fig:probe}
+
+\section{The tabs}
+
+\begin{center}
+\begin{tabular}{ll}
+  \toprule
+  \textbf{Tab} & \textbf{What it measures} \\
+  \midrule
+  \state{OUTSIDE CORNERS} & X/Y faces and corners from outside the part \\
+  \state{INSIDE CORNERS} & Faces and corners from inside a pocket \\
+  \state{BOSS AND POCKET} & Round and rectangular bosses and pockets: width, centre, diameter \\
+  \state{RIDGE AND VALLEY} & Ridges, valleys and their centres \\
+  \state{EDGE ANGLE} & The angle of an edge, and applying it as a work rotation \\
+  \state{CALIBRATE} & Probe calibration: round and square boss and pocket, offsets, reset \\
+  \state{PROBE HELP} & The Probe Basic help text, page by page \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\keycap{F8} moves to the next tab and \keycap{PgUp}/\keycap{PgDn} cycle them; \keycap{Esc}
+returns to Offsets. The tabs are indicators, not buttons, and take no keyboard focus.
+
+\section{The page}
+
+\begin{itemize}
+  \item \textbf{Top left:} an editable work-coordinate DRO. \keycap{X}, \keycap{Y} and
+        \keycap{Z} open that axis, \keycap{Enter} writes the work position with
+        \texttt{G10 L20}, \keycap{Esc} cancels. Work offsets themselves stay on the Offsets
+        page; the header names the active system.
+  \item \textbf{Below it:} the parameter card, with the probe tool, the fast, slow and
+        traverse feed rates, the maximum X/Y and Z distance, the clearances, the extra depth,
+        the edge width and the diameter hints. Arithmetic is accepted, as in the offset cells.
+  \item \textbf{Centre:} the illustrated routines of the selected tab. \keycap{1} to
+        \keycap{9} highlight a routine. \keycap{Enter} runs it.
+  \item \textbf{Right:} the probe symbol and the results of the last run.
+\end{itemize}
+
+No routine is selected when the page opens or a tab changes. A number key is the only way to
+select one; \keycap{Enter} before that reports that a routine must be selected.
+
+\begin{tipbox}
+  The keys that matter are listed in the pane under the navigation column: \state{PROBE KEYS}
+  and \state{RESULT KEYS}. After an hour away from the machine, that pane is faster than this
+  chapter.
+\end{tipbox}
+
+\section{Position and direct: the W key}
+
+\keycap{W} switches what a run does with its result, and the screen says which mode is active:
+
+\begin{description}[font=\normalfont\sffamily\bfseries, leftmargin=3.4cm, style=nextline]
+  \item[\state{POSITION}] The default. The routine measures and records. Nothing is written to
+        a work offset; \keycap{A} applies the last result when you decide to.
+  \item[\state{DIRECT WCO}] The routine writes the active work offset itself, in the issued
+        block. It needs a valid active offset, and it is refused when protect is on.
+\end{description}
+
+\section{Running a routine}
+
+\keycap{Enter} builds the selected \texttt{o<probe\_...> call} and its argument values and
+issues it immediately. The controller is switched to MDI for the block and the previous task
+mode is restored when the interpreter returns idle. No physical cycle start is involved.
+
+A run requires:
+
+\begin{itemize}
+  \item machine power on and every axis homed,
+  \item the probe tool in the spindle,
+  \item an idle interpreter and no active program,
+  \item valid parameters.
+\end{itemize}
+
+A validation error issues nothing and marks the failing condition.
+
+\begin{cautionbox}
+  A probe cycle moves the machine. Check the clearance values and the probe tool before
+  \keycap{Enter}. The fast feed rate is the approach; the slow feed rate is the contact.
+\end{cautionbox}
+
+\section{The results}
+
+Results come from the subroutine outputs and are shown as named slots: \state{X WIDTH},
+\state{X CENTRE}, \state{Y WIDTH}, \state{Y CENTRE}, \state{X- FACE}, \state{X+ FACE},
+\state{Y- FACE}, \state{Y+ FACE}, \state{Z SURFACE}, \state{AVG DIAM} and
+\state{EDGE DELTA}.
+
+\begin{longtable}{L{4.7cm}L{8.1cm}}
+  \toprule
+  \textbf{Keys} & \textbf{Action} \\
+  \midrule
+  \endhead
+  \keycap{A} & Apply the last result to the active work offset. Protect must be off. \\
+  \keycap{U} & Update the probe parameters from the last result. \\
+  \chordtwo{Ctrl}{R} & Reset all probe data. \\
+  \chordtwo{Ctrl}{X} / \chordtwo{Ctrl}{Y} & Reset the X or the Y data. \\
+  \bottomrule
+\end{longtable}
+
+The results panel carries no buttons: those keys are the whole surface.
+
+\section{Edge angle and work rotation}
+
+On \state{EDGE ANGLE}, \keycap{R} applies the measured angle as the active work coordinate
+rotation. Check the Offsets page afterwards: the rotation appears there, and the preview shows
+the part rotated around its zero.
+
+\section{Calibration}
+
+The \state{CALIBRATE} tab measures the probe against a known feature and stores the calibration
+offset. Its fields -- known width or diameter, calibration axis and the calibration offset
+itself -- live on the same panel.
+
+\begin{itemize}
+  \item \keycap{1} to \keycap{4} highlight a calibration routine; \keycap{Enter} runs it.
+  \item \keycap{V} switches the calibration between the averaged XY result and the single X or
+        Y result.
+  \item \chordtwo{Ctrl}{P} reaches the calibration dimensions.
+  \item \chordtwo{Ctrl}{R} resets the calibration through the Probe Basic reset routine.
+\end{itemize}
+
+\section{When the probe is hit}
+
+If the probe input rises during a move that is not a probe, the controller aborts the move and
+reports an operator error. LiNC latches it: a red banner carries the controller's text on every
+page, motion and MDI are blocked, and the machine is switched off unless it was paused with
+nothing moving.
+
+\keycap{Esc} clears the latched trip from any page. Re-powering afterwards needs a fresh
+\pbtn{ON} at the panel. The full behaviour is in chapter~\ref{ch:power}.
+
+\begin{notebox}
+  The probe input is also shown in the bottom bar, but only while the probe tool is in the
+  spindle: \state{PROBE READY} or \state{PROBE TRIPPED}. There is no probe field for a cutter in
+  the spindle, because there is no probe to read.
+\end{notebox}

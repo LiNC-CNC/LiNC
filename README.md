@@ -34,6 +34,38 @@ LinuxCNC through its NML channels in the same process.
 The project is also developed against a working machine and its control panel,
 so the screens are exercised on real hardware rather than only in the simulator.
 
+## Safety, warranty and liability
+
+LiNC is control software, not a safety device. It is provided "as is", without
+warranty of any kind, express or implied, including merchantability and fitness
+for a particular purpose. To the extent permitted by law, the authors and
+contributors accept no liability for damage arising from its use or misuse --
+in particular damage to the machine, tooling, workpiece or other property,
+lost production, or injury to persons.
+
+Running a CNC machine is dangerous. The emergency stop, guards, limit switches,
+door interlocks and the machine's own safety circuits are hardware: they must
+stay functional and independent of this software, and they must never be
+bypassed. LiNC cannot see everything the machine does, cannot prevent every
+programming error, and its interlocks (including the network interlock) are
+convenience features, not safety functions. You are responsible for the
+programs you run, the offsets, tool and limit data you set, and for the safe
+operation of the machine.
+
+By installing or using LiNC you accept this notice and the licence terms. If
+you do not accept them, do not use the software.
+
+Nothing here excludes or limits liability that cannot be excluded or limited by
+applicable law -- in particular liability for intent, gross negligence, injury
+to life, body or health, or liability under mandatory product liability law.
+
+The licence is GPL-2.0-or-later (declared in `Cargo.toml`, recorded in
+`debian/copyright`). Sections 11, 12 and 15 to 17 of that licence already carry
+a warranty and liability disclaimer; this notice states the same for the
+machine context and adds the safety warning. It is not legal advice: if you
+deploy LiNC commercially or in a safety-relevant setting, have the terms
+reviewed.
+
 ## What makes it different
 
 **The panel is the control surface, and LiNC respects that.** There is no
@@ -67,7 +99,7 @@ change; LiNC issues the tool change for you, and the manual case asks you to
 install the tool and confirm it.
 
 **The editor checks work before the machine sees it.** The Program page doubles
-as a G-code editor with syntax highlighting, undo and redo, find, unsaved-change
+as a G-code editor with syntax highlighting, undo and redo, unsaved-change
 state and a live preview. An edit updates the drawing only after it parses, and
 saving is refused while a program runs or the machine is in program protect.
 
@@ -336,4 +368,5 @@ opens the panel's serial port.
 
 GPL-2.0-or-later, as declared in `Cargo.toml`. `debian/copyright` records the
 packaging details, including the GPLv3 text that the vendored Probe Basic
-routines carry.
+routines carry. The warranty and liability disclaimer that applies to using the
+software is in [Safety, warranty and liability](#safety-warranty-and-liability).
