@@ -25,8 +25,8 @@ impl LincApp {
         // Enter accepts, Esc quits, everything else is swallowed.
         if self.safety_gate {
             let k = &self.prefs.keymap;
-            let accept = ui
-                .input_mut(|input| input.consume_key(k.activate.modifiers, k.activate.key));
+            let accept =
+                ui.input_mut(|input| input.consume_key(k.activate.modifiers, k.activate.key));
             let quit = ui.input_mut(|input| input.consume_key(k.back.modifiers, k.back.key));
             if accept {
                 self.accept_safety_notice();

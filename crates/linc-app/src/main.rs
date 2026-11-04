@@ -181,8 +181,7 @@ fn main() -> Result<()> {
     // automated session never sees the dialog. Failure to write is logged, not
     // fatal: the dialog then asks again, which is the safe direction.
     if args.accept_safety_notice {
-        let mut preferences =
-            linc_core::preferences::Preferences::load(&profile.preferences_path);
+        let mut preferences = linc_core::preferences::Preferences::load(&profile.preferences_path);
         preferences.accept_safety_notice(linc_core::model::now_ms() / 1000);
         match preferences.save(&profile.preferences_path) {
             Ok(()) => log::info!(

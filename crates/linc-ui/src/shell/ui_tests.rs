@@ -50,14 +50,14 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
     )
     .unwrap();
     let profile = Profile::load(&root.join("sim.toml"), None).unwrap();
-        // The safety notice is accepted in the fixture: these tests drive the
-        // shell, not the first-run gate. The gate itself has its own tests.
-        let preferences = linc_core::preferences::Preferences {
-            safety_notice_version: linc_core::preferences::SAFETY_NOTICE_VERSION,
-            ..Default::default()
-        };
-        std::fs::create_dir_all(root.join("prefs")).unwrap();
-        preferences.save(&profile.preferences_path).unwrap();
+    // The safety notice is accepted in the fixture: these tests drive the
+    // shell, not the first-run gate. The gate itself has its own tests.
+    let preferences = linc_core::preferences::Preferences {
+        safety_notice_version: linc_core::preferences::SAFETY_NOTICE_VERSION,
+        ..Default::default()
+    };
+    std::fs::create_dir_all(root.join("prefs")).unwrap();
+    preferences.save(&profile.preferences_path).unwrap();
     (dir, profile)
 }
 
@@ -217,7 +217,6 @@ fn make_app(mode: PanelMode) -> (tempfile::TempDir, LincApp) {
     (dir, app)
 }
 
-
 /// A fresh installation has no acceptance in its preferences file, so the shell
 /// must ask before it does anything, and a page key must not get past it.
 #[test]
@@ -238,7 +237,10 @@ fn the_first_start_asks_for_the_safety_notice_before_any_page_key() {
     output.textures_delta.clear();
     let mut app = app_slot.unwrap();
     assert!(app.safety_gate, "a fresh installation starts at the notice");
-    assert!(app.overlay_open(), "the notice is an overlay like any other");
+    assert!(
+        app.overlay_open(),
+        "the notice is an overlay like any other"
+    );
 
     // The notice is on screen with its two answers.
     let frame = |app: &mut LincApp, events: Vec<egui::Event>| {
@@ -266,7 +268,11 @@ fn the_first_start_asks_for_the_safety_notice_before_any_page_key() {
         modifiers: egui::Modifiers::NONE,
     }];
     frame(&mut app, f6);
-    assert_eq!(app.nav.page, Page::Machine, "F6 must not get past the notice");
+    assert_eq!(
+        app.nav.page,
+        Page::Machine,
+        "F6 must not get past the notice"
+    );
     assert!(app.safety_gate);
 
     // Enter accepts, and the acceptance is on disk immediately.
@@ -313,7 +319,10 @@ fn escaping_the_safety_notice_quits_without_accepting() {
         app.draw(ui);
     });
     out.textures_delta.clear();
-    assert!(app.chrome.quit_requested, "Esc declines and ends the session");
+    assert!(
+        app.chrome.quit_requested,
+        "Esc declines and ends the session"
+    );
     let saved = linc_core::preferences::Preferences::load(&profile.preferences_path);
     assert!(
         !saved.safety_notice_accepted(),
