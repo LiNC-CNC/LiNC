@@ -516,19 +516,13 @@ fn category_tabs(app: &mut LincApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         for category in ProbeCategory::ALL {
             let active = app.probe.category == category;
-            let text = RichText::new(category_label(category))
-                .size(theme::font_size(9.0))
-                .color(if active { theme::ACCENT } else { theme::MUTED })
-                .strong();
-            let response = ui.add(egui::Label::new(text).sense(Sense::hover()));
-            if active {
-                ui.painter().line_segment(
-                    [
-                        Pos2::new(response.rect.left(), response.rect.bottom() + 2.0),
-                        Pos2::new(response.rect.right(), response.rect.bottom() + 2.0),
-                    ],
-                    Stroke::new(2.0, theme::ACCENT),
-                );
+            // Words, not buttons, like the DIAGNOSTICS strip: the active tab is
+            // the accent word with a rule under it, and a click selects it.
+            if common::text_tab(ui, category_label(category), active).clicked() && !active {
+                app.probe.category = category;
+                // A routine belongs to the tab it was chosen on, so a direct
+                // click clears it for the same reason stepping the tabs does.
+                clear_selection(app);
             }
         }
         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {

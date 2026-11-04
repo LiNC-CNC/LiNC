@@ -1195,8 +1195,9 @@ choose a routine group, then pick the operation card.
 
 - Category strip, matching Probe Basic: Outside Corners, Inside Corners,
   Boss and Pocket, Ridge and Valley, Edge Angle, Calibrate and
-  Probe Help. Rotary-axis probing is not offered. The tabs are passive
-  indicators: they are not buttons and take no keyboard focus.
+  Probe Help. Rotary-axis probing is not offered. The tabs are clickable and
+  follow the DIAGNOSTICS strip: a click selects the tab and clears the routine
+  chosen on the old one. They take no keyboard focus.
 - `OFFSET` (F8) cycles Offsets → Outside → Inside → Boss + Pocket → Ridge +
   Valley → Edge Angle → Calibrate → Help → Offsets. Clicking the `OFFSET`
   navigation row walks the same route, so repeated clicks reach every tab and
@@ -2089,7 +2090,7 @@ Only the accepted versions are included.
 | `svg/gcode-help.svg` | G-code Help: offline quick-reference index, code search, detail pane, parameter tables, figures and related codes |
 | `svg/files.svg` | Files: USB and `NC_FILES` panes, mount/eject status, file listing and explicit copy/load actions |
 | `svg/lathe-dashboard.svg` | Lathe dashboard: X/Z/C/Y cards, XZ toolpath, power turret/live-tool card, spindle load and machine health |
-| `svg/probe.svg` | Touch probe — outside corners: keyboard-first Probe Basic 3×3 matrix (numpad 1–9 highlight, Enter run), passive offset-key category indicator, Probe Basic parameter/result block, work offsets and live probe LED |
+| `svg/probe.svg` | Touch probe — outside corners: keyboard-first Probe Basic 3×3 matrix (numpad 1–9 highlight, Enter run), clickable offset-key category tabs, Probe Basic parameter/result block, work offsets and live probe LED |
 | `svg/probe-inside-corners.svg` | Touch probe — inside corners: four inside corners, straight X/Y edges and Z centre in the same 3×3 matrix |
 | `svg/probe-boss-pocket.svg` | Touch probe — boss and pocket: six round/rect boss and pocket routines plus the stacked diam/X/Y hint fields |
 | `svg/probe-ridge-valley.svg` | Touch probe — ridge and valley: six ridge/valley routines plus the stacked X/Y hint fields |

@@ -4706,6 +4706,17 @@ fn nav_row_center(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
         .unwrap_or_else(|| panic!("{label} is painted in the navigation"))
 }
 
+/// The centre of a probe category tab, from the topmost painted copy of its
+/// label: the strip sits above the card headings that repeat the active name.
+fn probe_category_point(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+    painted_text(output)
+        .into_iter()
+        .filter(|(text, _)| text == label)
+        .min_by(|a, b| a.1.top().total_cmp(&b.1.top()))
+        .map(|(_, rect)| rect.center())
+        .unwrap_or_else(|| panic!("{label} is painted in the probe category strip"))
+}
+
 /// A point inside the toolpath card, below the line that titles it.
 fn toolpath_card_point(output: &egui::FullOutput) -> egui::Pos2 {
     let (_, rect) = painted_text(output)
@@ -5411,6 +5422,36 @@ fn f8_opens_the_first_probe_tab_with_no_routine_selected() {
     assert_eq!(harness.app.nav.page, Page::Probe);
     assert_eq!(harness.app.probe.category, ProbeCategory::OutsideCorners);
     assert!(harness.app.probe.operation.is_empty());
+}
+
+#[test]
+fn probe_category_tabs_are_clickable() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.enter_probe(ProbeCategory::OutsideCorners, "back_left_top_corner");
+
+    let output = harness.frame_full(Vec::new());
+    let point = probe_category_point(&output, "INSIDE CORNERS");
+    harness.frame_events(vec![egui::Event::PointerMoved(point)]);
+    harness.frame_events(vec![press_at(point, true)]);
+    harness.frame_events(vec![press_at(point, false)]);
+    assert_eq!(
+        harness.app.probe.category,
+        ProbeCategory::InsideCorners,
+        "a click selects the tab"
+    );
+    assert!(
+        harness.app.probe.operation.is_empty(),
+        "a new tab starts with no routine chosen"
+    );
+    assert_eq!(harness.app.nav.page, Page::Probe, "the page stays in front");
+
+    // Calibrate draws a different body but uses the same strip.
+    let output = harness.frame_full(Vec::new());
+    let point = probe_category_point(&output, "CALIBRATE");
+    harness.frame_events(vec![egui::Event::PointerMoved(point)]);
+    harness.frame_events(vec![press_at(point, true)]);
+    harness.frame_events(vec![press_at(point, false)]);
+    assert_eq!(harness.app.probe.category, ProbeCategory::Calibrate);
 }
 
 #[test]
