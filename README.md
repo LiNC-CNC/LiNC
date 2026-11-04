@@ -34,9 +34,20 @@ LinuxCNC through its NML channels in the same process.
 The project is also developed against a working machine and its control panel,
 so the screens are exercised on real hardware rather than only in the simulator.
 
+## Documentation
+
+- **[Operator manual (PDF, 75 pages)](doc/manual.pdf)** — the machine from the
+  operator's side: the panel, the keyboard, the modes, running and editing
+  programs, MDI, tools and offsets, probing, diagnostics, and a quick reference.
+- The sources are in [`doc/`](doc/); `make` in that directory rebuilds the PDF
+  with `pdflatex` (two passes).
+- The design reasoning is in [`SPEC.md`](SPEC.md), the profile format in
+  [`CONFIGURATION.md`](CONFIGURATION.md).
+
 ## ⚠️ Safety and Liability Disclaimer
 
-**Read this before you use LiNC on a machine.**
+**Read this before you use LiNC on a machine.** The full notice is also printed
+at the front of the [operator manual](doc/manual.pdf).
 
 LiNC controls CNC machines and other potentially dangerous equipment. By using
 it you acknowledge and agree to the following.
