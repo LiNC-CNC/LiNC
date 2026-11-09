@@ -42,6 +42,11 @@ same frame.
 The project is also developed against a working machine and its control panel,
 so the screens are exercised on real hardware rather than only in the simulator.
 
+![LiNC is running on the mill's control panel: the screen sits above the POWER, MODE, FEEDRATE OVERRIDE, RAPID OVERRIDE and SPINDLE OVERRIDE dials, the status lamps and the CYCLE START / CYCLE STOP keys, with the handwheel pendant mounted beside it](docs/screenshots/panel-on-machine.jpg)
+
+*LiNC on the mill it is written for: the screen in the panel, the panel's keys
+and dials in reach of both hands, and the handwheel pendant on the wall.*
+
 ## Documentation
 
 - **[Operator manual (PDF, 75 pages)](doc/manual.pdf)** — the machine from the
