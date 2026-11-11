@@ -145,6 +145,8 @@ pub enum Action {
     Force(String, bool),
     /// Pin an operand to the watch list, or unpin it.
     ToggleWatch(String),
+    /// Set the comment of a declared symbol.
+    SetSymbolComment(String, String),
     /// Write one grid cell of a rung.
     SetCell {
         section: usize,
@@ -836,6 +838,23 @@ impl PlcUi {
         }
     }
 
+    /// The comment declared for a symbol, if it has one.
+    pub fn symbol_comment(&self, name: &str) -> Option<&str> {
+        self.project
+            .io
+            .iter()
+            .find(|point| point.name == name)
+            .map(|point| point.comment.as_str())
+            .or_else(|| {
+                self.project
+                    .vars
+                    .iter()
+                    .find(|var| var.name == name)
+                    .map(|var| var.comment.as_str())
+            })
+            .filter(|comment| !comment.is_empty())
+    }
+
     pub fn current_pou(&self) -> Option<Pou> {
         self.project.all_pous().into_iter().nth(self.pou)
     }
@@ -1206,6 +1225,18 @@ impl PlcUi {
             Action::ClearForces => {
                 self.send(Tag::ClearForces, Request::ClearForces);
                 self.message = "CLEAR FORCES SENT".to_string();
+            }
+            Action::SetSymbolComment(name, comment) => {
+                for point in self.project.io.iter_mut() {
+                    if point.name == name {
+                        point.comment = comment.clone();
+                    }
+                }
+                for var in self.project.vars.iter_mut() {
+                    if var.name == name {
+                        var.comment = comment.clone();
+                    }
+                }
             }
             Action::ToggleWatch(name) => {
                 if let Some(index) = self
@@ -1835,7 +1866,102 @@ fn fbd_notice(ui: &mut Ui) {
 
 /// Symbols: the declared I/O and variables with their live values.
 fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
-    variables_card(plc, ui, height, actions)
+    common::card_title(ui, "SYMBOLS");
+    ui.label(
+        RichText::new("Names as the operand picker and the status bar show them, with their comments.")
+            .size(theme::font_size(9.0))
+            .color(theme::MUTED),
+    );
+    ui.add_space(4.0);
+    let mut edits: Vec<(String, String)> = Vec::new();
+    egui::ScrollArea::vertical()
+        .max_height((height - 140.0).max(120.0))
+        .show(ui, |ui| {
+            egui::Grid::new("plc-symbols")
+                .num_columns(4)
+                .spacing([12.0, 4.0])
+                .show(ui, |ui| {
+                    for heading in ["symbol", "area", "value", "comment"] {
+                        ui.label(
+                            RichText::new(heading)
+                                .size(theme::font_size(9.0))
+                                .color(theme::MUTED),
+                        );
+                    }
+                    ui.end_row();
+                    let rows = plc
+                        .project
+                        .io
+                        .iter()
+                        .map(|point| {
+                            (
+                                point.name.clone(),
+                                match point.direction {
+                                    IoDirection::In => "input",
+                                    IoDirection::Out => "output",
+                                }
+                                .to_string(),
+                                point.comment.clone(),
+                            )
+                        })
+                        .chain(plc.project.vars.iter().map(|var| {
+                            (
+                                var.name.clone(),
+                                if var.retain {
+                                    "retained var".to_string()
+                                } else {
+                                    "var".to_string()
+                                },
+                                var.comment.clone(),
+                            )
+                        }))
+                        .collect::<Vec<_>>();
+                    for (name, area, comment) in rows {
+                        ui.label(
+                            RichText::new(&name)
+                                .monospace()
+                                .size(theme::font_size(10.0))
+                                .color(theme::FG),
+                        );
+                        ui.label(
+                            RichText::new(area)
+                                .size(theme::font_size(9.0))
+                                .color(theme::MUTED),
+                        );
+                        let value = plc
+                            .vars
+                            .iter()
+                            .find(|var| var.name == name)
+                            .map(|var| if var.value { "TRUE" } else { "FALSE" })
+                            .unwrap_or("-");
+                        ui.label(
+                            RichText::new(value)
+                                .monospace()
+                                .size(theme::font_size(9.0))
+                                .color(if value == "TRUE" {
+                                    theme::SUCCESS
+                                } else {
+                                    theme::MUTED
+                                }),
+                        );
+                        let mut buffer = comment;
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut buffer)
+                                    .desired_width(180.0)
+                                    .font(egui::TextStyle::Small),
+                            )
+                            .changed()
+                        {
+                            edits.push((name, buffer));
+                        }
+                        ui.end_row();
+                    }
+                });
+        });
+    for (name, comment) in edits {
+        actions.push(Action::SetSymbolComment(name, comment));
+    }
 }
 
 /// Simulation: the live program above, the input/output LED panel below.
@@ -2020,12 +2146,36 @@ fn sim_view(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
 /// ZX-PLC's status bar: the symbol and comment of the selection on the left,
 /// free space and the run state on the right.
 fn status_bar(plc: &PlcUi, ui: &mut Ui) {
-    let selected = plc.selection.as_ref().and_then(|node| {
-        let sections = plc.current_pou_sections();
-        let section = sections.get(node.section)?;
-        let rung = section.rungs.get(node.rung)?;
-        Some((rung.coil.var.clone(), rung.comment.clone()))
-    });
+    // The cell under the cursor wins, because that is what ZX shows; with no
+    // cursor the selected rung's coil and its comment stand in.
+    let sections = plc.current_pou_sections();
+    let rung_at = |section: usize, rung: usize| {
+        sections
+            .get(section)
+            .and_then(|section| section.rungs.get(rung))
+    };
+    let selected = plc
+        .cell_cursor
+        .and_then(|(section, rung, position)| {
+            let rung = rung_at(section, rung)?;
+            let operand = if position >= POSITIONS {
+                Some(rung.coil.var.clone())
+            } else {
+                rung.cells
+                    .get(position)
+                    .and_then(|cell| cell.operand())
+                    .map(|operand| operand.to_string())
+            };
+            operand.map(|operand| {
+                let comment = plc.symbol_comment(&operand).unwrap_or("").to_string();
+                (operand, comment)
+            })
+        })
+        .or_else(|| {
+            let node = plc.selection.as_ref()?;
+            let rung = rung_at(node.section, node.rung)?;
+            Some((rung.coil.var.clone(), rung.comment.clone()))
+        });
     let (state_label, state_color) = run_state_label(plc.state);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;

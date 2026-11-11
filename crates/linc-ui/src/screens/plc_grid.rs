@@ -501,7 +501,13 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 ui.label("No symbols declared yet. Add an input, output or variable.");
             }
             for (name, kind) in &names {
-                if ui.button(format!("{name}   {kind}")).clicked() {
+                let comment = plc.symbol_comment(name).unwrap_or("");
+                let label = if comment.is_empty() {
+                    format!("{name}   {kind}")
+                } else {
+                    format!("{name}   {kind}   — {comment}")
+                };
+                if ui.button(label).clicked() {
                     let chosen = match &cell {
                         Cell::Contact { negated, .. } => Cell::Contact {
                             var: name.clone(),

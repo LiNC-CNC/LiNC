@@ -80,6 +80,9 @@ pub struct IoPoint {
     pub name: String,
     pub direction: IoDirection,
     pub kind: IoKind,
+    /// Free text shown next to the operand, as ZX-PLC's symbol table has.
+    #[serde(default)]
+    pub comment: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +104,8 @@ pub struct VarDecl {
     pub kind: VarKind,
     #[serde(default)]
     pub retain: bool,
+    #[serde(default)]
+    pub comment: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -261,6 +266,7 @@ impl IoPoint {
             name: name.into(),
             direction,
             kind: IoKind::Bit,
+            comment: String::new(),
         }
     }
 }
@@ -271,6 +277,7 @@ impl VarDecl {
             name: name.into(),
             kind: VarKind::Bit,
             retain: false,
+            comment: String::new(),
         }
     }
 }

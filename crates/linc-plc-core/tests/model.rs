@@ -168,3 +168,24 @@ fn rung_and_description_defaults_deserialise() {
     assert_eq!(project.description, "");
     assert_eq!(project.sections[0].rungs[0].comment, "");
 }
+
+#[test]
+fn symbol_comments_round_trip_and_default_to_empty() {
+    let mut project = Project::new("comments");
+    project.io.push(IoPoint::new("start", IoDirection::In));
+    project.io[0].comment = "seal bar closed".to_string();
+    project.vars.push(VarDecl::new("lamp"));
+    project.vars[0].comment = "panel light".to_string();
+
+    let json = serde_json::to_string(&project).expect("json");
+    let back: Project = serde_json::from_str(&json).expect("decode");
+    assert_eq!(back.io[0].comment, "seal bar closed");
+    assert_eq!(back.vars[0].comment, "panel light");
+
+    // A file written before comments existed still decodes.
+    let old = r#"{"schema":2,"name":"old","io":[{"name":"a","direction":"in","kind":"bit"}],
+        "vars":[{"name":"v","kind":"bit","retain":false}],"sections":[],"pous":[]}"#;
+    let decoded: Project = serde_json::from_str(old).expect("old file");
+    assert_eq!(decoded.io[0].comment, "");
+    assert_eq!(decoded.vars[0].comment, "");
+}
