@@ -2151,9 +2151,15 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         app.plc.apply(Action::AddRung);
     }
     if add_row {
-        let row = app.plc.cell_cursor.map(|cursor| cursor.1).unwrap_or(0);
+        // Add the row after the cursor, not after whatever the tree selection
+        // happens to be: `AddRung` reads the selection.
+        let (section, row) = app
+            .plc
+            .cell_cursor
+            .map(|cursor| (cursor.0, cursor.1))
+            .unwrap_or((0, 0));
+        app.plc.selection = Some(NodePath::root(section, row));
         app.plc.apply(Action::AddRung);
-        let section = app.plc.cell_cursor.map(|cursor| cursor.0).unwrap_or(0);
         app.plc.cell_cursor = Some((section, row + 1, 0));
     }
     if save {
