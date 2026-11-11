@@ -185,10 +185,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     if !declared {
                         diagnostics.push(Diagnostic::error(
                             "fbd_output",
-                            format!(
-                                "'{}' is not a declared output or variable",
-                                line.output
-                            ),
+                            format!("'{}' is not a declared output or variable", line.output),
                             format!("{path}.output"),
                         ));
                     }

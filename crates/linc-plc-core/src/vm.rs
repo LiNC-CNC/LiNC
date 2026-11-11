@@ -191,17 +191,61 @@ impl Vm {
                 Op::Sub => bin_word(&mut word_stack, &mut word_depth, i16::wrapping_sub),
                 Op::Mul => bin_word(&mut word_stack, &mut word_depth, i16::wrapping_mul),
                 Op::Div => bin_word(&mut word_stack, &mut word_depth, |left, right| {
-                    if right == 0 { 0 } else { left.wrapping_div(right) }
+                    if right == 0 {
+                        0
+                    } else {
+                        left.wrapping_div(right)
+                    }
                 }),
                 Op::Mod => bin_word(&mut word_stack, &mut word_depth, |left, right| {
-                    if right == 0 { 0 } else { left.wrapping_rem(right) }
+                    if right == 0 {
+                        0
+                    } else {
+                        left.wrapping_rem(right)
+                    }
                 }),
-                Op::CmpGt => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a > b),
-                Op::CmpGe => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a >= b),
-                Op::CmpEq => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a == b),
-                Op::CmpNe => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a != b),
-                Op::CmpLe => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a <= b),
-                Op::CmpLt => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a < b),
+                Op::CmpGt => cmp_word(
+                    &mut stack,
+                    &mut depth,
+                    &mut word_stack,
+                    &mut word_depth,
+                    |a, b| a > b,
+                ),
+                Op::CmpGe => cmp_word(
+                    &mut stack,
+                    &mut depth,
+                    &mut word_stack,
+                    &mut word_depth,
+                    |a, b| a >= b,
+                ),
+                Op::CmpEq => cmp_word(
+                    &mut stack,
+                    &mut depth,
+                    &mut word_stack,
+                    &mut word_depth,
+                    |a, b| a == b,
+                ),
+                Op::CmpNe => cmp_word(
+                    &mut stack,
+                    &mut depth,
+                    &mut word_stack,
+                    &mut word_depth,
+                    |a, b| a != b,
+                ),
+                Op::CmpLe => cmp_word(
+                    &mut stack,
+                    &mut depth,
+                    &mut word_stack,
+                    &mut word_depth,
+                    |a, b| a <= b,
+                ),
+                Op::CmpLt => cmp_word(
+                    &mut stack,
+                    &mut depth,
+                    &mut word_stack,
+                    &mut word_depth,
+                    |a, b| a < b,
+                ),
                 Op::Fb {
                     kind,
                     instance,
@@ -228,11 +272,7 @@ impl Vm {
                 }
                 Op::Edge { slot, var, rising } => {
                     let now = self.prev.get(var as usize).copied().unwrap_or(false);
-                    let before = self
-                        .edge_prev
-                        .get(slot as usize)
-                        .copied()
-                        .unwrap_or(false);
+                    let before = self.edge_prev.get(slot as usize).copied().unwrap_or(false);
                     let changed = if rising {
                         now && !before
                     } else {

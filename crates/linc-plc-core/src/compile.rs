@@ -370,11 +370,7 @@ fn intern(
 
 /// Lower one function-block assignment: build the block from its inputs, then
 /// store its result in the output operand.
-fn lower_fbd_line(
-    line: &crate::model::FbdLine,
-    lookup: &HashMap<String, u16>,
-    ops: &mut Vec<Op>,
-) {
+fn lower_fbd_line(line: &crate::model::FbdLine, lookup: &HashMap<String, u16>, ops: &mut Vec<Op>) {
     let block = line.block.trim().to_ascii_uppercase();
     let bit = |operand: &str| -> Option<u16> {
         if operand.eq_ignore_ascii_case("TRUE") {
@@ -382,12 +378,10 @@ fn lower_fbd_line(
         }
         lookup.get(operand.trim()).copied()
     };
-    let push_bit = |ops: &mut Vec<Op>, operand: &str| {
-        match bit(operand) {
-            Some(u16::MAX) => ops.push(Op::PushConst(true)),
-            Some(index) => ops.push(Op::PushNext(index)),
-            None => ops.push(Op::PushConst(false)),
-        }
+    let push_bit = |ops: &mut Vec<Op>, operand: &str| match bit(operand) {
+        Some(u16::MAX) => ops.push(Op::PushConst(true)),
+        Some(index) => ops.push(Op::PushNext(index)),
+        None => ops.push(Op::PushConst(false)),
     };
     match block.as_str() {
         "AND" | "OR" | "XOR" => {
@@ -407,14 +401,18 @@ fn lower_fbd_line(
             }
         }
         "NOT" => {
-            push_bit(ops, line.inputs.first().map(String::as_str).unwrap_or("FALSE"));
+            push_bit(
+                ops,
+                line.inputs.first().map(String::as_str).unwrap_or("FALSE"),
+            );
             ops.push(Op::Not);
         }
         _ => {
-            if let Some((kind, instance, preset)) =
-                parse_block(&block, &block, &line.preset)
-            {
-                push_bit(ops, line.inputs.first().map(String::as_str).unwrap_or("FALSE"));
+            if let Some((kind, instance, preset)) = parse_block(&block, &block, &line.preset) {
+                push_bit(
+                    ops,
+                    line.inputs.first().map(String::as_str).unwrap_or("FALSE"),
+                );
                 ops.push(Op::Fb {
                     kind,
                     instance,

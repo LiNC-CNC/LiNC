@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 use egui::{pos2, vec2, Align, Color32, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_client::Client;
 use linc_plc_core::grid::{Cell, POSITIONS};
+use linc_plc_core::model::FbdLine;
 use linc_plc_core::protocol::{Request, Response, RunState, StateSnapshot, PROTOCOL_VERSION};
 use linc_plc_core::WordValue;
-use linc_plc_core::model::FbdLine;
 use linc_plc_core::{
     validate, Coil, CoilKind, Diagnostic, IoDirection, Logic, Pou, PouLanguage, Project, Rung,
     Section, Severity, VarValue,
@@ -1062,7 +1062,8 @@ impl PlcUi {
         self.vars = snapshot.vars;
         self.words = snapshot.words;
         // One sample per received snapshot, so the traces follow the scan.
-        self.trend.sample(&self.vars, &self.words, &self.project.watch);
+        self.trend
+            .sample(&self.vars, &self.words, &self.project.watch);
         self.forced = snapshot.forced;
     }
 
@@ -1991,9 +1992,11 @@ fn fbd_notice(ui: &mut Ui) {
 fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
     common::card_title(ui, "SYMBOLS");
     ui.label(
-        RichText::new("Names as the operand picker and the status bar show them, with their comments.")
-            .size(theme::font_size(9.0))
-            .color(theme::MUTED),
+        RichText::new(
+            "Names as the operand picker and the status bar show them, with their comments.",
+        )
+        .size(theme::font_size(9.0))
+        .color(theme::MUTED),
     );
     ui.add_space(4.0);
     let mut edits: Vec<(String, String)> = Vec::new();
@@ -2119,7 +2122,11 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
                 let text = if let Some(value) = plc.words.iter().find(|word| word.name == name) {
                     format!("{}  =  {}", name, value.value)
                 } else if let Some(value) = plc.vars.iter().find(|var| var.name == name) {
-                    format!("{}  =  {}", name, if value.value { "TRUE" } else { "FALSE" })
+                    format!(
+                        "{}  =  {}",
+                        name,
+                        if value.value { "TRUE" } else { "FALSE" }
+                    )
                 } else {
                     format!("{name}  =  -")
                 };

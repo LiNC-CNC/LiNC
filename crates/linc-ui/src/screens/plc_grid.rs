@@ -198,7 +198,11 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
                     .color(theme::MUTED),
             );
             ui.add_space(4.0);
-            ui.label(RichText::new("instance").size(theme::font_size(9.0)).color(theme::MUTED));
+            ui.label(
+                RichText::new("instance")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
             ui.horizontal(|ui| {
                 for number in 0..4 {
                     let name = format!("{block}{number}");
@@ -212,7 +216,11 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
                 }
             });
             ui.add_space(4.0);
-            ui.label(RichText::new("preset").size(theme::font_size(9.0)).color(theme::MUTED));
+            ui.label(
+                RichText::new("preset")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
             ui.horizontal_wrapped(|ui| {
                 let presets: &[&str] = if block.starts_with("CT") {
                     &["1", "5", "10", "50", "100", "1000"]
