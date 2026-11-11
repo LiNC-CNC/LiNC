@@ -1564,7 +1564,7 @@ pub fn grid_rung(
                 &label,
                 matches!(cell, Cell::Wire),
                 cell_symbol(&cell),
-                if commented { 15.0 } else { 8.0 },
+                if commented { 19.0 } else { 10.0 },
             );
         }
         let coil = plc.operand_label(&rung.coil.var);
@@ -1577,7 +1577,7 @@ pub fn grid_rung(
             &coil,
             rung.coil.var.is_empty(),
             CellSymbol::Coil(rung.coil.kind),
-            if commented { 15.0 } else { 8.0 },
+            if commented { 19.0 } else { 10.0 },
         );
     });
     if commented {
@@ -1585,7 +1585,7 @@ pub fn grid_rung(
         // drop to the branch row lands on that row's conductor.
         let rect = strip.response.rect;
         ui.painter().text(
-            egui::pos2(rect.left() + 2.0, rect.top() + 6.0),
+            egui::pos2(rect.left() + 2.0, rect.top() + 7.0),
             Align2::LEFT_CENTER,
             format!("// {}", rung.comment),
             FontId::monospace(theme::font_size(8.0)),
@@ -1638,8 +1638,8 @@ pub fn cell_symbol(cell: &Cell) -> CellSymbol {
 /// cell borders and no spacing between cells. A row is a strip whose conductor
 /// runs along `CONDUCTOR_Y` from its left edge to its right edge.
 pub const CELL_WIDTH: f32 = 48.0;
-pub const CELL_HEIGHT: f32 = 36.0;
-pub const CONDUCTOR_Y: f32 = 24.0;
+pub const CELL_HEIGHT: f32 = 40.0;
+pub const CONDUCTOR_Y: f32 = 28.0;
 pub const ROW_GAP: f32 = 0.0;
 /// Distance from one row's conductor to the next row's conductor.
 pub const ROW_STRIDE: f32 = CELL_HEIGHT + ROW_GAP;
@@ -1794,13 +1794,31 @@ fn cell_box(
     }
     draw_cell_symbol(painter, rect, symbol, color);
     if !label.is_empty() {
-        painter.text(
-            egui::pos2(rect.center().x, rect.top() + name_y),
-            Align2::CENTER_CENTER,
-            label,
-            FontId::monospace(theme::font_size(8.5)),
-            color,
-        );
+        // Fit the operand inside the cell: expressions such as `MW2:=MW1+5` and
+        // long coil names were clipped at the strip edges. The font shrinks to fit
+        // rather than the name being cut, and a very long name keeps a floor so it
+        // stays legible.
+        let available = rect.width() - 4.0;
+        let mut size = theme::font_size(8.5);
+        loop {
+            let galley = painter.layout_no_wrap(
+                label.to_string(),
+                FontId::monospace(size),
+                color,
+            );
+            if galley.size().x <= available || size <= 5.5 {
+                painter.galley(
+                    egui::pos2(
+                        rect.center().x - galley.size().x / 2.0,
+                        rect.top() + name_y - galley.size().y / 2.0,
+                    ),
+                    galley,
+                    color,
+                );
+                break;
+            }
+            size -= 0.5;
+        }
     }
 }
 

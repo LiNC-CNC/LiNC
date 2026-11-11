@@ -40,16 +40,41 @@ is covered by a fullscreen browser.
 Build DEMO_LD's four rungs through the grid once 2 and 3 are fixed, then the
 compare/compute POU, then run it and capture the simulation.
 
-## After the ZX geometry + shortcut strip (session 2)
+## Resolved in the ZX geometry pass
 
-- **Fixed**: per-cell boxes/borders removed, zero spacing, one conductor, names above
-  symbols, coil as two arcs, link drop exact, comments inside the strip, ladder clipped
-  to its column, shortcut strip on main-GUI row metrics.
-- **Open**: on this build the Sim page shows `page=Sim` and the daemon answers snapshots
-  (`run=Idle`), but neither `R` nor the Run menu starts the ladder — no Load/Start reaches
-  the daemon (`vars=0`). The same project ran earlier in the session (`vars=13`, all six
-  behaviours captured), so this is a regression in key consumption or in the Load path,
-  not in the ladder.
-- **Open**: comment text and the operand name share the strip band and can crowd at 8-9 px.
-- **Open**: expressions rows 7-10 are authored but their live values were never observed
-  in the Watch/Symbols table.
+- **Sim page would not start.** Two causes, both fixed and logged: the validator
+  counted a compute rung's unused coil as a write, so `Load` was refused with
+  "`run` has more than one write coil" (`70074dc`), and the daemon serves a single
+  client, so a second client saw `WouldBlock` — which is what several "no reply"
+  runs actually were.
+- **Sim page layout.** The ladder monitor has its own bounded scroll pane, so the
+  I/O tiles are always on screen (`6987a64`).
+- **Ladder looked like a table.** Now bare strips: no cell borders or backgrounds,
+  zero spacing, one conductor, names above symbols, coil as two arcs, comments in
+  the strip band, exact link pitch (`69c7ff2`, `d0b719c`).
+- **Expression labels clipped.** Labels shrink to fit the cell instead of being cut,
+  and the comment and operand baselines are separated inside a 40 px strip.
+- **Expression values truncated.** `ExprEdit.text` holds the per-stage buffer, so a
+  value typed across frames arrives whole (`7c27f9d`).
+- **Chords applied twice / modifier mismatch.** `ctrl_key` consumes `CTRL` and
+  `CTRL|COMMAND` once each (`677a6cf`, `e034edf`).
+
+## Verified behaviours (screenshots in this directory)
+
+Pump seal-in (`plc-sim-pump`), seal holding after release (`plc-sim-seal-in`),
+estop dropping the run (`plc-sim-estop`), the 5 s fan run-on (`plc-sim-fan-runon`),
+alert set and reset (`plc-sim-alert-set`, `plc-sim-alert-reset`), blinkers
+alternating (`plc-sim-blink-a`, `plc-sim-blink-b`), and live symbol values with
+`lamp` false at `MW1 = 0` (`plc-sim-live-values`).
+
+## Genuine known limitations
+
+- **One client at a time.** The daemon accepts a single connection; a second client
+  blocks. Worth a queue or a clear refusal message.
+- **Words are not in the Symbols table.** Only boolean symbols show live values; the
+  `MW` bank and block members are visible in the snapshot and the watch list, not in
+  that table.
+- **Coil glyph** is a pair of arcs drawn as polylines; it reads correctly at this
+  size but is not the exact IEC curve.
+- **Menu clicks** still do not open dropdowns in the workbench; the keyboard paths
+  (View/Run with Down+Enter, Ctrl+1..4) are the supported route.
