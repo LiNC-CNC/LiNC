@@ -2097,6 +2097,9 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         app.plc.apply(Action::Save);
     }
     let mut actions: Vec<Action> = Vec::new();
+    // Pickers first: they own the keyboard while they are open, and a text field
+    // drawn later in the frame would consume Enter before the picker saw it.
+    crate::screens::plc_grid::pickers(&mut app.plc, ui.ctx(), &mut actions);
     crate::screens::plc_grid::editor_keys(app, ui, &mut actions);
     il_keys(&mut app.plc, ui, &mut actions);
     fbd_keys(&mut app.plc, ui, &mut actions);
@@ -2114,12 +2117,11 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         status_bar(plc, ui);
     }
 
-    // Windows last: egui paints in call order, so a picker drawn before the
-    // page ends up underneath the page's cards and looks like it never opened.
+    // The other modal windows last: egui paints in call order, so a window drawn
+    // before the page ends up underneath the page's cards.
     let windows_plc = &mut app.plc;
     fbd_grid_menu(windows_plc, ui.ctx(), &mut actions);
     fbd_operand_menu(windows_plc, ui.ctx(), &mut actions);
-    crate::screens::plc_grid::pickers(windows_plc, ui.ctx(), &mut actions);
     pou_edit_dialog(windows_plc, ui.ctx(), &mut actions);
 
     for action in actions {
