@@ -114,16 +114,14 @@ pub fn lower_rung(rows: &[Vec<Cell>], index: usize) -> (Logic, usize) {
         return (Logic::Const { value: true }, 1);
     };
     let own = lower_row(cells);
-    if cells.iter().any(|cell| matches!(cell, Cell::Link)) {
-        if rows.get(index + 1).is_some() {
-            let (branch, used) = lower_rung(rows, index + 1);
-            return (
-                Logic::Parallel {
-                    items: vec![own, branch],
-                },
-                1 + used,
-            );
-        }
+    if cells.iter().any(|cell| matches!(cell, Cell::Link)) && rows.get(index + 1).is_some() {
+        let (branch, used) = lower_rung(rows, index + 1);
+        return (
+            Logic::Parallel {
+                items: vec![own, branch],
+            },
+            1 + used,
+        );
     }
     (own, 1)
 }
@@ -220,15 +218,31 @@ mod tests {
     #[test]
     fn unsupported_cells_name_their_feature() {
         assert_eq!(Cell::Link.unsupported(), None, "links compile now");
-        assert_eq!(Cell::Edge { var: "a".into(), rising: true }.unsupported(), Some("edge contacts"));
+        assert_eq!(
+            Cell::Edge {
+                var: "a".into(),
+                rising: true
+            }
+            .unsupported(),
+            Some("edge contacts")
+        );
         assert_eq!(Cell::Wire.unsupported(), None);
     }
 
     #[test]
     fn a_link_ors_the_row_below() {
-        let a = Cell::Contact { var: "a".into(), negated: false };
-        let b = Cell::Contact { var: "b".into(), negated: false };
-        let c = Cell::Contact { var: "c".into(), negated: false };
+        let a = Cell::Contact {
+            var: "a".into(),
+            negated: false,
+        };
+        let b = Cell::Contact {
+            var: "b".into(),
+            negated: false,
+        };
+        let c = Cell::Contact {
+            var: "c".into(),
+            negated: false,
+        };
         let rows = vec![
             vec![a.clone(), b.clone(), Cell::Wire, Cell::Link],
             vec![Cell::Wire, Cell::Wire, Cell::Wire, c.clone()],

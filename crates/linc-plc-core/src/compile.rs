@@ -260,8 +260,7 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
                         }
                         let mut offset = 0;
                         while offset < run.len() {
-                            let (used, compute) =
-                                lower_grid_rung(&run, offset, &lookup, &mut ops);
+                            let (used, compute) = lower_grid_rung(&run, offset, &lookup, &mut ops);
                             if !compute {
                                 store_coil(&mut ops, &lookup, &section.rungs[index + offset].coil);
                             }
@@ -274,7 +273,11 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
             PouLanguage::Il => {
                 for line in &pou.il {
                     if let IlLine::Instruction { mnemonic, operand } = parse_line(line) {
-                        lower_line(&mnemonic, il_operand(&operand, &lookup, &lookup_ci), &mut ops);
+                        lower_line(
+                            &mnemonic,
+                            il_operand(&operand, &lookup, &lookup_ci),
+                            &mut ops,
+                        );
                     }
                 }
             }
@@ -344,7 +347,11 @@ fn intern(
 /// and ANDs it with the power so far. A box consumes the power as its input and
 /// pushes `Q`, so the rung continues from the block's output. A row with no
 /// element is a true rung.
-fn lower_cells(cells: &[crate::grid::Cell], lookup: &HashMap<String, u16>, ops: &mut Vec<Op>) -> bool {
+fn lower_cells(
+    cells: &[crate::grid::Cell],
+    lookup: &HashMap<String, u16>,
+    ops: &mut Vec<Op>,
+) -> bool {
     let mut has_power = false;
     for cell in cells {
         match cell {
@@ -379,7 +386,8 @@ fn lower_cells(cells: &[crate::grid::Cell], lookup: &HashMap<String, u16>, ops: 
                 }
             }
             crate::grid::Cell::Compare { op, left, right } => {
-                let (Some(left), Some(right)) = (word_operand_value(left), word_operand_value(right))
+                let (Some(left), Some(right)) =
+                    (word_operand_value(left), word_operand_value(right))
                 else {
                     continue;
                 };
@@ -404,11 +412,13 @@ fn lower_cells(cells: &[crate::grid::Cell], lookup: &HashMap<String, u16>, ops: 
                 left,
                 right,
             } => {
-                let (Some(left), Some(right)) = (word_operand_value(left), word_operand_value(right))
+                let (Some(left), Some(right)) =
+                    (word_operand_value(left), word_operand_value(right))
                 else {
                     continue;
                 };
-                let (Some(math), Some(target)) = (MathOp::parse(op), crate::il::word_operand(target))
+                let (Some(math), Some(target)) =
+                    (MathOp::parse(op), crate::il::word_operand(target))
                 else {
                     continue;
                 };
@@ -514,14 +524,13 @@ pub fn compare_op(name: &str) -> Option<Op> {
 /// `TON` + `TON2` + `T#4s` -> kind, instance index, preset in ms or counts.
 pub fn parse_block(block: &str, instance: &str, preset: &str) -> Option<(FbKind, u16, i16)> {
     let instance = instance.trim();
-    let kind = FbKind::parse(block)
-        .or_else(|| {
-            let letters: String = instance
-                .chars()
-                .take_while(|c| c.is_ascii_alphabetic())
-                .collect();
-            FbKind::parse(&letters)
-        })?;
+    let kind = FbKind::parse(block).or_else(|| {
+        let letters: String = instance
+            .chars()
+            .take_while(|c| c.is_ascii_alphabetic())
+            .collect();
+        FbKind::parse(&letters)
+    })?;
     let digits: String = instance
         .chars()
         .skip_while(|c| c.is_ascii_alphabetic())
@@ -562,10 +571,9 @@ fn parse_preset(text: &str, timer: bool) -> Option<i16> {
                 (1, tail)
             } else if let Some(tail) = tail.strip_prefix('s') {
                 (1000, tail)
-            } else if let Some(tail) = tail.strip_prefix('m') {
-                (60_000, tail)
             } else {
-                return None;
+                let tail = tail.strip_prefix('m')?;
+                (60_000, tail)
             };
             total += value * unit;
             rest = tail;

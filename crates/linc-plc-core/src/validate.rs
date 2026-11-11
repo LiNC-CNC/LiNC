@@ -179,7 +179,10 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             }
             PouLanguage::Fbd => diagnostics.push(Diagnostic::error(
                 "language",
-                format!("POU '{}' is FBD; that compiler is not implemented yet", pou.name),
+                format!(
+                    "POU '{}' is FBD; that compiler is not implemented yet",
+                    pou.name
+                ),
                 format!("pous[{index}].language"),
             )),
         }
@@ -205,10 +208,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         ));
     }
 
-    let rung_count: usize = sections
-        .iter()
-        .map(|section| section.rungs.len())
-        .sum();
+    let rung_count: usize = sections.iter().map(|section| section.rungs.len()).sum();
     if rung_count > MAX_RUNGS {
         diagnostics.push(Diagnostic::error(
             "too_large",
@@ -248,8 +248,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         format!("{rung_path}.cells[{cell_index}]"),
                     ));
                 }
-                if matches!(cell, crate::grid::Cell::Link)
-                    && rung_index + 1 == section.rungs.len()
+                if matches!(cell, crate::grid::Cell::Link) && rung_index + 1 == section.rungs.len()
                 {
                     diagnostics.push(Diagnostic::error(
                         "link_without_branch",
@@ -277,7 +276,9 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     if crate::compile::compare_op(op).is_none() {
                         diagnostics.push(Diagnostic::error(
                             "cell_compare",
-                            format!("'{op}' is not a compare operator; use GT, GE, EQ, NE, LE or LT"),
+                            format!(
+                                "'{op}' is not a compare operator; use GT, GE, EQ, NE, LE or LT"
+                            ),
                             format!("{rung_path}.cells[{cell_index}]"),
                         ));
                     }
@@ -285,7 +286,9 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         if crate::compile::word_operand_value(operand).is_none() {
                             diagnostics.push(Diagnostic::error(
                                 "cell_compare_operand",
-                                format!("'{operand}' is not a word, a number, a time or a block member"),
+                                format!(
+                                    "'{operand}' is not a word, a number, a time or a block member"
+                                ),
                                 format!("{rung_path}.cells[{cell_index}]"),
                             ));
                         }
@@ -312,7 +315,9 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         if crate::compile::word_operand_value(operand).is_none() {
                             diagnostics.push(Diagnostic::error(
                                 "cell_compute_operand",
-                                format!("'{operand}' is not a word, a number, a time or a block member"),
+                                format!(
+                                    "'{operand}' is not a word, a number, a time or a block member"
+                                ),
                                 format!("{rung_path}.cells[{cell_index}]"),
                             ));
                         }
@@ -324,9 +329,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     if !known {
                         diagnostics.push(Diagnostic::error(
                             "cell_operand",
-                            format!(
-                                "'{operand}' is not a declared input, output or variable"
-                            ),
+                            format!("'{operand}' is not a declared input, output or variable"),
                             format!("{rung_path}.cells[{cell_index}]"),
                         ));
                     }

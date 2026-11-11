@@ -239,7 +239,8 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     });
                     close = true;
                 }
-                for (label, reason) in [("Edge contact  P N", "edge contacts")] {
+                {
+                    let (label, reason) = ("Edge contact  P N", "edge contacts");
                     ui.add_enabled(
                         false,
                         egui::Button::new(format!("{label} — {reason} not implemented")),
