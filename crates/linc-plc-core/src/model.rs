@@ -481,9 +481,16 @@ impl Project {
                 Rung {
                     cells: Vec::new(),
                     comment: "Stopping while running latches the alarm.".to_string(),
+                    // The falling edge of `run` is the stop that must be caught:
+                    // with sequential rungs `run` is already low by the time this
+                    // rung reads it, so a level on `run` could never see the stop
+                    // that turned it off.
                     logic: Logic::series(vec![
                         Logic::contact("stop", false),
-                        Logic::contact("run", false),
+                        Logic::Edge {
+                            var: "run".to_string(),
+                            rising: false,
+                        },
                     ]),
                     coil: Coil::new("alarm", CoilKind::Set),
                 },

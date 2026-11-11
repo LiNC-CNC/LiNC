@@ -177,20 +177,37 @@ impl Vm {
                 }
                 Op::Store(index) => {
                     let value = pop(&stack, &mut depth);
-                    if let Some(cell) = self.next.get_mut(index as usize) {
+                    if let (Some(cell), Some(seen)) = (
+                        self.next.get_mut(index as usize),
+                        self.prev.get_mut(index as usize),
+                    ) {
+                        // A coil write is visible to the rungs after it in the same
+                        // scan, as the manual's ladder shows. External inputs stay
+                        // latched for the whole scan, which is what makes the image
+                        // a scan-boundary snapshot of the field I/O only.
+                        *seen = value;
                         *cell = value;
                     }
                 }
                 Op::Set(index) => {
                     if pop(&stack, &mut depth) {
-                        if let Some(cell) = self.next.get_mut(index as usize) {
+                        if let (Some(cell), Some(seen)) = (
+                            self.next.get_mut(index as usize),
+                            self.prev.get_mut(index as usize),
+                        ) {
+                            // Latched writes are live for later rungs too.
+                            *seen = true;
                             *cell = true;
                         }
                     }
                 }
                 Op::Reset(index) => {
                     if pop(&stack, &mut depth) {
-                        if let Some(cell) = self.next.get_mut(index as usize) {
+                        if let (Some(cell), Some(seen)) = (
+                            self.next.get_mut(index as usize),
+                            self.prev.get_mut(index as usize),
+                        ) {
+                            *seen = false;
                             *cell = false;
                         }
                     }
