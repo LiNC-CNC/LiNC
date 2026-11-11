@@ -2430,7 +2430,10 @@ fn il_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
                     plc.il_message = None;
                 }
                 egui::Key::Delete => {
-                    if lines.get(plc.il_cursor).map(|line| line.trim().is_empty()).unwrap_or(true)
+                    if lines
+                        .get(plc.il_cursor)
+                        .map(|line| line.trim().is_empty())
+                        .unwrap_or(true)
                     {
                         if plc.il_cursor < lines.len() {
                             lines.remove(plc.il_cursor);

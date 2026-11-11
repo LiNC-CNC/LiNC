@@ -18,9 +18,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
     if app.plc.page == PlcPage::Trend {
         // Z cycles the window, as the manual's trend page does; the daemon
         // restarts the history when the window changes.
-        let zoom = ui.input_mut(|input| {
-            input.consume_key(egui::Modifiers::NONE, egui::Key::Z)
-        });
+        let zoom = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Z));
         if zoom {
             app.plc.trend_window_ms = match app.plc.trend_window_ms {
                 4_000 => 20_000,
@@ -139,10 +137,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             .and_then(|section| section.rungs.get(cursor.1))
             .map(|rung| {
                 rung.coil.var.trim().is_empty()
-                    && rung
-                        .cells
-                        .iter()
-                        .all(|cell| matches!(cell, Cell::Wire))
+                    && rung.cells.iter().all(|cell| matches!(cell, Cell::Wire))
             })
             .unwrap_or(false);
         if empty {
@@ -1018,9 +1013,7 @@ pub fn grid_rung(
             let label = match &cell {
                 Cell::Contact { var, .. }
                 | Cell::Edge { var, .. }
-                | Cell::Block {
-                    instance: var, ..
-                } => plc.operand_label(var),
+                | Cell::Block { instance: var, .. } => plc.operand_label(var),
                 other => cell_label(other),
             };
             cell_box(
