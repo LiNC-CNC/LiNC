@@ -82,7 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             other => println!("snapshot replied {other:?}"),
         }
     }
-    if let Ok(Response::Trend(data)) = client.call(&Request::Trend) {
+    if let Ok(Response::Trend(data)) = client.call(&Request::Trend { window_ms: 20_000 }) {
         println!(
             "trend: {} names, {} samples, first row {:?}",
             data.names.len(),

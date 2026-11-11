@@ -26,8 +26,11 @@ pub enum Request {
     Start,
     Stop,
     Snapshot,
-    /// The watch list sampled once per scan.
-    Trend,
+    /// The watch list sampled into a window of this many milliseconds. Asking
+    /// for a different window clears the history, so the chart restarts.
+    Trend {
+        window_ms: u32,
+    },
     Force {
         name: String,
         value: bool,
@@ -76,6 +79,9 @@ pub struct TrendData {
     /// Parallel to `names`: true when the operand is a word.
     pub words: Vec<bool>,
     pub samples: Vec<Vec<i32>>,
+    /// The span the samples cover, and the scans between two of them.
+    pub window_ms: u32,
+    pub stride: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

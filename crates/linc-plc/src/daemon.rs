@@ -57,6 +57,13 @@ pub(crate) struct Daemon {
     alive: bool,
     /// Watch list of the loaded project, sampled per scan.
     watch: Vec<String>,
+    /// Configured scan period, used to turn a window in milliseconds into a
+    /// stride in scans.
+    period_us: u64,
+    /// The window and stride the ring is currently using.
+    trend_window: u32,
+    trend_stride: u32,
+    trend_tick: u32,
     /// When the previous scan ran; timers advance by the real delta.
     last_scan: Option<Instant>,
 }
@@ -75,6 +82,10 @@ impl Daemon {
             overruns: 0,
             alive: false,
             watch: Vec::new(),
+            period_us: 2000,
+            trend_window: 20_000,
+            trend_stride: 1,
+            trend_tick: 0,
             last_scan: None,
         }
     }
@@ -89,6 +100,7 @@ impl Daemon {
         period: Duration,
     ) {
         log::info!("linc-plc: scanning every {} us", period.as_micros());
+        self.period_us = period.as_micros().max(1) as u64;
         while !shared.shutdown.load(Ordering::Relaxed) {
             let started = Instant::now();
             while let Ok(command) = commands.try_recv() {
@@ -336,15 +348,29 @@ impl Daemon {
         // The watch list is read from the VM after the scan, so a sample is the
         // state a reader saw at the end of that scan.
         if !self.watch.is_empty() {
-            let row = self
-                .watch
-                .iter()
-                .map(|name| super::trend_value(name, vm).unwrap_or(0))
-                .collect::<Vec<i32>>();
             if let Ok(mut trend) = shared.trend.lock() {
-                trend.samples.push(row);
-                if trend.samples.len() > 512 {
-                    trend.samples.remove(0);
+                if trend.window_ms != self.trend_window {
+                    // A new window restarts the chart: the samples on screen
+                    // cover a different span, so mixing them would lie.
+                    self.trend_window = trend.window_ms.max(1);
+                    let window_us = u64::from(self.trend_window) * 1000;
+                    let span_us = self.period_us.saturating_mul(512);
+                    self.trend_stride = (window_us / span_us.max(1)).max(1) as u32;
+                    self.trend_tick = 0;
+                    trend.stride = self.trend_stride;
+                    trend.samples.clear();
+                }
+                self.trend_tick = self.trend_tick.wrapping_add(1);
+                if self.trend_tick % self.trend_stride.max(1) == 0 {
+                    let row = self
+                        .watch
+                        .iter()
+                        .map(|name| super::trend_value(name, vm).unwrap_or(0))
+                        .collect::<Vec<i32>>();
+                    trend.samples.push(row);
+                    if trend.samples.len() > 512 {
+                        trend.samples.remove(0);
+                    }
                 }
             }
         }
@@ -396,6 +422,8 @@ impl Daemon {
         self.watch = watch;
         if let Ok(mut trend) = shared.trend.lock() {
             trend.names = self.watch.clone();
+            trend.window_ms = self.trend_window;
+            trend.stride = self.trend_stride;
             trend.words = self
                 .watch
                 .iter()

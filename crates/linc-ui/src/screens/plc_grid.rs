@@ -15,6 +15,22 @@ use crate::theme;
 
 /// Keys the ladder editor owns. Consumed before any widget sees them.
 pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
+    if app.plc.page == PlcPage::Trend {
+        // Z cycles the window, as the manual's trend page does; the daemon
+        // restarts the history when the window changes.
+        let zoom = ui.input_mut(|input| {
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Z)
+        });
+        if zoom {
+            app.plc.trend_window_ms = match app.plc.trend_window_ms {
+                4_000 => 20_000,
+                20_000 => 100_000,
+                _ => 4_000,
+            };
+            app.plc.trend_remote.samples.clear();
+        }
+        return;
+    }
     if app.plc.page != PlcPage::Edit || app.plc.picker.is_some() || app.plc.operand_pick.is_some() {
         return;
     }

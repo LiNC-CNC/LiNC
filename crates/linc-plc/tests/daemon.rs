@@ -489,7 +489,7 @@ fn the_trend_ring_samples_the_watch_list_every_scan() {
     let mut data = None;
     for _ in 0..40 {
         std::thread::sleep(Duration::from_millis(25));
-        if let Response::Trend(trend) = client.call(&Request::Trend).expect("trend") {
+        if let Response::Trend(trend) = client.call(&Request::Trend { window_ms: 20_000 }).expect("trend") {
             if trend.samples.len() >= 4 {
                 data = Some(trend);
                 break;
@@ -503,4 +503,65 @@ fn the_trend_ring_samples_the_watch_list_every_scan() {
         trend.samples.iter().all(|row| row.len() == 2),
         "every sample carries one value per watch entry"
     );
+}
+
+#[test]
+fn a_new_trend_window_restarts_history_and_stretches_the_stride() {
+    let mut project = Project::example();
+    project.watch = vec!["run".to_string()];
+    let mut harness = Harness::start(&project, false);
+    let mut client = harness.client();
+    match client
+        .call(&Request::Load {
+            project: project.clone(),
+        })
+        .expect("load")
+    {
+        Response::Loaded { .. } => {}
+        other => panic!("expected loaded, got {}", describe(&other)),
+    }
+    client.call(&Request::Start).expect("start");
+
+    // Fill the default window first.
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(20));
+        if let Response::Trend(data) = client
+            .call(&Request::Trend { window_ms: 20_000 })
+            .expect("trend")
+        {
+            if data.samples.len() >= 4 {
+                break;
+            }
+        }
+    }
+
+    // Asking for a longer window drops what was there and samples sparsely.
+    let reset = match client
+        .call(&Request::Trend { window_ms: 100_000 })
+        .expect("trend")
+    {
+        Response::Trend(data) => data,
+        other => panic!("expected trend, got {}", describe(&other)),
+    };
+    assert!(
+        reset.samples.len() <= 1,
+        "the history restarts on a window change, got {} samples",
+        reset.samples.len()
+    );
+
+    let mut stretched = reset;
+    for _ in 0..60 {
+        std::thread::sleep(Duration::from_millis(20));
+        if let Response::Trend(data) = client
+            .call(&Request::Trend { window_ms: 100_000 })
+            .expect("trend")
+        {
+            stretched = data;
+            if stretched.stride > 1 && !stretched.samples.is_empty() {
+                break;
+            }
+        }
+    }
+    assert!(stretched.stride > 1, "a long window samples sparsely");
+    assert_eq!(stretched.window_ms, 100_000);
 }

@@ -828,6 +828,8 @@ pub struct PlcUi {
     pub fbd_negate: bool,
     /// A POU is being renamed or copied.
     pub pou_edit: Option<PouEdit>,
+    /// The trend window in milliseconds: 4 s, 20 s or 100 s.
+    pub trend_window_ms: u32,
     /// The name typed into the symbols table's new row.
     pub symbol_new: String,
     /// Boolean traces for the trend page.
@@ -890,6 +892,7 @@ impl Default for PlcUi {
             fbd_box_edit: None,
             fbd_negate: false,
             pou_edit: None,
+            trend_window_ms: 20_000,
             symbol_new: String::new(),
             trend: TrendBuffer::default(),
             trend_remote: TrendData::default(),
@@ -1035,7 +1038,12 @@ impl PlcUi {
             // The trend page needs the daemon's per-scan window, not the frame
             // sampling the page can do on its own.
             if self.page == PlcPage::Trend || !self.trend_remote.samples.is_empty() {
-                self.send(Tag::Trend, Request::Trend);
+                self.send(
+                    Tag::Trend,
+                    Request::Trend {
+                        window_ms: self.trend_window_ms,
+                    },
+                );
             }
         }
     }
@@ -2886,8 +2894,10 @@ fn draw_remote_trend(plc: &PlcUi, ui: &mut Ui) {
     common::card_title(ui, "TREND");
     ui.label(
         RichText::new(format!(
-            "{} samples from the scan loop, newest at the right",
-            data.samples.len()
+            "{} samples over {} s (every {} scans), newest at the right",
+            data.samples.len(),
+            plc.trend_window_ms / 1000,
+            data.stride.max(1)
         ))
         .size(theme::font_size(9.0))
         .color(theme::MUTED),
