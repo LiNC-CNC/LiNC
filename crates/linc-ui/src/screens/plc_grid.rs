@@ -1579,7 +1579,16 @@ pub fn grid_rung(
             rung.coil.var.is_empty(),
             CellSymbol::Coil(rung.coil.kind),
             if commented { 18.0 } else { 10.0 },
-            plc.bit_value(&rung.coil.var),
+            // A compute rung writes through its cell, so its coil slot is unused
+            // and must not light up from a variable of the same name.
+            if cells
+                .iter()
+                .any(|cell| matches!(cell, linc_plc_core::grid::Cell::Compute { .. }))
+            {
+                None
+            } else {
+                plc.bit_value(&rung.coil.var)
+            },
         );
     });
     if commented {
@@ -1783,7 +1792,8 @@ pub fn cell_active(plc: &PlcUi, cell: &Cell) -> Option<bool> {
                 _ => a > b,
             })
         }
-        Cell::Wire | Cell::Link | Cell::Block { .. } | Cell::Compute { .. } => None,
+        Cell::Block { instance, .. } => plc.bit_value(&format!("{instance}.Q")),
+        Cell::Wire | Cell::Link | Cell::Compute { .. } => None,
     }
 }
 

@@ -2938,6 +2938,49 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
     });
 }
 
+
+/// The operand a line refers to and its live bit value, if the snapshot has one.
+/// A `CAL TON0(...)` line names the instance, so the block's `Q` is the bit.
+fn il_operand_value(plc: &PlcUi, line: &str) -> (String, Option<bool>) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with("//") {
+        return (String::new(), None);
+    }
+    let mut words = trimmed.split_whitespace();
+    let _mnemonic = words.next();
+    let rest = words.next().unwrap_or("").trim();
+    if rest.is_empty() {
+        return (String::new(), None);
+    }
+    let operand = match rest.find('(') {
+        Some(open) => format!("{}.Q", &rest[..open]),
+        None => rest.to_string(),
+    };
+    let value = plc.bit_value(&operand);
+    (operand, value)
+}
+
+/// The right-hand column of an IL line: `TRUE`/`FALSE` for a bit, the value for a
+/// word, and the running `ET` for a timer call.
+fn il_display_value(plc: &PlcUi, operand: &str) -> Option<String> {
+    if operand.is_empty() {
+        return None;
+    }
+    if let Some(value) = plc.bit_value(operand) {
+        return Some(if value { "TRUE".to_string() } else { "FALSE".to_string() });
+    }
+    if let Some(value) = plc.word_value(operand) {
+        return Some(value.to_string());
+    }
+    // `CAL TON0(...)`: the instance's ET, which is what a running timer shows.
+    if let Some(instance) = operand.strip_suffix(".Q") {
+        if let Some(et) = plc.word_value(&format!("{instance}.ET")) {
+            return Some(format!("ET {et}"));
+        }
+    }
+    None
+}
+
 /// The IL editor: numbered source lines over the POU's `il` body. The compiler
 /// that turns them into bytecode is the next slice.
 fn il_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32) {
@@ -2970,8 +3013,13 @@ fn il_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32) {
                     } else {
                         line.clone()
                     };
+                    // The operand of a line is live: green when its bit is true,
+                    // and timers also show their running ET on the right.
+                    let (operand, live) = il_operand_value(plc, line);
                     let colour = if line.trim_start().starts_with("//") {
                         theme::COMMENT
+                    } else if live == Some(true) {
+                        theme::C4
                     } else if active {
                         theme::ACCENT
                     } else {
@@ -2994,6 +3042,16 @@ fn il_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32) {
                         plc.il_cursor = index;
                         plc.il_buffer = line.clone();
                         plc.il_message = None;
+                    }
+                    if let Some(value) = il_display_value(plc, &operand) {
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(
+                                RichText::new(value)
+                                    .monospace()
+                                    .size(theme::font_size(8.5))
+                                    .color(theme::MUTED),
+                            );
+                        });
                     }
                 });
             }
@@ -3306,12 +3364,23 @@ fn fbd_grid_view(
                         FbdCell::Empty => String::new(),
                     };
                     if !text.is_empty() {
+                        // A TRUE operand is green, as the manual's FBD monitor shows.
+                        let operand = match grid.cell(row, col) {
+                            FbdCell::In { operand } | FbdCell::Out { operand } => {
+                                Some(operand.trim_start_matches('!').to_string())
+                            }
+                            _ => None,
+                        };
+                        let live = operand
+                            .as_deref()
+                            .and_then(|name| plc.bit_value(name))
+                            .unwrap_or(false);
                         painter.text(
                             cell_rect.center(),
                             egui::Align2::CENTER_CENTER,
                             text,
                             egui::FontId::monospace(theme::font_size(8.5)),
-                            theme::FG,
+                            if live { theme::C4 } else { theme::FG },
                         );
                     }
                 }
@@ -3330,12 +3399,18 @@ fn fbd_grid_view(
                     Stroke::new(1.0, theme::ACCENT),
                     egui::StrokeKind::Inside,
                 );
+                // A block is coloured by its own output, which the snapshot now
+                // publishes as `TON0.Q` etc.
+                let q = plc
+                    .bit_value(&format!("{}.Q", block.instance))
+                    .unwrap_or(false);
+                let block_colour = if q { theme::C4 } else { theme::ACCENT };
                 painter.text(
                     block_rect.center(),
                     egui::Align2::CENTER_CENTER,
                     &block.kind,
                     egui::FontId::monospace(theme::font_size(9.0)),
-                    theme::ACCENT,
+                    block_colour,
                 );
                 if !block.preset.is_empty() {
                     painter.text(

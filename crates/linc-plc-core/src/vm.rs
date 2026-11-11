@@ -552,6 +552,32 @@ impl Vm {
                 kind: *kind,
                 forced: matches!(self.forces.get(slot), Some(Some(_))),
             })
+            .chain(self.block_outputs())
+            .collect()
+    }
+
+    /// Each block's `Q`, published as `TON0.Q`, so the editor can colour a block by
+    /// its real output instead of guessing from the rung.
+    fn block_outputs(&self) -> Vec<VarValue> {
+        self.blocks
+            .iter()
+            .enumerate()
+            .map(|(index, state)| {
+                let kind = match index / usize::from(crate::compile::FB_PER_TYPE) {
+                    0 => "TON",
+                    1 => "TOF",
+                    2 => "TP",
+                    3 => "CTU",
+                    _ => "CTD",
+                };
+                let number = index % usize::from(crate::compile::FB_PER_TYPE);
+                VarValue {
+                    name: format!("{kind}{number}.Q"),
+                    value: state.q,
+                    kind: SymbolKind::Output,
+                    forced: false,
+                }
+            })
             .collect()
     }
 

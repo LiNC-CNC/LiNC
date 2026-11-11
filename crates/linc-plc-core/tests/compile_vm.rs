@@ -1471,3 +1471,41 @@ fn a_compute_rung_does_not_count_as_a_coil_write() {
         "ordinary duplicate writes are still caught"
     );
 }
+
+/// Each block publishes its `Q`, so the editor colours a block from the value the
+/// program produced rather than from the rung's power.
+#[test]
+fn block_outputs_are_published_with_the_snapshot() {
+    use linc_plc_core::grid::Cell;
+    let mut rung = Rung::new(Logic::Const { value: true }, Coil::new("lamp", CoilKind::Normal));
+    rung.cells = vec![
+        Cell::Contact {
+            var: "start".into(),
+            negated: false,
+        },
+        Cell::Block {
+            block: "TON".into(),
+            instance: "TON0".into(),
+            preset: "T#0ms".into(),
+        },
+    ];
+    let project = project_with(
+        vec![
+            IoPoint::new("start", IoDirection::In),
+            IoPoint::new("lamp", IoDirection::Out),
+        ],
+        Vec::new(),
+        vec![section("main", vec![rung])],
+    );
+    let compiled = compile(&project).expect("compile");
+    let mut vm = Vm::new(&compiled);
+    for _ in 0..20 {
+        vm.scan(&[true]);
+    }
+    let q = vm
+        .snapshot()
+        .into_iter()
+        .find(|var| var.name == "TON0.Q")
+        .expect("the snapshot carries the block output");
+    assert!(q.value, "the timer's Q is true once its preset elapses");
+}
