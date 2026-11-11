@@ -5422,3 +5422,25 @@ mod fbd_grid_tests {
         assert_eq!(fbd_preset_cell(&grid, 0, 2), None);
     }
 }
+
+#[cfg(test)]
+mod coil_pick_tests {
+    use super::*;
+
+    /// The picker's commit path: choosing a name writes the coil operand of the
+    /// row it was opened for, and closes the picker.
+    #[test]
+    fn choosing_a_coil_operand_sets_it_and_closes_the_picker() {
+        let mut plc = PlcUi::default();
+        plc.coil_pick = Some((0, 0));
+        plc.apply(Action::SetCoilVar {
+            section: 0,
+            rung: 0,
+            var: "fan".to_string(),
+        });
+        plc.coil_pick = None;
+        let rungs = plc.current_pou_sections();
+        assert_eq!(rungs[0].rungs[0].coil.var, "fan");
+        assert!(plc.coil_pick.is_none(), "the picker closes on a pick");
+    }
+}
