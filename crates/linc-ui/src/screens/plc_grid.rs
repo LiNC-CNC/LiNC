@@ -70,8 +70,10 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
 
     let (left, right, up, down, enter, delete) = ui.input_mut(|input| {
         (
-            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft)
+                || input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowLeft),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight)
+                || input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowRight),
             input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)
                 || input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowUp),
             input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
@@ -1079,11 +1081,13 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     let Some((section, rung)) = plc.coil_pick else {
         return;
     };
+    // Every symbol, not only the outputs: a coil may drive a variable, and a
+    // list that filtered them out could be empty, which left Enter with nothing
+    // to commit and the window open for good.
     let names = plc
         .project
         .io
         .iter()
-        .filter(|point| point.direction == linc_plc_core::IoDirection::Out)
         .map(|point| point.name.clone())
         .chain(plc.project.vars.iter().map(|var| var.name.clone()))
         .collect::<Vec<_>>();
@@ -1132,8 +1136,10 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
                         rung,
                         var: (*name).clone(),
                     });
-                    close = true;
                 }
+                // Enter with nothing to commit still closes the window: a modal
+                // that cannot be left with the keyboard is a dead end.
+                close = true;
             }
             for name in matches {
                 if ui.button(name).clicked() {
