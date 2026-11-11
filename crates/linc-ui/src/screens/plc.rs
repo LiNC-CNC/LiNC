@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use egui::{pos2, vec2, Align, Color32, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_client::Client;
 use linc_plc_core::grid::{Cell, POSITIONS};
-use linc_plc_core::model::FbdLine;
+use linc_plc_core::model::{FbdCell, FbdGrid, FbdLine};
 use linc_plc_core::protocol::{
     Request, Response, RunState, StateSnapshot, TrendData, PROTOCOL_VERSION,
 };
@@ -169,6 +169,8 @@ pub enum Action {
     },
     /// Replace the function-block body of the current POU.
     SetFbd(Vec<FbdLine>),
+    /// Replace the drawn function-block grid of the current POU.
+    SetFbdGrid(linc_plc_core::model::FbdGrid),
     /// Rename a POU.
     RenamePou {
         index: usize,
@@ -647,14 +649,6 @@ fn worker(jobs: Receiver<Job>, events: Sender<Event>, path: PathBuf) {
 // Page state
 // ---------------------------------------------------------------------------
 
-/// Which field of an FBD line the value picker fills: the output when `input`
-/// is `None`, otherwise that input position.
-#[derive(Debug, Clone, Copy)]
-pub struct FbdPick {
-    pub line: usize,
-    pub input: Option<usize>,
-}
-
 /// One compare (`G`) or compute (`M`) cell being assembled: operator, then the
 /// values, then (for compute) the destination word.
 #[derive(Debug, Clone)]
@@ -831,12 +825,16 @@ pub struct PlcUi {
     pub xref: Option<String>,
     /// A timer or counter box is being edited at this cell.
     pub block_edit: Option<(usize, usize, usize)>,
-    /// An FBD line's output or one of its inputs is being picked.
-    pub fbd_pick: Option<FbdPick>,
-    /// The block on this FBD line is being edited (instance and preset).
-    pub fbd_box_edit: Option<usize>,
+    /// The block at this grid cell is having its instance and preset edited.
+    pub fbd_block_edit: Option<(usize, usize)>,
     /// The next FBD value chosen is negated (`!`).
     pub fbd_negate: bool,
+    /// Cursor on the FBD grid: row and column.
+    pub fbd_cursor: Option<(usize, usize)>,
+    /// The grid element menu is open at this cell.
+    pub fbd_grid_pick: Option<(usize, usize)>,
+    /// An input or output operand is being picked for this cell.
+    pub fbd_operand_pick: Option<(usize, usize, bool)>,
     /// A POU is being renamed or copied.
     pub pou_edit: Option<PouEdit>,
     /// The trend window in milliseconds: 4 s, 20 s or 100 s.
@@ -907,9 +905,11 @@ impl Default for PlcUi {
             cell_mark: None,
             xref: None,
             block_edit: None,
-            fbd_pick: None,
-            fbd_box_edit: None,
+            fbd_block_edit: None,
             fbd_negate: false,
+            fbd_cursor: None,
+            fbd_grid_pick: None,
+            fbd_operand_pick: None,
             pou_edit: None,
             trend_window_ms: 20_000,
             view_addresses: false,
@@ -1611,6 +1611,13 @@ impl PlcUi {
                     self.pou = self.pou.min(pous_len(&self.project));
                 }
             }
+            Action::SetFbdGrid(grid) => {
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    pou.fbd_grid = Some(grid);
+                }
+                self.project.set_pous(pous);
+            }
             Action::SetFbd(lines) => {
                 let mut pous = self.project.all_pous();
                 if let Some(pou) = pous.get_mut(self.pou) {
@@ -1904,6 +1911,9 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     let mut actions: Vec<Action> = Vec::new();
     crate::screens::plc_grid::editor_keys(app, ui, &mut actions);
     il_keys(&mut app.plc, ui, &mut actions);
+    fbd_keys(&mut app.plc, ui, &mut actions);
+    fbd_grid_menu(&mut app.plc, ui.ctx(), &mut actions);
+    fbd_operand_menu(&mut app.plc, ui.ctx(), &mut actions);
     crate::screens::plc_grid::pickers(&mut app.plc, ui.ctx(), &mut actions);
     pou_edit_dialog(&mut app.plc, ui.ctx(), &mut actions);
     let plc = &mut app.plc;
@@ -2243,7 +2253,6 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
         });
     });
     if language == PouLanguage::Fbd {
-        fbd_picker(plc, ui.ctx(), actions);
         fbd_box_editor(plc, ui.ctx(), actions);
     }
     ui.add_space(2.0);
@@ -2470,129 +2479,39 @@ fn il_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
 
 /// Draw the lines as a diagram: inputs enter on their own rows, the block spans
 /// them, and its output leaves on the top row, which is the shape ZX draws.
-fn fbd_diagram(plc: &mut PlcUi, lines: &[FbdLine], ui: &mut Ui) {
-    if lines.is_empty() {
-        return;
-    }
-    let row = 18.0_f32;
-    for (line_index, line) in lines.iter().enumerate() {
-        let rows = line.inputs.len().max(1) as f32;
-        let height = rows * row + 6.0;
-        let (rect, response) =
-            ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
-        let painter = ui.painter();
-        painter.rect_filled(rect, 3.0, theme::SURFACE);
-        let box_left = rect.left() + 132.0;
-        let box_right = box_left + 96.0;
-        let top = rect.top() + 3.0;
-        let first_y = top + row / 2.0;
-        // Inputs and their wires.
-        for (index, input) in line.inputs.iter().enumerate() {
-            let y = top + index as f32 * row + row / 2.0;
-            painter.text(
-                pos2(rect.left() + 6.0, y),
-                egui::Align2::LEFT_CENTER,
-                plc.operand_label(input.trim_start_matches(['!', '@'])),
-                egui::FontId::monospace(theme::font_size(9.0)),
-                theme::FG,
-            );
-            painter.line_segment(
-                [pos2(rect.left() + 112.0, y), pos2(box_left, y)],
-                Stroke::new(1.0, theme::C1),
-            );
-        }
-        // The vertical bus and the block.
-        if line.inputs.len() > 1 {
-            let last_y = top + (rows - 1.0) * row + row / 2.0;
-            painter.line_segment(
-                [pos2(box_left - 8.0, first_y), pos2(box_left - 8.0, last_y)],
-                Stroke::new(1.0, theme::C1),
-            );
-        }
-        painter.rect_filled(
-            egui::Rect::from_min_max(
-                pos2(box_left, top),
-                pos2(box_right, top + (rows * row).max(row)),
-            ),
-            2.0,
-            theme::PANEL_RAISED,
-        );
-        let block_rect = egui::Rect::from_min_max(
-            pos2(box_left, top),
-            pos2(box_right, top + (rows * row).max(row)),
-        );
-        painter.rect_stroke(
-            block_rect,
-            2.0,
-            Stroke::new(1.0, theme::ACCENT),
-            egui::StrokeKind::Inside,
-        );
-        if let Some(pointer) = response.interact_pointer_pos() {
-            if block_rect.contains(pointer) && response.clicked() {
-                plc.fbd_box_edit = Some(line_index);
-            }
-        }
-        painter.text(
-            pos2((box_left + box_right) / 2.0, first_y),
-            egui::Align2::CENTER_CENTER,
-            &line.block,
-            egui::FontId::monospace(theme::font_size(10.0)),
-            theme::ACCENT,
-        );
-        // Output leaves on the top row.
-        painter.line_segment(
-            [pos2(box_right, first_y), pos2(rect.right() - 74.0, first_y)],
-            Stroke::new(1.0, theme::SUCCESS),
-        );
-        painter.text(
-            pos2(rect.right() - 6.0, first_y),
-            egui::Align2::RIGHT_CENTER,
-            plc.operand_label(line.output.trim_start_matches('!')),
-            egui::FontId::monospace(theme::font_size(9.0)),
-            theme::SUCCESS,
-        );
-        if !line.comment.is_empty() {
-            painter.text(
-                pos2(rect.left() + 6.0, rect.bottom() - 5.0),
-                egui::Align2::LEFT_BOTTOM,
-                &line.comment,
-                egui::FontId::monospace(theme::font_size(8.0)),
-                theme::MUTED,
-            );
-        }
-    }
-}
-
 /// The value list for an FBD output or input: declared symbols (with their
 /// comments), the word bank, block members, booleans, numbers and times.
-/// Instance and preset of the block on one FBD line. The same choices the ladder
-/// box editor offers, written back through `SetFbd`.
+/// Instance and preset of the block on one FBD line. The same choices the ladder/// Instance and preset of the block under the FBD cursor.
 fn fbd_box_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
-    let Some(index) = plc.fbd_box_edit else {
+    let Some((row, col)) = plc.fbd_block_edit else {
         return;
     };
-    let mut lines = plc.current_pou().map(|pou| pou.fbd).unwrap_or_default();
-    let Some(line) = lines.get(index).cloned() else {
-        plc.fbd_box_edit = None;
+    let grid = fbd_grid_of(plc);
+    let Some(block) = grid
+        .blocks
+        .iter()
+        .find(|block| block.row == row && block.col == col)
+        .cloned()
+    else {
+        plc.fbd_block_edit = None;
         return;
     };
-    let letters: String = line
-        .block
+    let letters: String = block
+        .kind
         .chars()
         .take_while(|c| c.is_ascii_alphabetic())
         .collect();
     let timer = matches!(letters.as_str(), "TON" | "TOF" | "TP");
     let counter = matches!(letters.as_str(), "CTU" | "CTD");
-    let latch = matches!(letters.as_str(), "SR" | "RS");
-    let _ = latch;
     let mut close = false;
-    let mut apply: Option<String> = None;
-    egui::Window::new(format!("{} · {}", line.block, line.output))
+    let mut next_block: Option<String> = None;
+    let mut next_preset: Option<String> = None;
+    egui::Window::new(format!("{} · row {} col {}", block.kind, row + 1, col + 1))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
-            if timer || counter {
+            if timer || counter || matches!(letters.as_str(), "SR" | "RS" | "RT" | "RF") {
                 ui.label(
                     RichText::new("instance")
                         .size(theme::font_size(9.0))
@@ -2602,11 +2521,13 @@ fn fbd_box_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     for number in 0..4 {
                         let name = format!("{letters}{number}");
                         if theme::action_button(ui, &name, true).clicked() {
-                            apply = Some(name);
+                            next_block = Some(name);
                         }
                     }
                 });
                 ui.add_space(4.0);
+            }
+            if timer || counter {
                 ui.label(
                     RichText::new("preset")
                         .size(theme::font_size(9.0))
@@ -2620,104 +2541,345 @@ fn fbd_box_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     };
                     for value in presets {
                         if ui.button(*value).clicked() {
-                            if let Some(edited) = lines.get_mut(index) {
-                                edited.preset = (*value).to_string();
-                            }
-                            actions.push(Action::SetFbd(lines.clone()));
-                            close = true;
+                            next_preset = Some((*value).to_string());
                         }
                     }
                 });
-            } else {
-                ui.label("This block has no instance or preset.");
             }
             ui.add_space(4.0);
             if theme::action_button(ui, "Close", true).clicked() {
                 close = true;
             }
         });
-    if let Some(name) = apply {
-        if let Some(edited) = lines.get_mut(index) {
-            edited.block = name;
+    if next_block.is_some() || next_preset.is_some() {
+        let mut grid = grid.clone();
+        for item in grid.blocks.iter_mut() {
+            if item.row == row && item.col == col {
+                if let Some(kind) = &next_block {
+                    item.kind = kind.clone();
+                }
+                if let Some(preset) = &next_preset {
+                    item.preset = preset.clone();
+                }
+            }
         }
-        actions.push(Action::SetFbd(lines));
+        actions.push(Action::SetFbdGrid(grid));
         close = true;
     }
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
-        plc.fbd_box_edit = None;
+        plc.fbd_block_edit = None;
     }
 }
 
 /// The value list for an FBD output or input: declared symbols (with their
 /// comments), the word bank, block members, booleans, numbers and times.
-fn fbd_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
-    let Some(pick) = plc.fbd_pick else {
+/// Function block diagram: one assignment per line, blocks nesting by naming
+/// an earlier line's output. Inputs are typed here; the value pickers the
+/// ladder editor has are not wired to this page yet.
+/// The grid the editor works on: the POU's own, or the line body laid out so an
+/// older project can be edited as a grid without being rewritten first.
+fn fbd_grid_of(plc: &PlcUi) -> FbdGrid {
+    plc.current_pou()
+        .and_then(|pou| match pou.fbd_grid {
+            Some(grid) if !grid.blocks.is_empty() => Some(grid),
+            _ if !pou.fbd.is_empty() => Some(FbdGrid::from_lines(&pou.fbd)),
+            _ => pou.fbd_grid,
+        })
+        .unwrap_or_default()
+}
+
+fn is_hidden(grid: &FbdGrid, row: usize, col: usize) -> bool {
+    grid.blocks.iter().any(|block| {
+        block.col == col && row > block.row && row < block.row + block.ins.max(1)
+    })
+}
+
+/// Draw the grid: cells, blocks spanning their rows, and the cursor.
+fn fbd_grid_view(plc: &mut PlcUi, grid: &FbdGrid, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
+    let _ = actions;
+    let cell_w = 56.0_f32;
+    let cell_h = 22.0_f32;
+    let rows = grid.rows.max(1);
+    let columns = grid.columns.max(6);
+    let width = (columns as f32) * cell_w;
+    let height_needed = (rows as f32) * cell_h + 8.0;
+    egui::ScrollArea::both()
+        .id_salt("plc-fbd-grid")
+        .max_height((height - 40.0).max(120.0))
+        .show(ui, |ui| {
+            let (rect, response) =
+                ui.allocate_exact_size(vec2(width + 8.0, height_needed), Sense::click());
+            let painter = ui.painter();
+            painter.rect_filled(rect, 3.0, theme::SURFACE);
+            let origin = rect.min + vec2(4.0, 4.0);
+            let at = |row: usize, col: usize| {
+                origin + vec2(col as f32 * cell_w, row as f32 * cell_h)
+            };
+            // Cells.
+            for row in 0..rows {
+                for col in 0..columns {
+                    if is_hidden(grid, row, col) {
+                        continue;
+                    }
+                    let cell_rect =
+                        egui::Rect::from_min_size(at(row, col), vec2(cell_w, cell_h));
+                    painter.rect_stroke(
+                        cell_rect,
+                        1.0,
+                        Stroke::new(1.0, theme::BORDER),
+                        egui::StrokeKind::Inside,
+                    );
+                    let text = match grid.cell(row, col) {
+                        FbdCell::In { operand } => plc.operand_label(operand.trim_start_matches('!')),
+                        FbdCell::Out { operand } => {
+                            plc.operand_label(operand.trim_start_matches('!'))
+                        }
+                        FbdCell::Wire => "—".to_string(),
+                        FbdCell::Empty => String::new(),
+                    };
+                    if !text.is_empty() {
+                        painter.text(
+                            cell_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            text,
+                            egui::FontId::monospace(theme::font_size(8.5)),
+                            theme::FG,
+                        );
+                    }
+                }
+            }
+            // Blocks span their rows.
+            for block in &grid.blocks {
+                let span = block.ins.max(1) as f32;
+                let block_rect = egui::Rect::from_min_size(
+                    at(block.row, block.col) + vec2(1.0, 1.0),
+                    vec2(cell_w - 2.0, span * cell_h - 2.0),
+                );
+                painter.rect_filled(block_rect, 2.0, theme::PANEL_RAISED);
+                painter.rect_stroke(
+                    block_rect,
+                    2.0,
+                    Stroke::new(1.0, theme::ACCENT),
+                    egui::StrokeKind::Inside,
+                );
+                painter.text(
+                    block_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    &block.kind,
+                    egui::FontId::monospace(theme::font_size(9.0)),
+                    theme::ACCENT,
+                );
+                if !block.preset.is_empty() {
+                    painter.text(
+                        egui::pos2(block_rect.right() + 2.0, block_rect.top() + cell_h / 2.0),
+                        egui::Align2::LEFT_CENTER,
+                        &block.preset,
+                        egui::FontId::monospace(theme::font_size(7.5)),
+                        theme::MUTED,
+                    );
+                }
+            }
+            // The cursor.
+            if let Some((row, col)) = plc.fbd_cursor {
+                let cursor_rect =
+                    egui::Rect::from_min_size(at(row, col), vec2(cell_w, cell_h));
+                painter.rect_stroke(
+                    cursor_rect,
+                    1.0,
+                    Stroke::new(1.8, theme::WARNING),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            // A click lands on a cell; a click inside a block body lands on the
+            // block's anchor, because the body is not a position.
+            if let Some(pointer) = response.interact_pointer_pos() {
+                if response.clicked() {
+                    let dx = (pointer.x - origin.x) / cell_w;
+                    let dy = (pointer.y - origin.y) / cell_h;
+                    if dx >= 0.0 && dy >= 0.0 {
+                        let mut row = dy as usize;
+                        let col = dx as usize;
+                        for block in &grid.blocks {
+                            if block.col == col
+                                && row > block.row
+                                && row < block.row + block.ins.max(1)
+                            {
+                                row = block.row;
+                            }
+                        }
+                        if row < rows && col < columns {
+                            plc.fbd_cursor = Some((row, col));
+                            plc.fbd_grid_pick = Some((row, col));
+                        }
+                    }
+                }
+            }
+        });
+}
+
+/// Rows a block of this kind spans, which is how many inputs it draws.
+fn fbd_block_rows(kind: &str) -> usize {
+    let name = kind.trim().to_ascii_uppercase();
+    if matches!(name.as_str(), "NOT" | "RT0" | "RF0") || name.starts_with("R_TRIG") {
+        return 1;
+    }
+    if name.starts_with("CTU") || name.starts_with("CTD") {
+        return 3;
+    }
+    2
+}
+
+/// Can this block sit with its anchor at `(row, col)` without covering a signal?
+fn fbd_room(grid: &FbdGrid, row: usize, col: usize, ins: usize) -> bool {
+    for offset in 0..ins {
+        for column in col.saturating_sub(1)..=col + 1 {
+            match grid.cell(row + offset, column) {
+                FbdCell::Empty => {}
+                FbdCell::Wire => {}
+                _ => return false,
+            }
+        }
+    }
+    true
+}
+
+fn fbd_place_block(plc: &mut PlcUi, kind: &str, actions: &mut Vec<Action>, message: &mut Option<String>) {
+    let Some((row, col)) = plc.fbd_cursor else {
+        return;
+    };
+    let mut grid = fbd_grid_of(plc);
+    let ins = fbd_block_rows(kind);
+    if !fbd_room(&grid, row, col, ins) {
+        *message = Some("No room for the block".to_string());
+        return;
+    }
+    grid.blocks.retain(|block| !(block.row == row && block.col == col));
+    for offset in 0..ins {
+        grid.set_cell(row + offset, col, FbdCell::Empty);
+    }
+    grid.blocks.push(linc_plc_core::model::FbdBlock {
+        row,
+        col,
+        ins,
+        kind: kind.to_string(),
+        instance: String::new(),
+        preset: String::new(),
+    });
+    grid.rows = grid.rows.max(row + ins);
+    actions.push(Action::SetFbdGrid(grid));
+}
+
+/// The element list for a grid cell: signals, gates, blocks.
+fn fbd_grid_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    let Some((row, col)) = plc.fbd_grid_pick else {
         return;
     };
     let mut close = false;
-    let mut chosen: Option<String> = None;
-
-    egui::Window::new(if pick.input.is_some() {
-        "FBD INPUT"
-    } else {
-        "FBD OUTPUT"
-    })
-    .collapsible(false)
-    .resizable(true)
-    .default_width(360.0)
-    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-    .show(ctx, |ui| {
-        if theme::action_button(
-            ui,
-            if plc.fbd_negate {
-                "negated  !  (next pick)"
-            } else {
-                "negated  !"
-            },
-            true,
-        )
-        .clicked()
-        {
-            plc.fbd_negate = !plc.fbd_negate;
-        }
-        ui.separator();
-        if pick.input.is_some() && pick.line > 0 {
-            ui.label(
-                RichText::new("pin of an earlier block on this page")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
+    let mut message: Option<String> = None;
+    let mut set_cell: Option<FbdCell> = None;
+    let mut operand_pick: Option<bool> = None;
+    let mut block: Option<String> = None;
+    let mut box_edit = false;
+    egui::Window::new(format!("FBD  row {} col {}", row + 1, col + 1))
+        .collapsible(false)
+        .resizable(true)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
-                for line in 1..=pick.line {
-                    if ui.button(format!("@{line}")).clicked() {
-                        chosen = Some(format!("@{line}"));
+                if theme::action_button(ui, "wire  -", true).clicked() {
+                    set_cell = Some(FbdCell::Wire);
+                }
+                if theme::action_button(ui, "input  I", true).clicked() {
+                    operand_pick = Some(false);
+                }
+                if theme::action_button(ui, "output  Q", true).clicked() {
+                    operand_pick = Some(true);
+                }
+            });
+            ui.separator();
+            ui.horizontal_wrapped(|ui| {
+                for kind in ["AND", "OR", "XOR", "NOT", "TON0", "TOF0", "TP0", "CTU0", "CTD0"] {
+                    if theme::action_button(ui, kind, true).clicked() {
+                        block = Some(kind.to_string());
+                    }
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                for kind in ["SR0", "RS0", "RT0", "RF0", "GT", "GE", "EQ", "NE", "LE", "LT"] {
+                    if theme::action_button(ui, kind, true).clicked() {
+                        block = Some(kind.to_string());
+                    }
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                for kind in ["ADD", "SUB", "MUL", "DIV", "MOVE"] {
+                    if theme::action_button(ui, kind, true).clicked() {
+                        block = Some(kind.to_string());
                     }
                 }
             });
             ui.separator();
-        }
-        egui::ScrollArea::vertical()
-            .max_height(360.0)
-            .show(ui, |ui| {
+            let existing = fbd_grid_of(plc)
+                .blocks
+                .iter()
+                .any(|block| block.row == row && block.col == col);
+            ui.add_enabled_ui(existing, |ui| {
+                if theme::action_button(ui, "instance / preset…", true).clicked() {
+                    box_edit = true;
+                }
+            });
+            ui.add_space(4.0);
+            if theme::action_button(ui, "Cancel", true).clicked() {
+                close = true;
+            }
+        });
+    if let Some(cell) = set_cell {
+        let mut grid = fbd_grid_of(plc);
+        grid.set_cell(row, col, cell);
+        actions.push(Action::SetFbdGrid(grid));
+        close = true;
+    }
+    if let Some(output) = operand_pick {
+        plc.fbd_operand_pick = Some((row, col, output));
+        close = true;
+    }
+    if let Some(kind) = block {
+        fbd_place_block(plc, &kind, actions, &mut message);
+        close = true;
+    }
+    if box_edit {
+        plc.fbd_block_edit = Some((row, col));
+        close = true;
+    }
+    if let Some(message) = message {
+        plc.il_message = Some(message);
+    }
+    if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        plc.fbd_grid_pick = None;
+    }
+}
+
+/// A symbol for an input or output cell.
+fn fbd_operand_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    let Some((row, col, output)) = plc.fbd_operand_pick else {
+        return;
+    };
+    let mut close = false;
+    let mut chosen: Option<String> = None;
+    egui::Window::new(if output { "FBD OUTPUT CELL" } else { "FBD INPUT CELL" })
+        .collapsible(false)
+        .resizable(true)
+        .default_width(320.0)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                 for point in plc.project.io.clone() {
-                    let label = format!(
-                        "{}   {}   {}",
-                        point.name,
-                        match point.direction {
-                            IoDirection::In => "input",
-                            IoDirection::Out => "output",
-                        },
-                        point.comment
-                    );
-                    if ui.button(label).clicked() {
+                    if ui.button(format!("{}   {}", point.name, point.comment)).clicked() {
                         chosen = Some(point.name);
                     }
                 }
                 for var in plc.project.vars.clone() {
-                    if ui
-                        .button(format!("{}   var   {}", var.name, var.comment))
-                        .clicked()
-                    {
+                    if ui.button(format!("{}   {}", var.name, var.comment)).clicked() {
                         chosen = Some(var.name);
                     }
                 }
@@ -2732,177 +2894,112 @@ fn fbd_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
                             chosen = Some(format!("MW{index}"));
                         }
                     }
-                    for value in ["0", "1", "5", "10", "100", "T#1s", "T#10s"] {
-                        if ui.button(value).clicked() {
-                            chosen = Some((*value).to_string());
-                        }
-                    }
-                    for kind in ["TON", "TOF", "TP"] {
-                        for number in 0..4 {
-                            let name = format!("{kind}{number}.ET");
-                            if ui.button(&name).clicked() {
-                                chosen = Some(name);
-                            }
-                        }
-                    }
-                    for kind in ["CTU", "CTD"] {
-                        for number in 0..4 {
-                            let name = format!("{kind}{number}.CV");
-                            if ui.button(&name).clicked() {
-                                chosen = Some(name);
-                            }
-                        }
-                    }
                 });
             });
-        ui.add_space(4.0);
-        if theme::action_button(ui, "Cancel", true).clicked() {
-            close = true;
-        }
-    });
-    if let Some(value) = chosen {
-        let value = if plc.fbd_negate && !value.starts_with('!') {
-            format!("!{value}")
-        } else {
-            value
-        };
-        let mut lines = plc.current_pou().map(|pou| pou.fbd).unwrap_or_default();
-        if let Some(line) = lines.get_mut(pick.line) {
-            match pick.input {
-                None => line.output = value,
-                Some(position) => {
-                    if position < line.inputs.len() {
-                        line.inputs[position] = value;
-                    } else {
-                        line.inputs.push(value);
-                    }
-                }
+            ui.add_space(4.0);
+            if theme::action_button(ui, "Cancel", true).clicked() {
+                close = true;
             }
-            actions.push(Action::SetFbd(lines));
-        }
+        });
+    if let Some(operand) = chosen {
+        let operand = if plc.fbd_negate && !operand.starts_with('!') {
+            format!("!{operand}")
+        } else {
+            operand
+        };
+        let mut grid = fbd_grid_of(plc);
+        grid.set_cell(
+            row,
+            col,
+            if output {
+                FbdCell::Out { operand }
+            } else {
+                FbdCell::In { operand }
+            },
+        );
+        actions.push(Action::SetFbdGrid(grid));
         close = true;
     }
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
-        plc.fbd_pick = None;
+        plc.fbd_operand_pick = None;
         plc.fbd_negate = false;
     }
 }
 
-/// Function block diagram: one assignment per line, blocks nesting by naming
-/// an earlier line's output. Inputs are typed here; the value pickers the
-/// ladder editor has are not wired to this page yet.
+/// Keys the grid owns: arrows move between cells, Enter opens the element list.
+fn fbd_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
+    if plc.page != PlcPage::Edit || ui.ctx().memory(|memory| memory.focused().is_some()) {
+        return;
+    }
+    let is_fbd = plc
+        .current_pou()
+        .map(|pou| pou.language == PouLanguage::Fbd)
+        .unwrap_or(false);
+    if !is_fbd {
+        return;
+    }
+    let grid = fbd_grid_of(plc);
+    let rows = grid.rows.max(1);
+    let columns = grid.columns.max(6);
+    let mut cursor = plc.fbd_cursor.unwrap_or((0, 0));
+    let (left, right, up, down, enter, delete) = ui.input_mut(|input| {
+        (
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
+        )
+    });
+    if right {
+        cursor.1 = (cursor.1 + 1).min(columns - 1);
+    }
+    if left {
+        cursor.1 = cursor.1.saturating_sub(1);
+    }
+    if down {
+        cursor.0 = (cursor.0 + 1).min(rows - 1);
+    }
+    if up {
+        cursor.0 = cursor.0.saturating_sub(1);
+    }
+    // A block body is not a position: land on its anchor row.
+    for block in &grid.blocks {
+        if block.col == cursor.1 && cursor.0 > block.row && cursor.0 < block.row + block.ins.max(1)
+        {
+            cursor.0 = block.row;
+        }
+    }
+    plc.fbd_cursor = Some(cursor);
+    if enter {
+        plc.fbd_grid_pick = Some(cursor);
+    }
+    if delete {
+        let mut grid = grid;
+        let before = grid.blocks.len();
+        grid.blocks
+            .retain(|block| !(block.row == cursor.0 && block.col == cursor.1));
+        if grid.blocks.len() == before {
+            grid.set_cell(cursor.0, cursor.1, FbdCell::Empty);
+        }
+        // Deleting a block leaves the signal of its first input on a wire.
+        actions.push(Action::SetFbdGrid(grid));
+    }
+}
+
 fn fbd_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
-    const BLOCKS: [&str; 20] = [
-        "AND", "OR", "XOR", "NOT", "TON0", "TOF0", "TP0", "CTU0", "CTD0", "SR0", "RS0", "RT0",
-        "RF0", "GT", "GE", "EQ", "NE", "LE", "LT", "MOVE",
-    ];
-    let mut lines = plc.current_pou().map(|pou| pou.fbd).unwrap_or_default();
-    let mut changed = false;
-    fbd_diagram(plc, &lines, ui);
-    ui.add_space(6.0);
+    let grid = fbd_grid_of(plc);
     ui.label(
         RichText::new(
-            "click a block in the diagram for its instance and preset · output := BLOCK(inputs)",
+            "grid: arrows move · Enter places an element · click a block for instance and preset",
         )
-        .size(theme::font_size(9.0))
+        .monospace()
+        .size(theme::font_size(8.5))
         .color(theme::MUTED),
     );
-    ui.add_space(4.0);
-    let mut remove: Option<usize> = None;
-    egui::ScrollArea::vertical()
-        .max_height((height - 96.0).max(120.0))
-        .show(ui, |ui| {
-            for (index, line) in lines.iter_mut().enumerate() {
-                ui.horizontal(|ui| {
-                    if theme::action_button(
-                        ui,
-                        if line.output.is_empty() {
-                            "output…"
-                        } else {
-                            &line.output
-                        },
-                        true,
-                    )
-                    .clicked()
-                    {
-                        plc.fbd_pick = Some(FbdPick {
-                            line: index,
-                            input: None,
-                        });
-                    }
-                    ui.label(RichText::new(":=").monospace().color(theme::MUTED));
-                    if theme::action_button(ui, &line.block, true).clicked() {
-                        let position = BLOCKS
-                            .iter()
-                            .position(|block| block.eq_ignore_ascii_case(&line.block))
-                            .map(|position| (position + 1) % BLOCKS.len())
-                            .unwrap_or(0);
-                        line.block = BLOCKS[position].to_string();
-                        changed = true;
-                    }
-                    for (position, input) in line.inputs.clone().iter().enumerate() {
-                        if theme::action_button(ui, input, true).clicked() {
-                            plc.fbd_pick = Some(FbdPick {
-                                line: index,
-                                input: Some(position),
-                            });
-                        }
-                    }
-                    if theme::action_button(ui, "+ in", true).clicked() {
-                        plc.fbd_pick = Some(FbdPick {
-                            line: index,
-                            input: Some(line.inputs.len()),
-                        });
-                    }
-                    let timer = line.block.starts_with("TON")
-                        || line.block.starts_with("TOF")
-                        || line.block.starts_with("TP")
-                        || line.block.starts_with("CTU")
-                        || line.block.starts_with("CTD");
-                    if timer {
-                        let mut preset = line.preset.clone();
-                        if ui
-                            .add(
-                                egui::TextEdit::singleline(&mut preset)
-                                    .desired_width(80.0)
-                                    .hint_text("T#1s"),
-                            )
-                            .changed()
-                        {
-                            line.preset = preset;
-                            changed = true;
-                        }
-                    }
-                    if theme::action_button(ui, "remove", true).clicked() {
-                        remove = Some(index);
-                    }
-                });
-                let mut comment = line.comment.clone();
-                if ui
-                    .add(
-                        egui::TextEdit::singleline(&mut comment)
-                            .desired_width(420.0)
-                            .hint_text("comment"),
-                    )
-                    .changed()
-                {
-                    line.comment = comment;
-                    changed = true;
-                }
-                ui.add_space(4.0);
-            }
-        });
-    if let Some(index) = remove {
-        lines.remove(index);
-        changed = true;
-    }
-    if theme::action_button(ui, "ADD LINE", true).clicked() {
-        lines.push(FbdLine::new("output", "AND"));
-        changed = true;
-    }
-    if changed {
-        actions.push(Action::SetFbd(lines));
-    }
+    ui.add_space(2.0);
+    fbd_grid_view(plc, &grid, ui, height, actions);
 }
 
 #[allow(dead_code)]
