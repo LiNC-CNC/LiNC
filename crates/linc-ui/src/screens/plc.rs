@@ -777,6 +777,8 @@ pub struct PlcUi {
     pub block_edit: Option<(usize, usize, usize)>,
     /// An FBD line's output or one of its inputs is being picked.
     pub fbd_pick: Option<FbdPick>,
+    /// The block on this FBD line is being edited (instance and preset).
+    pub fbd_box_edit: Option<usize>,
     /// Boolean traces for the trend page.
     pub trend: TrendBuffer,
     /// Per-scan window from the daemon, when one is connected.
@@ -834,6 +836,7 @@ impl Default for PlcUi {
             xref: None,
             block_edit: None,
             fbd_pick: None,
+            fbd_box_edit: None,
             trend: TrendBuffer::default(),
             trend_remote: TrendData::default(),
             words: Vec::new(),
@@ -1875,6 +1878,7 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
     });
     if language == PouLanguage::Fbd {
         fbd_picker(plc, ui.ctx(), actions);
+        fbd_box_editor(plc, ui.ctx(), actions);
     }
     ui.add_space(2.0);
     let right_width = 296.0_f32.min(ui.available_width() * 0.34);
@@ -1941,15 +1945,16 @@ fn il_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32) {
 
 /// Draw the lines as a diagram: inputs enter on their own rows, the block spans
 /// them, and its output leaves on the top row, which is the shape ZX draws.
-fn fbd_diagram(lines: &[FbdLine], ui: &mut Ui) {
+fn fbd_diagram(plc: &mut PlcUi, lines: &[FbdLine], ui: &mut Ui) {
     if lines.is_empty() {
         return;
     }
     let row = 18.0_f32;
-    for line in lines {
+    for (line_index, line) in lines.iter().enumerate() {
         let rows = line.inputs.len().max(1) as f32;
         let height = rows * row + 6.0;
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
         let painter = ui.painter();
         painter.rect_filled(rect, 3.0, theme::SURFACE);
         let box_left = rect.left() + 132.0;
@@ -1987,15 +1992,21 @@ fn fbd_diagram(lines: &[FbdLine], ui: &mut Ui) {
             2.0,
             theme::PANEL_RAISED,
         );
+        let block_rect = egui::Rect::from_min_max(
+            pos2(box_left, top),
+            pos2(box_right, top + (rows * row).max(row)),
+        );
         painter.rect_stroke(
-            egui::Rect::from_min_max(
-                pos2(box_left, top),
-                pos2(box_right, top + (rows * row).max(row)),
-            ),
+            block_rect,
             2.0,
             Stroke::new(1.0, theme::ACCENT),
             egui::StrokeKind::Inside,
         );
+        if let Some(pointer) = response.interact_pointer_pos() {
+            if block_rect.contains(pointer) && response.clicked() {
+                plc.fbd_box_edit = Some(line_index);
+            }
+        }
         painter.text(
             pos2((box_left + box_right) / 2.0, first_y),
             egui::Align2::CENTER_CENTER,
@@ -2024,6 +2035,89 @@ fn fbd_diagram(lines: &[FbdLine], ui: &mut Ui) {
                 theme::MUTED,
             );
         }
+    }
+}
+
+/// The value list for an FBD output or input: declared symbols (with their
+/// comments), the word bank, block members, booleans, numbers and times.
+/// Instance and preset of the block on one FBD line. The same choices the ladder
+/// box editor offers, written back through `SetFbd`.
+fn fbd_box_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    let Some(index) = plc.fbd_box_edit else {
+        return;
+    };
+    let mut lines = plc.current_pou().map(|pou| pou.fbd).unwrap_or_default();
+    let Some(line) = lines.get(index).cloned() else {
+        plc.fbd_box_edit = None;
+        return;
+    };
+    let letters: String = line
+        .block
+        .chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .collect();
+    let timer = matches!(letters.as_str(), "TON" | "TOF" | "TP");
+    let counter = matches!(letters.as_str(), "CTU" | "CTD");
+    let mut close = false;
+    let mut apply: Option<String> = None;
+    egui::Window::new(format!("{} · {}", line.block, line.output))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            if timer || counter {
+                ui.label(
+                    RichText::new("instance")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                ui.horizontal(|ui| {
+                    for number in 0..4 {
+                        let name = format!("{letters}{number}");
+                        if theme::action_button(ui, &name, true).clicked() {
+                            apply = Some(name);
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("preset")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                ui.horizontal_wrapped(|ui| {
+                    let presets: &[&str] = if timer {
+                        &["T#100ms", "T#500ms", "T#1s", "T#2s", "T#5s", "T#10s"]
+                    } else {
+                        &["1", "5", "10", "50", "100", "1000"]
+                    };
+                    for value in presets {
+                        if ui.button(*value).clicked() {
+                            if let Some(edited) = lines.get_mut(index) {
+                                edited.preset = (*value).to_string();
+                            }
+                            actions.push(Action::SetFbd(lines.clone()));
+                            close = true;
+                        }
+                    }
+                });
+            } else {
+                ui.label("This block has no instance or preset.");
+            }
+            ui.add_space(4.0);
+            if theme::action_button(ui, "Close", true).clicked() {
+                close = true;
+            }
+        });
+    if let Some(name) = apply {
+        if let Some(edited) = lines.get_mut(index) {
+            edited.block = name;
+        }
+        actions.push(Action::SetFbd(lines));
+        close = true;
+    }
+    if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        plc.fbd_box_edit = None;
     }
 }
 
@@ -2141,10 +2235,12 @@ fn fbd_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
     ];
     let mut lines = plc.current_pou().map(|pou| pou.fbd).unwrap_or_default();
     let mut changed = false;
-    fbd_diagram(&lines, ui);
+    fbd_diagram(plc, &lines, ui);
     ui.add_space(6.0);
     ui.label(
-        RichText::new("output := BLOCK(inputs)   ·   click the block to cycle it")
+        RichText::new(
+            "click a block in the diagram for its instance and preset · output := BLOCK(inputs)",
+        )
             .size(theme::font_size(9.0))
             .color(theme::MUTED),
     );
