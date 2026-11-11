@@ -884,7 +884,7 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
 }
 
 /// The cell with its operand replaced, keeping its kind and negation.
-fn with_operand(cell: &Cell, name: &str) -> Cell {
+pub fn with_operand(cell: &Cell, name: &str) -> Cell {
     match cell {
         Cell::Contact { negated, .. } => Cell::Contact {
             var: name.to_string(),
@@ -1135,12 +1135,7 @@ pub fn grid_rung(
         ui.spacing_mut().item_spacing.x = 2.0;
         for position in 0..POSITIONS {
             let cell = cells.get(position).cloned().unwrap_or(Cell::Wire);
-            let label = match &cell {
-                Cell::Contact { var, .. }
-                | Cell::Edge { var, .. }
-                | Cell::Block { instance: var, .. } => plc.operand_label(var),
-                other => cell_label(other),
-            };
+            let label = grid_cell_label(plc, &cell);
             cell_box(
                 plc,
                 ui,
@@ -1205,6 +1200,29 @@ fn cell_box(
         FontId::monospace(theme::font_size(9.5)),
         color,
     );
+}
+
+/// What a cell shows: the operand in the chosen name/address mode, with the
+/// negation and edge markers the element itself carries. Rendering it through
+/// `operand_label` alone dropped the `/`, which made a negated contact look
+/// identical to a plain one.
+pub fn grid_cell_label(plc: &PlcUi, cell: &Cell) -> String {
+    match cell {
+        Cell::Contact { var, negated } => {
+            let name = plc.operand_label(var);
+            if *negated {
+                format!("/{name}")
+            } else {
+                name
+            }
+        }
+        Cell::Edge { var, rising } => {
+            let name = plc.operand_label(var);
+            format!("{}{name}", if *rising { "P " } else { "N " })
+        }
+        Cell::Block { instance, .. } => plc.operand_label(instance),
+        other => cell_label(other),
+    }
 }
 
 fn cell_label(cell: &Cell) -> String {

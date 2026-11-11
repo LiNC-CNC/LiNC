@@ -5444,3 +5444,47 @@ mod coil_pick_tests {
         assert!(plc.coil_pick.is_none(), "the picker closes on a pick");
     }
 }
+
+#[cfg(test)]
+mod negated_contact_tests {
+    use super::*;
+
+    /// The chain behind `X`: the picker's cell keeps its negation, `SetCell`
+    /// stores it, and the grid draws the `/` that tells the operator so.
+    #[test]
+    fn a_negated_contact_survives_the_picker_and_draws_a_slash() {
+        let picked = crate::screens::plc_grid::with_operand(
+            &Cell::Contact {
+                var: String::new(),
+                negated: true,
+            },
+            "estop",
+        );
+        assert_eq!(
+            picked,
+            Cell::Contact {
+                var: "estop".into(),
+                negated: true
+            }
+        );
+
+        let mut plc = PlcUi::default();
+        plc.apply(Action::SetCell {
+            section: 0,
+            rung: 0,
+            position: 2,
+            cell: picked.clone(),
+        });
+        let rungs = plc.current_pou_sections();
+        assert_eq!(
+            rungs[0].rungs[0].cells[2], picked,
+            "the cell keeps its negation in the project"
+        );
+
+        assert_eq!(
+            crate::screens::plc_grid::grid_cell_label(&plc, &picked),
+            "/estop",
+            "a negated contact is drawn with its slash"
+        );
+    }
+}
