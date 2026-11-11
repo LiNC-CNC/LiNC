@@ -113,6 +113,11 @@ impl Vm {
                     let left = pop(&stack, &mut depth);
                     push(&mut stack, &mut depth, left || right);
                 }
+                Op::Xor => {
+                    let right = pop(&stack, &mut depth);
+                    let left = pop(&stack, &mut depth);
+                    push(&mut stack, &mut depth, left ^ right);
+                }
                 Op::Store(index) => {
                     let value = pop(&stack, &mut depth);
                     if let Some(cell) = self.next.get_mut(index as usize) {

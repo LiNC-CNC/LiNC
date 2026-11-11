@@ -5,7 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{PouLanguage, Section, IoDirection, Logic, Project};
+use crate::il::{parse_line, IlLine, UNSUPPORTED};
+use crate::model::{IoDirection, Logic, PouLanguage, Project, Section};
 use crate::SCHEMA_VERSION;
 
 /// Maximum accepted logic nesting depth.
@@ -131,17 +132,53 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     }
 
     let pous = project.all_pous();
+    let known: HashSet<String> = project
+        .io
+        .iter()
+        .map(|point| point.name.to_ascii_lowercase())
+        .chain(project.vars.iter().map(|var| var.name.to_ascii_lowercase()))
+        .collect();
     for (index, pou) in pous.iter().enumerate() {
-        if pou.language != PouLanguage::Ld {
-            diagnostics.push(Diagnostic::error(
+        match pou.language {
+            PouLanguage::Ld => {}
+            PouLanguage::Il => {
+                for (line_index, line) in pou.il.iter().enumerate() {
+                    let path = format!("pous[{index}].il[{line_index}]");
+                    match parse_line(line) {
+                        IlLine::Instruction { mnemonic, operand } => {
+                            if UNSUPPORTED.contains(&mnemonic.as_str()) {
+                                diagnostics.push(Diagnostic::error(
+                                    "il_unsupported",
+                                    format!("'{mnemonic}' is not implemented yet"),
+                                    path,
+                                ));
+                            } else if !known.contains(&operand.to_ascii_lowercase()) {
+                                diagnostics.push(Diagnostic::error(
+                                    "il_operand",
+                                    format!(
+                                        "'{operand}' is not a declared input, output or variable"
+                                    ),
+                                    path,
+                                ));
+                            }
+                        }
+                        IlLine::Label(name) => diagnostics.push(Diagnostic::error(
+                            "il_label",
+                            format!("label '{name}' needs jumps, which are not implemented yet"),
+                            path,
+                        )),
+                        IlLine::Bad(message) => {
+                            diagnostics.push(Diagnostic::error("il", message, path))
+                        }
+                        IlLine::Blank | IlLine::Comment => {}
+                    }
+                }
+            }
+            PouLanguage::Fbd => diagnostics.push(Diagnostic::error(
                 "language",
-                format!(
-                    "POU '{}' is {}; that compiler is not implemented yet",
-                    pou.name,
-                    pou.language.label()
-                ),
+                format!("POU '{}' is FBD; that compiler is not implemented yet", pou.name),
                 format!("pous[{index}].language"),
-            ));
+            )),
         }
         if pou.name.trim().is_empty() {
             diagnostics.push(Diagnostic::error(

@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{CoilKind, IoDirection, Logic, Project};
+use crate::il::{lower_line, parse_line, IlLine};
+use crate::model::{CoilKind, IoDirection, Logic, PouLanguage, Project};
 use crate::validate::{validate, Diagnostic, Severity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +37,7 @@ pub enum Op {
     Not,
     And,
     Or,
+    Xor,
     Store(u16),
     Set(u16),
     Reset(u16),
@@ -121,15 +123,40 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
 
     let mut ops = Vec::new();
     let pous = project.all_pous();
-    for section in pous.iter().flat_map(|pou| pou.sections.iter()) {
-        for rung in &section.rungs {
-            lower_logic(&rung.logic, &lookup, &mut ops);
-            let index = lookup.get(rung.coil.var.as_str()).copied().unwrap_or(0);
-            ops.push(match rung.coil.kind {
-                CoilKind::Normal => Op::Store(index),
-                CoilKind::Set => Op::Set(index),
-                CoilKind::Reset => Op::Reset(index),
-            });
+    // IL operands are typed by hand; accept any spelling of a declared name.
+    let lookup_ci: HashMap<String, u16> = lookup
+        .iter()
+        .map(|(name, index)| (name.to_ascii_lowercase(), *index))
+        .collect();
+    for pou in &pous {
+        match pou.language {
+            PouLanguage::Ld => {
+                for section in &pou.sections {
+                    for rung in &section.rungs {
+                        lower_logic(&rung.logic, &lookup, &mut ops);
+                        let index = lookup.get(rung.coil.var.as_str()).copied().unwrap_or(0);
+                        ops.push(match rung.coil.kind {
+                            CoilKind::Normal => Op::Store(index),
+                            CoilKind::Set => Op::Set(index),
+                            CoilKind::Reset => Op::Reset(index),
+                        });
+                    }
+                }
+            }
+            PouLanguage::Il => {
+                for line in &pou.il {
+                    if let IlLine::Instruction { mnemonic, operand } = parse_line(line) {
+                        let index = lookup
+                            .get(operand.as_str())
+                            .or_else(|| lookup_ci.get(&operand.to_ascii_lowercase()))
+                            .copied()
+                            .unwrap_or(0);
+                        lower_line(&mnemonic, index, &mut ops);
+                    }
+                }
+            }
+            // Validation refuses these before lowering runs.
+            PouLanguage::Fbd => {}
         }
     }
 
@@ -159,10 +186,7 @@ pub fn project_hash(project: &Project) -> String {
     const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
 
-    let bytes = match serde_json::to_vec(project) {
-        Ok(bytes) => bytes,
-        Err(_) => Vec::new(),
-    };
+    let bytes = serde_json::to_vec(project).unwrap_or_default();
     let mut hash = OFFSET_BASIS;
     for byte in bytes {
         hash ^= u64::from(byte);
