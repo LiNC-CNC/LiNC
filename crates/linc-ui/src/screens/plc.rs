@@ -170,6 +170,11 @@ pub enum Action {
         instance: Option<String>,
         preset: Option<String>,
     },
+    /// Insert a row directly after `row`, without consulting the tree selection.
+    AddRungAfter {
+        section: usize,
+        row: usize,
+    },
     /// Remove a ladder row.
     DeleteRung {
         section: usize,
@@ -1471,6 +1476,35 @@ impl PlcUi {
                 }
             }
             Action::Delete => self.delete_selection(),
+            Action::AddRungAfter { section, row } => {
+                let input = default_input_var(&self.project);
+                let output = default_output_var(&self.project);
+                let mut pous = self.project.all_pous();
+                let mut made = None;
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    if let Some(target) = pou.sections.get_mut(section) {
+                        let at = (row + 1).min(target.rungs.len());
+                        target.rungs.insert(
+                            at,
+                            Rung {
+                                cells: Vec::new(),
+                                comment: String::new(),
+                                logic: Logic::Contact {
+                                    var: input,
+                                    negated: false,
+                                },
+                                coil: Coil::new(output, CoilKind::Normal),
+                            },
+                        );
+                        made = Some(at);
+                    }
+                }
+                self.project.set_pous(pous);
+                if let Some(at) = made {
+                    self.selection = Some(NodePath::root(section, at));
+                }
+                self.normalise_selection();
+            }
             Action::DeleteRung { section, rung } => {
                 // A row directly under a Link is that link's parallel branch;
                 // deleting it would leave the link joined to an unrelated row.
@@ -2187,7 +2221,9 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
             );
         }
     }
-    common::focus_anchor(ui, "plc-editor-focus");
+    // Locked: the grid owns the arrows, and an unlocked anchor let egui walk the
+    // focus away on a plain Left/Right, so the cursor never moved.
+    common::focus_anchor_locked(ui, "plc-editor-focus", true);
     // The menu bar does not take clicks in this build, so the pages and the
     // two actions the workflow needs every minute have keys as well.
     let (to_pous, to_edit, to_symbols, to_sim, add_rung, save, add_row, delete_row) = (
@@ -2222,7 +2258,12 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         app.plc.page = PlcPage::Sim;
     }
     if add_rung {
-        app.plc.apply(Action::AddRung);
+        let (section, row) = app
+            .plc
+            .cell_cursor
+            .map(|cursor| (cursor.0, cursor.1))
+            .unwrap_or((0, 0));
+        app.plc.apply(Action::AddRungAfter { section, row });
     }
     if delete_row {
         if let Some((section, rung)) = app.plc.cell_cursor.map(|cursor| (cursor.0, cursor.1)) {
@@ -2231,15 +2272,14 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         }
     }
     if add_row {
-        // Add the row after the cursor, not after whatever the tree selection
-        // happens to be: `AddRung` reads the selection.
+        // Explicit row, not the tree selection: `AddRung` reads the selection,
+        // which is not the cell cursor and inserted the row in the wrong place.
         let (section, row) = app
             .plc
             .cell_cursor
             .map(|cursor| (cursor.0, cursor.1))
             .unwrap_or((0, 0));
-        app.plc.selection = Some(NodePath::root(section, row));
-        app.plc.apply(Action::AddRung);
+        app.plc.apply(Action::AddRungAfter { section, row });
         app.plc.cell_cursor = Some((section, row + 1, 0));
     }
     if save {
