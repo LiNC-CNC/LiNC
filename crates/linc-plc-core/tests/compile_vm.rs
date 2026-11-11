@@ -1152,3 +1152,38 @@ fn a_grid_block_chains_through_the_cell_to_its_left() {
     vm.scan(&[true, true, false]);
     assert_eq!(vm.outputs(), &[true, false], "z is not (a and b)");
 }
+
+#[test]
+fn a_tree_rung_can_hold_a_block_an_edge_and_a_compare() {
+    let logic = Logic::series(vec![
+        Logic::contact("a", false),
+        Logic::Block {
+            block: "TON".into(),
+            instance: "TON0".into(),
+            preset: "T#1s".into(),
+        },
+        Logic::Edge {
+            var: "b".into(),
+            rising: true,
+        },
+    ]);
+    let mut project = simple_project(logic, Coil::new("y", CoilKind::Normal));
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan_with_dt(&[true, false], 400);
+    assert_eq!(vm.outputs(), &[false], "the timer is still counting");
+    vm.scan_with_dt(&[true, false], 700);
+    assert_eq!(vm.outputs(), &[false], "Q is on but b has not risen");
+    vm.scan_with_dt(&[true, true], 20);
+    assert_eq!(vm.outputs(), &[true], "b rose");
+
+    // A compare in a series behaves like a contact.
+    project.sections[0].rungs[0].logic = Logic::series(vec![Logic::Compare {
+        operator: "GE".into(),
+        left: "MW0".into(),
+        right: "5".into(),
+    }]);
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.set_word(0, 5);
+    vm.scan(&[]);
+    assert_eq!(vm.outputs(), &[true]);
+}

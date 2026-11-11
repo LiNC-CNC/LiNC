@@ -320,6 +320,24 @@ pub struct Rung {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Logic {
+    /// A function block in a rung: the power so far is its input, `Q` the power
+    /// on. `preset` is the `PT`/`PV` a block was imported or drawn with.
+    Block {
+        block: String,
+        #[serde(default)]
+        instance: String,
+        #[serde(default)]
+        preset: String,
+    },
+    /// A rising or falling edge contact.
+    Edge { var: String, rising: bool },
+    /// A compare contact over two word values. `operator` is GT, GE, EQ, NE, LE
+    /// or LT; the tag already owns the name `op`.
+    Compare {
+        operator: String,
+        left: String,
+        right: String,
+    },
     Const { value: bool },
     Contact { var: String, negated: bool },
     Series { items: Vec<Logic> },

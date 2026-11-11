@@ -949,13 +949,48 @@ fn check_logic(
 ) {
     match logic {
         Logic::Const { .. } => {}
-        Logic::Contact { var, .. } => {
+        Logic::Contact { var, .. } | Logic::Edge { var, .. } => {
             if !symbols.contains_key(var.as_str()) {
                 diagnostics.push(Diagnostic::error(
                     "unknown_symbol",
                     format!("contact `{var}` is not declared"),
                     format!("{path}.var"),
                 ));
+            }
+        }
+        Logic::Block {
+            block,
+            instance,
+            preset,
+        } => {
+            if crate::compile::parse_block(block, instance, preset).is_none() {
+                diagnostics.push(Diagnostic::error(
+                    "unknown_block",
+                    format!("`{block}` is not a block; use TON/TOF/TP/CTU/CTD/SR/RS/RT/RF"),
+                    format!("{path}.block"),
+                ));
+            }
+        }
+        Logic::Compare {
+            operator,
+            left,
+            right,
+        } => {
+            if crate::compile::compare_op(operator).is_none() {
+                diagnostics.push(Diagnostic::error(
+                    "compare_operator",
+                    format!("`{operator}` is not GT, GE, EQ, NE, LE or LT"),
+                    format!("{path}.operator"),
+                ));
+            }
+            for operand in [left, right] {
+                if crate::compile::word_operand_value(operand).is_none() {
+                    diagnostics.push(Diagnostic::error(
+                        "compare_operand",
+                        format!("`{operand}` is not a word, a number or a block member"),
+                        format!("{path}.left"),
+                    ));
+                }
             }
         }
         Logic::Series { items } => {

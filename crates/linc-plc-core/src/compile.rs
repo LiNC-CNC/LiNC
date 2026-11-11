@@ -401,7 +401,7 @@ fn lower_pou(
                 while index < section.rungs.len() {
                     if section.rungs[index].cells.is_empty() {
                         let rung = &section.rungs[index];
-                        lower_logic(&rung.logic, lookup, ops);
+                        lower_logic(&rung.logic, lookup, edges, ops);
                         store_coil(ops, lookup, &rung.coil);
                         index += 1;
                         continue;
@@ -1200,7 +1200,7 @@ fn store_coil(ops: &mut Vec<Op>, lookup: &HashMap<String, u16>, coil: &crate::mo
     });
 }
 
-fn lower_logic(logic: &Logic, lookup: &HashMap<String, u16>, ops: &mut Vec<Op>) {
+fn lower_logic(logic: &Logic, lookup: &HashMap<String, u16>, edges: &mut u16, ops: &mut Vec<Op>) {
     match logic {
         Logic::Const { value } => ops.push(Op::PushConst(*value)),
         Logic::Contact { var, negated } => {
@@ -1209,26 +1209,99 @@ fn lower_logic(logic: &Logic, lookup: &HashMap<String, u16>, ops: &mut Vec<Op>) 
                 ops.push(Op::Not);
             }
         }
-        Logic::Series { items } => lower_nary(items, lookup, ops, Op::And, Op::PushConst(true)),
-        Logic::Parallel { items } => lower_nary(items, lookup, ops, Op::Or, Op::PushConst(false)),
-    }
-}
-
-fn lower_nary(
-    items: &[Logic],
-    lookup: &HashMap<String, u16>,
-    ops: &mut Vec<Op>,
-    combine: Op,
-    empty: Op,
-) {
-    if items.is_empty() {
-        ops.push(empty);
-        return;
-    }
-    for (index, item) in items.iter().enumerate() {
-        lower_logic(item, lookup, ops);
-        if index > 0 {
-            ops.push(combine);
+        Logic::Edge { var, rising } => {
+            let slot = *edges;
+            *edges = edges.saturating_add(1);
+            ops.push(Op::Edge {
+                slot,
+                var: lookup.get(var.as_str()).copied().unwrap_or(0),
+                rising: *rising,
+            });
+        }
+        Logic::Compare {
+            operator,
+            left,
+            right,
+        } => {
+            let (Some(left), Some(right)) = (
+                word_operand_value(left),
+                word_operand_value(right),
+            ) else {
+                ops.push(Op::PushConst(false));
+                return;
+            };
+            emit_word(ops, left);
+            emit_word(ops, right);
+            match compare_op(operator) {
+                Some(compare) => ops.push(compare),
+                None => ops.push(Op::PushConst(false)),
+            }
+        }
+        Logic::Block {
+            block,
+            instance,
+            preset,
+        } => {
+            match parse_block(block, instance, preset) {
+                Some((kind, instance, preset)) => ops.push(Op::Fb {
+                    kind,
+                    instance,
+                    preset,
+                }),
+                None => ops.push(Op::PushConst(false)),
+            }
+        }
+        Logic::Series { items } => {
+            // Power flows left to right. A block consumes the power so far as
+            // its input and pushes Q, so the rest of the rung continues from
+            // the block's output.
+            let mut powered = false;
+            for item in items {
+                match item {
+                    Logic::Block {
+                        block,
+                        instance,
+                        preset,
+                    } => {
+                        if !powered {
+                            ops.push(Op::PushConst(true));
+                        }
+                        match parse_block(block, instance, preset) {
+                            Some((kind, instance, preset)) => ops.push(Op::Fb {
+                                kind,
+                                instance,
+                                preset,
+                            }),
+                            None => ops.push(Op::PushConst(false)),
+                        }
+                    }
+                    other => {
+                        lower_logic(other, lookup, edges, ops);
+                        if powered {
+                            ops.push(Op::And);
+                        }
+                    }
+                }
+                powered = true;
+            }
+            if !powered {
+                ops.push(Op::PushConst(true));
+            }
+        }
+        Logic::Parallel { items } => {
+            if items.is_empty() {
+                ops.push(Op::PushConst(false));
+            } else {
+                for (index, item) in items.iter().enumerate() {
+                    lower_logic(item, lookup, edges, ops);
+                    if index > 0 {
+                        ops.push(Op::Or);
+                    }
+                }
+            }
         }
     }
 }
+
+
+
