@@ -1391,6 +1391,7 @@ fn expr_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     } else {
         "COMPARE CONTACT  G"
     })
+    .order(egui::Order::Foreground)
     .collapsible(false)
     .resizable(false)
     .anchor(Align2::CENTER_CENTER, [0.0, 0.0])

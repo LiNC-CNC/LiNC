@@ -2247,13 +2247,15 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         // behind, which is how a correct driver loop kept pressing arrows.
         {
             eprintln!(
-                "plc keys: page={:?} text_editing={} focus={:?} picker={} operand_pick={} coil_pick={} cursor={:?}",
+                "plc keys: page={:?} text_editing={} focus={:?} picker={} operand_pick={} coil_pick={} expr={} block={} cursor={:?}",
                 app.plc.page,
                 app.plc.text_editing,
                 ui.ctx().memory(|memory| memory.focused()),
                 app.plc.picker.is_some(),
                 app.plc.operand_pick.is_some(),
                 app.plc.coil_pick.is_some(),
+                app.plc.expr_edit.is_some(),
+                app.plc.block_edit.is_some(),
                 app.plc.cell_cursor,
             );
         }
