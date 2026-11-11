@@ -71,9 +71,8 @@ impl Cell {
     /// Does this cell need a feature the compiler does not have yet?
     pub fn unsupported(&self) -> Option<&'static str> {
         match self {
-            Self::Wire | Self::Contact { .. } | Self::Link => None,
+            Self::Wire | Self::Contact { .. } | Self::Link | Self::Block { .. } => None,
             Self::Edge { .. } => Some("edge contacts"),
-            Self::Block { .. } => Some("timer and counter boxes"),
             Self::Compare { .. } => Some("compare contacts"),
             Self::Compute { .. } => Some("compute coils"),
         }

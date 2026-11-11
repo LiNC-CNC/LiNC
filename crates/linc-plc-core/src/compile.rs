@@ -30,6 +30,46 @@ pub struct Binding {
     pub index: u16,
 }
 
+/// Standard function blocks, four instances each, as ZX-PLC numbers them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FbKind {
+    Ton,
+    Tof,
+    Tp,
+    Ctu,
+    Ctd,
+}
+
+impl FbKind {
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.to_ascii_uppercase().as_str() {
+            "TON" => Some(Self::Ton),
+            "TOF" => Some(Self::Tof),
+            "TP" => Some(Self::Tp),
+            "CTU" => Some(Self::Ctu),
+            "CTD" => Some(Self::Ctd),
+            _ => None,
+        }
+    }
+
+    pub fn code(self) -> u16 {
+        match self {
+            Self::Ton => 0,
+            Self::Tof => 1,
+            Self::Tp => 2,
+            Self::Ctu => 3,
+            Self::Ctd => 4,
+        }
+    }
+
+    pub fn is_timer(self) -> bool {
+        matches!(self, Self::Ton | Self::Tof | Self::Tp)
+    }
+}
+
+/// Instances per function-block type.
+pub const FB_PER_TYPE: u16 = 4;
+
 /// Word slots in the bank. ZX-PLC has `MW0`-`MW15`; keeping the same sixteen
 /// means an existing ZX program's `MW` numbers mean the same thing here.
 pub const WORD_COUNT: u16 = 16;
@@ -63,6 +103,16 @@ pub enum Op {
     CmpNe,
     CmpLe,
     CmpLt,
+    /// Run a standard function block: pop its input, push `Q`.
+    Fb {
+        kind: FbKind,
+        instance: u16,
+        preset: i16,
+    },
+    /// Push the block's `ET` (timers) or `CV` (counters) on the word stack.
+    FbWord(u16),
+    /// Push the block's `Q` on the bit stack.
+    FbQ(u16),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +122,8 @@ pub struct Program {
     pub var_count: u16,
     /// Word slots in the integer bank.
     pub word_count: u16,
+    /// Function-block instances: `FB_PER_TYPE` per kind, index `kind*4 + n`.
+    pub fb_count: u16,
     pub input_count: u16,
     pub output_count: u16,
 }
@@ -177,8 +229,7 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
                         }
                         let mut offset = 0;
                         while offset < run.len() {
-                            let (logic, used) = crate::grid::lower_rung(&run, offset);
-                            lower_logic(&logic, &lookup, &mut ops);
+                            let used = lower_grid_rung(&run, offset, &lookup, &mut ops);
                             store_coil(&mut ops, &lookup, &section.rungs[index + offset].coil);
                             offset += used;
                         }
@@ -200,6 +251,7 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
 
     let program = Program {
         word_count: WORD_COUNT,
+        fb_count: FB_PER_TYPE * 5,
         ops,
         var_count: symbols.len() as u16,
         input_count: inputs.len() as u16,
@@ -250,6 +302,150 @@ fn intern(
     });
     lookup.insert(name.to_string(), index);
     index
+}
+
+/// Lower one grid row to ops, leaving exactly one power bit on the stack.
+///
+/// Power starts true at the rail. A contact pops nothing: it pushes its operand
+/// and ANDs it with the power so far. A box consumes the power as its input and
+/// pushes `Q`, so the rung continues from the block's output. A row with no
+/// element is a true rung.
+fn lower_cells(cells: &[crate::grid::Cell], lookup: &HashMap<String, u16>, ops: &mut Vec<Op>) {
+    let mut has_power = false;
+    for cell in cells {
+        match cell {
+            crate::grid::Cell::Wire | crate::grid::Cell::Link => continue,
+            crate::grid::Cell::Contact { var, negated } => {
+                let index = lookup.get(var.as_str()).copied().unwrap_or(0);
+                ops.push(Op::Push(index));
+                if *negated {
+                    ops.push(Op::Not);
+                }
+                if has_power {
+                    ops.push(Op::And);
+                }
+            }
+            crate::grid::Cell::Block {
+                block,
+                instance,
+                preset,
+            } => {
+                if !has_power {
+                    ops.push(Op::PushConst(true));
+                }
+                if let Some((kind, instance, preset)) = parse_block(block, instance, preset) {
+                    ops.push(Op::Fb {
+                        kind,
+                        instance,
+                        preset,
+                    });
+                } else {
+                    // Validation refused this cell; keep the rung alive.
+                    ops.push(Op::PushConst(false));
+                }
+            }
+            // Validation refuses these until their semantics exist.
+            crate::grid::Cell::Edge { .. }
+            | crate::grid::Cell::Compare { .. }
+            | crate::grid::Cell::Compute { .. } => continue,
+        }
+        has_power = true;
+    }
+    if !has_power {
+        ops.push(Op::PushConst(true));
+    }
+}
+
+/// Lower a row and, when it links, the branch below it. Returns rows used.
+fn lower_grid_rung(
+    run: &[Vec<crate::grid::Cell>],
+    index: usize,
+    lookup: &HashMap<String, u16>,
+    ops: &mut Vec<Op>,
+) -> usize {
+    let Some(cells) = run.get(index) else {
+        ops.push(Op::PushConst(true));
+        return 1;
+    };
+    lower_cells(cells, lookup, ops);
+    let mut used = 1;
+    if cells
+        .iter()
+        .any(|cell| matches!(cell, crate::grid::Cell::Link))
+        && index + 1 < run.len()
+    {
+        used += lower_grid_rung(run, index + 1, lookup, ops);
+        ops.push(Op::Or);
+    }
+    used
+}
+
+/// `TON` + `TON2` + `T#4s` -> kind, instance index, preset in ms or counts.
+pub fn parse_block(block: &str, instance: &str, preset: &str) -> Option<(FbKind, u16, i16)> {
+    let instance = instance.trim();
+    let kind = FbKind::parse(block)
+        .or_else(|| {
+            let letters: String = instance
+                .chars()
+                .take_while(|c| c.is_ascii_alphabetic())
+                .collect();
+            FbKind::parse(&letters)
+        })?;
+    let digits: String = instance
+        .chars()
+        .skip_while(|c| c.is_ascii_alphabetic())
+        .collect();
+    let number = digits.parse::<u16>().unwrap_or(0);
+    if number >= FB_PER_TYPE {
+        return None;
+    }
+    let index = kind.code() * FB_PER_TYPE + number;
+    let preset = parse_preset(preset, kind.is_timer())?;
+    Some((kind, index, preset))
+}
+
+/// Presets: `T#4s`, `T#1s500ms`, `T#2m`, or a count. Milliseconds are capped at
+/// what the 16-bit `ET` can hold, which is just under 33 seconds.
+fn parse_preset(text: &str, timer: bool) -> Option<i16> {
+    let text = text.trim();
+    if timer {
+        if text.is_empty() {
+            return Some(1000);
+        }
+        let body = text
+            .strip_prefix("T#")
+            .or_else(|| text.strip_prefix("t#"))
+            .unwrap_or(text);
+        let mut total = 0i32;
+        let mut digits = String::new();
+        let mut rest = body;
+        while !rest.is_empty() {
+            let (number, tail) = match rest.find(|c: char| c.is_ascii_alphabetic()) {
+                Some(index) => rest.split_at(index),
+                None => (rest, ""),
+            };
+            digits.clear();
+            digits.push_str(number);
+            let value: i32 = digits.parse().ok()?;
+            let (unit, tail) = if let Some(tail) = tail.strip_prefix("ms") {
+                (1, tail)
+            } else if let Some(tail) = tail.strip_prefix('s') {
+                (1000, tail)
+            } else if let Some(tail) = tail.strip_prefix('m') {
+                (60_000, tail)
+            } else {
+                return None;
+            };
+            total += value * unit;
+            rest = tail;
+        }
+        Some(total.clamp(0, i32::from(i16::MAX)) as i16)
+    } else {
+        if text.is_empty() {
+            return Some(10);
+        }
+        text.parse::<i16>().ok()
+    }
 }
 
 /// Resolve an IL operand: `MWn`, a decimal literal, or a declared symbol.

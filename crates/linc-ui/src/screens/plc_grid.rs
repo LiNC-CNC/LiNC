@@ -185,9 +185,35 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     }
                 }
                 ui.add_space(4.0);
+                ui.label(
+                    RichText::new("boxes")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                for (label, block, instance, preset) in [
+                    ("TON  T", "TON", "TON0", "T#1s"),
+                    ("TOF  F", "TOF", "TOF0", "T#1s"),
+                    ("TP   U", "TP", "TP0", "T#1s"),
+                    ("CTU  K", "CTU", "CTU0", "10"),
+                    ("CTD  D", "CTD", "CTD0", "10"),
+                ] {
+                    if theme::action_button(ui, label, true).clicked() {
+                        actions.push(Action::SetCell {
+                            section,
+                            rung,
+                            position,
+                            cell: Cell::Block {
+                                block: block.to_string(),
+                                instance: instance.to_string(),
+                                preset: preset.to_string(),
+                            },
+                        });
+                        close = true;
+                    }
+                }
+                ui.add_space(4.0);
                 for (label, reason) in [
                     ("Edge contact  P N", "edge contacts"),
-                    ("Timer / counter  T F U K D", "timer and counter boxes"),
                     ("Compare  G", "compare contacts"),
                     ("Compute  M", "compute coils"),
                 ] {

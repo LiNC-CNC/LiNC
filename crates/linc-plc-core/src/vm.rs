@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-use crate::compile::{Binding, Compiled, Op, Program, SymbolKind};
+use crate::compile::{Binding, Compiled, FbKind, Op, Program, SymbolKind};
 
 /// Operand-stack depth. Validation caps logic nesting at 64, so this is slack.
 const STACK_DEPTH: usize = 128;
@@ -42,6 +42,7 @@ pub struct Vm {
     next: Vec<bool>,
     words: Vec<i16>,
     dt_ms: u16,
+    blocks: Vec<FbState>,
     output_image: Vec<bool>,
     forces: Vec<Option<bool>>,
     scan_count: u64,
@@ -64,6 +65,7 @@ impl Vm {
             next: vec![false; slots],
             words: vec![0; compiled.program.word_count as usize],
             dt_ms: DEFAULT_DT_MS,
+            blocks: vec![FbState::default(); compiled.program.fb_count as usize],
             output_image: vec![false; compiled.outputs.len()],
             forces: vec![None; slots],
             scan_count: 0,
@@ -76,6 +78,7 @@ impl Vm {
         self.prev.fill(false);
         self.next.fill(false);
         self.words.fill(0);
+        self.blocks.fill(FbState::default());
         self.output_image.fill(false);
         self.forces.fill(None);
     }
@@ -181,6 +184,38 @@ impl Vm {
                 Op::CmpNe => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a != b),
                 Op::CmpLe => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a <= b),
                 Op::CmpLt => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a < b),
+                Op::Fb {
+                    kind,
+                    instance,
+                    preset,
+                } => {
+                    let input = pop(&stack, &mut depth);
+                    let q = run_block(
+                        &mut self.blocks,
+                        instance as usize,
+                        kind,
+                        input,
+                        preset,
+                        self.dt_ms,
+                    );
+                    push(&mut stack, &mut depth, q);
+                }
+                Op::FbWord(instance) => {
+                    let value = self
+                        .blocks
+                        .get(instance as usize)
+                        .map(|state| state.value)
+                        .unwrap_or(0);
+                    push_word(&mut word_stack, &mut word_depth, value);
+                }
+                Op::FbQ(instance) => {
+                    let value = self
+                        .blocks
+                        .get(instance as usize)
+                        .map(|state| state.q)
+                        .unwrap_or(false);
+                    push(&mut stack, &mut depth, value);
+                }
             }
         }
 
@@ -209,6 +244,22 @@ impl Vm {
     /// Output values in compiled output order, as produced by the last scan.
     pub fn outputs(&self) -> &[bool] {
         &self.output_image
+    }
+
+    /// `ET`/`CV` of a block instance.
+    pub fn block_value(&self, instance: u16) -> i16 {
+        self.blocks
+            .get(instance as usize)
+            .map(|state| state.value)
+            .unwrap_or(0)
+    }
+
+    /// `Q` of a block instance.
+    pub fn block_q(&self, instance: u16) -> bool {
+        self.blocks
+            .get(instance as usize)
+            .map(|state| state.q)
+            .unwrap_or(false)
     }
 
     /// Read a word slot of the bank.
@@ -286,6 +337,86 @@ fn apply_forces(image: &mut [bool], forces: &[Option<bool>]) {
             }
         }
     }
+}
+
+/// A standard function block, one record per instance.
+#[derive(Debug, Clone, Copy, Default)]
+struct FbState {
+    input: bool,
+    q: bool,
+    running: bool,
+    /// `ET` of a timer, `CV` of a counter.
+    value: i16,
+}
+
+/// Advance one block and return its `Q`. `dt` is the scan delta in
+/// milliseconds; presets are milliseconds for timers and counts for counters.
+fn run_block(
+    blocks: &mut [FbState],
+    instance: usize,
+    kind: FbKind,
+    input: bool,
+    preset: i16,
+    dt: u16,
+) -> bool {
+    let Some(state) = blocks.get_mut(instance) else {
+        return false;
+    };
+    let preset = preset.max(0);
+    let dt = i16::try_from(dt).unwrap_or(i16::MAX);
+    match kind {
+        FbKind::Ton => {
+            if input {
+                state.value = state.value.saturating_add(dt).min(preset);
+                state.q = state.value >= preset;
+            } else {
+                state.value = 0;
+                state.q = false;
+            }
+        }
+        FbKind::Tof => {
+            if input {
+                state.value = 0;
+                state.q = true;
+                state.running = false;
+            } else if state.q {
+                state.value = state.value.saturating_add(dt).min(preset);
+                state.running = true;
+                if state.value >= preset {
+                    state.q = false;
+                    state.running = false;
+                }
+            }
+        }
+        FbKind::Tp => {
+            if input && !state.input {
+                state.value = 0;
+                state.q = true;
+                state.running = true;
+            }
+            if state.running {
+                state.value = state.value.saturating_add(dt).min(preset);
+                if state.value >= preset {
+                    state.q = false;
+                    state.running = false;
+                }
+            }
+        }
+        FbKind::Ctu => {
+            if input && !state.input {
+                state.value = state.value.saturating_add(1);
+            }
+            state.q = state.value >= preset;
+        }
+        FbKind::Ctd => {
+            if input && !state.input {
+                state.value = state.value.saturating_sub(1);
+            }
+            state.q = state.value <= 0;
+        }
+    }
+    state.input = input;
+    state.q
 }
 
 fn push_word(stack: &mut [i16; STACK_DEPTH], depth: &mut usize, value: i16) {

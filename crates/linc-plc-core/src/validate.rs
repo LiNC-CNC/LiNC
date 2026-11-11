@@ -257,7 +257,23 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         format!("{rung_path}.cells[{cell_index}]"),
                     ));
                 }
-                if let Some(operand) = cell.operand() {
+                if let crate::grid::Cell::Block {
+                    block,
+                    instance,
+                    preset,
+                } = cell
+                {
+                    if crate::compile::parse_block(block, instance, preset).is_none() {
+                        diagnostics.push(Diagnostic::error(
+                            "cell_block",
+                            format!(
+                                "'{instance}' with preset '{preset}' is not a valid block; use \
+                                 TON0-3, TOF0-3, TP0-3, CTU0-3 or CTD0-3 and a preset like T#4s"
+                            ),
+                            format!("{rung_path}.cells[{cell_index}]"),
+                        ));
+                    }
+                } else if let Some(operand) = cell.operand() {
                     let known = symbols
                         .keys()
                         .any(|name| name.eq_ignore_ascii_case(operand));

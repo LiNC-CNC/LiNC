@@ -55,6 +55,8 @@ pub(crate) struct Daemon {
     scan_time_us: u32,
     overruns: u64,
     alive: bool,
+    /// When the previous scan ran; timers advance by the real delta.
+    last_scan: Option<Instant>,
 }
 
 impl Daemon {
@@ -70,6 +72,7 @@ impl Daemon {
             scan_time_us: 0,
             overruns: 0,
             alive: false,
+            last_scan: None,
         }
     }
 
@@ -309,7 +312,14 @@ impl Daemon {
             return Err("no program is loaded".to_string());
         };
         let inputs = hal.read_inputs().map_err(|error| error.to_string())?;
-        vm.scan(&inputs);
+        // Timers add the real scan delta, not a fixed tick. The cap keeps a
+        // stalled thread from jumping a timer past its preset in one scan.
+        let dt_ms = self
+            .last_scan
+            .map(|last| last.elapsed().as_millis().min(1000) as u16)
+            .unwrap_or(20);
+        self.last_scan = Some(Instant::now());
+        vm.scan_with_dt(&inputs, dt_ms.max(1));
         hal.write_outputs(vm.outputs())
             .map_err(|error| error.to_string())
     }

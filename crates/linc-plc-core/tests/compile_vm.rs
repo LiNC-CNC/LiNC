@@ -490,3 +490,57 @@ fn il_words_add_and_compare() {
     assert_eq!(vm.word(1), 15);
     assert_eq!(vm.outputs(), &[true], "15 is greater than 9");
 }
+
+#[test]
+fn a_timer_box_passes_power_after_its_preset() {
+    let mut project = simple_project(Logic::Const { value: true }, Coil::new("y", CoilKind::Normal));
+    project.sections[0].rungs[0].cells = vec![
+        linc_plc_core::Cell::Contact {
+            var: "a".into(),
+            negated: false,
+        },
+        linc_plc_core::Cell::Block {
+            block: "TON".into(),
+            instance: "TON0".into(),
+            preset: "T#2s".into(),
+        },
+    ];
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+
+    vm.scan_with_dt(&[true], 1000);
+    assert_eq!(vm.outputs(), &[false], "one second is not two");
+    vm.scan_with_dt(&[true], 1000);
+    assert_eq!(vm.outputs(), &[true], "two seconds elapsed");
+    assert_eq!(vm.block_value(0), 2000, "ET stops at PT");
+
+    vm.scan_with_dt(&[false], 1000);
+    assert_eq!(vm.outputs(), &[false], "IN low resets the timer");
+    assert_eq!(vm.block_value(0), 0);
+}
+
+#[test]
+fn a_counter_counts_rising_edges() {
+    let mut project = simple_project(Logic::Const { value: true }, Coil::new("y", CoilKind::Normal));
+    project.sections[0].rungs[0].cells = vec![
+        linc_plc_core::Cell::Contact {
+            var: "a".into(),
+            negated: false,
+        },
+        linc_plc_core::Cell::Block {
+            block: "CTU".into(),
+            instance: "CTU1".into(),
+            preset: "2".into(),
+        },
+    ];
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+
+    vm.scan(&[true]);
+    assert_eq!(vm.block_value(13), 1, "one rising edge");
+    assert_eq!(vm.outputs(), &[false]);
+    vm.scan(&[true]);
+    assert_eq!(vm.block_value(13), 1, "a held input is not another edge");
+    vm.scan(&[false]);
+    vm.scan(&[true]);
+    assert_eq!(vm.block_value(13), 2);
+    assert_eq!(vm.outputs(), &[true], "CV reached PV");
+}
