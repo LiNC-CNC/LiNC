@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use egui::{pos2, vec2, Align, Color32, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_client::Client;
 use linc_plc_core::protocol::{Request, Response, RunState, StateSnapshot, PROTOCOL_VERSION};
+use linc_plc_core::grid::{Cell, POSITIONS};
 use linc_plc_core::{
     validate, Coil, CoilKind, Diagnostic, IoDirection, Logic, Pou, PouLanguage, Project, Rung,
     Section, Severity, VarValue,
@@ -123,6 +124,19 @@ pub enum Action {
     Stop,
     ClearForces,
     Force(String, bool),
+    /// Write one grid cell of a rung.
+    SetCell {
+        section: usize,
+        rung: usize,
+        position: usize,
+        cell: Cell,
+    },
+    /// Write the coil position of a grid rung.
+    SetCoil {
+        section: usize,
+        rung: usize,
+        coil: Coil,
+    },
     Arm(String),
 }
 
@@ -594,6 +608,10 @@ pub struct PlcUi {
     pub pou: usize,
     /// The editor's File > Close was chosen; the shell closes the overlay.
     pub close_requested: bool,
+    /// Cell cursor in the ladder grid: section, rung, position (9 = coil).
+    pub cell_cursor: Option<(usize, usize, usize)>,
+    /// The element picker is open on this cell.
+    pub picker: Option<(usize, usize, usize)>,
     /// Buffer for the IL editor; synced when the selected POU changes.
     il_text: String,
     il_for: Option<usize>,
@@ -633,6 +651,8 @@ impl Default for PlcUi {
             page: PlcPage::PouList,
             pou: 0,
             close_requested: false,
+            cell_cursor: None,
+            picker: None,
             il_text: String::new(),
             il_for: None,
             next_poll: Instant::now(),
@@ -1005,6 +1025,49 @@ impl PlcUi {
             Action::ClearForces => {
                 self.send(Tag::ClearForces, Request::ClearForces);
                 self.message = "CLEAR FORCES SENT".to_string();
+            }
+            Action::SetCell {
+                section,
+                rung,
+                position,
+                cell,
+            } => {
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    if let Some(row) = pou
+                        .sections
+                        .get_mut(section)
+                        .and_then(|section| section.rungs.get_mut(rung))
+                    {
+                        if row.cells.is_empty() {
+                            row.cells = vec![Cell::Wire; POSITIONS];
+                        }
+                        while row.cells.len() <= position && position < POSITIONS {
+                            row.cells.push(Cell::Wire);
+                        }
+                        if position < POSITIONS {
+                            row.cells[position] = cell;
+                        }
+                    }
+                }
+                self.project.set_pous(pous);
+            }
+            Action::SetCoil {
+                section,
+                rung,
+                coil,
+            } => {
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    if let Some(row) = pou
+                        .sections
+                        .get_mut(section)
+                        .and_then(|section| section.rungs.get_mut(rung))
+                    {
+                        row.coil = coil;
+                    }
+                }
+                self.project.set_pous(pous);
             }
             Action::Force(name, value) => {
                 self.send(
