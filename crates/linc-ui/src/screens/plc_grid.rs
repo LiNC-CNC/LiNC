@@ -1564,7 +1564,7 @@ pub fn grid_rung(
                 &label,
                 matches!(cell, Cell::Wire),
                 cell_symbol(&cell),
-                if commented { 19.0 } else { 10.0 },
+                if commented { 18.0 } else { 10.0 },
             );
         }
         let coil = plc.operand_label(&rung.coil.var);
@@ -1577,7 +1577,7 @@ pub fn grid_rung(
             &coil,
             rung.coil.var.is_empty(),
             CellSymbol::Coil(rung.coil.kind),
-            if commented { 19.0 } else { 10.0 },
+            if commented { 18.0 } else { 10.0 },
         );
     });
     if commented {
@@ -1585,7 +1585,7 @@ pub fn grid_rung(
         // drop to the branch row lands on that row's conductor.
         let rect = strip.response.rect;
         ui.painter().text(
-            egui::pos2(rect.left() + 2.0, rect.top() + 7.0),
+            egui::pos2(rect.left() + 2.0, rect.top() + 8.0),
             Align2::LEFT_CENTER,
             format!("// {}", rung.comment),
             FontId::monospace(theme::font_size(8.0)),
@@ -1638,13 +1638,19 @@ pub fn cell_symbol(cell: &Cell) -> CellSymbol {
 /// cell borders and no spacing between cells. A row is a strip whose conductor
 /// runs along `CONDUCTOR_Y` from its left edge to its right edge.
 pub const CELL_WIDTH: f32 = 48.0;
-pub const CELL_HEIGHT: f32 = 40.0;
-pub const CONDUCTOR_Y: f32 = 28.0;
+pub const CELL_HEIGHT: f32 = 50.0;
+pub const CONDUCTOR_Y: f32 = 39.0;
 pub const ROW_GAP: f32 = 0.0;
 /// Distance from one row's conductor to the next row's conductor.
 pub const ROW_STRIDE: f32 = CELL_HEIGHT + ROW_GAP;
 
-fn arc_points(centre: egui::Pos2, radius: f32, from: f32, to: f32, steps: usize) -> Vec<egui::Pos2> {
+fn arc_points(
+    centre: egui::Pos2,
+    radius: f32,
+    from: f32,
+    to: f32,
+    steps: usize,
+) -> Vec<egui::Pos2> {
     (0..=steps)
         .map(|step| {
             let t = from + (to - from) * (step as f32 / steps as f32);
@@ -1675,8 +1681,14 @@ fn draw_cell_symbol(painter: &egui::Painter, rect: egui::Rect, symbol: CellSymbo
             let bar = 6.5;
             painter.line_segment([egui::pos2(left, y), egui::pos2(cx - bar, y)], thin);
             painter.line_segment([egui::pos2(cx + bar, y), egui::pos2(right, y)], thin);
-            painter.line_segment([egui::pos2(cx - bar, y - 8.0), egui::pos2(cx - bar, y + 8.0)], line);
-            painter.line_segment([egui::pos2(cx + bar, y - 8.0), egui::pos2(cx + bar, y + 8.0)], line);
+            painter.line_segment(
+                [egui::pos2(cx - bar, y - 8.0), egui::pos2(cx - bar, y + 8.0)],
+                line,
+            );
+            painter.line_segment(
+                [egui::pos2(cx + bar, y - 8.0), egui::pos2(cx + bar, y + 8.0)],
+                line,
+            );
             if symbol == CellSymbol::ContactNc {
                 painter.line_segment(
                     [egui::pos2(cx - 9.0, y + 8.0), egui::pos2(cx + 9.0, y - 8.0)],
@@ -1784,11 +1796,17 @@ fn cell_box(
         let tick = Stroke::new(1.6, theme::ACCENT);
         let y = rect.top() + CONDUCTOR_Y;
         painter.line_segment(
-            [egui::pos2(rect.left() + 1.0, y - 13.0), egui::pos2(rect.left() + 1.0, y - 7.0)],
+            [
+                egui::pos2(rect.left() + 1.0, y - 13.0),
+                egui::pos2(rect.left() + 1.0, y - 7.0),
+            ],
             tick,
         );
         painter.line_segment(
-            [egui::pos2(rect.right() - 1.0, y - 13.0), egui::pos2(rect.right() - 1.0, y - 7.0)],
+            [
+                egui::pos2(rect.right() - 1.0, y - 13.0),
+                egui::pos2(rect.right() - 1.0, y - 7.0),
+            ],
             tick,
         );
     }
@@ -1801,11 +1819,7 @@ fn cell_box(
         let available = rect.width() - 4.0;
         let mut size = theme::font_size(8.5);
         loop {
-            let galley = painter.layout_no_wrap(
-                label.to_string(),
-                FontId::monospace(size),
-                color,
-            );
+            let galley = painter.layout_no_wrap(label.to_string(), FontId::monospace(size), color);
             if galley.size().x <= available || size <= 5.5 {
                 painter.galley(
                     egui::pos2(
@@ -1986,5 +2000,39 @@ mod symbol_tests {
             CELL_WIDTH >= 40.0,
             "a cell has room for a symbol and its name"
         );
+    }
+}
+
+#[cfg(test)]
+mod label_clearance_tests {
+    use super::*;
+
+    /// The operand label must sit clear of the symbol. With the strip's fixed
+    /// geometry the gap is arithmetic, so a change to either constant that closes
+    /// the clearance fails here instead of shipping a crowded ladder.
+    #[test]
+    fn the_label_clears_the_symbol_on_commented_and_plain_rows() {
+        const LABEL_HALF: f32 = 4.5; // half a 9 px galley
+        const SYMBOL_HALF: f32 = 9.0; // tallest symbol above the conductor
+        for name_y in [18.0_f32, 10.0] {
+            let label_bottom = name_y + LABEL_HALF;
+            let symbol_top = CONDUCTOR_Y - SYMBOL_HALF;
+            assert!(
+                symbol_top - label_bottom >= 7.0,
+                "label bottom {label_bottom} to symbol top {symbol_top} must be 7 px"
+            );
+        }
+        assert!(
+            CONDUCTOR_Y < CELL_HEIGHT,
+            "the conductor stays inside the strip"
+        );
+    }
+
+    /// The link reaches the next row's conductor exactly: the drop is the strip
+    /// height plus the conductor offset, with no row gap.
+    #[test]
+    fn the_link_pitch_is_one_strip() {
+        assert_eq!(ROW_STRIDE, CELL_HEIGHT + ROW_GAP);
+        assert_eq!(ROW_GAP, 0.0);
     }
 }

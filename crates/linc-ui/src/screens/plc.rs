@@ -2210,7 +2210,14 @@ pub fn escape_closes_editor(plc: &PlcUi) -> bool {
 /// a fixed row height, a 2 px gap inside a group and a wider gap before each group
 /// heading. Loose `ui.horizontal` spacing is exactly what made it read as a list of
 /// floating labels.
+/// Row metrics of the shortcut rail. Every gap is explicit: the rail zeroes egui's
+/// own `item_spacing.y`, which otherwise added the default vertical spacing on top of
+/// `NAV_ROW_GAP` and left empty-looking lines between rows.
+pub const RAIL_INNER_GAP: f32 = theme::NAV_ROW_GAP;
+pub const RAIL_GROUP_GAP: f32 = 8.0;
+
 fn shortcut_nav(plc: &PlcUi, ui: &mut Ui) {
+    ui.spacing_mut().item_spacing.y = 0.0;
     let row = |ui: &mut Ui, text: &str, key: &str, active: bool| {
         let (rect, _) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
@@ -2236,7 +2243,7 @@ fn shortcut_nav(plc: &PlcUi, ui: &mut Ui) {
     };
     let heading = |ui: &mut Ui, text: &str, first: bool| {
         if !first {
-            ui.add_space(theme::NAV_ROW_GAP.max(6.0) + 2.0);
+            ui.add_space(RAIL_GROUP_GAP);
         }
         let (rect, _) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
@@ -2252,19 +2259,19 @@ fn shortcut_nav(plc: &PlcUi, ui: &mut Ui) {
     };
     heading(ui, "PAGES", true);
     row(ui, "POU list", "Ctrl+1", plc.page == PlcPage::PouList);
-    ui.add_space(theme::NAV_ROW_GAP);
+    ui.add_space(RAIL_INNER_GAP);
     row(ui, "Ladder", "Ctrl+2", plc.page == PlcPage::Edit);
-    ui.add_space(theme::NAV_ROW_GAP);
+    ui.add_space(RAIL_INNER_GAP);
     row(ui, "Symbols", "Ctrl+3", plc.page == PlcPage::Symbols);
-    ui.add_space(theme::NAV_ROW_GAP);
+    ui.add_space(RAIL_INNER_GAP);
     row(ui, "Simulation", "Ctrl+4", plc.page == PlcPage::Sim);
     heading(ui, "RUN", false);
     row(ui, "Run / stop", "R", false);
     heading(ui, "RUNG", false);
     row(ui, "New row", "Ctrl+N", false);
-    ui.add_space(theme::NAV_ROW_GAP);
+    ui.add_space(RAIL_INNER_GAP);
     row(ui, "New row at cursor", "Ctrl+J", false);
-    ui.add_space(theme::NAV_ROW_GAP);
+    ui.add_space(RAIL_INNER_GAP);
     row(ui, "Delete row", "Ctrl+Del", false);
     heading(ui, "SAVE", false);
     row(ui, "Save project", "Ctrl+S", false);
@@ -2280,7 +2287,7 @@ fn shortcut_nav(plc: &PlcUi, ui: &mut Ui) {
         ("Delete cell", "Bksp"),
     ] {
         row(ui, text, key, false);
-        ui.add_space(theme::NAV_ROW_GAP);
+        ui.add_space(RAIL_INNER_GAP);
     }
     heading(ui, "COIL", false);
     row(ui, "Normal / set / reset", "C S R", false);
@@ -2291,7 +2298,7 @@ fn shortcut_nav(plc: &PlcUi, ui: &mut Ui) {
         ("Undo / redo", "Ctrl+Z Y"),
     ] {
         row(ui, text, key, false);
-        ui.add_space(theme::NAV_ROW_GAP);
+        ui.add_space(RAIL_INNER_GAP);
     }
 }
 
@@ -2398,7 +2405,10 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
             eprintln!(
                 "sim R: page={:?} state={:?} online={} stop={}",
-                app.plc.page, app.plc.state, app.plc.online, matches!(action, Action::Stop)
+                app.plc.page,
+                app.plc.state,
+                app.plc.online,
+                matches!(action, Action::Stop)
             );
         }
         app.plc.apply(action);
@@ -6307,5 +6317,22 @@ mod delete_rung_tests {
             before,
             "the branch row stays"
         );
+    }
+}
+
+#[cfg(test)]
+mod rail_spacing_tests {
+    use super::*;
+
+    /// The rail spaces itself: rows sit a hair apart inside a group, groups get a
+    /// real gap, and nothing is left to egui's default vertical spacing.
+    #[test]
+    fn the_shortcut_rail_spaces_its_own_rows() {
+        assert_eq!(RAIL_INNER_GAP, theme::NAV_ROW_GAP);
+        assert!(
+            RAIL_GROUP_GAP > RAIL_INNER_GAP * 2.0,
+            "a group gap reads as a gap, not as a row"
+        );
+        assert_eq!(theme::NAV_ROW_GAP, 2.0);
     }
 }
