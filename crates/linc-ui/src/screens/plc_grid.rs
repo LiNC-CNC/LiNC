@@ -9,7 +9,7 @@ use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_core::grid::{Cell, POSITIONS};
 use linc_plc_core::{Coil, CoilKind, PouLanguage, Rung};
 
-use crate::screens::plc::{Action, PlcPage, PlcUi};
+use crate::screens::plc::{Action, ExprEdit, PlcPage, PlcUi};
 use crate::shell::LincApp;
 use crate::theme;
 
@@ -92,6 +92,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
 pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
     element_picker(plc, ctx, actions);
     operand_picker(plc, ctx, actions);
+    expr_editor(plc, ctx, actions);
 }
 
 fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
@@ -213,29 +214,30 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 }
                 ui.add_space(4.0);
                 if theme::action_button(ui, "Compare  G", true).clicked() {
-                    actions.push(Action::SetCell {
+                    plc.expr_edit = Some(ExprEdit {
                         section,
                         rung,
                         position,
-                        cell: Cell::Compare {
-                            op: "GT".to_string(),
-                            left: "MW0".to_string(),
-                            right: "0".to_string(),
-                        },
+                        compute: false,
+                        stage: 0,
+                        op: "GT".to_string(),
+                        left: "MW0".to_string(),
+                        right: "0".to_string(),
+                        target: "MW0".to_string(),
                     });
                     close = true;
                 }
                 if theme::action_button(ui, "Compute  M", true).clicked() {
-                    actions.push(Action::SetCell {
+                    plc.expr_edit = Some(ExprEdit {
                         section,
                         rung,
                         position,
-                        cell: Cell::Compute {
-                            op: "ADD".to_string(),
-                            target: "MW0".to_string(),
-                            left: "MW0".to_string(),
-                            right: "1".to_string(),
-                        },
+                        compute: true,
+                        stage: 0,
+                        op: "ADD".to_string(),
+                        left: "MW0".to_string(),
+                        right: "1".to_string(),
+                        target: "MW1".to_string(),
                     });
                     close = true;
                 }
@@ -317,6 +319,147 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
         });
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
         plc.operand_pick = None;
+    }
+}
+
+/// Compare and compute are built in steps, as ZX asks: operator, then the
+/// values one by one, then the destination for a compute coil.
+fn expr_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    let Some(edit) = plc.expr_edit.clone() else {
+        return;
+    };
+    let mut close = false;
+    let mut next: Option<ExprEdit> = None;
+    let mut finish: Option<Cell> = None;
+    egui::Window::new(if edit.compute {
+        "COMPUTE COIL  M"
+    } else {
+        "COMPARE CONTACT  G"
+    })
+    .collapsible(false)
+    .resizable(false)
+    .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+    .show(ctx, |ui| {
+        let stage = if edit.compute {
+            ["operator", "left value", "right value", "destination"][edit.stage.min(3) as usize]
+        } else {
+            ["operator", "left value", "right value"][edit.stage.min(2) as usize]
+        };
+        ui.label(
+            RichText::new(format!(
+                "{}   {}   {}   {}",
+                stage, edit.op, edit.left, edit.right
+            ))
+            .monospace()
+            .size(theme::font_size(9.0))
+            .color(theme::MUTED),
+        );
+        ui.add_space(4.0);
+        match edit.stage {
+            0 => {
+                let operators: &[&str] = if edit.compute {
+                    &["ADD", "SUB", "MUL", "DIV", "MOVE"]
+                } else {
+                    &["GT", "GE", "EQ", "NE", "LE", "LT"]
+                };
+                for op in operators {
+                    if theme::action_button(ui, op, true).clicked() {
+                        let mut edited = edit.clone();
+                        edited.op = (*op).to_string();
+                        edited.stage = 1;
+                        next = Some(edited);
+                    }
+                }
+            }
+            1 | 2 => {
+                let mut chosen: Option<String> = None;
+                ui.horizontal_wrapped(|ui| {
+                    for index in 0..16 {
+                        if ui.button(format!("MW{index}")).clicked() {
+                            chosen = Some(format!("MW{index}"));
+                        }
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    for value in ["0", "1", "5", "10", "100", "T#1s", "T#10s"] {
+                        if ui.button(value).clicked() {
+                            chosen = Some(value.to_string());
+                        }
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    for kind in ["TON", "TOF", "TP"] {
+                        for number in 0..4 {
+                            let name = format!("{kind}{number}.ET");
+                            if ui.button(&name).clicked() {
+                                chosen = Some(name);
+                            }
+                        }
+                    }
+                    for kind in ["CTU", "CTD"] {
+                        for number in 0..4 {
+                            let name = format!("{kind}{number}.CV");
+                            if ui.button(&name).clicked() {
+                                chosen = Some(name);
+                            }
+                        }
+                    }
+                });
+                if let Some(value) = chosen {
+                    let mut edited = edit.clone();
+                    if edited.stage == 1 {
+                        edited.left = value;
+                        edited.stage = 2;
+                    } else {
+                        edited.right = value;
+                        if edited.compute {
+                            edited.stage = 3;
+                        } else {
+                            finish = Some(Cell::Compare {
+                                op: edited.op.clone(),
+                                left: edited.left.clone(),
+                                right: edited.right.clone(),
+                            });
+                        }
+                    }
+                    next = Some(edited);
+                }
+            }
+            _ => {
+                for index in 0..16 {
+                    if ui.button(format!("MW{index} := result")).clicked() {
+                        finish = Some(Cell::Compute {
+                            op: edit.op.clone(),
+                            target: format!("MW{index}"),
+                            left: edit.left.clone(),
+                            right: edit.right.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        ui.add_space(4.0);
+        if theme::action_button(ui, "Cancel", true).clicked() {
+            close = true;
+        }
+    });
+    if let Some(cell) = finish {
+        let (section, rung, position) = (edit.section, edit.rung, edit.position);
+        actions.push(Action::SetCell {
+            section,
+            rung,
+            position,
+            cell,
+        });
+        close = true;
+    } else if let Some(next) = next {
+        plc.expr_edit = Some(next);
+    }
+    if close {
+        plc.expr_edit = None;
+    }
+    if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        plc.expr_edit = None;
     }
 }
 

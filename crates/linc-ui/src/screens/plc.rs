@@ -567,6 +567,22 @@ fn worker(jobs: Receiver<Job>, events: Sender<Event>, path: PathBuf) {
 // Page state
 // ---------------------------------------------------------------------------
 
+/// One compare (`G`) or compute (`M`) cell being assembled: operator, then the
+/// values, then (for compute) the destination word.
+#[derive(Debug, Clone)]
+pub struct ExprEdit {
+    pub section: usize,
+    pub rung: usize,
+    pub position: usize,
+    pub compute: bool,
+    /// 0 operator, 1 left value, 2 right value, 3 destination.
+    pub stage: u8,
+    pub op: String,
+    pub left: String,
+    pub right: String,
+    pub target: String,
+}
+
 pub struct PlcUi {
     pub project: Project,
     /// Project file, edited in the status card.
@@ -614,6 +630,8 @@ pub struct PlcUi {
     pub picker: Option<(usize, usize, usize)>,
     /// The operand list is open for the cell a kind was just chosen for.
     pub operand_pick: Option<(usize, usize, usize, Cell)>,
+    /// A compare or compute expression is being built step by step.
+    pub expr_edit: Option<ExprEdit>,
     /// Buffer for the IL editor; synced when the selected POU changes.
     il_text: String,
     il_for: Option<usize>,
@@ -656,6 +674,7 @@ impl Default for PlcUi {
             cell_cursor: None,
             picker: None,
             operand_pick: None,
+            expr_edit: None,
             il_text: String::new(),
             il_for: None,
             next_poll: Instant::now(),
