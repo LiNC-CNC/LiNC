@@ -55,6 +55,8 @@ pub(crate) struct Daemon {
     scan_time_us: u32,
     overruns: u64,
     alive: bool,
+    /// Watch list of the loaded project, sampled per scan.
+    watch: Vec<String>,
     /// When the previous scan ran; timers advance by the real delta.
     last_scan: Option<Instant>,
 }
@@ -72,6 +74,7 @@ impl Daemon {
             scan_time_us: 0,
             overruns: 0,
             alive: false,
+            watch: Vec::new(),
             last_scan: None,
         }
     }
@@ -93,7 +96,7 @@ impl Daemon {
             }
 
             if self.phase == Phase::Running {
-                if let Err(message) = self.execute(hal) {
+                if let Err(message) = self.execute(hal, shared) {
                     self.fail(message, hal, shared);
                 }
             } else if let Err(error) = hal.drive_outputs_false() {
@@ -149,6 +152,7 @@ impl Daemon {
             Command::Load {
                 compiled,
                 warnings,
+                watch,
                 reply,
             } => {
                 if self.phase == Phase::Running {
@@ -164,6 +168,7 @@ impl Daemon {
                 // The program is swapped at the top of a scan, never inside
                 // one, so an input decodes against exactly one program.
                 self.vm = Some(Vm::new(&compiled));
+                self.set_watch(watch, shared);
                 self.hash = compiled.hash.clone();
                 self.forces.clear();
                 self.phase = Phase::Loaded;
@@ -306,7 +311,7 @@ impl Daemon {
 
     /// One ladder scan: read the bound inputs, run the program, write the
     /// bound outputs.
-    fn execute(&mut self, hal: &Hal) -> Result<(), String> {
+    fn execute(&mut self, hal: &Hal, shared: &Shared) -> Result<(), String> {
         self.expire_forces();
         let Some(vm) = self.vm.as_mut() else {
             return Err("no program is loaded".to_string());
@@ -320,6 +325,21 @@ impl Daemon {
             .unwrap_or(20);
         self.last_scan = Some(Instant::now());
         vm.scan_with_dt(&inputs, dt_ms.max(1));
+        // The watch list is read from the VM after the scan, so a sample is the
+        // state a reader saw at the end of that scan.
+        if !self.watch.is_empty() {
+            let row = self
+                .watch
+                .iter()
+                .map(|name| super::trend_value(name, vm).unwrap_or(0))
+                .collect::<Vec<i32>>();
+            if let Ok(mut trend) = shared.trend.lock() {
+                trend.samples.push(row);
+                if trend.samples.len() > 512 {
+                    trend.samples.remove(0);
+                }
+            }
+        }
         hal.write_outputs(vm.outputs())
             .map_err(|error| error.to_string())
     }
@@ -360,6 +380,21 @@ impl Daemon {
         let _ = hal.ctl().set_fault(true);
         let _ = hal.drive_outputs_false();
         self.publish(shared);
+    }
+
+    /// Point the trend ring at the loaded project's watch list and clear it, so
+    /// a sample never mixes two programs.
+    fn set_watch(&mut self, watch: Vec<String>, shared: &Shared) {
+        self.watch = watch;
+        if let Ok(mut trend) = shared.trend.lock() {
+            trend.names = self.watch.clone();
+            trend.words = self
+                .watch
+                .iter()
+                .map(|name| !super::is_bit_operand(name))
+                .collect();
+            trend.samples.clear();
+        }
     }
 
     fn snapshot(&self) -> StateSnapshot {

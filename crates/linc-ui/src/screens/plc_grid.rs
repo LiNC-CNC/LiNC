@@ -136,7 +136,13 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         element = Some(Cell::Link);
     }
     if ton || tof || tp {
-        let block = if ton { "TON" } else if tof { "TOF" } else { "TP" };
+        let block = if ton {
+            "TON"
+        } else if tof {
+            "TOF"
+        } else {
+            "TP"
+        };
         element = Some(Cell::Block {
             block: block.to_string(),
             instance: format!("{block}0"),
@@ -241,9 +247,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             _ => Vec::new(),
         };
         if span.is_empty() {
-            app.plc.cell_clipboard = rung
-                .and_then(|rung| rung.cells.get(cursor.2))
-                .cloned();
+            app.plc.cell_clipboard = rung.and_then(|rung| rung.cells.get(cursor.2)).cloned();
             app.plc.cell_span.clear();
         } else {
             app.plc.cell_span = span;

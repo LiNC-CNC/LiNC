@@ -14,7 +14,9 @@ use egui::{pos2, vec2, Align, Color32, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_client::Client;
 use linc_plc_core::grid::{Cell, POSITIONS};
 use linc_plc_core::model::FbdLine;
-use linc_plc_core::protocol::{Request, Response, RunState, StateSnapshot, PROTOCOL_VERSION};
+use linc_plc_core::protocol::{
+    Request, Response, RunState, StateSnapshot, TrendData, PROTOCOL_VERSION,
+};
 use linc_plc_core::WordValue;
 use linc_plc_core::{
     validate, Coil, CoilKind, Diagnostic, IoDirection, Logic, Pou, PouLanguage, Project, Rung,
@@ -519,6 +521,7 @@ pub fn default_project_path() -> PathBuf {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tag {
     Hello,
+    Trend,
     Validate,
     Load,
     Start,
@@ -776,6 +779,8 @@ pub struct PlcUi {
     pub fbd_pick: Option<FbdPick>,
     /// Boolean traces for the trend page.
     pub trend: TrendBuffer,
+    /// Per-scan window from the daemon, when one is connected.
+    pub trend_remote: TrendData,
     /// The word bank and block members from the last snapshot.
     pub words: Vec<WordValue>,
     /// Buffer for the IL editor; synced when the selected POU changes.
@@ -830,6 +835,7 @@ impl Default for PlcUi {
             block_edit: None,
             fbd_pick: None,
             trend: TrendBuffer::default(),
+            trend_remote: TrendData::default(),
             words: Vec::new(),
             il_text: String::new(),
             il_for: None,
@@ -969,6 +975,11 @@ impl PlcUi {
                     POLL_OFFLINE
                 };
             self.send(Tag::Snapshot, Request::Snapshot);
+            // The trend page needs the daemon's per-scan window, not the frame
+            // sampling the page can do on its own.
+            if self.page == PlcPage::Trend || !self.trend_remote.samples.is_empty() {
+                self.send(Tag::Trend, Request::Trend);
+            }
         }
     }
 
@@ -1019,6 +1030,10 @@ impl PlcUi {
     }
 
     fn apply_response(&mut self, tag: Tag, response: Response) {
+        if let (Tag::Trend, Response::Trend(data)) = (tag, &response) {
+            self.trend_remote = data.clone();
+            return;
+        }
         match (tag, response) {
             (
                 Tag::Hello,
@@ -2308,6 +2323,10 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
 }
 
 fn trend_page(plc: &PlcUi, ui: &mut Ui) {
+    if !plc.trend_remote.samples.is_empty() {
+        draw_remote_trend(plc, ui);
+        return;
+    }
     let trend = &plc.trend;
     common::card_title(ui, "TREND");
     if trend.channels.is_empty() || trend.samples == 0 {
@@ -2376,6 +2395,92 @@ fn trend_page(plc: &PlcUi, ui: &mut Ui) {
                     },
                 ),
             ));
+        }
+    }
+}
+
+/// The daemon's per-scan window: one lane per watch entry, words auto-scaled.
+fn draw_remote_trend(plc: &PlcUi, ui: &mut Ui) {
+    let data = &plc.trend_remote;
+    common::card_title(ui, "TREND");
+    ui.label(
+        RichText::new(format!(
+            "{} samples from the scan loop, newest at the right",
+            data.samples.len()
+        ))
+        .size(theme::font_size(9.0))
+        .color(theme::MUTED),
+    );
+    ui.add_space(4.0);
+    let width = ui.available_width();
+    let lane_height = 26.0;
+    for (index, name) in data.names.iter().enumerate() {
+        let column = data
+            .samples
+            .iter()
+            .map(|row| row.get(index).copied().unwrap_or(0))
+            .collect::<Vec<i32>>();
+        let (rect, _) = ui.allocate_exact_size(vec2(width, lane_height), Sense::hover());
+        let painter = ui.painter();
+        painter.rect_filled(rect, 2.0, theme::SURFACE);
+        painter.rect_stroke(
+            rect,
+            2.0,
+            Stroke::new(1.0, theme::BORDER),
+            egui::StrokeKind::Inside,
+        );
+        if data.words.get(index).copied().unwrap_or(false) {
+            let low = column.iter().copied().min().unwrap_or(0);
+            let high = column.iter().copied().max().unwrap_or(0);
+            painter.text(
+                pos2(rect.left() + 4.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                format!("{name} {low}..{high}"),
+                egui::FontId::monospace(theme::font_size(8.5)),
+                theme::MUTED,
+            );
+            let step = (rect.right() - 4.0 - (rect.left() + 110.0)) / 512.0;
+            let offset = 512usize.saturating_sub(column.len()) as f32 * step;
+            let span = (high - low).max(1) as f32;
+            let height = (rect.height() - 6.0).max(1.0);
+            let points = column
+                .iter()
+                .enumerate()
+                .map(|(position, value)| {
+                    let x = rect.left() + 110.0 + offset + position as f32 * step;
+                    let y = rect.bottom() - 3.0 - (*value - low) as f32 / span * height;
+                    pos2(x, y)
+                })
+                .collect::<Vec<_>>();
+            if points.len() > 1 {
+                painter.add(egui::Shape::line(points, Stroke::new(1.2, theme::C2)));
+            }
+        } else {
+            painter.text(
+                pos2(rect.left() + 4.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                name,
+                egui::FontId::monospace(theme::font_size(9.0)),
+                theme::MUTED,
+            );
+            let step = (rect.right() - 4.0 - (rect.left() + 92.0)) / 512.0;
+            let offset = 512usize.saturating_sub(column.len()) as f32 * step;
+            let points = column
+                .iter()
+                .enumerate()
+                .map(|(position, value)| {
+                    let x = rect.left() + 92.0 + offset + position as f32 * step;
+                    let y = if *value != 0 {
+                        rect.top() + 3.0
+                    } else {
+                        rect.bottom() - 3.0
+                    };
+                    pos2(x, y)
+                })
+                .collect::<Vec<_>>();
+            if points.len() > 1 {
+                painter.add(egui::Shape::line(points, Stroke::new(1.2, theme::C1)));
+            }
         }
     }
 }

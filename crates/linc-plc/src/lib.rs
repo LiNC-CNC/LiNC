@@ -67,8 +67,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use linc_plc_core::protocol::{RunState, StateSnapshot};
-use linc_plc_core::{Compiled, Diagnostic, Project, Severity};
+use linc_plc_core::protocol::{RunState, StateSnapshot, TrendData};
+use linc_plc_core::{Compiled, Diagnostic, Project, Severity, Vm};
 use thiserror::Error;
 
 /// Everything the daemon needs to start.
@@ -113,6 +113,8 @@ pub(crate) enum Command {
     Load {
         compiled: Box<Compiled>,
         warnings: Vec<Diagnostic>,
+        /// The watch list of the loaded project, sampled once per scan.
+        watch: Vec<String>,
         reply: mpsc::Sender<linc_plc_core::protocol::Response>,
     },
     Start {
@@ -130,6 +132,29 @@ pub(crate) enum Command {
     ClearForces {
         reply: mpsc::Sender<linc_plc_core::protocol::Response>,
     },
+}
+
+/// Is this watch name a plain bit symbol rather than a word or block member?
+pub(crate) fn is_bit_operand(name: &str) -> bool {
+    linc_plc_core::il::word_operand(name).is_none() && !name.contains('.')
+}
+
+/// One watch value: a bit as 0/1, or a word or block member.
+pub(crate) fn trend_value(name: &str, vm: &Vm) -> Option<i32> {
+    if let Some(index) = linc_plc_core::il::word_operand(name) {
+        return Some(i32::from(vm.word(index)));
+    }
+    if let Some(rest) = name
+        .strip_suffix(".ET")
+        .or_else(|| name.strip_suffix(".CV"))
+        .or_else(|| name.strip_suffix(".et"))
+        .or_else(|| name.strip_suffix(".cv"))
+    {
+        if let Some((_, instance, _)) = linc_plc_core::compile::parse_block(rest, rest, "") {
+            return Some(i32::from(vm.block_value(instance)));
+        }
+    }
+    vm.get(name).map(i32::from)
 }
 
 /// The compiled input and output binding names the pins were created for.
@@ -172,6 +197,9 @@ pub(crate) struct Shared {
     pub(crate) project: PathBuf,
     pub(crate) no_hal: bool,
     pub(crate) allow_force: bool,
+    /// Per-scan watch-list samples, written by the scan loop and read by the
+    /// socket thread. The ring lives here so a request never copies per scan.
+    pub(crate) trend: Arc<Mutex<TrendData>>,
 }
 
 /// Run the daemon until `shutdown` is set. See the crate documentation for the
@@ -222,6 +250,7 @@ pub fn run(config: Config, shutdown: Arc<AtomicBool>) -> Result<(), Error> {
         project: config.project.clone(),
         no_hal: config.no_hal,
         allow_force: config.allow_force,
+        trend: Arc::new(Mutex::new(TrendData::default())),
     });
 
     let server_shared = Arc::clone(&shared);

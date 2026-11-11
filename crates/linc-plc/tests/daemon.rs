@@ -467,3 +467,40 @@ fn socket_is_private_and_removed_on_shutdown() {
         "the socket is removed on shutdown"
     );
 }
+
+#[test]
+fn the_trend_ring_samples_the_watch_list_every_scan() {
+    let mut project = Project::example();
+    project.watch = vec!["run".to_string(), "MW0".to_string()];
+    let mut harness = Harness::start(&project, false);
+    let mut client = harness.client();
+
+    match client
+        .call(&Request::Load {
+            project: project.clone(),
+        })
+        .expect("load")
+    {
+        Response::Loaded { .. } => {}
+        other => panic!("expected loaded, got {}", describe(&other)),
+    }
+    client.call(&Request::Start).expect("start");
+
+    let mut data = None;
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(25));
+        if let Response::Trend(trend) = client.call(&Request::Trend).expect("trend") {
+            if trend.samples.len() >= 4 {
+                data = Some(trend);
+                break;
+            }
+        }
+    }
+    let trend = data.expect("the daemon must fill the trend ring once it scans");
+    assert_eq!(trend.names, vec!["run".to_string(), "MW0".to_string()]);
+    assert_eq!(trend.words, vec![false, true], "a word is marked as such");
+    assert!(
+        trend.samples.iter().all(|row| row.len() == 2),
+        "every sample carries one value per watch entry"
+    );
+}

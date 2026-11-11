@@ -179,6 +179,14 @@ fn handle_request(request: Request, shared: &Shared) -> Result<Outcome, Error> {
             Outcome::Reply(dispatch(shared, |reply| Command::ClearForces { reply }))
         }
 
+        Request::Trend => Outcome::Reply(match shared.trend.lock() {
+            Ok(trend) => Response::Trend(trend.clone()),
+            Err(_) => Response::Error {
+                code: "internal".to_string(),
+                message: "the trend lock is poisoned".to_string(),
+            },
+        }),
+
         Request::Snapshot => Outcome::Reply(match shared.snapshot.lock() {
             Ok(snapshot) => Response::State(snapshot.clone()),
             Err(_) => Response::Error {
@@ -230,6 +238,7 @@ fn load(project: Project, shared: &Shared) -> Result<Response, Error> {
 
     let warnings = compiled.warnings.clone();
     let response = dispatch(shared, |reply| Command::Load {
+            watch: project.watch.clone(),
         compiled: Box::new(compiled),
         warnings,
         reply,

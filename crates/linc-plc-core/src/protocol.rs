@@ -26,6 +26,8 @@ pub enum Request {
     Start,
     Stop,
     Snapshot,
+    /// The watch list sampled once per scan.
+    Trend,
     Force {
         name: String,
         value: bool,
@@ -53,11 +55,23 @@ pub enum Response {
         diagnostics: Vec<Diagnostic>,
     },
     State(StateSnapshot),
+    /// Watch-list samples, oldest first; a bit is 0 or 1.
+    Trend(TrendData),
     Error {
         code: String,
         message: String,
     },
     Bye,
+}
+
+/// A window of the watch list, sampled by the daemon once per scan so a pulse
+/// shorter than a UI frame is still visible.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrendData {
+    pub names: Vec<String>,
+    /// Parallel to `names`: true when the operand is a word.
+    pub words: Vec<bool>,
+    pub samples: Vec<Vec<i32>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
