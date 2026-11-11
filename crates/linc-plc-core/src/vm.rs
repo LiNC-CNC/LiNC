@@ -268,6 +268,30 @@ impl Vm {
                     let q = run_latch(&mut self.blocks, instance as usize, kind, set, reset);
                     push(&mut stack, &mut depth, q);
                 }
+                Op::FbReset(instance) => {
+                    let power = pop(&mut stack, &mut depth);
+                    if power {
+                        if let Some(state) = self.blocks.get_mut(instance as usize) {
+                            state.value = 0;
+                        }
+                    }
+                }
+                Op::FbLoad(instance) => {
+                    let power = pop(&mut stack, &mut depth);
+                    if power {
+                        if let Some(state) = self.blocks.get_mut(instance as usize) {
+                            state.value = state.preset;
+                        }
+                    }
+                }
+                Op::FbPreset(instance) => {
+                    let value = self
+                        .blocks
+                        .get(instance as usize)
+                        .map(|state| state.preset)
+                        .unwrap_or(0);
+                    push_word(&mut word_stack, &mut word_depth, value);
+                }
                 Op::FbWord(instance) => {
                     let value = self
                         .blocks
@@ -358,6 +382,11 @@ impl Vm {
             WordOperand::Word(index) => self.word(index),
             WordOperand::Const(value) => value,
             WordOperand::Block(instance) => self.block_value(instance),
+            WordOperand::BlockPreset(instance) => self
+                .blocks
+                .get(instance as usize)
+                .map(|state| state.preset)
+                .unwrap_or(0),
         }
     }
 
@@ -495,6 +524,8 @@ struct FbState {
     running: bool,
     /// `ET` of a timer, `CV` of a counter.
     value: i16,
+    /// `PT` of a timer, `PV` of a counter, as last executed.
+    preset: i16,
 }
 
 /// Advance one block and return its `Q`. `dt` is the scan delta in
@@ -511,6 +542,7 @@ fn run_block(
         return false;
     };
     let preset = preset.max(0);
+    state.preset = preset;
     let dt = i16::try_from(dt).unwrap_or(i16::MAX);
     match kind {
         FbKind::Ton => {

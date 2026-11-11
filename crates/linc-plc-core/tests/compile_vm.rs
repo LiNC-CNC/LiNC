@@ -964,3 +964,58 @@ fn an_sr_latch_holds_and_an_rt_block_pulses() {
     vm.scan(&[false, true, true]);
     assert_eq!(vm.outputs(), &[false, false], "R resets the latch");
 }
+
+#[test]
+fn a_counter_resets_from_a_coil_and_its_pv_can_be_read() {
+    let mut project = project_with(
+        vec![
+            IoPoint::new("a", IoDirection::In),
+            IoPoint::new("r", IoDirection::In),
+            IoPoint::new("y", IoDirection::Out),
+            IoPoint::new("below".to_string(), IoDirection::Out),
+        ],
+        Vec::new(),
+        vec![section(
+            "main",
+            vec![
+                Rung::new(Logic::Const { value: true }, Coil::new("y", CoilKind::Normal)),
+                Rung::new(Logic::Const { value: true }, Coil::new("CTU0.R", CoilKind::Normal)),
+                Rung::new(Logic::Const { value: true }, Coil::new("below", CoilKind::Normal)),
+            ],
+        )],
+    );
+    project.sections[0].rungs[0].cells = vec![
+        linc_plc_core::Cell::Contact {
+            var: "a".into(),
+            negated: false,
+        },
+        linc_plc_core::Cell::Block {
+            block: "CTU".into(),
+            instance: "CTU0".into(),
+            preset: "5".into(),
+        },
+    ];
+    project.sections[0].rungs[1].cells = vec![linc_plc_core::Cell::Contact {
+        var: "r".into(),
+        negated: false,
+    }];
+    project.sections[0].rungs[2].cells = vec![linc_plc_core::Cell::Compare {
+        op: "LT".into(),
+        left: "CTU0.CV".into(),
+        right: "CTU0.PV".into(),
+    }];
+    let diagnostics = linc_plc_core::validate(&project);
+    assert!(
+        diagnostics.iter().all(|item| item.severity != linc_plc_core::Severity::Error),
+        "{diagnostics:?}"
+    );
+
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan(&[true, false]);
+    vm.scan(&[false, false]);
+    vm.scan(&[true, false]);
+    assert_eq!(vm.block_value(12), 2, "two rising edges");
+    assert_eq!(vm.outputs(), &[false, true], "below PV");
+    vm.scan(&[false, true]);
+    assert_eq!(vm.block_value(12), 0, "the reset coil cleared CV");
+}

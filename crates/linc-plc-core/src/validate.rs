@@ -645,6 +645,23 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             }
 
             let coil_path = format!("{rung_path}.coil.var");
+            // A counter's reset/load is a coil on the instance, not on a bit.
+            let counter_coil = rung
+                .coil
+                .var
+                .strip_suffix(".R")
+                .or_else(|| rung.coil.var.strip_suffix(".LD"))
+                .and_then(|rest| crate::compile::parse_block(rest, rest, ""));
+            if let Some((kind, _, _)) = counter_coil {
+                if !matches!(kind, crate::compile::FbKind::Ctu | crate::compile::FbKind::Ctd) {
+                    diagnostics.push(Diagnostic::error(
+                        "coil_target",
+                        format!("`{}` is not a counter; only CTU and CTD have R and LD", rung.coil.var),
+                        &coil_path,
+                    ));
+                }
+                continue;
+            }
             match symbols.get(rung.coil.var.as_str()) {
                 None => diagnostics.push(Diagnostic::error(
                     "unknown_symbol",

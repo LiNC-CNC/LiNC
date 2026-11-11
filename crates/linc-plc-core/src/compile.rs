@@ -166,6 +166,12 @@ pub enum Op {
     FbQ(u16),
     /// A two-input latch: pop the reset bit, then the set bit.
     Latch { kind: FbKind, instance: u16 },
+    /// Pop the power bit; when it is true, clear `CV` (`CTU0.R`).
+    FbReset(u16),
+    /// Pop the power bit; when it is true, load `PV` into `CV` (`CTD0.LD`).
+    FbLoad(u16),
+    /// Push the block's preset (`PT` / `PV`) on the word stack.
+    FbPreset(u16),
     /// Edge contact: push true on the scan the operand changed, then remember
     /// the value in slot `slot` for the next scan.
     Edge {
@@ -775,12 +781,24 @@ fn lower_grid_rung(
 pub enum WordOperand {
     Word(u16),
     Const(i16),
+    /// The block's `ET` / `CV`.
     Block(u16),
+    /// The block's `PT` / `PV`.
+    BlockPreset(u16),
 }
 
 /// Resolve `MW3`, `T#4s`, `-12`, `TON0.ET` or `CTU1.CV`.
 pub fn word_operand_value(text: &str) -> Option<WordOperand> {
     let text = text.trim();
+    if let Some(rest) = text
+        .strip_suffix(".PT")
+        .or_else(|| text.strip_suffix(".PV"))
+        .or_else(|| text.strip_suffix(".pt"))
+        .or_else(|| text.strip_suffix(".pv"))
+    {
+        let (_, instance, _) = parse_block(rest, rest, "")?;
+        return Some(WordOperand::BlockPreset(instance));
+    }
     if let Some(rest) = text
         .strip_suffix(".ET")
         .or_else(|| text.strip_suffix(".CV"))
@@ -807,6 +825,7 @@ fn emit_word(ops: &mut Vec<Op>, value: WordOperand) {
         WordOperand::Word(index) => ops.push(Op::LoadWord(index)),
         WordOperand::Const(value) => ops.push(Op::LoadConst(value)),
         WordOperand::Block(index) => ops.push(Op::FbWord(index)),
+        WordOperand::BlockPreset(index) => ops.push(Op::FbPreset(index)),
     }
 }
 
@@ -917,6 +936,18 @@ fn il_operand(
 }
 
 fn store_coil(ops: &mut Vec<Op>, lookup: &HashMap<String, u16>, coil: &crate::model::Coil) {
+    // `CTU0.R` and `CTD0.LD` are coils on a counter, not on a bit.
+    if let Some((rest, load)) = coil
+        .var
+        .strip_suffix(".R")
+        .map(|rest| (rest, false))
+        .or_else(|| coil.var.strip_suffix(".LD").map(|rest| (rest, true)))
+    {
+        if let Some((_, instance, _)) = parse_block(rest, rest, "") {
+            ops.push(if load { Op::FbLoad(instance) } else { Op::FbReset(instance) });
+            return;
+        }
+    }
     let index = lookup.get(coil.var.as_str()).copied().unwrap_or(0);
     let kind = coil.kind;
     if kind == CoilKind::Negated {
