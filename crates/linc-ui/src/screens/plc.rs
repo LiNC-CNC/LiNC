@@ -2047,13 +2047,10 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         app.plc.text_editing = derived;
     }
     if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
-        let keyed = ui.input(|input| {
-            input
-                .events
-                .iter()
-                .any(|event| matches!(event, egui::Event::Key { .. }))
-        });
-        if keyed {
+        // Every frame, not only key frames: a click changes the cursor without a
+        // key, and a log written only on keys made the cursor look one input
+        // behind, which is how a correct driver loop kept pressing arrows.
+        {
             eprintln!(
                 "plc keys: page={:?} text_editing={} picker={} operand_pick={} coil_pick={} cursor={:?}",
                 app.plc.page,
