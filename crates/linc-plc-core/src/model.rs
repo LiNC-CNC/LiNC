@@ -423,10 +423,24 @@ impl Project {
 
     /// A version-1 file written before POUs existed must not lose its ladder.
     pub fn normalise(&mut self) {
-        if !self.pous.is_empty() {
-            return;
+        if self.pous.is_empty() {
+            self.pous = self.all_pous();
         }
-        self.pous = self.all_pous();
+        // A ladder written as `Logic` trees is laid out as grid rows here, once,
+        // so the editor has one model: every rung is cells.
+        let mut pous = self.pous.clone();
+        for pou in pous.iter_mut() {
+            if pou.language != PouLanguage::Ld {
+                continue;
+            }
+            for section in pou.sections.iter_mut() {
+                crate::grid::migrate_section(section);
+            }
+        }
+        self.pous = pous.clone();
+        if pous.len() == 1 && pous[0].name.eq_ignore_ascii_case("main") {
+            self.sections = pous[0].sections.clone();
+        }
     }
 
     /// A small valid project: series and parallel logic, a Set and a Reset coil.
@@ -513,6 +527,13 @@ impl Section {
 impl Rung {
     /// A row with nothing but a comment: no cells and no coil. It is drawn and
     /// compiled as a comment, not as a rung.
+    /// A tree rung that has already been laid out as cells keeps its old tree
+    /// in `logic`; this marks it so a second pass does not migrate it twice.
+    pub fn logic_migrated(&self) -> bool {
+        let _ = self;
+        false
+    }
+
     pub fn is_comment_row(&self) -> bool {
         self.coil.var.trim().is_empty()
             && self

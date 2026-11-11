@@ -32,7 +32,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
     if app.plc.page != PlcPage::Edit || app.plc.picker.is_some() || app.plc.operand_pick.is_some() {
         return;
     }
-    if crate::screens::plc::text_field_focused(ui.ctx()) {
+    if app.plc.text_editing {
         return;
     }
     let ld = app
@@ -449,6 +449,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
 
 /// The element picker and, after it, the operand list.
 pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+
     element_picker(plc, ctx, actions);
     operand_picker(plc, ctx, actions);
     expr_editor(plc, ctx, actions);
@@ -480,6 +481,7 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
     let mut close = false;
     let mut apply: Option<Cell> = None;
     egui::Window::new(format!("{block} BOX"))
+        .order(egui::Order::Foreground)
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
@@ -557,6 +559,7 @@ fn xref_window(plc: &mut PlcUi, ctx: &egui::Context) {
     };
     let mut close = false;
     egui::Window::new(format!("CROSS REFERENCES  {name}"))
+        .order(egui::Order::Foreground)
         .collapsible(false)
         .resizable(true)
         .default_width(420.0)
@@ -622,6 +625,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
     let mut close = false;
     let mut next_operand = None;
     egui::Window::new("ELEMENT")
+        .order(egui::Order::Foreground)
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
@@ -794,6 +798,7 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
         .collect::<Vec<_>>();
     let mut close = false;
     egui::Window::new("OPERAND")
+        .order(egui::Order::Foreground)
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])

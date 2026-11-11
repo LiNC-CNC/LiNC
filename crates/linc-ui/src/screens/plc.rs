@@ -152,8 +152,10 @@ pub enum Action {
     Unforce(String),
     /// Set the comment of a declared symbol.
     SetSymbolComment(String, String),
-    /// Add an output symbol, which is what a new name in the table means.
+    /// Add an output symbol.
     AddSymbol(String),
+    /// Add an input symbol, which the DEMO ladder needs as much as outputs.
+    AddInput(String),
     /// Remove a declared symbol.
     RemoveSymbol(String),
     /// Write a row's comment, which is what a comment row holds.
@@ -841,6 +843,9 @@ pub struct PlcUi {
     pub pou_edit: Option<PouEdit>,
     /// The trend window in milliseconds: 4 s, 20 s or 100 s.
     pub trend_window_ms: u32,
+    /// A property text field is being typed into, so the ladder keys stand down.
+    /// Cleared by Escape, by a click on the canvas, or by leaving the field.
+    pub text_editing: bool,
     /// Show operands by IEC address instead of symbol name.
     pub view_addresses: bool,
     /// The name typed into the symbols table's new row.
@@ -866,7 +871,11 @@ pub struct PlcUi {
 impl Default for PlcUi {
     fn default() -> Self {
         Self {
-            project: Project::example(),
+            project: {
+                let mut project = Project::example();
+                project.normalise();
+                project
+            },
             path_text: default_project_path().display().to_string(),
             socket_text: linc_plc_client::default_socket_path().display().to_string(),
             selection: Some(NodePath::root(0, 0)),
@@ -915,6 +924,7 @@ impl Default for PlcUi {
             fbd_operand_pick: None,
             pou_edit: None,
             trend_window_ms: 20_000,
+            text_editing: false,
             view_addresses: false,
             symbol_new: String::new(),
             comment_row: None,
@@ -1486,6 +1496,15 @@ impl PlcUi {
                 self.comment_row = Some((section, rung + 1));
                 self.comment_buffer = String::new();
             }
+            Action::AddInput(name) => {
+                if !self.project.io.iter().any(|point| point.name == name)
+                    && !self.project.vars.iter().any(|var| var.name == name)
+                {
+                    self.project
+                        .io
+                        .push(linc_plc_core::IoPoint::new(name, IoDirection::In));
+                }
+            }
             Action::AddSymbol(name) => {
                 if !self.project.io.iter().any(|point| point.name == name)
                     && !self.project.vars.iter().any(|var| var.name == name)
@@ -1739,7 +1758,10 @@ impl PlcUi {
     pub fn open(&mut self) {
         match std::fs::read_to_string(self.path_text.trim()) {
             Ok(text) => match project_from_json(&text) {
-                Ok(project) => {
+                Ok(mut project) => {
+                    // Lay any tree rung out as cells on the way in, so the
+                    // editor has one model from the first frame.
+                    project.normalise();
                     self.project = project;
                     self.selection = Some(NodePath::root(0, 0));
                     self.daemon_diags.clear();
@@ -1916,10 +1938,7 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     crate::screens::plc_grid::editor_keys(app, ui, &mut actions);
     il_keys(&mut app.plc, ui, &mut actions);
     fbd_keys(&mut app.plc, ui, &mut actions);
-    fbd_grid_menu(&mut app.plc, ui.ctx(), &mut actions);
-    fbd_operand_menu(&mut app.plc, ui.ctx(), &mut actions);
-    crate::screens::plc_grid::pickers(&mut app.plc, ui.ctx(), &mut actions);
-    pou_edit_dialog(&mut app.plc, ui.ctx(), &mut actions);
+    {
     let plc = &mut app.plc;
 
     menu_bar(plc, ui, &mut actions);
@@ -1931,12 +1950,21 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         .auto_shrink([false, false])
         .show(ui, |ui| page_body(plc, ui, height, &mut actions));
     status_bar(plc, ui);
+    }
+
+    // Windows last: egui paints in call order, so a picker drawn before the
+    // page ends up underneath the page's cards and looks like it never opened.
+    let windows_plc = &mut app.plc;
+    fbd_grid_menu(windows_plc, ui.ctx(), &mut actions);
+    fbd_operand_menu(windows_plc, ui.ctx(), &mut actions);
+    crate::screens::plc_grid::pickers(windows_plc, ui.ctx(), &mut actions);
+    pou_edit_dialog(windows_plc, ui.ctx(), &mut actions);
 
     for action in actions {
-        plc.apply(action);
+        app.plc.apply(action);
     }
-    if plc.close_requested {
-        plc.close_requested = false;
+    if app.plc.close_requested {
+        app.plc.close_requested = false;
         app.overlay.plc_editor = false;
     }
 }
@@ -2383,7 +2411,7 @@ pub fn text_field_focused(ctx: &egui::Context) -> bool {
 
 /// Keys the IL editor owns, as the manual's line editor describes them.
 fn il_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
-    if plc.page != PlcPage::Edit || crate::screens::plc::text_field_focused(ui.ctx()) {
+    if plc.page != PlcPage::Edit || plc.text_editing {
         return;
     }
     let is_il = plc
@@ -2522,6 +2550,7 @@ fn fbd_box_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
     let mut next_block: Option<String> = None;
     let mut next_preset: Option<String> = None;
     egui::Window::new(format!("{} · row {} col {}", block.kind, row + 1, col + 1))
+        .order(egui::Order::Foreground)
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -2959,6 +2988,7 @@ fn fbd_grid_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>
     let mut block: Option<String> = None;
     let mut box_edit = false;
     egui::Window::new(format!("FBD  row {} col {}", row + 1, col + 1))
+        .order(egui::Order::Foreground)
         .collapsible(false)
         .resizable(true)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -3122,7 +3152,7 @@ fn fbd_operand_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Acti
 
 /// Keys the grid owns: arrows move between cells, Enter opens the element list.
 fn fbd_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
-    if plc.page != PlcPage::Edit || crate::screens::plc::text_field_focused(ui.ctx()) {
+    if plc.page != PlcPage::Edit || plc.text_editing {
         return;
     }
     let is_fbd = plc
@@ -3953,19 +3983,17 @@ fn ladder_body(
                         comment_row(plc, ui, section_index, rung_index, rung, actions);
                         continue;
                     }
-                    if rung.cells.is_empty() && linc_plc_core::grid::migrate(&rung.logic).is_none()
-                    {
-                        draw_rung(plc, ui, section_index, rung_index, rung, actions);
-                    } else {
-                        crate::screens::plc_grid::grid_rung(
-                            plc,
-                            ui,
-                            section_index,
-                            rung_index,
-                            rung,
-                            actions,
-                        );
-                    }
+                    // One model: every rung is cells. `normalise` lays a tree
+                    // out on the way in, and a rung that still has none is
+                    // shown as an empty row rather than in a second editor.
+                    crate::screens::plc_grid::grid_rung(
+                        plc,
+                        ui,
+                        section_index,
+                        rung_index,
+                        rung,
+                        actions,
+                    );
                 }
             }
         });
@@ -4098,6 +4126,7 @@ fn field(ui: &mut Ui, label: &str, id: &str, text: &mut String) {
     theme::focus_ring(ui, &response);
 }
 
+#[allow(dead_code)]
 fn draw_rung(
     plc: &PlcUi,
     ui: &mut Ui,
@@ -4428,6 +4457,12 @@ fn property_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
                     .font(egui::FontId::monospace(theme::font_size(10.0))),
             );
             theme::focus_ring(ui, &response);
+            if response.clicked() {
+                plc.text_editing = true;
+            }
+            if response.lost_focus() {
+                plc.text_editing = false;
+            }
             if response.changed() {
                 actions.push(Action::SetVariable(plc.var_text.clone()));
             }
@@ -4457,6 +4492,12 @@ fn property_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
                     .font(egui::FontId::monospace(theme::font_size(10.0))),
             );
             theme::focus_ring(ui, &response);
+            if response.clicked() {
+                plc.text_editing = true;
+            }
+            if response.lost_focus() {
+                plc.text_editing = false;
+            }
             if response.changed() {
                 actions.push(Action::SetCoilVariable(plc.coil_text.clone()));
             }

@@ -266,3 +266,146 @@ mod tests {
         );
     }
 }
+
+/// Lay a rung tree out as grid rows, the first row carrying the coil.
+///
+/// A series becomes consecutive cells; a parallel branch becomes a row below
+/// with a `Link` at the right edge of the row above it, which is the shape the
+/// editor draws and the compiler lowers. Returns `None` for a tree this cannot
+/// express, so a caller can keep the tree instead of guessing.
+pub fn tree_rows(logic: &Logic) -> Option<Vec<Vec<Cell>>> {
+    match logic {
+        Logic::Const { value: true } => Some(vec![vec![]]),
+        Logic::Const { value: false } => None,
+        Logic::Contact { var, negated } => Some(vec![vec![Cell::Contact {
+            var: var.clone(),
+            negated: *negated,
+        }]]),
+        Logic::Edge { var, rising } => Some(vec![vec![Cell::Edge {
+            var: var.clone(),
+            rising: *rising,
+        }]]),
+        Logic::Block {
+            block,
+            instance,
+            preset,
+        } => Some(vec![vec![Cell::Block {
+            block: block.clone(),
+            instance: instance.clone(),
+            preset: preset.clone(),
+        }]]),
+        Logic::Compare {
+            operator,
+            left,
+            right,
+        } => Some(vec![vec![Cell::Compare {
+            op: operator.clone(),
+            left: left.clone(),
+            right: right.clone(),
+        }]]),
+        Logic::Series { items } => {
+            // Row 0 is the series; a parallel item adds its remaining branches
+            // as rows below and leaves a link on row 0.
+            let mut rows: Vec<Vec<Cell>> = vec![Vec::new()];
+            for item in items {
+                match item {
+                    Logic::Parallel { items: branches } => {
+                        if branches.is_empty() {
+                            return None;
+                        }
+                        let (mut first, rest) = split_parallel(branches)?;
+                        rows[0].append(&mut first);
+                        rows[0].push(Cell::Link);
+                        rows.extend(rest);
+                    }
+                    other => {
+                        let mut part = tree_rows(other)?;
+                        if part.len() != 1 {
+                            return None;
+                        }
+                        rows[0].append(&mut part[0]);
+                    }
+                }
+            }
+            Some(rows)
+        }
+        Logic::Parallel { items } => split_parallel(items).map(|(first, rest)| {
+            let mut rows = vec![first];
+            rows.extend(rest);
+            rows
+        }),
+    }
+}
+
+/// Lay every tree rung of a section out as grid rows.
+///
+/// A rung that is already cells is left alone, as is a comment row. A parallel
+/// branch becomes the row below with a `Link` above it, so the section keeps one
+/// representation from then on.
+pub fn migrate_section(section: &mut crate::model::Section) {
+    let mut index = 0;
+    while index < section.rungs.len() {
+        let needs = section.rungs[index].cells.is_empty()
+            && !section.rungs[index].is_comment_row()
+            && !section.rungs[index].logic_migrated();
+        if !needs {
+            index += 1;
+            continue;
+        }
+        let rows = match tree_rows(&section.rungs[index].logic) {
+            Some(rows) if rows[0].len() <= POSITIONS => rows,
+            _ => {
+                index += 1;
+                continue;
+            }
+        };
+        let mut rows = rows;
+        let first = rows.remove(0);
+        section.rungs[index].cells = padded(first);
+        let coil = section.rungs[index].coil.clone();
+        for (offset, row) in rows.into_iter().enumerate() {
+            let mut branch = crate::model::Rung::new(
+                Logic::Const { value: true },
+                crate::model::Coil {
+                    var: String::new(),
+                    kind: crate::model::CoilKind::Normal,
+                },
+            );
+            branch.cells = padded(row);
+            branch.comment = if offset == 0 {
+                format!("branch of {}", coil.var)
+            } else {
+                String::new()
+            };
+            section.rungs.insert(index + 1 + offset, branch);
+        }
+        index += 1;
+    }
+}
+
+fn padded(mut cells: Vec<Cell>) -> Vec<Cell> {
+    cells.resize(POSITIONS, Cell::Wire);
+    cells
+}
+
+/// The first branch on this row, the others as rows below it.
+fn split_parallel(branches: &[Logic]) -> Option<(Vec<Cell>, Vec<Vec<Cell>>)> {
+    let mut rows = Vec::new();
+    let mut first: Option<Vec<Cell>> = None;
+    for branch in branches {
+        let mut part = tree_rows(branch)?;
+        if part.len() != 1 {
+            return None;
+        }
+        match first.take() {
+            None => first = Some(part.remove(0)),
+            Some(kept) => {
+                let mut previous = kept;
+                previous.push(Cell::Link);
+                first = Some(previous);
+                rows.push(part.remove(0));
+            }
+        }
+    }
+    first.map(|first| (first, rows))
+}
