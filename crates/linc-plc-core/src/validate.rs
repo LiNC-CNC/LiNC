@@ -193,6 +193,11 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                     ));
                                 }
                             }
+                            if mnemonic == "RET" {
+                                // A trailing RET returns from the POU; inlining
+                                // already ends there, so it has no effect.
+                                continue;
+                            }
                             if UNSUPPORTED.contains(&mnemonic.as_str()) {
                                 diagnostics.push(Diagnostic::error(
                                     "il_unsupported",
@@ -200,7 +205,57 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                     path,
                                 ));
                             } else if mnemonic == "CAL" {
-                                if !pou_names.contains(&operand.trim().to_ascii_uppercase()) {
+                                if let Some((name, args)) = crate::il::parse_call(&operand) {
+                                    let block = crate::compile::parse_block(&name, &name, "");
+                                    if block.is_none() {
+                                        diagnostics.push(Diagnostic::error(
+                                            "cal_block",
+                                            format!(
+                                                "'{name}' is not a block instance; use TON0-3, TOF0-3, TP0-3, CTU0-3 or CTD0-3"
+                                            ),
+                                            path.clone(),
+                                        ));
+                                    }
+                                    for (key, value) in args {
+                                        match key.as_str() {
+                                            "IN" | "CU" | "CD" => {
+                                                if !known.contains(&value.to_ascii_lowercase())
+                                                    && !value.eq_ignore_ascii_case("TRUE")
+                                                    && !value.eq_ignore_ascii_case("FALSE")
+                                                {
+                                                    diagnostics.push(Diagnostic::error(
+                                                        "cal_arg",
+                                                        format!("'{value}' is not a declared input"),
+                                                        path.clone(),
+                                                    ));
+                                                }
+                                            }
+                                            "PT" | "PV" => {
+                                                let timer = block
+                                                    .map(|(kind, _, _)| kind.is_timer())
+                                                    .unwrap_or(true);
+                                                if crate::compile::parse_preset(&value, timer)
+                                                    .is_none()
+                                                {
+                                                    diagnostics.push(Diagnostic::error(
+                                                        "cal_arg",
+                                                        format!(
+                                                            "'{value}' is not a valid preset"
+                                                        ),
+                                                        path.clone(),
+                                                    ));
+                                                }
+                                            }
+                                            other => diagnostics.push(Diagnostic::error(
+                                                "cal_arg",
+                                                format!(
+                                                    "'{other}' is not an argument; use IN, CU, CD, PT or PV"
+                                                ),
+                                                path.clone(),
+                                            )),
+                                        }
+                                    }
+                                } else if !pou_names.contains(&operand.trim().to_ascii_uppercase()) {
                                     diagnostics.push(Diagnostic::error(
                                         "cal_target",
                                         format!("'{operand}' is not a POU in this project"),

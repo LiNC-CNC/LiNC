@@ -29,8 +29,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         project: project.clone(),
     })? {
         Response::Loaded { hash, diagnostics } => {
-            println!("loaded {} rung section(s), hash {hash}, {} diagnostics",
-                project.sections.len(), diagnostics.len());
+            println!(
+                "loaded {} rung section(s), hash {hash}, {} diagnostics",
+                project.sections.len(),
+                diagnostics.len()
+            );
             for item in diagnostics.iter().take(4) {
                 println!("  {:?} {}", item.severity, item.message);
             }
@@ -43,11 +46,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for argument in std::env::args().skip(3) {
         if let Some((name, value)) = argument.split_once('=') {
             let value = matches!(value, "true" | "1" | "on");
-            println!("force {name}={value}: {:?}", client.call(&Request::Force {
-                name: name.to_string(),
-                value,
-                ttl_ms: 0,
-            })?);
+            println!(
+                "force {name}={value}: {:?}",
+                client.call(&Request::Force {
+                    name: name.to_string(),
+                    value,
+                    ttl_ms: 0,
+                })?
+            );
         }
     }
 

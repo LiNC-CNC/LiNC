@@ -1949,8 +1949,7 @@ fn fbd_diagram(lines: &[FbdLine], ui: &mut Ui) {
     for line in lines {
         let rows = line.inputs.len().max(1) as f32;
         let height = rows * row + 6.0;
-        let (rect, _) =
-            ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
         let painter = ui.painter();
         painter.rect_filled(rect, 3.0, theme::SURFACE);
         let box_left = rect.left() + 132.0;
@@ -2046,60 +2045,65 @@ fn fbd_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
     .default_width(360.0)
     .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
     .show(ctx, |ui| {
-        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-            for point in plc.project.io.clone() {
-                let label = format!(
-                    "{}   {}   {}",
-                    point.name,
-                    match point.direction {
-                        IoDirection::In => "input",
-                        IoDirection::Out => "output",
-                    },
-                    point.comment
-                );
-                if ui.button(label).clicked() {
-                    chosen = Some(point.name);
-                }
-            }
-            for var in plc.project.vars.clone() {
-                if ui.button(format!("{}   var   {}", var.name, var.comment)).clicked() {
-                    chosen = Some(var.name);
-                }
-            }
-            ui.horizontal_wrapped(|ui| {
-                for value in ["TRUE", "FALSE"] {
-                    if ui.button(value).clicked() {
-                        chosen = Some((*value).to_string());
+        egui::ScrollArea::vertical()
+            .max_height(360.0)
+            .show(ui, |ui| {
+                for point in plc.project.io.clone() {
+                    let label = format!(
+                        "{}   {}   {}",
+                        point.name,
+                        match point.direction {
+                            IoDirection::In => "input",
+                            IoDirection::Out => "output",
+                        },
+                        point.comment
+                    );
+                    if ui.button(label).clicked() {
+                        chosen = Some(point.name);
                     }
                 }
-                for index in 0..16 {
-                    if ui.button(format!("MW{index}")).clicked() {
-                        chosen = Some(format!("MW{index}"));
+                for var in plc.project.vars.clone() {
+                    if ui
+                        .button(format!("{}   var   {}", var.name, var.comment))
+                        .clicked()
+                    {
+                        chosen = Some(var.name);
                     }
                 }
-                for value in ["0", "1", "5", "10", "100", "T#1s", "T#10s"] {
-                    if ui.button(value).clicked() {
-                        chosen = Some((*value).to_string());
-                    }
-                }
-                for kind in ["TON", "TOF", "TP"] {
-                    for number in 0..4 {
-                        let name = format!("{kind}{number}.ET");
-                        if ui.button(&name).clicked() {
-                            chosen = Some(name);
+                ui.horizontal_wrapped(|ui| {
+                    for value in ["TRUE", "FALSE"] {
+                        if ui.button(value).clicked() {
+                            chosen = Some((*value).to_string());
                         }
                     }
-                }
-                for kind in ["CTU", "CTD"] {
-                    for number in 0..4 {
-                        let name = format!("{kind}{number}.CV");
-                        if ui.button(&name).clicked() {
-                            chosen = Some(name);
+                    for index in 0..16 {
+                        if ui.button(format!("MW{index}")).clicked() {
+                            chosen = Some(format!("MW{index}"));
                         }
                     }
-                }
+                    for value in ["0", "1", "5", "10", "100", "T#1s", "T#10s"] {
+                        if ui.button(value).clicked() {
+                            chosen = Some((*value).to_string());
+                        }
+                    }
+                    for kind in ["TON", "TOF", "TP"] {
+                        for number in 0..4 {
+                            let name = format!("{kind}{number}.ET");
+                            if ui.button(&name).clicked() {
+                                chosen = Some(name);
+                            }
+                        }
+                    }
+                    for kind in ["CTU", "CTD"] {
+                        for number in 0..4 {
+                            let name = format!("{kind}{number}.CV");
+                            if ui.button(&name).clicked() {
+                                chosen = Some(name);
+                            }
+                        }
+                    }
+                });
             });
-        });
         ui.add_space(4.0);
         if theme::action_button(ui, "Cancel", true).clicked() {
             close = true;

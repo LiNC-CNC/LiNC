@@ -352,65 +352,101 @@ fn lower_pou(
         return;
     }
     match pou.language {
-            PouLanguage::Ld => {
-                for section in &pou.sections {
-                    let mut index = 0;
-                    while index < section.rungs.len() {
-                        if section.rungs[index].cells.is_empty() {
-                            let rung = &section.rungs[index];
-                            lower_logic(&rung.logic, lookup, ops);
-                            store_coil(ops, lookup, &rung.coil);
-                            index += 1;
-                            continue;
-                        }
-                        // A run of grid rows. A link in one row makes the next
-                        // row its parallel branch, so the run is lowered as a
-                        // stack rather than one rung at a time.
-                        let mut run: Vec<Vec<crate::grid::Cell>> = Vec::new();
-                        while let Some(row) = section.rungs.get(index + run.len()) {
-                            if row.cells.is_empty() {
-                                break;
-                            }
-                            run.push(row.cells.clone());
-                        }
-                        let mut offset = 0;
-                        while offset < run.len() {
-                            let (used, compute) =
-                                lower_grid_rung(&run, offset, lookup, ops, edges);
-                            if !compute {
-                                store_coil(ops, lookup, &section.rungs[index + offset].coil);
-                            }
-                            offset += used;
-                        }
-                        index += run.len();
+        PouLanguage::Ld => {
+            for section in &pou.sections {
+                let mut index = 0;
+                while index < section.rungs.len() {
+                    if section.rungs[index].cells.is_empty() {
+                        let rung = &section.rungs[index];
+                        lower_logic(&rung.logic, lookup, ops);
+                        store_coil(ops, lookup, &rung.coil);
+                        index += 1;
+                        continue;
                     }
-                }
-            }
-            PouLanguage::Il => {
-                for line in &pou.il {
-                    if let IlLine::Instruction { mnemonic, operand } = parse_line(line) {
-                        if mnemonic == "CAL" {
-                            if let Some(callee) =
-                                pous.get(&operand.trim().to_ascii_uppercase())
-                            {
-                                lower_pou(callee, pous, lookup, lookup_ci, ops, edges, depth + 1);
-                            }
-                            continue;
+                    // A run of grid rows. A link in one row makes the next
+                    // row its parallel branch, so the run is lowered as a
+                    // stack rather than one rung at a time.
+                    let mut run: Vec<Vec<crate::grid::Cell>> = Vec::new();
+                    while let Some(row) = section.rungs.get(index + run.len()) {
+                        if row.cells.is_empty() {
+                            break;
                         }
-                        lower_line(
-                            &mnemonic,
-                            il_operand(&operand, lookup, lookup_ci),
-                            ops,
-                        );
+                        run.push(row.cells.clone());
                     }
-                }
-            }
-            PouLanguage::Fbd => {
-                for line in &pou.fbd {
-                    lower_fbd_line(line, lookup, ops);
+                    let mut offset = 0;
+                    while offset < run.len() {
+                        let (used, compute) = lower_grid_rung(&run, offset, lookup, ops, edges);
+                        if !compute {
+                            store_coil(ops, lookup, &section.rungs[index + offset].coil);
+                        }
+                        offset += used;
+                    }
+                    index += run.len();
                 }
             }
         }
+        PouLanguage::Il => {
+            for line in &pou.il {
+                if let IlLine::Instruction { mnemonic, operand } = parse_line(line) {
+                    if mnemonic == "RET" {
+                        // Inlining already ends at the end of the body, so a
+                        // trailing RET needs no op.
+                        continue;
+                    }
+                    if mnemonic == "CAL" {
+                        // `CAL TON0(IN:=x, PT:=T#1s)` runs a block; a bare name
+                        // is a POU call.
+                        if let Some((name, args)) = crate::il::parse_call(&operand) {
+                            if let Some((kind, instance, mut preset)) =
+                                parse_block(&name, &name, "")
+                            {
+                                let input = args
+                                    .iter()
+                                    .find(|(key, _)| matches!(key.as_str(), "IN" | "CU" | "CD"))
+                                    .map(|(_, value)| value.as_str())
+                                    .unwrap_or("FALSE");
+                                if let Some((_, value)) = args
+                                    .iter()
+                                    .find(|(key, _)| matches!(key.as_str(), "PT" | "PV"))
+                                {
+                                    preset =
+                                        parse_preset(value, kind.is_timer()).unwrap_or(preset);
+                                }
+                                push_bit_operand(input, lookup, ops);
+                                ops.push(Op::Fb {
+                                    kind,
+                                    instance,
+                                    preset,
+                                });
+                            }
+                            continue;
+                        }
+                        if let Some(callee) = pous.get(&operand.trim().to_ascii_uppercase()) {
+                            lower_pou(callee, pous, lookup, lookup_ci, ops, edges, depth + 1);
+                        }
+                        continue;
+                    }
+                    lower_line(&mnemonic, il_operand(&operand, lookup, lookup_ci), ops);
+                }
+            }
+        }
+        PouLanguage::Fbd => {
+            for line in &pou.fbd {
+                lower_fbd_line(line, lookup, ops);
+            }
+        }
+    }
+}
+
+/// Push a bit operand: `TRUE`, a declared symbol, or false when unknown.
+fn push_bit_operand(operand: &str, lookup: &HashMap<String, u16>, ops: &mut Vec<Op>) {
+    if operand.eq_ignore_ascii_case("TRUE") {
+        ops.push(Op::PushConst(true));
+    } else if let Some(index) = lookup.get(operand.trim()) {
+        ops.push(Op::Push(*index));
+    } else {
+        ops.push(Op::PushConst(false));
+    }
 }
 
 /// Lower one function-block assignment: build the block from its inputs, then
@@ -702,7 +738,7 @@ pub fn parse_block(block: &str, instance: &str, preset: &str) -> Option<(FbKind,
 
 /// Presets: `T#4s`, `T#1s500ms`, `T#2m`, or a count. Milliseconds are capped at
 /// what the 16-bit `ET` can hold, which is just under 33 seconds.
-fn parse_preset(text: &str, timer: bool) -> Option<i16> {
+pub fn parse_preset(text: &str, timer: bool) -> Option<i16> {
     let text = text.trim();
     if timer {
         if text.is_empty() {

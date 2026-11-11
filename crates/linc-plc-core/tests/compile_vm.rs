@@ -802,3 +802,29 @@ fn a_call_cycle_is_reported() {
         "{diagnostics:?}"
     );
 }
+
+#[test]
+fn an_il_fb_call_runs_a_timer_with_its_arguments() {
+    let mut project = project_with(
+        vec![
+            IoPoint::new("a", IoDirection::In),
+            IoPoint::new("y", IoDirection::Out),
+        ],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Il);
+    pou.il = vec![
+        "CAL TON0(IN:=a, PT:=T#1s)".into(),
+        "ST y".into(),
+        "RET".into(),
+    ];
+    project.pous = vec![pou];
+
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan_with_dt(&[true], 400);
+    assert_eq!(vm.outputs(), &[false], "the timer is still counting");
+    vm.scan_with_dt(&[true], 700);
+    assert_eq!(vm.outputs(), &[true], "ET passed the preset");
+    assert_eq!(vm.block_value(0), 1000);
+}

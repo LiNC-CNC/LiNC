@@ -26,15 +26,39 @@ pub enum IlLine {
 }
 
 /// Mnemonics this compiler can lower into the scan VM.
-pub const SUPPORTED: [&str; 25] = [
+pub const SUPPORTED: [&str; 26] = [
     "LD", "LDN", "AND", "ANDN", "OR", "ORN", "XOR", "XORN", "NOT", "ST", "STN", "S", "R", "=",
-    "ADD", "SUB", "MUL", "DIV", "MOD", "GT", "GE", "EQ", "NE", "LE", "CAL",
+    "ADD", "SUB", "MUL", "DIV", "MOD", "GT", "GE", "EQ", "NE", "LE", "CAL", "RET",
 ];
 
 /// Mnemonics that need a feature this compiler does not have yet.
-pub const UNSUPPORTED: [&str; 8] = [
-    "CALC", "CALCN", "JMP", "JMPC", "JMPCN", "RET", "RETC", "RETCN",
+pub const UNSUPPORTED: [&str; 7] = [
+    "CALC", "CALCN", "JMP", "JMPC", "JMPCN", "RETC", "RETCN",
 ];
+
+/// Parse a function-block call: `TON0(IN:=start, PT:=T#4s)`.
+pub fn parse_call(operand: &str) -> Option<(String, Vec<(String, String)>)> {
+    let text = operand.trim();
+    let open = text.find('(')?;
+    let close = text.rfind(')')?;
+    if close < open {
+        return None;
+    }
+    let name = text[..open].trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+    let mut args = Vec::new();
+    for part in text[open + 1..close].split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (key, value) = part.split_once(":=")?;
+        args.push((key.trim().to_ascii_uppercase(), value.trim().to_string()));
+    }
+    Some((name, args))
+}
 
 /// A word operand of the `MWn` bank, as the compiler resolves it.
 pub fn word_operand(operand: &str) -> Option<u16> {
@@ -76,11 +100,11 @@ pub fn parse_line(line: &str) -> IlLine {
     if !SUPPORTED.contains(&mnemonic.as_str()) && !UNSUPPORTED.contains(&mnemonic.as_str()) {
         return IlLine::Bad(format!("unknown instruction '{mnemonic}'"));
     }
-    if mnemonic != "NOT" && operand.is_empty() {
+    if !matches!(mnemonic.as_str(), "NOT" | "RET") && operand.is_empty() {
         return IlLine::Bad(format!("'{mnemonic}' needs an operand"));
     }
-    if mnemonic == "NOT" && !operand.is_empty() {
-        return IlLine::Bad("'NOT' takes no operand".to_string());
+    if matches!(mnemonic.as_str(), "NOT" | "RET") && !operand.is_empty() {
+        return IlLine::Bad(format!("'{mnemonic}' takes no operand"));
     }
     IlLine::Instruction { mnemonic, operand }
 }
