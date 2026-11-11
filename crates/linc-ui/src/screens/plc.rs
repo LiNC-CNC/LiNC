@@ -601,6 +601,40 @@ pub struct ExprEdit {
     pub target: String,
 }
 
+/// A ring of boolean samples for the trend page: one lane per symbol, oldest
+/// sample first. Sampling happens once per drawn frame, not per scan, so a
+/// change shorter than a frame can be missed; the scan itself is unaffected.
+#[derive(Debug, Clone, Default)]
+pub struct TrendBuffer {
+    pub channels: Vec<String>,
+    pub lanes: Vec<Vec<bool>>,
+    pub samples: usize,
+}
+
+impl TrendBuffer {
+    pub const DEPTH: usize = 512;
+    pub const CHANNELS: usize = 8;
+
+    pub fn sample(&mut self, vars: &[VarValue]) {
+        let names = vars
+            .iter()
+            .take(Self::CHANNELS)
+            .map(|var| var.name.clone())
+            .collect::<Vec<_>>();
+        if names != self.channels {
+            self.channels = names;
+            self.lanes = vec![Vec::new(); self.channels.len()];
+        }
+        for (lane, var) in self.lanes.iter_mut().zip(vars.iter()) {
+            lane.push(var.value);
+            if lane.len() > Self::DEPTH {
+                lane.remove(0);
+            }
+        }
+        self.samples = self.samples.saturating_add(1);
+    }
+}
+
 pub struct PlcUi {
     pub project: Project,
     /// Project file, edited in the status card.
@@ -657,6 +691,8 @@ pub struct PlcUi {
     pub cell_clipboard: Option<Cell>,
     /// The operand whose cross references are shown.
     pub xref: Option<String>,
+    /// Boolean traces for the trend page.
+    pub trend: TrendBuffer,
     /// Buffer for the IL editor; synced when the selected POU changes.
     il_text: String,
     il_for: Option<usize>,
@@ -704,6 +740,7 @@ impl Default for PlcUi {
             redo_stack: Vec::new(),
             cell_clipboard: None,
             xref: None,
+            trend: TrendBuffer::default(),
             il_text: String::new(),
             il_for: None,
             next_poll: Instant::now(),
@@ -940,6 +977,8 @@ impl PlcUi {
         self.alive = snapshot.alive;
         self.fault = snapshot.fault;
         self.vars = snapshot.vars;
+        // One sample per received snapshot, so the traces follow the scan.
+        self.trend.sample(&self.vars);
         self.forced = snapshot.forced;
     }
 
@@ -1739,14 +1778,66 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
 }
 
 fn trend_page(plc: &PlcUi, ui: &mut Ui) {
+    let trend = &plc.trend;
+    common::card_title(ui, "TREND");
+    if trend.channels.is_empty() || trend.samples == 0 {
+        ui.label(
+            RichText::new("No samples yet. Start the PLC and the first eight symbols are traced.")
+                .size(theme::font_size(10.0))
+                .color(theme::MUTED),
+        );
+        return;
+    }
     ui.label(
-        RichText::new(
-            "No samples yet: the trend page follows the watch list once the model carries it.",
-        )
-        .size(theme::font_size(10.0))
+        RichText::new(format!(
+            "{} samples, {} lanes, newest at the right",
+            trend.samples,
+            trend.channels.len()
+        ))
+        .size(theme::font_size(9.0))
         .color(theme::MUTED),
     );
-    let _ = plc;
+    ui.add_space(4.0);
+    let width = ui.available_width();
+    let lane_height = 26.0;
+    for (name, lane) in trend.channels.iter().zip(trend.lanes.iter()) {
+        let (rect, _) = ui.allocate_exact_size(vec2(width, lane_height), Sense::hover());
+        let painter = ui.painter();
+        painter.rect_filled(rect, 2.0, theme::SURFACE);
+        painter.rect_stroke(rect, 2.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+        painter.text(
+            pos2(rect.left() + 4.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            name,
+            egui::FontId::monospace(theme::font_size(9.0)),
+            theme::MUTED,
+        );
+        let plot_left = rect.left() + 92.0;
+        let plot_right = rect.right() - 4.0;
+        let height = rect.height() - 6.0;
+        let step = (plot_right - plot_left) / TrendBuffer::DEPTH as f32;
+        let offset = TrendBuffer::DEPTH.saturating_sub(lane.len()) as f32 * step;
+        let mut points = Vec::with_capacity(lane.len());
+        for (index, value) in lane.iter().enumerate() {
+            let x = plot_left + offset + index as f32 * step;
+            let y = if *value {
+                rect.top() + 3.0
+            } else {
+                rect.top() + 3.0 + height
+            };
+            points.push(pos2(x, y));
+        }
+        if points.len() > 1 {
+            painter.add(egui::Shape::line(
+                points,
+                Stroke::new(1.2, if lane.last().copied().unwrap_or(false) {
+                    theme::SUCCESS
+                } else {
+                    theme::C1
+                }),
+            ));
+        }
+    }
 }
 
 /// The simulation panel: one LED per declared I/O point. A click on an input
