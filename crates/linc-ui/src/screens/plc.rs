@@ -150,6 +150,13 @@ pub enum Action {
     SetSymbolComment(String, String),
     /// Replace the function-block body of the current POU.
     SetFbd(Vec<FbdLine>),
+    /// Insert a cell in front of the cursor, moving the rest of the row right.
+    InsertCell {
+        section: usize,
+        rung: usize,
+        position: usize,
+        cell: Cell,
+    },
     /// Write one grid cell of a rung.
     SetCell {
         section: usize,
@@ -1252,6 +1259,36 @@ impl PlcUi {
                         var.comment = comment.clone();
                     }
                 }
+            }
+            Action::InsertCell {
+                section,
+                rung,
+                position,
+                cell,
+            } => {
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    if let Some(row) = pou
+                        .sections
+                        .get_mut(section)
+                        .and_then(|section| section.rungs.get_mut(rung))
+                    {
+                        let migrated = if row.cells.is_empty() {
+                            linc_plc_core::grid::migrate(&row.logic)
+                        } else {
+                            Some(row.cells.clone())
+                        };
+                        if let Some(mut cells) = migrated {
+                            cells.resize(POSITIONS, Cell::Wire);
+                            if position < POSITIONS {
+                                cells.pop();
+                                cells.insert(position, cell);
+                                row.cells = cells;
+                            }
+                        }
+                    }
+                }
+                self.project.set_pous(pous);
             }
             Action::SetFbd(lines) => {
                 let mut pous = self.project.all_pous();

@@ -66,6 +66,122 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             input.consume_key(egui::Modifiers::CTRL, egui::Key::W),
         )
     });
+    // ZX element letters. They live on the page now that the editor overlay owns
+    // the keyboard, and a text field's focus stops the handler above.
+    let letter = |input: &mut egui::InputState, key: egui::Key| {
+        input.consume_key(egui::Modifiers::NONE, key)
+    };
+    let (contact, negated, wire, link, edge_p, edge_n, ton, tof, tp, ctu, ctd, compare, compute) =
+        ui.input_mut(|input| {
+            (
+                letter(input, egui::Key::C),
+                letter(input, egui::Key::X),
+                letter(input, egui::Key::W),
+                letter(input, egui::Key::V),
+                letter(input, egui::Key::P),
+                letter(input, egui::Key::N),
+                letter(input, egui::Key::T),
+                letter(input, egui::Key::F),
+                letter(input, egui::Key::U),
+                letter(input, egui::Key::K),
+                letter(input, egui::Key::D),
+                letter(input, egui::Key::G),
+                letter(input, egui::Key::M),
+            )
+        });
+    let insert = ui.input_mut(|input| letter(input, egui::Key::I));
+    let first = sections
+        .get(cursor.0)
+        .and_then(|section| section.rungs.get(cursor.1))
+        .and_then(|rung| rung.cells.get(cursor.2))
+        .cloned();
+    let mut element: Option<Cell> = None;
+    let mut pick_operand: Option<Cell> = None;
+    if contact {
+        pick_operand = Some(Cell::Contact {
+            var: String::new(),
+            negated: false,
+        });
+    }
+    if negated {
+        pick_operand = Some(Cell::Contact {
+            var: String::new(),
+            negated: true,
+        });
+    }
+    if edge_p {
+        pick_operand = Some(Cell::Edge {
+            var: String::new(),
+            rising: true,
+        });
+    }
+    if edge_n {
+        pick_operand = Some(Cell::Edge {
+            var: String::new(),
+            rising: false,
+        });
+    }
+    if wire {
+        element = Some(Cell::Wire);
+    }
+    if link {
+        element = Some(Cell::Link);
+    }
+    if ton || tof || tp {
+        let block = if ton { "TON" } else if tof { "TOF" } else { "TP" };
+        element = Some(Cell::Block {
+            block: block.to_string(),
+            instance: format!("{block}0"),
+            preset: "T#1s".to_string(),
+        });
+    }
+    if ctu || ctd {
+        let block = if ctu { "CTU" } else { "CTD" };
+        element = Some(Cell::Block {
+            block: block.to_string(),
+            instance: format!("{block}0"),
+            preset: "10".to_string(),
+        });
+    }
+    if compare {
+        element = Some(Cell::Compare {
+            op: "GT".to_string(),
+            left: "MW0".to_string(),
+            right: "0".to_string(),
+        });
+    }
+    if compute {
+        element = Some(Cell::Compute {
+            op: "ADD".to_string(),
+            target: "MW0".to_string(),
+            left: "MW0".to_string(),
+            right: "1".to_string(),
+        });
+    }
+    if let Some(cell) = pick_operand {
+        if cursor.2 < POSITIONS {
+            app.plc.operand_pick = Some((cursor.0, cursor.1, cursor.2, cell));
+        }
+    } else if let Some(cell) = element {
+        if cursor.2 < POSITIONS {
+            actions.push(if insert {
+                Action::InsertCell {
+                    section: cursor.0,
+                    rung: cursor.1,
+                    position: cursor.2,
+                    cell,
+                }
+            } else {
+                Action::SetCell {
+                    section: cursor.0,
+                    rung: cursor.1,
+                    position: cursor.2,
+                    cell,
+                }
+            });
+        }
+    }
+    let _ = first;
     if undo {
         app.plc.undo();
     }
