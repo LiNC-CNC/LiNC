@@ -106,6 +106,30 @@ pub fn lower_row(cells: &[Cell]) -> Logic {
     }
 }
 
+/// Turn a version-2 series rung into cells.
+///
+/// Only a flat series of contacts is expressible one-to-one; a parallel branch
+/// (or a constant) returns `None` rather than being flattened into something
+/// that means something else. The caller then leaves the tree in place.
+pub fn migrate(logic: &Logic) -> Option<Vec<Cell>> {
+    match logic {
+        // An always-true rung is an empty row: both energise the coil.
+        Logic::Const { value: true } => Some(Vec::new()),
+        Logic::Contact { var, negated } => Some(vec![Cell::Contact {
+            var: var.clone(),
+            negated: *negated,
+        }]),
+        Logic::Series { items } => {
+            let mut cells = Vec::new();
+            for item in items {
+                cells.extend(migrate(item)?);
+            }
+            Some(cells)
+        }
+        _ => None,
+    }
+}
+
 /// The coil of a grid row. Compute coils carry their expression in the cell.
 pub fn coil_of(cells: &[Cell], coil: &Coil) -> Coil {
     let _ = cells;
@@ -147,6 +171,28 @@ mod tests {
     fn the_coil_is_carried_through_unchanged() {
         let coil = Coil::new("y", CoilKind::Set);
         assert_eq!(coil_of(&[], &coil), coil);
+    }
+
+    #[test]
+    fn a_series_rung_migrates_and_a_branch_does_not() {
+        let series = Logic::series(vec![Logic::contact("a", false), Logic::contact("b", true)]);
+        assert_eq!(
+            migrate(&series),
+            Some(vec![
+                Cell::Contact {
+                    var: "a".into(),
+                    negated: false
+                },
+                Cell::Contact {
+                    var: "b".into(),
+                    negated: true
+                },
+            ])
+        );
+        let branch = Logic::Parallel {
+            items: vec![Logic::contact("a", false), Logic::contact("b", false)],
+        };
+        assert_eq!(migrate(&branch), None, "a branch is not a row of cells");
     }
 
     #[test]

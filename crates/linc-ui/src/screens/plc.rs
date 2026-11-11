@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use egui::{pos2, vec2, Align, Color32, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_client::Client;
-use linc_plc_core::protocol::{Request, Response, RunState, StateSnapshot, PROTOCOL_VERSION};
 use linc_plc_core::grid::{Cell, POSITIONS};
+use linc_plc_core::protocol::{Request, Response, RunState, StateSnapshot, PROTOCOL_VERSION};
 use linc_plc_core::{
     validate, Coil, CoilKind, Diagnostic, IoDirection, Logic, Pou, PouLanguage, Project, Rung,
     Section, Severity, VarValue,
@@ -612,6 +612,8 @@ pub struct PlcUi {
     pub cell_cursor: Option<(usize, usize, usize)>,
     /// The element picker is open on this cell.
     pub picker: Option<(usize, usize, usize)>,
+    /// The operand list is open for the cell a kind was just chosen for.
+    pub operand_pick: Option<(usize, usize, usize, Cell)>,
     /// Buffer for the IL editor; synced when the selected POU changes.
     il_text: String,
     il_for: Option<usize>,
@@ -653,6 +655,7 @@ impl Default for PlcUi {
             close_requested: false,
             cell_cursor: None,
             picker: None,
+            operand_pick: None,
             il_text: String::new(),
             il_for: None,
             next_poll: Instant::now(),
@@ -1039,14 +1042,20 @@ impl PlcUi {
                         .get_mut(section)
                         .and_then(|section| section.rungs.get_mut(rung))
                     {
-                        if row.cells.is_empty() {
-                            row.cells = vec![Cell::Wire; POSITIONS];
-                        }
-                        while row.cells.len() <= position && position < POSITIONS {
-                            row.cells.push(Cell::Wire);
-                        }
-                        if position < POSITIONS {
-                            row.cells[position] = cell;
+                        // A version-2 rung converts to cells only when it is a
+                        // flat series; a parallel branch keeps its tree instead
+                        // of being silently flattened into different logic.
+                        let migrated = if row.cells.is_empty() {
+                            linc_plc_core::grid::migrate(&row.logic)
+                        } else {
+                            Some(row.cells.clone())
+                        };
+                        if let Some(mut cells) = migrated {
+                            if position < POSITIONS {
+                                cells.resize(POSITIONS, Cell::Wire);
+                                cells[position] = cell;
+                                row.cells = cells;
+                            }
                         }
                     }
                 }
@@ -1292,6 +1301,8 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     app.plc.poll();
     common::focus_anchor(ui, "plc-editor-focus");
     let mut actions: Vec<Action> = Vec::new();
+    crate::screens::plc_grid::editor_keys(app, ui, &mut actions);
+    crate::screens::plc_grid::pickers(&mut app.plc, ui.ctx(), &mut actions);
     let plc = &mut app.plc;
 
     menu_bar(plc, ui, &mut actions);
@@ -1790,7 +1801,20 @@ fn ladder_body(
                         .color(theme::C3),
                 );
                 for (rung_index, rung) in section.rungs.iter().enumerate() {
-                    draw_rung(plc, ui, section_index, rung_index, rung, actions);
+                    if rung.cells.is_empty()
+                        && linc_plc_core::grid::migrate(&rung.logic).is_none()
+                    {
+                        draw_rung(plc, ui, section_index, rung_index, rung, actions);
+                    } else {
+                        crate::screens::plc_grid::grid_rung(
+                            plc,
+                            ui,
+                            section_index,
+                            rung_index,
+                            rung,
+                            actions,
+                        );
+                    }
                 }
             }
         });
