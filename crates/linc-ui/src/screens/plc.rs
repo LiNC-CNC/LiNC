@@ -2106,24 +2106,14 @@ const STATUS_BAR_HEIGHT: f32 = 22.0;
 /// workbench itself is a popped-out overlay that owns every key; the page keeps
 /// the project, the service and the way in.
 
-/// True when `key` was pressed with Ctrl held.
-///
-/// `consume_key` matches modifiers exactly, and egui-winit reports Ctrl as
-/// `CTRL | COMMAND` on Linux, so an exact `CTRL` binding never fired. The bit is
-/// what the operator means, so the bit is what is tested.
+/// True when `key` was pressed with Ctrl held, consumed so it is applied once.
 fn ctrl_key(ui: &Ui, key: egui::Key) -> bool {
-    ui.input(|input| {
-        input.events.iter().any(|event| {
-            matches!(
-                event,
-                egui::Event::Key {
-                    key: pressed,
-                    pressed: true,
-                    modifiers,
-                    ..
-                } if *pressed == key && modifiers.ctrl
-            )
-        })
+    // Consume, so one press is handled once: reading the event list let the same
+    // chord be applied twice and added two rows per Ctrl+N. egui-winit reports
+    // Ctrl as CTRL|COMMAND on Linux, so both spellings are consumed.
+    ui.input_mut(|input| {
+        input.consume_key(egui::Modifiers::CTRL, key)
+            || input.consume_key(egui::Modifiers::CTRL | egui::Modifiers::COMMAND, key)
     })
 }
 
