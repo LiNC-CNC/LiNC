@@ -10,7 +10,7 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use egui::{pos2, vec2, Align, Color32, RichText, Sense, Stroke, Ui, Vec2};
+use egui::{pos2, vec2, Align, Align2, Color32, FontId, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_client::Client;
 use linc_plc_core::grid::{Cell, POSITIONS};
 use linc_plc_core::model::{FbdCell, FbdGrid, FbdLine};
@@ -2200,80 +2200,93 @@ pub fn escape_closes_editor(plc: &PlcUi) -> bool {
         && plc.expr_edit.is_none()
 }
 
-/// The PLC workbench's own navigation strip: the shortcuts this editor answers to,
-/// grouped the way the main GUI's sidebar groups pages. It lists keys, not main
-/// page destinations, because the editor owns the keyboard while it is open.
+/// The PLC workbench's navigation strip, built with the main GUI's row metrics:
+/// a fixed row height, a 2 px gap inside a group and a wider gap before each group
+/// heading. Loose `ui.horizontal` spacing is exactly what made it read as a list of
+/// floating labels.
 fn shortcut_nav(plc: &PlcUi, ui: &mut Ui) {
-    ui.vertical(|ui| {
-        ui.label(
-            RichText::new("SHORTCUTS")
-                .size(theme::font_size(8.5))
-                .color(theme::MUTED),
+    let row = |ui: &mut Ui, text: &str, key: &str, active: bool| {
+        let (rect, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
+            egui::Sense::hover(),
         );
-        ui.add_space(2.0);
-        let entries: &[(&str, &str)] = &[
-            ("PAGES", ""),
-            ("POU list", "Ctrl+1"),
-            ("Ladder", "Ctrl+2"),
-            ("Symbols", "Ctrl+3"),
-            ("Simulation", "Ctrl+4"),
-            ("RUN", ""),
-            ("Run / stop", "R"),
-            ("RUNG", ""),
-            ("New row", "Ctrl+N"),
-            ("New row at cursor", "Ctrl+J"),
-            ("Delete row", "Ctrl+Del"),
-            ("SAVE", ""),
-            ("Save project", "Ctrl+S"),
-            ("ELEMENTS", ""),
-            ("Contact", "C"),
-            ("Negated contact", "X"),
-            ("Rising / falling edge", "P N"),
-            ("Wire / link", "W V"),
-            ("Timer / counter", "T F U K D"),
-            ("Compare / compute", "G M"),
-            ("Insert before", "I"),
-            ("Delete cell", "Bksp"),
-            ("COIL", ""),
-            ("Normal / set / reset", "C S R"),
-            ("TOOLS", ""),
-            ("Watch", "Ctrl+W"),
-            ("Cross references", "Ctrl+X"),
-            ("Undo / redo", "Ctrl+Z Y"),
-        ];
-        for (text, key) in entries {
-            if key.is_empty() {
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(*text)
-                        .size(theme::font_size(8.5))
-                        .color(theme::C3),
-                );
-                continue;
-            }
-            let active = match *key {
-                "Ctrl+2" => plc.page == PlcPage::Edit,
-                "Ctrl+3" => plc.page == PlcPage::Symbols,
-                "Ctrl+1" => plc.page == PlcPage::PouList,
-                _ => false,
-            };
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(*text)
-                        .size(theme::font_size(9.0))
-                        .color(if active { theme::FG } else { theme::MUTED }),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(*key)
-                            .monospace()
-                            .size(theme::font_size(8.5))
-                            .color(theme::ACCENT),
-                    );
-                });
-            });
+        if active {
+            ui.painter().rect_filled(rect, 2.0, theme::PANEL_RAISED);
         }
-    });
+        ui.painter().text(
+            egui::pos2(rect.left() + 6.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            text,
+            FontId::proportional(theme::font_size(9.5)),
+            if active { theme::FG } else { theme::MUTED },
+        );
+        ui.painter().text(
+            egui::pos2(rect.right() - 6.0, rect.center().y),
+            Align2::RIGHT_CENTER,
+            key,
+            FontId::monospace(theme::font_size(8.5)),
+            theme::ACCENT,
+        );
+    };
+    let heading = |ui: &mut Ui, text: &str, first: bool| {
+        if !first {
+            ui.add_space(theme::NAV_ROW_GAP.max(6.0) + 2.0);
+        }
+        let (rect, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
+            egui::Sense::hover(),
+        );
+        ui.painter().text(
+            egui::pos2(rect.left() + 6.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            text,
+            FontId::proportional(theme::font_size(8.0)),
+            theme::C3,
+        );
+    };
+    heading(ui, "PAGES", true);
+    row(ui, "POU list", "Ctrl+1", plc.page == PlcPage::PouList);
+    ui.add_space(theme::NAV_ROW_GAP);
+    row(ui, "Ladder", "Ctrl+2", plc.page == PlcPage::Edit);
+    ui.add_space(theme::NAV_ROW_GAP);
+    row(ui, "Symbols", "Ctrl+3", plc.page == PlcPage::Symbols);
+    ui.add_space(theme::NAV_ROW_GAP);
+    row(ui, "Simulation", "Ctrl+4", plc.page == PlcPage::Sim);
+    heading(ui, "RUN", false);
+    row(ui, "Run / stop", "R", false);
+    heading(ui, "RUNG", false);
+    row(ui, "New row", "Ctrl+N", false);
+    ui.add_space(theme::NAV_ROW_GAP);
+    row(ui, "New row at cursor", "Ctrl+J", false);
+    ui.add_space(theme::NAV_ROW_GAP);
+    row(ui, "Delete row", "Ctrl+Del", false);
+    heading(ui, "SAVE", false);
+    row(ui, "Save project", "Ctrl+S", false);
+    heading(ui, "ELEMENTS", false);
+    for (text, key) in [
+        ("Contact", "C"),
+        ("Negated contact", "X"),
+        ("Rising / falling edge", "P N"),
+        ("Wire / link", "W V"),
+        ("Timer / counter", "T F U K D"),
+        ("Compare / compute", "G M"),
+        ("Insert before", "I"),
+        ("Delete cell", "Bksp"),
+    ] {
+        row(ui, text, key, false);
+        ui.add_space(theme::NAV_ROW_GAP);
+    }
+    heading(ui, "COIL", false);
+    row(ui, "Normal / set / reset", "C S R", false);
+    heading(ui, "TOOLS", false);
+    for (text, key) in [
+        ("Watch", "Ctrl+W"),
+        ("Cross references", "Ctrl+X"),
+        ("Undo / redo", "Ctrl+Z Y"),
+    ] {
+        row(ui, text, key, false);
+        ui.add_space(theme::NAV_ROW_GAP);
+    }
 }
 
 pub fn editor(app: &mut LincApp, ui: &mut Ui) {
@@ -2791,8 +2804,16 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
             egui::Layout::top_down(Align::Min),
             |ui| match language {
                 PouLanguage::Ld => {
+                    // Clipped to its column: without a bounded scroll area the
+                    // ladder drew past it and under the properties card.
                     let sections = plc.current_pou_sections();
-                    ladder_body(plc, &sections, ui, body_height, actions);
+                    egui::ScrollArea::both()
+                        .id_salt("plc-ladder-clip")
+                        .max_width(left_width)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ladder_body(plc, &sections, ui, body_height, actions);
+                        });
                 }
                 PouLanguage::Il => il_editor(plc, ui, body_height),
                 PouLanguage::Fbd => fbd_editor(plc, ui, body_height, actions),

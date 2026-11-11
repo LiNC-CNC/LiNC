@@ -1546,15 +1546,10 @@ pub fn grid_rung(
     } else {
         rung.cells.clone()
     };
-    if !rung.comment.is_empty() {
-        ui.label(
-            RichText::new(format!("// {}", rung.comment))
-                .monospace()
-                .size(theme::font_size(9.0))
-                .color(theme::COMMENT),
-        );
-    }
-    ui.horizontal(|ui| {
+    // The comment sits inside the strip's upper band so every rung is exactly
+    // `CELL_HEIGHT` tall: the link's drop to the branch row stays exact.
+    let commented = !rung.comment.is_empty();
+    let strip = ui.horizontal(|ui| {
         // Zero spacing: neighbouring cells share one conductor with no joint.
         ui.spacing_mut().item_spacing.x = 0.0;
         for position in 0..POSITIONS {
@@ -1569,6 +1564,7 @@ pub fn grid_rung(
                 &label,
                 matches!(cell, Cell::Wire),
                 cell_symbol(&cell),
+                if commented { 15.0 } else { 8.0 },
             );
         }
         let coil = plc.operand_label(&rung.coil.var);
@@ -1581,9 +1577,22 @@ pub fn grid_rung(
             &coil,
             rung.coil.var.is_empty(),
             CellSymbol::Coil(rung.coil.kind),
+            if commented { 15.0 } else { 8.0 },
         );
     });
-    ui.add_space(4.0);
+    if commented {
+        // Inside the strip: the rung stays exactly CELL_HEIGHT tall, so the link's
+        // drop to the branch row lands on that row's conductor.
+        let rect = strip.response.rect;
+        ui.painter().text(
+            egui::pos2(rect.left() + 2.0, rect.top() + 6.0),
+            Align2::LEFT_CENTER,
+            format!("// {}", rung.comment),
+            FontId::monospace(theme::font_size(8.0)),
+            theme::COMMENT,
+        );
+    }
+    ui.add_space(ROW_GAP);
 }
 
 /// The graphical element a cell stands for. The ladder draws IEC symbols, not
@@ -1628,7 +1637,7 @@ pub fn cell_symbol(cell: &Cell) -> CellSymbol {
 /// ZX geometry: one continuous conductor per rung, name above the symbol, no
 /// cell borders and no spacing between cells. A row is a strip whose conductor
 /// runs along `CONDUCTOR_Y` from its left edge to its right edge.
-pub const CELL_WIDTH: f32 = 56.0;
+pub const CELL_WIDTH: f32 = 48.0;
 pub const CELL_HEIGHT: f32 = 36.0;
 pub const CONDUCTOR_Y: f32 = 24.0;
 pub const ROW_GAP: f32 = 0.0;
@@ -1755,6 +1764,7 @@ fn cell_box(
     label: &str,
     quiet: bool,
     symbol: CellSymbol,
+    name_y: f32,
 ) {
     let size = Vec2::new(CELL_WIDTH, CELL_HEIGHT);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
@@ -1785,7 +1795,7 @@ fn cell_box(
     draw_cell_symbol(painter, rect, symbol, color);
     if !label.is_empty() {
         painter.text(
-            egui::pos2(rect.center().x, rect.top() + 8.0),
+            egui::pos2(rect.center().x, rect.top() + name_y),
             Align2::CENTER_CENTER,
             label,
             FontId::monospace(theme::font_size(8.5)),
