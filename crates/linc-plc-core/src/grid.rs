@@ -86,6 +86,14 @@ impl Cell {
 ///
 /// Empty positions and wires add nothing: power flows through them. The coil
 /// stays where it is; the caller pairs it with the returned logic.
+/// Does this row carry a compute cell? Those rows write through the cell and their
+/// coil slot is unused, so the caller must not also store a coil.
+pub fn is_compute_row(cells: &[Cell]) -> bool {
+    cells
+        .iter()
+        .any(|cell| matches!(cell, Cell::Compute { .. }))
+}
+
 pub fn lower_row(cells: &[Cell]) -> Logic {
     let mut items = Vec::new();
     for cell in cells.iter().take(POSITIONS) {

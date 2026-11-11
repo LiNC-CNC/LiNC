@@ -1256,6 +1256,9 @@ impl PlcUi {
     }
 
     fn send(&mut self, tag: Tag, request: Request) {
+        if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+            eprintln!("send {tag:?} link={}", self.link.is_some());
+        }
         let Some(link) = &self.link else {
             return;
         };
@@ -1623,6 +1626,9 @@ impl PlcUi {
             Action::Validate => self.validate(),
             Action::Download => self.download(),
             Action::Start => {
+                if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+                    eprintln!("apply Start online={} state={:?}", self.online, self.state);
+                }
                 // A bare Start is refused unless the daemon is Loaded, so a start
                 // from the manual always loads first, in this order on the same
                 // connection.
@@ -2389,6 +2395,12 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         } else {
             Action::Start
         };
+        if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+            eprintln!(
+                "sim R: page={:?} state={:?} online={} stop={}",
+                app.plc.page, app.plc.state, app.plc.online, matches!(action, Action::Stop)
+            );
+        }
         app.plc.apply(action);
     }
     if add_rung {

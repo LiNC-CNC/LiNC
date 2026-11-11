@@ -707,6 +707,15 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 }
                 continue;
             }
+            // A compute rung writes through its `Compute` cell, so its coil slot is
+            // unused: neither an empty target nor a duplicate there means anything.
+            if rung
+                .cells
+                .iter()
+                .any(|cell| matches!(cell, crate::grid::Cell::Compute { .. }))
+            {
+                continue;
+            }
             // A blank coil is the linked continuation row: the row holds the
             // branch under the `Link` above it and the link's row carries the
             // coil. A blank coil anywhere else is still an error.
@@ -741,7 +750,9 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         crate::model::CoilKind::Reset => "reset",
                         _ => "write",
                     };
-                    let seen = coils.entry(rung.coil.var.clone()).or_insert((false, false, false));
+                    let seen = coils
+                        .entry(rung.coil.var.clone())
+                        .or_insert((false, false, false));
                     let conflict = match class {
                         "set" => seen.1 || seen.0,
                         "reset" => seen.2 || seen.0,

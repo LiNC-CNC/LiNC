@@ -2,6 +2,14 @@ use linc_plc_core::{
     compile, project_hash, Coil, CoilKind, IoDirection, IoPoint, Logic, Op, Project, Rung, Section,
     SymbolKind, VarDecl, Vm,
 };
+use linc_plc_core::validate::validate;
+
+fn codes(diagnostics: &[linc_plc_core::Diagnostic]) -> Vec<String> {
+    diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code.to_string())
+        .collect()
+}
 
 fn project_with(io: Vec<IoPoint>, vars: Vec<VarDecl>, sections: Vec<Section>) -> Project {
     let mut project = Project::new("vm-test");
@@ -1385,5 +1393,81 @@ fn cross_coupled_tp_blocks_alternate() {
         swapped,
         vec![false, true],
         "past T#1s the blinkers swap: {swapped:?}"
+    );
+}
+
+/// Compute rows execute, and with sequential rungs the second sees the first's
+/// result: `MW2 := MW1+5` then `MW2 := MW2+1` gives 6 from MW1 = 0 in one scan.
+#[test]
+fn compute_rows_run_and_chain_their_words() {
+    use linc_plc_core::grid::Cell;
+    let compute = |target: &str, left: &str, right: &str| Rung {
+        cells: vec![Cell::Compute {
+            op: "ADD".to_string(),
+            target: target.to_string(),
+            left: left.to_string(),
+            right: right.to_string(),
+        }],
+        comment: String::new(),
+        logic: Logic::Const { value: true },
+        coil: Coil::new("", CoilKind::Normal),
+    };
+    let project = project_with(
+        vec![IoPoint::new("lamp", IoDirection::Out)],
+        Vec::new(),
+        vec![section(
+            "main",
+            vec![compute("MW2", "MW1", "5"), compute("MW2", "MW2", "1")],
+        )],
+    );
+    let compiled = compile(&project).expect("compute rows compile");
+    let mut vm = Vm::new(&compiled);
+    // Sequential rungs: the second compute sees the first's write, so one scan
+    // lands on MW1+5+1 = 6, which is what the daemon reports.
+    vm.scan(&[]);
+    assert_eq!(vm.word(2), 6, "MW1+5 then +1 in the same scan");
+    vm.scan(&[]);
+    assert_eq!(vm.word(2), 6, "and it settles there");
+}
+
+/// A compute rung's coil slot is unused, so a shared coil name there is not a
+/// duplicate write; the same name on two ordinary rows still is.
+#[test]
+fn a_compute_rung_does_not_count_as_a_coil_write() {
+    use linc_plc_core::grid::Cell;
+    let mut project = project_with(
+        vec![
+            IoPoint::new("start", IoDirection::In),
+            IoPoint::new("run", IoDirection::Out),
+        ],
+        Vec::new(),
+        vec![section(
+            "main",
+            vec![Rung::new(
+                Logic::contact("start", false),
+                Coil::new("run", CoilKind::Normal),
+            )],
+        )],
+    );
+    let mut compute_row = Rung::new(Logic::Const { value: true }, Coil::new("run", CoilKind::Normal));
+    compute_row.cells = vec![Cell::Compute {
+        op: "ADD".to_string(),
+        target: "MW2".to_string(),
+        left: "MW1".to_string(),
+        right: "1".to_string(),
+    }];
+    project.sections[0].rungs.push(compute_row);
+    assert!(
+        validate(&project).is_empty(),
+        "a compute row may reuse the section's coil name: {:?}",
+        validate(&project)
+    );
+    // Two ordinary writes of the same kind are still ambiguous.
+    let mut second = Rung::new(Logic::contact("start", false), Coil::new("run", CoilKind::Normal));
+    second.cells = Vec::new();
+    project.sections[0].rungs.push(second);
+    assert!(
+        codes(&validate(&project)).iter().any(|code| code == "duplicate_coil"),
+        "ordinary duplicate writes are still caught"
     );
 }
