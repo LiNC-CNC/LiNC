@@ -855,7 +855,10 @@ pub struct PlcUi {
     /// The word bank and block members from the last snapshot.
     pub words: Vec<WordValue>,
     /// Buffer for the IL editor; synced when the selected POU changes.
-    il_text: String,
+    /// IL line editor: the line under the cursor and the text typed into it.
+    pub il_cursor: usize,
+    pub il_buffer: String,
+    pub il_message: Option<String>,
     il_for: Option<usize>,
     next_poll: Instant,
 }
@@ -916,7 +919,9 @@ impl Default for PlcUi {
             trend: TrendBuffer::default(),
             trend_remote: TrendData::default(),
             words: Vec::new(),
-            il_text: String::new(),
+            il_cursor: 0,
+            il_buffer: String::new(),
+            il_message: None,
             il_for: None,
             next_poll: Instant::now(),
         }
@@ -1038,23 +1043,71 @@ impl PlcUi {
         self.project.set_pous(pous);
     }
 
-    fn sync_il_text(&mut self) {
+    /// Load the line under the cursor when the POU changed.
+    pub fn sync_il_line(&mut self) {
         if self.il_for != Some(self.pou) {
-            self.il_text = self
-                .current_pou()
-                .map(|pou| pou.il.join("\n"))
-                .unwrap_or_default();
+            self.il_cursor = 0;
+            self.il_buffer = self.il_lines().first().cloned().unwrap_or_default();
+            self.il_message = None;
             self.il_for = Some(self.pou);
         }
     }
 
-    fn set_il_text(&mut self, text: &str) {
+    pub fn il_lines(&self) -> Vec<String> {
+        self.current_pou().map(|pou| pou.il).unwrap_or_default()
+    }
+
+    /// Write the line buffer into the program, keeping the cursor on it.
+    pub fn il_store(&mut self, lines: Vec<String>) {
+        self.snapshot();
         let mut pous = self.project.all_pous();
         if let Some(pou) = pous.get_mut(self.pou) {
-            pou.il = text.lines().map(str::to_string).collect();
+            pou.il = lines;
             pou.language = PouLanguage::Il;
         }
         self.project.set_pous(pous);
+    }
+
+    /// Write the line buffer into `lines` (and into the program when asked).
+    pub fn il_store_buffer(&mut self, lines: &mut Vec<String>, keep: bool) {
+        if self.il_cursor < lines.len() {
+            lines[self.il_cursor] = self.il_buffer.clone();
+        } else if self.il_cursor == lines.len() {
+            lines.push(self.il_buffer.clone());
+        }
+        if keep {
+            self.il_store(lines.clone());
+        }
+    }
+
+    /// Write a whole line list, used when a line is removed.
+    pub fn il_store_lines(&mut self, lines: Vec<String>) {
+        self.il_store(lines);
+    }
+
+    /// Check the edited line on its own, so an error keeps the cursor here.
+    pub fn il_check(&self, line: &str) -> Option<String> {
+        let mut lines = self.il_lines();
+        if self.il_cursor < lines.len() {
+            lines[self.il_cursor] = line.to_string();
+        }
+        let mut project = self.project.clone();
+        let mut pous = project.all_pous();
+        let Some(pou) = pous.get_mut(self.pou) else {
+            return None;
+        };
+        pou.il = lines;
+        pou.language = PouLanguage::Il;
+        project.set_pous(pous);
+        validate(&project)
+            .into_iter()
+            .find(|item| {
+                item.severity == Severity::Error
+                    && item
+                        .path
+                        .starts_with(&format!("pous[{}].il[{}]", self.pou, self.il_cursor))
+            })
+            .map(|item| item.message)
     }
     fn poll(&mut self) {
         if self.link.is_none() {
@@ -1850,6 +1903,7 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     common::focus_anchor(ui, "plc-editor-focus");
     let mut actions: Vec<Action> = Vec::new();
     crate::screens::plc_grid::editor_keys(app, ui, &mut actions);
+    il_keys(&mut app.plc, ui, &mut actions);
     crate::screens::plc_grid::pickers(&mut app.plc, ui.ctx(), &mut actions);
     pou_edit_dialog(&mut app.plc, ui.ctx(), &mut actions);
     let plc = &mut app.plc;
@@ -2228,31 +2282,187 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
 /// The IL editor: numbered source lines over the POU's `il` body. The compiler
 /// that turns them into bytecode is the next slice.
 fn il_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32) {
-    plc.sync_il_text();
-    let mut text = plc.il_text.clone();
-    ui.horizontal_top(|ui| {
-        let digits = text.lines().count().to_string().len().max(3);
-        let mut numbers = String::new();
-        for (index, _) in text.lines().enumerate() {
-            numbers.push_str(&format!("{:0width$}\n", index + 1, width = digits));
-        }
+    plc.sync_il_line();
+    let lines = plc.il_lines();
+    ui.label(
+        RichText::new(
+            "SPACE finishes an instruction · ENTER checks the line · Ctrl+Enter inserts below · DELETE removes an empty line",
+        )
+        .monospace()
+        .size(theme::font_size(8.5))
+        .color(theme::MUTED),
+    );
+    ui.add_space(2.0);
+    egui::ScrollArea::vertical()
+        .id_salt("plc-il")
+        .max_height((height - 8.0).max(120.0))
+        .show(ui, |ui| {
+            for (index, line) in lines.iter().enumerate() {
+                let active = index == plc.il_cursor;
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!("{:>3}", index + 1))
+                            .monospace()
+                            .size(theme::font_size(10.0))
+                            .color(theme::LINE_NUMBER),
+                    );
+                    let text = if active {
+                        format!("{}█", plc.il_buffer)
+                    } else {
+                        line.clone()
+                    };
+                    let colour = if line.trim_start().starts_with("//") {
+                        theme::COMMENT
+                    } else if active {
+                        theme::ACCENT
+                    } else {
+                        theme::FG
+                    };
+                    let response = ui.add(
+                        egui::Label::new(
+                            RichText::new(if text.is_empty() {
+                                " ".to_string()
+                            } else {
+                                text
+                            })
+                            .monospace()
+                            .size(theme::font_size(10.0))
+                            .color(colour),
+                        )
+                        .sense(Sense::click()),
+                    );
+                    if response.clicked() {
+                        plc.il_cursor = index;
+                        plc.il_buffer = line.clone();
+                        plc.il_message = None;
+                    }
+                });
+            }
+            if lines.is_empty() {
+                ui.label(
+                    RichText::new("empty POU — type the first instruction")
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
+                );
+            }
+        });
+    if let Some(message) = &plc.il_message {
+        ui.add_space(2.0);
         ui.label(
-            RichText::new(numbers)
+            RichText::new(message.clone())
                 .monospace()
-                .size(theme::font_size(10.0))
-                .color(theme::LINE_NUMBER),
+                .size(theme::font_size(9.0))
+                .color(theme::ERROR),
         );
-        let response = ui.add_sized(
-            vec2(ui.available_width(), (height - 8.0).max(120.0)),
-            egui::TextEdit::multiline(&mut text)
-                .code_editor()
-                .font(egui::TextStyle::Monospace)
-                .desired_width(f32::INFINITY),
-        );
-        if response.changed() {
-            plc.set_il_text(&text);
+    }
+}
+
+/// Keys the IL editor owns, as the manual's line editor describes them.
+fn il_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
+    if plc.page != PlcPage::Edit || ui.ctx().memory(|memory| memory.focused().is_some()) {
+        return;
+    }
+    let is_il = plc
+        .current_pou()
+        .map(|pou| pou.language == PouLanguage::Il)
+        .unwrap_or(false);
+    if !is_il {
+        return;
+    }
+    plc.sync_il_line();
+    let mut lines = plc.il_lines();
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    let events = ui.input(|input| input.events.clone());
+    for event in events {
+        match event {
+            egui::Event::Text(text) => {
+                for character in text.chars() {
+                    if !character.is_ascii() || character == '\n' {
+                        continue;
+                    }
+                    if character == ' '
+                        && !plc.il_buffer.ends_with(' ')
+                        && linc_plc_core::il::SUPPORTED
+                            .iter()
+                            .chain(linc_plc_core::il::UNSUPPORTED.iter())
+                            .any(|known| known.eq_ignore_ascii_case(plc.il_buffer.trim()))
+                    {
+                        // A known mnemonic uppercases and the cursor moves on,
+                        // which is what SPACE does on the ZX line.
+                        plc.il_buffer = format!("{} ", plc.il_buffer.trim().to_ascii_uppercase());
+                    } else {
+                        plc.il_buffer.push(character);
+                    }
+                }
+            }
+            egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } => match key {
+                egui::Key::Backspace => {
+                    plc.il_buffer.pop();
+                }
+                egui::Key::Enter => {
+                    if modifiers.ctrl {
+                        plc.il_store_buffer(&mut lines, false);
+                        lines.insert(plc.il_cursor + 1, String::new());
+                        plc.il_cursor += 1;
+                        plc.il_buffer.clear();
+                    } else if plc.il_buffer.trim().is_empty() && plc.il_cursor == 0 {
+                        lines.insert(0, String::new());
+                        plc.il_cursor = 0;
+                        plc.il_buffer.clear();
+                    } else if let Some(message) = plc.il_check(&plc.il_buffer) {
+                        plc.il_message = Some(message);
+                        break;
+                    } else {
+                        plc.il_store_buffer(&mut lines, true);
+                        if plc.il_cursor + 1 < lines.len() {
+                            plc.il_cursor += 1;
+                            plc.il_buffer = lines[plc.il_cursor].clone();
+                        }
+                    }
+                    plc.il_message = None;
+                }
+                egui::Key::Delete => {
+                    if lines.get(plc.il_cursor).map(|line| line.trim().is_empty()).unwrap_or(true)
+                    {
+                        if plc.il_cursor < lines.len() {
+                            lines.remove(plc.il_cursor);
+                        }
+                        plc.il_cursor = plc.il_cursor.min(lines.len().saturating_sub(1));
+                        plc.il_buffer = lines.get(plc.il_cursor).cloned().unwrap_or_default();
+                        plc.il_store_lines(lines);
+                    }
+                    break;
+                }
+                egui::Key::ArrowUp => {
+                    plc.il_store_buffer(&mut lines, false);
+                    if plc.il_cursor > 0 {
+                        plc.il_cursor -= 1;
+                        plc.il_buffer = lines[plc.il_cursor].clone();
+                    }
+                    break;
+                }
+                egui::Key::ArrowDown => {
+                    plc.il_store_buffer(&mut lines, false);
+                    if plc.il_cursor + 1 < lines.len() {
+                        plc.il_cursor += 1;
+                        plc.il_buffer = lines[plc.il_cursor].clone();
+                    }
+                    break;
+                }
+                _ => {}
+            },
+            _ => {}
         }
-    });
+    }
+    let _ = actions;
 }
 
 /// Draw the lines as a diagram: inputs enter on their own rows, the block spans
