@@ -566,7 +566,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             ));
         }
 
-        let mut coils: HashSet<&str> = HashSet::new();
+        let mut coils: HashSet<String> = HashSet::new();
         for (rung_index, rung) in section.rungs.iter().enumerate() {
             let rung_path = format!("{section_path}.rungs[{rung_index}]");
             let logic_path = format!("{rung_path}.logic");
@@ -719,11 +719,18 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     &coil_path,
                 )),
                 Some(_) => {
-                    if !coils.insert(&rung.coil.var) {
+                    // A Set and a Reset on one target are a latch, not a
+                    // conflict: only two writes of the same kind are ambiguous.
+                    let class = match rung.coil.kind {
+                        crate::model::CoilKind::Set => "set",
+                        crate::model::CoilKind::Reset => "reset",
+                        _ => "write",
+                    };
+                    if !coils.insert(format!("{class}:{}", rung.coil.var)) {
                         diagnostics.push(Diagnostic::error(
                             "duplicate_coil",
                             format!(
-                                "`{}` is driven by more than one coil in this section",
+                                "`{}` has more than one {class} coil in this section",
                                 rung.coil.var
                             ),
                             &coil_path,

@@ -176,6 +176,8 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                 rung: cursor.1,
                 coil: Coil::new(var, kind),
             });
+            app.plc.operand_filter.clear();
+            app.plc.coil_pick = Some((cursor.0, cursor.1));
         }
         return;
     }
@@ -285,10 +287,12 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
     }
     if let Some(cell) = pick_operand {
         if cursor.2 < POSITIONS {
+            app.plc.operand_filter.clear();
             app.plc.operand_pick = Some((cursor.0, cursor.1, cursor.2, cell));
         }
     } else if let Some(cell) = element {
         if cursor.2 < POSITIONS {
+            app.plc.operand_filter.clear();
             app.plc.cell_cursor = Some((cursor.0, cursor.1, (cursor.2 + 1).min(POSITIONS)));
             actions.push(if insert {
                 Action::InsertCell {
@@ -451,6 +455,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
 pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
     element_picker(plc, ctx, actions);
     operand_picker(plc, ctx, actions);
+    coil_picker(plc, ctx, actions);
     expr_editor(plc, ctx, actions);
     block_editor(plc, ctx, actions);
     xref_window(plc, ctx);
@@ -827,7 +832,9 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 .iter()
                 .filter(|(name, _)| needle.is_empty() || name.to_ascii_lowercase().contains(&needle))
                 .collect::<Vec<_>>();
-            if enter_pressed && (filter.has_focus() || filter.lost_focus()) {
+            // The picker is modal, so Enter always takes the first match; the
+            // focus test made it depend on a frame the field had already lost.
+            if enter_pressed {
                 if let Some((name, _)) = matches.first() {
                     let chosen = with_operand(&cell, name);
                     actions.push(Action::SetCell {
@@ -880,6 +887,72 @@ fn with_operand(cell: &Cell, name: &str) -> Cell {
             rising: *rising,
         },
         other => other.clone(),
+    }
+}
+
+/// The coil's operand: same filtered list as a contact, different target.
+fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    let Some((section, rung)) = plc.coil_pick else {
+        return;
+    };
+    let names = plc
+        .project
+        .io
+        .iter()
+        .filter(|point| point.direction == linc_plc_core::IoDirection::Out)
+        .map(|point| point.name.clone())
+        .chain(plc.project.vars.iter().map(|var| var.name.clone()))
+        .collect::<Vec<_>>();
+    let mut close = false;
+    egui::Window::new("COIL OPERAND")
+        .order(egui::Order::Foreground)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            let enter_pressed = ui.input(|input| input.key_pressed(egui::Key::Enter));
+            let filter = ui.add(
+                egui::TextEdit::singleline(&mut plc.operand_filter)
+                    .hint_text("type to narrow, Enter picks the first match")
+                    .desired_width(240.0),
+            );
+            if !filter.has_focus() {
+                filter.request_focus();
+            }
+            let needle = plc.operand_filter.trim().to_ascii_lowercase();
+            let matches = names
+                .iter()
+                .filter(|name| needle.is_empty() || name.to_ascii_lowercase().contains(&needle))
+                .collect::<Vec<_>>();
+            // The picker is modal, so Enter always takes the first match; the
+            // focus test made it depend on a frame the field had already lost.
+            if enter_pressed {
+                if let Some(name) = matches.first() {
+                    actions.push(Action::SetCoilVar {
+                        section,
+                        rung,
+                        var: (*name).clone(),
+                    });
+                    close = true;
+                }
+            }
+            for name in matches {
+                if ui.button(name).clicked() {
+                    actions.push(Action::SetCoilVar {
+                        section,
+                        rung,
+                        var: name.clone(),
+                    });
+                    close = true;
+                }
+            }
+            if theme::action_button(ui, "Cancel", true).clicked() {
+                close = true;
+            }
+        });
+    if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        plc.coil_pick = None;
+        plc.operand_filter.clear();
     }
 }
 

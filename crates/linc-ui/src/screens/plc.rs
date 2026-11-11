@@ -158,6 +158,12 @@ pub enum Action {
     AddInput(String),
     /// Remove a declared symbol.
     RemoveSymbol(String),
+    /// Set a coil's operand by name.
+    SetCoilVar {
+        section: usize,
+        rung: usize,
+        var: String,
+    },
     /// Write a row's comment, which is what a comment row holds.
     SetRungComment {
         section: usize,
@@ -849,6 +855,8 @@ pub struct PlcUi {
     pub operand_pick: Option<(usize, usize, usize, Cell)>,
     /// Filter typed into the operand list; Enter takes the only match.
     pub operand_filter: String,
+    /// The coil operand is being picked for this row.
+    pub coil_pick: Option<(usize, usize)>,
     /// A compare or compute expression is being built step by step.
     pub expr_edit: Option<ExprEdit>,
     /// Project snapshots for undo, oldest first, and the redo arm of the pair.
@@ -941,6 +949,7 @@ impl Default for PlcUi {
             picker: None,
             operand_pick: None,
             operand_filter: String::new(),
+            coil_pick: None,
             expr_edit: None,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
@@ -1527,6 +1536,23 @@ impl PlcUi {
                 self.project.set_pous(pous);
                 self.comment_row = Some((section, rung + 1));
                 self.comment_buffer = String::new();
+            }
+            Action::SetCoilVar {
+                section,
+                rung,
+                var,
+            } => {
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    if let Some(row) = pou
+                        .sections
+                        .get_mut(section)
+                        .and_then(|section| section.rungs.get_mut(rung))
+                    {
+                        row.coil.var = var;
+                    }
+                }
+                self.project.set_pous(pous);
             }
             Action::AddInput(name) => {
                 if !self.project.io.iter().any(|point| point.name == name)
