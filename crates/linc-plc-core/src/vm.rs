@@ -262,6 +262,12 @@ impl Vm {
                     );
                     push(&mut stack, &mut depth, q);
                 }
+                Op::Latch { kind, instance } => {
+                    let reset = pop(&mut stack, &mut depth);
+                    let set = pop(&mut stack, &mut depth);
+                    let q = run_latch(&mut self.blocks, instance as usize, kind, set, reset);
+                    push(&mut stack, &mut depth, q);
+                }
                 Op::FbWord(instance) => {
                     let value = self
                         .blocks
@@ -556,8 +562,30 @@ fn run_block(
             }
             state.q = state.value <= 0;
         }
+        FbKind::Rt => state.q = input && !state.input,
+        FbKind::Rf => state.q = !input && state.input,
+        // Latches run through `run_latch`.
+        FbKind::Sr | FbKind::Rs => {}
     }
     state.input = input;
+    state.q
+}
+
+/// Set-dominant `SR` and reset-dominant `RS`.
+fn run_latch(
+    blocks: &mut [FbState],
+    instance: usize,
+    kind: FbKind,
+    set: bool,
+    reset: bool,
+) -> bool {
+    let Some(state) = blocks.get_mut(instance) else {
+        return false;
+    };
+    state.q = match kind {
+        FbKind::Rs => !reset && (set || state.q),
+        _ => set || (state.q && !reset),
+    };
     state.q
 }
 

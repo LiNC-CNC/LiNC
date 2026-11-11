@@ -38,6 +38,14 @@ pub enum FbKind {
     Tp,
     Ctu,
     Ctd,
+    /// `R_TRIG` / `RT`: a rising edge on CLK.
+    Rt,
+    /// `F_TRIG` / `RF`: a falling edge on CLK.
+    Rf,
+    /// Set-dominant latch (`SR`): S1 or (Q and not R).
+    Sr,
+    /// Reset-dominant latch (`RS`): not R1 and (S or Q).
+    Rs,
 }
 
 impl FbKind {
@@ -48,6 +56,10 @@ impl FbKind {
             "TP" => Some(Self::Tp),
             "CTU" => Some(Self::Ctu),
             "CTD" => Some(Self::Ctd),
+            "RT" | "R_TRIG" => Some(Self::Rt),
+            "RF" | "F_TRIG" => Some(Self::Rf),
+            "SR" => Some(Self::Sr),
+            "RS" => Some(Self::Rs),
             _ => None,
         }
     }
@@ -59,11 +71,20 @@ impl FbKind {
             Self::Tp => 2,
             Self::Ctu => 3,
             Self::Ctd => 4,
+            Self::Rt => 5,
+            Self::Rf => 6,
+            Self::Sr => 7,
+            Self::Rs => 8,
         }
     }
 
     pub fn is_timer(self) -> bool {
         matches!(self, Self::Ton | Self::Tof | Self::Tp)
+    }
+
+    /// Latches take two inputs; the rest take one.
+    pub fn is_latch(self) -> bool {
+        matches!(self, Self::Sr | Self::Rs)
     }
 }
 
@@ -143,6 +164,8 @@ pub enum Op {
     FbWord(u16),
     /// Push the block's `Q` on the bit stack.
     FbQ(u16),
+    /// A two-input latch: pop the reset bit, then the set bit.
+    Latch { kind: FbKind, instance: u16 },
     /// Edge contact: push true on the scan the operand changed, then remember
     /// the value in slot `slot` for the next scan.
     Edge {
@@ -289,7 +312,7 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
 
     let program = Program {
         word_count: WORD_COUNT,
-        fb_count: FB_PER_TYPE * 5,
+        fb_count: FB_PER_TYPE * 9,
         edge_count: edges,
         ops,
         var_count: symbols.len() as u16,
@@ -524,6 +547,26 @@ fn lower_fbd_block(
         }
         _ => {
             if let Some((kind, instance, preset)) = parse_block(&block, &block, &line.preset) {
+                if kind.is_latch() {
+                    lower_fbd_bit(
+                        line.inputs.first().map(String::as_str).unwrap_or("FALSE"),
+                        lines,
+                        index,
+                        lookup,
+                        ops,
+                        depth,
+                    );
+                    lower_fbd_bit(
+                        line.inputs.get(1).map(String::as_str).unwrap_or("FALSE"),
+                        lines,
+                        index,
+                        lookup,
+                        ops,
+                        depth,
+                    );
+                    ops.push(Op::Latch { kind, instance });
+                    return;
+                }
                 lower_fbd_bit(
                     line.inputs.first().map(String::as_str).unwrap_or("FALSE"),
                     lines,

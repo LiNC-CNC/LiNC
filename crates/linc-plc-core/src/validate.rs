@@ -364,6 +364,20 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                 format!("{path}.inputs"),
                             ));
                         }
+                    } else if let Some((kind, _, _)) =
+                        crate::compile::parse_block(&block, &block, &line.preset)
+                    {
+                        let needed = if kind.is_latch() { 2 } else { 1 };
+                        if !bit_ok || line.inputs.len() < needed {
+                            diagnostics.push(Diagnostic::error(
+                                "fbd_input",
+                                format!(
+                                    "{block} takes {needed} declared input{}",
+                                    if needed == 1 { "" } else { "s" }
+                                ),
+                                format!("{path}.inputs"),
+                            ));
+                        }
                     } else if crate::compile::parse_block(&block, &block, &line.preset).is_some() {
                         if !bit_ok || line.inputs.is_empty() {
                             diagnostics.push(Diagnostic::error(

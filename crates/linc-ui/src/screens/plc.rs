@@ -2116,6 +2116,8 @@ fn fbd_box_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
         .collect();
     let timer = matches!(letters.as_str(), "TON" | "TOF" | "TP");
     let counter = matches!(letters.as_str(), "CTU" | "CTD");
+    let latch = matches!(letters.as_str(), "SR" | "RS");
+    let _ = latch;
     let mut close = false;
     let mut apply: Option<String> = None;
     egui::Window::new(format!("{} · {}", line.block, line.output))
@@ -2302,9 +2304,9 @@ fn fbd_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
 /// an earlier line's output. Inputs are typed here; the value pickers the
 /// ladder editor has are not wired to this page yet.
 fn fbd_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
-    const BLOCKS: [&str; 16] = [
-        "AND", "OR", "XOR", "NOT", "TON0", "TOF0", "TP0", "CTU0", "CTD0", "GT", "GE", "EQ", "NE",
-        "LE", "LT", "MOVE",
+    const BLOCKS: [&str; 20] = [
+        "AND", "OR", "XOR", "NOT", "TON0", "TOF0", "TP0", "CTU0", "CTD0", "SR0", "RS0", "RT0",
+        "RF0", "GT", "GE", "EQ", "NE", "LE", "LT", "MOVE",
     ];
     let mut lines = plc.current_pou().map(|pou| pou.fbd).unwrap_or_default();
     let mut changed = false;

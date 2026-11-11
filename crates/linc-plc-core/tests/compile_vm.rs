@@ -920,3 +920,47 @@ fn only_main_runs_and_an_uncalled_pou_is_reported() {
     vm.scan(&[true]);
     assert_eq!(vm.outputs(), &[true, false], "only MAIN ran");
 }
+
+#[test]
+fn an_sr_latch_holds_and_an_rt_block_pulses() {
+    let mut project = project_with(
+        vec![
+            IoPoint::new("set", IoDirection::In),
+            IoPoint::new("reset", IoDirection::In),
+            IoPoint::new("clk", IoDirection::In),
+            IoPoint::new("held", IoDirection::Out),
+            IoPoint::new("pulse", IoDirection::Out),
+        ],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Fbd);
+    pou.fbd = vec![
+        linc_plc_core::model::FbdLine {
+            output: "held".into(),
+            block: "SR0".into(),
+            inputs: vec!["set".into(), "reset".into()],
+            preset: String::new(),
+            comment: String::new(),
+        },
+        linc_plc_core::model::FbdLine {
+            output: "pulse".into(),
+            block: "RT0".into(),
+            inputs: vec!["clk".into()],
+            preset: String::new(),
+            comment: String::new(),
+        },
+    ];
+    project.pous = vec![pou];
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+
+    // held = SR(set, reset); pulse = rising edge of clk.
+    vm.scan(&[true, false, false]);
+    assert_eq!(vm.outputs(), &[true, false], "S1 sets the latch");
+    vm.scan(&[false, false, true]);
+    assert_eq!(vm.outputs(), &[true, true], "the latch holds, clk rises");
+    vm.scan(&[false, false, true]);
+    assert_eq!(vm.outputs(), &[true, false], "a held clk is not another edge");
+    vm.scan(&[false, true, true]);
+    assert_eq!(vm.outputs(), &[false, false], "R resets the latch");
+}
