@@ -2370,9 +2370,20 @@ fn il_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32) {
     }
 }
 
+/// Is a text field holding the keyboard?
+///
+/// A button keeps keyboard focus after a click, so checking "some widget is
+/// focused" would swallow every ladder key for the rest of the session. Only a
+/// text field should take the keys away from the editor.
+pub fn text_field_focused(ctx: &egui::Context) -> bool {
+    ctx.memory(|memory| memory.focused())
+        .map(|id| egui::widgets::text_edit::TextEditState::load(ctx, id).is_some())
+        .unwrap_or(false)
+}
+
 /// Keys the IL editor owns, as the manual's line editor describes them.
 fn il_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
-    if plc.page != PlcPage::Edit || ui.ctx().memory(|memory| memory.focused().is_some()) {
+    if plc.page != PlcPage::Edit || crate::screens::plc::text_field_focused(ui.ctx()) {
         return;
     }
     let is_il = plc
@@ -3111,7 +3122,7 @@ fn fbd_operand_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Acti
 
 /// Keys the grid owns: arrows move between cells, Enter opens the element list.
 fn fbd_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
-    if plc.page != PlcPage::Edit || ui.ctx().memory(|memory| memory.focused().is_some()) {
+    if plc.page != PlcPage::Edit || crate::screens::plc::text_field_focused(ui.ctx()) {
         return;
     }
     let is_fbd = plc

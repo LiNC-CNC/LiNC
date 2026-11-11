@@ -32,7 +32,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
     if app.plc.page != PlcPage::Edit || app.plc.picker.is_some() || app.plc.operand_pick.is_some() {
         return;
     }
-    if ui.ctx().memory(|memory| memory.focused().is_some()) {
+    if crate::screens::plc::text_field_focused(ui.ctx()) {
         return;
     }
     let ld = app
