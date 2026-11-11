@@ -241,6 +241,15 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         format!("{rung_path}.cells[{cell_index}]"),
                     ));
                 }
+                if matches!(cell, crate::grid::Cell::Link)
+                    && rung_index + 1 == section.rungs.len()
+                {
+                    diagnostics.push(Diagnostic::error(
+                        "link_without_branch",
+                        "a link has no row below to join",
+                        format!("{rung_path}.cells[{cell_index}]"),
+                    ));
+                }
                 if let Some(operand) = cell.operand() {
                     let known = symbols
                         .keys()

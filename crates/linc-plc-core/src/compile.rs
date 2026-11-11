@@ -132,19 +132,33 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         match pou.language {
             PouLanguage::Ld => {
                 for section in &pou.sections {
-                    for rung in &section.rungs {
-                        let logic = if rung.cells.is_empty() {
-                            rung.logic.clone()
-                        } else {
-                            crate::grid::lower_row(&rung.cells)
-                        };
-                        lower_logic(&logic, &lookup, &mut ops);
-                        let index = lookup.get(rung.coil.var.as_str()).copied().unwrap_or(0);
-                        ops.push(match rung.coil.kind {
-                            CoilKind::Normal => Op::Store(index),
-                            CoilKind::Set => Op::Set(index),
-                            CoilKind::Reset => Op::Reset(index),
-                        });
+                    let mut index = 0;
+                    while index < section.rungs.len() {
+                        if section.rungs[index].cells.is_empty() {
+                            let rung = &section.rungs[index];
+                            lower_logic(&rung.logic, &lookup, &mut ops);
+                            store_coil(&mut ops, &lookup, &rung.coil);
+                            index += 1;
+                            continue;
+                        }
+                        // A run of grid rows. A link in one row makes the next
+                        // row its parallel branch, so the run is lowered as a
+                        // stack rather than one rung at a time.
+                        let mut run: Vec<Vec<crate::grid::Cell>> = Vec::new();
+                        while let Some(row) = section.rungs.get(index + run.len()) {
+                            if row.cells.is_empty() {
+                                break;
+                            }
+                            run.push(row.cells.clone());
+                        }
+                        let mut offset = 0;
+                        while offset < run.len() {
+                            let (logic, used) = crate::grid::lower_rung(&run, offset);
+                            lower_logic(&logic, &lookup, &mut ops);
+                            store_coil(&mut ops, &lookup, &section.rungs[index + offset].coil);
+                            offset += used;
+                        }
+                        index += run.len();
                     }
                 }
             }
@@ -216,6 +230,15 @@ fn intern(
     });
     lookup.insert(name.to_string(), index);
     index
+}
+
+fn store_coil(ops: &mut Vec<Op>, lookup: &HashMap<String, u16>, coil: &crate::model::Coil) {
+    let index = lookup.get(coil.var.as_str()).copied().unwrap_or(0);
+    ops.push(match coil.kind {
+        CoilKind::Normal => Op::Store(index),
+        CoilKind::Set => Op::Set(index),
+        CoilKind::Reset => Op::Reset(index),
+    });
 }
 
 fn lower_logic(logic: &Logic, lookup: &HashMap<String, u16>, ops: &mut Vec<Op>) {

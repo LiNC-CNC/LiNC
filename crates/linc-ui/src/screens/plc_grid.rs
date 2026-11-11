@@ -168,6 +168,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                             negated: true,
                         },
                     ),
+                    ("Link  V", Cell::Link),
                 ] {
                     if theme::action_button(ui, label, true).clicked() {
                         match cell {
@@ -187,7 +188,6 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 ui.add_space(4.0);
                 for (label, reason) in [
                     ("Edge contact  P N", "edge contacts"),
-                    ("Link  V", "parallel links"),
                     ("Timer / counter  T F U K D", "timer and counter boxes"),
                     ("Compare  G", "compare contacts"),
                     ("Compute  M", "compute coils"),
