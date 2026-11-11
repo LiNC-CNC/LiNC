@@ -226,45 +226,65 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
     }
     app.plc.cell_cursor = Some(cursor);
     if copy {
-        // A mark on the same rung copies the whole span; without one, just the
-        // cell under the cursor.
-        let rung = sections
-            .get(cursor.0)
-            .and_then(|section| section.rungs.get(cursor.1));
-        let span = match (app.plc.cell_mark, rung) {
-            (Some((mark_section, mark_rung, mark)), Some(rung))
-                if mark_section == cursor.0 && mark_rung == cursor.1 =>
-            {
-                let (low, high) = if mark <= cursor.2 {
-                    (mark, cursor.2)
+        // A mark in the same section copies the rectangle between it and the
+        // cursor, one row per rung; without one, just the cell under the cursor.
+        let sections_view = &sections;
+        let block = match app.plc.cell_mark {
+            Some((mark_section, mark_rung, mark_position)) if mark_section == cursor.0 => {
+                let rung_range = if mark_rung <= cursor.1 {
+                    mark_rung..=cursor.1
                 } else {
-                    (cursor.2, mark)
+                    cursor.1..=mark_rung
                 };
-                (low..=high)
-                    .map(|position| rung.cells.get(position).cloned().unwrap_or(Cell::Wire))
-                    .collect::<Vec<_>>()
+                let (low, high) = if mark_position <= cursor.2 {
+                    (mark_position, cursor.2)
+                } else {
+                    (cursor.2, mark_position)
+                };
+                let rows = rung_range
+                    .filter_map(|rung_index| {
+                        sections_view
+                            .get(mark_section)
+                            .and_then(|section| section.rungs.get(rung_index))
+                    })
+                    .map(|rung| {
+                        (low..=high)
+                            .map(|position| {
+                                rung.cells.get(position).cloned().unwrap_or(Cell::Wire)
+                            })
+                            .collect::<Vec<Cell>>()
+                    })
+                    .collect::<Vec<_>>();
+                rows
             }
             _ => Vec::new(),
         };
-        if span.is_empty() {
-            app.plc.cell_clipboard = rung.and_then(|rung| rung.cells.get(cursor.2)).cloned();
-            app.plc.cell_span.clear();
+        if block.is_empty() {
+            app.plc.cell_clipboard = sections_view
+                .get(cursor.0)
+                .and_then(|section| section.rungs.get(cursor.1))
+                .and_then(|rung| rung.cells.get(cursor.2))
+                .cloned();
+            app.plc.cell_block.clear();
         } else {
-            app.plc.cell_span = span;
+            app.plc.cell_block = block;
             app.plc.cell_clipboard = None;
         }
     }
     if paste {
-        if !app.plc.cell_span.is_empty() {
-            for (offset, cell) in app.plc.cell_span.clone().into_iter().enumerate() {
-                let position = cursor.2 + offset;
-                if position < POSITIONS {
-                    actions.push(Action::SetCell {
-                        section: cursor.0,
-                        rung: cursor.1,
-                        position,
-                        cell,
-                    });
+        if !app.plc.cell_block.is_empty() {
+            for (row_offset, row) in app.plc.cell_block.clone().into_iter().enumerate() {
+                let rung = cursor.1 + row_offset;
+                for (column_offset, cell) in row.into_iter().enumerate() {
+                    let position = cursor.2 + column_offset;
+                    if position < POSITIONS {
+                        actions.push(Action::SetCell {
+                            section: cursor.0,
+                            rung,
+                            position,
+                            cell,
+                        });
+                    }
                 }
             }
         } else if let (Some(cell), true) = (app.plc.cell_clipboard.clone(), cursor.2 < POSITIONS) {
