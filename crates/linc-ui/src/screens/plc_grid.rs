@@ -1696,20 +1696,14 @@ fn draw_cell_symbol(painter: &egui::Painter, rect: egui::Rect, symbol: CellSymbo
                 );
             }
             if let CellSymbol::Edge(rising) = symbol {
-                let (tip, tail) = if rising {
-                    (egui::pos2(cx + bar, y - 9.0), egui::pos2(cx + bar, y - 2.0))
-                } else {
-                    (egui::pos2(cx + bar, y + 9.0), egui::pos2(cx + bar, y + 2.0))
-                };
-                painter.line_segment([tail, tip], line);
-                let wing = 3.5;
-                let sign = if rising { 1.0 } else { -1.0 };
-                painter.line_segment(
-                    [
-                        egui::pos2(tip.x - wing, tip.y + wing * sign),
-                        egui::pos2(tip.x + wing, tip.y + wing * sign),
-                    ],
-                    line,
+                // ZX writes the letter between the bars; an arrow over the bar read
+                // as a stray plus sign at this size.
+                painter.text(
+                    egui::pos2(cx, y - 11.0),
+                    Align2::CENTER_CENTER,
+                    if rising { "P" } else { "N" },
+                    FontId::monospace(8.0),
+                    color,
                 );
             }
         }
@@ -1850,10 +1844,7 @@ pub fn grid_cell_label(plc: &PlcUi, cell: &Cell) -> String {
                 name
             }
         }
-        Cell::Edge { var, rising } => {
-            let name = plc.operand_label(var);
-            format!("{}{name}", if *rising { "P " } else { "N " })
-        }
+        Cell::Edge { var, .. } => plc.operand_label(var),
         Cell::Block { instance, .. } => plc.operand_label(instance),
         other => cell_label(other),
     }
@@ -2034,5 +2025,66 @@ mod label_clearance_tests {
     fn the_link_pitch_is_one_strip() {
         assert_eq!(ROW_STRIDE, CELL_HEIGHT + ROW_GAP);
         assert_eq!(ROW_GAP, 0.0);
+    }
+}
+
+#[cfg(test)]
+mod rung_pitch_tests {
+    use super::*;
+
+    fn pass_with<T>(mut body: impl FnMut(&mut Ui) -> T) -> T {
+        let ctx = egui::Context::default();
+        let mut out: Option<T> = None;
+        let mut output = ctx.run_pass(egui::RawInput::default(), |ctx| {
+            egui::Area::new(egui::Id::new("rung-pitch"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    out = Some(body(ui));
+                });
+        });
+        let _ = &ctx;
+        output.textures_delta.clear();
+        out.expect("body ran")
+    }
+
+    /// The ladder must not inherit egui's vertical item spacing: the link's drop is
+    /// one strip long, so two rungs have to be exactly `CELL_HEIGHT` apart in the
+    /// real layout, not only in the constants.
+    #[test]
+    fn consecutive_rungs_are_one_strip_apart_in_the_layout() {
+        let mut plc = PlcUi::default();
+        let rung = Rung {
+            cells: vec![Cell::Wire],
+            comment: String::new(),
+            logic: linc_plc_core::model::Logic::Const { value: true },
+            coil: linc_plc_core::model::Coil::new("", linc_plc_core::model::CoilKind::Normal),
+        };
+        let mut actions = Vec::new();
+        let (advance, spacing) = pass_with(|ui| {
+            crate::screens::plc::zero_rung_spacing(ui);
+            let before = ui.cursor().top();
+            grid_rung(&plc, ui, 0, 0, &rung, &mut actions);
+            let step = ui.cursor().top() - before;
+            grid_rung(&plc, ui, 0, 1, &rung, &mut actions);
+            let two = ui.cursor().top() - before;
+            (step, two - step)
+        });
+        let _ = &mut plc;
+        assert!(
+            (advance - CELL_HEIGHT).abs() < 0.5,
+            "one rung advances {advance}, expected {CELL_HEIGHT}"
+        );
+        assert!(
+            (spacing - CELL_HEIGHT).abs() < 0.5,
+            "the second rung starts one strip lower, got {spacing}"
+        );
+    }
+
+    /// Zeroing the spacing is what the ladder does, and it returns the value so the
+    /// caller cannot silently keep egui's default.
+    #[test]
+    fn the_ladder_zeroes_the_vertical_spacing() {
+        let spacing = pass_with(|ui| crate::screens::plc::zero_rung_spacing(ui));
+        assert_eq!(spacing, 0.0);
     }
 }

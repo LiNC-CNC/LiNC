@@ -4502,6 +4502,13 @@ fn comment_row(
     }
 }
 
+/// Make consecutive rungs exactly one strip apart. Returns the spacing it set, so a
+/// caller (or a test) can assert the ladder is not inheriting egui's default.
+pub fn zero_rung_spacing(ui: &mut Ui) -> f32 {
+    ui.spacing_mut().item_spacing.y = 0.0;
+    ui.spacing().item_spacing.y
+}
+
 fn ladder_body(
     plc: &mut PlcUi,
     sections: &[linc_plc_core::model::Section],
@@ -4522,6 +4529,10 @@ fn ladder_body(
         .max_height((height - 6.0).max(80.0))
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            // The rungs stack themselves: `grid_rung` is exactly CELL_HEIGHT tall
+            // and the link's drop assumes that pitch, so egui's default vertical
+            // item spacing must not add to it.
+            zero_rung_spacing(ui);
             for (section_index, section) in sections.iter().enumerate() {
                 ui.add_space(2.0);
                 ui.label(
