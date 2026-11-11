@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A set coil, and a second coil on the same variable: the first maps to
+     CoilKind::Set, the second trips validate's duplicate_coil. -->
+<project xmlns="http://www.plcopen.org/xml/tc6_0200">
+  <fileHeader companyName="hand-written" productName="fixture" productVersion="1"
+              creationDateTime="2026-01-01T00:00:00"/>
+  <contentHeader name="set-coil"/>
+  <types>
+    <pous>
+      <pou name="Demo" pouType="program">
+        <interface>
+          <inputVars>
+            <variable name="Start"><type><BOOL/></type></variable>
+          </inputVars>
+          <outputVars>
+            <variable name="Lamp"><type><BOOL/></type></variable>
+          </outputVars>
+        </interface>
+        <body>
+          <LD>
+            <leftPowerRail localId="1"/>
+            <rightPowerRail localId="2"/>
+            <contact localId="3" negated="false">
+              <connectionPointIn><connection refLocalId="1"/></connectionPointIn>
+              <variable>Start</variable>
+              <connectionPointOut/>
+            </contact>
+            <coil localId="4" negated="false" storage="set">
+              <connectionPointIn><connection refLocalId="3"/></connectionPointIn>
+              <variable>Lamp</variable>
+            </coil>
+            <coil localId="5" negated="false" storage="none">
+              <connectionPointIn><connection refLocalId="1"/></connectionPointIn>
+              <variable>Lamp</variable>
+            </coil>
+          </LD>
+        </body>
+      </pou>
+    </pous>
+  </types>
+</project>

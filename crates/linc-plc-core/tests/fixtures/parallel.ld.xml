@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Two contacts in parallel feeding a TON in series. Hand-written from the
+     PLCopen TC6 element names: a parallel branch is several <connection>
+     children on the consumer's connectionPointIn. -->
+<project xmlns="http://www.plcopen.org/xml/tc6_0200">
+  <fileHeader companyName="hand-written" productName="fixture" productVersion="1"
+              creationDateTime="2026-01-01T00:00:00"/>
+  <contentHeader name="parallel"/>
+  <types>
+    <pous>
+      <pou name="Demo" pouType="program">
+        <interface>
+          <inputVars>
+            <variable name="A"><type><BOOL/></type></variable>
+            <variable name="B"><type><BOOL/></type></variable>
+          </inputVars>
+          <outputVars>
+            <variable name="Run"><type><BOOL/></type></variable>
+          </outputVars>
+        </interface>
+        <body>
+          <LD>
+            <leftPowerRail localId="1"/>
+            <rightPowerRail localId="2"/>
+            <contact localId="10" negated="false">
+              <connectionPointIn><connection refLocalId="1"/></connectionPointIn>
+              <variable>A</variable>
+              <connectionPointOut/>
+            </contact>
+            <contact localId="11" negated="false">
+              <connectionPointIn><connection refLocalId="1"/></connectionPointIn>
+              <variable>B</variable>
+              <connectionPointOut/>
+            </contact>
+            <block localId="13" typeName="TON">
+              <connectionPointIn>
+                <connection refLocalId="10"/>
+                <connection refLocalId="11"/>
+              </connectionPointIn>
+              <inputVariables>
+                <variable formalParameter="PT"><expression>T#2s</expression></variable>
+              </inputVariables>
+              <inOutVariables/>
+              <outputVariables>
+                <variable formalParameter="Q"><connectionPointOut/></variable>
+                <variable formalParameter="ET"><connectionPointOut/></variable>
+              </outputVariables>
+            </block>
+            <coil localId="14" negated="false" storage="none">
+              <connectionPointIn><connection refLocalId="13"/></connectionPointIn>
+              <variable>Run</variable>
+            </coil>
+          </LD>
+        </body>
+      </pou>
+    </pous>
+  </types>
+</project>

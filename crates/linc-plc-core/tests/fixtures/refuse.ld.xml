@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- An SFC body: the importer must refuse the file, not skip the POU. -->
+<project xmlns="http://www.plcopen.org/xml/tc6_0200">
+  <fileHeader companyName="hand-written" productName="fixture" productVersion="1"
+              creationDateTime="2026-01-01T00:00:00"/>
+  <contentHeader name="refuse"/>
+  <types>
+    <pous>
+      <pou name="Sequencer" pouType="program">
+        <interface>
+          <localVars>
+            <variable name="Step"><type><BOOL/></type></variable>
+          </localVars>
+        </interface>
+        <body>
+          <SFC>
+            <step localId="1" name="Start"/>
+          </SFC>
+        </body>
+      </pou>
+    </pous>
+  </types>
+</project>

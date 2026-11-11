@@ -118,10 +118,48 @@ Supported in this slice: NO/NC contacts, normal/set/reset coils,
 series/parallel branches, multiple sections, constants, validation, local
 offline editing, download, start/stop, live monitoring and forcing.
 
-Not yet: timers, counters, compare/math, SFC, `.clp` or IEC 61131-3 import,
-Modbus, retained values across daemon restarts, true hot swap, and a
-servo-thread realtime component. The scan is userspace (1–5 ms target, soft
+Not yet: SFC, `.clp`, Modbus, retained values across daemon restarts, true hot
+swap, and a servo-thread realtime component. Timers, counters, compare/compute
+and a PLCopen XML import exist (see **Import**). The scan is userspace (1–5 ms target, soft
 realtime); do not use it for encoder phasing or step timing.
+
+## Import
+
+`linc_plc_core::plcopen::import(xml)` reads a PLCopen TC6 / IEC 61131-10 file
+(via `quick-xml`, MIT) and returns a `Project` with `schema: 1`. It is
+read-only and there is no exporter.
+
+What it maps:
+
+| PLCopen | model |
+|---|---|
+| `<contentHeader name>` | `Project::name` |
+| first `<pou pouType="program">` | `MAIN`; other POUs keep their names |
+| `<LD>` body | `PouLanguage::Ld`, one section, one `Rung` per `<coil>` |
+| `<contact negated edge="rising|falling">` | `Logic::Contact` / `Logic::Edge` |
+| `<coil negated storage="none|set|reset">` | `Coil` with `Normal`/`Negated`/`Set`/`Reset` |
+| `<block typeName="TON|TOF|TP|CTU|CTD">` | `Logic::Block`, `PT`/`PV` from an `<expression>` |
+| compare block (`GT`…`LT`) | `Logic::Compare` from two `<expression>` inputs |
+| `<localVars>` / `<inputVars>` / `<outputVars>`, BOOL | `VarDecl` / `IoPoint` |
+| `<documentation>` | POU and rung comments, markup stripped |
+
+Wiring is followed backwards from each coil: one `<connection>` is a series
+step, several are `Logic::Parallel`, and the walk ends at the left power rail as
+`Logic::Const { value: true }`. Imports become `Logic` trees; `Rung::cells` stays
+empty and the existing compiler lowers the tree.
+
+Names are lowercased to the model's `^[a-z][a-z0-9_-]{0,31}$` (PLCopen allows
+capitalised identifiers), so `Motor` arrives as `motor`; a collision is a
+`duplicate_symbol` error rather than a silent merge.
+
+The import is **all-or-nothing**: any element with no faithful mapping fails the
+whole file and no project is returned. Codes: `plcopen_xml` (malformed XML),
+`plcopen_unsupported_body` (an `<SFC>`, `<ST>` or other non-LD body),
+`plcopen_unsupported_element` (by name: jumps, labels, connectors, compute
+blocks, latches fed by wires, non-BOOL variables), `plcopen_multi_coil` (a coil
+feeding a coil), `plcopen_unreachable` (an element with no rail) and
+`plcopen_cycle` (a connection loop). The result is then run through
+`validate()`, so ordinary model rules such as `duplicate_coil` apply as well.
 
 ## Scan semantics
 
