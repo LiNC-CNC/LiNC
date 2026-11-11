@@ -158,6 +158,11 @@ pub enum Action {
         rung: usize,
         position: usize,
     },
+    /// Add an empty row after this one, for a branch to hang on.
+    AddRowAfter {
+        section: usize,
+        rung: usize,
+    },
     /// Insert a cell in front of the cursor, moving the rest of the row right.
     InsertCell {
         section: usize,
@@ -1291,6 +1296,22 @@ impl PlcUi {
                         var.comment = comment.clone();
                     }
                 }
+            }
+            Action::AddRowAfter { section, rung } => {
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    if let Some(section) = pou.sections.get_mut(section) {
+                        if rung < section.rungs.len() {
+                            let mut row = Rung::new(
+                                Logic::Const { value: true },
+                                Coil::new(String::new(), CoilKind::Normal),
+                            );
+                            row.cells = vec![Cell::Wire; POSITIONS];
+                            section.rungs.insert(rung + 1, row);
+                        }
+                    }
+                }
+                self.project.set_pous(pous);
             }
             Action::DeleteCell {
                 section,

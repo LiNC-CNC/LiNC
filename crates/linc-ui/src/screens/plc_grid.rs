@@ -175,8 +175,43 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
     if wire {
         element = Some(Cell::Wire);
     }
+    let minus = ui.input_mut(|input| letter(input, egui::Key::Minus));
+    if minus {
+        element = Some(Cell::Wire);
+    }
+    // V toggles: a link on this position becomes a wire again.
     if link {
-        element = Some(Cell::Link);
+        let current = sections
+            .get(cursor.0)
+            .and_then(|section| section.rungs.get(cursor.1))
+            .and_then(|rung| rung.cells.get(cursor.2))
+            .cloned();
+        if matches!(current, Some(Cell::Link)) {
+            element = Some(Cell::Wire);
+        } else {
+            element = Some(Cell::Link);
+            let has_next = sections
+                .get(cursor.0)
+                .map(|section| cursor.1 + 1 < section.rungs.len())
+                .unwrap_or(false);
+            if !has_next {
+                actions.push(Action::AddRowAfter {
+                    section: cursor.0,
+                    rung: cursor.1,
+                });
+            }
+        }
+    }
+    // A letter on an existing box edits it instead of replacing it.
+    if (ton || tof || tp || ctu || ctd) && cursor.2 < POSITIONS {
+        let existing = sections
+            .get(cursor.0)
+            .and_then(|section| section.rungs.get(cursor.1))
+            .and_then(|rung| rung.cells.get(cursor.2));
+        if matches!(existing, Some(Cell::Block { .. })) {
+            app.plc.block_edit = Some((cursor.0, cursor.1, cursor.2));
+            return;
+        }
     }
     if ton || tof || tp {
         let block = if ton {
