@@ -14,8 +14,8 @@ use egui::{pos2, vec2, Align, Color32, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_client::Client;
 use linc_plc_core::protocol::{Request, Response, RunState, StateSnapshot, PROTOCOL_VERSION};
 use linc_plc_core::{
-    validate, Coil, CoilKind, Diagnostic, IoDirection, Logic, Project, Rung, Section, Severity,
-    VarValue,
+    validate, Coil, CoilKind, Diagnostic, IoDirection, Logic, Pou, PouLanguage, Project, Rung,
+    Section, Severity, VarValue,
 };
 
 use crate::screens::common;
@@ -587,6 +587,13 @@ pub struct PlcUi {
     pub daemon_diags: Vec<Diagnostic>,
     pub last_error: Option<String>,
     pub message: String,
+    /// Which of the six pages is showing.
+    pub page: PlcPage,
+    /// Index into `project.all_pous()`.
+    pub pou: usize,
+    /// Buffer for the IL editor; synced when the selected POU changes.
+    il_text: String,
+    il_for: Option<usize>,
     next_poll: Instant,
 }
 
@@ -620,12 +627,70 @@ impl Default for PlcUi {
             daemon_diags: Vec::new(),
             last_error: None,
             message: String::new(),
+            page: PlcPage::PouList,
+            pou: 0,
+            il_text: String::new(),
+            il_for: None,
             next_poll: Instant::now(),
         }
     }
 }
 
 impl PlcUi {
+    /// The selected POU, cloned so the caller can hold a ladder body while the
+    /// page keeps mutating the service state.
+    pub fn current_pou(&self) -> Option<Pou> {
+        self.project.all_pous().into_iter().nth(self.pou)
+    }
+
+    pub fn current_pou_sections(&self) -> Vec<linc_plc_core::model::Section> {
+        self.current_pou()
+            .map(|pou| pou.sections)
+            .unwrap_or_default()
+    }
+
+    pub fn pou_count(&self) -> usize {
+        self.project.all_pous().len()
+    }
+
+    /// A new POU in `language`, selected and opened for editing. ZX-PLC's
+    /// POU > New asks for the name and language; the name is generated here.
+    pub fn add_pou(&mut self, language: PouLanguage) {
+        let mut pous = self.project.all_pous();
+        let name = format!("POU{}", pous.len() + 1);
+        pous.push(Pou::new(name, language));
+        self.pou = pous.len() - 1;
+        self.project.set_pous(pous);
+        self.page = PlcPage::Edit;
+        self.selection = None;
+    }
+
+    pub fn set_language(&mut self, language: PouLanguage) {
+        let mut pous = self.project.all_pous();
+        if let Some(pou) = pous.get_mut(self.pou) {
+            pou.language = language;
+        }
+        self.project.set_pous(pous);
+    }
+
+    fn sync_il_text(&mut self) {
+        if self.il_for != Some(self.pou) {
+            self.il_text = self
+                .current_pou()
+                .map(|pou| pou.il.join("\n"))
+                .unwrap_or_default();
+            self.il_for = Some(self.pou);
+        }
+    }
+
+    fn set_il_text(&mut self, text: &str) {
+        let mut pous = self.project.all_pous();
+        if let Some(pou) = pous.get_mut(self.pou) {
+            pou.il = text.lines().map(str::to_string).collect();
+            pou.language = PouLanguage::Il;
+        }
+        self.project.set_pous(pous);
+    }
     fn poll(&mut self) {
         if self.link.is_none() {
             self.dial();
@@ -1053,73 +1118,69 @@ impl PlcUi {
 // Drawing
 // ---------------------------------------------------------------------------
 
+/// The page the PLC application shows, as ZX-PLC's VIEW menu chooses it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlcPage {
+    PouList,
+    Edit,
+    Symbols,
+    Sim,
+    Watch,
+    Trend,
+    Messages,
+    Service,
+}
+
+impl PlcPage {
+    fn label(self) -> &'static str {
+        match self {
+            Self::PouList => "POU LIST",
+            Self::Edit => "EDIT",
+            Self::Symbols => "SYMBOLS",
+            Self::Sim => "SIMULATION",
+            Self::Watch => "WATCH",
+            Self::Trend => "TREND",
+            Self::Messages => "MESSAGES",
+            Self::Service => "SERVICE",
+        }
+    }
+
+    const ALL: [PlcPage; 6] = [
+        Self::PouList,
+        Self::Edit,
+        Self::Symbols,
+        Self::Sim,
+        Self::Watch,
+        Self::Trend,
+    ];
+}
+
+/// The page's status bar height, below the content.
+const STATUS_BAR_HEIGHT: f32 = 22.0;
+
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
     app.plc.poll();
     page_keys(app, ui);
-    // No page title: the navigation names the page.
     common::focus_anchor(ui, "plc-page-focus");
 
     let mut actions: Vec<Action> = Vec::new();
-    let width = ui.available_width();
-    let page_top = ui.cursor().min.y;
     let page_bottom =
         ui.ctx().input(|input| input.viewport_rect().bottom()) - theme::BOTTOM_BAR_HEIGHT;
-    let page_height = (page_bottom - page_top).max(220.0);
+    let plc = &mut app.plc;
 
-    let status_height = 158.0_f32.min(page_height * 0.42);
-    card(ui, vec2(width, status_height), |ui, _| {
-        status_card(&mut app.plc, ui, &mut actions)
-    });
-    ui.add_space(6.0);
+    menu_bar(plc, ui, &mut actions);
+    ui.add_space(2.0);
 
-    let rest = (page_height - status_height - 6.0).max(160.0);
-    let left_width = (width - right_minimum(width)).min(width * 0.62).max(320.0);
-    let right_width = (width - left_width - 8.0).max(right_minimum(width));
-    let diagnostics_height = (rest * 0.32).clamp(96.0, 170.0);
-    let ladder_height = (rest - diagnostics_height - 6.0).max(150.0);
-    let node_height = (rest * 0.55).clamp(180.0, 300.0);
-    let variables_height = (rest - node_height - 6.0).max(120.0);
+    let height = (page_bottom - ui.cursor().min.y - STATUS_BAR_HEIGHT - 6.0).max(200.0);
+    egui::ScrollArea::vertical()
+        .id_salt("plc-page")
+        .auto_shrink([false, false])
+        .show(ui, |ui| page_body(plc, ui, height, &mut actions));
 
-    ui.horizontal_top(|ui| {
-        ui.allocate_ui_with_layout(
-            Vec2::new(left_width, rest),
-            egui::Layout::top_down(Align::Min),
-            |ui| {
-                card(ui, vec2(left_width, ladder_height), |ui, height| {
-                    ladder_card(&app.plc, ui, height, &mut actions)
-                });
-                ui.add_space(6.0);
-                card(ui, vec2(left_width, diagnostics_height), |ui, height| {
-                    diagnostics_card(&app.plc, ui, height)
-                });
-            },
-        );
-        ui.add_space(8.0);
-        ui.allocate_ui_with_layout(
-            Vec2::new(right_width, rest),
-            egui::Layout::top_down(Align::Min),
-            |ui| {
-                card(ui, vec2(right_width, node_height), |ui, _| {
-                    property_card(&mut app.plc, ui, &mut actions)
-                });
-                ui.add_space(6.0);
-                card(ui, vec2(right_width, variables_height), |ui, height| {
-                    variables_card(&app.plc, ui, height, &mut actions)
-                });
-            },
-        );
-    });
+    status_bar(plc, ui);
 
     for action in actions {
-        app.plc.apply(action);
-    }
-}
-
-fn right_minimum(width: f32) -> f32 {
-    if width >= 900.0 {
-        320.0
-    } else {
-        260.0
+        plc.apply(action);
     }
 }
 
@@ -1147,6 +1208,470 @@ fn page_keys(app: &mut LincApp, ui: &Ui) {
     if download {
         app.plc.apply(Action::Download);
     }
+}
+
+/// ZX-PLC's menu bar: FILE, POU, EDIT, VIEW, RUN, HELP, with the current POU and
+/// its language at the right, as the ZX screen shows `DEMO_LD (L10)`.
+fn menu_bar(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        ui.menu_button("File", |ui| {
+            if ui.button("New").clicked() {
+                actions.push(Action::New);
+            }
+            if ui.button("Open").clicked() {
+                actions.push(Action::Open);
+            }
+            if ui.button("Save").clicked() {
+                actions.push(Action::Save);
+            }
+            ui.separator();
+            if ui.button("Validate").clicked() {
+                actions.push(Action::Validate);
+            }
+            if ui.button("Download").clicked() {
+                actions.push(Action::Download);
+            }
+            ui.separator();
+            if ui.button("Service").clicked() {
+                plc.page = PlcPage::Service;
+            }
+        });
+        ui.menu_button("POU", |ui| {
+            if ui.button("POU list").clicked() {
+                plc.page = PlcPage::PouList;
+            }
+            ui.separator();
+            for language in [PouLanguage::Il, PouLanguage::Ld, PouLanguage::Fbd] {
+                if ui.button(format!("New {} POU", language.label())).clicked() {
+                    plc.add_pou(language);
+                }
+            }
+            ui.separator();
+            for language in [PouLanguage::Il, PouLanguage::Ld, PouLanguage::Fbd] {
+                if ui
+                    .button(format!("Language: {}", language.label()))
+                    .clicked()
+                {
+                    plc.set_language(language);
+                }
+            }
+        });
+        ui.menu_button("Edit", |ui| {
+            let selected = plc.selection.is_some();
+            if ui.add_enabled(selected, egui::Button::new("Delete")).clicked() {
+                actions.push(Action::Delete);
+            }
+            if ui.add_enabled(selected, egui::Button::new("Negate")).clicked() {
+                if let Some(node) = plc.selection.clone() {
+                    actions.push(Action::ToggleContact(node));
+                }
+            }
+            if ui.add_enabled(selected, egui::Button::new("Series")).clicked() {
+                actions.push(Action::WrapSeries);
+            }
+            if ui.add_enabled(selected, egui::Button::new("Parallel")).clicked() {
+                actions.push(Action::WrapParallel);
+            }
+            ui.separator();
+            if ui.button("Add rung").clicked() {
+                actions.push(Action::AddRung);
+            }
+            if ui.button("Add section").clicked() {
+                actions.push(Action::AddSection);
+            }
+        });
+        ui.menu_button("View", |ui| {
+            for page in PlcPage::ALL {
+                let active = plc.page == page;
+                if ui.selectable_label(active, page.label()).clicked() {
+                    plc.page = page;
+                }
+            }
+            ui.separator();
+            if ui.button("Messages").clicked() {
+                plc.page = PlcPage::Messages;
+            }
+            if ui.button("Service").clicked() {
+                plc.page = PlcPage::Service;
+            }
+        });
+        ui.menu_button("Run", |ui| {
+            let running = matches!(plc.state, RunState::Running);
+            if ui.add_enabled(plc.online && !running, egui::Button::new("Run")).clicked() {
+                actions.push(Action::Start);
+            }
+            if ui.add_enabled(plc.online && running, egui::Button::new("Stop")).clicked() {
+                actions.push(Action::Stop);
+            }
+            ui.separator();
+            if ui.button("Clear forces").clicked() {
+                actions.push(Action::ClearForces);
+            }
+        });
+        ui.menu_button("Help", |ui| {
+            ui.label(format!("POU {} of {}", plc.pou + 1, plc.pou_count()));
+            ui.label(DISABLED_HINT);
+        });
+        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+            let (state_label, state_color) = run_state_label(plc.state);
+            common::nav_badge(ui, state_label, state_color);
+            ui.add_space(8.0);
+            if let Some(pou) = plc.current_pou() {
+                ui.label(
+                    RichText::new(format!("{}  {}", pou.name, pou.language.label()))
+                        .monospace()
+                        .size(theme::font_size(10.0))
+                        .color(theme::FG),
+                );
+            }
+        });
+    });
+}
+
+fn page_body(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
+    match plc.page {
+        PlcPage::PouList => pou_list_page(plc, ui, height, actions),
+        PlcPage::Edit => edit_page(plc, ui, height, actions),
+        PlcPage::Symbols => symbols_page(plc, ui, height, actions),
+        PlcPage::Sim => sim_page(plc, ui, height, actions),
+        PlcPage::Watch => watch_page(plc, ui, height, actions),
+        PlcPage::Trend => trend_page(plc, ui),
+        PlcPage::Messages => {
+            let _ = height;
+            diagnostics_card(plc, ui, 400.0)
+        }
+        PlcPage::Service => card(ui, vec2(ui.available_width(), height), |ui, _| {
+            status_card(plc, ui, actions)
+        }),
+    }
+}
+
+/// ZX-PLC's POU list: name, language, size, comment. Select with a click, open
+/// with a second click or Enter.
+fn pou_list_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, _actions: &mut Vec<Action>) {
+    let pous = plc.project.all_pous();
+    egui::Grid::new("plc-pou-list")
+        .num_columns(4)
+        .spacing(vec2(18.0, 2.0))
+        .show(ui, |ui| {
+            for header in ["POU NAME", "LANGUAGE", "SIZE", "COMMENT"] {
+                ui.label(
+                    RichText::new(header)
+                        .monospace()
+                        .strong()
+                        .size(theme::font_size(10.0))
+                        .color(theme::C1),
+                );
+            }
+            ui.end_row();
+            for (index, pou) in pous.iter().enumerate() {
+                let size = match pou.language {
+                    PouLanguage::Ld => pou.sections.iter().map(|s| s.rungs.len()).sum::<usize>(),
+                    PouLanguage::Il => pou.il.len(),
+                    PouLanguage::Fbd => 0,
+                };
+                let selected = index == plc.pou;
+                let response = ui.selectable_label(
+                    selected,
+                    RichText::new(&pou.name)
+                        .monospace()
+                        .size(theme::font_size(10.0)),
+                );
+                if response.clicked() {
+                    if selected {
+                        plc.page = PlcPage::Edit;
+                    } else {
+                        plc.pou = index;
+                    }
+                }
+                ui.label(
+                    RichText::new(pou.language.label())
+                        .monospace()
+                        .size(theme::font_size(10.0))
+                        .color(theme::C3),
+                );
+                ui.label(
+                    RichText::new(size.to_string())
+                        .monospace()
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new(&pou.comment)
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
+                );
+                ui.end_row();
+            }
+        });
+    ui.add_space(6.0);
+    ui.label(
+        RichText::new(format!(
+            "{} POU · Free {} B",
+            pous.len(),
+            height as usize
+        ))
+        .monospace()
+        .size(theme::font_size(9.0))
+        .color(theme::MUTED),
+    );
+}
+
+/// The EDIT page: the selected POU in its own language, with the property
+/// panel on the right. ZX-PLC opens a picker on Enter; the panel is the modern
+/// form of the same thing, and it edits the same selection.
+fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
+    let language = plc
+        .current_pou()
+        .map(|pou| pou.language)
+        .unwrap_or(PouLanguage::Ld);
+    ui.horizontal(|ui| {
+        if let Some(pou) = plc.current_pou() {
+            ui.label(
+                RichText::new(format!("{} · {}", pou.name, language.label()))
+                    .monospace()
+                    .size(theme::font_size(10.0))
+                    .color(theme::FG),
+            );
+        }
+        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+            if theme::action_button(ui, "POU LIST", true).clicked() {
+                plc.page = PlcPage::PouList;
+            }
+        });
+    });
+    ui.add_space(2.0);
+    let right_width = 296.0_f32.min(ui.available_width() * 0.34);
+    let left_width = (ui.available_width() - right_width - 6.0).max(220.0);
+    let body_height = (height - 32.0).max(120.0);
+    ui.horizontal_top(|ui| {
+        ui.allocate_ui_with_layout(
+            vec2(left_width, body_height),
+            egui::Layout::top_down(Align::Min),
+            |ui| match language {
+                PouLanguage::Ld => {
+                    let sections = plc.current_pou_sections();
+                    ladder_body(plc, &sections, ui, body_height, actions);
+                }
+                PouLanguage::Il => il_editor(plc, ui, body_height),
+                PouLanguage::Fbd => fbd_notice(ui),
+            },
+        );
+        ui.add_space(6.0);
+        ui.allocate_ui_with_layout(
+            vec2(right_width, body_height),
+            egui::Layout::top_down(Align::Min),
+            |ui| {
+                card(ui, vec2(right_width, body_height), |ui, _| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("plc-properties")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| property_card(plc, ui, actions));
+                });
+            },
+        );
+    });
+}
+
+/// The IL editor: numbered source lines over the POU's `il` body. The compiler
+/// that turns them into bytecode is the next slice.
+fn il_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32) {
+    plc.sync_il_text();
+    let mut text = plc.il_text.clone();
+    ui.horizontal_top(|ui| {
+        let digits = text.lines().count().to_string().len().max(3);
+        let mut numbers = String::new();
+        for (index, _) in text.lines().enumerate() {
+            numbers.push_str(&format!("{:0width$}\n", index + 1, width = digits));
+        }
+        ui.label(
+            RichText::new(numbers)
+                .monospace()
+                .size(theme::font_size(10.0))
+                .color(theme::LINE_NUMBER),
+        );
+        let response = ui.add_sized(
+            vec2(ui.available_width(), (height - 8.0).max(120.0)),
+            egui::TextEdit::multiline(&mut text)
+                .code_editor()
+                .font(egui::TextStyle::Monospace)
+                .desired_width(f32::INFINITY),
+        );
+        if response.changed() {
+            plc.set_il_text(&text);
+        }
+    });
+}
+
+fn fbd_notice(ui: &mut Ui) {
+    ui.label(
+        RichText::new("FBD editor is the next slice: the network model and compiler land first.")
+            .size(theme::font_size(10.0))
+            .color(theme::MUTED),
+    );
+}
+
+/// Symbols: the declared I/O and variables with their live values.
+fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
+    variables_card(plc, ui, height, actions)
+}
+
+/// Simulation: the live program above, the input/output LED panel below.
+fn sim_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
+    let panel = (height * 0.42).clamp(120.0, 220.0);
+    let sections = plc.current_pou_sections();
+    ladder_body(plc, &sections, ui, height - panel - 8.0, actions);
+    ui.add_space(4.0);
+    sim_view(plc, ui, actions);
+}
+
+fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
+    variables_card(plc, ui, height, actions)
+}
+
+fn trend_page(plc: &PlcUi, ui: &mut Ui) {
+    ui.label(
+        RichText::new("No samples yet: the trend page follows the watch list once the model carries it.")
+            .size(theme::font_size(10.0))
+            .color(theme::MUTED),
+    );
+    let _ = plc;
+}
+
+/// The simulation panel: one LED per declared I/O point. A click on an input
+/// forces it for the daemon's force TTL, which is how the ZX simulation's LED
+/// panel sets an input. Outputs are read-only.
+fn sim_view(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
+    common::card_title(ui, "SIMULATION");
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
+        for point in &plc.project.io {
+            let value = plc
+                .vars
+                .iter()
+                .find(|var| var.name == point.name)
+                .map(|var| var.value)
+                .unwrap_or(false);
+            let forced = plc.forced.iter().any(|name| name == &point.name);
+            let input = point.direction == IoDirection::In;
+            let colour = if value { theme::SUCCESS } else { theme::MUTED };
+            let label = format!(
+                "{}{}\n{}",
+                if forced { "F " } else { "" },
+                if value { "\u{25cf}" } else { "\u{25cb}" },
+                point.name
+            );
+            let response = ui
+                .add(
+                    egui::Button::new(
+                        RichText::new(label)
+                            .monospace()
+                            .size(theme::font_size(10.0))
+                            .color(colour),
+                    )
+                    .fill(if value {
+                        theme::tint(theme::SUCCESS, 28)
+                    } else {
+                        theme::PANEL_RAISED
+                    })
+                    .min_size(vec2(92.0, 44.0)),
+                )
+                .on_hover_text(if input {
+                    "Click forces this input for the force TTL"
+                } else {
+                    "Output, driven by the scan"
+                });
+            if input && response.clicked() {
+                actions.push(Action::Force(point.name.clone(), !value));
+            }
+        }
+    });
+}
+
+/// ZX-PLC's status bar: the symbol and comment of the selection on the left,
+/// free space and the run state on the right.
+fn status_bar(plc: &PlcUi, ui: &mut Ui) {
+    let selected = plc.selection.as_ref().and_then(|node| {
+        let sections = plc.current_pou_sections();
+        let section = sections.get(node.section)?;
+        let rung = section.rungs.get(node.rung)?;
+        Some((rung.coil.var.clone(), rung.comment.clone()))
+    });
+    let (state_label, state_color) = run_state_label(plc.state);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        match &selected {
+            Some((operand, comment)) => {
+                common::nav_badge(ui, operand, theme::ACCENT);
+                if !comment.is_empty() {
+                    ui.label(
+                        RichText::new(comment.clone())
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
+                }
+            }
+            None => {
+                ui.label(
+                    RichText::new("no selection")
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+            }
+        }
+        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+            ui.label(
+                RichText::new(format!(
+                    "{} us · OVERRUN {}",
+                    plc.scan_time_us, plc.overruns
+                ))
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+            );
+            ui.add_space(8.0);
+            common::nav_badge(ui, state_label, state_color);
+        });
+    });
+}
+
+/// The ladder canvas over an explicit section list.
+fn ladder_body(
+    plc: &PlcUi,
+    sections: &[linc_plc_core::model::Section],
+    ui: &mut Ui,
+    height: f32,
+    actions: &mut Vec<Action>,
+) {
+    if sections.is_empty() {
+        ui.label(
+            RichText::new("No sections. Add rung / Add section starts one.")
+                .size(theme::font_size(10.0))
+                .color(theme::MUTED),
+        );
+        return;
+    }
+    egui::ScrollArea::both()
+        .id_salt("plc-ladder")
+        .max_height((height - 6.0).max(80.0))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for (section_index, section) in sections.iter().enumerate() {
+                ui.add_space(2.0);
+                ui.label(
+                    RichText::new(format!("{} · {}", section.name, section.rungs.len()))
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::C3),
+                );
+                for (rung_index, rung) in section.rungs.iter().enumerate() {
+                    draw_rung(plc, ui, section_index, rung_index, rung, actions);
+                }
+            }
+        });
 }
 
 /// A card with an exact rect, sized by the caller so the page's columns end on
@@ -1274,68 +1799,6 @@ fn field(ui: &mut Ui, label: &str, id: &str, text: &mut String) {
             .font(egui::FontId::monospace(theme::font_size(10.0))),
     );
     theme::focus_ring(ui, &response);
-}
-
-fn ladder_card(plc: &PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
-    ui.horizontal(|ui| {
-        common::card_title(ui, "LADDER");
-        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            if theme::action_button(ui, "ADD RUNG", true).clicked() {
-                actions.push(Action::AddRung);
-            }
-            if theme::action_button(ui, "ADD SECTION", true).clicked() {
-                actions.push(Action::AddSection);
-            }
-            ui.label(
-                RichText::new(format!(
-                    "{} SECTION · {} RUNG",
-                    plc.project.sections.len(),
-                    plc.project
-                        .sections
-                        .iter()
-                        .map(|section| section.rungs.len())
-                        .sum::<usize>()
-                ))
-                .monospace()
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-            );
-        });
-    });
-    let list_height = (height - 56.0).max(60.0);
-    egui::ScrollArea::vertical()
-        .id_salt("plc-ladder")
-        .max_height(list_height)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            if plc.project.sections.is_empty() {
-                ui.label(
-                    RichText::new("No sections. ADD SECTION starts one.")
-                        .size(theme::font_size(10.0))
-                        .color(theme::MUTED),
-                );
-                return;
-            }
-            for (section_index, section) in plc.project.sections.iter().enumerate() {
-                ui.add_space(2.0);
-                ui.label(
-                    RichText::new(format!("{} · {}", section.name, section.rungs.len()))
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::C3),
-                );
-                if section.rungs.is_empty() {
-                    ui.label(
-                        RichText::new("empty section")
-                            .size(theme::font_size(9.0))
-                            .color(theme::MUTED),
-                    );
-                }
-                for (rung_index, rung) in section.rungs.iter().enumerate() {
-                    draw_rung(plc, ui, section_index, rung_index, rung, actions);
-                }
-            }
-        });
 }
 
 fn draw_rung(

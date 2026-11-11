@@ -18,7 +18,8 @@ pub mod vm;
 
 pub use compile::{compile, project_hash, Binding, Compiled, Op, Program, Symbol, SymbolKind};
 pub use model::{
-    Coil, CoilKind, IoDirection, IoKind, IoPoint, Logic, Project, Rung, Section, VarDecl, VarKind,
+    Coil, CoilKind, IoDirection, IoKind, IoPoint, Logic, Pou, PouLanguage, Project, Rung, Section,
+    VarDecl, VarKind,
 };
 pub use protocol::{ProtocolError, Request, Response, RunState, StateSnapshot};
 pub use validate::{validate, Diagnostic, Severity};

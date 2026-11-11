@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{IoDirection, Logic, Project};
+use crate::model::{PouLanguage, Section, IoDirection, Logic, Project};
 use crate::SCHEMA_VERSION;
 
 /// Maximum accepted logic nesting depth.
@@ -130,7 +130,30 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         );
     }
 
-    if project.sections.is_empty() {
+    let pous = project.all_pous();
+    for (index, pou) in pous.iter().enumerate() {
+        if pou.language != PouLanguage::Ld {
+            diagnostics.push(Diagnostic::error(
+                "language",
+                format!(
+                    "POU '{}' is {}; that compiler is not implemented yet",
+                    pou.name,
+                    pou.language.label()
+                ),
+                format!("pous[{index}].language"),
+            ));
+        }
+        if pou.name.trim().is_empty() {
+            diagnostics.push(Diagnostic::error(
+                "pou_name",
+                "POU name must not be empty",
+                format!("pous[{index}].name"),
+            ));
+        }
+    }
+    let sections: Vec<&Section> = pous.iter().flat_map(|pou| pou.sections.iter()).collect();
+
+    if sections.is_empty() {
         diagnostics.push(Diagnostic::error(
             "no_sections",
             "project has no sections",
@@ -138,8 +161,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         ));
     }
 
-    let rung_count: usize = project
-        .sections
+    let rung_count: usize = sections
         .iter()
         .map(|section| section.rungs.len())
         .sum();
@@ -151,8 +173,8 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         ));
     }
 
-    let mut section_names: HashSet<&str> = HashSet::with_capacity(project.sections.len());
-    for (section_index, section) in project.sections.iter().enumerate() {
+    let mut section_names: HashSet<&str> = HashSet::with_capacity(sections.len());
+    for (section_index, section) in sections.iter().enumerate() {
         let section_path = format!("sections[{section_index}]");
         if section.name.trim().is_empty() {
             diagnostics.push(Diagnostic::error(

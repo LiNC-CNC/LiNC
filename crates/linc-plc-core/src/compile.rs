@@ -120,7 +120,8 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
     }
 
     let mut ops = Vec::new();
-    for section in &project.sections {
+    let pous = project.all_pous();
+    for section in pous.iter().flat_map(|pou| pou.sections.iter()) {
         for rung in &section.rungs {
             lower_logic(&rung.logic, &lookup, &mut ops);
             let index = lookup.get(rung.coil.var.as_str()).copied().unwrap_or(0);
