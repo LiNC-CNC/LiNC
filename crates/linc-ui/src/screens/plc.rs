@@ -792,6 +792,8 @@ pub struct PlcUi {
     pub fbd_pick: Option<FbdPick>,
     /// The block on this FBD line is being edited (instance and preset).
     pub fbd_box_edit: Option<usize>,
+    /// The next FBD value chosen is negated (`!`).
+    pub fbd_negate: bool,
     /// Boolean traces for the trend page.
     pub trend: TrendBuffer,
     /// Per-scan window from the daemon, when one is connected.
@@ -850,6 +852,7 @@ impl Default for PlcUi {
             block_edit: None,
             fbd_pick: None,
             fbd_box_edit: None,
+            fbd_negate: false,
             trend: TrendBuffer::default(),
             trend_remote: TrendData::default(),
             words: Vec::new(),
@@ -2189,6 +2192,7 @@ fn fbd_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
     };
     let mut close = false;
     let mut chosen: Option<String> = None;
+
     egui::Window::new(if pick.input.is_some() {
         "FBD INPUT"
     } else {
@@ -2199,6 +2203,20 @@ fn fbd_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
     .default_width(360.0)
     .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
     .show(ctx, |ui| {
+        if theme::action_button(
+            ui,
+            if plc.fbd_negate {
+                "negated  !  (next pick)"
+            } else {
+                "negated  !"
+            },
+            true,
+        )
+        .clicked()
+        {
+            plc.fbd_negate = !plc.fbd_negate;
+        }
+        ui.separator();
         if pick.input.is_some() && pick.line > 0 {
             ui.label(
                 RichText::new("pin of an earlier block on this page")
@@ -2279,6 +2297,11 @@ fn fbd_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
         }
     });
     if let Some(value) = chosen {
+        let value = if plc.fbd_negate && !value.starts_with('!') {
+            format!("!{value}")
+        } else {
+            value
+        };
         let mut lines = plc.current_pou().map(|pou| pou.fbd).unwrap_or_default();
         if let Some(line) = lines.get_mut(pick.line) {
             match pick.input {
@@ -2297,6 +2320,7 @@ fn fbd_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
     }
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
         plc.fbd_pick = None;
+        plc.fbd_negate = false;
     }
 }
 

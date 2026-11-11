@@ -315,7 +315,12 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 for (line_index, line) in pou.fbd.iter().enumerate() {
                     let path = format!("pous[{index}].fbd[{line_index}]");
                     let block = line.block.trim().to_ascii_uppercase();
-                    let declared = known.contains(&line.output.to_ascii_lowercase());
+                    let output_name = line
+                        .output
+                        .trim()
+                        .strip_prefix('!')
+                        .unwrap_or_else(|| line.output.trim());
+                    let declared = known.contains(&output_name.to_ascii_lowercase());
                     if !declared {
                         diagnostics.push(Diagnostic::error(
                             "fbd_output",
@@ -343,6 +348,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         }
                     }
                     let bit_ok = line.inputs.iter().all(|input| {
+                        let input = input.trim().strip_prefix('!').unwrap_or(input.trim());
                         input.eq_ignore_ascii_case("TRUE")
                             || input.eq_ignore_ascii_case("FALSE")
                             || known.contains(&input.to_ascii_lowercase())

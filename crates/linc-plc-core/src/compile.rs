@@ -501,7 +501,14 @@ fn lower_fbd_line(
         return;
     };
     lower_fbd_block(lines, index, lookup, ops, 0);
-    if let Some(target) = lookup.get(line.output.trim()) {
+    let (negated, name) = match line.output.trim().strip_prefix('!') {
+        Some(rest) => (true, rest),
+        None => (false, line.output.trim()),
+    };
+    if negated {
+        ops.push(Op::Not);
+    }
+    if let Some(target) = lookup.get(name) {
         ops.push(Op::Store(*target));
     }
 }
@@ -615,6 +622,12 @@ fn lower_fbd_bit(
     depth: u8,
 ) {
     let text = input.trim();
+    // A leading `!` is the negated input/output the manual draws as a circle.
+    if let Some(rest) = text.strip_prefix('!') {
+        lower_fbd_bit(rest, lines, index, lookup, ops, depth);
+        ops.push(Op::Not);
+        return;
+    }
     if let Some(reference) = text.strip_prefix('@') {
         if let Ok(number) = reference.parse::<usize>() {
             let target = number.saturating_sub(1);
