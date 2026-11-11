@@ -196,6 +196,24 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     }
     let sections: Vec<&Section> = pous.iter().flat_map(|pou| pou.sections.iter()).collect();
 
+    let edge_contacts = pous
+        .iter()
+        .flat_map(|pou| pou.sections.iter())
+        .flat_map(|section| section.rungs.iter())
+        .flat_map(|rung| rung.cells.iter())
+        .filter(|cell| matches!(cell, crate::grid::Cell::Edge { .. }))
+        .count();
+    if edge_contacts > usize::from(crate::compile::MAX_EDGE_CONTACTS) {
+        diagnostics.push(Diagnostic::error(
+            "edge_limit",
+            format!(
+                "{edge_contacts} edge contacts; at most {} are supported",
+                crate::compile::MAX_EDGE_CONTACTS
+            ),
+            "sections",
+        ));
+    }
+
     // An IL-only project has no rungs; that is a program, not an empty one.
     let il_only = pous
         .iter()

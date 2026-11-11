@@ -43,6 +43,8 @@ pub struct Vm {
     words: Vec<i16>,
     dt_ms: u16,
     blocks: Vec<FbState>,
+    /// Previous value of each edge contact, one slot per contact occurrence.
+    edge_prev: Vec<bool>,
     output_image: Vec<bool>,
     forces: Vec<Option<bool>>,
     scan_count: u64,
@@ -66,6 +68,7 @@ impl Vm {
             words: vec![0; compiled.program.word_count as usize],
             dt_ms: DEFAULT_DT_MS,
             blocks: vec![FbState::default(); compiled.program.fb_count as usize],
+            edge_prev: vec![false; compiled.program.edge_count as usize],
             output_image: vec![false; compiled.outputs.len()],
             forces: vec![None; slots],
             scan_count: 0,
@@ -79,6 +82,7 @@ impl Vm {
         self.next.fill(false);
         self.words.fill(0);
         self.blocks.fill(FbState::default());
+        self.edge_prev.fill(false);
         self.output_image.fill(false);
         self.forces.fill(None);
     }
@@ -207,6 +211,23 @@ impl Vm {
                         .map(|state| state.value)
                         .unwrap_or(0);
                     push_word(&mut word_stack, &mut word_depth, value);
+                }
+                Op::Edge { slot, var, rising } => {
+                    let now = self.prev.get(var as usize).copied().unwrap_or(false);
+                    let before = self
+                        .edge_prev
+                        .get(slot as usize)
+                        .copied()
+                        .unwrap_or(false);
+                    let changed = if rising {
+                        now && !before
+                    } else {
+                        before && !now
+                    };
+                    if let Some(cell) = self.edge_prev.get_mut(slot as usize) {
+                        *cell = now;
+                    }
+                    push(&mut stack, &mut depth, changed);
                 }
                 Op::Compute {
                     op,

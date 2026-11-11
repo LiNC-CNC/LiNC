@@ -71,9 +71,13 @@ impl Cell {
     /// Does this cell need a feature the compiler does not have yet?
     pub fn unsupported(&self) -> Option<&'static str> {
         match self {
-            Self::Wire | Self::Contact { .. } | Self::Link | Self::Block { .. } => None,
-            Self::Edge { .. } => Some("edge contacts"),
-            Self::Compare { .. } | Self::Compute { .. } => None,
+            Self::Edge { .. }
+            | Self::Compare { .. }
+            | Self::Compute { .. }
+            | Self::Wire
+            | Self::Contact { .. }
+            | Self::Link
+            | Self::Block { .. } => None,
         }
     }
 }
@@ -224,7 +228,8 @@ mod tests {
                 rising: true
             }
             .unsupported(),
-            Some("edge contacts")
+            None,
+            "edge contacts compile now"
         );
         assert_eq!(Cell::Wire.unsupported(), None);
     }

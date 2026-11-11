@@ -90,6 +90,9 @@ impl MathOp {
     }
 }
 
+/// Edge contacts a project may declare, the same 32 ZX-PLC allows.
+pub const MAX_EDGE_CONTACTS: u16 = 32;
+
 /// Instances per function-block type.
 pub const FB_PER_TYPE: u16 = 4;
 
@@ -136,6 +139,13 @@ pub enum Op {
     FbWord(u16),
     /// Push the block's `Q` on the bit stack.
     FbQ(u16),
+    /// Edge contact: push true on the scan the operand changed, then remember
+    /// the value in slot `slot` for the next scan.
+    Edge {
+        slot: u16,
+        var: u16,
+        rising: bool,
+    },
     /// A compute coil: pop the power bit and, when it is true, write the result
     /// to `MWtarget`. It ends the rung; there is no coil output.
     Compute {
@@ -155,6 +165,8 @@ pub struct Program {
     pub word_count: u16,
     /// Function-block instances: `FB_PER_TYPE` per kind, index `kind*4 + n`.
     pub fb_count: u16,
+    /// Previous-value slots for edge contacts.
+    pub edge_count: u16,
     pub input_count: u16,
     pub output_count: u16,
 }
@@ -229,6 +241,7 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
     }
 
     let mut ops = Vec::new();
+    let mut edges = 0u16;
     let pous = project.all_pous();
     // IL operands are typed by hand; accept any spelling of a declared name.
     let lookup_ci: HashMap<String, u16> = lookup
@@ -260,7 +273,8 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
                         }
                         let mut offset = 0;
                         while offset < run.len() {
-                            let (used, compute) = lower_grid_rung(&run, offset, &lookup, &mut ops);
+                            let (used, compute) =
+                                lower_grid_rung(&run, offset, &lookup, &mut ops, &mut edges);
                             if !compute {
                                 store_coil(&mut ops, &lookup, &section.rungs[index + offset].coil);
                             }
@@ -289,6 +303,7 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
     let program = Program {
         word_count: WORD_COUNT,
         fb_count: FB_PER_TYPE * 5,
+        edge_count: edges,
         ops,
         var_count: symbols.len() as u16,
         input_count: inputs.len() as u16,
@@ -351,6 +366,7 @@ fn lower_cells(
     cells: &[crate::grid::Cell],
     lookup: &HashMap<String, u16>,
     ops: &mut Vec<Op>,
+    edges: &mut u16,
 ) -> bool {
     let mut has_power = false;
     for cell in cells {
@@ -435,7 +451,18 @@ fn lower_cells(
                 return true;
             }
             // Validation refuses these until their semantics exist.
-            crate::grid::Cell::Edge { .. } => continue,
+            crate::grid::Cell::Edge { var, rising } => {
+                let index = lookup.get(var.as_str()).copied().unwrap_or(0);
+                ops.push(Op::Edge {
+                    slot: *edges,
+                    var: index,
+                    rising: *rising,
+                });
+                *edges = edges.saturating_add(1);
+                if has_power {
+                    ops.push(Op::And);
+                }
+            }
         }
         has_power = true;
     }
@@ -451,19 +478,20 @@ fn lower_grid_rung(
     index: usize,
     lookup: &HashMap<String, u16>,
     ops: &mut Vec<Op>,
+    edges: &mut u16,
 ) -> (usize, bool) {
     let Some(cells) = run.get(index) else {
         ops.push(Op::PushConst(true));
         return (1, false);
     };
-    let compute = lower_cells(cells, lookup, ops);
+    let compute = lower_cells(cells, lookup, ops, edges);
     let mut used = 1;
     if cells
         .iter()
         .any(|cell| matches!(cell, crate::grid::Cell::Link))
         && index + 1 < run.len()
     {
-        used += lower_grid_rung(run, index + 1, lookup, ops).0;
+        used += lower_grid_rung(run, index + 1, lookup, ops, edges).0;
         ops.push(Op::Or);
     }
     (used, compute)

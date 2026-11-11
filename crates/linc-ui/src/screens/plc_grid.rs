@@ -295,6 +295,10 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                             var: name.clone(),
                             negated: *negated,
                         },
+                        Cell::Edge { rising, .. } => Cell::Edge {
+                            var: name.clone(),
+                            rising: *rising,
+                        },
                         other => other.clone(),
                     };
                     actions.push(Action::SetCell {

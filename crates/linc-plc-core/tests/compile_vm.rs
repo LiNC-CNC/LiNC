@@ -446,17 +446,16 @@ fn a_grid_rung_compiles_like_its_tree() {
 }
 
 #[test]
-fn an_unsupported_grid_cell_is_named_by_validation() {
-    let mut project = simple_project(Logic::contact("a", false), Coil::new("y", CoilKind::Normal));
-    project.sections[0].rungs[0].cells = vec![linc_plc_core::Cell::Edge {
-        var: "a".into(),
-        rising: true,
+fn an_invalid_block_instance_is_named_by_validation() {
+    let mut project = simple_project(Logic::Const { value: true }, Coil::new("y", CoilKind::Normal));
+    project.sections[0].rungs[0].cells = vec![linc_plc_core::Cell::Block {
+        block: "TON".into(),
+        instance: "TON9".into(),
+        preset: "T#1s".into(),
     }];
     let diagnostics = linc_plc_core::validate(&project);
     assert!(
-        diagnostics
-            .iter()
-            .any(|item| item.code == "cell_unsupported"),
+        diagnostics.iter().any(|item| item.code == "cell_block"),
         "{diagnostics:?}"
     );
 }
@@ -626,4 +625,42 @@ fn a_compute_coil_writes_a_word_while_it_has_power() {
     assert_eq!(vm.word(1), 0, "power is low, nothing is written");
     vm.scan(&[true]);
     assert_eq!(vm.word(1), 42);
+}
+
+#[test]
+fn an_edge_contact_fires_on_one_scan_only() {
+    let mut project = simple_project(Logic::Const { value: true }, Coil::new("y", CoilKind::Normal));
+    project.sections[0].rungs[0].cells = vec![linc_plc_core::Cell::Edge {
+        var: "a".into(),
+        rising: true,
+    }];
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+
+    vm.scan(&[false]);
+    assert_eq!(vm.outputs(), &[false], "no edge yet");
+    vm.scan(&[true]);
+    assert_eq!(vm.outputs(), &[true], "rising edge");
+    vm.scan(&[true]);
+    assert_eq!(vm.outputs(), &[false], "held input is not a new edge");
+    vm.scan(&[false]);
+    assert_eq!(vm.outputs(), &[false], "falling edge is not a rising one");
+    vm.scan(&[true]);
+    assert_eq!(vm.outputs(), &[true], "the next rising edge fires");
+}
+
+#[test]
+fn a_falling_edge_contact_is_the_mirror() {
+    let mut project = simple_project(Logic::Const { value: true }, Coil::new("y", CoilKind::Normal));
+    project.sections[0].rungs[0].cells = vec![linc_plc_core::Cell::Edge {
+        var: "a".into(),
+        rising: false,
+    }];
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+
+    vm.scan(&[true]);
+    assert_eq!(vm.outputs(), &[false]);
+    vm.scan(&[false]);
+    assert_eq!(vm.outputs(), &[true], "falling edge");
+    vm.scan(&[false]);
+    assert_eq!(vm.outputs(), &[false]);
 }
