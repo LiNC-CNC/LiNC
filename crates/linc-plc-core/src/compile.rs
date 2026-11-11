@@ -104,6 +104,10 @@ pub const WORD_COUNT: u16 = 16;
 pub enum Op {
     PushConst(bool),
     Push(u16),
+    /// Read the value being built this scan rather than the previous image.
+    /// Function-block lines chain inside one scan, so their inputs must see a
+    /// value an earlier line stored.
+    PushNext(u16),
     Not,
     And,
     Or,
@@ -296,7 +300,11 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
                 }
             }
             // Validation refuses these before lowering runs.
-            PouLanguage::Fbd => {}
+            PouLanguage::Fbd => {
+                for line in &pou.fbd {
+                    lower_fbd_line(line, &lookup, &mut ops);
+                }
+            }
         }
     }
 
@@ -358,6 +366,79 @@ fn intern(
     });
     lookup.insert(name.to_string(), index);
     index
+}
+
+/// Lower one function-block assignment: build the block from its inputs, then
+/// store its result in the output operand.
+fn lower_fbd_line(
+    line: &crate::model::FbdLine,
+    lookup: &HashMap<String, u16>,
+    ops: &mut Vec<Op>,
+) {
+    let block = line.block.trim().to_ascii_uppercase();
+    let bit = |operand: &str| -> Option<u16> {
+        if operand.eq_ignore_ascii_case("TRUE") {
+            return Some(u16::MAX);
+        }
+        lookup.get(operand.trim()).copied()
+    };
+    let push_bit = |ops: &mut Vec<Op>, operand: &str| {
+        match bit(operand) {
+            Some(u16::MAX) => ops.push(Op::PushConst(true)),
+            Some(index) => ops.push(Op::PushNext(index)),
+            None => ops.push(Op::PushConst(false)),
+        }
+    };
+    match block.as_str() {
+        "AND" | "OR" | "XOR" => {
+            if line.inputs.is_empty() {
+                ops.push(Op::PushConst(block == "AND"));
+            } else {
+                for (index, input) in line.inputs.iter().enumerate() {
+                    push_bit(ops, input);
+                    if index > 0 {
+                        ops.push(match block.as_str() {
+                            "AND" => Op::And,
+                            "OR" => Op::Or,
+                            _ => Op::Xor,
+                        });
+                    }
+                }
+            }
+        }
+        "NOT" => {
+            push_bit(ops, line.inputs.first().map(String::as_str).unwrap_or("FALSE"));
+            ops.push(Op::Not);
+        }
+        _ => {
+            if let Some((kind, instance, preset)) =
+                parse_block(&block, &block, &line.preset)
+            {
+                push_bit(ops, line.inputs.first().map(String::as_str).unwrap_or("FALSE"));
+                ops.push(Op::Fb {
+                    kind,
+                    instance,
+                    preset,
+                });
+            } else if let Some(compare) = compare_op(&block) {
+                let (Some(left), Some(right)) = (
+                    word_operand_value(line.inputs.first().map(String::as_str).unwrap_or("0")),
+                    word_operand_value(line.inputs.get(1).map(String::as_str).unwrap_or("0")),
+                ) else {
+                    ops.push(Op::PushConst(false));
+                    return;
+                };
+                emit_word(ops, left);
+                emit_word(ops, right);
+                ops.push(compare);
+            } else {
+                ops.push(Op::PushConst(false));
+                return;
+            }
+        }
+    }
+    let index = lookup.get(line.output.trim()).copied().unwrap_or(0);
+    ops.push(Op::Store(index));
 }
 
 /// Lower one grid row to ops, leaving exactly one power bit on the stack.

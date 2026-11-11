@@ -117,7 +117,10 @@ impl Vm {
             }
         }
 
+        // Both images, as documented: a function-block line reads `next`, so a
+        // force that only reached `prev` would be invisible to it.
         apply_forces(&mut self.prev, &self.forces);
+        apply_forces(&mut self.next, &self.forces);
 
         let mut stack = [false; STACK_DEPTH];
         let mut depth = 0usize;
@@ -128,6 +131,10 @@ impl Vm {
                 Op::PushConst(value) => push(&mut stack, &mut depth, value),
                 Op::Push(index) => {
                     let value = self.prev.get(index as usize).copied().unwrap_or(false);
+                    push(&mut stack, &mut depth, value);
+                }
+                Op::PushNext(index) => {
+                    let value = self.next.get(index as usize).copied().unwrap_or(false);
                     push(&mut stack, &mut depth, value);
                 }
                 Op::Not => {

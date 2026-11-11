@@ -41,6 +41,10 @@ pub struct Pou {
     /// is `il`.
     #[serde(default)]
     pub il: Vec<String>,
+    /// Function-block body, one assignment per entry, used when `language` is
+    /// `fbd`.
+    #[serde(default)]
+    pub fbd: Vec<FbdLine>,
 }
 
 /// The IEC 61131-3 languages a POU can be written in.
@@ -71,6 +75,42 @@ impl Pou {
             comment: String::new(),
             sections: Vec::new(),
             il: Vec::new(),
+            fbd: Vec::new(),
+        }
+    }
+}
+
+/// One function-block assignment: `output := block(inputs…)`.
+///
+/// ZX-PLC draws blocks on a grid and lets one block's output feed another's
+/// input. Here a line is the same idea named once: an input may be any declared
+/// operand, including the output of an earlier line, which is how blocks nest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FbdLine {
+    /// The operand the block drives.
+    pub output: String,
+    /// `AND`, `OR`, `XOR`, `NOT`, a timer or counter instance (`TON0`), or a
+    /// compare operator (`GT`, `GE`, `EQ`, `NE`, `LE`, `LT`).
+    pub block: String,
+    /// Block inputs, in order. A compare takes two word values, `NOT` one bit,
+    /// a timer or counter one bit.
+    #[serde(default)]
+    pub inputs: Vec<String>,
+    /// Timer preset (`T#4s`) or counter preset (`10`).
+    #[serde(default)]
+    pub preset: String,
+    #[serde(default)]
+    pub comment: String,
+}
+
+impl FbdLine {
+    pub fn new(output: impl Into<String>, block: impl Into<String>) -> Self {
+        Self {
+            output: output.into(),
+            block: block.into(),
+            inputs: Vec::new(),
+            preset: String::new(),
+            comment: String::new(),
         }
     }
 }
@@ -182,6 +222,7 @@ impl Project {
                 comment: self.description.clone(),
                 sections: self.sections.clone(),
                 il: Vec::new(),
+                fbd: Vec::new(),
             }]
         } else {
             self.pous.clone()

@@ -673,3 +673,80 @@ fn pinning_a_watch_operand_does_not_change_the_program_hash() {
     pinned.watch = vec!["a".into(), "MW0".into()];
     assert_eq!(linc_plc_core::project_hash(&pinned), before);
 }
+
+#[test]
+fn an_fbd_line_nests_blocks_by_naming_their_output() {
+    let mut project = project_with(
+        vec![
+            IoPoint::new("a", IoDirection::In),
+            IoPoint::new("b", IoDirection::In),
+            IoPoint::new("run", IoDirection::Out),
+            IoPoint::new("y", IoDirection::Out),
+        ],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Fbd);
+    pou.fbd = vec![
+        linc_plc_core::model::FbdLine {
+            output: "run".into(),
+            block: "AND".into(),
+            inputs: vec!["a".into(), "b".into()],
+            preset: String::new(),
+            comment: String::new(),
+        },
+        linc_plc_core::model::FbdLine {
+            output: "y".into(),
+            block: "NOT".into(),
+            inputs: vec!["run".into()],
+            preset: String::new(),
+            comment: String::new(),
+        },
+    ];
+    project.pous = vec![pou];
+
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan(&[true, true]);
+    assert_eq!(vm.outputs(), &[true, false], "run = a and b, y = not run");
+    vm.scan(&[true, false]);
+    assert_eq!(vm.outputs(), &[false, true]);
+}
+
+#[test]
+fn an_fbd_timer_and_compare_share_the_ladder_machinery() {
+    let mut project = project_with(
+        vec![
+            IoPoint::new("a", IoDirection::In),
+            IoPoint::new("slow", IoDirection::Out),
+            IoPoint::new("y", IoDirection::Out),
+        ],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Fbd);
+    pou.fbd = vec![
+        linc_plc_core::model::FbdLine {
+            output: "slow".into(),
+            block: "TON0".into(),
+            inputs: vec!["a".into()],
+            preset: "T#1s".into(),
+            comment: String::new(),
+        },
+        linc_plc_core::model::FbdLine {
+            output: "y".into(),
+            block: "GT".into(),
+            inputs: vec!["TON0.ET".into(), "T#500ms".into()],
+            preset: String::new(),
+            comment: String::new(),
+        },
+    ];
+    project.pous = vec![pou];
+
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan_with_dt(&[true], 400);
+    assert_eq!(vm.outputs(), &[false, false], "under half a second");
+    vm.scan_with_dt(&[true], 400);
+    assert_eq!(vm.outputs(), &[false, true], "ET passed 800 ms, Q still low");
+    vm.scan_with_dt(&[true], 400);
+    assert_eq!(vm.outputs(), &[true, true], "ET reached PT");
+}

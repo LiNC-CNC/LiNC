@@ -177,14 +177,72 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     }
                 }
             }
-            PouLanguage::Fbd => diagnostics.push(Diagnostic::error(
-                "language",
-                format!(
-                    "POU '{}' is FBD; that compiler is not implemented yet",
-                    pou.name
-                ),
-                format!("pous[{index}].language"),
-            )),
+            PouLanguage::Fbd => {
+                for (line_index, line) in pou.fbd.iter().enumerate() {
+                    let path = format!("pous[{index}].fbd[{line_index}]");
+                    let block = line.block.trim().to_ascii_uppercase();
+                    let declared = known.contains(&line.output.to_ascii_lowercase());
+                    if !declared {
+                        diagnostics.push(Diagnostic::error(
+                            "fbd_output",
+                            format!(
+                                "'{}' is not a declared output or variable",
+                                line.output
+                            ),
+                            format!("{path}.output"),
+                        ));
+                    }
+                    let bit_ok = line.inputs.iter().all(|input| {
+                        input.eq_ignore_ascii_case("TRUE")
+                            || input.eq_ignore_ascii_case("FALSE")
+                            || known.contains(&input.to_ascii_lowercase())
+                    });
+                    if matches!(block.as_str(), "AND" | "OR" | "XOR" | "NOT") {
+                        if !bit_ok {
+                            diagnostics.push(Diagnostic::error(
+                                "fbd_input",
+                                format!("{block} takes declared inputs"),
+                                format!("{path}.inputs"),
+                            ));
+                        }
+                        let needed = if block == "NOT" { 1 } else { 2 };
+                        if block == "NOT" && line.inputs.len() != needed {
+                            diagnostics.push(Diagnostic::error(
+                                "fbd_arity",
+                                "NOT takes one input",
+                                format!("{path}.inputs"),
+                            ));
+                        }
+                    } else if crate::compile::parse_block(&block, &block, &line.preset).is_some() {
+                        if !bit_ok || line.inputs.is_empty() {
+                            diagnostics.push(Diagnostic::error(
+                                "fbd_input",
+                                format!("{block} takes one declared input"),
+                                format!("{path}.inputs"),
+                            ));
+                        }
+                    } else if crate::compile::compare_op(&block).is_some() {
+                        if line.inputs.len() != 2
+                            || !line
+                                .inputs
+                                .iter()
+                                .all(|input| crate::compile::word_operand_value(input).is_some())
+                        {
+                            diagnostics.push(Diagnostic::error(
+                                "fbd_input",
+                                format!("{block} takes two word values"),
+                                format!("{path}.inputs"),
+                            ));
+                        }
+                    } else {
+                        diagnostics.push(Diagnostic::error(
+                            "fbd_block",
+                            format!("'{block}' is not a block; use AND, OR, XOR, NOT, a TON/TOF/TP/CTU/CTD instance or a compare"),
+                            format!("{path}.block"),
+                        ));
+                    }
+                }
+            }
         }
         if pou.name.trim().is_empty() {
             diagnostics.push(Diagnostic::error(
@@ -215,10 +273,12 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     }
 
     // An IL-only project has no rungs; that is a program, not an empty one.
-    let il_only = pous
-        .iter()
-        .any(|pou| pou.language == PouLanguage::Il && !pou.il.is_empty());
-    if sections.is_empty() && !il_only {
+    let program_only = pous.iter().any(|pou| match pou.language {
+        PouLanguage::Il => !pou.il.is_empty(),
+        PouLanguage::Fbd => !pou.fbd.is_empty(),
+        PouLanguage::Ld => false,
+    });
+    if sections.is_empty() && !program_only {
         diagnostics.push(Diagnostic::error(
             "no_sections",
             "project has no sections",

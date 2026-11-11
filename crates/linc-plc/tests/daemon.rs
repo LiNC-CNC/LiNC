@@ -306,6 +306,7 @@ fn load_rejects_a_changed_io_map() {
         name: name.clone(),
         direction: IoDirection::Out,
         kind: IoKind::Bit,
+        comment: String::new(),
     });
     let mut section = Section::new("io map lock");
     section.rungs.push(Rung::new(

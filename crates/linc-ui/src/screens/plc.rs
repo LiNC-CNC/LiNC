@@ -15,6 +15,7 @@ use linc_plc_client::Client;
 use linc_plc_core::grid::{Cell, POSITIONS};
 use linc_plc_core::protocol::{Request, Response, RunState, StateSnapshot, PROTOCOL_VERSION};
 use linc_plc_core::WordValue;
+use linc_plc_core::model::FbdLine;
 use linc_plc_core::{
     validate, Coil, CoilKind, Diagnostic, IoDirection, Logic, Pou, PouLanguage, Project, Rung,
     Section, Severity, VarValue,
@@ -147,6 +148,8 @@ pub enum Action {
     ToggleWatch(String),
     /// Set the comment of a declared symbol.
     SetSymbolComment(String, String),
+    /// Replace the function-block body of the current POU.
+    SetFbd(Vec<FbdLine>),
     /// Write one grid cell of a rung.
     SetCell {
         section: usize,
@@ -1238,6 +1241,13 @@ impl PlcUi {
                     }
                 }
             }
+            Action::SetFbd(lines) => {
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    pou.fbd = lines;
+                }
+                self.project.set_pous(pous);
+            }
             Action::ToggleWatch(name) => {
                 if let Some(index) = self
                     .project
@@ -1725,7 +1735,7 @@ fn pou_list_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, _actions: &mut Vec<A
                 let size = match pou.language {
                     PouLanguage::Ld => pou.sections.iter().map(|s| s.rungs.len()).sum::<usize>(),
                     PouLanguage::Il => pou.il.len(),
-                    PouLanguage::Fbd => 0,
+                    PouLanguage::Fbd => pou.fbd.len(),
                 };
                 let selected = index == plc.pou;
                 let response = ui.selectable_label(
@@ -1807,7 +1817,7 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
                     ladder_body(plc, &sections, ui, body_height, actions);
                 }
                 PouLanguage::Il => il_editor(plc, ui, body_height),
-                PouLanguage::Fbd => fbd_notice(ui),
+                PouLanguage::Fbd => fbd_editor(plc, ui, body_height, actions),
             },
         );
         ui.add_space(6.0);
@@ -1856,6 +1866,119 @@ fn il_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32) {
     });
 }
 
+/// Function block diagram: one assignment per line, blocks nesting by naming
+/// an earlier line's output. Inputs are typed here; the value pickers the
+/// ladder editor has are not wired to this page yet.
+fn fbd_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
+    const BLOCKS: [&str; 16] = [
+        "AND", "OR", "XOR", "NOT", "TON0", "TOF0", "TP0", "CTU0", "CTD0", "GT", "GE", "EQ", "NE",
+        "LE", "LT", "MOVE",
+    ];
+    let mut lines = plc.current_pou().map(|pou| pou.fbd).unwrap_or_default();
+    let mut changed = false;
+    ui.label(
+        RichText::new("output := BLOCK(inputs)   ·   click the block to cycle it")
+            .size(theme::font_size(9.0))
+            .color(theme::MUTED),
+    );
+    ui.add_space(4.0);
+    let mut remove: Option<usize> = None;
+    egui::ScrollArea::vertical()
+        .max_height((height - 96.0).max(120.0))
+        .show(ui, |ui| {
+            for (index, line) in lines.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    let mut output = line.output.clone();
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut output)
+                                .desired_width(90.0)
+                                .hint_text("output"),
+                        )
+                        .changed()
+                    {
+                        line.output = output;
+                        changed = true;
+                    }
+                    ui.label(RichText::new(":=").monospace().color(theme::MUTED));
+                    if theme::action_button(ui, &line.block, true).clicked() {
+                        let position = BLOCKS
+                            .iter()
+                            .position(|block| block.eq_ignore_ascii_case(&line.block))
+                            .map(|position| (position + 1) % BLOCKS.len())
+                            .unwrap_or(0);
+                        line.block = BLOCKS[position].to_string();
+                        changed = true;
+                    }
+                    let mut inputs = line.inputs.join(", ");
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut inputs)
+                                .desired_width(200.0)
+                                .hint_text("inputs, comma separated"),
+                        )
+                        .changed()
+                    {
+                        line.inputs = inputs
+                            .split(',')
+                            .map(str::trim)
+                            .filter(|input| !input.is_empty())
+                            .map(str::to_string)
+                            .collect();
+                        changed = true;
+                    }
+                    let timer = line.block.starts_with("TON")
+                        || line.block.starts_with("TOF")
+                        || line.block.starts_with("TP")
+                        || line.block.starts_with("CTU")
+                        || line.block.starts_with("CTD");
+                    if timer {
+                        let mut preset = line.preset.clone();
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut preset)
+                                    .desired_width(80.0)
+                                    .hint_text("T#1s"),
+                            )
+                            .changed()
+                        {
+                            line.preset = preset;
+                            changed = true;
+                        }
+                    }
+                    if theme::action_button(ui, "remove", true).clicked() {
+                        remove = Some(index);
+                    }
+                });
+                let mut comment = line.comment.clone();
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut comment)
+                            .desired_width(420.0)
+                            .hint_text("comment"),
+                    )
+                    .changed()
+                {
+                    line.comment = comment;
+                    changed = true;
+                }
+                ui.add_space(4.0);
+            }
+        });
+    if let Some(index) = remove {
+        lines.remove(index);
+        changed = true;
+    }
+    if theme::action_button(ui, "ADD LINE", true).clicked() {
+        lines.push(FbdLine::new("output", "AND"));
+        changed = true;
+    }
+    if changed {
+        actions.push(Action::SetFbd(lines));
+    }
+}
+
+#[allow(dead_code)]
 fn fbd_notice(ui: &mut Ui) {
     ui.label(
         RichText::new("FBD editor is the next slice: the network model and compiler land first.")
