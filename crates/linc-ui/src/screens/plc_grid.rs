@@ -52,6 +52,25 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
         )
     });
+    let (undo, redo) = ui.input_mut(|input| {
+        (
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::Z),
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::Y),
+        )
+    });
+    let (copy, paste, xref) = ui.input_mut(|input| {
+        (
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::C),
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::V),
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::X),
+        )
+    });
+    if undo {
+        app.plc.undo();
+    }
+    if redo {
+        app.plc.redo();
+    }
     if right {
         cursor.2 = (cursor.2 + 1).min(POSITIONS);
     }
@@ -75,6 +94,32 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         }
     }
     app.plc.cell_cursor = Some(cursor);
+    if copy {
+        let cell = sections
+            .get(cursor.0)
+            .and_then(|section| section.rungs.get(cursor.1))
+            .and_then(|rung| rung.cells.get(cursor.2))
+            .cloned();
+        app.plc.cell_clipboard = cell;
+    }
+    if paste {
+        if let (Some(cell), true) = (app.plc.cell_clipboard.clone(), cursor.2 < POSITIONS) {
+            actions.push(Action::SetCell {
+                section: cursor.0,
+                rung: cursor.1,
+                position: cursor.2,
+                cell,
+            });
+        }
+    }
+    if xref {
+        app.plc.xref = sections
+            .get(cursor.0)
+            .and_then(|section| section.rungs.get(cursor.1))
+            .and_then(|rung| rung.cells.get(cursor.2))
+            .and_then(|cell| cell.operand())
+            .map(|operand| operand.to_string());
+    }
     if enter {
         app.plc.picker = Some(cursor);
     }
@@ -93,6 +138,64 @@ pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     element_picker(plc, ctx, actions);
     operand_picker(plc, ctx, actions);
     expr_editor(plc, ctx, actions);
+    xref_window(plc, ctx);
+}
+
+/// Cross references of the operand under the cursor: every cell and coil that
+/// names it, across every POU.
+fn xref_window(plc: &mut PlcUi, ctx: &egui::Context) {
+    let Some(name) = plc.xref.clone() else {
+        return;
+    };
+    let mut close = false;
+    egui::Window::new(format!("CROSS REFERENCES  {name}"))
+        .collapsible(false)
+        .resizable(true)
+        .default_width(420.0)
+        .show(ctx, |ui| {
+            let mut hits = 0usize;
+            for pou in plc.project.all_pous() {
+                for section in &pou.sections {
+                    for (rung_index, rung) in section.rungs.iter().enumerate() {
+                        for (position, cell) in rung.cells.iter().enumerate() {
+                            if cell
+                                .operand()
+                                .map(|operand| operand.eq_ignore_ascii_case(&name))
+                                .unwrap_or(false)
+                            {
+                                hits += 1;
+                                ui.label(format!(
+                                    "{}  {}  rung {}  position {}",
+                                    pou.name,
+                                    section.name,
+                                    rung_index + 1,
+                                    position
+                                ));
+                            }
+                        }
+                        if rung.coil.var.eq_ignore_ascii_case(&name) {
+                            hits += 1;
+                            ui.label(format!(
+                                "{}  {}  rung {}  coil",
+                                pou.name,
+                                section.name,
+                                rung_index + 1
+                            ));
+                        }
+                    }
+                }
+            }
+            if hits == 0 {
+                ui.label("no references");
+            }
+            ui.add_space(4.0);
+            if theme::action_button(ui, "Close", true).clicked() {
+                close = true;
+            }
+        });
+    if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        plc.xref = None;
+    }
 }
 
 fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {

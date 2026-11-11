@@ -99,6 +99,24 @@ impl NodePath {
 /// What a click on the page asked for. Nothing mutates the project while a
 /// card is being drawn: the cards only record the intent, and the page applies
 /// them after the last card so no borrow is held across an edit.
+impl Action {
+    /// Does this action change what a Save writes?
+    pub fn edits_project(&self) -> bool {
+        !matches!(
+            self,
+            Self::Select(_)
+                | Self::Validate
+                | Self::Download
+                | Self::Start
+                | Self::Stop
+                | Self::ClearForces
+                | Self::Force(_, _)
+                | Self::Arm(_)
+                | Self::Save
+        )
+    }
+}
+
 pub enum Action {
     Select(NodePath),
     ToggleContact(NodePath),
@@ -632,6 +650,13 @@ pub struct PlcUi {
     pub operand_pick: Option<(usize, usize, usize, Cell)>,
     /// A compare or compute expression is being built step by step.
     pub expr_edit: Option<ExprEdit>,
+    /// Project snapshots for undo, oldest first, and the redo arm of the pair.
+    pub undo_stack: Vec<Vec<Pou>>,
+    pub redo_stack: Vec<Vec<Pou>>,
+    /// The cell copied with Ctrl+C.
+    pub cell_clipboard: Option<Cell>,
+    /// The operand whose cross references are shown.
+    pub xref: Option<String>,
     /// Buffer for the IL editor; synced when the selected POU changes.
     il_text: String,
     il_for: Option<usize>,
@@ -675,6 +700,10 @@ impl Default for PlcUi {
             picker: None,
             operand_pick: None,
             expr_edit: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            cell_clipboard: None,
+            xref: None,
             il_text: String::new(),
             il_for: None,
             next_poll: Instant::now(),
@@ -685,6 +714,30 @@ impl Default for PlcUi {
 impl PlcUi {
     /// The selected POU, cloned so the caller can hold a ladder body while the
     /// page keeps mutating the service state.
+    /// Remember the project before an edit. Fifty steps is enough to undo a
+    /// session's worth of work without holding every intermediate file.
+    pub fn snapshot(&mut self) {
+        self.undo_stack.push(self.project.all_pous());
+        if self.undo_stack.len() > 50 {
+            self.undo_stack.remove(0);
+        }
+        self.redo_stack.clear();
+    }
+
+    pub fn undo(&mut self) {
+        if let Some(previous) = self.undo_stack.pop() {
+            self.redo_stack.push(self.project.all_pous());
+            self.project.set_pous(previous);
+        }
+    }
+
+    pub fn redo(&mut self) {
+        if let Some(next) = self.redo_stack.pop() {
+            self.undo_stack.push(self.project.all_pous());
+            self.project.set_pous(next);
+        }
+    }
+
     pub fn current_pou(&self) -> Option<Pou> {
         self.project.all_pous().into_iter().nth(self.pou)
     }
@@ -950,6 +1003,11 @@ impl PlcUi {
     }
 
     pub fn apply(&mut self, action: Action) {
+        // Everything that changes the program is undoable; selection, runtime
+        // control and forces are not part of the project.
+        if action.edits_project() {
+            self.snapshot();
+        }
         match action {
             Action::Select(node) => {
                 self.selection = Some(node);
