@@ -593,6 +593,14 @@ fn worker(jobs: Receiver<Job>, events: Sender<Event>, path: PathBuf) {
 // Page state
 // ---------------------------------------------------------------------------
 
+/// Which field of an FBD line the value picker fills: the output when `input`
+/// is `None`, otherwise that input position.
+#[derive(Debug, Clone, Copy)]
+pub struct FbdPick {
+    pub line: usize,
+    pub input: Option<usize>,
+}
+
 /// One compare (`G`) or compute (`M`) cell being assembled: operator, then the
 /// values, then (for compute) the destination word.
 #[derive(Debug, Clone)]
@@ -753,6 +761,8 @@ pub struct PlcUi {
     pub xref: Option<String>,
     /// A timer or counter box is being edited at this cell.
     pub block_edit: Option<(usize, usize, usize)>,
+    /// An FBD line's output or one of its inputs is being picked.
+    pub fbd_pick: Option<FbdPick>,
     /// Boolean traces for the trend page.
     pub trend: TrendBuffer,
     /// The word bank and block members from the last snapshot.
@@ -805,6 +815,7 @@ impl Default for PlcUi {
             cell_clipboard: None,
             xref: None,
             block_edit: None,
+            fbd_pick: None,
             trend: TrendBuffer::default(),
             words: Vec::new(),
             il_text: String::new(),
@@ -1804,6 +1815,9 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
             }
         });
     });
+    if language == PouLanguage::Fbd {
+        fbd_picker(plc, ui.ctx(), actions);
+    }
     ui.add_space(2.0);
     let right_width = 296.0_f32.min(ui.available_width() * 0.34);
     let left_width = (ui.available_width() - right_width - 6.0).max(220.0);
@@ -1867,6 +1881,105 @@ fn il_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32) {
     });
 }
 
+/// The value list for an FBD output or input: declared symbols (with their
+/// comments), the word bank, block members, booleans, numbers and times.
+fn fbd_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    let Some(pick) = plc.fbd_pick else {
+        return;
+    };
+    let mut close = false;
+    let mut chosen: Option<String> = None;
+    egui::Window::new(if pick.input.is_some() {
+        "FBD INPUT"
+    } else {
+        "FBD OUTPUT"
+    })
+    .collapsible(false)
+    .resizable(true)
+    .default_width(360.0)
+    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+    .show(ctx, |ui| {
+        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+            for point in plc.project.io.clone() {
+                let label = format!(
+                    "{}   {}   {}",
+                    point.name,
+                    match point.direction {
+                        IoDirection::In => "input",
+                        IoDirection::Out => "output",
+                    },
+                    point.comment
+                );
+                if ui.button(label).clicked() {
+                    chosen = Some(point.name);
+                }
+            }
+            for var in plc.project.vars.clone() {
+                if ui.button(format!("{}   var   {}", var.name, var.comment)).clicked() {
+                    chosen = Some(var.name);
+                }
+            }
+            ui.horizontal_wrapped(|ui| {
+                for value in ["TRUE", "FALSE"] {
+                    if ui.button(value).clicked() {
+                        chosen = Some((*value).to_string());
+                    }
+                }
+                for index in 0..16 {
+                    if ui.button(format!("MW{index}")).clicked() {
+                        chosen = Some(format!("MW{index}"));
+                    }
+                }
+                for value in ["0", "1", "5", "10", "100", "T#1s", "T#10s"] {
+                    if ui.button(value).clicked() {
+                        chosen = Some((*value).to_string());
+                    }
+                }
+                for kind in ["TON", "TOF", "TP"] {
+                    for number in 0..4 {
+                        let name = format!("{kind}{number}.ET");
+                        if ui.button(&name).clicked() {
+                            chosen = Some(name);
+                        }
+                    }
+                }
+                for kind in ["CTU", "CTD"] {
+                    for number in 0..4 {
+                        let name = format!("{kind}{number}.CV");
+                        if ui.button(&name).clicked() {
+                            chosen = Some(name);
+                        }
+                    }
+                }
+            });
+        });
+        ui.add_space(4.0);
+        if theme::action_button(ui, "Cancel", true).clicked() {
+            close = true;
+        }
+    });
+    if let Some(value) = chosen {
+        let mut lines = plc.current_pou().map(|pou| pou.fbd).unwrap_or_default();
+        if let Some(line) = lines.get_mut(pick.line) {
+            match pick.input {
+                None => line.output = value,
+                Some(position) => {
+                    if position < line.inputs.len() {
+                        line.inputs[position] = value;
+                    } else {
+                        line.inputs.push(value);
+                    }
+                }
+            }
+            actions.push(Action::SetFbd(lines));
+        }
+        close = true;
+    }
+    if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        plc.fbd_pick = None;
+    }
+}
+
 /// Function block diagram: one assignment per line, blocks nesting by naming
 /// an earlier line's output. Inputs are typed here; the value pickers the
 /// ladder editor has are not wired to this page yet.
@@ -1889,17 +2002,21 @@ fn fbd_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
         .show(ui, |ui| {
             for (index, line) in lines.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
-                    let mut output = line.output.clone();
-                    if ui
-                        .add(
-                            egui::TextEdit::singleline(&mut output)
-                                .desired_width(90.0)
-                                .hint_text("output"),
-                        )
-                        .changed()
+                    if theme::action_button(
+                        ui,
+                        if line.output.is_empty() {
+                            "output…"
+                        } else {
+                            &line.output
+                        },
+                        true,
+                    )
+                    .clicked()
                     {
-                        line.output = output;
-                        changed = true;
+                        plc.fbd_pick = Some(FbdPick {
+                            line: index,
+                            input: None,
+                        });
                     }
                     ui.label(RichText::new(":=").monospace().color(theme::MUTED));
                     if theme::action_button(ui, &line.block, true).clicked() {
@@ -1911,22 +2028,19 @@ fn fbd_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
                         line.block = BLOCKS[position].to_string();
                         changed = true;
                     }
-                    let mut inputs = line.inputs.join(", ");
-                    if ui
-                        .add(
-                            egui::TextEdit::singleline(&mut inputs)
-                                .desired_width(200.0)
-                                .hint_text("inputs, comma separated"),
-                        )
-                        .changed()
-                    {
-                        line.inputs = inputs
-                            .split(',')
-                            .map(str::trim)
-                            .filter(|input| !input.is_empty())
-                            .map(str::to_string)
-                            .collect();
-                        changed = true;
+                    for (position, input) in line.inputs.clone().iter().enumerate() {
+                        if theme::action_button(ui, input, true).clicked() {
+                            plc.fbd_pick = Some(FbdPick {
+                                line: index,
+                                input: Some(position),
+                            });
+                        }
+                    }
+                    if theme::action_button(ui, "+ in", true).clicked() {
+                        plc.fbd_pick = Some(FbdPick {
+                            line: index,
+                            input: Some(line.inputs.len()),
+                        });
                     }
                     let timer = line.block.starts_with("TON")
                         || line.block.starts_with("TOF")
