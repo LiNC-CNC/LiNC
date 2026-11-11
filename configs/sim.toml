@@ -50,3 +50,6 @@ panel_scale = 1.0
 # The simulation ships a ladder project, but the PLC stays off until
 # `start-sim.sh --plc` (LINC_PLC=1) or [plc] enabled = true turns it on.
 project = "plc-sim.json"
+# A simulation drives inputs by forcing them, so forcing is on here and stays
+# off in base.toml: a real machine must be driven by its own I/O, not the HMI.
+allow_force = true

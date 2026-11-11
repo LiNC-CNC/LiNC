@@ -1516,9 +1516,7 @@ impl PlcUi {
                             .sections
                             .get(section)
                             .and_then(|target| target.rungs.get(rung - 1))
-                            .map(|above| {
-                                above.cells.iter().any(|cell| matches!(cell, Cell::Link))
-                            })
+                            .map(|above| above.cells.iter().any(|cell| matches!(cell, Cell::Link)))
                             .unwrap_or(false);
                     if linked {
                         refused = true;
@@ -2256,6 +2254,18 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     }
     if to_sim {
         app.plc.page = PlcPage::Sim;
+    }
+    // R runs and stops the ladder on the simulation page, as the manual's §10
+    // does, so the acceptance does not depend on the menu taking a click.
+    if app.plc.page == PlcPage::Sim
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::R))
+    {
+        let action = if matches!(app.plc.state, RunState::Running) {
+            Action::Stop
+        } else {
+            Action::Start
+        };
+        app.plc.apply(action);
     }
     if add_rung {
         let (section, row) = app
@@ -5885,7 +5895,10 @@ mod picker_key_tests {
             }],
         );
         assert!(plc.coil_pick.is_none(), "the picker took the Escape");
-        assert!(escape_closes_editor(&plc), "and now Escape closes the editor");
+        assert!(
+            escape_closes_editor(&plc),
+            "and now Escape closes the editor"
+        );
     }
 
     /// Escape closes every picker before the editor's own Escape: a list left

@@ -117,25 +117,25 @@
             ]
           },
           "coil": {
-            "var": "seal",
+            "var": "run",
             "kind": "normal"
           },
           "cells": [
             {
               "cell": "contact",
-              "var": "start",
+              "var": "pump",
               "negated": false
             },
             {
               "cell": "link"
             },
             {
-              "cell": "link"
+              "cell": "contact",
+              "var": "estop",
+              "negated": true
             },
             {
-              "cell": "contact",
-              "var": "stop",
-              "negated": true
+              "cell": "wire"
             },
             {
               "cell": "wire"
@@ -167,7 +167,7 @@
           "cells": [
             {
               "cell": "contact",
-              "var": "seal",
+              "var": "run",
               "negated": false
             },
             {
@@ -204,14 +204,60 @@
             "negated": false
           },
           "coil": {
-            "var": "run",
+            "var": "fan",
             "kind": "normal"
           },
           "cells": [
             {
               "cell": "contact",
-              "var": "seal",
+              "var": "run",
               "negated": false
+            },
+            {
+              "cell": "block",
+              "block": "TOF",
+              "instance": "TOF0",
+              "preset": "T#5s"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "comment": "",
+          "logic": {
+            "op": "contact",
+            "var": "start",
+            "negated": false
+          },
+          "coil": {
+            "var": "alarm",
+            "kind": "reset"
+          },
+          "cells": [
+            {
+              "cell": "edge",
+              "var": "alert_n",
+              "rising": false
             },
             {
               "cell": "wire"
@@ -262,17 +308,111 @@
           },
           "cells": [
             {
-              "cell": "contact",
-              "var": "stop",
-              "negated": false
-            },
-            {
-              "cell": "contact",
-              "var": "run",
-              "negated": false
+              "cell": "edge",
+              "var": "alert_p",
+              "rising": true
             },
             {
               "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "comment": "",
+          "logic": {
+            "op": "contact",
+            "var": "start",
+            "negated": false
+          },
+          "coil": {
+            "var": "blink_a",
+            "kind": "normal"
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "alarm",
+              "negated": false
+            },
+            {
+              "cell": "contact",
+              "var": "blink_b",
+              "negated": true
+            },
+            {
+              "cell": "block",
+              "block": "TP",
+              "instance": "TP0",
+              "preset": "T#1s"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "comment": "",
+          "logic": {
+            "op": "contact",
+            "var": "start",
+            "negated": false
+          },
+          "coil": {
+            "var": "blink_b",
+            "kind": "normal"
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "alarm",
+              "negated": false
+            },
+            {
+              "cell": "contact",
+              "var": "blink_a",
+              "negated": true
+            },
+            {
+              "cell": "block",
+              "block": "TP",
+              "instance": "TP1",
+              "preset": "T#1s"
             },
             {
               "cell": "wire"
@@ -334,25 +474,25 @@
                 ]
               },
               "coil": {
-                "var": "seal",
+                "var": "run",
                 "kind": "normal"
               },
               "cells": [
                 {
                   "cell": "contact",
-                  "var": "start",
+                  "var": "pump",
                   "negated": false
                 },
                 {
                   "cell": "link"
                 },
                 {
-                  "cell": "link"
+                  "cell": "contact",
+                  "var": "estop",
+                  "negated": true
                 },
                 {
-                  "cell": "contact",
-                  "var": "stop",
-                  "negated": true
+                  "cell": "wire"
                 },
                 {
                   "cell": "wire"
@@ -384,7 +524,7 @@
               "cells": [
                 {
                   "cell": "contact",
-                  "var": "seal",
+                  "var": "run",
                   "negated": false
                 },
                 {
@@ -421,14 +561,60 @@
                 "negated": false
               },
               "coil": {
-                "var": "run",
+                "var": "fan",
                 "kind": "normal"
               },
               "cells": [
                 {
                   "cell": "contact",
-                  "var": "seal",
+                  "var": "run",
                   "negated": false
+                },
+                {
+                  "cell": "block",
+                  "block": "TOF",
+                  "instance": "TOF0",
+                  "preset": "T#5s"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "start",
+                "negated": false
+              },
+              "coil": {
+                "var": "alarm",
+                "kind": "reset"
+              },
+              "cells": [
+                {
+                  "cell": "edge",
+                  "var": "alert_n",
+                  "rising": false
                 },
                 {
                   "cell": "wire"
@@ -479,17 +665,111 @@
               },
               "cells": [
                 {
-                  "cell": "contact",
-                  "var": "stop",
-                  "negated": false
-                },
-                {
-                  "cell": "contact",
-                  "var": "run",
-                  "negated": false
+                  "cell": "edge",
+                  "var": "alert_p",
+                  "rising": true
                 },
                 {
                   "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "start",
+                "negated": false
+              },
+              "coil": {
+                "var": "blink_a",
+                "kind": "normal"
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "alarm",
+                  "negated": false
+                },
+                {
+                  "cell": "contact",
+                  "var": "blink_b",
+                  "negated": true
+                },
+                {
+                  "cell": "block",
+                  "block": "TP",
+                  "instance": "TP0",
+                  "preset": "T#1s"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "start",
+                "negated": false
+              },
+              "coil": {
+                "var": "blink_b",
+                "kind": "normal"
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "alarm",
+                  "negated": false
+                },
+                {
+                  "cell": "contact",
+                  "var": "blink_a",
+                  "negated": true
+                },
+                {
+                  "cell": "block",
+                  "block": "TP",
+                  "instance": "TP1",
+                  "preset": "T#1s"
                 },
                 {
                   "cell": "wire"
