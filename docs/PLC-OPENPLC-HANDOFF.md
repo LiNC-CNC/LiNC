@@ -220,12 +220,20 @@ Otherwise: keep the Rust stack, add the importer if interop is wanted.
   `validate.rs:85` rejects `schema: 2` outright while still decoding `pous` at
   schema 1. The comments describe a shape, not a schema revision. An importer
   must write `schema: 1`.
-- `grid.rs` documents that `Compare` and `Compute` cells parse but are refused by
-  validation until their semantics exist, and `Edge` needs a previous-scan value
-  the VM does not carry. Importing a PLCopen file that uses edge contacts or
-  compare contacts therefore hits a known-refused path — refuse them explicitly
-  with `plcopen_unsupported_element` rather than emitting a cell the compiler
-  rejects later.
+- Corrected since the review: **edge contacts and compare/compute cells are
+  implemented**. `Op::Edge` in `vm.rs` carries the previous-value slot per
+  contact (32 per project), `Cell::Edge` is lowered by the grid compiler, and
+  `validate.rs` checks `Compare` and `Compute` operators and operands. The
+  importer must therefore *map* these where a faithful mapping exists:
+  - `R_TRIG` / `F_TRIG` blocks and rising/falling contacts map to `Cell::Edge`
+    (rising / falling) or to the `RT`/`RF` function block, whichever the source
+    construct names.
+  - `GT`/`GE`/`EQ`/`NE`/`LE`/`LT` map to `Cell::Compare` over `MW`, literals and
+    block members, or to the `Logic` comparison the tree lowering already has.
+  - `ADD`/`SUB`/`MUL`/`DIV`/`MOVE` map to `Cell::Compute` with an `MW` target.
+  Refuse with `plcopen_unsupported_element` only when no faithful mapping
+  exists (for example an operand kind the VM cannot hold), and name the element
+  in the message rather than refusing the construct by class.
 
 ## 9. Second source: openplc-runtime v4
 
