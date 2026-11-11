@@ -1,22 +1,33 @@
-# PLC interop handoff — what to take from openplc-editor
+# PLC interop handoff — what to take from the OpenPLC projects
 
-Status: decision recorded, one implementation item proposed, none started
+Status: decision recorded, three items proposed, none started
 Date: 2026-11-11
 Target: LiNC `main` @ `16b4c4b` reviewed, HEAD `aeb1eed` at write time
 License: GPL-2.0-or-later
 Author: session that evaluated <https://github.com/Autonomy-Logic/openplc-editor>
-against the PLC stack in this repo
+and <https://github.com/Autonomy-Logic/openplc-runtime> against the PLC stack in
+this repo
 
 ---
 
 ## 0. Decision
 
-**Do not adopt openplc-editor.** It is not a drop-in and not a code donor for the
-PLC stack here. Continue `crates/linc-plc-core`, `crates/linc-plc`,
+**Adopt neither repository.** Neither is a drop-in and neither is a code donor for
+the PLC stack here. Continue `crates/linc-plc-core`, `crates/linc-plc`,
 `crates/linc-ui/src/screens/plc*.rs`.
 
-One durable asset is worth taking: the **PLCopen TC6 XML (IEC 61131-10) exchange
-format** — a standard, not their code. Section 3 is the proposed work item.
+Three things are worth taking. Sections 3 and 9 are the work items; section 9 also
+carries one small delta.
+
+| # | Item | Source | Size |
+|---|---|---|---|
+| §3 | PLCopen TC6 XML importer for LD | the *standard*, not their code | ~1 day |
+| §9.1 | Retained-variable persistence | openplc-runtime v4 design | ~1 day |
+| §9.2 | Scan lateness as the overrun measure | openplc-runtime v4 | ~20 lines |
+
+The PLCopen format is the one durable asset from the editor: a published exchange
+format, not their code. §9.1 closes a hole this repo documents as open — `retain`
+is carried on every symbol and persisted nowhere (`lib.rs` says so).
 
 Do not re-open the adoption question unless one of the conditions in §7 appears.
 
@@ -215,3 +226,138 @@ Otherwise: keep the Rust stack, add the importer if interop is wanted.
   compare contacts therefore hits a known-refused path — refuse them explicitly
   with `plcopen_unsupported_element` rather than emitting a cell the compiler
   rejects later.
+
+## 9. Second source: openplc-runtime v4
+
+<https://github.com/Autonomy-Logic/openplc-runtime> — the runtime half. `GPL-3.0-only`
+or a paid commercial licence (`LICENSING.md`), so the same rule as §5 applies: read
+the design, write Rust, copy nothing.
+
+Shape, for context: a Flask REST/WebSocket control plane (port 8443, JWT, TLS) in
+one process, and a C/C++ scan engine (`core/src/plc_app/`) in another, joined by a
+Unix socket. Programs arrive as a zip, are compiled on the device into a shared
+library, and are executed under SCHED_FIFO. Multi-task (`plc_tasks[]`, IEC priority
+1-15 mapped to a FIFO band), a plugin ABI for I/O (Modbus, EtherCAT, S7comm, OPC-UA,
+Python plugins in per-plugin venvs), and a Go bootloader that self-updates
+containers.
+
+### 9.1 Retained-variable persistence — take this
+
+The gap is already documented here: `Symbol::retain` exists in `compile.rs`, is
+shown in the UI ("retained var", `screens/plc.rs:3060`), is reported over the
+protocol — and `linc-plc-core/src/lib.rs` states that "persistence of retained
+variables across daemon restarts is not implemented in this round". Every retained
+variable currently starts at its declared initial value after a restart, which for
+a machine tool means a lost tool number, lost counter, lost absolute position.
+
+Their design, in `core/src/plc_app/plc_retain{.h,.cpp}` and
+`plc_retain_file_store{.h,.cpp}` (809 lines together, a third of it prose), is the part
+worth reading. What to copy as a spec:
+
+1. **Program identity gates the restore.** The blob is keyed by the program's hash
+   (an MD5 there; `Compiled::hash` here). A store holding a different program's
+   bytes discards them and every retained variable starts at its declared initial
+   value. That is the correct behaviour for an upload, and it means the store needs
+   no notification when one happens.
+2. **A layout hash as well as the program hash.** Reordering or retyping
+   declarations changes byte offsets without changing logic. Their blob carries a
+   layout hash and refuses on mismatch. `project_hash` alone is not sufficient here
+   either.
+3. **Validate inside the pack, and say which check failed.** Magic, format version,
+   layout hash, crc32. Their refusal strings are enumerated — "bad magic", "crc
+   mismatch", "layout is from a different program", "truncated" — because a generic
+   "retain refused" sends someone hunting. Start from initial values on any
+   failure: a machine starting from defaults is recoverable, one starting from
+   plausible-looking garbage is not.
+4. **Cap the blob at init, not on the scan path.** They refuse above 64 KiB with a
+   logged error and continue without retention rather than failing the load.
+5. **Cadence: pack every scan, let the store decide the commit.** `save()` runs once
+   per cycle and does not diff or rate-limit; the store marks dirty and its own
+   flusher thread commits every `flush_seconds` (default 5), plus a flush as the
+   program unloads. "Save is the durability path, flush is only a hint — a power cut
+   does not call flush."
+6. **Publish the file atomically, then fsync the directory.** Write to `path.tmp`,
+   `fsync` the file, `rename`, then `fsync` the directory (they note an ext4 rename
+   can otherwise be lost). Identity and bytes go in one file so they cannot
+   disagree; a torn write is indistinguishable from a short file and is discarded.
+7. **A restore must never force.** They route each restored leaf through an ordinary
+   write, explicitly not a force, so a restored value does not stay pinned. The
+   analogue here: restore into `Vm` as values, not through `set_force`.
+8. **Store selection is a driver, not a fallback branch.** Not needed here — one
+   store and one profile key is enough — but the note that "retention off" is an
+   info log, not a warning, is right: a program must still run when nobody
+   configured a store.
+
+Their host test `tests/host/test_plc_retain_file_store.cpp` is a ready checklist to
+mirror in Rust (tempdir, no HAL): header layout; same program restores; different
+program is discarded; short file is unattributable; empty store is not an error;
+wrong identity length is refused; unchanged blob is not rewritten.
+
+Where it lands here:
+
+- `crates/linc-plc-core/src/retain.rs` — pack/unpack over the VM's bit and word
+  banks, layout hash, crc32, magic and version. No new dependencies (crc32 is 15
+  lines or a `crc32fast` dependency; a hand-rolled table is fine and testable).
+- `Vm` gains `retain_pack(&self, out: &mut Vec<u8>) -> usize`,
+  `retain_unpack(&mut self, blob: &[u8]) -> Result<u32, RetainRefusal>` and
+  `retain_layout_hash()`. `Compiled` already carries `hash`.
+- `linc-plc/src/daemon.rs` — read after `Load` and before the first scan; save at the
+  end of each scan while `Phase::Running`; flush on Stop, on Unload and on exit.
+  Load must clear whatever the store held only through the identity check, never by
+  deleting the file first.
+- Profile gains `[plc] retain_file = ""` (empty means off) and `retain_flush_s = 5`,
+  validated by `--check-config` like every other key in `CONFIGURATION.md`.
+- Tests: `crates/linc-plc-core/tests/retain.rs` for the seven cases above, plus one
+  daemon test that stops and restarts and sees the value survive.
+
+Effort: half a day for the pack and the store, half a day for the daemon call sites,
+the profile keys and the docs.
+
+### 9.2 Scan lateness, not scan duration, is the overrun — small take
+
+`scan_cycle_manager.c` measures three numbers, not one:
+
+- **scan time** — start to end of the body;
+- **cycle time** — start to next start;
+- **cycle latency** — how far past the *projected* next start the wakeup actually
+  landed, where the projection is `expected_start += interval`, anchored once.
+
+Their overrun is `now > expected_start`, not `duration >= interval`. Those differ:
+a scan that is fast but woke late never registers under the duration test, and a
+fixed-schedule anchor makes phase drift visible. `linc-plc` currently counts
+`elapsed >= period` (`daemon.rs`, scan loop), which is the duration test, and when
+late it does not sleep — so the schedule re-anchors to the late start and the drift
+is invisible in `overruns`.
+
+Take: keep `overruns` as lateness, and publish the same three numbers (min, max and
+an EWMA average over a 2 s window, which is also roughly the UI's publish interval)
+instead of a single `scan_time_us`. That is ~20 lines next to the existing
+`SNAPSHOT_EVERY` block, and gives the Diagnostics page a real answer to "is this
+scan late, or is this scan long".
+
+Do not change the clock choice: they use `CLOCK_MONOTONIC` and explicitly warn
+against `CLOCK_MONOTONIC_RAW`, which drifts against `clock_nanosleep` through NTP
+slew and produces false overruns after tens of minutes. Rust's `Instant` is already
+`CLOCK_MONOTONIC`; worth one comment so nobody "improves" it.
+
+### 9.3 Checked and not worth taking
+
+- **External-write journal** (`debug_write_journal.cpp`, 277 lines): bounded queue
+  of debugger writes and forces, drained in the no-task window under the image lock,
+  with overflow logging. This repo already applies commands at the top of a scan
+  ("the program is swapped at the top of a scan, never inside one"), which is the
+  same guarantee. Two details worth remembering rather than porting: the queue is
+  bounded and overflow is logged rather than silently dropped, and a write is
+  distinguished from a force so a restore or an OPC-UA write does not pin a slot.
+- **SCHED_FIFO priority map** (`task_policy.c`): IEC task priority 1-15 mapped onto a
+  FIFO band with clamping. Single scan here; nothing to map.
+- **Program `.so` hot swap, plugin ABI and I/O image** (`image_tables.cpp` 1389
+  lines, `plugin_driver.c`, `journal_buffer.c`): built for swappable C++ program
+  libraries and third-party I/O drivers. This repo has a Rust VM and owns its pins;
+  a plugin ABI would be new surface with no user.
+- **REST + JWT + TLS + WebSocket control plane, Docker, Go bootloader, self-update,
+  per-plugin venvs**: the opposite of the in-process constraint in `README.md`.
+  `linc-plc`'s Unix socket and `linc-diag` already cover the local control and
+  observation surface without a network listener.
+- **Mode switch gating start** (`plc_switch.c`): this machine's panel *is* the switch;
+  `linc_ui` already gates on panel state.

@@ -2709,7 +2709,12 @@ fn fbd_grid_view(plc: &mut PlcUi, grid: &FbdGrid, ui: &mut Ui, height: f32, acti
                         }
                         if row < rows && col < columns {
                             plc.fbd_cursor = Some((row, col));
-                            plc.fbd_grid_pick = Some((row, col));
+                            // The PT/PV cell belongs to the block's preset, not
+                            // to the element list.
+                            match fbd_preset_cell(grid, row, col) {
+                                Some(anchor) => plc.fbd_block_edit = Some(anchor),
+                                None => plc.fbd_grid_pick = Some((row, col)),
+                            }
                         }
                     }
                 }
@@ -2729,10 +2734,82 @@ fn fbd_block_rows(kind: &str) -> usize {
     2
 }
 
+/// The width a block occupies: its input cell, the box, and its output cell.
+const FBD_BLOCK_WIDTH: usize = 2;
+
+/// Rows a block spans; a block is one network with everything it overlaps.
+fn fbd_network_rows(grid: &FbdGrid, row: usize, ins: usize) -> (usize, usize) {
+    let mut low = row;
+    let mut high = row + ins.saturating_sub(1);
+    loop {
+        let mut grew = false;
+        for block in &grid.blocks {
+            let top = block.row;
+            let bottom = block.row + block.ins.max(1).saturating_sub(1);
+            if top <= high + 1 && bottom + 1 >= low && (top < low || bottom > high) {
+                if top < low {
+                    low = top;
+                    grew = true;
+                }
+                if bottom > high {
+                    high = bottom;
+                    grew = true;
+                }
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    (low, high)
+}
+
+/// Shift a network right by `amount` columns. Returns false when it would run
+/// off the grid, in which case nothing is moved.
+fn fbd_shift_right(
+    grid: &mut FbdGrid,
+    row: usize,
+    ins: usize,
+    from_col: usize,
+    amount: usize,
+) -> bool {
+    let (low, high) = fbd_network_rows(grid, row, ins);
+    let rightmost = grid
+        .blocks
+        .iter()
+        .filter(|block| block.row >= low && block.row <= high && block.col >= from_col)
+        .map(|block| block.col)
+        .max()
+        .unwrap_or(from_col);
+    if rightmost + amount + 2 >= grid.columns {
+        return false;
+    }
+    // Everything from the cursor rightwards moves; what is left of it stays, so
+    // the input that fed the network still feeds the new block.
+    for r in low..=high {
+        for col in (from_col + amount..grid.columns).rev() {
+            let cell = grid.cell(r, col - amount);
+            let keep = matches!(cell, FbdCell::In { .. } | FbdCell::Out { .. } | FbdCell::Wire);
+            grid.set_cell(r, col, if keep { cell } else { FbdCell::Empty });
+        }
+        for col in from_col..(from_col + amount).min(grid.columns) {
+            grid.set_cell(r, col, FbdCell::Empty);
+        }
+    }
+    for block in grid.blocks.iter_mut() {
+        if block.row >= low && block.row <= high && block.col >= from_col {
+            block.col += amount;
+        }
+    }
+    true
+}
+
 /// Can this block sit with its anchor at `(row, col)` without covering a signal?
 fn fbd_room(grid: &FbdGrid, row: usize, col: usize, ins: usize) -> bool {
     for offset in 0..ins {
-        for column in col.saturating_sub(1)..=col + 1 {
+        // The cell to the left is the input the block reads, so a signal there
+        // is what we want; the box itself and its output must be free.
+        for column in col..=col + 1 {
             match grid.cell(row + offset, column) {
                 FbdCell::Empty => {}
                 FbdCell::Wire => {}
@@ -2750,8 +2827,16 @@ fn fbd_place_block(plc: &mut PlcUi, kind: &str, actions: &mut Vec<Action>, messa
     let mut grid = fbd_grid_of(plc);
     let ins = fbd_block_rows(kind);
     if !fbd_room(&grid, row, col, ins) {
-        *message = Some("No room for the block".to_string());
-        return;
+        // Make room by moving the network right, as the manual describes; if it
+        // cannot move, nothing changes at all.
+        if !fbd_shift_right(&mut grid, row, ins, col, FBD_BLOCK_WIDTH) {
+            *message = Some("No room for the block".to_string());
+            return;
+        }
+        if !fbd_room(&grid, row, col, ins) {
+            *message = Some("No room for the block".to_string());
+            return;
+        }
     }
     grid.blocks.retain(|block| !(block.row == row && block.col == col));
     for offset in 0..ins {
@@ -2767,6 +2852,67 @@ fn fbd_place_block(plc: &mut PlcUi, kind: &str, actions: &mut Vec<Action>, messa
     });
     grid.rows = grid.rows.max(row + ins);
     actions.push(Action::SetFbdGrid(grid));
+}
+
+/// The block whose preset cell this is: a timer's PT on its second row and a
+/// counter's PV on its third, both written on the cell left of that row.
+fn fbd_preset_cell(grid: &FbdGrid, row: usize, col: usize) -> Option<(usize, usize)> {
+    for block in &grid.blocks {
+        let timer = block.kind.starts_with("TON")
+            || block.kind.starts_with("TOF")
+            || block.kind.starts_with("TP");
+        let counter = block.kind.starts_with("CTU") || block.kind.starts_with("CTD");
+        if col + 1 != block.col {
+            continue;
+        }
+        if timer && row == block.row + 1 {
+            return Some((block.row, block.col));
+        }
+        if counter && row == block.row + 2 {
+            return Some((block.row, block.col));
+        }
+    }
+    None
+}
+
+/// Close the gap a deleted block left: move the network back left, then drop
+/// the rows that ended up empty.
+fn fbd_close_up(grid: &mut FbdGrid, row: usize, ins: usize) {
+    let (low, high) = fbd_network_rows(grid, row, ins);
+    let leftmost = grid
+        .blocks
+        .iter()
+        .filter(|block| block.row >= low && block.row <= high)
+        .map(|block| block.col.saturating_sub(1))
+        .min()
+        .unwrap_or(0);
+    if leftmost > 1 {
+        let amount = leftmost - 1;
+        for r in low..=high {
+            for col in 1..grid.columns {
+                let source = col + amount;
+                let cell = grid.cell(r, source);
+                let keep = matches!(cell, FbdCell::In { .. } | FbdCell::Out { .. } | FbdCell::Wire);
+                grid.set_cell(r, col, if keep { cell } else { FbdCell::Empty });
+            }
+        }
+        for block in grid.blocks.iter_mut() {
+            if block.row >= low && block.row <= high {
+                block.col = block.col.saturating_sub(amount);
+            }
+        }
+    }
+    // Empty rows below the network disappear.
+    while grid.rows > 1 {
+        let last = grid.rows - 1;
+        let empty = (0..grid.columns).all(|col| matches!(grid.cell(last, col), FbdCell::Empty))
+            && !grid.blocks.iter().any(|block| block.row == last);
+        if !empty {
+            break;
+        }
+        grid.rows -= 1;
+        grid.cells.truncate(grid.rows);
+    }
 }
 
 /// The element list for a grid cell: signals, gates, blocks.
@@ -2973,17 +3119,35 @@ fn fbd_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
     }
     plc.fbd_cursor = Some(cursor);
     if enter {
-        plc.fbd_grid_pick = Some(cursor);
+        match fbd_preset_cell(&grid, cursor.0, cursor.1) {
+            Some(anchor) => plc.fbd_block_edit = Some(anchor),
+            None => plc.fbd_grid_pick = Some(cursor),
+        }
     }
     if delete {
         let mut grid = grid;
-        let before = grid.blocks.len();
-        grid.blocks
-            .retain(|block| !(block.row == cursor.0 && block.col == cursor.1));
-        if grid.blocks.len() == before {
-            grid.set_cell(cursor.0, cursor.1, FbdCell::Empty);
+        let removed = grid
+            .blocks
+            .iter()
+            .find(|block| block.row == cursor.0 && block.col == cursor.1)
+            .cloned();
+        match removed {
+            Some(block) => {
+                grid.blocks
+                    .retain(|item| !(item.row == block.row && item.col == block.col));
+                let input_col = block.col.saturating_sub(1);
+                // The first input's signal goes on through a wire; the rest of
+                // what fed the block is removed with it.
+                if matches!(grid.cell(block.row, input_col), FbdCell::In { .. }) {
+                    grid.set_cell(block.row, input_col, FbdCell::Wire);
+                }
+                for offset in 1..block.ins.max(1) {
+                    grid.set_cell(block.row + offset, input_col, FbdCell::Empty);
+                }
+                fbd_close_up(&mut grid, block.row, block.ins);
+            }
+            None => grid.set_cell(cursor.0, cursor.1, FbdCell::Empty),
         }
-        // Deleting a block leaves the signal of its first input on a wire.
         actions.push(Action::SetFbdGrid(grid));
     }
 }
@@ -4912,5 +5076,108 @@ mod tests {
         assert!(rows
             .iter()
             .any(|row| row.name == "alarm" && row.kind == "VAR"));
+    }
+}
+
+#[cfg(test)]
+mod fbd_grid_tests {
+    use super::*;
+
+    fn grid_with_input() -> FbdGrid {
+        let mut grid = FbdGrid {
+            columns: 8,
+            rows: 1,
+            cells: Vec::new(),
+            blocks: Vec::new(),
+        };
+        grid.set_cell(0, 2, FbdCell::In { operand: "a".into() });
+        grid.set_cell(1, 2, FbdCell::In { operand: "b".into() });
+        grid
+    }
+
+    #[test]
+    fn a_timer_spans_two_rows_and_a_counter_three() {
+        assert_eq!(fbd_block_rows("NOT"), 1);
+        assert_eq!(fbd_block_rows("RT0"), 1);
+        assert_eq!(fbd_block_rows("TON0"), 2);
+        assert_eq!(fbd_block_rows("CTU0"), 3);
+        assert_eq!(fbd_block_rows("AND"), 2);
+    }
+
+    #[test]
+    fn an_occupied_cell_makes_room_by_moving_the_network_right() {
+        let mut grid = grid_with_input();
+        // A block sits where the new one wants to go.
+        grid.blocks.push(linc_plc_core::model::FbdBlock {
+            row: 0,
+            col: 3,
+            ins: 2,
+            kind: "AND".into(),
+            instance: String::new(),
+            preset: String::new(),
+        });
+        grid.set_cell(0, 4, FbdCell::Out { operand: "y".into() });
+        assert!(!fbd_room(&grid, 0, 3, 2), "the cell is taken");
+        assert!(fbd_shift_right(&mut grid, 0, 2, 3, FBD_BLOCK_WIDTH));
+        assert_eq!(grid.blocks[0].col, 5, "the old block moved right");
+        assert!(
+            matches!(grid.cell(0, 2), FbdCell::In { .. }),
+            "the input that fed the network stayed put"
+        );
+        assert!(fbd_room(&grid, 0, 3, 2));
+    }
+
+    #[test]
+    fn a_full_grid_refuses_without_moving_anything() {
+        let mut grid = grid_with_input();
+        grid.blocks.push(linc_plc_core::model::FbdBlock {
+            row: 0,
+            col: 5,
+            ins: 2,
+            kind: "AND".into(),
+            instance: String::new(),
+            preset: String::new(),
+        });
+        let before = grid.clone();
+        assert!(!fbd_shift_right(&mut grid, 0, 2, 5, FBD_BLOCK_WIDTH));
+        assert_eq!(grid.blocks, before.blocks, "nothing changed");
+        assert_eq!(grid.cells, before.cells, "nothing changed");
+    }
+
+    #[test]
+    fn deleting_a_block_leaves_its_first_input_on_a_wire() {
+        let mut grid = grid_with_input();
+        grid.blocks.push(linc_plc_core::model::FbdBlock {
+            row: 0,
+            col: 3,
+            ins: 2,
+            kind: "AND".into(),
+            instance: String::new(),
+            preset: String::new(),
+        });
+        grid.blocks
+            .retain(|block| !(block.row == 0 && block.col == 3));
+        grid.set_cell(0, 2, FbdCell::Wire);
+        for offset in 1..2 {
+            grid.set_cell(offset, 2, FbdCell::Empty);
+        }
+        fbd_close_up(&mut grid, 0, 2);
+        assert!(matches!(grid.cell(0, 2), FbdCell::Wire));
+        assert!(matches!(grid.cell(1, 2), FbdCell::Empty));
+    }
+
+    #[test]
+    fn a_timers_preset_cell_is_the_second_row_on_its_left() {
+        let mut grid = grid_with_input();
+        grid.blocks.push(linc_plc_core::model::FbdBlock {
+            row: 0,
+            col: 3,
+            ins: 2,
+            kind: "TON0".into(),
+            instance: String::new(),
+            preset: "T#1s".into(),
+        });
+        assert_eq!(fbd_preset_cell(&grid, 1, 2), Some((0, 3)));
+        assert_eq!(fbd_preset_cell(&grid, 0, 2), None);
     }
 }
