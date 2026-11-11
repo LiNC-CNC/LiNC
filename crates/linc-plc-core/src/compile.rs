@@ -875,8 +875,12 @@ fn il_operand(
 
 fn store_coil(ops: &mut Vec<Op>, lookup: &HashMap<String, u16>, coil: &crate::model::Coil) {
     let index = lookup.get(coil.var.as_str()).copied().unwrap_or(0);
-    ops.push(match coil.kind {
-        CoilKind::Normal => Op::Store(index),
+    let kind = coil.kind;
+    if kind == CoilKind::Negated {
+        ops.push(Op::Not);
+    }
+    ops.push(match kind {
+        CoilKind::Normal | CoilKind::Negated => Op::Store(index),
         CoilKind::Set => Op::Set(index),
         CoilKind::Reset => Op::Reset(index),
     });

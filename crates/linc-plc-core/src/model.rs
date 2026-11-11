@@ -191,6 +191,8 @@ pub struct Coil {
 #[serde(rename_all = "snake_case")]
 pub enum CoilKind {
     Normal,
+    /// `-[\]-`: the coil is energised while the rung is **not** passing.
+    Negated,
     Set,
     Reset,
 }

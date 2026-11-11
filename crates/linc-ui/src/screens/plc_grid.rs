@@ -79,8 +79,23 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
     let letter = |input: &mut egui::InputState, key: egui::Key| {
         input.consume_key(egui::Modifiers::NONE, key)
     };
-    let (contact, negated, wire, link, edge_p, edge_n, ton, tof, tp, ctu, ctd, compare, compute) =
-        ui.input_mut(|input| {
+    let (
+        contact,
+        negated,
+        wire,
+        link,
+        edge_p,
+        edge_n,
+        ton,
+        tof,
+        tp,
+        ctu,
+        ctd,
+        compare,
+        compute,
+        set_coil,
+        reset_coil,
+    ) = ui.input_mut(|input| {
             (
                 letter(input, egui::Key::C),
                 letter(input, egui::Key::X),
@@ -95,6 +110,8 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                 letter(input, egui::Key::D),
                 letter(input, egui::Key::G),
                 letter(input, egui::Key::M),
+                letter(input, egui::Key::S),
+                letter(input, egui::Key::R),
             )
         });
     let insert = ui.input_mut(|input| letter(input, egui::Key::I));
@@ -103,6 +120,32 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         .and_then(|section| section.rungs.get(cursor.1))
         .and_then(|rung| rung.cells.get(cursor.2))
         .cloned();
+    if cursor.2 >= POSITIONS {
+        let kind = if contact {
+            Some(CoilKind::Normal)
+        } else if negated {
+            Some(CoilKind::Negated)
+        } else if set_coil {
+            Some(CoilKind::Set)
+        } else if reset_coil {
+            Some(CoilKind::Reset)
+        } else {
+            None
+        };
+        if let Some(kind) = kind {
+            let var = sections
+                .get(cursor.0)
+                .and_then(|section| section.rungs.get(cursor.1))
+                .map(|rung| rung.coil.var.clone())
+                .unwrap_or_default();
+            actions.push(Action::SetCoil {
+                section: cursor.0,
+                rung: cursor.1,
+                coil: Coil::new(var, kind),
+            });
+        }
+        return;
+    }
     let mut element: Option<Cell> = None;
     let mut pick_operand: Option<Cell> = None;
     if contact {
@@ -178,6 +221,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         }
     } else if let Some(cell) = element {
         if cursor.2 < POSITIONS {
+            app.plc.cell_cursor = Some((cursor.0, cursor.1, (cursor.2 + 1).min(POSITIONS)));
             actions.push(if insert {
                 Action::InsertCell {
                     section: cursor.0,
@@ -326,11 +370,11 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         }
     }
     if delete && cursor.2 < POSITIONS {
-        actions.push(Action::SetCell {
+        // ZX closes the row up to the left; a wire in place would leave a gap.
+        actions.push(Action::DeleteCell {
             section: cursor.0,
             rung: cursor.1,
             position: cursor.2,
-            cell: Cell::Wire,
         });
     }
 }

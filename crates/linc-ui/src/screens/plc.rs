@@ -152,6 +152,12 @@ pub enum Action {
     SetSymbolComment(String, String),
     /// Replace the function-block body of the current POU.
     SetFbd(Vec<FbdLine>),
+    /// Remove a cell and close the row up to the left.
+    DeleteCell {
+        section: usize,
+        rung: usize,
+        position: usize,
+    },
     /// Insert a cell in front of the cursor, moving the rest of the row right.
     InsertCell {
         section: usize,
@@ -417,6 +423,7 @@ pub fn move_rung(
 pub fn coil_label(kind: CoilKind) -> &'static str {
     match kind {
         CoilKind::Normal => "( )",
+        CoilKind::Negated => "(/)",
         CoilKind::Set => "(S)",
         CoilKind::Reset => "(R)",
     }
@@ -425,8 +432,9 @@ pub fn coil_label(kind: CoilKind) -> &'static str {
 fn coil_index(kind: &CoilKind) -> usize {
     match kind {
         CoilKind::Normal => 0,
-        CoilKind::Set => 1,
-        CoilKind::Reset => 2,
+        CoilKind::Negated => 1,
+        CoilKind::Set => 2,
+        CoilKind::Reset => 3,
     }
 }
 
@@ -1283,6 +1291,35 @@ impl PlcUi {
                         var.comment = comment.clone();
                     }
                 }
+            }
+            Action::DeleteCell {
+                section,
+                rung,
+                position,
+            } => {
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    if let Some(row) = pou
+                        .sections
+                        .get_mut(section)
+                        .and_then(|section| section.rungs.get_mut(rung))
+                    {
+                        let migrated = if row.cells.is_empty() {
+                            linc_plc_core::grid::migrate(&row.logic)
+                        } else {
+                            Some(row.cells.clone())
+                        };
+                        if let Some(mut cells) = migrated {
+                            cells.resize(POSITIONS, Cell::Wire);
+                            if position < POSITIONS {
+                                cells.remove(position);
+                                cells.push(Cell::Wire);
+                                row.cells = cells;
+                            }
+                        }
+                    }
+                }
+                self.project.set_pous(pous);
             }
             Action::InsertCell {
                 section,
