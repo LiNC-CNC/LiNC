@@ -44,6 +44,17 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
     {
         return;
     }
+    // A click anywhere on the page takes the keyboard back. A text field left
+    // focused by an earlier visit otherwise kept `text_editing` true and the grid
+    // ignored every key, which looked like a dead editor rather than a lost focus.
+    if ui.input(|input| input.pointer.any_pressed()) {
+        ui.ctx().memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+        app.plc.text_editing = false;
+    }
     if app.plc.text_editing {
         return;
     }
