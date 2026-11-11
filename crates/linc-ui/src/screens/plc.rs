@@ -170,6 +170,11 @@ pub enum Action {
         instance: Option<String>,
         preset: Option<String>,
     },
+    /// Remove a ladder row.
+    DeleteRung {
+        section: usize,
+        rung: usize,
+    },
     /// Set a coil's operand by name.
     SetCoilVar {
         section: usize,
@@ -1466,6 +1471,34 @@ impl PlcUi {
                 }
             }
             Action::Delete => self.delete_selection(),
+            Action::DeleteRung { section, rung } => {
+                // A row directly under a Link is that link's parallel branch;
+                // deleting it would leave the link joined to an unrelated row.
+                let mut pous = self.project.all_pous();
+                let mut refused = false;
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    let linked = rung > 0
+                        && pou
+                            .sections
+                            .get(section)
+                            .and_then(|target| target.rungs.get(rung - 1))
+                            .map(|above| {
+                                above.cells.iter().any(|cell| matches!(cell, Cell::Link))
+                            })
+                            .unwrap_or(false);
+                    if linked {
+                        refused = true;
+                    } else if let Some(target) = pou.sections.get_mut(section) {
+                        if rung < target.rungs.len() {
+                            target.rungs.remove(rung);
+                        }
+                    }
+                }
+                if !refused {
+                    self.project.set_pous(pous);
+                    self.normalise_selection();
+                }
+            }
             Action::AddRung => {
                 // The POU list is canonical: the compiler reads it. `set_pous`
                 // folds a single MAIN ladder back into the legacy `sections`, so
@@ -2142,7 +2175,7 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     common::focus_anchor(ui, "plc-editor-focus");
     // The menu bar does not take clicks in this build, so the pages and the
     // two actions the workflow needs every minute have keys as well.
-    let (to_pous, to_edit, to_symbols, to_sim, add_rung, save, add_row) = (
+    let (to_pous, to_edit, to_symbols, to_sim, add_rung, save, add_row, delete_row) = (
         ctrl_key(ui, egui::Key::Num1),
         ctrl_key(ui, egui::Key::Num2),
         ctrl_key(ui, egui::Key::Num3),
@@ -2152,6 +2185,7 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         // The manual's SS+ENTER substitute, plus Ctrl+J for terminals that
         // cannot send Ctrl+Enter.
         ctrl_key(ui, egui::Key::Enter) || ctrl_key(ui, egui::Key::J),
+        ctrl_key(ui, egui::Key::Delete),
     );
     if to_pous {
         app.plc.page = PlcPage::PouList;
@@ -2174,6 +2208,12 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     }
     if add_rung {
         app.plc.apply(Action::AddRung);
+    }
+    if delete_row {
+        if let Some((section, rung)) = app.plc.cell_cursor.map(|cursor| (cursor.0, cursor.1)) {
+            app.plc.apply(Action::DeleteRung { section, rung });
+            app.plc.cell_cursor = Some((section, rung.saturating_sub(1), 0));
+        }
     }
     if add_row {
         // Add the row after the cursor, not after whatever the tree selection
@@ -5908,6 +5948,66 @@ mod add_rung_tests {
                 .iter()
                 .all(|diagnostic| diagnostic.code != "pou_unreachable"),
             "the added row is part of the reachable program"
+        );
+    }
+}
+
+#[cfg(test)]
+mod delete_rung_tests {
+    use super::*;
+
+    fn with_rows(rows: usize) -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.project.normalise();
+        for _ in 1..rows {
+            plc.selection = Some(NodePath::root(0, rows - 2));
+            plc.apply(Action::AddRung);
+        }
+        plc
+    }
+
+    /// A delete writes the POU list and the legacy mirror together, like a
+    /// row insert does, so the compiler and the editor cannot drift.
+    #[test]
+    fn deleting_a_rung_keeps_pous_and_sections_equal() {
+        let mut plc = with_rows(5);
+        let before = plc.project.all_pous()[0].sections[0].rungs.len();
+        plc.apply(Action::DeleteRung {
+            section: 0,
+            rung: 3,
+        });
+        let after = plc.project.all_pous()[0].sections[0].rungs.len();
+        assert_eq!(after, before - 1);
+        assert_eq!(
+            plc.project.sections[0].rungs.len(),
+            after,
+            "legacy sections mirror the POU"
+        );
+    }
+
+    /// The row under a Link is that link's branch: deleting it would join the
+    /// link to an unrelated row, so the delete is refused.
+    #[test]
+    fn a_rung_under_a_link_is_not_deleted() {
+        let mut plc = with_rows(3);
+        let mut pous = plc.project.all_pous();
+        pous[0].sections[0].rungs[0].cells = vec![
+            Cell::Contact {
+                var: "a".into(),
+                negated: false,
+            },
+            Cell::Link,
+        ];
+        plc.project.set_pous(pous);
+        let before = plc.project.all_pous()[0].sections[0].rungs.len();
+        plc.apply(Action::DeleteRung {
+            section: 0,
+            rung: 1,
+        });
+        assert_eq!(
+            plc.project.all_pous()[0].sections[0].rungs.len(),
+            before,
+            "the branch row stays"
         );
     }
 }
