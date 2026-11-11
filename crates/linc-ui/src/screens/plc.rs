@@ -4206,6 +4206,39 @@ fn paint_logic(
                     .line_segment([pos2(right_rail, *first), pos2(right_rail, *last)], wire);
             }
         }
+        Logic::Block { .. } | Logic::Edge { .. } | Logic::Compare { .. } => {
+            // Blocks, edges and compares are drawn as a named box; the tree
+            // canvas is only a fallback for rungs the grid cannot show.
+            let label = match logic {
+                Logic::Block { block, instance, .. } => {
+                    if instance.is_empty() {
+                        block.clone()
+                    } else {
+                        format!("{block} {instance}")
+                    }
+                }
+                Logic::Edge { var, rising } => {
+                    format!("{}{var}", if *rising { "P " } else { "N " })
+                }
+                Logic::Compare {
+                    operator,
+                    left,
+                    right,
+                } => format!("{left}{operator}{right}"),
+                _ => String::new(),
+            };
+            let live = plc.live_value(label.as_str()).unwrap_or(false);
+            let selected = plc.selection.as_ref() == Some(node);
+            let mut child = parent.new_child(
+                egui::UiBuilder::new()
+                    .id_salt(("plc-element", node.clone()))
+                    .max_rect(rect),
+            );
+            let response = child.add_sized(BOX, ladder_box(&label, live, selected, false));
+            if response.clicked() {
+                actions.push(Action::Select(node.clone()));
+            }
+        }
         Logic::Contact { var, negated } => {
             let live = plc.live_value(var).unwrap_or(false);
             let selected = plc.selection.as_ref() == Some(node);
@@ -4304,6 +4337,9 @@ fn property_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
         Some(Logic::Const { .. }) => "CONSTANT",
         Some(Logic::Series { .. }) => "SERIES",
         Some(Logic::Parallel { .. }) => "PARALLEL",
+        Some(Logic::Block { .. }) => "BLOCK",
+        Some(Logic::Edge { .. }) => "EDGE",
+        Some(Logic::Compare { .. }) => "COMPARE",
         None => "RUNG",
     };
     ui.horizontal(|ui| {
