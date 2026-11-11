@@ -4451,50 +4451,9 @@ fn sim_bit_panel(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
 
 fn sim_view(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
     common::card_title(ui, "SIMULATION");
+    // The 16-bit panel is the control surface: the named button row below it said
+    // the same thing twice and is gone.
     sim_bit_panel(plc, ui, actions);
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
-        for point in &plc.project.io {
-            let value = plc
-                .vars
-                .iter()
-                .find(|var| var.name == point.name)
-                .map(|var| var.value)
-                .unwrap_or(false);
-            let forced = plc.forced.iter().any(|name| name == &point.name);
-            let input = point.direction == IoDirection::In;
-            let colour = if value { theme::SUCCESS } else { theme::MUTED };
-            let label = format!(
-                "{}{}\n{}",
-                if forced { "F " } else { "" },
-                if value { "\u{25cf}" } else { "\u{25cb}" },
-                point.name
-            );
-            let response = ui
-                .add(
-                    egui::Button::new(
-                        RichText::new(label)
-                            .monospace()
-                            .size(theme::font_size(10.0))
-                            .color(colour),
-                    )
-                    .fill(if value {
-                        theme::tint(theme::SUCCESS, 28)
-                    } else {
-                        theme::PANEL_RAISED
-                    })
-                    .min_size(vec2(92.0, 44.0)),
-                )
-                .on_hover_text(if input {
-                    "Click forces this input for the force TTL"
-                } else {
-                    "Output, driven by the scan"
-                });
-            if input && response.clicked() {
-                actions.push(Action::Force(point.name.clone(), !value));
-            }
-        }
-    });
 }
 
 /// ZX-PLC's status bar: the symbol and comment of the selection on the left,
