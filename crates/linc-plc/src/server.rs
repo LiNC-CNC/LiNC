@@ -175,9 +175,9 @@ fn handle_request(request: Request, shared: &Shared) -> Result<Outcome, Error> {
             }
         }
 
-        Request::Unforce { name } => Outcome::Reply(dispatch(shared, |reply| {
-            Command::Unforce { name, reply }
-        })),
+        Request::Unforce { name } => {
+            Outcome::Reply(dispatch(shared, |reply| Command::Unforce { name, reply }))
+        }
 
         Request::ClearForces => {
             Outcome::Reply(dispatch(shared, |reply| Command::ClearForces { reply }))
@@ -251,7 +251,7 @@ fn load(project: Project, shared: &Shared) -> Result<Response, Error> {
 
     let warnings = compiled.warnings.clone();
     let response = dispatch(shared, |reply| Command::Load {
-            watch: project.watch.clone(),
+        watch: project.watch.clone(),
         compiled: Box::new(compiled),
         warnings,
         reply,

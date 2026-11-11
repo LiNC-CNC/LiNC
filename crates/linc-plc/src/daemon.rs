@@ -77,7 +77,11 @@ pub(crate) struct Daemon {
 }
 
 impl Daemon {
-    pub(crate) fn new(project: PathBuf, retain_path: Option<PathBuf>, retain_flush: Duration) -> Self {
+    pub(crate) fn new(
+        project: PathBuf,
+        retain_path: Option<PathBuf>,
+        retain_flush: Duration,
+    ) -> Self {
         Self {
             project,
             phase: Phase::Idle,
@@ -144,7 +148,7 @@ impl Daemon {
             // The snapshot is a convenience for the UI, not the scan itself:
             // publishing every scan would contend on the mutex, and a load,
             // stop, force or fault publishes immediately anyway.
-            if self.scan_count % SNAPSHOT_EVERY == 0 {
+            if self.scan_count.is_multiple_of(SNAPSHOT_EVERY) {
                 self.publish(shared);
             }
 
@@ -401,7 +405,7 @@ impl Daemon {
                     trend.samples.clear();
                 }
                 self.trend_tick = self.trend_tick.wrapping_add(1);
-                if self.trend_tick % self.trend_stride.max(1) == 0 {
+                if self.trend_tick.is_multiple_of(self.trend_stride.max(1)) {
                     let row = self
                         .watch
                         .iter()
@@ -523,7 +527,10 @@ impl Daemon {
                     path.display()
                 );
             }
-            Err(refusal) => log::error!("linc-plc: {}; continuing with fresh values", refusal.message()),
+            Err(refusal) => log::error!(
+                "linc-plc: {}; continuing with fresh values",
+                refusal.message()
+            ),
         }
     }
 

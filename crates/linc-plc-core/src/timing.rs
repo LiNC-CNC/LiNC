@@ -103,7 +103,8 @@ impl ScanTiming {
             self.overruns = self.overruns.saturating_add(1);
         }
         if let Some(previous) = self.last_wake {
-            self.cycle.observe(now.saturating_duration_since(previous), self.weight);
+            self.cycle
+                .observe(now.saturating_duration_since(previous), self.weight);
         }
         self.last_wake = Some(now);
     }
@@ -111,7 +112,8 @@ impl ScanTiming {
     /// Record the end of the body, which is the scan time.
     pub fn finish(&mut self, now: Instant) {
         if let Some(wake) = self.last_wake {
-            self.scan.observe(now.saturating_duration_since(wake), self.weight);
+            self.scan
+                .observe(now.saturating_duration_since(wake), self.weight);
         }
     }
 
@@ -170,7 +172,10 @@ mod tests {
         timing.finish(start + Duration::from_millis(3));
         let snapshot = timing.snapshot();
         assert_eq!(snapshot.scan.now_us, 3_000, "the body took 3 ms");
-        assert_eq!(snapshot.overruns, 0, "a long body is not itself a late wake");
+        assert_eq!(
+            snapshot.overruns, 0,
+            "a long body is not itself a late wake"
+        );
 
         // The schedule still points at start + 1 ms, so the next wake is 2 ms late.
         timing.schedule_next();
