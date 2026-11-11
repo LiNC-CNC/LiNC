@@ -433,6 +433,184 @@
               "cell": "wire"
             }
           ]
+        },
+        {
+          "comment": "",
+          "logic": {
+            "op": "contact",
+            "var": "start",
+            "negated": false
+          },
+          "coil": {
+            "var": "lamp",
+            "kind": "normal"
+          },
+          "cells": [
+            {
+              "cell": "compare",
+              "op": "GT",
+              "left": "MW1",
+              "right": "5"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "comment": "",
+          "logic": {
+            "op": "contact",
+            "var": "start",
+            "negated": false
+          },
+          "coil": {
+            "var": "run",
+            "kind": "normal"
+          },
+          "cells": [
+            {
+              "cell": "compute",
+              "op": "ADD",
+              "target": "MW2",
+              "left": "MW1",
+              "right": "5"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "comment": "",
+          "logic": {
+            "op": "contact",
+            "var": "start",
+            "negated": false
+          },
+          "coil": {
+            "var": "run",
+            "kind": "normal"
+          },
+          "cells": [
+            {
+              "cell": "compute",
+              "op": "ADD",
+              "target": "MW2",
+              "left": "MW2",
+              "right": "1"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "comment": "",
+          "logic": {
+            "op": "contact",
+            "var": "start",
+            "negated": false
+          },
+          "coil": {
+            "var": "seal",
+            "kind": "normal"
+          },
+          "cells": [
+            {
+              "cell": "compare",
+              "op": "GE",
+              "left": "CTU0.CV",
+              "right": "3"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
         }
       ]
     }
@@ -770,6 +948,184 @@
                   "block": "TP",
                   "instance": "TP1",
                   "preset": "T#1s"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "start",
+                "negated": false
+              },
+              "coil": {
+                "var": "lamp",
+                "kind": "normal"
+              },
+              "cells": [
+                {
+                  "cell": "compare",
+                  "op": "GT",
+                  "left": "MW1",
+                  "right": "5"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "start",
+                "negated": false
+              },
+              "coil": {
+                "var": "run",
+                "kind": "normal"
+              },
+              "cells": [
+                {
+                  "cell": "compute",
+                  "op": "ADD",
+                  "target": "MW2",
+                  "left": "MW1",
+                  "right": "5"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "start",
+                "negated": false
+              },
+              "coil": {
+                "var": "run",
+                "kind": "normal"
+              },
+              "cells": [
+                {
+                  "cell": "compute",
+                  "op": "ADD",
+                  "target": "MW2",
+                  "left": "MW2",
+                  "right": "1"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "start",
+                "negated": false
+              },
+              "coil": {
+                "var": "seal",
+                "kind": "normal"
+              },
+              "cells": [
+                {
+                  "cell": "compare",
+                  "op": "GE",
+                  "left": "CTU0.CV",
+                  "right": "3"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
                 },
                 {
                   "cell": "wire"

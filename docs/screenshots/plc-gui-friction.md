@@ -39,3 +39,17 @@ is covered by a fullscreen browser.
 
 Build DEMO_LD's four rungs through the grid once 2 and 3 are fixed, then the
 compare/compute POU, then run it and capture the simulation.
+
+## After the ZX geometry + shortcut strip (session 2)
+
+- **Fixed**: per-cell boxes/borders removed, zero spacing, one conductor, names above
+  symbols, coil as two arcs, link drop exact, comments inside the strip, ladder clipped
+  to its column, shortcut strip on main-GUI row metrics.
+- **Open**: on this build the Sim page shows `page=Sim` and the daemon answers snapshots
+  (`run=Idle`), but neither `R` nor the Run menu starts the ladder — no Load/Start reaches
+  the daemon (`vars=0`). The same project ran earlier in the session (`vars=13`, all six
+  behaviours captured), so this is a regression in key consumption or in the Load path,
+  not in the ladder.
+- **Open**: comment text and the operand name share the strip band and can crowd at 8-9 px.
+- **Open**: expressions rows 7-10 are authored but their live values were never observed
+  in the Watch/Symbols table.
