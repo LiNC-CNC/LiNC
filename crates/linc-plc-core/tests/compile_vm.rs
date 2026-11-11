@@ -1038,3 +1038,117 @@ fn a_comment_row_compiles_to_nothing() {
     vm.scan(&[true]);
     assert_eq!(vm.outputs(), &[true], "the comment row changed nothing");
 }
+
+fn fbd_project(lines: Vec<linc_plc_core::model::FbdLine>) -> Project {
+    let mut project = project_with(
+        vec![
+            IoPoint::new("a", IoDirection::In),
+            IoPoint::new("b", IoDirection::In),
+            IoPoint::new("clk", IoDirection::In),
+            IoPoint::new("y", IoDirection::Out),
+            IoPoint::new("z", IoDirection::Out),
+        ],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Fbd);
+    pou.fbd = lines;
+    project.pous = vec![pou];
+    project
+}
+
+fn line(output: &str, block: &str, inputs: &[&str], preset: &str) -> linc_plc_core::model::FbdLine {
+    linc_plc_core::model::FbdLine {
+        output: output.into(),
+        block: block.into(),
+        inputs: inputs.iter().map(|input| (*input).to_string()).collect(),
+        preset: preset.into(),
+        comment: String::new(),
+    }
+}
+
+#[test]
+fn every_fbd_line_project_migrates_to_the_grid_with_the_same_ops() {
+    let cases = vec![
+        // Nested gates through a named output.
+        vec![
+            line("y", "AND", &["a", "b"], ""),
+            line("z", "NOT", &["y"], ""),
+        ],
+        // A timer feeding a compare, plus a negated input.
+        vec![
+            line("y", "TON0", &["a"], "T#1s"),
+            line("z", "GT", &["TON0.ET", "T#500ms"], ""),
+        ],
+        // A latch and an edge block.
+        vec![
+            line("y", "SR0", &["a", "b"], ""),
+            line("z", "RT0", &["clk"], ""),
+        ],
+        // A pin reference instead of a named intermediate.
+        vec![line("y", "NOT", &["a"], ""), line("z", "AND", &["@1", "b"], "")],
+    ];
+
+    for lines in cases {
+        let mut from_lines = fbd_project(lines.clone());
+        let lines_ops = compile(&from_lines).expect("line compile").program.ops;
+
+        let grid = linc_plc_core::model::FbdGrid::from_lines(&lines);
+        from_lines.pous[0].fbd_grid = Some(grid);
+        let grid_ops = compile(&from_lines).expect("grid compile").program.ops;
+
+        assert_eq!(
+            grid_ops, lines_ops,
+            "the grid must compile to exactly the ops the lines did for {lines:?}"
+        );
+    }
+}
+
+#[test]
+fn a_grid_block_chains_through_the_cell_to_its_left() {
+    use linc_plc_core::model::{FbdBlock, FbdCell, FbdGrid};
+    let mut grid = FbdGrid {
+        columns: 6,
+        rows: 2,
+        cells: Vec::new(),
+        blocks: Vec::new(),
+    };
+    // Row 0: a AND b, its output on the wire; row 1: NOT of that wire.
+    grid.set_cell(0, 1, FbdCell::In { operand: "a".into() });
+    grid.set_cell(1, 1, FbdCell::In { operand: "b".into() });
+    grid.set_cell(0, 3, FbdCell::Out { operand: "y".into() });
+    grid.blocks.push(FbdBlock {
+        row: 0,
+        col: 2,
+        ins: 2,
+        kind: "AND".into(),
+        instance: String::new(),
+        preset: String::new(),
+    });
+    // Second network: a NOT whose input cell is empty next to the first
+    // block's output row, which is the chaining case.
+    grid.set_cell(0, 5, FbdCell::Out { operand: "z".into() });
+    grid.blocks.push(FbdBlock {
+        row: 0,
+        col: 4,
+        ins: 1,
+        kind: "NOT".into(),
+        instance: String::new(),
+        preset: String::new(),
+    });
+
+    let mut project = fbd_project(Vec::new());
+    project.pous[0].fbd_grid = Some(grid);
+    let diagnostics = linc_plc_core::validate(&project);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|item| item.severity != linc_plc_core::Severity::Error),
+        "{diagnostics:?}"
+    );
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan(&[true, false, false]);
+    assert_eq!(vm.outputs(), &[false, true], "z is not (a and b)");
+    vm.scan(&[true, true, false]);
+    assert_eq!(vm.outputs(), &[true, false], "z is not (a and b)");
+}

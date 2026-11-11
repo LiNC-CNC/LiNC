@@ -472,11 +472,14 @@ fn lower_pou(
                 }
             }
         }
-        PouLanguage::Fbd => {
-            for index in 0..pou.fbd.len() {
-                lower_fbd_line(&pou.fbd, index, lookup, ops);
+        PouLanguage::Fbd => match pou.fbd_grid.as_ref().filter(|grid| !grid.blocks.is_empty()) {
+            Some(grid) => lower_fbd_grid(grid, lookup, ops),
+            None => {
+                for index in 0..pou.fbd.len() {
+                    lower_fbd_line(&pou.fbd, index, lookup, ops);
+                }
             }
-        }
+        },
     }
 }
 
@@ -512,6 +515,228 @@ fn lower_fbd_line(
     }
     if let Some(target) = lookup.get(name) {
         ops.push(Op::Store(*target));
+    }
+}
+
+/// Lower a drawn grid. Blocks are evaluated in reading order (row, then
+/// column), which is the order the editor enforces: a block may only take its
+/// input from something to its left or above.
+fn lower_fbd_grid(
+    grid: &crate::model::FbdGrid,
+    lookup: &HashMap<String, u16>,
+    ops: &mut Vec<Op>,
+) {
+    let mut order = grid
+        .blocks
+        .iter()
+        .enumerate()
+        .collect::<Vec<(usize, &crate::model::FbdBlock)>>();
+    order.sort_by_key(|(_, block)| (block.row, block.col));
+    for (index, block) in order {
+        lower_fbd_grid_block(grid, index, lookup, ops);
+        // The output cell to the right of the anchor stores the result.
+        if let crate::model::FbdCell::Out { operand } = grid.cell(block.row, block.col + 1) {
+            let (negated, name) = split_negation(&operand);
+            if negated {
+                ops.push(Op::Not);
+            }
+            let name = name.trim();
+            // A word target is written by the compute block itself.
+            if crate::il::word_operand(name).is_none() {
+                if let Some(slot) = lookup.get(name) {
+                    ops.push(Op::Store(*slot));
+                }
+            }
+        }
+    }
+}
+
+/// `!start` -> (true, "start").
+fn split_negation(operand: &str) -> (bool, &str) {
+    match operand.trim().strip_prefix('!') {
+        Some(rest) => (true, rest),
+        None => (false, operand.trim()),
+    }
+}
+
+/// Push one grid block's result on the stack.
+fn lower_fbd_grid_block(
+    grid: &crate::model::FbdGrid,
+    index: usize,
+    lookup: &HashMap<String, u16>,
+    ops: &mut Vec<Op>,
+) {
+    let Some(block) = grid.blocks.get(index) else {
+        ops.push(Op::PushConst(false));
+        return;
+    };
+    let name = block.kind.trim().to_ascii_uppercase();
+    let mut inputs = Vec::new();
+    for offset in 0..block.ins.max(1) {
+        let row = block.row + offset;
+        let mut operand = grid
+            .input_at(row, block.col.saturating_sub(1))
+            .unwrap_or_default();
+        if operand.trim().is_empty() {
+            // Chaining: the value on the wire is the block to the left whose
+            // output leaves on this row.
+            operand = chained_source(grid, index, row);
+        }
+        inputs.push(operand);
+    }
+    match name.as_str() {
+        "AND" | "OR" | "XOR" => {
+            if inputs.is_empty() {
+                ops.push(Op::PushConst(name == "AND"));
+            } else {
+                for (position, input) in inputs.iter().enumerate() {
+                    lower_fbd_grid_bit(input, grid, index, lookup, ops, 0);
+                    if position > 0 {
+                        ops.push(match name.as_str() {
+                            "AND" => Op::And,
+                            "OR" => Op::Or,
+                            _ => Op::Xor,
+                        });
+                    }
+                }
+            }
+        }
+        "NOT" => {
+            lower_fbd_grid_bit(&inputs[0], grid, index, lookup, ops, 0);
+            ops.push(Op::Not);
+        }
+        _ => {
+            if let Some((kind, instance, preset)) = parse_block(&name, &name, &block.preset) {
+                if kind.is_latch() {
+                    lower_fbd_grid_bit(
+                        inputs.first().map(String::as_str).unwrap_or("FALSE"),
+                        grid,
+                        index,
+                        lookup,
+                        ops,
+                        0,
+                    );
+                    lower_fbd_grid_bit(
+                        inputs.get(1).map(String::as_str).unwrap_or("FALSE"),
+                        grid,
+                        index,
+                        lookup,
+                        ops,
+                        0,
+                    );
+                    ops.push(Op::Latch { kind, instance });
+                    return;
+                }
+                lower_fbd_grid_bit(
+                    inputs.first().map(String::as_str).unwrap_or("FALSE"),
+                    grid,
+                    index,
+                    lookup,
+                    ops,
+                    0,
+                );
+                ops.push(Op::Fb {
+                    kind,
+                    instance,
+                    preset,
+                });
+            } else if let Some(compare) = compare_op(&name) {
+                let (Some(left), Some(right)) = (
+                    word_operand_value(inputs.first().map(String::as_str).unwrap_or("0")),
+                    word_operand_value(inputs.get(1).map(String::as_str).unwrap_or("0")),
+                ) else {
+                    ops.push(Op::PushConst(false));
+                    return;
+                };
+                emit_word(ops, left);
+                emit_word(ops, right);
+                ops.push(compare);
+            } else if let Some(math) = MathOp::parse(&name) {
+                // A compute block: `row` holds A, the next holds B, and the
+                // result goes to the word named on its output cell.
+                let target = match grid.cell(block.row, block.col + 1) {
+                    crate::model::FbdCell::Out { operand } => operand,
+                    _ => String::new(),
+                };
+                let (Some(left), Some(right), Some(target)) = (
+                    word_operand_value(inputs.first().map(String::as_str).unwrap_or("0")),
+                    word_operand_value(inputs.get(1).map(String::as_str).unwrap_or("0")),
+                    crate::il::word_operand(&target),
+                ) else {
+                    ops.push(Op::PushConst(false));
+                    return;
+                };
+                ops.push(Op::PushConst(true));
+                ops.push(Op::Compute {
+                    op: math,
+                    target,
+                    left,
+                    right,
+                });
+            } else {
+                ops.push(Op::PushConst(false));
+            }
+        }
+    }
+}
+
+/// The block whose output leaves on `row` to the left of `index`, if any.
+fn chained_source(grid: &crate::model::FbdGrid, index: usize, row: usize) -> String {
+    let mut best: Option<(usize, String)> = None;
+    for (position, block) in grid.blocks.iter().enumerate() {
+        if position == index || block.row != row {
+            continue;
+        }
+        if let crate::model::FbdCell::Out { operand } = grid.cell(block.row, block.col + 1) {
+            if best
+                .as_ref()
+                .map(|(col, _)| block.col < *col)
+                .unwrap_or(true)
+            {
+                best = Some((block.col, operand));
+            }
+        }
+    }
+    best.map(|(_, operand)| operand).unwrap_or_default()
+}
+
+/// A bit input of a grid block: `@n` names another block, `!` negates, and an
+/// empty string is a chain that produced nothing.
+fn lower_fbd_grid_bit(
+    input: &str,
+    grid: &crate::model::FbdGrid,
+    index: usize,
+    lookup: &HashMap<String, u16>,
+    ops: &mut Vec<Op>,
+    depth: u8,
+) {
+    let (negated, rest) = split_negation(input);
+    let text = rest.trim();
+    if depth < 8 {
+        if let Some(reference) = text.strip_prefix('@') {
+            if let Ok(number) = reference.parse::<usize>() {
+                let target = number.saturating_sub(1);
+                if target < index {
+                    lower_fbd_grid_block(grid, target, lookup, ops);
+                    if negated {
+                        ops.push(Op::Not);
+                    }
+                    return;
+                }
+            }
+        }
+    }
+    if text.is_empty() {
+        ops.push(Op::PushConst(false));
+    } else if text.eq_ignore_ascii_case("TRUE") {
+        ops.push(Op::PushConst(true));
+    } else if let Some(slot) = lookup.get(text) {
+        ops.push(Op::PushNext(*slot));
+    } else {
+        ops.push(Op::PushConst(false));
+    }
+    if negated {
+        ops.push(Op::Not);
     }
 }
 

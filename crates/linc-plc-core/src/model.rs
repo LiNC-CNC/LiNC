@@ -42,9 +42,14 @@ pub struct Pou {
     #[serde(default)]
     pub il: Vec<String>,
     /// Function-block body, one assignment per entry, used when `language` is
-    /// `fbd`.
+    /// `fbd`. Kept for files written before the grid; the compiler prefers
+    /// `fbd_grid` when it is present.
     #[serde(default)]
     pub fbd: Vec<FbdLine>,
+    /// Function-block body as the grid the editor draws. Absent means the POU
+    /// still uses `fbd`.
+    #[serde(default)]
+    pub fbd_grid: Option<FbdGrid>,
 }
 
 /// The IEC 61131-3 languages a POU can be written in.
@@ -76,7 +81,147 @@ impl Pou {
             sections: Vec::new(),
             il: Vec::new(),
             fbd: Vec::new(),
+            fbd_grid: None,
         }
+    }
+}
+
+/// One cell of the FBD grid. `Empty` is a hole a block's body occupies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "cell", rename_all = "snake_case")]
+pub enum FbdCell {
+    Empty,
+    Wire,
+    /// A signal entering from the left; `!` negates it.
+    In {
+        operand: String,
+    },
+    /// A signal leaving to the right.
+    Out {
+        operand: String,
+    },
+}
+
+/// A block on the grid. `row`/`col` is its anchor: the output leaves there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FbdBlock {
+    pub row: usize,
+    pub col: usize,
+    /// Rows the block spans, which is how many inputs it draws.
+    pub ins: usize,
+    pub kind: String,
+    #[serde(default)]
+    pub instance: String,
+    #[serde(default)]
+    pub preset: String,
+}
+
+/// The FBD grid: cells for signals, a table for blocks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct FbdGrid {
+    #[serde(default)]
+    pub columns: usize,
+    #[serde(default)]
+    pub rows: usize,
+    #[serde(default)]
+    pub cells: Vec<Vec<FbdCell>>,
+    #[serde(default)]
+    pub blocks: Vec<FbdBlock>,
+}
+
+impl FbdGrid {
+    pub const DEFAULT_COLUMNS: usize = 12;
+
+    pub fn cell(&self, row: usize, col: usize) -> FbdCell {
+        self.cells
+            .get(row)
+            .and_then(|line| line.get(col))
+            .cloned()
+            .unwrap_or(FbdCell::Empty)
+    }
+
+    pub fn set_cell(&mut self, row: usize, col: usize, cell: FbdCell) {
+        while self.cells.len() <= row {
+            self.cells.push(vec![FbdCell::Empty; self.columns]);
+        }
+        for line in self.cells.iter_mut() {
+            while line.len() < self.columns {
+                line.push(FbdCell::Empty);
+            }
+        }
+        while self.rows <= row {
+            self.rows += 1;
+        }
+        if let Some(line) = self.cells.get_mut(row) {
+            if let Some(slot) = line.get_mut(col) {
+                *slot = cell;
+            }
+        }
+    }
+
+    /// Name of the operand string for a block's input at `row`, or `None` when
+    /// the cell holds no signal. An empty cell next to a block's output is the
+    /// chaining case and yields `Some("")`.
+    pub fn input_at(&self, row: usize, col: usize) -> Option<String> {
+        match self.cell(row, col) {
+            FbdCell::In { operand } => Some(operand),
+            FbdCell::Wire => Some(String::new()),
+            _ => None,
+        }
+    }
+
+    /// Lay the line-based body out on the grid, one block per line, in order.
+    ///
+    /// Evaluation order is preserved because each line gets its own rows, so
+    /// block `n` on the grid is line `n` and an `@n` reference still names the
+    /// same block.
+    pub fn from_lines(lines: &[FbdLine]) -> Self {
+        let columns = Self::DEFAULT_COLUMNS;
+        let mut grid = FbdGrid {
+            columns,
+            rows: 0,
+            cells: Vec::new(),
+            blocks: Vec::new(),
+        };
+        let mut row = 0;
+        for line in lines {
+            let ins = line.inputs.len().max(1);
+            let col = (columns / 2).max(1);
+            for (index, input) in line.inputs.iter().enumerate() {
+                grid.set_cell(
+                    row + index,
+                    col.saturating_sub(1),
+                    FbdCell::In {
+                        operand: input.clone(),
+                    },
+                );
+            }
+            grid.set_cell(
+                row,
+                col + 1,
+                FbdCell::Out {
+                    operand: line.output.clone(),
+                },
+            );
+            for index in 1..ins {
+                for column in col.saturating_sub(1)..=col + 1 {
+                    if matches!(grid.cell(row + index, column), FbdCell::Empty) {
+                        grid.set_cell(row + index, column, FbdCell::Empty);
+                    }
+                }
+            }
+            grid.blocks.push(FbdBlock {
+                row,
+                col,
+                ins,
+                kind: line.block.clone(),
+                instance: String::new(),
+                preset: line.preset.clone(),
+            });
+            row += ins;
+        }
+        grid.rows = row.max(grid.cells.len());
+        grid
     }
 }
 
@@ -225,6 +370,7 @@ impl Project {
                 sections: self.sections.clone(),
                 il: Vec::new(),
                 fbd: Vec::new(),
+                fbd_grid: None,
             }]
         } else {
             self.pous.clone()

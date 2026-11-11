@@ -81,6 +81,7 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
   `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`, `machine-off`); SPEC §5/§11, CONFIGURATION §1/§8 keep the same list. Follow
   the code; fix the docs.
 - `docs/solutions/` — documented solutions to past problems (bugs, best practices, workflow patterns), organized by category with YAML frontmatter (`module`, `tags`, `problem_type`); check it when working in a documented area.
+- `docs/PLC-OPENPLC-HANDOFF.md` — decision record on adopting openplc-editor (rejected, with reasons) and the one proposed work item from it: a PLCopen TC6 XML importer for LD. Read before changing the PLC project schema or adding an import path.
 
 ## Hard invariants
 

@@ -312,6 +312,17 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 }
             }
             PouLanguage::Fbd => {
+                if let Some(grid) = pou.fbd_grid.as_ref().filter(|grid| !grid.blocks.is_empty()) {
+                    check_fbd_grid(grid, index, &known, &mut diagnostics);
+                    if pou.name.trim().is_empty() {
+                        diagnostics.push(Diagnostic::error(
+                            "pou_name",
+                            "POU name must not be empty",
+                            format!("pous[{index}].name"),
+                        ));
+                    }
+                    continue;
+                }
                 for (line_index, line) in pou.fbd.iter().enumerate() {
                     let path = format!("pous[{index}].fbd[{line_index}]");
                     let block = line.block.trim().to_ascii_uppercase();
@@ -511,7 +522,14 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     // An IL-only project has no rungs; that is a program, not an empty one.
     let program_only = pous.iter().any(|pou| match pou.language {
         PouLanguage::Il => !pou.il.is_empty(),
-        PouLanguage::Fbd => !pou.fbd.is_empty(),
+        PouLanguage::Fbd => {
+            !pou.fbd.is_empty()
+                || pou
+                    .fbd_grid
+                    .as_ref()
+                    .map(|grid| !grid.blocks.is_empty())
+                    .unwrap_or(false)
+        }
         PouLanguage::Ld => false,
     });
     if sections.is_empty() && !program_only {
@@ -735,6 +753,123 @@ fn register<'a>(
         return;
     }
     symbols.insert(name, class);
+}
+
+/// A drawn grid: every block must be one the compiler knows, every input must
+/// come from somewhere, and every output must name something to store.
+fn check_fbd_grid(
+    grid: &crate::model::FbdGrid,
+    pou_index: usize,
+    known: &HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for (block_index, block) in grid.blocks.iter().enumerate() {
+        let path = format!("pous[{pou_index}].fbd_grid.blocks[{block_index}]");
+        let name = block.kind.trim().to_ascii_uppercase();
+        let reference = |input: &str| -> Option<usize> {
+            input
+                .trim()
+                .strip_prefix('@')
+                .and_then(|number| number.parse::<usize>().ok())
+        };
+        let bit_ok = |input: &str| -> bool {
+            let input = input.trim().trim_start_matches('!');
+            input.is_empty()
+                || input.eq_ignore_ascii_case("TRUE")
+                || input.eq_ignore_ascii_case("FALSE")
+                || known.contains(&input.to_ascii_lowercase())
+                || reference(input)
+                    .map(|target| target >= 1 && target <= grid.blocks.len())
+                    .unwrap_or(false)
+        };
+        let inputs = (0..block.ins.max(1))
+            .map(|offset| {
+                grid.input_at(block.row + offset, block.col.saturating_sub(1))
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>();
+        let mut needs_bit = false;
+        let mut needs_two_bits = false;
+        let mut needs_words = false;
+        let mut compute = false;
+        if matches!(name.as_str(), "AND" | "OR" | "XOR" | "NOT") {
+            needs_bit = true;
+        } else if let Some((kind, _, _)) =
+            crate::compile::parse_block(&name, &name, &block.preset)
+        {
+            if kind.is_latch() {
+                needs_two_bits = true;
+            } else {
+                needs_bit = true;
+            }
+        } else if crate::compile::compare_op(&name).is_some() {
+            needs_words = true;
+        } else if crate::compile::MathOp::parse(&name).is_some() {
+            compute = true;
+        } else {
+            diagnostics.push(Diagnostic::error(
+                "fbd_block",
+                format!("'{name}' is not a block"),
+                format!("{path}.kind"),
+            ));
+            continue;
+        }
+        if needs_bit && (inputs.is_empty() || !bit_ok(&inputs[0])) {
+            diagnostics.push(Diagnostic::error(
+                "fbd_open",
+                format!("{name} has no input to read"),
+                format!("{path}.row"),
+            ));
+        }
+        if needs_two_bits && !inputs.get(1).map(|input| bit_ok(input)).unwrap_or(false) {
+            diagnostics.push(Diagnostic::error(
+                "fbd_open",
+                format!("{name} needs two inputs"),
+                format!("{path}.row"),
+            ));
+        }
+        if needs_words
+            && !inputs.iter().take(2).all(|input| {
+                crate::compile::word_operand_value(input.trim().trim_start_matches('!')).is_some()
+            })
+        {
+            diagnostics.push(Diagnostic::error(
+                "fbd_input",
+                format!("{name} takes two word values"),
+                format!("{path}.row"),
+            ));
+        }
+        if compute
+            && !inputs.iter().take(2).all(|input| {
+                crate::compile::word_operand_value(input.trim().trim_start_matches('!')).is_some()
+            })
+        {
+            diagnostics.push(Diagnostic::error(
+                "fbd_input",
+                format!("{name} takes two word values"),
+                format!("{path}.row"),
+            ));
+        }
+        match grid.cell(block.row, block.col + 1) {
+            crate::model::FbdCell::Out { operand } => {
+                let target = operand.trim().trim_start_matches('!');
+                let declared = known.contains(&target.to_ascii_lowercase());
+                let word = crate::il::word_operand(target).is_some();
+                if !declared && !word {
+                    diagnostics.push(Diagnostic::error(
+                        "fbd_output",
+                        format!("'{operand}' is not a declared output or variable"),
+                        format!("{path}.row"),
+                    ));
+                }
+            }
+            _ => diagnostics.push(Diagnostic::error(
+                "fbd_dangling",
+                format!("{name} has nothing on its output"),
+                format!("{path}.row"),
+            )),
+        }
+    }
 }
 
 /// Depth-first walk of the call graph, returning the path that closes a cycle.
