@@ -165,7 +165,10 @@ pub enum Op {
     /// Push the block's `Q` on the bit stack.
     FbQ(u16),
     /// A two-input latch: pop the reset bit, then the set bit.
-    Latch { kind: FbKind, instance: u16 },
+    Latch {
+        kind: FbKind,
+        instance: u16,
+    },
     /// Pop the power bit; when it is true, clear `CV` (`CTU0.R`).
     FbReset(u16),
     /// Pop the power bit; when it is true, load `PV` into `CV` (`CTD0.LD`).
@@ -449,8 +452,7 @@ fn lower_pou(
                                     .iter()
                                     .find(|(key, _)| matches!(key.as_str(), "PT" | "PV"))
                                 {
-                                    preset =
-                                        parse_preset(value, kind.is_timer()).unwrap_or(preset);
+                                    preset = parse_preset(value, kind.is_timer()).unwrap_or(preset);
                                 }
                                 push_bit_operand(input, lookup, ops);
                                 ops.push(Op::Fb {
@@ -957,7 +959,11 @@ fn store_coil(ops: &mut Vec<Op>, lookup: &HashMap<String, u16>, coil: &crate::mo
         .or_else(|| coil.var.strip_suffix(".LD").map(|rest| (rest, true)))
     {
         if let Some((_, instance, _)) = parse_block(rest, rest, "") {
-            ops.push(if load { Op::FbLoad(instance) } else { Op::FbReset(instance) });
+            ops.push(if load {
+                Op::FbLoad(instance)
+            } else {
+                Op::FbReset(instance)
+            });
             return;
         }
     }

@@ -159,11 +159,19 @@ pub enum Action {
     /// Replace the function-block body of the current POU.
     SetFbd(Vec<FbdLine>),
     /// Rename a POU.
-    RenamePou { index: usize, name: String },
+    RenamePou {
+        index: usize,
+        name: String,
+    },
     /// Copy a POU under a new name.
-    DuplicatePou { index: usize, name: String },
+    DuplicatePou {
+        index: usize,
+        name: String,
+    },
     /// Delete a POU. MAIN is refused.
-    DeletePou { index: usize },
+    DeletePou {
+        index: usize,
+    },
     /// Remove a cell and close the row up to the left.
     DeleteCell {
         section: usize,
@@ -1325,10 +1333,9 @@ impl PlcUi {
                 if !self.project.io.iter().any(|point| point.name == name)
                     && !self.project.vars.iter().any(|var| var.name == name)
                 {
-                    self.project.io.push(linc_plc_core::IoPoint::new(
-                        name,
-                        IoDirection::Out,
-                    ));
+                    self.project
+                        .io
+                        .push(linc_plc_core::IoPoint::new(name, IoDirection::Out));
                 }
             }
             Action::RemoveSymbol(name) => {
@@ -2679,7 +2686,11 @@ fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Act
                         }
                         ui.end_row();
                     }
-                    ui.label(RichText::new("new").size(theme::font_size(9.0)).color(theme::MUTED));
+                    ui.label(
+                        RichText::new("new")
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
                     ui.label("");
                     ui.label("");
                     ui.horizontal(|ui| {
@@ -2692,7 +2703,8 @@ fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Act
                         if response.changed() {
                             plc.symbol_new = name.clone();
                         }
-                        if theme::action_button(ui, "add", true).clicked() && !name.trim().is_empty()
+                        if theme::action_button(ui, "add", true).clicked()
+                            && !name.trim().is_empty()
                         {
                             actions.push(Action::AddSymbol(name.trim().to_string()));
                             plc.symbol_new.clear();
@@ -2758,9 +2770,15 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
                     );
                     // BOOL rows can be forced, word rows cannot (manual §11).
                     let forced = plc.forced.iter().any(|item| item == &name);
-                    let word = plc.words.iter().any(|word| &word.name == &name);
+                    let word = plc.words.iter().any(|word| word.name == name);
                     if !word {
-                        let (label, value) = match (forced, plc.vars.iter().find(|var| &var.name == &name).map(|var| var.value)) {
+                        let (label, value) = match (
+                            forced,
+                            plc.vars
+                                .iter()
+                                .find(|var| var.name == name)
+                                .map(|var| var.value),
+                        ) {
                             (false, _) => ("force T", Some(true)),
                             (true, Some(true)) => ("force F", Some(false)),
                             (true, _) => ("release", None),

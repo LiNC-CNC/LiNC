@@ -454,7 +454,10 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     }
 
     // With MAIN as the entry, a POU that nothing calls never runs.
-    if let Some(main) = pous.iter().find(|pou| pou.name.eq_ignore_ascii_case("MAIN")) {
+    if let Some(main) = pous
+        .iter()
+        .find(|pou| pou.name.eq_ignore_ascii_case("MAIN"))
+    {
         for pou in &pous {
             let name = pou.name.to_ascii_uppercase();
             if name == main.name.to_ascii_uppercase() {
@@ -473,7 +476,13 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         "'{}' is never called, so the scan does not run it; call it from MAIN",
                         pou.name
                     ),
-                    path: format!("pous[{index}].name", index = pous.iter().position(|item| item.name == pou.name).unwrap_or(0)),
+                    path: format!(
+                        "pous[{index}].name",
+                        index = pous
+                            .iter()
+                            .position(|item| item.name == pou.name)
+                            .unwrap_or(0)
+                    ),
                 });
             }
         }
@@ -659,10 +668,16 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 .or_else(|| rung.coil.var.strip_suffix(".LD"))
                 .and_then(|rest| crate::compile::parse_block(rest, rest, ""));
             if let Some((kind, _, _)) = counter_coil {
-                if !matches!(kind, crate::compile::FbKind::Ctu | crate::compile::FbKind::Ctd) {
+                if !matches!(
+                    kind,
+                    crate::compile::FbKind::Ctu | crate::compile::FbKind::Ctd
+                ) {
                     diagnostics.push(Diagnostic::error(
                         "coil_target",
-                        format!("`{}` is not a counter; only CTU and CTD have R and LD", rung.coil.var),
+                        format!(
+                            "`{}` is not a counter; only CTU and CTD have R and LD",
+                            rung.coil.var
+                        ),
                         &coil_path,
                     ));
                 }

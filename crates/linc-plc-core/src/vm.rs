@@ -263,13 +263,13 @@ impl Vm {
                     push(&mut stack, &mut depth, q);
                 }
                 Op::Latch { kind, instance } => {
-                    let reset = pop(&mut stack, &mut depth);
-                    let set = pop(&mut stack, &mut depth);
+                    let reset = pop(&stack, &mut depth);
+                    let set = pop(&stack, &mut depth);
                     let q = run_latch(&mut self.blocks, instance as usize, kind, set, reset);
                     push(&mut stack, &mut depth, q);
                 }
                 Op::FbReset(instance) => {
-                    let power = pop(&mut stack, &mut depth);
+                    let power = pop(&stack, &mut depth);
                     if power {
                         if let Some(state) = self.blocks.get_mut(instance as usize) {
                             state.value = 0;
@@ -277,7 +277,7 @@ impl Vm {
                     }
                 }
                 Op::FbLoad(instance) => {
-                    let power = pop(&mut stack, &mut depth);
+                    let power = pop(&stack, &mut depth);
                     if power {
                         if let Some(state) = self.blocks.get_mut(instance as usize) {
                             state.value = state.preset;

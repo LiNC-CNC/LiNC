@@ -96,24 +96,24 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         set_coil,
         reset_coil,
     ) = ui.input_mut(|input| {
-            (
-                letter(input, egui::Key::C),
-                letter(input, egui::Key::X),
-                letter(input, egui::Key::W),
-                letter(input, egui::Key::V),
-                letter(input, egui::Key::P),
-                letter(input, egui::Key::N),
-                letter(input, egui::Key::T),
-                letter(input, egui::Key::F),
-                letter(input, egui::Key::U),
-                letter(input, egui::Key::K),
-                letter(input, egui::Key::D),
-                letter(input, egui::Key::G),
-                letter(input, egui::Key::M),
-                letter(input, egui::Key::S),
-                letter(input, egui::Key::R),
-            )
-        });
+        (
+            letter(input, egui::Key::C),
+            letter(input, egui::Key::X),
+            letter(input, egui::Key::W),
+            letter(input, egui::Key::V),
+            letter(input, egui::Key::P),
+            letter(input, egui::Key::N),
+            letter(input, egui::Key::T),
+            letter(input, egui::Key::F),
+            letter(input, egui::Key::U),
+            letter(input, egui::Key::K),
+            letter(input, egui::Key::D),
+            letter(input, egui::Key::G),
+            letter(input, egui::Key::M),
+            letter(input, egui::Key::S),
+            letter(input, egui::Key::R),
+        )
+    });
     let insert = ui.input_mut(|input| letter(input, egui::Key::I));
     let first = sections
         .get(cursor.0)
