@@ -13,6 +13,7 @@
 pub mod compile;
 pub mod grid;
 pub mod plcopen;
+pub mod retain;
 pub mod il;
 pub mod model;
 pub mod protocol;

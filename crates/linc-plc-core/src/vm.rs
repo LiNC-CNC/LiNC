@@ -52,6 +52,10 @@ pub struct Vm {
     blocks: Vec<FbState>,
     /// Previous value of each edge contact, one slot per contact occurrence.
     edge_prev: Vec<bool>,
+    /// Slots declared `retain`, with their names, in program order.
+    retained: Vec<(u16, String)>,
+    /// Hash of that layout, so a store from another shape is refused.
+    layout: u64,
     output_image: Vec<bool>,
     forces: Vec<Option<bool>>,
     scan_count: u64,
@@ -61,6 +65,19 @@ pub struct Vm {
 impl Vm {
     pub fn new(compiled: &Compiled) -> Self {
         let slots = compiled.symbols.len();
+        let retained = compiled
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.retain)
+            .map(|symbol| (symbol.index, symbol.name.clone()))
+            .collect::<Vec<_>>();
+        let layout = crate::retain::layout_hash(
+            &retained
+                .iter()
+                .map(|(index, name)| (*index, name.as_str()))
+                .collect::<Vec<_>>(),
+            compiled.program.word_count,
+        );
         Self {
             program: compiled.program.clone(),
             names: compiled
@@ -76,6 +93,8 @@ impl Vm {
             dt_ms: DEFAULT_DT_MS,
             blocks: vec![FbState::default(); compiled.program.fb_count as usize],
             edge_prev: vec![false; compiled.program.edge_count as usize],
+            retained,
+            layout,
             output_image: vec![false; compiled.outputs.len()],
             forces: vec![None; slots],
             scan_count: 0,
@@ -370,6 +389,46 @@ impl Vm {
             scan_us: self.last_scan_us,
             scan_count: self.scan_count,
         }
+    }
+
+    /// The retained slots and the whole word bank, ready to store.
+    pub fn retain_pack(&self) -> crate::retain::Retained {
+        crate::retain::Retained {
+            bits: self
+                .retained
+                .iter()
+                .map(|(slot, _)| (*slot, self.prev.get(*slot as usize).copied().unwrap_or(false)))
+                .collect(),
+            words: self
+                .words
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (index as u16, *value))
+                .collect(),
+        }
+    }
+
+    /// Restore values. This writes the two scan images and the word bank; it
+    /// never touches forces, so a restore cannot silently force the plant.
+    pub fn retain_unpack(&mut self, retained: &crate::retain::Retained) {
+        for (slot, value) in &retained.bits {
+            if let Some(cell) = self.prev.get_mut(*slot as usize) {
+                *cell = *value;
+            }
+            if let Some(cell) = self.next.get_mut(*slot as usize) {
+                *cell = *value;
+            }
+        }
+        for (slot, value) in &retained.words {
+            if let Some(cell) = self.words.get_mut(*slot as usize) {
+                *cell = *value;
+            }
+        }
+    }
+
+    /// Hash of the retained layout, for the store's gate.
+    pub fn retain_layout_hash(&self) -> u64 {
+        self.layout
     }
 
     /// Output values in compiled output order, as produced by the last scan.
