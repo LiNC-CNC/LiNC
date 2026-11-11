@@ -431,8 +431,8 @@ fn lower_pou(
             }
         }
         PouLanguage::Fbd => {
-            for line in &pou.fbd {
-                lower_fbd_line(line, lookup, ops);
+            for index in 0..pou.fbd.len() {
+                lower_fbd_line(&pou.fbd, index, lookup, ops);
             }
         }
     }
@@ -451,27 +451,46 @@ fn push_bit_operand(operand: &str, lookup: &HashMap<String, u16>, ops: &mut Vec<
 
 /// Lower one function-block assignment: build the block from its inputs, then
 /// store its result in the output operand.
-fn lower_fbd_line(line: &crate::model::FbdLine, lookup: &HashMap<String, u16>, ops: &mut Vec<Op>) {
+fn lower_fbd_line(
+    lines: &[crate::model::FbdLine],
+    index: usize,
+    lookup: &HashMap<String, u16>,
+    ops: &mut Vec<Op>,
+) {
+    let Some(line) = lines.get(index) else {
+        return;
+    };
+    lower_fbd_block(lines, index, lookup, ops, 0);
+    if let Some(target) = lookup.get(line.output.trim()) {
+        ops.push(Op::Store(*target));
+    }
+}
+
+/// Emit one block and leave its result on the stack.
+fn lower_fbd_block(
+    lines: &[crate::model::FbdLine],
+    index: usize,
+    lookup: &HashMap<String, u16>,
+    ops: &mut Vec<Op>,
+    depth: u8,
+) {
+    let Some(line) = lines.get(index) else {
+        ops.push(Op::PushConst(false));
+        return;
+    };
+    if depth > 8 {
+        ops.push(Op::PushConst(false));
+        return;
+    }
     let block = line.block.trim().to_ascii_uppercase();
-    let bit = |operand: &str| -> Option<u16> {
-        if operand.eq_ignore_ascii_case("TRUE") {
-            return Some(u16::MAX);
-        }
-        lookup.get(operand.trim()).copied()
-    };
-    let push_bit = |ops: &mut Vec<Op>, operand: &str| match bit(operand) {
-        Some(u16::MAX) => ops.push(Op::PushConst(true)),
-        Some(index) => ops.push(Op::PushNext(index)),
-        None => ops.push(Op::PushConst(false)),
-    };
     match block.as_str() {
         "AND" | "OR" | "XOR" => {
             if line.inputs.is_empty() {
                 ops.push(Op::PushConst(block == "AND"));
             } else {
-                for (index, input) in line.inputs.iter().enumerate() {
-                    push_bit(ops, input);
-                    if index > 0 {
+                for (position, input) in line.inputs.iter().enumerate() {
+                    lower_fbd_bit(input, lines, index, lookup, ops, depth);
+                    if position > 0 {
                         ops.push(match block.as_str() {
                             "AND" => Op::And,
                             "OR" => Op::Or,
@@ -482,17 +501,25 @@ fn lower_fbd_line(line: &crate::model::FbdLine, lookup: &HashMap<String, u16>, o
             }
         }
         "NOT" => {
-            push_bit(
-                ops,
+            lower_fbd_bit(
                 line.inputs.first().map(String::as_str).unwrap_or("FALSE"),
+                lines,
+                index,
+                lookup,
+                ops,
+                depth,
             );
             ops.push(Op::Not);
         }
         _ => {
             if let Some((kind, instance, preset)) = parse_block(&block, &block, &line.preset) {
-                push_bit(
-                    ops,
+                lower_fbd_bit(
                     line.inputs.first().map(String::as_str).unwrap_or("FALSE"),
+                    lines,
+                    index,
+                    lookup,
+                    ops,
+                    depth,
                 );
                 ops.push(Op::Fb {
                     kind,
@@ -512,12 +539,40 @@ fn lower_fbd_line(line: &crate::model::FbdLine, lookup: &HashMap<String, u16>, o
                 ops.push(compare);
             } else {
                 ops.push(Op::PushConst(false));
-                return;
             }
         }
     }
-    let index = lookup.get(line.output.trim()).copied().unwrap_or(0);
-    ops.push(Op::Store(index));
+}
+
+/// A bit input: `@n` is the value on line `n`'s output pin, lowered here so a
+/// block can feed another without naming an intermediate symbol.
+fn lower_fbd_bit(
+    input: &str,
+    lines: &[crate::model::FbdLine],
+    index: usize,
+    lookup: &HashMap<String, u16>,
+    ops: &mut Vec<Op>,
+    depth: u8,
+) {
+    let text = input.trim();
+    if let Some(reference) = text.strip_prefix('@') {
+        if let Ok(number) = reference.parse::<usize>() {
+            let target = number.saturating_sub(1);
+            if target < index {
+                lower_fbd_block(lines, target, lookup, ops, depth + 1);
+                return;
+            }
+        }
+        ops.push(Op::PushConst(false));
+        return;
+    }
+    if text.eq_ignore_ascii_case("TRUE") {
+        ops.push(Op::PushConst(true));
+    } else if let Some(slot) = lookup.get(text) {
+        ops.push(Op::PushNext(*slot));
+    } else {
+        ops.push(Op::PushConst(false));
+    }
 }
 
 /// Lower one grid row to ops, leaving exactly one power bit on the stack.

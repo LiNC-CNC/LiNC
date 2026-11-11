@@ -828,3 +828,65 @@ fn an_il_fb_call_runs_a_timer_with_its_arguments() {
     assert_eq!(vm.outputs(), &[true], "ET passed the preset");
     assert_eq!(vm.block_value(0), 1000);
 }
+
+#[test]
+fn an_fbd_input_can_read_a_pin_above_it() {
+    let mut project = project_with(
+        vec![
+            IoPoint::new("a", IoDirection::In),
+            IoPoint::new("b", IoDirection::In),
+            IoPoint::new("y", IoDirection::Out),
+        ],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Fbd);
+    // Line 1 computes (!a), line 2 is (line 1) AND b: the AND reads a pin
+    // rather than a named intermediate.
+    pou.fbd = vec![
+        linc_plc_core::model::FbdLine {
+            output: "y".into(),
+            block: "NOT".into(),
+            inputs: vec!["a".into()],
+            preset: String::new(),
+            comment: String::new(),
+        },
+        linc_plc_core::model::FbdLine {
+            output: "y".into(),
+            block: "AND".into(),
+            inputs: vec!["@1".into(), "b".into()],
+            preset: String::new(),
+            comment: String::new(),
+        },
+    ];
+    project.pous = vec![pou];
+
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan(&[false, true]);
+    assert_eq!(vm.outputs(), &[true], "not a and b");
+    vm.scan(&[true, true]);
+    assert_eq!(vm.outputs(), &[false], "a is high, so not a is low");
+}
+
+#[test]
+fn a_forward_pin_reference_is_reported() {
+    let mut project = project_with(
+        vec![IoPoint::new("a", IoDirection::In), IoPoint::new("y", IoDirection::Out)],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Fbd);
+    pou.fbd = vec![linc_plc_core::model::FbdLine {
+        output: "y".into(),
+        block: "NOT".into(),
+        inputs: vec!["@2".into()],
+        preset: String::new(),
+        comment: String::new(),
+    }];
+    project.pous = vec![pou];
+    let diagnostics = linc_plc_core::validate(&project);
+    assert!(
+        diagnostics.iter().any(|item| item.code == "fbd_ref"),
+        "{diagnostics:?}"
+    );
+}

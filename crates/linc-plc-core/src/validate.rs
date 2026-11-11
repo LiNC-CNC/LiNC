@@ -322,10 +322,30 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                             format!("{path}.output"),
                         ));
                     }
+                    let reference = |input: &str| -> Option<usize> {
+                        input
+                            .trim()
+                            .strip_prefix('@')
+                            .and_then(|number| number.parse::<usize>().ok())
+                    };
+                    for input in &line.inputs {
+                        if let Some(target) = reference(input) {
+                            if target == 0 || target > line_index {
+                                diagnostics.push(Diagnostic::error(
+                                    "fbd_ref",
+                                    format!(
+                                        "'{input}' is not an earlier line; a block can only read a pin above it"
+                                    ),
+                                    format!("{path}.inputs"),
+                                ));
+                            }
+                        }
+                    }
                     let bit_ok = line.inputs.iter().all(|input| {
                         input.eq_ignore_ascii_case("TRUE")
                             || input.eq_ignore_ascii_case("FALSE")
                             || known.contains(&input.to_ascii_lowercase())
+                            || reference(input).map(|target| target >= 1).unwrap_or(false)
                     });
                     if matches!(block.as_str(), "AND" | "OR" | "XOR" | "NOT") {
                         if !bit_ok {

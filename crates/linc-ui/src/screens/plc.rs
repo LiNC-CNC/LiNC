@@ -2139,6 +2139,21 @@ fn fbd_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
     .default_width(360.0)
     .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
     .show(ctx, |ui| {
+        if pick.input.is_some() && pick.line > 0 {
+            ui.label(
+                RichText::new("pin of an earlier block on this page")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            ui.horizontal_wrapped(|ui| {
+                for line in 1..=pick.line {
+                    if ui.button(format!("@{line}")).clicked() {
+                        chosen = Some(format!("@{line}"));
+                    }
+                }
+            });
+            ui.separator();
+        }
         egui::ScrollArea::vertical()
             .max_height(360.0)
             .show(ui, |ui| {
