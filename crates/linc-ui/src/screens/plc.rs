@@ -3752,9 +3752,18 @@ fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Act
 
 /// Simulation: the live program above, the input/output LED panel below.
 fn sim_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
-    let panel = (height * 0.42).clamp(120.0, 220.0);
+    // The monitor gets its own bounded scroll area so the I/O controls below are
+    // always on screen: with the whole page in one scroll area the ladder pushed
+    // them past the fold, and the wheel did not reach them.
+    let monitor = (height * 0.45).clamp(140.0, 260.0);
     let sections = plc.current_pou_sections();
-    ladder_body(plc, &sections, ui, height - panel - 8.0, actions);
+    egui::ScrollArea::vertical()
+        .id_salt("plc-sim-monitor")
+        .max_height(monitor)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ladder_body(plc, &sections, ui, monitor, actions);
+        });
     ui.add_space(4.0);
     sim_view(plc, ui, actions);
 }
