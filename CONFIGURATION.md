@@ -884,11 +884,14 @@ which overrides this table for one run; see `docs/plc.md`.
 | `socket` | `""` | Daemon socket. Empty uses `linc_plc_client::default_socket_path()` (`$XDG_RUNTIME_DIR/linc/plc-<uid>.sock`); a relative path resolves against the profile directory. |
 | `scan_us` | `2000` | Scan period in microseconds, 100..=1000000. |
 | `allow_force` | `false` | Let the PLC page force I/O; the daemon refuses forces without it. |
+| `retain_file` | `""` | Retained-value store. Empty means retention is off, logged at info level. A relative path resolves against the profile directory. |
+| `retain_flush_s` | `5` | Seconds between publishes of the retained values, 1..=3600; the store is also written on Stop and at exit. |
 
 Validation: `enabled = true` with an empty `project` fails with
 `plc.project must name a ladder project when [plc] enabled = true`; a
 `scan_us` outside 100..=1000000 fails with `plc.scan_us must be between 100 and
-1000000 microseconds`. The table is `deny_unknown_fields` like every other.
+1000000 microseconds`; `retain_flush_s` outside 1..=3600 fails with
+`plc.retain_flush_s must be between 1 and 3600 seconds`. The table is `deny_unknown_fields` like every other.
 
 ### `[mdi]`
 

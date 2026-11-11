@@ -118,7 +118,7 @@ Supported in this slice: NO/NC contacts, normal/set/reset coils,
 series/parallel branches, multiple sections, constants, validation, local
 offline editing, download, start/stop, live monitoring and forcing.
 
-Not yet: SFC, `.clp`, Modbus, retained values across daemon restarts, true hot
+Not yet: SFC, `.clp`, Modbus, true hot
 swap, and a servo-thread realtime component. Timers, counters, compare/compute
 and a PLCopen XML import exist (see **Import**). The scan is userspace (1–5 ms target, soft
 realtime); do not use it for encoder phasing or step timing.
@@ -173,6 +173,22 @@ images swap, and outputs are read from the new `prev`. So:
 - a forced input affects logic on the same scan;
 - a forced output is not overwritten by a coil;
 - duplicate coil targets in one section are a compile error (no last-one-wins).
+
+## Retained values
+
+Variables declared `retain` and the whole `MW` bank can survive a daemon
+restart. Set `[plc] retain_file` to a path (empty means off, logged at info) and
+`retain_flush_s` for how often the store is published (default 5; Stop and exit
+always publish).
+
+The store is a small blob: magic `LPRT`, format version, the **program hash** and
+a **layout hash** over the retained slots, the values, and a CRC-32. A restore
+needs both hashes to match, so editing the program or reordering its symbols
+refuses an old store instead of lining values up with the wrong slots. A refusal
+is logged with its reason — bad magic, unsupported format, truncated, CRC
+mismatch, layout mismatch, another program, or a blob over 64 KiB, which turns
+retention off rather than writing something unreadable. A restore writes values
+into both scan images; it never creates a force.
 
 ## Protocol
 

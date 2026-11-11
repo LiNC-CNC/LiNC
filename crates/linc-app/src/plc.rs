@@ -97,6 +97,21 @@ pub fn start(profile: &Profile, no_hal: bool) -> Option<PathBuf> {
     if config.allow_force {
         command.arg("--allow-force");
     }
+    if !config.retain_file.trim().is_empty() {
+        // A relative path belongs beside the profile, as the project does.
+        let retain = Path::new(&config.retain_file);
+        let retain = if retain.is_absolute() {
+            retain.to_path_buf()
+        } else {
+            project
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(retain)
+        };
+        command.arg("--retain-file").arg(retain);
+        command.arg("--retain-flush-s");
+        command.arg(config.retain_flush_s.to_string());
+    }
     if no_hal {
         command.arg("--no-hal");
     }

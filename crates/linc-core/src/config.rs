@@ -742,6 +742,17 @@ pub struct PlcConfig {
     pub scan_us: u64,
     #[serde(default)]
     pub allow_force: bool,
+    /// Retained-value store; empty means retention is off. A relative path
+    /// resolves against the profile directory, like the project.
+    #[serde(default)]
+    pub retain_file: String,
+    /// Seconds between publishes of the retained values.
+    #[serde(default = "default_plc_retain_flush_s")]
+    pub retain_flush_s: u64,
+}
+
+fn default_plc_retain_flush_s() -> u64 {
+    5
 }
 
 fn default_plc_scan_us() -> u64 {
@@ -755,6 +766,8 @@ impl Default for PlcConfig {
             project: String::new(),
             socket: String::new(),
             scan_us: default_plc_scan_us(),
+            retain_file: String::new(),
+            retain_flush_s: default_plc_retain_flush_s(),
             allow_force: false,
         }
     }
@@ -1188,6 +1201,12 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
         return Err(ConfigError::Invalid(
             "plc.project must name a ladder project when [plc] enabled = true".into(),
         ));
+    }
+    if !(1..=3600).contains(&config.plc.retain_flush_s) {
+        return Err(ConfigError::Invalid(format!(
+            "plc.retain_flush_s must be between 1 and 3600 seconds, not {}",
+            config.plc.retain_flush_s
+        )));
     }
     if !(100..=1_000_000).contains(&config.plc.scan_us) {
         return Err(ConfigError::Invalid(
@@ -2098,6 +2117,8 @@ enabled = true
         let plc: PlcConfig = toml::from_str("").unwrap();
         assert!(!plc.enabled);
         assert!(plc.project.is_empty());
+        assert!(plc.retain_file.is_empty(), "retention is off by default");
+        assert_eq!(plc.retain_flush_s, 5);
         assert!(plc.socket.is_empty());
         assert_eq!(plc.scan_us, 2000);
         assert!(!plc.allow_force);

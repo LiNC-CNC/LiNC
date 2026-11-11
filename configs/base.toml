@@ -377,3 +377,11 @@ socket = ""
 scan_us = 2000
 # Let the PLC page force I/O for diagnostics; the daemon refuses forces without it.
 allow_force = false
+# Retained values across a daemon restart: BOOL variables declared `retain` and
+# the MW bank are written here and restored on the next Load. Empty means
+# retention is off, which is logged at info level, not warned about. A relative
+# path resolves against the profile directory.
+retain_file = ""
+# Seconds between publishes of the retained values (1..=3600). The store is also
+# written on Stop and when the daemon exits, so a clean stop loses nothing.
+retain_flush_s = 5
