@@ -175,6 +175,10 @@ fn handle_request(request: Request, shared: &Shared) -> Result<Outcome, Error> {
             }
         }
 
+        Request::Unforce { name } => Outcome::Reply(dispatch(shared, |reply| {
+            Command::Unforce { name, reply }
+        })),
+
         Request::ClearForces => {
             Outcome::Reply(dispatch(shared, |reply| Command::ClearForces { reply }))
         }

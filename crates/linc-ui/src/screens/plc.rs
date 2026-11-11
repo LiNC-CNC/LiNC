@@ -148,6 +148,8 @@ pub enum Action {
     Force(String, bool),
     /// Pin an operand to the watch list, or unpin it.
     ToggleWatch(String),
+    /// Release one operand's force.
+    Unforce(String),
     /// Set the comment of a declared symbol.
     SetSymbolComment(String, String),
     /// Replace the function-block body of the current POU.
@@ -1304,6 +1306,9 @@ impl PlcUi {
             Action::Stop => {
                 self.send(Tag::Stop, Request::Stop);
                 self.message = "STOP SENT".to_string();
+            }
+            Action::Unforce(name) => {
+                self.send(Tag::Force, Request::Unforce { name });
             }
             Action::ClearForces => {
                 self.send(Tag::ClearForces, Request::ClearForces);
@@ -2680,6 +2685,22 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
                             .size(theme::font_size(10.0))
                             .color(theme::FG),
                     );
+                    // BOOL rows can be forced, word rows cannot (manual §11).
+                    let forced = plc.forced.iter().any(|item| item == &name);
+                    let word = plc.words.iter().any(|word| &word.name == &name);
+                    if !word {
+                        let (label, value) = match (forced, plc.vars.iter().find(|var| &var.name == &name).map(|var| var.value)) {
+                            (false, _) => ("force T", Some(true)),
+                            (true, Some(true)) => ("force F", Some(false)),
+                            (true, _) => ("release", None),
+                        };
+                        if theme::action_button(ui, label, true).clicked() {
+                            match value {
+                                Some(value) => actions.push(Action::Force(name.clone(), value)),
+                                None => actions.push(Action::Unforce(name.clone())),
+                            }
+                        }
+                    }
                     if theme::action_button(ui, "unpin", true).clicked() {
                         unpin = Some(name.clone());
                     }

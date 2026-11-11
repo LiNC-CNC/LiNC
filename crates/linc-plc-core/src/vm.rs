@@ -488,6 +488,13 @@ impl Vm {
         }
     }
 
+    /// Release one operand, leaving the others forced.
+    pub fn clear_force(&mut self, name: &str) {
+        if let Some(slot) = self.slot(name) {
+            self.forces[slot] = None;
+        }
+    }
+
     pub fn clear_forces(&mut self) {
         self.forces.fill(None);
     }

@@ -33,6 +33,10 @@ pub enum Request {
         value: bool,
         ttl_ms: u32,
     },
+    /// Release one operand's force, leaving the others.
+    Unforce {
+        name: String,
+    },
     ClearForces,
     Shutdown,
 }

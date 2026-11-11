@@ -129,6 +129,10 @@ pub(crate) enum Command {
         ttl_ms: u32,
         reply: mpsc::Sender<linc_plc_core::protocol::Response>,
     },
+    Unforce {
+        name: String,
+        reply: mpsc::Sender<linc_plc_core::protocol::Response>,
+    },
     ClearForces {
         reply: mpsc::Sender<linc_plc_core::protocol::Response>,
     },

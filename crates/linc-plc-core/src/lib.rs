@@ -33,8 +33,8 @@ pub const SCHEMA_VERSION: u32 = 1;
 
 /// Wire protocol version spoken by the daemon and the client.
 /// Bumped when a snapshot gains a field the other side must understand. 2 adds
-/// the word bank, 3 adds the per-scan trend.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// the word bank, 3 the per-scan trend, 4 the single-operand unforce.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Largest accepted frame payload, in bytes.
 pub const MAX_FRAME: usize = 4 * 1024 * 1024;

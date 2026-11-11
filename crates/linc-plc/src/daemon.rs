@@ -298,6 +298,14 @@ impl Daemon {
                 answer(reply, Response::State(self.snapshot()));
             }
 
+            Command::Unforce { name, reply } => {
+                if let Some(vm) = self.vm.as_mut() {
+                    vm.clear_force(&name);
+                }
+                self.forces.retain(|force| force.name != name);
+                self.publish(shared);
+                answer(reply, Response::State(self.snapshot()));
+            }
             Command::ClearForces { reply } => {
                 if let Some(vm) = self.vm.as_mut() {
                     vm.clear_forces();
