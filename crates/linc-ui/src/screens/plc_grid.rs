@@ -29,7 +29,11 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         }
         return;
     }
-    if app.plc.page != PlcPage::Edit || app.plc.picker.is_some() || app.plc.operand_pick.is_some() {
+    if app.plc.page != PlcPage::Edit
+        || app.plc.picker.is_some()
+        || app.plc.operand_pick.is_some()
+        || app.plc.coil_pick.is_some()
+    {
         return;
     }
     if app.plc.text_editing {
@@ -830,7 +834,9 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
             let needle = plc.operand_filter.trim().to_ascii_lowercase();
             let matches = names
                 .iter()
-                .filter(|(name, _)| needle.is_empty() || name.to_ascii_lowercase().contains(&needle))
+                .filter(|(name, _)| {
+                    needle.is_empty() || name.to_ascii_lowercase().contains(&needle)
+                })
                 .collect::<Vec<_>>();
             // The picker is modal, so Enter always takes the first match; the
             // focus test made it depend on a frame the field had already lost.

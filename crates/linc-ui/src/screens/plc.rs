@@ -1537,11 +1537,7 @@ impl PlcUi {
                 self.comment_row = Some((section, rung + 1));
                 self.comment_buffer = String::new();
             }
-            Action::SetCoilVar {
-                section,
-                rung,
-                var,
-            } => {
+            Action::SetCoilVar { section, rung, var } => {
                 let mut pous = self.project.all_pous();
                 if let Some(pou) = pous.get_mut(self.pou) {
                     if let Some(row) = pou
