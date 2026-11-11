@@ -3150,12 +3150,20 @@ fn il_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
                         break;
                     } else {
                         plc.il_store_buffer(&mut lines, true);
+                        // Commit is one line: the cursor moves on and the buffer is
+                        // either the next stored line or empty. Leaving the typed
+                        // text in the buffer glued the next line onto it
+                        // (`LD pumpST run`).
                         if plc.il_cursor + 1 < lines.len() {
                             plc.il_cursor += 1;
                             plc.il_buffer = lines[plc.il_cursor].clone();
+                        } else {
+                            plc.il_cursor = lines.len();
+                            plc.il_buffer.clear();
                         }
                     }
                     plc.il_message = None;
+                    break;
                 }
                 egui::Key::Delete => {
                     if lines
@@ -6594,5 +6602,92 @@ mod sim_keys_tests {
         // rather than faked.
         assert_eq!(sim_input_name(&plc, 1, 4), None);
         assert_eq!(sim_input_name(&plc, 1, 7), None);
+    }
+}
+
+#[cfg(test)]
+mod il_editor_tests {
+    use super::*;
+
+    fn il_plc() -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.project.normalise();
+        let mut pous = plc.project.all_pous();
+        pous[0].language = PouLanguage::Il;
+        pous[0].il = Vec::new();
+        plc.project.set_pous(pous);
+        plc.page = PlcPage::Edit;
+        plc.pou = 0;
+        plc.il_cursor = 0;
+        plc.il_buffer.clear();
+        plc
+    }
+
+    fn frame(plc: &mut PlcUi, events: Vec<egui::Event>) {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Area::new(egui::Id::new("il-keys"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    il_keys(plc, ui, &mut Vec::new());
+                });
+        });
+        output.textures_delta.clear();
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// One ENTER commits one line. Before this the typed text stayed in the buffer
+    /// and the next line was glued onto it (`LD pumpST run`).
+    #[test]
+    fn enter_commits_one_line_and_leaves_an_empty_buffer() {
+        let mut plc = il_plc();
+        for events in [
+            vec![egui::Event::Text("LD".into())],
+            vec![egui::Event::Text(" ".into())],
+            vec![egui::Event::Text("pump".into())],
+            vec![key(egui::Key::Enter)],
+            vec![egui::Event::Text("ST".into())],
+            vec![egui::Event::Text(" ".into())],
+            vec![egui::Event::Text("run".into())],
+            vec![key(egui::Key::Enter)],
+        ] {
+            frame(&mut plc, events);
+        }
+        let lines = plc.il_lines();
+        assert_eq!(lines[0], "LD pump", "first line kept as typed");
+        assert_eq!(lines[1], "ST run", "second line is its own line, not glued");
+        assert!(plc.il_buffer.is_empty(), "the buffer is empty after a commit");
+    }
+
+    /// Backspace edits the line being typed, however many times it is pressed.
+    #[test]
+    fn backspace_clears_the_typed_text() {
+        let mut plc = il_plc();
+        frame(&mut plc, vec![egui::Event::Text("LD pumq".into())]);
+        let before = plc.il_buffer.chars().count();
+        for _ in 0..4 {
+            frame(&mut plc, vec![key(egui::Key::Backspace)]);
+        }
+        assert_eq!(
+            plc.il_buffer.chars().count(),
+            before - 4,
+            "four presses remove four characters: {:?}",
+            plc.il_buffer
+        );
+        frame(&mut plc, vec![egui::Event::Text("pump".into())]);
+        assert_eq!(plc.il_buffer, "LD pump");
     }
 }
