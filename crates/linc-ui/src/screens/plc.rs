@@ -2055,12 +2055,13 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         });
         if keyed {
             eprintln!(
-                "plc keys: page={:?} text_editing={} picker={} operand_pick={} coil_pick={}",
+                "plc keys: page={:?} text_editing={} picker={} operand_pick={} coil_pick={} cursor={:?}",
                 app.plc.page,
                 app.plc.text_editing,
                 app.plc.picker.is_some(),
                 app.plc.operand_pick.is_some(),
                 app.plc.coil_pick.is_some(),
+                app.plc.cell_cursor,
             );
         }
     }
@@ -2083,6 +2084,12 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     if to_edit {
         app.plc.page = PlcPage::Edit;
         app.plc.text_editing = false;
+        // Opening the page starts from a clean keyboard: a picker left open by
+        // an earlier visit would otherwise swallow the first keys of the batch.
+        app.plc.picker = None;
+        app.plc.operand_pick = None;
+        app.plc.coil_pick = None;
+        app.plc.operand_filter.clear();
     }
     if to_symbols {
         app.plc.page = PlcPage::Symbols;
@@ -5667,6 +5674,38 @@ mod picker_key_tests {
             }
             ref other => panic!("expected a contact pick, got {other:?}"),
         }
+    }
+
+    /// The coil list commits on Enter too: at a coil position `C` sets the
+    /// normal kind and opens this list, so typing the output and pressing Enter
+    /// is the whole gesture.
+    #[test]
+    fn the_coil_list_commits_the_typed_output() {
+        let mut plc = plc_with_symbols();
+        plc.project.io.push(IoPoint {
+            name: "run".into(),
+            direction: IoDirection::Out,
+            kind: IoKind::Bit,
+            comment: String::new(),
+        });
+        plc.coil_pick = Some((0, 0));
+        let mut events = text("run");
+        events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let actions = frame(&mut plc, events);
+        assert!(plc.coil_pick.is_none(), "coil list closed");
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::SetCoilVar { var, .. } if var == "run")),
+            "no coil action; filter {:?}",
+            plc.operand_filter
+        );
     }
 
     /// Typing narrows the operand list and Enter commits the typed name on the
