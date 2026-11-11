@@ -497,7 +497,8 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
         return;
     };
     let mut close = false;
-    let mut apply: Option<Cell> = None;
+    let mut patch_instance: Option<String> = None;
+    let mut patch_preset: Option<String> = None;
     egui::Window::new(format!("{block} BOX"))
         .order(egui::Order::Foreground)
         .collapsible(false)
@@ -520,11 +521,7 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
                 for number in 0..4 {
                     let name = format!("{block}{number}");
                     if theme::action_button(ui, &name, true).clicked() {
-                        apply = Some(Cell::Block {
-                            block: block.clone(),
-                            instance: name,
-                            preset: preset.clone(),
-                        });
+                        patch_instance = Some(name);
                     }
                 }
             });
@@ -542,11 +539,7 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
                 };
                 for value in presets {
                     if ui.button(*value).clicked() {
-                        apply = Some(Cell::Block {
-                            block: block.clone(),
-                            instance: instance.clone(),
-                            preset: (*value).to_string(),
-                        });
+                        patch_preset = Some((*value).to_string());
                     }
                 }
             });
@@ -555,12 +548,13 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
                 close = true;
             }
         });
-    if let Some(cell) = apply {
-        actions.push(Action::SetCell {
+    if patch_instance.is_some() || patch_preset.is_some() {
+        actions.push(Action::SetBlockField {
             section,
             rung,
             position,
-            cell,
+            instance: patch_instance,
+            preset: patch_preset,
         });
         close = true;
     }

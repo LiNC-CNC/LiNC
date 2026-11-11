@@ -158,6 +158,18 @@ pub enum Action {
     AddInput(String),
     /// Remove a declared symbol.
     RemoveSymbol(String),
+    /// Patch a block cell's instance and preset in place.
+    ///
+    /// A whole-cell write from the box window raced the cell it had read when it
+    /// opened, so a placed `TOF0` could be replaced by the older cell and vanish
+    /// from the saved file. This writes only the two fields the window owns.
+    SetBlockField {
+        section: usize,
+        rung: usize,
+        position: usize,
+        instance: Option<String>,
+        preset: Option<String>,
+    },
     /// Set a coil's operand by name.
     SetCoilVar {
         section: usize,
@@ -1536,6 +1548,38 @@ impl PlcUi {
                 self.project.set_pous(pous);
                 self.comment_row = Some((section, rung + 1));
                 self.comment_buffer = String::new();
+            }
+            Action::SetBlockField {
+                section,
+                rung,
+                position,
+                instance,
+                preset,
+            } => {
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    if let Some(cell) = pou
+                        .sections
+                        .get_mut(section)
+                        .and_then(|section| section.rungs.get_mut(rung))
+                        .and_then(|row| row.cells.get_mut(position))
+                    {
+                        if let Cell::Block {
+                            instance: current_instance,
+                            preset: current_preset,
+                            ..
+                        } = cell
+                        {
+                            if let Some(name) = instance {
+                                *current_instance = name;
+                            }
+                            if let Some(value) = preset {
+                                *current_preset = value;
+                            }
+                        }
+                    }
+                }
+                self.project.set_pous(pous);
             }
             Action::SetCoilVar { section, rung, var } => {
                 let mut pous = self.project.all_pous();
@@ -5492,6 +5536,45 @@ mod negated_contact_tests {
             crate::screens::plc_grid::grid_cell_label(&plc, &picked),
             "/estop",
             "a negated contact is drawn with its slash"
+        );
+    }
+}
+
+#[cfg(test)]
+mod block_field_tests {
+    use super::*;
+
+    /// The box window patches the cell it owns: a placed block keeps its cell
+    /// and only its instance and preset change, so no stale whole-cell write can
+    /// replace it.
+    #[test]
+    fn patching_a_block_keeps_the_cell_and_sets_preset() {
+        let mut plc = PlcUi::default();
+        plc.apply(Action::SetCell {
+            section: 0,
+            rung: 0,
+            position: 1,
+            cell: Cell::Block {
+                block: "TOF".into(),
+                instance: "TOF0".into(),
+                preset: "T#1s".into(),
+            },
+        });
+        plc.apply(Action::SetBlockField {
+            section: 0,
+            rung: 0,
+            position: 1,
+            instance: None,
+            preset: Some("T#5s".into()),
+        });
+        let rungs = plc.current_pou_sections();
+        assert_eq!(
+            rungs[0].rungs[0].cells[1],
+            Cell::Block {
+                block: "TOF".into(),
+                instance: "TOF0".into(),
+                preset: "T#5s".into()
+            }
         );
     }
 }
