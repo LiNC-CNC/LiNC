@@ -58,9 +58,7 @@ impl Refusal {
             Self::LayoutMismatch => {
                 "retain: the program layout changed, so the saved slots do not line up".to_string()
             }
-            Self::WrongProgram => {
-                "retain: the store belongs to a different program".to_string()
-            }
+            Self::WrongProgram => "retain: the store belongs to a different program".to_string(),
         }
     }
 }
@@ -126,11 +124,7 @@ pub fn pack(program_hash: &str, layout: u64, retained: &Retained) -> Vec<u8> {
 }
 
 /// Parse a store, refusing anything that does not belong to this program.
-pub fn unpack(
-    bytes: &[u8],
-    program_hash: &str,
-    layout: u64,
-) -> Result<Retained, Refusal> {
+pub fn unpack(bytes: &[u8], program_hash: &str, layout: u64) -> Result<Retained, Refusal> {
     if bytes.len() > MAX_BLOB {
         return Err(Refusal::TooLarge(bytes.len()));
     }
@@ -154,11 +148,7 @@ pub fn unpack(
     if crc32(body) != stored_crc {
         return Err(Refusal::CrcMismatch);
     }
-    let stored_layout = u64::from_le_bytes(
-        body[6..14]
-            .try_into()
-            .map_err(|_| Refusal::Truncated)?,
-    );
+    let stored_layout = u64::from_le_bytes(body[6..14].try_into().map_err(|_| Refusal::Truncated)?);
     if stored_layout != layout {
         return Err(Refusal::LayoutMismatch);
     }

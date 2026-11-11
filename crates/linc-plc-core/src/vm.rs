@@ -397,7 +397,12 @@ impl Vm {
             bits: self
                 .retained
                 .iter()
-                .map(|(slot, _)| (*slot, self.prev.get(*slot as usize).copied().unwrap_or(false)))
+                .map(|(slot, _)| {
+                    (
+                        *slot,
+                        self.prev.get(*slot as usize).copied().unwrap_or(false),
+                    )
+                })
                 .collect(),
             words: self
                 .words
