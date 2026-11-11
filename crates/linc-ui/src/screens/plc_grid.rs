@@ -64,8 +64,10 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         (
             input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft),
             input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)
+                || input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowUp),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+                || input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowDown),
             input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
             input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
         )
