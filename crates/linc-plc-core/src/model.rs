@@ -12,6 +12,9 @@ pub struct Project {
     pub description: String,
     pub io: Vec<IoPoint>,
     pub vars: Vec<VarDecl>,
+    /// Operands pinned to the watch and trend pages, at most sixteen.
+    #[serde(default)]
+    pub watch: Vec<String>,
     /// The ladder body of `MAIN` in a version-1 project. Version 2 projects
     /// carry `pous` instead; the field is kept so an old file still decodes and
     /// `main_sections` can find it.
@@ -155,6 +158,7 @@ impl Project {
             description: String::new(),
             io: Vec::new(),
             vars: Vec::new(),
+            watch: Vec::new(),
             sections: Vec::new(),
             pous: Vec::new(),
         }

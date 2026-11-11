@@ -58,11 +58,12 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             input.consume_key(egui::Modifiers::CTRL, egui::Key::Y),
         )
     });
-    let (copy, paste, xref) = ui.input_mut(|input| {
+    let (copy, paste, xref, watch) = ui.input_mut(|input| {
         (
             input.consume_key(egui::Modifiers::CTRL, egui::Key::C),
             input.consume_key(egui::Modifiers::CTRL, egui::Key::V),
             input.consume_key(egui::Modifiers::CTRL, egui::Key::X),
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::W),
         )
     });
     if undo {
@@ -119,6 +120,16 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             .and_then(|rung| rung.cells.get(cursor.2))
             .and_then(|cell| cell.operand())
             .map(|operand| operand.to_string());
+    }
+    if watch {
+        if let Some(operand) = sections
+            .get(cursor.0)
+            .and_then(|section| section.rungs.get(cursor.1))
+            .and_then(|rung| rung.cells.get(cursor.2))
+            .and_then(|cell| cell.operand())
+        {
+            actions.push(Action::ToggleWatch(operand.to_string()));
+        }
     }
     if enter {
         let block = sections

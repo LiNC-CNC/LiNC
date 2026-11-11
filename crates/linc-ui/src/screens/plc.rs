@@ -143,6 +143,8 @@ pub enum Action {
     Stop,
     ClearForces,
     Force(String, bool),
+    /// Pin an operand to the watch list, or unpin it.
+    ToggleWatch(String),
     /// Write one grid cell of a rung.
     SetCell {
         section: usize,
@@ -621,33 +623,63 @@ impl TrendBuffer {
 
     pub const WORD_CHANNELS: usize = 4;
 
-    pub fn sample(&mut self, vars: &[VarValue], words: &[WordValue]) {
-        let names = vars
-            .iter()
-            .take(Self::CHANNELS)
-            .map(|var| var.name.clone())
-            .collect::<Vec<_>>();
+    pub fn sample(&mut self, vars: &[VarValue], words: &[WordValue], watch: &[String]) {
+        let names = if watch.is_empty() {
+            vars.iter()
+                .take(Self::CHANNELS)
+                .map(|var| var.name.clone())
+                .collect::<Vec<_>>()
+        } else {
+            watch
+                .iter()
+                .filter(|name| words.iter().all(|word| &word.name != *name))
+                .take(Self::CHANNELS)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
         if names != self.channels {
-            self.channels = names;
+            self.channels = names.clone();
             self.lanes = vec![Vec::new(); self.channels.len()];
         }
-        for (lane, var) in self.lanes.iter_mut().zip(vars.iter()) {
-            lane.push(var.value);
+        let mut values = Vec::with_capacity(names.len());
+        for name in &names {
+            values.push(
+                vars.iter()
+                    .find(|var| &var.name == name)
+                    .map(|var| var.value)
+                    .unwrap_or(false),
+            );
+        }
+        for (lane, value) in self.lanes.iter_mut().zip(values.iter()) {
+            lane.push(*value);
             if lane.len() > Self::DEPTH {
                 lane.remove(0);
             }
         }
-        let word_names = words
-            .iter()
-            .filter(|word| word.name.contains('.'))
-            .take(Self::WORD_CHANNELS)
-            .map(|word| word.name.clone())
-            .collect::<Vec<_>>();
+        let word_names = if watch.is_empty() {
+            words
+                .iter()
+                .filter(|word| word.name.contains('.'))
+                .take(Self::WORD_CHANNELS)
+                .map(|word| word.name.clone())
+                .collect::<Vec<_>>()
+        } else {
+            watch
+                .iter()
+                .filter(|name| words.iter().any(|word| &word.name == *name))
+                .take(Self::WORD_CHANNELS)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
         if word_names != self.word_channels {
             self.word_channels = word_names;
             self.word_lanes = vec![Vec::new(); self.word_channels.len()];
         }
-        let members = words.iter().filter(|word| word.name.contains('.'));
+        let members = self
+            .word_channels
+            .clone()
+            .into_iter()
+            .filter_map(|name| words.iter().find(|word| word.name == name).cloned());
         for (lane, word) in self.word_lanes.iter_mut().zip(members) {
             lane.push(word.value);
             if lane.len() > Self::DEPTH {
@@ -1008,7 +1040,7 @@ impl PlcUi {
         self.vars = snapshot.vars;
         self.words = snapshot.words;
         // One sample per received snapshot, so the traces follow the scan.
-        self.trend.sample(&self.vars, &self.words);
+        self.trend.sample(&self.vars, &self.words, &self.project.watch);
         self.forced = snapshot.forced;
     }
 
@@ -1174,6 +1206,18 @@ impl PlcUi {
             Action::ClearForces => {
                 self.send(Tag::ClearForces, Request::ClearForces);
                 self.message = "CLEAR FORCES SENT".to_string();
+            }
+            Action::ToggleWatch(name) => {
+                if let Some(index) = self
+                    .project
+                    .watch
+                    .iter()
+                    .position(|operand| operand.eq_ignore_ascii_case(&name))
+                {
+                    self.project.watch.remove(index);
+                } else if self.project.watch.len() < 16 {
+                    self.project.watch.push(name);
+                }
             }
             Action::SetCell {
                 section,
@@ -1804,6 +1848,49 @@ fn sim_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>
 }
 
 fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
+    common::card_title(ui, "WATCH");
+    ui.label(
+        RichText::new("Ctrl+W on a cell pins its operand. The trend page follows this list.")
+            .size(theme::font_size(9.0))
+            .color(theme::MUTED),
+    );
+    ui.add_space(4.0);
+    if plc.project.watch.is_empty() {
+        ui.label(
+            RichText::new("Nothing pinned yet.")
+                .size(theme::font_size(10.0))
+                .color(theme::MUTED),
+        );
+    }
+    let mut unpin: Option<String> = None;
+    egui::ScrollArea::vertical()
+        .max_height((height - 120.0).max(80.0))
+        .show(ui, |ui| {
+            for name in plc.project.watch.clone() {
+                let text = if let Some(value) = plc.words.iter().find(|word| word.name == name) {
+                    format!("{}  =  {}", name, value.value)
+                } else if let Some(value) = plc.vars.iter().find(|var| var.name == name) {
+                    format!("{}  =  {}", name, if value.value { "TRUE" } else { "FALSE" })
+                } else {
+                    format!("{name}  =  -")
+                };
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(text)
+                            .monospace()
+                            .size(theme::font_size(10.0))
+                            .color(theme::FG),
+                    );
+                    if theme::action_button(ui, "unpin", true).clicked() {
+                        unpin = Some(name.clone());
+                    }
+                });
+            }
+        });
+    if let Some(name) = unpin {
+        actions.push(Action::ToggleWatch(name));
+    }
+    ui.add_space(6.0);
     variables_card(plc, ui, height, actions)
 }
 
