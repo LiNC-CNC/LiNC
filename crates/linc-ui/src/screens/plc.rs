@@ -1467,11 +1467,36 @@ impl PlcUi {
             }
             Action::Delete => self.delete_selection(),
             Action::AddRung => {
+                // The POU list is canonical: the compiler reads it. `set_pous`
+                // folds a single MAIN ladder back into the legacy `sections`, so
+                // both representations and the compiler see the new row.
                 let after = self.selection.as_ref().map(|node| node.rung);
                 let section = self.selected_section();
-                if let Some(node) = add_rung(&mut self.project, section, after) {
-                    self.selection = Some(node);
+                let input = default_input_var(&self.project);
+                let output = default_output_var(&self.project);
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    if let Some(target) = pou.sections.get_mut(section) {
+                        let at = match after {
+                            Some(index) if index < target.rungs.len() => index + 1,
+                            _ => target.rungs.len(),
+                        };
+                        target.rungs.insert(
+                            at,
+                            Rung {
+                                cells: Vec::new(),
+                                comment: String::new(),
+                                logic: Logic::Contact {
+                                    var: input,
+                                    negated: false,
+                                },
+                                coil: Coil::new(output, CoilKind::Normal),
+                            },
+                        );
+                        self.selection = Some(NodePath::root(section, at));
+                    }
                 }
+                self.project.set_pous(pous);
                 self.normalise_selection();
             }
             Action::AddSection => {
@@ -5849,6 +5874,40 @@ mod picker_key_tests {
                 var: "estop".into(),
                 negated: true
             }
+        );
+    }
+}
+
+#[cfg(test)]
+mod add_rung_tests {
+    use super::*;
+
+    /// A new row must land in the POU list the compiler reads, and the legacy
+    /// `sections` must mirror it for a single MAIN ladder. When they diverged,
+    /// rows appeared in the editor and never reached the program.
+    #[test]
+    fn adding_a_rung_keeps_both_representations_and_the_compiler_in_step() {
+        let mut plc = PlcUi::default();
+        plc.project.normalise();
+        let before = plc.project.all_pous()[0].sections[0].rungs.len();
+        plc.selection = Some(NodePath::root(0, 0));
+        plc.apply(Action::AddRung);
+        let pous = plc.project.all_pous();
+        assert_eq!(pous[0].sections[0].rungs.len(), before + 1, "POU grew");
+        assert_eq!(
+            plc.project.sections[0].rungs.len(),
+            pous[0].sections[0].rungs.len(),
+            "legacy sections mirror the POU"
+        );
+        // The compiler walks `all_pous`, so agreement between the POU list and
+        // the legacy mirror is what keeps the editor and the program in step.
+        let compiled = linc_plc_core::compile::compile(&plc.project);
+        let diagnostics = compiled.err().unwrap_or_default();
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "pou_unreachable"),
+            "the added row is part of the reachable program"
         );
     }
 }
