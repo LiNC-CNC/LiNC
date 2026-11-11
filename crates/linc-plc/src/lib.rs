@@ -250,6 +250,7 @@ pub fn run(config: Config, shutdown: Arc<AtomicBool>) -> Result<(), Error> {
             overruns: 0,
             alive: false,
             fault: None,
+            timing: linc_plc_core::timing::TimingSnapshot::default(),
             vars: Vec::new(),
             words: Vec::new(),
             forced: Vec::new(),

@@ -18,6 +18,7 @@ fn snapshot() -> StateSnapshot {
         overruns: 0,
         alive: true,
         fault: None,
+        timing: Default::default(),
         vars: vec![VarValue {
             name: "run".to_string(),
             value: true,
@@ -202,6 +203,12 @@ fn wire_envelope_uses_adjacent_tagging() {
                 "overruns": 0,
                 "alive": true,
                 "fault": null,
+                "timing": {
+                    "scan": {"now_us": 0, "min_us": 0, "max_us": 0, "avg_us": 0},
+                    "cycle": {"now_us": 0, "min_us": 0, "max_us": 0, "avg_us": 0},
+                    "latency": {"now_us": 0, "min_us": 0, "max_us": 0, "avg_us": 0},
+                    "overruns": 0,
+                },
                 "vars": [{"name": "run", "value": true, "kind": "output", "forced": false}],
                 "words": [{"name": "MW0", "value": -7}],
                 "forced": [],

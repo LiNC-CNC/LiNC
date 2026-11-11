@@ -7,6 +7,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use linc_plc_core::protocol::{Response, RunState, StateSnapshot};
+use linc_plc_core::timing::ScanTiming;
 use linc_plc_core::Vm;
 
 use crate::hal::Hal;
@@ -54,6 +55,8 @@ pub(crate) struct Daemon {
     scan_count: u64,
     scan_time_us: u32,
     overruns: u64,
+    /// Anchored schedule and the scan, cycle and lateness metrics.
+    timing: ScanTiming,
     alive: bool,
     /// Watch list of the loaded project, sampled per scan.
     watch: Vec<String>,
@@ -85,6 +88,7 @@ impl Daemon {
             scan_count: 0,
             scan_time_us: 0,
             overruns: 0,
+            timing: ScanTiming::new(Duration::from_millis(2), Instant::now()),
             alive: false,
             watch: Vec::new(),
             period_us: 2000,
@@ -110,8 +114,13 @@ impl Daemon {
     ) {
         log::info!("linc-plc: scanning every {} us", period.as_micros());
         self.period_us = period.as_micros().max(1) as u64;
+        // The schedule is anchored here once. A late wake-up is measured against
+        // this expectation and never re-anchors it, so a persistently late run
+        // keeps reporting lateness instead of quietly moving the clock.
+        self.timing = ScanTiming::new(period.max(Duration::from_micros(1)), Instant::now());
         while !shared.shutdown.load(Ordering::Relaxed) {
             let started = Instant::now();
+            self.timing.wake(started);
             while let Ok(command) = commands.try_recv() {
                 self.apply(command, hal, shared);
             }
@@ -152,11 +161,15 @@ impl Daemon {
             let _ = hal.ctl().set_scan_time_us(self.scan_time_us as i32);
             let _ = hal.ctl().set_overruns(self.overruns as i32);
 
-            let elapsed = started.elapsed();
-            if elapsed >= period {
-                self.overruns = self.overruns.wrapping_add(1);
-            } else {
-                std::thread::sleep(period - elapsed);
+            // Scan time is the body; the schedule moves one interval, and the
+            // sleep aims at the anchored expectation rather than at "now".
+            self.timing.finish(Instant::now());
+            self.timing.schedule_next();
+            self.overruns = self.timing.snapshot().overruns;
+            let due = self.timing.expected();
+            let now = Instant::now();
+            if due > now {
+                std::thread::sleep(due - now);
             }
         }
         // Leaving: publish whatever the last run produced.
@@ -548,6 +561,7 @@ impl Daemon {
             scan_count: self.scan_count,
             scan_time_us: self.scan_time_us,
             overruns: self.overruns,
+            timing: self.timing.snapshot(),
             // Health, not the pin's parity: the HAL heartbeat toggles once per
             // scan, so a snapshot sampled at a fixed cadence would otherwise
             // report whichever edge it happened to catch. A UI reads this field

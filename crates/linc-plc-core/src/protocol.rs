@@ -94,6 +94,9 @@ pub struct StateSnapshot {
     pub overruns: u64,
     pub alive: bool,
     pub fault: Option<String>,
+    /// Scan, cycle and lateness metrics with their bounds and averages.
+    #[serde(default)]
+    pub timing: crate::timing::TimingSnapshot,
     pub vars: Vec<VarValue>,
     /// The word bank and the block members (`MW3`, `TON0.ET`, `CTU1.CV`).
     #[serde(default)]

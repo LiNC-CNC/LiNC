@@ -786,6 +786,8 @@ pub struct PlcUi {
     pub hash: String,
     pub scan_count: u64,
     pub scan_time_us: u32,
+    /// Scan, cycle and lateness metrics from the last snapshot.
+    pub timing: linc_plc_core::timing::TimingSnapshot,
     pub overruns: u64,
     /// Daemon heartbeat health, not a pin level: true only while the ladder is
     /// running and not faulted. The pin values are in `vars`.
@@ -881,6 +883,7 @@ impl Default for PlcUi {
             hash: String::new(),
             scan_count: 0,
             scan_time_us: 0,
+            timing: linc_plc_core::timing::TimingSnapshot::default(),
             overruns: 0,
             alive: false,
             fault: None,
@@ -1269,6 +1272,7 @@ impl PlcUi {
         self.hash = snapshot.hash;
         self.scan_count = snapshot.scan_count;
         self.scan_time_us = snapshot.scan_time_us;
+        self.timing = snapshot.timing;
         self.overruns = snapshot.overruns;
         self.alive = snapshot.alive;
         self.fault = snapshot.fault;
@@ -3830,8 +3834,13 @@ fn status_bar(plc: &PlcUi, ui: &mut Ui) {
         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
             ui.label(
                 RichText::new(format!(
-                    "{} us · OVERRUN {}",
-                    plc.scan_time_us, plc.overruns
+                    "scan {} us ({}..{}) · cycle {} us · late {} us · OVERRUN {}",
+                    plc.timing.scan.now_us,
+                    plc.timing.scan.min_us,
+                    plc.timing.scan.max_us,
+                    plc.timing.cycle.now_us,
+                    plc.timing.latency.now_us,
+                    plc.timing.overruns,
                 ))
                 .monospace()
                 .size(theme::font_size(9.0))
@@ -5030,6 +5039,7 @@ mod tests {
                 overruns: 1,
                 alive: true,
                 fault: None,
+                timing: Default::default(),
                 vars: vec![VarValue {
                     name: "seal".into(),
                     value: true,

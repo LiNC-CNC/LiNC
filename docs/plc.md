@@ -190,6 +190,35 @@ mismatch, layout mismatch, another program, or a blob over 64 KiB, which turns
 retention off rather than writing something unreadable. A restore writes values
 into both scan images; it never creates a force.
 
+## Timing
+
+The scan schedule is **anchored**: the expected start of a scan is the previous
+expected start plus the interval, set once when the daemon starts and never
+re-anchored on a late wake. A late scan therefore carries its lateness into the
+next one instead of quietly resetting the clock, so a run that is consistently
+late keeps reporting it.
+
+Three durations are measured, each with current, minimum, maximum and an
+exponentially weighted average over about two seconds:
+
+| metric | from → to |
+|---|---|
+| scan time | wake-up → end of the body (inputs, ops, outputs) |
+| cycle time | wake-up → previous wake-up |
+| latency | wake-up → its expected start |
+
+An **overrun** is a wake-up that landed past its expected start by more than
+100 µs, not a body that ran longer than the period. A long body shows in scan
+time, and makes the *next* wake late, which is where the overrun appears.
+
+All timestamps are `std::time::Instant` (`CLOCK_MONOTONIC`). Do not switch to
+`CLOCK_MONOTONIC_RAW`: it is not slewed by NTP, so a corrected clock would show
+up as phantom lateness and false overruns.
+
+The snapshot carries `timing.scan`, `timing.cycle`, `timing.latency` and
+`timing.overruns` alongside `scan_time_us` and `overruns`; the PLC status bar
+shows scan, cycle and lateness.
+
 ## Protocol
 
 4-byte big-endian length + JSON, adjacent tagging:

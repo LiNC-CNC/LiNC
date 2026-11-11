@@ -5050,7 +5050,7 @@ fn a_navigation_click_releases_the_keyboard_from_the_gcode_editor() {
 #[test]
 fn the_offsets_navigation_row_cycles_the_probe_tabs() {
     let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
-    let mut click_offsets = |harness: &mut ProbeHarness| {
+    let click_offsets = |harness: &mut ProbeHarness| {
         let output = harness.frame_full(Vec::new());
         let row = nav_row_center(&output, "OFFSETS");
         harness.frame_events(vec![egui::Event::PointerMoved(row)]);
@@ -5090,7 +5090,7 @@ fn the_diag_navigation_row_cycles_the_visible_tabs() {
     let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
     let tabs = DiagnosticsTab::visible(&harness.app.profile);
     harness.app.diagnostics.tab = tabs[0];
-    let mut click_diag = |harness: &mut ProbeHarness| {
+    let click_diag = |harness: &mut ProbeHarness| {
         let output = harness.frame_full(Vec::new());
         let row = nav_row_center(&output, "DIAG");
         harness.frame_events(vec![egui::Event::PointerMoved(row)]);
