@@ -73,8 +73,7 @@ impl Cell {
         match self {
             Self::Wire | Self::Contact { .. } | Self::Link | Self::Block { .. } => None,
             Self::Edge { .. } => Some("edge contacts"),
-            Self::Compare { .. } => None,
-            Self::Compute { .. } => Some("compute coils"),
+            Self::Compare { .. } | Self::Compute { .. } => None,
         }
     }
 }

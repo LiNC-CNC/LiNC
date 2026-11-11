@@ -603,3 +603,27 @@ fn a_compare_can_read_a_timer_elapsed_time() {
     vm.scan_with_dt(&[true], 700);
     assert_eq!(vm.outputs(), &[true, false], "ET is 1200 ms, Q is still low");
 }
+
+#[test]
+fn a_compute_coil_writes_a_word_while_it_has_power() {
+    let mut project = simple_project(Logic::Const { value: true }, Coil::new("y", CoilKind::Normal));
+    project.sections[0].rungs[0].cells = vec![
+        linc_plc_core::Cell::Contact {
+            var: "a".into(),
+            negated: false,
+        },
+        linc_plc_core::Cell::Compute {
+            op: "ADD".into(),
+            target: "MW1".into(),
+            left: "MW0".into(),
+            right: "1".into(),
+        },
+    ];
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+
+    vm.set_word(0, 41);
+    vm.scan(&[false]);
+    assert_eq!(vm.word(1), 0, "power is low, nothing is written");
+    vm.scan(&[true]);
+    assert_eq!(vm.word(1), 42);
+}

@@ -67,6 +67,29 @@ impl FbKind {
     }
 }
 
+/// Arithmetic of a compute coil.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MathOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Move,
+}
+
+impl MathOp {
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_uppercase().as_str() {
+            "ADD" | "+" => Some(Self::Add),
+            "SUB" | "-" => Some(Self::Sub),
+            "MUL" | "*" => Some(Self::Mul),
+            "DIV" | "/" => Some(Self::Div),
+            "MOVE" | ":=" => Some(Self::Move),
+            _ => None,
+        }
+    }
+}
+
 /// Instances per function-block type.
 pub const FB_PER_TYPE: u16 = 4;
 
@@ -113,6 +136,14 @@ pub enum Op {
     FbWord(u16),
     /// Push the block's `Q` on the bit stack.
     FbQ(u16),
+    /// A compute coil: pop the power bit and, when it is true, write the result
+    /// to `MWtarget`. It ends the rung; there is no coil output.
+    Compute {
+        op: MathOp,
+        target: u16,
+        left: WordValue,
+        right: WordValue,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -229,8 +260,11 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
                         }
                         let mut offset = 0;
                         while offset < run.len() {
-                            let used = lower_grid_rung(&run, offset, &lookup, &mut ops);
-                            store_coil(&mut ops, &lookup, &section.rungs[index + offset].coil);
+                            let (used, compute) =
+                                lower_grid_rung(&run, offset, &lookup, &mut ops);
+                            if !compute {
+                                store_coil(&mut ops, &lookup, &section.rungs[index + offset].coil);
+                            }
                             offset += used;
                         }
                         index += run.len();
@@ -310,7 +344,7 @@ fn intern(
 /// and ANDs it with the power so far. A box consumes the power as its input and
 /// pushes `Q`, so the rung continues from the block's output. A row with no
 /// element is a true rung.
-fn lower_cells(cells: &[crate::grid::Cell], lookup: &HashMap<String, u16>, ops: &mut Vec<Op>) {
+fn lower_cells(cells: &[crate::grid::Cell], lookup: &HashMap<String, u16>, ops: &mut Vec<Op>) -> bool {
     let mut has_power = false;
     for cell in cells {
         match cell {
@@ -364,14 +398,41 @@ fn lower_cells(cells: &[crate::grid::Cell], lookup: &HashMap<String, u16>, ops: 
                 has_power = true;
                 continue;
             }
+            crate::grid::Cell::Compute {
+                op,
+                target,
+                left,
+                right,
+            } => {
+                let (Some(left), Some(right)) = (word_operand_value(left), word_operand_value(right))
+                else {
+                    continue;
+                };
+                let (Some(math), Some(target)) = (MathOp::parse(op), crate::il::word_operand(target))
+                else {
+                    continue;
+                };
+                if !has_power {
+                    ops.push(Op::PushConst(true));
+                }
+                ops.push(Op::Compute {
+                    op: math,
+                    target,
+                    left,
+                    right,
+                });
+                // A compute coil ends the rung: there is no coil output.
+                return true;
+            }
             // Validation refuses these until their semantics exist.
-            crate::grid::Cell::Edge { .. } | crate::grid::Cell::Compute { .. } => continue,
+            crate::grid::Cell::Edge { .. } => continue,
         }
         has_power = true;
     }
     if !has_power {
         ops.push(Op::PushConst(true));
     }
+    false
 }
 
 /// Lower a row and, when it links, the branch below it. Returns rows used.
@@ -380,22 +441,22 @@ fn lower_grid_rung(
     index: usize,
     lookup: &HashMap<String, u16>,
     ops: &mut Vec<Op>,
-) -> usize {
+) -> (usize, bool) {
     let Some(cells) = run.get(index) else {
         ops.push(Op::PushConst(true));
-        return 1;
+        return (1, false);
     };
-    lower_cells(cells, lookup, ops);
+    let compute = lower_cells(cells, lookup, ops);
     let mut used = 1;
     if cells
         .iter()
         .any(|cell| matches!(cell, crate::grid::Cell::Link))
         && index + 1 < run.len()
     {
-        used += lower_grid_rung(run, index + 1, lookup, ops);
+        used += lower_grid_rung(run, index + 1, lookup, ops).0;
         ops.push(Op::Or);
     }
-    used
+    (used, compute)
 }
 
 /// A word-valued operand of a compare contact.

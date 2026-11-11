@@ -225,10 +225,21 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     });
                     close = true;
                 }
-                for (label, reason) in [
-                    ("Edge contact  P N", "edge contacts"),
-                    ("Compute  M", "compute coils"),
-                ] {
+                if theme::action_button(ui, "Compute  M", true).clicked() {
+                    actions.push(Action::SetCell {
+                        section,
+                        rung,
+                        position,
+                        cell: Cell::Compute {
+                            op: "ADD".to_string(),
+                            target: "MW0".to_string(),
+                            left: "MW0".to_string(),
+                            right: "1".to_string(),
+                        },
+                    });
+                    close = true;
+                }
+                for (label, reason) in [("Edge contact  P N", "edge contacts")] {
                     ui.add_enabled(
                         false,
                         egui::Button::new(format!("{label} — {reason} not implemented")),
@@ -425,6 +436,26 @@ fn cell_label(cell: &Cell) -> String {
             };
             format!("{left}{symbol}{right}")
         }
-        Cell::Compute { target, .. } => target.clone(),
+        Cell::Compute {
+            op,
+            target,
+            left,
+            right,
+        } => {
+            let upper = op.to_ascii_uppercase();
+            let symbol = match upper.as_str() {
+                "ADD" => "+",
+                "SUB" => "-",
+                "MUL" => "*",
+                "DIV" => "/",
+                "MOVE" => "",
+                other => other,
+            };
+            if symbol.is_empty() {
+                format!("{target}:={left}")
+            } else {
+                format!("{target}:={left}{symbol}{right}")
+            }
+        }
     }
 }

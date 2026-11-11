@@ -290,6 +290,33 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                             ));
                         }
                     }
+                } else if let crate::grid::Cell::Compute {
+                    op,
+                    target,
+                    left,
+                    right,
+                } = cell
+                {
+                    if crate::compile::MathOp::parse(op).is_none()
+                        || crate::il::word_operand(target).is_none()
+                    {
+                        diagnostics.push(Diagnostic::error(
+                            "cell_compute",
+                            format!(
+                                "'{target}':='{op}' is not a compute coil; use MW0-15 and ADD, SUB, MUL, DIV or MOVE"
+                            ),
+                            format!("{rung_path}.cells[{cell_index}]"),
+                        ));
+                    }
+                    for operand in [left, right] {
+                        if crate::compile::word_operand_value(operand).is_none() {
+                            diagnostics.push(Diagnostic::error(
+                                "cell_compute_operand",
+                                format!("'{operand}' is not a word, a number, a time or a block member"),
+                                format!("{rung_path}.cells[{cell_index}]"),
+                            ));
+                        }
+                    }
                 } else if let Some(operand) = cell.operand() {
                     let known = symbols
                         .keys()

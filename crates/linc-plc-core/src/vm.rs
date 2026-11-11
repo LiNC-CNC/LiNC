@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-use crate::compile::{Binding, Compiled, FbKind, Op, Program, SymbolKind};
+use crate::compile::{Binding, Compiled, FbKind, MathOp, Op, Program, SymbolKind, WordValue};
 
 /// Operand-stack depth. Validation caps logic nesting at 64, so this is slack.
 const STACK_DEPTH: usize = 128;
@@ -208,6 +208,32 @@ impl Vm {
                         .unwrap_or(0);
                     push_word(&mut word_stack, &mut word_depth, value);
                 }
+                Op::Compute {
+                    op,
+                    target,
+                    left,
+                    right,
+                } => {
+                    let power = pop(&stack, &mut depth);
+                    if power {
+                        let left = self.word_value(left);
+                        let right = self.word_value(right);
+                        let result = match op {
+                            MathOp::Add => left.wrapping_add(right),
+                            MathOp::Sub => left.wrapping_sub(right),
+                            MathOp::Mul => left.wrapping_mul(right),
+                            MathOp::Div => {
+                                if right == 0 {
+                                    0
+                                } else {
+                                    left.wrapping_div(right)
+                                }
+                            }
+                            MathOp::Move => left,
+                        };
+                        self.set_word(target, result);
+                    }
+                }
                 Op::FbQ(instance) => {
                     let value = self
                         .blocks
@@ -244,6 +270,14 @@ impl Vm {
     /// Output values in compiled output order, as produced by the last scan.
     pub fn outputs(&self) -> &[bool] {
         &self.output_image
+    }
+
+    fn word_value(&self, value: WordValue) -> i16 {
+        match value {
+            WordValue::Word(index) => self.word(index),
+            WordValue::Const(value) => value,
+            WordValue::Block(instance) => self.block_value(instance),
+        }
     }
 
     /// `ET`/`CV` of a block instance.
