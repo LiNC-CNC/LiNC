@@ -327,6 +327,7 @@ impl LincApp {
                 messages_dialog: false,
                 messages_scroll: 0.0,
                 confirm_token: None,
+                plc_editor: false,
             },
             safety_gate,
             jog: JogUi {
@@ -537,6 +538,7 @@ impl LincApp {
             .fold(0.0f32, f32::max);
         self.diagnostics.viewport.width = self.diagnostics.viewport.width.max(right);
         self.diagnostics.viewport.height = self.diagnostics.viewport.height.max(bottom);
+        self.draw_plc_editor(ui.ctx());
         self.draw_modal(ui.ctx());
         self.draw_tool_change_prompt(ui.ctx());
         crate::screens::help::draw_dialog(self, ui.ctx());

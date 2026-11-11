@@ -240,6 +240,37 @@ impl LincApp {
         }
     }
 
+    /// The popped-out PLC editor: a full-window overlay that owns the keyboard.
+    ///
+    /// It is drawn before the dialogs so a message or a confirmation opened
+    /// from inside the editor still sits on top of it. `overlay_open()` includes
+    /// it, so the shell's own keys never reach the page behind.
+    pub(super) fn draw_plc_editor(&mut self, ctx: &egui::Context) {
+        if !self.overlay.plc_editor {
+            return;
+        }
+        let screen = ctx.input(|input| input.viewport_rect());
+        egui::Area::new(egui::Id::unique("linc-plc-editor"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .show(ctx, |ui| {
+                // Swallow pointer input aimed at the page underneath.
+                ui.interact(
+                    screen,
+                    egui::Id::unique("linc-plc-editor-backdrop"),
+                    egui::Sense::click_and_drag(),
+                );
+                ui.painter().rect_filled(screen, 0.0, theme::PANEL);
+                egui::Frame::new()
+                    .fill(theme::PANEL)
+                    .inner_margin(egui::Margin::same(10))
+                    .show(ui, |ui| {
+                        ui.set_min_size(screen.size() - egui::vec2(20.0, 20.0));
+                        crate::screens::plc::editor(self, ui);
+                    });
+            });
+    }
+
     pub(super) fn draw_modal(&mut self, ctx: &egui::Context) {
         let Some(modal) = self.overlay.modal.clone() else {
             self.overlay.modal_open_last_frame = None;
@@ -963,4 +994,7 @@ pub(crate) struct OverlayUi {
     /// the page (see `restore_page_keyboard`).
     pub overlay_was_open: bool,
     pub confirm_token: Option<linc_core::model::ToolChangeToken>,
+    /// The PLC editor is popped out: it owns the whole keyboard, exactly like
+    /// the ZX-PLC application, so the shell's keys must not reach the page.
+    pub plc_editor: bool,
 }

@@ -591,6 +591,8 @@ pub struct PlcUi {
     pub page: PlcPage,
     /// Index into `project.all_pous()`.
     pub pou: usize,
+    /// The editor's File > Close was chosen; the shell closes the overlay.
+    pub close_requested: bool,
     /// Buffer for the IL editor; synced when the selected POU changes.
     il_text: String,
     il_for: Option<usize>,
@@ -629,6 +631,7 @@ impl Default for PlcUi {
             message: String::new(),
             page: PlcPage::PouList,
             pou: 0,
+            close_requested: false,
             il_text: String::new(),
             il_for: None,
             next_poll: Instant::now(),
@@ -1158,55 +1161,88 @@ impl PlcPage {
 /// The page's status bar height, below the content.
 const STATUS_BAR_HEIGHT: f32 = 22.0;
 
+/// The PLC page is the launcher. ZX-PLC is a keyboard application, so the
+/// workbench itself is a popped-out overlay that owns every key; the page keeps
+/// the project, the service and the way in.
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
     app.plc.poll();
-    page_keys(app, ui);
     common::focus_anchor(ui, "plc-page-focus");
 
     let mut actions: Vec<Action> = Vec::new();
-    let page_bottom =
-        ui.ctx().input(|input| input.viewport_rect().bottom()) - theme::BOTTOM_BAR_HEIGHT;
+    let mut open_editor = false;
+    let plc = &mut app.plc;
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        if theme::accent_button(ui, "OPEN EDITOR", true).clicked() {
+            open_editor = true;
+        }
+        ui.label(
+            RichText::new("The editor opens in its own window and takes the keyboard; Esc closes it.")
+                .size(theme::font_size(10.0))
+                .color(theme::MUTED),
+        );
+    });
+    ui.add_space(4.0);
+
+    let width = ui.available_width();
+    let left_width = (width * 0.36).clamp(260.0, 380.0);
+    let tree_width = (width - left_width - 8.0).max(320.0);
+    ui.horizontal_top(|ui| {
+        ui.allocate_ui_with_layout(
+            vec2(left_width, 220.0),
+            egui::Layout::top_down(Align::Min),
+            |ui| {
+                card(ui, vec2(left_width, 220.0), |ui, _| status_card(plc, ui, &mut actions));
+            },
+        );
+        ui.add_space(6.0);
+        ui.allocate_ui_with_layout(
+            vec2(tree_width, 220.0),
+            egui::Layout::top_down(Align::Min),
+            |ui| pou_list_page(plc, ui, 220.0, &mut actions),
+        );
+    });
+
+    for action in actions {
+        plc.apply(action);
+    }
+    if open_editor {
+        app.overlay.plc_editor = true;
+    }
+}
+
+/// The popped-out workbench: menu bar, pages, status bar, keyboard owner.
+pub fn editor(app: &mut LincApp, ui: &mut Ui) {
+    if ui
+        .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        && !ui.ctx().text_edit_focused()
+    {
+        app.overlay.plc_editor = false;
+        return;
+    }
+
+    app.plc.poll();
+    common::focus_anchor(ui, "plc-editor-focus");
+    let mut actions: Vec<Action> = Vec::new();
     let plc = &mut app.plc;
 
     menu_bar(plc, ui, &mut actions);
     ui.add_space(2.0);
 
-    let height = (page_bottom - ui.cursor().min.y - STATUS_BAR_HEIGHT - 6.0).max(200.0);
+    let height = (ui.available_height() - STATUS_BAR_HEIGHT - 4.0).max(160.0);
     egui::ScrollArea::vertical()
         .id_salt("plc-page")
         .auto_shrink([false, false])
         .show(ui, |ui| page_body(plc, ui, height, &mut actions));
-
     status_bar(plc, ui);
 
     for action in actions {
         plc.apply(action);
     }
-}
-
-/// Page-local keys, before any widget draws: the ladder box that holds focus
-/// must not eat them first. Ctrl+D stays the navigation key for Diagnostics, so
-/// DOWNLOAD is on Ctrl+Enter instead.
-fn page_keys(app: &mut LincApp, ui: &Ui) {
-    // A text field keeps Backspace for its own editing.
-    if ui.ctx().text_edit_focused() {
-        return;
-    }
-    let (save, delete, download) = ui.input_mut(|input| {
-        (
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::S),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::Enter),
-        )
-    });
-    if delete {
-        app.plc.apply(Action::Delete);
-    }
-    if save {
-        app.plc.apply(Action::Save);
-    }
-    if download {
-        app.plc.apply(Action::Download);
+    if plc.close_requested {
+        plc.close_requested = false;
+        app.overlay.plc_editor = false;
     }
 }
 
@@ -1235,6 +1271,9 @@ fn menu_bar(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
             ui.separator();
             if ui.button("Service").clicked() {
                 plc.page = PlcPage::Service;
+            }
+            if ui.button("Close editor").clicked() {
+                plc.close_requested = true;
             }
         });
         ui.menu_button("POU", |ui| {

@@ -17,7 +17,10 @@ pub enum IlLine {
     Comment,
     /// `LOOP:` — a jump target. Accepted by the parser, refused by the compiler.
     Label(String),
-    Instruction { mnemonic: String, operand: String },
+    Instruction {
+        mnemonic: String,
+        operand: String,
+    },
     /// A line the parser could not read at all.
     Bad(String),
 }
@@ -67,10 +70,7 @@ pub fn parse_line(line: &str) -> IlLine {
     if mnemonic == "NOT" && !operand.is_empty() {
         return IlLine::Bad("'NOT' takes no operand".to_string());
     }
-    IlLine::Instruction {
-        mnemonic,
-        operand,
-    }
+    IlLine::Instruction { mnemonic, operand }
 }
 
 /// Append the ops for one instruction. `index` is the resolved symbol slot.

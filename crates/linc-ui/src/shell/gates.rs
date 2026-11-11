@@ -198,6 +198,7 @@ impl LincApp {
         self.safety_gate
             || self.overlay.modal.is_some()
             || self.overlay.messages_dialog
+            || self.overlay.plc_editor
             || self.help.dialog.is_some()
             || self.tools.number.is_some()
             || self.tools.position.is_some()

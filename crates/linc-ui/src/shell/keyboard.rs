@@ -86,11 +86,15 @@ impl LincApp {
             {
                 return;
             }
-            let escape = ui.input_mut(|input| {
-                input.consume_key(self.prefs.keymap.back.modifiers, self.prefs.keymap.back.key)
-            });
-            if escape && (self.overlay.modal.is_some() || self.help.dialog.is_some()) {
-                self.escape();
+            // A dismissible dialog takes Escape. The popped-out PLC editor is
+            // the keyboard owner itself, so Escape reaches it untouched.
+            if self.overlay.modal.is_some() || self.help.dialog.is_some() {
+                let escape = ui.input_mut(|input| {
+                    input.consume_key(self.prefs.keymap.back.modifiers, self.prefs.keymap.back.key)
+                });
+                if escape {
+                    self.escape();
+                }
             }
             return;
         }
