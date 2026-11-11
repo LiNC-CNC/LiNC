@@ -729,6 +729,10 @@ pub struct ExprEdit {
     pub left: String,
     pub right: String,
     pub target: String,
+    /// The value being typed for the current stage. It lives here, not in
+    /// `operand_filter`, so the pickers clearing their own buffer cannot wipe a
+    /// half-typed value between frames.
+    pub text: String,
 }
 
 /// A ring of boolean samples for the trend page: one lane per symbol, oldest
@@ -5930,6 +5934,42 @@ mod picker_key_tests {
             escape_closes_editor(&plc),
             "and now Escape closes the editor"
         );
+    }
+
+    /// A value typed across several frames survives: the buffer is the editor's
+    /// own, so a picker clearing its filter cannot truncate it.
+    #[test]
+    fn a_value_typed_in_chunks_reaches_the_stage() {
+        let mut plc = plc_with_symbols();
+        plc.expr_edit = Some(ExprEdit {
+            section: 0,
+            rung: 0,
+            position: 0,
+            compute: true,
+            stage: 1,
+            op: "ADD".to_string(),
+            left: String::new(),
+            right: String::new(),
+            target: String::new(),
+            text: String::new(),
+        });
+        for chunk in ["M", "W", "2"] {
+            let _ = frame(&mut plc, text(chunk));
+        }
+        let _ = frame(
+            &mut plc,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        let edit = plc.expr_edit.expect("editor still open");
+        assert_eq!(edit.left, "MW2", "the whole value arrived");
+        assert_eq!(edit.stage, 2, "and the stage advanced once");
+        assert!(edit.text.is_empty(), "the buffer cleared on commit");
     }
 
     /// Escape closes every picker before the editor's own Escape: a list left

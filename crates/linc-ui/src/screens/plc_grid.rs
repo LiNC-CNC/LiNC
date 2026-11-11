@@ -838,6 +838,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                         left: "MW0".to_string(),
                         right: "0".to_string(),
                         target: "MW0".to_string(),
+                        text: String::new(),
                     });
                     close = true;
                 }
@@ -852,6 +853,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                         left: "MW0".to_string(),
                         right: "1".to_string(),
                         target: "MW1".to_string(),
+                        text: String::new(),
                     });
                     close = true;
                 }
@@ -995,6 +997,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                         left: "MW0".to_string(),
                         right: "0".to_string(),
                         target: "MW0".to_string(),
+                        text: String::new(),
                     });
                     close = true;
                 }
@@ -1009,6 +1012,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                         left: "MW0".to_string(),
                         right: "1".to_string(),
                         target: "MW1".to_string(),
+                        text: String::new(),
                     });
                     close = true;
                 }
@@ -1299,7 +1303,6 @@ fn expr_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
         let mut commit = false;
         if keys.escape {
             plc.expr_edit = None;
-            plc.operand_filter.clear();
             return;
         }
         if edited.stage == 0 {
@@ -1323,26 +1326,28 @@ fn expr_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
             }
             if keys.enter {
                 edited.stage = 1;
-                plc.operand_filter.clear();
+                edited.text.clear();
                 plc.expr_edit = Some(edited);
                 return;
             }
         } else {
+            // The buffer belongs to the editor: a picker clearing its own filter
+            // used to truncate a half-typed value to its first character.
             for character in &keys.typed {
-                plc.operand_filter.push(*character);
+                edited.text.push(*character);
             }
             if keys.backspace {
-                plc.operand_filter.pop();
+                edited.text.pop();
             }
             if keys.enter {
-                let value = plc.operand_filter.trim().to_string();
+                let value = edited.text.trim().to_string();
                 if !value.is_empty() {
                     match edited.stage {
                         1 => edited.left = value,
                         2 => edited.right = value,
                         _ => edited.target = value,
                     }
-                    plc.operand_filter.clear();
+                    edited.text.clear();
                     edited.stage += 1;
                     let done = if edited.compute {
                         edited.stage > 3
@@ -1384,7 +1389,6 @@ fn expr_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
                 cell,
             });
             plc.expr_edit = None;
-            plc.operand_filter.clear();
             return;
         }
     }
