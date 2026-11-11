@@ -143,6 +143,9 @@ pub enum Action {
     Validate,
     Download,
     Start,
+    /// Load the project, then start it: the daemon refuses a bare Start unless
+    /// it is Loaded, so the manual's Run is the pair.
+    RunProject,
     Stop,
     ClearForces,
     Force(String, bool),
@@ -1280,6 +1283,33 @@ impl PlcUi {
     }
 
     fn apply_response(&mut self, tag: Tag, response: Response) {
+        if std::env::var_os("LINC_PLC_SNAP_DEBUG").is_some() {
+            match (&tag, &response) {
+                (
+                    Tag::Hello,
+                    Response::Hello {
+                        protocol, schema, ..
+                    },
+                ) => {
+                    eprintln!(
+                        "snap hello protocol={protocol} schema={schema} want={PROTOCOL_VERSION}"
+                    );
+                }
+                (tag, Response::State(state)) => {
+                    eprintln!(
+                        "snap state tag={tag:?} run={:?} scan={} vars={} words={}",
+                        state.state,
+                        state.scan_count,
+                        state.vars.len(),
+                        state.words.len()
+                    );
+                }
+                (tag, Response::Error { code, message }) => {
+                    eprintln!("snap error tag={tag:?} {code}: {message}");
+                }
+                _ => {}
+            }
+        }
         if let (Tag::Trend, Response::Trend(data)) = (tag, &response) {
             self.trend_remote = data.clone();
             return;
@@ -1589,8 +1619,17 @@ impl PlcUi {
             Action::Validate => self.validate(),
             Action::Download => self.download(),
             Action::Start => {
+                // A bare Start is refused unless the daemon is Loaded, so a start
+                // from the manual always loads first, in this order on the same
+                // connection.
+                self.download();
                 self.send(Tag::Start, Request::Start);
-                self.message = "START SENT".to_string();
+                self.message = "LOAD + START SENT".to_string();
+            }
+            Action::RunProject => {
+                self.download();
+                self.send(Tag::Start, Request::Start);
+                self.message = "LOAD + START SENT".to_string();
             }
             Action::Stop => {
                 self.send(Tag::Stop, Request::Stop);

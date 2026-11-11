@@ -189,3 +189,33 @@ fn symbol_comments_round_trip_and_default_to_empty() {
     assert_eq!(decoded.io[0].comment, "");
     assert_eq!(decoded.vars[0].comment, "");
 }
+
+/// A row directly under a `Link` is that link's parallel branch: it carries no
+/// coil of its own, and the ladder must still validate and compile.
+#[test]
+fn a_linked_continuation_row_may_have_a_blank_coil() {
+    use linc_plc_core::grid::Cell;
+    let mut project = base_project();
+    project.sections[0].rungs[0].cells = vec![
+        Cell::Contact {
+            var: "start".into(),
+            negated: false,
+        },
+        Cell::Link,
+    ];
+    let mut branch = Rung::new(Logic::contact("seal", false), Coil::new("", CoilKind::Normal));
+    branch.cells = vec![Cell::Contact {
+        var: "seal".into(),
+        negated: false,
+    }];
+    project.sections[0].rungs.push(branch);
+    let diagnostics = validate(&project);
+    assert!(
+        !codes(&diagnostics).contains(&"unknown_symbol"),
+        "a branch row's blank coil is not an undeclared symbol: {diagnostics:?}"
+    );
+    assert!(
+        linc_plc_core::compile::compile(&project).is_ok(),
+        "the ladder compiles"
+    );
+}

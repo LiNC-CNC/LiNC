@@ -566,7 +566,10 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             ));
         }
 
-        let mut coils: HashSet<String> = HashSet::new();
+        // Per target: which coil kinds wrote it. Write conflicts with anything,
+        // Set and Reset together are a latch, and set-set or reset-reset are
+        // ambiguous.
+        let mut coils: HashMap<String, (bool, bool, bool)> = HashMap::new();
         for (rung_index, rung) in section.rungs.iter().enumerate() {
             let rung_path = format!("{section_path}.rungs[{rung_index}]");
             let logic_path = format!("{rung_path}.logic");
@@ -704,6 +707,18 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 }
                 continue;
             }
+            // A blank coil is the linked continuation row: the row holds the
+            // branch under the `Link` above it and the link's row carries the
+            // coil. A blank coil anywhere else is still an error.
+            let linked_continuation = rung.coil.var.trim().is_empty()
+                && rung_index > 0
+                && section.rungs[rung_index - 1]
+                    .cells
+                    .iter()
+                    .any(|cell| matches!(cell, crate::grid::Cell::Link));
+            if linked_continuation {
+                continue;
+            }
             match symbols.get(rung.coil.var.as_str()) {
                 None => diagnostics.push(Diagnostic::error(
                     "unknown_symbol",
@@ -726,7 +741,13 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         crate::model::CoilKind::Reset => "reset",
                         _ => "write",
                     };
-                    if !coils.insert(format!("{class}:{}", rung.coil.var)) {
+                    let seen = coils.entry(rung.coil.var.clone()).or_insert((false, false, false));
+                    let conflict = match class {
+                        "set" => seen.1 || seen.0,
+                        "reset" => seen.2 || seen.0,
+                        _ => seen.0 || seen.1 || seen.2,
+                    };
+                    if conflict {
                         diagnostics.push(Diagnostic::error(
                             "duplicate_coil",
                             format!(
@@ -735,6 +756,11 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                             ),
                             &coil_path,
                         ));
+                    }
+                    match class {
+                        "set" => seen.1 = true,
+                        "reset" => seen.2 = true,
+                        _ => seen.0 = true,
                     }
                 }
             }
