@@ -131,6 +131,16 @@ impl LincApp {
         // path it starts with so an operator can still edit, validate and save one.
         if !project.as_os_str().is_empty() {
             self.plc.path_text = project.display().to_string();
+            // Open the file the daemon is running, so what the operator edits is
+            // what runs and what the next Save writes.
+            if project.exists() {
+                if let Ok(text) = std::fs::read_to_string(&project) {
+                    if let Ok(mut loaded) = crate::screens::plc::project_from_json(&text) {
+                        loaded.normalise();
+                        self.plc.project = loaded;
+                    }
+                }
+            }
         }
     }
 

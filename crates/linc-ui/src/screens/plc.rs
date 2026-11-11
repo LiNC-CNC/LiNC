@@ -546,6 +546,39 @@ pub fn project_from_json(text: &str) -> Result<Project, String> {
     serde_json::from_str(text).map_err(|error| error.to_string())
 }
 
+/// The project the page opens on start: the one the profile names, else the
+/// simulation's ladder, else the built-in example. Loading it is what makes an
+/// edit survive a restart, which is the difference between a demo and a toy.
+pub fn startup_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("LINC_PLC_PROJECT") {
+        return PathBuf::from(path);
+    }
+    let candidate = PathBuf::from("configs/plc-sim.json");
+    if candidate.exists() {
+        candidate
+    } else {
+        default_project_path()
+    }
+}
+
+fn startup_project() -> Project {
+    let path = startup_path();
+    let loaded = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| project_from_json(&text).ok());
+    match loaded {
+        Some(mut project) => {
+            project.normalise();
+            project
+        }
+        None => {
+            let mut project = Project::example();
+            project.normalise();
+            project
+        }
+    }
+}
+
 /// Where the page keeps its project when nothing else says otherwise.
 pub fn project_path_from(xdg: Option<PathBuf>, home: Option<PathBuf>) -> PathBuf {
     let base = xdg
@@ -814,6 +847,8 @@ pub struct PlcUi {
     pub picker: Option<(usize, usize, usize)>,
     /// The operand list is open for the cell a kind was just chosen for.
     pub operand_pick: Option<(usize, usize, usize, Cell)>,
+    /// Filter typed into the operand list; Enter takes the only match.
+    pub operand_filter: String,
     /// A compare or compute expression is being built step by step.
     pub expr_edit: Option<ExprEdit>,
     /// Project snapshots for undo, oldest first, and the redo arm of the pair.
@@ -871,12 +906,8 @@ pub struct PlcUi {
 impl Default for PlcUi {
     fn default() -> Self {
         Self {
-            project: {
-                let mut project = Project::example();
-                project.normalise();
-                project
-            },
-            path_text: default_project_path().display().to_string(),
+            project: startup_project(),
+            path_text: startup_path().display().to_string(),
             socket_text: linc_plc_client::default_socket_path().display().to_string(),
             selection: Some(NodePath::root(0, 0)),
             var_text: String::new(),
@@ -909,6 +940,7 @@ impl Default for PlcUi {
             cell_cursor: None,
             picker: None,
             operand_pick: None,
+            operand_filter: String::new(),
             expr_edit: None,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),

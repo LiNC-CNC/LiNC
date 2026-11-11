@@ -795,6 +795,9 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 .map(|var| (var.name.clone(), "VAR".to_string())),
         )
         .collect::<Vec<_>>();
+    if plc.operand_filter.is_empty() && names.len() > 6 {
+        plc.operand_filter.clear();
+    }
     let mut close = false;
     egui::Window::new("OPERAND")
         .order(egui::Order::Foreground)
@@ -805,7 +808,38 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
             if names.is_empty() {
                 ui.label("No symbols declared yet. Add an input, output or variable.");
             }
-            for (name, kind) in &names {
+            // Type to narrow, Enter takes a single match: with a dozen symbols
+            // the list is long and clicking it is a coordinate game.
+            let enter_pressed = ui.input(|input| input.key_pressed(egui::Key::Enter));
+            let filter = ui.add(
+                egui::TextEdit::singleline(&mut plc.operand_filter)
+                    .hint_text("type to narrow, Enter picks the first match")
+                    .desired_width(240.0),
+            );
+            // The picker is modal for this cell, so the filter owns the keys
+            // from the first frame: typing a name and pressing Enter is the
+            // quickest way through a list of a dozen symbols.
+            if !filter.has_focus() {
+                filter.request_focus();
+            }
+            let needle = plc.operand_filter.trim().to_ascii_lowercase();
+            let matches = names
+                .iter()
+                .filter(|(name, _)| needle.is_empty() || name.to_ascii_lowercase().contains(&needle))
+                .collect::<Vec<_>>();
+            if enter_pressed && (filter.has_focus() || filter.lost_focus()) {
+                if let Some((name, _)) = matches.first() {
+                    let chosen = with_operand(&cell, name);
+                    actions.push(Action::SetCell {
+                        section,
+                        rung,
+                        position,
+                        cell: chosen,
+                    });
+                    close = true;
+                }
+            }
+            for (name, kind) in matches {
                 let comment = plc.symbol_comment(name).unwrap_or("");
                 let label = if comment.is_empty() {
                     format!("{name}   {kind}")
@@ -813,17 +847,7 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     format!("{name}   {kind}   — {comment}")
                 };
                 if ui.button(label).clicked() {
-                    let chosen = match &cell {
-                        Cell::Contact { negated, .. } => Cell::Contact {
-                            var: name.clone(),
-                            negated: *negated,
-                        },
-                        Cell::Edge { rising, .. } => Cell::Edge {
-                            var: name.clone(),
-                            rising: *rising,
-                        },
-                        other => other.clone(),
-                    };
+                    let chosen = with_operand(&cell, name);
                     actions.push(Action::SetCell {
                         section,
                         rung,
@@ -840,6 +864,22 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
         });
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
         plc.operand_pick = None;
+        plc.operand_filter.clear();
+    }
+}
+
+/// The cell with its operand replaced, keeping its kind and negation.
+fn with_operand(cell: &Cell, name: &str) -> Cell {
+    match cell {
+        Cell::Contact { negated, .. } => Cell::Contact {
+            var: name.to_string(),
+            negated: *negated,
+        },
+        Cell::Edge { rising, .. } => Cell::Edge {
+            var: name.to_string(),
+            rising: *rising,
+        },
+        other => other.clone(),
     }
 }
 

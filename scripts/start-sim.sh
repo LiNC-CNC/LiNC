@@ -197,6 +197,11 @@ if [[ -n "$PLC_FLAG" ]]; then
 fi
 export LINC_PLC_BIN="$PLC_BIN"
 export LINC_PLC_PID_FILE="$PLC_PID_FILE"
+# The PLC page opens the same ladder the daemon runs, so an edit saved in the
+# GUI is the file the next start loads instead of the built-in example.
+if [[ -n "${LINC_PLC_PROJECT:-}" ]]; then
+    export LINC_PLC_PROJECT
+fi
 # Only override the filter when asked; the binaries default to LiNC at info and
 # third-party crates at warn, so an exported `RUST_LOG=info` here would turn the
 # D-Bus stack back on and bury the log.
