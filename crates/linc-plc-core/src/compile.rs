@@ -999,17 +999,34 @@ fn lower_grid_rung(
         ops.push(Op::PushConst(true));
         return (1, false);
     };
-    let compute = lower_cells(cells, lookup, ops, edges);
-    let mut used = 1;
-    if cells
+    // A `Link` at position k joins the row below at that column, so the branch is
+    // in parallel with the cells left of the link only; cells from the link on
+    // stay in series with both. Lowering the whole row in parallel let a branch
+    // contact bypass a series contact to the right of the link.
+    let link = cells
         .iter()
-        .any(|cell| matches!(cell, crate::grid::Cell::Link))
-        && index + 1 < run.len()
-    {
+        .position(|cell| matches!(cell, crate::grid::Cell::Link))
+        .filter(|_| index + 1 < run.len());
+    if let Some(link) = link {
+        let before = &cells[..link];
+        let after = &cells[link + 1..];
+        let mut compute = false;
+        if !before.iter().all(|cell| matches!(cell, crate::grid::Cell::Wire)) {
+            compute |= lower_cells(before, lookup, ops, edges);
+        } else {
+            ops.push(Op::PushConst(true));
+        }
+        let mut used = 1;
         used += lower_grid_rung(run, index + 1, lookup, ops, edges).0;
         ops.push(Op::Or);
+        if !after.iter().all(|cell| matches!(cell, crate::grid::Cell::Wire)) {
+            compute |= lower_cells(after, lookup, ops, edges);
+            ops.push(Op::And);
+        }
+        return (used, compute);
     }
-    (used, compute)
+    let compute = lower_cells(cells, lookup, ops, edges);
+    (1, compute)
 }
 
 /// A word-valued operand of a compare contact.

@@ -1187,3 +1187,43 @@ fn a_tree_rung_can_hold_a_block_an_edge_and_a_compare() {
     vm.scan(&[]);
     assert_eq!(vm.outputs(), &[true]);
 }
+
+/// The pump latch as the grid draws it: a `Link` at position 1 puts the row below
+/// in parallel with position 0 only, so `/estop` stays in series with the whole
+/// branch and must drop the run output.
+#[test]
+fn a_linked_branch_parallels_one_cell_and_not_the_estop() {
+    use linc_plc_core::grid::Cell;
+    let contact = |name: &str, negated: bool| Cell::Contact {
+        var: name.to_string(),
+        negated,
+    };
+    let mut latch = Rung::new(
+        Logic::contact("pump", false),
+        Coil::new("run", CoilKind::Normal),
+    );
+    latch.cells = vec![contact("pump", false), Cell::Link, contact("estop", true)];
+    let mut branch = Rung::new(Logic::contact("run", false), Coil::new("", CoilKind::Normal));
+    branch.cells = vec![contact("run", false)];
+    let project = project_with(
+        vec![
+            IoPoint::new("pump", IoDirection::In),
+            IoPoint::new("estop", IoDirection::In),
+            IoPoint::new("run", IoDirection::Out),
+        ],
+        Vec::new(),
+        vec![section("main", vec![latch, branch])],
+    );
+    let compiled = compile(&project).expect("compile");
+    let mut vm = Vm::new(&compiled);
+
+    // inputs are slots 0 (pump) and 1 (estop); the coil is slot 2.
+    vm.scan(&[true, false]);
+    assert_eq!(vm.outputs(), &[true], "pump seals the run on");
+
+    vm.scan(&[false, false]);
+    assert_eq!(vm.outputs(), &[true], "the branch holds the run on");
+
+    vm.scan(&[false, true]);
+    assert_eq!(vm.outputs(), &[false], "the estop breaks the branch");
+}

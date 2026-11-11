@@ -117,17 +117,36 @@ pub fn lower_rung(rows: &[Vec<Cell>], index: usize) -> (Logic, usize) {
     let Some(cells) = rows.get(index) else {
         return (Logic::Const { value: true }, 1);
     };
-    let own = lower_row(cells);
-    if cells.iter().any(|cell| matches!(cell, Cell::Link)) && rows.get(index + 1).is_some() {
-        let (branch, used) = lower_rung(rows, index + 1);
-        return (
-            Logic::Parallel {
-                items: vec![own, branch],
-            },
-            1 + used,
-        );
+    // A `Link` at position k joins the row below at that column: cells left of
+    // the link run in parallel with the branch, and everything from the link on
+    // runs in series with both. Treating the whole row as parallel (the old
+    // behaviour) let a branch contact bypass a contact to the right of the link,
+    // so `/estop` could never break the pump latch.
+    if let Some(link) = cells
+        .iter()
+        .take(POSITIONS)
+        .position(|cell| matches!(cell, Cell::Link))
+    {
+        if rows.get(index + 1).is_some() {
+            let before = lower_row(&cells[..link]);
+            let after = lower_row(&cells[link + 1..]);
+            let (branch, used) = lower_rung(rows, index + 1);
+            let joined = Logic::Parallel {
+                items: vec![before, branch],
+            };
+            let combined = if matches!(after, Logic::Const { value: true }) {
+                joined
+            } else if matches!(joined, Logic::Const { value: true }) {
+                after
+            } else {
+                Logic::Series {
+                    items: vec![joined, after],
+                }
+            };
+            return (combined, 1 + used);
+        }
     }
-    (own, 1)
+    (lower_row(cells), 1)
 }
 
 /// Turn a version-2 series rung into cells.
