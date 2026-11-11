@@ -29,6 +29,14 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         }
         return;
     }
+    // Escape always gives the keyboard back to the grid: a property field that
+    // took it must never be able to wedge the editor.
+    if app.plc.text_editing
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        app.plc.text_editing = false;
+        return;
+    }
     if app.plc.page != PlcPage::Edit
         || app.plc.picker.is_some()
         || app.plc.operand_pick.is_some()

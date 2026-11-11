@@ -1738,6 +1738,13 @@ impl PlcUi {
                         if let Some(mut cells) = migrated {
                             if position < POSITIONS {
                                 cells.resize(POSITIONS, Cell::Wire);
+                                // ZX asks for a box's instance and preset as it
+                                // is placed, so the window opens from the write:
+                                // opening it from the editor ran a frame before
+                                // the cell existed and was then cleared.
+                                if matches!(cell, Cell::Block { .. }) {
+                                    self.block_edit = Some((section, rung, position));
+                                }
                                 cells[position] = cell;
                                 row.cells = cells;
                             }
@@ -3236,7 +3243,7 @@ fn fbd_operand_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Acti
 
 /// Keys the grid owns: arrows move between cells, Enter opens the element list.
 fn fbd_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
-    if plc.page != PlcPage::Edit || plc.text_editing {
+    if plc.page != PlcPage::Edit || plc.text_editing || text_field_focused(ui.ctx()) {
         return;
     }
     let is_fbd = plc
