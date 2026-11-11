@@ -37,10 +37,15 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         app.plc.text_editing = false;
         return;
     }
+    // Any modal owns the frame's keys: the element list, the operand and coil
+    // lists, and the compare/compute and box windows. Without the last two an
+    // Enter that advanced a stage here also opened the element list there.
     if app.plc.page != PlcPage::Edit
         || app.plc.picker.is_some()
         || app.plc.operand_pick.is_some()
         || app.plc.coil_pick.is_some()
+        || app.plc.expr_edit.is_some()
+        || app.plc.block_edit.is_some()
     {
         return;
     }
