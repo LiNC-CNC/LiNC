@@ -85,6 +85,11 @@ pub struct Config {
     pub scan_us: u64,
     /// Accept Force requests. Commissioning and tests only.
     pub allow_force: bool,
+    /// Where retained values are kept. `None` means retention is off, which is
+    /// logged at info level because it is a valid configuration.
+    pub retain_file: Option<PathBuf>,
+    /// How often the daemon publishes the store, in seconds.
+    pub retain_flush_s: u64,
 }
 
 /// A fatal startup or runtime error. Per-request failures travel back to the
@@ -262,7 +267,11 @@ pub fn run(config: Config, shutdown: Arc<AtomicBool>) -> Result<(), Error> {
         .name("linc-plc-socket".to_string())
         .spawn(move || server::serve(listener, server_shared))?;
 
-    let mut daemon = daemon::Daemon::new(config.project.clone());
+    let mut daemon = daemon::Daemon::new(
+        config.project.clone(),
+        config.retain_file.clone(),
+        Duration::from_secs(config.retain_flush_s.max(1)),
+    );
     daemon.run(
         &machine,
         &shared,

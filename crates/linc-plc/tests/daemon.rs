@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 use linc_plc::Config;
 use linc_plc_client::Client;
 use linc_plc_core::protocol::{Request, Response, StateSnapshot, PROTOCOL_VERSION};
-use linc_plc_core::{Coil, CoilKind, IoDirection, IoKind, IoPoint, Logic, Project, Rung, Section};
+use linc_plc_core::{
+    Coil, CoilKind, IoDirection, IoKind, IoPoint, Logic, Project, Rung, Section, VarDecl,
+};
 
 /// A daemon running on a temp socket with a temp project file.
 struct Harness {
@@ -25,7 +27,19 @@ struct Harness {
 
 impl Harness {
     fn start(project: &Project, allow_force: bool) -> Self {
-        let directory = tempfile::tempdir().expect("temp dir");
+        Self::start_with(project, allow_force, None)
+    }
+
+    fn start_with(project: &Project, allow_force: bool, retain: Option<PathBuf>) -> Self {
+        Self::start_in(project, allow_force, retain, tempfile::tempdir().expect("temp dir"))
+    }
+
+    fn start_in(
+        project: &Project,
+        allow_force: bool,
+        retain: Option<PathBuf>,
+        directory: tempfile::TempDir,
+    ) -> Self {
         let project_path = directory.path().join("ladder.json");
         let json = serde_json::to_vec_pretty(project).expect("serialize the project");
         fs::write(&project_path, json).expect("write the project");
@@ -38,6 +52,8 @@ impl Harness {
             no_hal: true,
             scan_us: 1000,
             allow_force,
+            retain_file: retain,
+            retain_flush_s: 1,
         };
         let flag = Arc::clone(&shutdown);
         let thread = thread::spawn(move || linc_plc::run(config, flag));
@@ -564,4 +580,87 @@ fn a_new_trend_window_restarts_history_and_stretches_the_stride() {
     }
     assert!(stretched.stride > 1, "a long window samples sparsely");
     assert_eq!(stretched.window_ms, 100_000);
+}
+
+#[test]
+fn retained_values_survive_a_daemon_restart() {
+    // A retained variable that a set coil drives on the first scan.
+    let mut project = Project::new("retain-restart");
+    let mut var = VarDecl::new("kept");
+    var.retain = true;
+    project.vars = vec![var];
+    project.sections = vec![Section {
+        name: "main".into(),
+        rungs: vec![Rung::new(
+            Logic::Const { value: true },
+            Coil::new("kept", CoilKind::Set),
+        )],
+    }];
+
+    let directory = tempfile::tempdir().expect("temp dir");
+    let retain_path = directory.path().join("retain.bin");
+
+    // First run: let the scan set the coil, then stop so the store is written.
+    {
+        let mut harness = Harness::start_in(
+            &project,
+            false,
+            Some(retain_path.clone()),
+            tempfile::tempdir().expect("first temp dir"),
+        );
+        let mut client = harness.client();
+        match client
+            .call(&Request::Load {
+                project: project.clone(),
+            })
+            .expect("load")
+        {
+            Response::Loaded { .. } => {}
+            other => panic!("expected loaded, got {}", describe(&other)),
+        }
+        client.call(&Request::Start).expect("start");
+        let mut seen = false;
+        for _ in 0..40 {
+            std::thread::sleep(Duration::from_millis(25));
+            if let Response::State(snapshot) = client.call(&Request::Snapshot).expect("snapshot") {
+                if var_value(&snapshot, "kept").0 {
+                    seen = true;
+                    break;
+                }
+            }
+        }
+        assert!(seen, "the set coil must drive the retained variable");
+        client.call(&Request::Stop).expect("stop");
+        client.call(&Request::Shutdown).expect("shutdown");
+        drop(harness);
+    }
+    assert!(retain_path.exists(), "Stop must publish the store");
+
+    // Second run: the value comes back on Load, before any scan.
+    {
+        let mut harness = Harness::start_in(
+            &project,
+            false,
+            Some(retain_path.clone()),
+            tempfile::tempdir().expect("second temp dir"),
+        );
+        let mut client = harness.client();
+        match client
+            .call(&Request::Load {
+                project: project.clone(),
+            })
+            .expect("load")
+        {
+            Response::Loaded { .. } => {}
+            other => panic!("expected loaded, got {}", describe(&other)),
+        }
+        let snapshot = expect_state(client.call(&Request::Snapshot).expect("snapshot"));
+        assert_eq!(
+            var_value(&snapshot, "kept").0,
+            true,
+            "the retained value came back without a scan"
+        );
+        assert!(!snapshot.forced.iter().any(|name| name == "kept"));
+        client.call(&Request::Shutdown).expect("shutdown");
+    }
 }

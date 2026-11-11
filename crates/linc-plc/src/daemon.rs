@@ -1,7 +1,7 @@
 //! The scan loop: command application, ladder execution, state machine and the
 //! shared snapshot.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
@@ -60,6 +60,11 @@ pub(crate) struct Daemon {
     /// Configured scan period, used to turn a window in milliseconds into a
     /// stride in scans.
     period_us: u64,
+    /// Retained values: where they go, how often, and the last packed blob.
+    retain_path: Option<PathBuf>,
+    retain_flush: Duration,
+    retain_dirty: Option<Vec<u8>>,
+    retain_last: Instant,
     /// The window and stride the ring is currently using.
     trend_window: u32,
     trend_stride: u32,
@@ -69,7 +74,7 @@ pub(crate) struct Daemon {
 }
 
 impl Daemon {
-    pub(crate) fn new(project: PathBuf) -> Self {
+    pub(crate) fn new(project: PathBuf, retain_path: Option<PathBuf>, retain_flush: Duration) -> Self {
         Self {
             project,
             phase: Phase::Idle,
@@ -83,6 +88,10 @@ impl Daemon {
             alive: false,
             watch: Vec::new(),
             period_us: 2000,
+            retain_path,
+            retain_flush,
+            retain_dirty: None,
+            retain_last: Instant::now(),
             trend_window: 20_000,
             trend_stride: 1,
             trend_tick: 0,
@@ -107,6 +116,7 @@ impl Daemon {
                 self.apply(command, hal, shared);
             }
 
+            self.flush_retained(false);
             if self.phase == Phase::Running {
                 if let Err(message) = self.execute(hal, shared) {
                     self.fail(message, hal, shared);
@@ -149,6 +159,8 @@ impl Daemon {
                 std::thread::sleep(period - elapsed);
             }
         }
+        // Leaving: publish whatever the last run produced.
+        self.flush_retained(true);
     }
 
     /// The daemon is leaving: make the last published state say so.
@@ -182,6 +194,7 @@ impl Daemon {
                 self.vm = Some(Vm::new(&compiled));
                 self.set_watch(watch, shared);
                 self.hash = compiled.hash.clone();
+                self.restore_retained();
                 self.forces.clear();
                 self.phase = Phase::Loaded;
                 self.fault = None;
@@ -250,6 +263,9 @@ impl Daemon {
                 self.alive = false;
                 let _ = hal.ctl().set_alive(false);
                 let _ = hal.ctl().set_fault(false);
+                // A stop is a safe point: the values a run produced are worth
+                // keeping even if the process goes away next.
+                self.flush_retained(true);
                 self.publish(shared);
                 answer(reply, Response::State(self.snapshot()));
             }
@@ -333,6 +349,8 @@ impl Daemon {
     /// bound outputs.
     fn execute(&mut self, hal: &Hal, shared: &Shared) -> Result<(), String> {
         self.expire_forces();
+        let retain_hash = self.hash.clone();
+        let retain_wanted = self.retain_path.is_some();
         let Some(vm) = self.vm.as_mut() else {
             return Err("no program is loaded".to_string());
         };
@@ -345,6 +363,15 @@ impl Daemon {
             .unwrap_or(20);
         self.last_scan = Some(Instant::now());
         vm.scan_with_dt(&inputs, dt_ms.max(1));
+        let packed = if retain_wanted {
+            Some(linc_plc_core::retain::pack(
+                &retain_hash,
+                vm.retain_layout_hash(),
+                &vm.retain_pack(),
+            ))
+        } else {
+            None
+        };
         // The watch list is read from the VM after the scan, so a sample is the
         // state a reader saw at the end of that scan.
         if !self.watch.is_empty() {
@@ -372,6 +399,21 @@ impl Daemon {
                         trend.samples.remove(0);
                     }
                 }
+            }
+        }
+        if let Some(blob) = packed {
+            // A blob over the cap turns retention off with one error rather
+            // than writing something the next start cannot read.
+            if blob.len() > linc_plc_core::retain::MAX_BLOB {
+                log::error!(
+                    "linc-plc: the retain blob would be {} bytes, over the {} limit; retention is off",
+                    blob.len(),
+                    linc_plc_core::retain::MAX_BLOB
+                );
+                self.retain_path = None;
+                self.retain_dirty = None;
+            } else {
+                self.retain_dirty = Some(blob);
             }
         }
         hal.write_outputs(vm.outputs())
@@ -433,6 +475,67 @@ impl Daemon {
         }
     }
 
+    /// Put the saved values back after a load, gated on both hashes.
+    fn restore_retained(&mut self) {
+        let Some(path) = self.retain_path.clone() else {
+            return;
+        };
+        let Some(vm) = self.vm.as_mut() else {
+            return;
+        };
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                log::info!(
+                    "linc-plc: no retain store at {}; starting with fresh values",
+                    path.display()
+                );
+                return;
+            }
+            Err(error) => {
+                log::error!(
+                    "linc-plc: cannot read the retain store {}: {error}; continuing without it",
+                    path.display()
+                );
+                return;
+            }
+        };
+        match linc_plc_core::retain::unpack(&bytes, &self.hash, vm.retain_layout_hash()) {
+            Ok(retained) => {
+                vm.retain_unpack(&retained);
+                log::info!(
+                    "linc-plc: restored {} retained bit(s) and {} word(s) from {}",
+                    retained.bits.len(),
+                    retained.words.len(),
+                    path.display()
+                );
+            }
+            Err(refusal) => log::error!("linc-plc: {}; continuing with fresh values", refusal.message()),
+        }
+    }
+
+    /// Publish the last packed blob: tmp file, fsync, rename, fsync the folder.
+    fn flush_retained(&mut self, force: bool) {
+        if !force && self.retain_last.elapsed() < self.retain_flush {
+            return;
+        }
+        let Some(path) = self.retain_path.clone() else {
+            return;
+        };
+        let Some(bytes) = self.retain_dirty.take() else {
+            return;
+        };
+        if let Err(error) = publish_atomic(&path, &bytes) {
+            log::error!(
+                "linc-plc: cannot publish {}: {error}; values stay in memory",
+                path.display()
+            );
+            self.retain_dirty = Some(bytes);
+            return;
+        }
+        self.retain_last = Instant::now();
+    }
+
     fn snapshot(&self) -> StateSnapshot {
         let (vars, words, forced) = match &self.vm {
             Some(vm) => (vm.snapshot(), vm.word_snapshot(), vm.forced()),
@@ -471,4 +574,24 @@ fn answer(reply: Sender<Response>, response: Response) {
     if reply.send(response).is_err() {
         log::warn!("linc-plc: the client went away before the reply");
     }
+}
+
+/// Write a file so a reader sees either the old bytes or the new ones.
+fn publish_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let directory = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "retain".to_string());
+    let temporary = directory.join(format!(".{name}.tmp"));
+    let mut file = std::fs::File::create(&temporary)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
+    std::fs::rename(&temporary, path)?;
+    if let Ok(folder) = std::fs::File::open(directory) {
+        let _ = folder.sync_all();
+    }
+    Ok(())
 }

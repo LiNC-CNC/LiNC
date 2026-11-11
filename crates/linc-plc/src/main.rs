@@ -42,6 +42,12 @@ struct Cli {
     /// Accept Force requests (commissioning and tests only).
     #[arg(long)]
     allow_force: bool,
+    /// File the retained values live in; absent means retention is off.
+    #[arg(long)]
+    retain_file: Option<PathBuf>,
+    /// Seconds between retained-value publishes.
+    #[arg(long, default_value_t = 5)]
+    retain_flush_s: u64,
 }
 
 fn main() -> ExitCode {
@@ -64,6 +70,8 @@ fn main() -> ExitCode {
         no_hal: cli.no_hal,
         scan_us: cli.scan_us,
         allow_force: cli.allow_force,
+        retain_file: cli.retain_file,
+        retain_flush_s: cli.retain_flush_s,
     };
 
     match linc_plc::run(config, shutdown) {
