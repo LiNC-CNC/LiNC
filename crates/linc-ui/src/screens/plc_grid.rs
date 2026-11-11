@@ -249,9 +249,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                     })
                     .map(|rung| {
                         (low..=high)
-                            .map(|position| {
-                                rung.cells.get(position).cloned().unwrap_or(Cell::Wire)
-                            })
+                            .map(|position| rung.cells.get(position).cloned().unwrap_or(Cell::Wire))
                             .collect::<Vec<Cell>>()
                     })
                     .collect::<Vec<_>>();

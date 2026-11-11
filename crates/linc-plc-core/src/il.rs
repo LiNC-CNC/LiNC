@@ -32,9 +32,7 @@ pub const SUPPORTED: [&str; 26] = [
 ];
 
 /// Mnemonics that need a feature this compiler does not have yet.
-pub const UNSUPPORTED: [&str; 7] = [
-    "CALC", "CALCN", "JMP", "JMPC", "JMPCN", "RETC", "RETCN",
-];
+pub const UNSUPPORTED: [&str; 7] = ["CALC", "CALCN", "JMP", "JMPC", "JMPCN", "RETC", "RETCN"];
 
 /// Parse a function-block call: `TON0(IN:=start, PT:=T#4s)`.
 pub fn parse_call(operand: &str) -> Option<(String, Vec<(String, String)>)> {

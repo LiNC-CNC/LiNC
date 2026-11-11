@@ -2256,8 +2256,8 @@ fn fbd_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
         RichText::new(
             "click a block in the diagram for its instance and preset · output := BLOCK(inputs)",
         )
-            .size(theme::font_size(9.0))
-            .color(theme::MUTED),
+        .size(theme::font_size(9.0))
+        .color(theme::MUTED),
     );
     ui.add_space(4.0);
     let mut remove: Option<usize> = None;

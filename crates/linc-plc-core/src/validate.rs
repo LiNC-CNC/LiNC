@@ -255,7 +255,8 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                             )),
                                         }
                                     }
-                                } else if !pou_names.contains(&operand.trim().to_ascii_uppercase()) {
+                                } else if !pou_names.contains(&operand.trim().to_ascii_uppercase())
+                                {
                                     diagnostics.push(Diagnostic::error(
                                         "cal_target",
                                         format!("'{operand}' is not a POU in this project"),
