@@ -794,8 +794,7 @@ fn check_fbd_grid(
         let mut compute = false;
         if matches!(name.as_str(), "AND" | "OR" | "XOR" | "NOT") {
             needs_bit = true;
-        } else if let Some((kind, _, _)) =
-            crate::compile::parse_block(&name, &name, &block.preset)
+        } else if let Some((kind, _, _)) = crate::compile::parse_block(&name, &name, &block.preset)
         {
             if kind.is_latch() {
                 needs_two_bits = true;

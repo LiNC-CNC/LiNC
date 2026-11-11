@@ -521,11 +521,7 @@ fn lower_fbd_line(
 /// Lower a drawn grid. Blocks are evaluated in reading order (row, then
 /// column), which is the order the editor enforces: a block may only take its
 /// input from something to its left or above.
-fn lower_fbd_grid(
-    grid: &crate::model::FbdGrid,
-    lookup: &HashMap<String, u16>,
-    ops: &mut Vec<Op>,
-) {
+fn lower_fbd_grid(grid: &crate::model::FbdGrid, lookup: &HashMap<String, u16>, ops: &mut Vec<Op>) {
     let mut order = grid
         .blocks
         .iter()
