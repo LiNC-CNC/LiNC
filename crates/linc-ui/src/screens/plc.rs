@@ -1976,7 +1976,44 @@ const STATUS_BAR_HEIGHT: f32 = 22.0;
 /// The PLC page is the launcher. ZX-PLC is a keyboard application, so the
 /// workbench itself is a popped-out overlay that owns every key; the page keeps
 /// the project, the service and the way in.
+
+/// True when `key` was pressed with Ctrl held.
+///
+/// `consume_key` matches modifiers exactly, and egui-winit reports Ctrl as
+/// `CTRL | COMMAND` on Linux, so an exact `CTRL` binding never fired. The bit is
+/// what the operator means, so the bit is what is tested.
+fn ctrl_key(ui: &Ui, key: egui::Key) -> bool {
+    ui.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key {
+                    key: pressed,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if *pressed == key && modifiers.ctrl
+            )
+        })
+    })
+}
+
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
+    if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+        ui.input(|input| {
+            for event in &input.events {
+                if let egui::Event::Key {
+                    key,
+                    pressed,
+                    modifiers,
+                    ..
+                } = event
+                {
+                    eprintln!("raw key {key:?} pressed={pressed} mods={modifiers:?}");
+                }
+            }
+        });
+    }
     app.plc.poll();
     common::focus_anchor(ui, "plc-page-focus");
 
@@ -2043,6 +2080,16 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     // focus all give it back. It is deliberately not derived from "some TextEdit
     // has focus", because egui can hand focus to a field on a plain key press and
     // then the grid went deaf without the operator ever clicking a field.
+    // No field may hold focus unless the operator claimed one by clicking it.
+    // A TextEdit that keeps focus on this page consumes Enter and chords such as
+    // Ctrl+Enter before the grid's handlers see them.
+    if !app.plc.text_editing {
+        ui.ctx().memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+    }
     if app.plc.text_editing {
         let still_focused = text_field_focused(ui.ctx());
         let page_lost_owner = app.plc.page != PlcPage::Edit;
@@ -2070,16 +2117,17 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     common::focus_anchor(ui, "plc-editor-focus");
     // The menu bar does not take clicks in this build, so the pages and the
     // two actions the workflow needs every minute have keys as well.
-    let (to_pous, to_edit, to_symbols, to_sim, add_rung, save) = ui.input_mut(|input| {
-        (
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::Num1),
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::Num2),
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::Num3),
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::Num4),
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::N),
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::S),
-        )
-    });
+    let (to_pous, to_edit, to_symbols, to_sim, add_rung, save, add_row) = (
+        ctrl_key(ui, egui::Key::Num1),
+        ctrl_key(ui, egui::Key::Num2),
+        ctrl_key(ui, egui::Key::Num3),
+        ctrl_key(ui, egui::Key::Num4),
+        ctrl_key(ui, egui::Key::N),
+        ctrl_key(ui, egui::Key::S),
+        // The manual's SS+ENTER substitute, plus Ctrl+J for terminals that
+        // cannot send Ctrl+Enter.
+        ctrl_key(ui, egui::Key::Enter) || ctrl_key(ui, egui::Key::J),
+    );
     if to_pous {
         app.plc.page = PlcPage::PouList;
     }
@@ -2101,6 +2149,12 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     }
     if add_rung {
         app.plc.apply(Action::AddRung);
+    }
+    if add_row {
+        let row = app.plc.cell_cursor.map(|cursor| cursor.1).unwrap_or(0);
+        app.plc.apply(Action::AddRung);
+        let section = app.plc.cell_cursor.map(|cursor| cursor.0).unwrap_or(0);
+        app.plc.cell_cursor = Some((section, row + 1, 0));
     }
     if save {
         app.plc.apply(Action::Save);
@@ -5710,7 +5764,10 @@ mod picker_key_tests {
     #[test]
     fn only_an_undrawn_picker_is_stale() {
         use crate::screens::plc_grid::picker_is_stale;
-        assert!(picker_is_stale(true, false), "state without a window is stale");
+        assert!(
+            picker_is_stale(true, false),
+            "state without a window is stale"
+        );
         assert!(!picker_is_stale(true, true), "a drawn picker stays");
         assert!(!picker_is_stale(false, false), "no state, nothing to drop");
     }

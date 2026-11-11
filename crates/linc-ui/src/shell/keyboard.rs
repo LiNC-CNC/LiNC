@@ -35,6 +35,14 @@ impl LincApp {
             }
             return;
         }
+        // The PLC editor owns the keyboard while it is open. Its grid, its
+        // pickers and its text fields all take the manual's keys, so the shell
+        // must not consume Enter, Escape, the arrows, the element letters or the
+        // page chords first. Emergency and safety keys stay global: they are
+        // handled on paths that run before this guard.
+        if self.overlay.plc_editor {
+            return;
+        }
         self.hand_cut_to_page(ui);
         // A modal messages dialog owns the keyboard: Enter/Escape close it and
         // the page keys scroll it. Nothing behind it may react to a key.

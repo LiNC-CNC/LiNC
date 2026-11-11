@@ -155,6 +155,17 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             letter(input, egui::Key::R),
         )
     });
+    // Ctrl+Enter adds a row below the cursor, the manual's SS+ENTER substitute.
+    // It is consumed here, before the page draws any widget, so a focused field
+    // cannot take the chord first.
+    if ui.input_mut(|input| {
+        input.consume_key(egui::Modifiers::CTRL, egui::Key::Enter)
+            || input.consume_key(egui::Modifiers::ALT, egui::Key::Enter)
+    }) {
+        actions.push(Action::AddRung);
+        app.plc.cell_cursor = Some((cursor.0, cursor.1 + 1, 0));
+        return;
+    }
     let insert = ui.input_mut(|input| letter(input, egui::Key::I));
     // `/` on an empty row starts a network comment row, as the manual does.
     let slash = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Slash));
