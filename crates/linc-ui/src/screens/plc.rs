@@ -2038,6 +2038,32 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     }
 
     app.plc.poll();
+    // The grid owns the keyboard unless a text field actually has focus. This is
+    // derived every frame: the property fields that set the flag are only drawn
+    // on some pages, so a click that opened one and then changed page left the
+    // flag set forever and the whole editor deaf to the manual's keys.
+    let derived = text_field_focused(ui.ctx());
+    if app.plc.text_editing != derived {
+        app.plc.text_editing = derived;
+    }
+    if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+        let keyed = ui.input(|input| {
+            input
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::Key { .. }))
+        });
+        if keyed {
+            eprintln!(
+                "plc keys: page={:?} text_editing={} picker={} operand_pick={} coil_pick={}",
+                app.plc.page,
+                app.plc.text_editing,
+                app.plc.picker.is_some(),
+                app.plc.operand_pick.is_some(),
+                app.plc.coil_pick.is_some(),
+            );
+        }
+    }
     common::focus_anchor(ui, "plc-editor-focus");
     // The menu bar does not take clicks in this build, so the pages and the
     // two actions the workflow needs every minute have keys as well.
@@ -2056,6 +2082,7 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     }
     if to_edit {
         app.plc.page = PlcPage::Edit;
+        app.plc.text_editing = false;
     }
     if to_symbols {
         app.plc.page = PlcPage::Symbols;

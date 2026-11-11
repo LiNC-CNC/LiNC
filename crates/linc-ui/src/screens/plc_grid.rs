@@ -626,7 +626,6 @@ fn xref_window(plc: &mut PlcUi, ctx: &egui::Context) {
     }
 }
 
-
 /// What a modal picker does with the keys pressed this frame.
 ///
 /// The pickers read events themselves rather than a text field: a field needs a
@@ -646,12 +645,11 @@ fn modal_keys(ctx: &egui::Context) -> ModalKeys {
     for event in ctx.input(|input| input.events.clone()) {
         match event {
             egui::Event::Text(text) => {
-                keys.typed.extend(text.chars().filter(|c| c.is_ascii_graphic() || *c == ' '));
+                keys.typed
+                    .extend(text.chars().filter(|c| c.is_ascii_graphic() || *c == ' '));
             }
             egui::Event::Key {
-                key,
-                pressed: true,
-                ..
+                key, pressed: true, ..
             } => match key {
                 egui::Key::Backspace => keys.backspace = true,
                 egui::Key::Enter => keys.enter = true,
@@ -708,14 +706,18 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 (true, _) => key_coil = Some(CoilKind::Normal),
                 (false, "wire") => key_cell = Some(Cell::Wire),
                 (false, "link") => key_cell = Some(Cell::Link),
-                (false, "contact") => key_cell = Some(Cell::Contact {
-                    var: first.clone(),
-                    negated: false,
-                }),
-                (false, "negated") => key_cell = Some(Cell::Contact {
-                    var: first.clone(),
-                    negated: true,
-                }),
+                (false, "contact") => {
+                    key_cell = Some(Cell::Contact {
+                        var: first.clone(),
+                        negated: false,
+                    })
+                }
+                (false, "negated") => {
+                    key_cell = Some(Cell::Contact {
+                        var: first.clone(),
+                        negated: true,
+                    })
+                }
                 (false, "compare") => {
                     plc.expr_edit = Some(ExprEdit {
                         section,
@@ -764,7 +766,9 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
         plc.picker = None;
         return true;
     }
+    let mut visible = true;
     egui::Window::new("ELEMENT")
+        .open(&mut visible)
         .order(egui::Order::Foreground)
         .collapsible(false)
         .resizable(false)
@@ -943,7 +947,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
     if let Some(pick) = next_operand {
         plc.operand_pick = Some(pick);
     }
-    if close {
+    if close || !visible {
         plc.picker = None;
         return true;
     }
@@ -982,7 +986,9 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
         plc.operand_filter.clear();
         return;
     }
+    let mut visible = true;
     egui::Window::new("OPERAND")
+        .open(&mut visible)
         .order(egui::Order::Foreground)
         .collapsible(false)
         .resizable(false)
@@ -1047,7 +1053,7 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 close = true;
             }
         });
-    if close {
+    if close || !visible {
         plc.operand_pick = None;
         plc.operand_filter.clear();
     }
@@ -1094,7 +1100,9 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
         plc.operand_filter.clear();
         return;
     }
+    let mut visible = true;
     egui::Window::new("COIL OPERAND")
+        .open(&mut visible)
         .order(egui::Order::Foreground)
         .collapsible(false)
         .resizable(false)
@@ -1141,7 +1149,7 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
                 close = true;
             }
         });
-    if close {
+    if close || !visible {
         plc.coil_pick = None;
         plc.operand_filter.clear();
     }
