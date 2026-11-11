@@ -121,7 +121,17 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             .map(|operand| operand.to_string());
     }
     if enter {
-        app.plc.picker = Some(cursor);
+        let block = sections
+            .get(cursor.0)
+            .and_then(|section| section.rungs.get(cursor.1))
+            .and_then(|rung| rung.cells.get(cursor.2))
+            .map(|cell| matches!(cell, Cell::Block { .. }))
+            .unwrap_or(false);
+        if block {
+            app.plc.block_edit = Some(cursor);
+        } else {
+            app.plc.picker = Some(cursor);
+        }
     }
     if delete && cursor.2 < POSITIONS {
         actions.push(Action::SetCell {
@@ -138,7 +148,93 @@ pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     element_picker(plc, ctx, actions);
     operand_picker(plc, ctx, actions);
     expr_editor(plc, ctx, actions);
+    block_editor(plc, ctx, actions);
     xref_window(plc, ctx);
+}
+
+/// Timer and counter boxes: which of the four instances, and the preset. ZX
+/// asks for both when the box is placed; here the same window edits a placed box.
+fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    let Some((section, rung, position)) = plc.block_edit else {
+        return;
+    };
+    let cell = plc
+        .current_pou_sections()
+        .get(section)
+        .and_then(|section| section.rungs.get(rung))
+        .and_then(|rung| rung.cells.get(position))
+        .cloned();
+    let Some(Cell::Block {
+        block,
+        instance,
+        preset,
+    }) = cell
+    else {
+        plc.block_edit = None;
+        return;
+    };
+    let mut close = false;
+    let mut apply: Option<Cell> = None;
+    egui::Window::new(format!("{block} BOX"))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.label(
+                RichText::new(format!("{instance}   {preset}"))
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            ui.add_space(4.0);
+            ui.label(RichText::new("instance").size(theme::font_size(9.0)).color(theme::MUTED));
+            ui.horizontal(|ui| {
+                for number in 0..4 {
+                    let name = format!("{block}{number}");
+                    if theme::action_button(ui, &name, true).clicked() {
+                        apply = Some(Cell::Block {
+                            block: block.clone(),
+                            instance: name,
+                            preset: preset.clone(),
+                        });
+                    }
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(RichText::new("preset").size(theme::font_size(9.0)).color(theme::MUTED));
+            ui.horizontal_wrapped(|ui| {
+                let presets: &[&str] = if block.starts_with("CT") {
+                    &["1", "5", "10", "50", "100", "1000"]
+                } else {
+                    &["T#100ms", "T#500ms", "T#1s", "T#2s", "T#5s", "T#10s"]
+                };
+                for value in presets {
+                    if ui.button(*value).clicked() {
+                        apply = Some(Cell::Block {
+                            block: block.clone(),
+                            instance: instance.clone(),
+                            preset: (*value).to_string(),
+                        });
+                    }
+                }
+            });
+            ui.add_space(4.0);
+            if theme::action_button(ui, "Cancel", true).clicked() {
+                close = true;
+            }
+        });
+    if let Some(cell) = apply {
+        actions.push(Action::SetCell {
+            section,
+            rung,
+            position,
+            cell,
+        });
+        close = true;
+    }
+    if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        plc.block_edit = None;
+    }
 }
 
 /// Cross references of the operand under the cursor: every cell and coil that

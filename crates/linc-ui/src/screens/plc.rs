@@ -714,6 +714,8 @@ pub struct PlcUi {
     pub cell_clipboard: Option<Cell>,
     /// The operand whose cross references are shown.
     pub xref: Option<String>,
+    /// A timer or counter box is being edited at this cell.
+    pub block_edit: Option<(usize, usize, usize)>,
     /// Boolean traces for the trend page.
     pub trend: TrendBuffer,
     /// The word bank and block members from the last snapshot.
@@ -765,6 +767,7 @@ impl Default for PlcUi {
             redo_stack: Vec::new(),
             cell_clipboard: None,
             xref: None,
+            block_edit: None,
             trend: TrendBuffer::default(),
             words: Vec::new(),
             il_text: String::new(),
