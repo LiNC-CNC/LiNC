@@ -9,6 +9,15 @@ use crate::il::{parse_line, word_operand, IlLine, UNSUPPORTED};
 use crate::model::{IoDirection, Logic, PouLanguage, Project, Section};
 use crate::SCHEMA_VERSION;
 
+/// IL mnemonics that push or combine a bit.
+const IL_BIT_OPS: [&str; 8] = ["LDN", "AND", "ANDN", "OR", "ORN", "XOR", "XORN", "NOT"];
+
+/// IL mnemonics that read a word accumulator.
+const IL_WORD_OPS: [&str; 5] = ["ADD", "SUB", "MUL", "DIV", "MOD"];
+
+/// IL compares: they read a word and leave a bit.
+const IL_COMPARES: [&str; 6] = ["GT", "GE", "EQ", "NE", "LE", "LT"];
+
 /// Maximum accepted logic nesting depth.
 const MAX_DEPTH: usize = 64;
 /// Maximum number of io points plus variables.
@@ -132,6 +141,10 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     }
 
     let pous = project.all_pous();
+    let pou_names: HashSet<String> = pous
+        .iter()
+        .map(|pou| pou.name.to_ascii_uppercase())
+        .collect();
     let known: HashSet<String> = project
         .io
         .iter()
@@ -142,16 +155,81 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         match pou.language {
             PouLanguage::Ld => {}
             PouLanguage::Il => {
+                // Type flow: a word operation on a bit accumulator computes
+                // garbage, so it is reported rather than silently run.
+                let mut accumulator: Option<bool> = None;
                 for (line_index, line) in pou.il.iter().enumerate() {
                     let path = format!("pous[{index}].il[{line_index}]");
                     match parse_line(line) {
                         IlLine::Instruction { mnemonic, operand } => {
+                            let operand_is_word = word_operand(&operand).is_some()
+                                || operand.trim().parse::<i16>().is_ok()
+                                || operand.starts_with("T#");
+                            if matches!(mnemonic.as_str(), "ST" | "STN" | "=") {
+                                if let Some(current) = accumulator {
+                                    if current != operand_is_word {
+                                        diagnostics.push(Diagnostic::error(
+                                            "il_type",
+                                            format!(
+                                                "'{mnemonic}' stores a {}, but the accumulator holds a {}",
+                                                if operand_is_word { "word" } else { "bit" },
+                                                if current { "word" } else { "bit" },
+                                            ),
+                                            path.clone(),
+                                        ));
+                                    }
+                                }
+                            }
+                            if matches!(mnemonic.as_str(), "LD" | "LDN") {
+                                accumulator = Some(operand_is_word);
+                            } else if IL_BIT_OPS.contains(&mnemonic.as_str()) {
+                                if let Some(true) = accumulator {
+                                    diagnostics.push(Diagnostic::error(
+                                        "il_type",
+                                        format!(
+                                            "'{mnemonic}' needs a bit in the accumulator, not a word"
+                                        ),
+                                        path.clone(),
+                                    ));
+                                }
+                            }
                             if UNSUPPORTED.contains(&mnemonic.as_str()) {
                                 diagnostics.push(Diagnostic::error(
                                     "il_unsupported",
                                     format!("'{mnemonic}' is not implemented yet"),
                                     path,
                                 ));
+                            } else if mnemonic == "CAL" {
+                                if !pou_names.contains(&operand.trim().to_ascii_uppercase()) {
+                                    diagnostics.push(Diagnostic::error(
+                                        "cal_target",
+                                        format!("'{operand}' is not a POU in this project"),
+                                        path,
+                                    ));
+                                }
+                            } else if IL_COMPARES.contains(&mnemonic.as_str()) {
+                                if let Some(false) = accumulator {
+                                    diagnostics.push(Diagnostic::error(
+                                        "il_type",
+                                        format!(
+                                            "'{mnemonic}' needs a word in the accumulator, not a bit"
+                                        ),
+                                        path.clone(),
+                                    ));
+                                }
+                                accumulator = Some(false);
+                            } else if IL_WORD_OPS.contains(&mnemonic.as_str()) {
+                                if let Some(false) = accumulator {
+                                    diagnostics.push(Diagnostic::error(
+                                        "il_type",
+                                        format!(
+                                            "'{mnemonic}' needs a word in the accumulator, not a bit"
+                                        ),
+                                        path.clone(),
+                                    ));
+                                }
+                                // Arithmetic leaves a word, a compare a bit.
+                                accumulator = Some(IL_WORD_OPS.contains(&mnemonic.as_str()));
                             } else if word_operand(&operand).is_none()
                                 && operand.trim().parse::<i16>().is_err()
                                 && !known.contains(&operand.to_ascii_lowercase())
@@ -249,6 +327,36 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             ));
         }
     }
+    // A call cycle is an error: inlining would stop at the depth guard and the
+    // program would silently do half of what it says.
+    let calls: HashMap<String, Vec<String>> = pous
+        .iter()
+        .map(|pou| {
+            let targets = pou
+                .il
+                .iter()
+                .filter_map(|line| match parse_line(line) {
+                    IlLine::Instruction { mnemonic, operand } if mnemonic == "CAL" => {
+                        Some(operand.trim().to_ascii_uppercase())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            (pou.name.to_ascii_uppercase(), targets)
+        })
+        .collect();
+    for pou in &pous {
+        let start = pou.name.to_ascii_uppercase();
+        let mut stack = vec![start.clone()];
+        if let Some(cycle) = find_cycle(&start, &calls, &mut stack) {
+            diagnostics.push(Diagnostic::error(
+                "cal_cycle",
+                format!("'{}' calls itself through {}", pou.name, cycle.join(" -> ")),
+                "pous",
+            ));
+        }
+    }
+
     let sections: Vec<&Section> = pous.iter().flat_map(|pou| pou.sections.iter()).collect();
 
     let edge_contacts = pous
@@ -470,6 +578,27 @@ fn register<'a>(
         return;
     }
     symbols.insert(name, class);
+}
+
+/// Depth-first walk of the call graph, returning the path that closes a cycle.
+fn find_cycle(
+    name: &str,
+    calls: &HashMap<String, Vec<String>>,
+    stack: &mut Vec<String>,
+) -> Option<Vec<String>> {
+    for target in calls.get(name).map(Vec::as_slice).unwrap_or(&[]) {
+        if let Some(position) = stack.iter().position(|entry| entry == target) {
+            let mut cycle = stack[position..].to_vec();
+            cycle.push(target.clone());
+            return Some(cycle);
+        }
+        stack.push(target.clone());
+        if let Some(cycle) = find_cycle(target, calls, stack) {
+            return Some(cycle);
+        }
+        stack.pop();
+    }
+    None
 }
 
 fn check_name(name: &str, path: &str, diagnostics: &mut Vec<Diagnostic>) {

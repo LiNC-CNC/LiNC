@@ -26,14 +26,14 @@ pub enum IlLine {
 }
 
 /// Mnemonics this compiler can lower into the scan VM.
-pub const SUPPORTED: [&str; 24] = [
+pub const SUPPORTED: [&str; 25] = [
     "LD", "LDN", "AND", "ANDN", "OR", "ORN", "XOR", "XORN", "NOT", "ST", "STN", "S", "R", "=",
-    "ADD", "SUB", "MUL", "DIV", "MOD", "GT", "GE", "EQ", "NE", "LE",
+    "ADD", "SUB", "MUL", "DIV", "MOD", "GT", "GE", "EQ", "NE", "LE", "CAL",
 ];
 
 /// Mnemonics that need a feature this compiler does not have yet.
-pub const UNSUPPORTED: [&str; 9] = [
-    "CAL", "CALC", "CALCN", "JMP", "JMPC", "JMPCN", "RET", "RETC", "RETCN",
+pub const UNSUPPORTED: [&str; 8] = [
+    "CALC", "CALCN", "JMP", "JMPC", "JMPCN", "RET", "RETC", "RETCN",
 ];
 
 /// A word operand of the `MWn` bank, as the compiler resolves it.

@@ -252,60 +252,28 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         .iter()
         .map(|(name, index)| (name.to_ascii_lowercase(), *index))
         .collect();
+    // A POU that another POU calls is a routine: it runs where it is called,
+    // not on its own. With no calls every POU is a program, which is how the
+    // compiler behaved before `CAL` existed.
+    let mut called: std::collections::HashSet<String> = std::collections::HashSet::new();
     for pou in &pous {
-        match pou.language {
-            PouLanguage::Ld => {
-                for section in &pou.sections {
-                    let mut index = 0;
-                    while index < section.rungs.len() {
-                        if section.rungs[index].cells.is_empty() {
-                            let rung = &section.rungs[index];
-                            lower_logic(&rung.logic, &lookup, &mut ops);
-                            store_coil(&mut ops, &lookup, &rung.coil);
-                            index += 1;
-                            continue;
-                        }
-                        // A run of grid rows. A link in one row makes the next
-                        // row its parallel branch, so the run is lowered as a
-                        // stack rather than one rung at a time.
-                        let mut run: Vec<Vec<crate::grid::Cell>> = Vec::new();
-                        while let Some(row) = section.rungs.get(index + run.len()) {
-                            if row.cells.is_empty() {
-                                break;
-                            }
-                            run.push(row.cells.clone());
-                        }
-                        let mut offset = 0;
-                        while offset < run.len() {
-                            let (used, compute) =
-                                lower_grid_rung(&run, offset, &lookup, &mut ops, &mut edges);
-                            if !compute {
-                                store_coil(&mut ops, &lookup, &section.rungs[index + offset].coil);
-                            }
-                            offset += used;
-                        }
-                        index += run.len();
-                    }
-                }
-            }
-            PouLanguage::Il => {
-                for line in &pou.il {
-                    if let IlLine::Instruction { mnemonic, operand } = parse_line(line) {
-                        lower_line(
-                            &mnemonic,
-                            il_operand(&operand, &lookup, &lookup_ci),
-                            &mut ops,
-                        );
-                    }
-                }
-            }
-            // Validation refuses these before lowering runs.
-            PouLanguage::Fbd => {
-                for line in &pou.fbd {
-                    lower_fbd_line(line, &lookup, &mut ops);
+        for line in &pou.il {
+            if let IlLine::Instruction { mnemonic, operand } = parse_line(line) {
+                if mnemonic == "CAL" {
+                    called.insert(operand.trim().to_ascii_uppercase());
                 }
             }
         }
+    }
+    let by_name: HashMap<String, &crate::model::Pou> = pous
+        .iter()
+        .map(|pou| (pou.name.to_ascii_uppercase(), pou))
+        .collect();
+    for pou in &pous {
+        if called.contains(&pou.name.to_ascii_uppercase()) {
+            continue;
+        }
+        lower_pou(pou, &by_name, &lookup, &lookup_ci, &mut ops, &mut edges, 0);
     }
 
     let program = Program {
@@ -366,6 +334,83 @@ fn intern(
     });
     lookup.insert(name.to_string(), index);
     index
+}
+
+/// Lower one POU. `CAL` reaches another POU by lowering its body here, which is
+/// what a call means in a scan-based PLC: no locals, no stack frame, the
+/// callee's coils and timers are the same ones it owns when it runs alone.
+fn lower_pou(
+    pou: &crate::model::Pou,
+    pous: &HashMap<String, &crate::model::Pou>,
+    lookup: &HashMap<String, u16>,
+    lookup_ci: &HashMap<String, u16>,
+    ops: &mut Vec<Op>,
+    edges: &mut u16,
+    depth: u8,
+) {
+    if depth > 8 {
+        return;
+    }
+    match pou.language {
+            PouLanguage::Ld => {
+                for section in &pou.sections {
+                    let mut index = 0;
+                    while index < section.rungs.len() {
+                        if section.rungs[index].cells.is_empty() {
+                            let rung = &section.rungs[index];
+                            lower_logic(&rung.logic, lookup, ops);
+                            store_coil(ops, lookup, &rung.coil);
+                            index += 1;
+                            continue;
+                        }
+                        // A run of grid rows. A link in one row makes the next
+                        // row its parallel branch, so the run is lowered as a
+                        // stack rather than one rung at a time.
+                        let mut run: Vec<Vec<crate::grid::Cell>> = Vec::new();
+                        while let Some(row) = section.rungs.get(index + run.len()) {
+                            if row.cells.is_empty() {
+                                break;
+                            }
+                            run.push(row.cells.clone());
+                        }
+                        let mut offset = 0;
+                        while offset < run.len() {
+                            let (used, compute) =
+                                lower_grid_rung(&run, offset, lookup, ops, edges);
+                            if !compute {
+                                store_coil(ops, lookup, &section.rungs[index + offset].coil);
+                            }
+                            offset += used;
+                        }
+                        index += run.len();
+                    }
+                }
+            }
+            PouLanguage::Il => {
+                for line in &pou.il {
+                    if let IlLine::Instruction { mnemonic, operand } = parse_line(line) {
+                        if mnemonic == "CAL" {
+                            if let Some(callee) =
+                                pous.get(&operand.trim().to_ascii_uppercase())
+                            {
+                                lower_pou(callee, pous, lookup, lookup_ci, ops, edges, depth + 1);
+                            }
+                            continue;
+                        }
+                        lower_line(
+                            &mnemonic,
+                            il_operand(&operand, lookup, lookup_ci),
+                            ops,
+                        );
+                    }
+                }
+            }
+            PouLanguage::Fbd => {
+                for line in &pou.fbd {
+                    lower_fbd_line(line, lookup, ops);
+                }
+            }
+        }
 }
 
 /// Lower one function-block assignment: build the block from its inputs, then

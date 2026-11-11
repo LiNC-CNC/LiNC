@@ -750,3 +750,55 @@ fn an_fbd_timer_and_compare_share_the_ladder_machinery() {
     vm.scan_with_dt(&[true], 400);
     assert_eq!(vm.outputs(), &[true, true], "ET reached PT");
 }
+
+#[test]
+fn a_called_pou_runs_where_it_is_called_and_not_on_its_own() {
+    let mut project = project_with(
+        vec![
+            IoPoint::new("a", IoDirection::In),
+            IoPoint::new("y", IoDirection::Out),
+        ],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut main = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Il);
+    main.il = vec![
+        "LD a".into(),
+        "ST y".into(),
+        "CAL COUNT".into(),
+    ];
+    let mut counter = linc_plc_core::Pou::new("COUNT", linc_plc_core::PouLanguage::Il);
+    counter.il = vec![
+        "LD MW0".into(),
+        "ADD 1".into(),
+        "ST MW0".into(),
+    ];
+    project.pous = vec![main, counter];
+
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan(&[true]);
+    assert_eq!(vm.outputs(), &[true], "MAIN drives y");
+    assert_eq!(vm.word(0), 1, "the routine ran once in the call, not as a root");
+    vm.scan(&[true]);
+    assert_eq!(vm.word(0), 2);
+}
+
+#[test]
+fn a_call_cycle_is_reported() {
+    let mut project = project_with(
+        vec![IoPoint::new("y", IoDirection::Out)],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut a = linc_plc_core::Pou::new("A", linc_plc_core::PouLanguage::Il);
+    a.il = vec!["CAL B".into(), "LD y".into(), "ST y".into()];
+    let mut b = linc_plc_core::Pou::new("B", linc_plc_core::PouLanguage::Il);
+    b.il = vec!["CAL A".into(), "LD y".into(), "ST y".into()];
+    project.pous = vec![a, b];
+
+    let diagnostics = linc_plc_core::validate(&project);
+    assert!(
+        diagnostics.iter().any(|item| item.code == "cal_cycle"),
+        "{diagnostics:?}"
+    );
+}

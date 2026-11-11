@@ -5,8 +5,12 @@ use linc_plc_client::{default_socket_path, Client};
 use linc_plc_core::protocol::{read_message, write_message};
 use linc_plc_core::{Request, Response, PROTOCOL_VERSION, SCHEMA_VERSION};
 
+/// The environment is process-global, so the two path tests must not overlap.
+static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn default_socket_path_honors_explicit_socket_env() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
     let dir = tempfile::tempdir().expect("temp dir");
     let explicit = dir.path().join("plc.sock");
     std::env::set_var("LINC_PLC_SOCKET", &explicit);
@@ -18,6 +22,7 @@ fn default_socket_path_honors_explicit_socket_env() {
 
 #[test]
 fn default_socket_path_falls_back_under_runtime_dir() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
     let dir = tempfile::tempdir().expect("temp dir");
     std::env::remove_var("LINC_PLC_SOCKET");
     std::env::set_var("XDG_RUNTIME_DIR", dir.path());
