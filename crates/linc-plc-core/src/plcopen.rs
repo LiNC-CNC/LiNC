@@ -23,7 +23,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::model::{Coil, CoilKind, IoDirection, IoPoint, Logic, Pou, PouLanguage, Project, Rung, Section, VarDecl};
+use crate::model::{
+    Coil, CoilKind, IoDirection, IoPoint, Logic, Pou, PouLanguage, Project, Rung, Section, VarDecl,
+};
 use crate::validate::Diagnostic;
 use crate::SCHEMA_VERSION;
 
@@ -134,9 +136,9 @@ fn parse_xml(text: &str) -> Result<Element, Diagnostic> {
             Ok(Event::Text(text)) => {
                 if let Some(element) = stack.last_mut() {
                     let decoded = text.unescape().map(|value| value.to_string());
-                    element
-                        .text
-                        .push_str(&decoded.unwrap_or_else(|_| String::from_utf8_lossy(&text).to_string()));
+                    element.text.push_str(
+                        &decoded.unwrap_or_else(|_| String::from_utf8_lossy(&text).to_string()),
+                    );
                 }
             }
             Ok(Event::CData(data)) => {
@@ -232,9 +234,7 @@ pub fn import(xml: &str) -> Result<Project, Vec<Diagnostic>> {
         if let Some((mut pou, io, vars)) = import_pou(pou_element, &path, &mut diagnostics) {
             // The first program is the entry point, as the repository's
             // model expects MAIN to be.
-            if !seen_main
-                && pou_element.attribute("pouType").unwrap_or("program") == "program"
-            {
+            if !seen_main && pou_element.attribute("pouType").unwrap_or("program") == "program" {
                 pou.name = "MAIN".to_string();
                 seen_main = true;
             }
@@ -266,10 +266,7 @@ fn import_pou(
     path: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<ImportedPou> {
-    let name = element
-        .attribute("name")
-        .unwrap_or("POU")
-        .to_string();
+    let name = element.attribute("name").unwrap_or("POU").to_string();
     let mut pou = Pou::new(name, PouLanguage::Ld);
     let mut io = Vec::new();
     let mut vars = Vec::new();
@@ -572,7 +569,15 @@ fn resolve_input(
                 ));
                 return Err(());
             }
-            "block" => build_block(source, elements, left_rails, right_rails, visiting, path, diagnostics),
+            "block" => build_block(
+                source,
+                elements,
+                left_rails,
+                right_rails,
+                visiting,
+                path,
+                diagnostics,
+            ),
             other => {
                 diagnostics.push(error(
                     "plcopen_unsupported_element",

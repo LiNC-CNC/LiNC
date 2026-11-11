@@ -2589,13 +2589,19 @@ fn fbd_grid_of(plc: &PlcUi) -> FbdGrid {
 }
 
 fn is_hidden(grid: &FbdGrid, row: usize, col: usize) -> bool {
-    grid.blocks.iter().any(|block| {
-        block.col == col && row > block.row && row < block.row + block.ins.max(1)
-    })
+    grid.blocks
+        .iter()
+        .any(|block| block.col == col && row > block.row && row < block.row + block.ins.max(1))
 }
 
 /// Draw the grid: cells, blocks spanning their rows, and the cursor.
-fn fbd_grid_view(plc: &mut PlcUi, grid: &FbdGrid, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
+fn fbd_grid_view(
+    plc: &mut PlcUi,
+    grid: &FbdGrid,
+    ui: &mut Ui,
+    height: f32,
+    actions: &mut Vec<Action>,
+) {
     let _ = actions;
     let cell_w = 56.0_f32;
     let cell_h = 22.0_f32;
@@ -2612,17 +2618,15 @@ fn fbd_grid_view(plc: &mut PlcUi, grid: &FbdGrid, ui: &mut Ui, height: f32, acti
             let painter = ui.painter();
             painter.rect_filled(rect, 3.0, theme::SURFACE);
             let origin = rect.min + vec2(4.0, 4.0);
-            let at = |row: usize, col: usize| {
-                origin + vec2(col as f32 * cell_w, row as f32 * cell_h)
-            };
+            let at =
+                |row: usize, col: usize| origin + vec2(col as f32 * cell_w, row as f32 * cell_h);
             // Cells.
             for row in 0..rows {
                 for col in 0..columns {
                     if is_hidden(grid, row, col) {
                         continue;
                     }
-                    let cell_rect =
-                        egui::Rect::from_min_size(at(row, col), vec2(cell_w, cell_h));
+                    let cell_rect = egui::Rect::from_min_size(at(row, col), vec2(cell_w, cell_h));
                     painter.rect_stroke(
                         cell_rect,
                         1.0,
@@ -2630,7 +2634,9 @@ fn fbd_grid_view(plc: &mut PlcUi, grid: &FbdGrid, ui: &mut Ui, height: f32, acti
                         egui::StrokeKind::Inside,
                     );
                     let text = match grid.cell(row, col) {
-                        FbdCell::In { operand } => plc.operand_label(operand.trim_start_matches('!')),
+                        FbdCell::In { operand } => {
+                            plc.operand_label(operand.trim_start_matches('!'))
+                        }
                         FbdCell::Out { operand } => {
                             plc.operand_label(operand.trim_start_matches('!'))
                         }
@@ -2681,8 +2687,7 @@ fn fbd_grid_view(plc: &mut PlcUi, grid: &FbdGrid, ui: &mut Ui, height: f32, acti
             }
             // The cursor.
             if let Some((row, col)) = plc.fbd_cursor {
-                let cursor_rect =
-                    egui::Rect::from_min_size(at(row, col), vec2(cell_w, cell_h));
+                let cursor_rect = egui::Rect::from_min_size(at(row, col), vec2(cell_w, cell_h));
                 painter.rect_stroke(
                     cursor_rect,
                     1.0,
@@ -2789,7 +2794,10 @@ fn fbd_shift_right(
     for r in low..=high {
         for col in (from_col + amount..grid.columns).rev() {
             let cell = grid.cell(r, col - amount);
-            let keep = matches!(cell, FbdCell::In { .. } | FbdCell::Out { .. } | FbdCell::Wire);
+            let keep = matches!(
+                cell,
+                FbdCell::In { .. } | FbdCell::Out { .. } | FbdCell::Wire
+            );
             grid.set_cell(r, col, if keep { cell } else { FbdCell::Empty });
         }
         for col in from_col..(from_col + amount).min(grid.columns) {
@@ -2820,7 +2828,12 @@ fn fbd_room(grid: &FbdGrid, row: usize, col: usize, ins: usize) -> bool {
     true
 }
 
-fn fbd_place_block(plc: &mut PlcUi, kind: &str, actions: &mut Vec<Action>, message: &mut Option<String>) {
+fn fbd_place_block(
+    plc: &mut PlcUi,
+    kind: &str,
+    actions: &mut Vec<Action>,
+    message: &mut Option<String>,
+) {
     let Some((row, col)) = plc.fbd_cursor else {
         return;
     };
@@ -2838,7 +2851,8 @@ fn fbd_place_block(plc: &mut PlcUi, kind: &str, actions: &mut Vec<Action>, messa
             return;
         }
     }
-    grid.blocks.retain(|block| !(block.row == row && block.col == col));
+    grid.blocks
+        .retain(|block| !(block.row == row && block.col == col));
     for offset in 0..ins {
         grid.set_cell(row + offset, col, FbdCell::Empty);
     }
@@ -2892,7 +2906,10 @@ fn fbd_close_up(grid: &mut FbdGrid, row: usize, ins: usize) {
             for col in 1..grid.columns {
                 let source = col + amount;
                 let cell = grid.cell(r, source);
-                let keep = matches!(cell, FbdCell::In { .. } | FbdCell::Out { .. } | FbdCell::Wire);
+                let keep = matches!(
+                    cell,
+                    FbdCell::In { .. } | FbdCell::Out { .. } | FbdCell::Wire
+                );
                 grid.set_cell(r, col, if keep { cell } else { FbdCell::Empty });
             }
         }
@@ -2944,14 +2961,18 @@ fn fbd_grid_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>
             });
             ui.separator();
             ui.horizontal_wrapped(|ui| {
-                for kind in ["AND", "OR", "XOR", "NOT", "TON0", "TOF0", "TP0", "CTU0", "CTD0"] {
+                for kind in [
+                    "AND", "OR", "XOR", "NOT", "TON0", "TOF0", "TP0", "CTU0", "CTD0",
+                ] {
                     if theme::action_button(ui, kind, true).clicked() {
                         block = Some(kind.to_string());
                     }
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                for kind in ["SR0", "RS0", "RT0", "RF0", "GT", "GE", "EQ", "NE", "LE", "LT"] {
+                for kind in [
+                    "SR0", "RS0", "RT0", "RF0", "GT", "GE", "EQ", "NE", "LE", "LT",
+                ] {
                     if theme::action_button(ui, kind, true).clicked() {
                         block = Some(kind.to_string());
                     }
@@ -3012,20 +3033,32 @@ fn fbd_operand_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Acti
     };
     let mut close = false;
     let mut chosen: Option<String> = None;
-    egui::Window::new(if output { "FBD OUTPUT CELL" } else { "FBD INPUT CELL" })
-        .collapsible(false)
-        .resizable(true)
-        .default_width(320.0)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
-            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+    egui::Window::new(if output {
+        "FBD OUTPUT CELL"
+    } else {
+        "FBD INPUT CELL"
+    })
+    .collapsible(false)
+    .resizable(true)
+    .default_width(320.0)
+    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+    .show(ctx, |ui| {
+        egui::ScrollArea::vertical()
+            .max_height(320.0)
+            .show(ui, |ui| {
                 for point in plc.project.io.clone() {
-                    if ui.button(format!("{}   {}", point.name, point.comment)).clicked() {
+                    if ui
+                        .button(format!("{}   {}", point.name, point.comment))
+                        .clicked()
+                    {
                         chosen = Some(point.name);
                     }
                 }
                 for var in plc.project.vars.clone() {
-                    if ui.button(format!("{}   {}", var.name, var.comment)).clicked() {
+                    if ui
+                        .button(format!("{}   {}", var.name, var.comment))
+                        .clicked()
+                    {
                         chosen = Some(var.name);
                     }
                 }
@@ -3042,11 +3075,11 @@ fn fbd_operand_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Acti
                     }
                 });
             });
-            ui.add_space(4.0);
-            if theme::action_button(ui, "Cancel", true).clicked() {
-                close = true;
-            }
-        });
+        ui.add_space(4.0);
+        if theme::action_button(ui, "Cancel", true).clicked() {
+            close = true;
+        }
+    });
     if let Some(operand) = chosen {
         let operand = if plc.fbd_negate && !operand.starts_with('!') {
             format!("!{operand}")
@@ -4210,7 +4243,9 @@ fn paint_logic(
             // Blocks, edges and compares are drawn as a named box; the tree
             // canvas is only a fallback for rungs the grid cannot show.
             let label = match logic {
-                Logic::Block { block, instance, .. } => {
+                Logic::Block {
+                    block, instance, ..
+                } => {
                     if instance.is_empty() {
                         block.clone()
                     } else {
@@ -5126,8 +5161,20 @@ mod fbd_grid_tests {
             cells: Vec::new(),
             blocks: Vec::new(),
         };
-        grid.set_cell(0, 2, FbdCell::In { operand: "a".into() });
-        grid.set_cell(1, 2, FbdCell::In { operand: "b".into() });
+        grid.set_cell(
+            0,
+            2,
+            FbdCell::In {
+                operand: "a".into(),
+            },
+        );
+        grid.set_cell(
+            1,
+            2,
+            FbdCell::In {
+                operand: "b".into(),
+            },
+        );
         grid
     }
 
@@ -5152,7 +5199,13 @@ mod fbd_grid_tests {
             instance: String::new(),
             preset: String::new(),
         });
-        grid.set_cell(0, 4, FbdCell::Out { operand: "y".into() });
+        grid.set_cell(
+            0,
+            4,
+            FbdCell::Out {
+                operand: "y".into(),
+            },
+        );
         assert!(!fbd_room(&grid, 0, 3, 2), "the cell is taken");
         assert!(fbd_shift_right(&mut grid, 0, 2, 3, FBD_BLOCK_WIDTH));
         assert_eq!(grid.blocks[0].col, 5, "the old block moved right");

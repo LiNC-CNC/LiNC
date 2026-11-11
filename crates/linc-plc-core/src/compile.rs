@@ -1223,10 +1223,8 @@ fn lower_logic(logic: &Logic, lookup: &HashMap<String, u16>, edges: &mut u16, op
             left,
             right,
         } => {
-            let (Some(left), Some(right)) = (
-                word_operand_value(left),
-                word_operand_value(right),
-            ) else {
+            let (Some(left), Some(right)) = (word_operand_value(left), word_operand_value(right))
+            else {
                 ops.push(Op::PushConst(false));
                 return;
             };
@@ -1241,16 +1239,14 @@ fn lower_logic(logic: &Logic, lookup: &HashMap<String, u16>, edges: &mut u16, op
             block,
             instance,
             preset,
-        } => {
-            match parse_block(block, instance, preset) {
-                Some((kind, instance, preset)) => ops.push(Op::Fb {
-                    kind,
-                    instance,
-                    preset,
-                }),
-                None => ops.push(Op::PushConst(false)),
-            }
-        }
+        } => match parse_block(block, instance, preset) {
+            Some((kind, instance, preset)) => ops.push(Op::Fb {
+                kind,
+                instance,
+                preset,
+            }),
+            None => ops.push(Op::PushConst(false)),
+        },
         Logic::Series { items } => {
             // Power flows left to right. A block consumes the power so far as
             // its input and pushes Q, so the rest of the rung continues from
@@ -1302,6 +1298,3 @@ fn lower_logic(logic: &Logic, lookup: &HashMap<String, u16>, edges: &mut u16, op
         }
     }
 }
-
-
-

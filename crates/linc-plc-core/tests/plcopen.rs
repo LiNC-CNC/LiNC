@@ -75,10 +75,7 @@ fn a_parallel_pair_feeding_a_timer_keeps_its_shape() {
     assert!(branches
         .iter()
         .all(|branch| matches!(branch, Logic::Contact { .. })));
-    let Logic::Block {
-        block, preset, ..
-    } = &items[1]
-    else {
+    let Logic::Block { block, preset, .. } = &items[1] else {
         panic!("expected the timer second, got {:?}", items[1]);
     };
     assert_eq!(block, "TON");

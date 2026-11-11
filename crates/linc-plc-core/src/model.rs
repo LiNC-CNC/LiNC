@@ -330,7 +330,10 @@ pub enum Logic {
         preset: String,
     },
     /// A rising or falling edge contact.
-    Edge { var: String, rising: bool },
+    Edge {
+        var: String,
+        rising: bool,
+    },
     /// A compare contact over two word values. `operator` is GT, GE, EQ, NE, LE
     /// or LT; the tag already owns the name `op`.
     Compare {
@@ -338,10 +341,19 @@ pub enum Logic {
         left: String,
         right: String,
     },
-    Const { value: bool },
-    Contact { var: String, negated: bool },
-    Series { items: Vec<Logic> },
-    Parallel { items: Vec<Logic> },
+    Const {
+        value: bool,
+    },
+    Contact {
+        var: String,
+        negated: bool,
+    },
+    Series {
+        items: Vec<Logic>,
+    },
+    Parallel {
+        items: Vec<Logic>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
