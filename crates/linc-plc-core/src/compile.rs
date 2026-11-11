@@ -1011,7 +1011,10 @@ fn lower_grid_rung(
         let before = &cells[..link];
         let after = &cells[link + 1..];
         let mut compute = false;
-        if !before.iter().all(|cell| matches!(cell, crate::grid::Cell::Wire)) {
+        if !before
+            .iter()
+            .all(|cell| matches!(cell, crate::grid::Cell::Wire))
+        {
             compute |= lower_cells(before, lookup, ops, edges);
         } else {
             ops.push(Op::PushConst(true));
@@ -1019,7 +1022,10 @@ fn lower_grid_rung(
         let mut used = 1;
         used += lower_grid_rung(run, index + 1, lookup, ops, edges).0;
         ops.push(Op::Or);
-        if !after.iter().all(|cell| matches!(cell, crate::grid::Cell::Wire)) {
+        if !after
+            .iter()
+            .all(|cell| matches!(cell, crate::grid::Cell::Wire))
+        {
             compute |= lower_cells(after, lookup, ops, edges);
             ops.push(Op::And);
         }
