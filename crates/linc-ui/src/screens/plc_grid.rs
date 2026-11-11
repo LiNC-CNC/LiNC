@@ -212,9 +212,21 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     }
                 }
                 ui.add_space(4.0);
+                if theme::action_button(ui, "Compare  G", true).clicked() {
+                    actions.push(Action::SetCell {
+                        section,
+                        rung,
+                        position,
+                        cell: Cell::Compare {
+                            op: "GT".to_string(),
+                            left: "MW0".to_string(),
+                            right: "0".to_string(),
+                        },
+                    });
+                    close = true;
+                }
                 for (label, reason) in [
                     ("Edge contact  P N", "edge contacts"),
-                    ("Compare  G", "compare contacts"),
                     ("Compute  M", "compute coils"),
                 ] {
                     ui.add_enabled(
@@ -400,7 +412,19 @@ fn cell_label(cell: &Cell) -> String {
         }
         Cell::Edge { var, rising } => format!("{}{var}", if *rising { "P " } else { "N " }),
         Cell::Block { instance, .. } => instance.clone(),
-        Cell::Compare { left, .. } => left.clone(),
+        Cell::Compare { op, left, right } => {
+            let upper = op.to_ascii_uppercase();
+            let symbol = match upper.as_str() {
+                "GT" => ">",
+                "GE" => ">=",
+                "EQ" => "=",
+                "NE" => "<>",
+                "LE" => "<=",
+                "LT" => "<",
+                other => other,
+            };
+            format!("{left}{symbol}{right}")
+        }
         Cell::Compute { target, .. } => target.clone(),
     }
 }

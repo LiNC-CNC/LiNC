@@ -544,3 +544,62 @@ fn a_counter_counts_rising_edges() {
     assert_eq!(vm.block_value(13), 2);
     assert_eq!(vm.outputs(), &[true], "CV reached PV");
 }
+
+#[test]
+fn a_compare_contact_passes_power_when_true() {
+    let mut project = simple_project(Logic::Const { value: true }, Coil::new("y", CoilKind::Normal));
+    project.sections[0].rungs[0].cells = vec![linc_plc_core::Cell::Compare {
+        op: "GE".into(),
+        left: "MW0".into(),
+        right: "5".into(),
+    }];
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+
+    vm.set_word(0, 4);
+    vm.scan(&[]);
+    assert_eq!(vm.outputs(), &[false]);
+    vm.set_word(0, 5);
+    vm.scan(&[]);
+    assert_eq!(vm.outputs(), &[true], "5 is greater than or equal to 5");
+}
+
+#[test]
+fn a_compare_can_read_a_timer_elapsed_time() {
+    let mut project = project_with(
+        vec![
+            IoPoint::new("a", IoDirection::In),
+            IoPoint::new("y", IoDirection::Out),
+            IoPoint::new("y2", IoDirection::Out),
+        ],
+        Vec::new(),
+        vec![section(
+            "main",
+            vec![
+                Rung::new(Logic::Const { value: true }, Coil::new("y2", CoilKind::Normal)),
+                Rung::new(Logic::Const { value: true }, Coil::new("y", CoilKind::Normal)),
+            ],
+        )],
+    );
+    project.sections[0].rungs[0].cells = vec![
+        linc_plc_core::Cell::Contact {
+            var: "a".into(),
+            negated: false,
+        },
+        linc_plc_core::Cell::Block {
+            block: "TON".into(),
+            instance: "TON0".into(),
+            preset: "T#10s".into(),
+        },
+    ];
+    project.sections[0].rungs[1].cells = vec![linc_plc_core::Cell::Compare {
+        op: "GT".into(),
+        left: "TON0.ET".into(),
+        right: "T#1s".into(),
+    }];
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+
+    vm.scan_with_dt(&[true], 500);
+    assert_eq!(vm.outputs(), &[false, false], "ET is under a second");
+    vm.scan_with_dt(&[true], 700);
+    assert_eq!(vm.outputs(), &[true, false], "ET is 1200 ms, Q is still low");
+}

@@ -344,10 +344,28 @@ fn lower_cells(cells: &[crate::grid::Cell], lookup: &HashMap<String, u16>, ops: 
                     ops.push(Op::PushConst(false));
                 }
             }
+            crate::grid::Cell::Compare { op, left, right } => {
+                let (Some(left), Some(right)) = (word_operand_value(left), word_operand_value(right))
+                else {
+                    continue;
+                };
+                if !has_power {
+                    ops.push(Op::PushConst(true));
+                }
+                emit_word(ops, left);
+                emit_word(ops, right);
+                match compare_op(op) {
+                    Some(compare) => ops.push(compare),
+                    None => continue,
+                }
+                if has_power {
+                    ops.push(Op::And);
+                }
+                has_power = true;
+                continue;
+            }
             // Validation refuses these until their semantics exist.
-            crate::grid::Cell::Edge { .. }
-            | crate::grid::Cell::Compare { .. }
-            | crate::grid::Cell::Compute { .. } => continue,
+            crate::grid::Cell::Edge { .. } | crate::grid::Cell::Compute { .. } => continue,
         }
         has_power = true;
     }
@@ -378,6 +396,58 @@ fn lower_grid_rung(
         ops.push(Op::Or);
     }
     used
+}
+
+/// A word-valued operand of a compare contact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WordValue {
+    Word(u16),
+    Const(i16),
+    Block(u16),
+}
+
+/// Resolve `MW3`, `T#4s`, `-12`, `TON0.ET` or `CTU1.CV`.
+pub fn word_operand_value(text: &str) -> Option<WordValue> {
+    let text = text.trim();
+    if let Some(rest) = text
+        .strip_suffix(".ET")
+        .or_else(|| text.strip_suffix(".CV"))
+        .or_else(|| text.strip_suffix(".et"))
+        .or_else(|| text.strip_suffix(".cv"))
+    {
+        let (kind, instance, _) = parse_block(rest, rest, "")?;
+        if !kind.is_timer() {
+            // `.ET` of a counter and `.CV` of a timer are the same field.
+        }
+        return Some(WordValue::Block(instance));
+    }
+    if let Some(index) = crate::il::word_operand(text) {
+        return Some(WordValue::Word(index));
+    }
+    if text.starts_with("T#") || text.starts_with("t#") {
+        return Some(WordValue::Const(parse_preset(text, true)?));
+    }
+    text.parse::<i16>().ok().map(WordValue::Const)
+}
+
+fn emit_word(ops: &mut Vec<Op>, value: WordValue) {
+    match value {
+        WordValue::Word(index) => ops.push(Op::LoadWord(index)),
+        WordValue::Const(value) => ops.push(Op::LoadConst(value)),
+        WordValue::Block(index) => ops.push(Op::FbWord(index)),
+    }
+}
+
+pub fn compare_op(name: &str) -> Option<Op> {
+    match name.trim().to_ascii_uppercase().as_str() {
+        "GT" => Some(Op::CmpGt),
+        "GE" => Some(Op::CmpGe),
+        "EQ" => Some(Op::CmpEq),
+        "NE" => Some(Op::CmpNe),
+        "LE" => Some(Op::CmpLe),
+        "LT" => Some(Op::CmpLt),
+        _ => None,
+    }
 }
 
 /// `TON` + `TON2` + `T#4s` -> kind, instance index, preset in ms or counts.

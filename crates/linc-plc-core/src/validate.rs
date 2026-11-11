@@ -273,6 +273,23 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                             format!("{rung_path}.cells[{cell_index}]"),
                         ));
                     }
+                } else if let crate::grid::Cell::Compare { op, left, right } = cell {
+                    if crate::compile::compare_op(op).is_none() {
+                        diagnostics.push(Diagnostic::error(
+                            "cell_compare",
+                            format!("'{op}' is not a compare operator; use GT, GE, EQ, NE, LE or LT"),
+                            format!("{rung_path}.cells[{cell_index}]"),
+                        ));
+                    }
+                    for operand in [left, right] {
+                        if crate::compile::word_operand_value(operand).is_none() {
+                            diagnostics.push(Diagnostic::error(
+                                "cell_compare_operand",
+                                format!("'{operand}' is not a word, a number, a time or a block member"),
+                                format!("{rung_path}.cells[{cell_index}]"),
+                            ));
+                        }
+                    }
                 } else if let Some(operand) = cell.operand() {
                     let known = symbols
                         .keys()
