@@ -152,6 +152,12 @@ pub enum Action {
     SetSymbolComment(String, String),
     /// Replace the function-block body of the current POU.
     SetFbd(Vec<FbdLine>),
+    /// Rename a POU.
+    RenamePou { index: usize, name: String },
+    /// Copy a POU under a new name.
+    DuplicatePou { index: usize, name: String },
+    /// Delete a POU. MAIN is refused.
+    DeletePou { index: usize },
     /// Remove a cell and close the row up to the left.
     DeleteCell {
         section: usize,
@@ -726,6 +732,18 @@ impl TrendBuffer {
     }
 }
 
+/// The POU being renamed or copied, with the name typed so far.
+#[derive(Debug, Clone)]
+pub struct PouEdit {
+    pub index: usize,
+    pub duplicate: bool,
+    pub name: String,
+}
+
+fn pous_len(project: &Project) -> usize {
+    project.all_pous().len().saturating_sub(1)
+}
+
 pub struct PlcUi {
     pub project: Project,
     /// Project file, edited in the status card.
@@ -794,6 +812,8 @@ pub struct PlcUi {
     pub fbd_box_edit: Option<usize>,
     /// The next FBD value chosen is negated (`!`).
     pub fbd_negate: bool,
+    /// A POU is being renamed or copied.
+    pub pou_edit: Option<PouEdit>,
     /// Boolean traces for the trend page.
     pub trend: TrendBuffer,
     /// Per-scan window from the daemon, when one is connected.
@@ -853,6 +873,7 @@ impl Default for PlcUi {
             fbd_pick: None,
             fbd_box_edit: None,
             fbd_negate: false,
+            pou_edit: None,
             trend: TrendBuffer::default(),
             trend_remote: TrendData::default(),
             words: Vec::new(),
@@ -1375,6 +1396,34 @@ impl PlcUi {
                 }
                 self.project.set_pous(pous);
             }
+            Action::RenamePou { index, name } => {
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(index) {
+                    pou.name = name;
+                }
+                self.project.set_pous(pous);
+            }
+            Action::DuplicatePou { index, name } => {
+                let mut pous = self.project.all_pous();
+                if let Some(source) = pous.get(index).cloned() {
+                    let mut copy = source;
+                    copy.name = name;
+                    pous.insert(index + 1, copy);
+                }
+                self.project.set_pous(pous);
+            }
+            Action::DeletePou { index } => {
+                let mut pous = self.project.all_pous();
+                if pous
+                    .get(index)
+                    .map(|pou| !pou.name.eq_ignore_ascii_case("MAIN"))
+                    .unwrap_or(false)
+                {
+                    pous.remove(index);
+                    self.project.set_pous(pous);
+                    self.pou = self.pou.min(pous_len(&self.project));
+                }
+            }
             Action::SetFbd(lines) => {
                 let mut pous = self.project.all_pous();
                 if let Some(pou) = pous.get_mut(self.pou) {
@@ -1668,6 +1717,7 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     let mut actions: Vec<Action> = Vec::new();
     crate::screens::plc_grid::editor_keys(app, ui, &mut actions);
     crate::screens::plc_grid::pickers(&mut app.plc, ui.ctx(), &mut actions);
+    pou_edit_dialog(&mut app.plc, ui.ctx(), &mut actions);
     let plc = &mut app.plc;
 
     menu_bar(plc, ui, &mut actions);
@@ -1729,6 +1779,37 @@ fn menu_bar(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
                     plc.add_pou(language);
                 }
             }
+            ui.separator();
+            if ui.button("Rename / comment…").clicked() {
+                plc.pou_edit = Some(PouEdit {
+                    index: plc.pou,
+                    duplicate: false,
+                    name: plc
+                        .current_pou()
+                        .map(|pou| pou.name)
+                        .unwrap_or_else(|| "MAIN".to_string()),
+                });
+            }
+            if ui.button("Duplicate…").clicked() {
+                let name = plc
+                    .current_pou()
+                    .map(|pou| format!("{}_2", pou.name))
+                    .unwrap_or_else(|| "COPY".to_string());
+                plc.pou_edit = Some(PouEdit {
+                    index: plc.pou,
+                    duplicate: true,
+                    name,
+                });
+            }
+            let is_main = plc
+                .current_pou()
+                .map(|pou| pou.name.eq_ignore_ascii_case("MAIN"))
+                .unwrap_or(true);
+            ui.add_enabled_ui(!is_main, |ui| {
+                if ui.button("Delete").clicked() {
+                    actions.push(Action::DeletePou { index: plc.pou });
+                }
+            });
             ui.separator();
             for language in [PouLanguage::Il, PouLanguage::Ld, PouLanguage::Fbd] {
                 if ui
@@ -2827,6 +2908,68 @@ fn sim_view(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
 
 /// ZX-PLC's status bar: the symbol and comment of the selection on the left,
 /// free space and the run state on the right.
+/// Rename or copy a POU: the name is typed once and applied on Enter.
+fn pou_edit_dialog(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    let Some(edit) = plc.pou_edit.clone() else {
+        return;
+    };
+    let mut close = false;
+    let mut apply: Option<String> = None;
+    egui::Window::new(if edit.duplicate {
+        "DUPLICATE POU"
+    } else {
+        "RENAME POU"
+    })
+    .collapsible(false)
+    .resizable(false)
+    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+    .show(ctx, |ui| {
+        ui.label(
+            RichText::new("name, up to eight characters")
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
+        let mut name = edit.name.clone();
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut name)
+                .desired_width(160.0)
+                .char_limit(8),
+        );
+        if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+            apply = Some(name.clone());
+        }
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if theme::action_button(ui, "Apply", true).clicked() {
+                apply = Some(name.clone());
+            }
+            if theme::action_button(ui, "Cancel", true).clicked() {
+                close = true;
+            }
+        });
+    });
+    if let Some(name) = apply {
+        let name = name.trim().to_string();
+        if !name.is_empty() {
+            actions.push(if edit.duplicate {
+                Action::DuplicatePou {
+                    index: edit.index,
+                    name,
+                }
+            } else {
+                Action::RenamePou {
+                    index: edit.index,
+                    name,
+                }
+            });
+        }
+        close = true;
+    }
+    if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        plc.pou_edit = None;
+    }
+}
+
 fn status_bar(plc: &PlcUi, ui: &mut Ui) {
     // The cell under the cursor wins, because that is what ZX shows; with no
     // cursor the selected rung's coil and its comment stand in.
