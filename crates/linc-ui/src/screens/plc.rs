@@ -152,6 +152,10 @@ pub enum Action {
     Unforce(String),
     /// Set the comment of a declared symbol.
     SetSymbolComment(String, String),
+    /// Add an output symbol, which is what a new name in the table means.
+    AddSymbol(String),
+    /// Remove a declared symbol.
+    RemoveSymbol(String),
     /// Replace the function-block body of the current POU.
     SetFbd(Vec<FbdLine>),
     /// Rename a POU.
@@ -816,6 +820,8 @@ pub struct PlcUi {
     pub fbd_negate: bool,
     /// A POU is being renamed or copied.
     pub pou_edit: Option<PouEdit>,
+    /// The name typed into the symbols table's new row.
+    pub symbol_new: String,
     /// Boolean traces for the trend page.
     pub trend: TrendBuffer,
     /// Per-scan window from the daemon, when one is connected.
@@ -876,6 +882,7 @@ impl Default for PlcUi {
             fbd_box_edit: None,
             fbd_negate: false,
             pou_edit: None,
+            symbol_new: String::new(),
             trend: TrendBuffer::default(),
             trend_remote: TrendData::default(),
             words: Vec::new(),
@@ -1313,6 +1320,21 @@ impl PlcUi {
             Action::ClearForces => {
                 self.send(Tag::ClearForces, Request::ClearForces);
                 self.message = "CLEAR FORCES SENT".to_string();
+            }
+            Action::AddSymbol(name) => {
+                if !self.project.io.iter().any(|point| point.name == name)
+                    && !self.project.vars.iter().any(|var| var.name == name)
+                {
+                    self.project.io.push(linc_plc_core::IoPoint::new(
+                        name,
+                        IoDirection::Out,
+                    ));
+                }
+            }
+            Action::RemoveSymbol(name) => {
+                self.project.io.retain(|point| point.name != name);
+                self.project.vars.retain(|var| var.name != name);
+                self.project.watch.retain(|operand| operand != &name);
             }
             Action::SetSymbolComment(name, comment) => {
                 for point in self.project.io.iter_mut() {
@@ -2548,6 +2570,7 @@ fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Act
     );
     ui.add_space(4.0);
     let mut edits: Vec<(String, String)> = Vec::new();
+    let mut remove: Option<String> = None;
     egui::ScrollArea::vertical()
         .max_height((height - 140.0).max(120.0))
         .show(ui, |ui| {
@@ -2563,7 +2586,7 @@ fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Act
                         );
                     }
                     ui.end_row();
-                    let rows = plc
+                    let mut rows = plc
                         .project
                         .io
                         .iter()
@@ -2590,6 +2613,10 @@ fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Act
                             )
                         }))
                         .collect::<Vec<_>>();
+                    rows.sort_by(|left, right| {
+                        (left.1.as_str(), left.0.as_str())
+                            .cmp(&(right.1.as_str(), right.0.as_str()))
+                    });
                     for (name, area, comment) in rows {
                         ui.label(
                             RichText::new(&name)
@@ -2627,12 +2654,38 @@ fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Act
                             )
                             .changed()
                         {
-                            edits.push((name, buffer));
+                            edits.push((name.clone(), buffer));
+                        }
+                        if theme::action_button(ui, "remove", true).clicked() {
+                            remove = Some(name);
                         }
                         ui.end_row();
                     }
+                    ui.label(RichText::new("new").size(theme::font_size(9.0)).color(theme::MUTED));
+                    ui.label("");
+                    ui.label("");
+                    ui.horizontal(|ui| {
+                        let mut name = plc.symbol_new.clone();
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut name)
+                                .desired_width(140.0)
+                                .hint_text("a new output name"),
+                        );
+                        if response.changed() {
+                            plc.symbol_new = name.clone();
+                        }
+                        if theme::action_button(ui, "add", true).clicked() && !name.trim().is_empty()
+                        {
+                            actions.push(Action::AddSymbol(name.trim().to_string()));
+                            plc.symbol_new.clear();
+                        }
+                    });
+                    ui.end_row();
                 });
         });
+    if let Some(name) = remove {
+        actions.push(Action::RemoveSymbol(name));
+    }
     for (name, comment) in edits {
         actions.push(Action::SetSymbolComment(name, comment));
     }
