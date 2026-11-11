@@ -2124,8 +2124,23 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 }
 
 /// The popped-out workbench: menu bar, pages, status bar, keyboard owner.
+/// Whether Escape should leave the workbench. A picker or block window inside it
+/// owns Escape first, so closing the editor while one is open would strand that
+/// state with no window and make the editor deaf.
+pub fn escape_closes_editor(plc: &PlcUi) -> bool {
+    plc.picker.is_none()
+        && plc.operand_pick.is_none()
+        && plc.coil_pick.is_none()
+        && plc.block_edit.is_none()
+        && plc.expr_edit.is_none()
+}
+
 pub fn editor(app: &mut LincApp, ui: &mut Ui) {
-    if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    // Escape closes the editor only when nothing is open inside it. A picker or a
+    // block window owns Escape first: consuming it here left the picker's state
+    // set with its window gone, and the editor deaf to every later key.
+    if escape_closes_editor(&app.plc)
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         && !ui.ctx().text_edit_focused()
     {
         app.overlay.plc_editor = false;
@@ -5801,6 +5816,27 @@ mod picker_key_tests {
             }
             ref other => panic!("expected a contact pick, got {other:?}"),
         }
+    }
+
+    /// Escape closes a picker, not the workbench: the early editor-close handler
+    /// used to take it first and strand `coil_pick` with no window.
+    #[test]
+    fn escape_does_not_close_the_editor_while_a_picker_is_open() {
+        let mut plc = plc_with_symbols();
+        plc.coil_pick = Some((0, 0));
+        assert!(!escape_closes_editor(&plc), "picker keeps the editor open");
+        let _ = frame(
+            &mut plc,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(plc.coil_pick.is_none(), "the picker took the Escape");
+        assert!(escape_closes_editor(&plc), "and now Escape closes the editor");
     }
 
     /// Escape closes every picker before the editor's own Escape: a list left
