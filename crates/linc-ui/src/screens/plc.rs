@@ -1801,8 +1801,7 @@ fn ladder_body(
                         .color(theme::C3),
                 );
                 for (rung_index, rung) in section.rungs.iter().enumerate() {
-                    if rung.cells.is_empty()
-                        && linc_plc_core::grid::migrate(&rung.logic).is_none()
+                    if rung.cells.is_empty() && linc_plc_core::grid::migrate(&rung.logic).is_none()
                     {
                         draw_rung(plc, ui, section_index, rung_index, rung, actions);
                     } else {

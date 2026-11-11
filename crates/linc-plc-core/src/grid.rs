@@ -117,7 +117,7 @@ pub fn lower_rung(rows: &[Vec<Cell>], index: usize) -> (Logic, usize) {
     };
     let own = lower_row(cells);
     if cells.iter().any(|cell| matches!(cell, Cell::Link)) {
-        if let Some(_) = rows.get(index + 1) {
+        if rows.get(index + 1).is_some() {
             let (branch, used) = lower_rung(rows, index + 1);
             return (
                 Logic::Parallel {

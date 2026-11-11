@@ -460,3 +460,33 @@ fn an_unsupported_grid_cell_is_named_by_validation() {
         "{diagnostics:?}"
     );
 }
+
+#[test]
+fn il_words_add_and_compare() {
+    let mut project = project_with(
+        vec![IoPoint::new("y", IoDirection::Out)],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Il);
+    pou.il = vec![
+        "LD MW0".into(),
+        "ADD 5".into(),
+        "ST MW1".into(),
+        "LD MW1".into(),
+        "GT 9".into(),
+        "ST y".into(),
+    ];
+    project.pous = vec![pou];
+
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.set_word(0, 3);
+    vm.scan(&[]);
+    assert_eq!(vm.word(1), 8, "3 + 5");
+    assert_eq!(vm.outputs(), &[false], "8 is not greater than 9");
+
+    vm.set_word(0, 10);
+    vm.scan(&[]);
+    assert_eq!(vm.word(1), 15);
+    assert_eq!(vm.outputs(), &[true], "15 is greater than 9");
+}

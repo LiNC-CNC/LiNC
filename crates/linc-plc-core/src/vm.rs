@@ -15,6 +15,9 @@ use crate::compile::{Binding, Compiled, Op, Program, SymbolKind};
 /// Operand-stack depth. Validation caps logic nesting at 64, so this is slack.
 const STACK_DEPTH: usize = 128;
 
+/// One 20 ms tick, ZX-PLC's scan period.
+pub const DEFAULT_DT_MS: u16 = 20;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScanStats {
     pub scan_us: u32,
@@ -37,6 +40,8 @@ pub struct Vm {
     outputs: Vec<Binding>,
     prev: Vec<bool>,
     next: Vec<bool>,
+    words: Vec<i16>,
+    dt_ms: u16,
     output_image: Vec<bool>,
     forces: Vec<Option<bool>>,
     scan_count: u64,
@@ -57,6 +62,8 @@ impl Vm {
             outputs: compiled.outputs.clone(),
             prev: vec![false; slots],
             next: vec![false; slots],
+            words: vec![0; compiled.program.word_count as usize],
+            dt_ms: DEFAULT_DT_MS,
             output_image: vec![false; compiled.outputs.len()],
             forces: vec![None; slots],
             scan_count: 0,
@@ -68,12 +75,20 @@ impl Vm {
     pub fn reset(&mut self) {
         self.prev.fill(false);
         self.next.fill(false);
+        self.words.fill(0);
         self.output_image.fill(false);
         self.forces.fill(None);
     }
 
+    /// Scan with the time since the previous scan. The default is one 20 ms
+    /// tick, which is what ZX-PLC measures in and what deterministic tests use.
     pub fn scan(&mut self, inputs: &[bool]) -> ScanStats {
+        self.scan_with_dt(inputs, DEFAULT_DT_MS)
+    }
+
+    pub fn scan_with_dt(&mut self, inputs: &[bool], dt_ms: u16) -> ScanStats {
         let started = Instant::now();
+        self.dt_ms = dt_ms.max(1);
         self.next.copy_from_slice(&self.prev);
 
         for slot in 0..self.inputs.len() {
@@ -92,6 +107,8 @@ impl Vm {
 
         let mut stack = [false; STACK_DEPTH];
         let mut depth = 0usize;
+        let mut word_stack = [0i16; STACK_DEPTH];
+        let mut word_depth = 0usize;
         for op_index in 0..self.program.ops.len() {
             match self.program.ops[op_index] {
                 Op::PushConst(value) => push(&mut stack, &mut depth, value),
@@ -138,6 +155,32 @@ impl Vm {
                         }
                     }
                 }
+                Op::LoadWord(index) => {
+                    let value = self.words.get(index as usize).copied().unwrap_or(0);
+                    push_word(&mut word_stack, &mut word_depth, value);
+                }
+                Op::LoadConst(value) => push_word(&mut word_stack, &mut word_depth, value),
+                Op::StoreWord(index) => {
+                    let value = pop_word(&word_stack, &mut word_depth);
+                    if let Some(cell) = self.words.get_mut(index as usize) {
+                        *cell = value;
+                    }
+                }
+                Op::Add => bin_word(&mut word_stack, &mut word_depth, i16::wrapping_add),
+                Op::Sub => bin_word(&mut word_stack, &mut word_depth, i16::wrapping_sub),
+                Op::Mul => bin_word(&mut word_stack, &mut word_depth, i16::wrapping_mul),
+                Op::Div => bin_word(&mut word_stack, &mut word_depth, |left, right| {
+                    if right == 0 { 0 } else { left.wrapping_div(right) }
+                }),
+                Op::Mod => bin_word(&mut word_stack, &mut word_depth, |left, right| {
+                    if right == 0 { 0 } else { left.wrapping_rem(right) }
+                }),
+                Op::CmpGt => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a > b),
+                Op::CmpGe => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a >= b),
+                Op::CmpEq => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a == b),
+                Op::CmpNe => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a != b),
+                Op::CmpLe => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a <= b),
+                Op::CmpLt => cmp_word(&mut stack, &mut depth, &mut word_stack, &mut word_depth, |a, b| a < b),
             }
         }
 
@@ -166,6 +209,23 @@ impl Vm {
     /// Output values in compiled output order, as produced by the last scan.
     pub fn outputs(&self) -> &[bool] {
         &self.output_image
+    }
+
+    /// Read a word slot of the bank.
+    pub fn word(&self, index: u16) -> i16 {
+        self.words.get(index as usize).copied().unwrap_or(0)
+    }
+
+    /// Write a word slot, for the protocol's force/set and for tests.
+    pub fn set_word(&mut self, index: u16, value: i16) {
+        if let Some(cell) = self.words.get_mut(index as usize) {
+            *cell = value;
+        }
+    }
+
+    /// The whole word bank, for the snapshot.
+    pub fn words(&self) -> &[i16] {
+        &self.words
     }
 
     pub fn get(&self, name: &str) -> Option<bool> {
@@ -226,6 +286,39 @@ fn apply_forces(image: &mut [bool], forces: &[Option<bool>]) {
             }
         }
     }
+}
+
+fn push_word(stack: &mut [i16; STACK_DEPTH], depth: &mut usize, value: i16) {
+    if *depth < STACK_DEPTH {
+        stack[*depth] = value;
+        *depth += 1;
+    }
+}
+
+fn pop_word(stack: &[i16; STACK_DEPTH], depth: &mut usize) -> i16 {
+    if *depth == 0 {
+        return 0;
+    }
+    *depth -= 1;
+    stack[*depth]
+}
+
+fn bin_word(stack: &mut [i16; STACK_DEPTH], depth: &mut usize, op: fn(i16, i16) -> i16) {
+    let right = pop_word(stack, depth);
+    let left = pop_word(stack, depth);
+    push_word(stack, depth, op(left, right));
+}
+
+fn cmp_word(
+    bits: &mut [bool; STACK_DEPTH],
+    bit_depth: &mut usize,
+    words: &mut [i16; STACK_DEPTH],
+    word_depth: &mut usize,
+    op: fn(i16, i16) -> bool,
+) {
+    let right = pop_word(words, word_depth);
+    let left = pop_word(words, word_depth);
+    push(bits, bit_depth, op(left, right));
 }
 
 fn push(stack: &mut [bool; STACK_DEPTH], depth: &mut usize, value: bool) {

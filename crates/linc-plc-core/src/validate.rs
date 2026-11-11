@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::il::{parse_line, IlLine, UNSUPPORTED};
+use crate::il::{parse_line, word_operand, IlLine, UNSUPPORTED};
 use crate::model::{IoDirection, Logic, PouLanguage, Project, Section};
 use crate::SCHEMA_VERSION;
 
@@ -152,7 +152,10 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                     format!("'{mnemonic}' is not implemented yet"),
                                     path,
                                 ));
-                            } else if !known.contains(&operand.to_ascii_lowercase()) {
+                            } else if word_operand(&operand).is_none()
+                                && operand.trim().parse::<i16>().is_err()
+                                && !known.contains(&operand.to_ascii_lowercase())
+                            {
                                 diagnostics.push(Diagnostic::error(
                                     "il_operand",
                                     format!(
@@ -190,7 +193,11 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     }
     let sections: Vec<&Section> = pous.iter().flat_map(|pou| pou.sections.iter()).collect();
 
-    if sections.is_empty() {
+    // An IL-only project has no rungs; that is a program, not an empty one.
+    let il_only = pous
+        .iter()
+        .any(|pou| pou.language == PouLanguage::Il && !pou.il.is_empty());
+    if sections.is_empty() && !il_only {
         diagnostics.push(Diagnostic::error(
             "no_sections",
             "project has no sections",

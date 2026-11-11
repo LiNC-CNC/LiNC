@@ -26,14 +26,26 @@ pub enum IlLine {
 }
 
 /// Mnemonics this compiler can lower into the scan VM.
-pub const SUPPORTED: [&str; 14] = [
+pub const SUPPORTED: [&str; 24] = [
     "LD", "LDN", "AND", "ANDN", "OR", "ORN", "XOR", "XORN", "NOT", "ST", "STN", "S", "R", "=",
+    "ADD", "SUB", "MUL", "DIV", "MOD", "GT", "GE", "EQ", "NE", "LE",
 ];
 
 /// Mnemonics that need a feature this compiler does not have yet.
-pub const UNSUPPORTED: [&str; 12] = [
-    "CAL", "CALC", "CALCN", "JMP", "JMPC", "JMPCN", "RET", "RETC", "RETCN", "ADD", "SUB", "MUL",
+pub const UNSUPPORTED: [&str; 9] = [
+    "CAL", "CALC", "CALCN", "JMP", "JMPC", "JMPCN", "RET", "RETC", "RETCN",
 ];
+
+/// A word operand of the `MWn` bank, as the compiler resolves it.
+pub fn word_operand(operand: &str) -> Option<u16> {
+    let text = operand.trim();
+    let bare = text.strip_prefix('%').unwrap_or(text);
+    let digits = bare
+        .strip_prefix("MW")
+        .or_else(|| bare.strip_prefix("mw"))?;
+    let index = digits.parse::<u16>().ok()?;
+    (index < crate::compile::WORD_COUNT).then_some(index)
+}
 
 pub fn parse_line(line: &str) -> IlLine {
     let text = match line.find("//") {
@@ -74,7 +86,94 @@ pub fn parse_line(line: &str) -> IlLine {
 }
 
 /// Append the ops for one instruction. `index` is the resolved symbol slot.
-pub fn lower_line(mnemonic: &str, index: u16, ops: &mut Vec<Op>) -> bool {
+/// What an IL operand resolved to: a bit slot, a word slot, or a literal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IlOperand {
+    Bit(u16),
+    Word(u16),
+    Literal(i16),
+}
+
+/// Lower one instruction. `false` means this compiler has no such operation for
+/// that operand kind, and validation reports it at the source line.
+pub fn lower_line(mnemonic: &str, operand: IlOperand, ops: &mut Vec<Op>) -> bool {
+    use IlOperand::{Bit, Literal, Word};
+
+    // Word instructions: the operand is a word or a literal.
+    match (mnemonic, operand) {
+        ("LD", Word(word)) => {
+            ops.push(Op::LoadWord(word));
+            return true;
+        }
+        ("LD", Literal(value)) => {
+            ops.push(Op::LoadConst(value));
+            return true;
+        }
+        ("ST", Word(word)) => {
+            ops.push(Op::StoreWord(word));
+            return true;
+        }
+        ("ADD", Word(_)) | ("ADD", Literal(_)) => {
+            push_operand(operand, ops);
+            ops.push(Op::Add);
+            return true;
+        }
+        ("SUB", Word(_)) | ("SUB", Literal(_)) => {
+            push_operand(operand, ops);
+            ops.push(Op::Sub);
+            return true;
+        }
+        ("MUL", Word(_)) | ("MUL", Literal(_)) => {
+            push_operand(operand, ops);
+            ops.push(Op::Mul);
+            return true;
+        }
+        ("DIV", Word(_)) | ("DIV", Literal(_)) => {
+            push_operand(operand, ops);
+            ops.push(Op::Div);
+            return true;
+        }
+        ("MOD", Word(_)) | ("MOD", Literal(_)) => {
+            push_operand(operand, ops);
+            ops.push(Op::Mod);
+            return true;
+        }
+        ("GT", Word(_)) | ("GT", Literal(_)) => {
+            push_operand(operand, ops);
+            ops.push(Op::CmpGt);
+            return true;
+        }
+        ("GE", Word(_)) | ("GE", Literal(_)) => {
+            push_operand(operand, ops);
+            ops.push(Op::CmpGe);
+            return true;
+        }
+        ("EQ", Word(_)) | ("EQ", Literal(_)) => {
+            push_operand(operand, ops);
+            ops.push(Op::CmpEq);
+            return true;
+        }
+        ("NE", Word(_)) | ("NE", Literal(_)) => {
+            push_operand(operand, ops);
+            ops.push(Op::CmpNe);
+            return true;
+        }
+        ("LE", Word(_)) | ("LE", Literal(_)) => {
+            push_operand(operand, ops);
+            ops.push(Op::CmpLe);
+            return true;
+        }
+        ("LT", Word(_)) | ("LT", Literal(_)) => {
+            push_operand(operand, ops);
+            ops.push(Op::CmpLt);
+            return true;
+        }
+        _ => {}
+    }
+
+    let Bit(index) = operand else {
+        return false;
+    };
     match mnemonic {
         "LD" => ops.push(Op::Push(index)),
         "LDN" => {
@@ -119,6 +218,14 @@ pub fn lower_line(mnemonic: &str, index: u16, ops: &mut Vec<Op>) -> bool {
         _ => return false,
     }
     true
+}
+
+fn push_operand(operand: IlOperand, ops: &mut Vec<Op>) {
+    match operand {
+        IlOperand::Word(word) => ops.push(Op::LoadWord(word)),
+        IlOperand::Literal(value) => ops.push(Op::LoadConst(value)),
+        IlOperand::Bit(_) => {}
+    }
 }
 
 #[cfg(test)]

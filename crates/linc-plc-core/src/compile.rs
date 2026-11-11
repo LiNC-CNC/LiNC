@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::il::{lower_line, parse_line, IlLine};
+use crate::il::{lower_line, parse_line, IlLine, IlOperand};
 use crate::model::{CoilKind, IoDirection, Logic, PouLanguage, Project};
 use crate::validate::{validate, Diagnostic, Severity};
 
@@ -30,6 +30,10 @@ pub struct Binding {
     pub index: u16,
 }
 
+/// Word slots in the bank. ZX-PLC has `MW0`-`MW15`; keeping the same sixteen
+/// means an existing ZX program's `MW` numbers mean the same thing here.
+pub const WORD_COUNT: u16 = 16;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     PushConst(bool),
@@ -41,6 +45,24 @@ pub enum Op {
     Store(u16),
     Set(u16),
     Reset(u16),
+    /// Push word slot `MWn` on the word stack.
+    LoadWord(u16),
+    /// Push a literal on the word stack.
+    LoadConst(i16),
+    /// Pop a word and write it to `MWn`.
+    StoreWord(u16),
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    /// Pop two words and push the boolean result on the bit stack.
+    CmpGt,
+    CmpGe,
+    CmpEq,
+    CmpNe,
+    CmpLe,
+    CmpLt,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +70,8 @@ pub struct Program {
     pub ops: Vec<Op>,
     /// Value slots in the scan image: inputs, then outputs, then variables.
     pub var_count: u16,
+    /// Word slots in the integer bank.
+    pub word_count: u16,
     pub input_count: u16,
     pub output_count: u16,
 }
@@ -165,12 +189,7 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
             PouLanguage::Il => {
                 for line in &pou.il {
                     if let IlLine::Instruction { mnemonic, operand } = parse_line(line) {
-                        let index = lookup
-                            .get(operand.as_str())
-                            .or_else(|| lookup_ci.get(&operand.to_ascii_lowercase()))
-                            .copied()
-                            .unwrap_or(0);
-                        lower_line(&mnemonic, index, &mut ops);
+                        lower_line(&mnemonic, il_operand(&operand, &lookup, &lookup_ci), &mut ops);
                     }
                 }
             }
@@ -180,6 +199,7 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
     }
 
     let program = Program {
+        word_count: WORD_COUNT,
         ops,
         var_count: symbols.len() as u16,
         input_count: inputs.len() as u16,
@@ -230,6 +250,34 @@ fn intern(
     });
     lookup.insert(name.to_string(), index);
     index
+}
+
+/// Resolve an IL operand: `MWn`, a decimal literal, or a declared symbol.
+fn il_operand(
+    operand: &str,
+    lookup: &HashMap<String, u16>,
+    lookup_ci: &HashMap<String, u16>,
+) -> IlOperand {
+    let text = operand.trim();
+    let bare = text.strip_prefix('%').unwrap_or(text);
+    let word = bare
+        .strip_prefix("MW")
+        .or_else(|| bare.strip_prefix("mw"))
+        .and_then(|index| index.parse::<u16>().ok());
+    if let Some(index) = word {
+        if index < WORD_COUNT {
+            return IlOperand::Word(index);
+        }
+    }
+    if let Ok(value) = text.parse::<i16>() {
+        return IlOperand::Literal(value);
+    }
+    let index = lookup
+        .get(text)
+        .or_else(|| lookup_ci.get(&text.to_ascii_lowercase()))
+        .copied()
+        .unwrap_or(0);
+    IlOperand::Bit(index)
 }
 
 fn store_coil(ops: &mut Vec<Op>, lookup: &HashMap<String, u16>, coil: &crate::model::Coil) {
