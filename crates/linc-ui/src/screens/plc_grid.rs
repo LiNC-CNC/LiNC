@@ -1567,6 +1567,7 @@ pub fn grid_rung(
                 position,
                 &label,
                 matches!(cell, Cell::Wire),
+                cell_symbol(&cell),
             );
         }
         ui.label(
@@ -1575,7 +1576,7 @@ pub fn grid_rung(
                 .size(theme::font_size(10.0))
                 .color(theme::MUTED),
         );
-        let coil = format!("({})", plc.operand_label(&rung.coil.var));
+        let coil = plc.operand_label(&rung.coil.var);
         cell_box(
             plc,
             ui,
@@ -1584,9 +1585,207 @@ pub fn grid_rung(
             POSITIONS,
             &coil,
             rung.coil.var.is_empty(),
+            CellSymbol::Coil(rung.coil.kind),
         );
     });
     ui.add_space(4.0);
+}
+
+/// The graphical element a cell stands for. The ladder draws IEC symbols, not
+/// text: a contact is two bars, a coil a rounded loop, a link a junction, and so
+/// on. The operand name is drawn beside the symbol, never instead of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellSymbol {
+    Wire,
+    Link,
+    /// Normally open contact.
+    Contact,
+    /// Normally closed contact: the bars plus a slash.
+    ContactNc,
+    /// Rising or falling edge contact.
+    Edge(bool),
+    /// Coil: normal, set or reset.
+    Coil(CoilKind),
+    Block,
+    Compare,
+    Compute,
+}
+
+/// Map a cell to the symbol the grid draws.
+pub fn cell_symbol(cell: &Cell) -> CellSymbol {
+    match cell {
+        Cell::Wire => CellSymbol::Wire,
+        Cell::Link => CellSymbol::Link,
+        Cell::Contact { negated, .. } => {
+            if *negated {
+                CellSymbol::ContactNc
+            } else {
+                CellSymbol::Contact
+            }
+        }
+        Cell::Edge { rising, .. } => CellSymbol::Edge(*rising),
+        Cell::Block { .. } => CellSymbol::Block,
+        Cell::Compare { .. } => CellSymbol::Compare,
+        Cell::Compute { .. } => CellSymbol::Compute,
+    }
+}
+
+/// How wide the symbol part of a cell is; the operand name takes the rest.
+pub const SYMBOL_WIDTH: f32 = 26.0;
+
+fn draw_cell_symbol(painter: &egui::Painter, rect: egui::Rect, symbol: CellSymbol, color: Color32) {
+    let line = Stroke::new(1.4, color);
+    let thin = Stroke::new(1.0, color);
+    let left = rect.left() + 2.0;
+    let right = rect.left() + SYMBOL_WIDTH - 2.0;
+    let mid = rect.center().y;
+    let top = rect.top() + 5.0;
+    let bottom = rect.bottom() - 5.0;
+    let centre = rect.left() + SYMBOL_WIDTH / 2.0;
+    match symbol {
+        CellSymbol::Wire => {
+            painter.line_segment([egui::pos2(left, mid), egui::pos2(right, mid)], thin);
+        }
+        CellSymbol::Link => {
+            painter.line_segment([egui::pos2(left, mid), egui::pos2(right, mid)], line);
+            // The junction drops to the branch row below.
+            painter.line_segment(
+                [egui::pos2(centre, mid), egui::pos2(centre, rect.bottom())],
+                line,
+            );
+        }
+        CellSymbol::Contact | CellSymbol::ContactNc | CellSymbol::Edge(_) => {
+            painter.line_segment([egui::pos2(left, mid), egui::pos2(centre - 5.0, mid)], thin);
+            painter.line_segment(
+                [egui::pos2(centre + 5.0, mid), egui::pos2(right, mid)],
+                thin,
+            );
+            painter.line_segment(
+                [
+                    egui::pos2(centre - 5.0, top),
+                    egui::pos2(centre - 5.0, bottom),
+                ],
+                line,
+            );
+            painter.line_segment(
+                [
+                    egui::pos2(centre + 5.0, top),
+                    egui::pos2(centre + 5.0, bottom),
+                ],
+                line,
+            );
+            if symbol == CellSymbol::ContactNc {
+                painter.line_segment(
+                    [
+                        egui::pos2(centre - 7.0, bottom),
+                        egui::pos2(centre + 7.0, top),
+                    ],
+                    line,
+                );
+            }
+            if let CellSymbol::Edge(rising) = symbol {
+                // A small arrow on the bar: up for a rising edge, down for a fall.
+                let tip = if rising {
+                    egui::pos2(centre - 1.0, top - 1.0)
+                } else {
+                    egui::pos2(centre - 1.0, bottom + 1.0)
+                };
+                let tail = if rising {
+                    egui::pos2(centre - 1.0, top + 6.0)
+                } else {
+                    egui::pos2(centre - 1.0, bottom - 6.0)
+                };
+                painter.line_segment([tail, tip], line);
+                let wing = 3.0;
+                let (a, b) = if rising {
+                    (
+                        egui::pos2(tip.x - wing, tip.y + wing),
+                        egui::pos2(tip.x + wing, tip.y + wing),
+                    )
+                } else {
+                    (
+                        egui::pos2(tip.x - wing, tip.y - wing),
+                        egui::pos2(tip.x + wing, tip.y - wing),
+                    )
+                };
+                painter.line_segment([a, tip], line);
+                painter.line_segment([b, tip], line);
+            }
+        }
+        CellSymbol::Coil(kind) => {
+            painter.line_segment([egui::pos2(left, mid), egui::pos2(centre - 7.0, mid)], thin);
+            painter.line_segment(
+                [egui::pos2(centre + 7.0, mid), egui::pos2(right, mid)],
+                thin,
+            );
+            let body =
+                egui::Rect::from_center_size(egui::pos2(centre, mid), egui::vec2(14.0, 16.0));
+            // Two arcs is the IEC coil; a rounded box reads the same at this size
+            // and survives a 1 px stroke.
+            painter.rect_stroke(body, 7.0, line, egui::StrokeKind::Middle);
+            match kind {
+                CoilKind::Set => {
+                    painter.text(
+                        egui::pos2(body.right() + 6.0, body.top()),
+                        Align2::CENTER_CENTER,
+                        "S",
+                        FontId::monospace(8.0),
+                        color,
+                    );
+                }
+                CoilKind::Reset => {
+                    painter.text(
+                        egui::pos2(body.right() + 6.0, body.top()),
+                        Align2::CENTER_CENTER,
+                        "R",
+                        FontId::monospace(8.0),
+                        color,
+                    );
+                }
+                CoilKind::Negated => {
+                    painter.line_segment(
+                        [
+                            egui::pos2(body.right() + 2.0, body.top() - 2.0),
+                            egui::pos2(body.right() + 8.0, body.bottom() + 2.0),
+                        ],
+                        line,
+                    );
+                }
+                CoilKind::Normal => {}
+            }
+        }
+        CellSymbol::Block => {
+            let body = egui::Rect::from_min_max(egui::pos2(left, top), egui::pos2(right, bottom));
+            painter.rect_stroke(body, 1.0, line, egui::StrokeKind::Middle);
+            painter.line_segment(
+                [egui::pos2(body.left(), mid), egui::pos2(body.right(), mid)],
+                thin,
+            );
+        }
+        CellSymbol::Compare => {
+            let body = egui::Rect::from_min_max(
+                egui::pos2(left + 3.0, top),
+                egui::pos2(right - 3.0, bottom),
+            );
+            painter.rect_stroke(body, 1.0, line, egui::StrokeKind::Middle);
+            painter.line_segment([egui::pos2(left, mid), egui::pos2(body.left(), mid)], thin);
+            painter.line_segment(
+                [egui::pos2(body.right(), mid), egui::pos2(right, mid)],
+                thin,
+            );
+        }
+        CellSymbol::Compute => {
+            let body = egui::Rect::from_min_max(egui::pos2(left, top), egui::pos2(right, bottom));
+            painter.rect_stroke(body, 1.0, line, egui::StrokeKind::Middle);
+            painter.text(
+                body.center(),
+                Align2::CENTER_CENTER,
+                ":=",
+                FontId::monospace(9.0),
+                color,
+            );
+        }
+    }
 }
 
 fn cell_box(
@@ -1597,8 +1796,9 @@ fn cell_box(
     position: usize,
     label: &str,
     quiet: bool,
+    symbol: CellSymbol,
 ) {
-    let size = Vec2::new(52.0, 24.0);
+    let size = Vec2::new(64.0, 26.0);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let selected = plc.cell_cursor == Some((section, rung, position));
     let painter = ui.painter();
@@ -1616,13 +1816,20 @@ fn cell_box(
     } else {
         theme::FG
     };
-    painter.text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        label,
-        FontId::monospace(theme::font_size(9.5)),
-        color,
-    );
+    draw_cell_symbol(painter, rect, symbol, color);
+    if !label.is_empty() {
+        let name_rect = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + SYMBOL_WIDTH, rect.top()),
+            egui::pos2(rect.right() - 2.0, rect.bottom()),
+        );
+        painter.text(
+            name_rect.center(),
+            Align2::CENTER_CENTER,
+            label,
+            FontId::monospace(theme::font_size(8.5)),
+            color,
+        );
+    }
 }
 
 /// What a cell shows: the operand in the chosen name/address mode, with the
@@ -1694,5 +1901,100 @@ fn cell_label(cell: &Cell) -> String {
                 format!("{target}:={left}{symbol}{right}")
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod symbol_tests {
+    use super::*;
+
+    /// The grid draws IEC symbols, so every element the manual has maps to a
+    /// distinct shape rather than to a text label.
+    #[test]
+    fn every_element_maps_to_its_own_symbol() {
+        assert_eq!(cell_symbol(&Cell::Wire), CellSymbol::Wire);
+        assert_eq!(cell_symbol(&Cell::Link), CellSymbol::Link);
+        assert_eq!(
+            cell_symbol(&Cell::Contact {
+                var: "a".into(),
+                negated: false
+            }),
+            CellSymbol::Contact
+        );
+        assert_eq!(
+            cell_symbol(&Cell::Contact {
+                var: "a".into(),
+                negated: true
+            }),
+            CellSymbol::ContactNc
+        );
+        assert_eq!(
+            cell_symbol(&Cell::Edge {
+                var: "a".into(),
+                rising: true
+            }),
+            CellSymbol::Edge(true)
+        );
+        assert_eq!(
+            cell_symbol(&Cell::Edge {
+                var: "a".into(),
+                rising: false
+            }),
+            CellSymbol::Edge(false)
+        );
+        assert_eq!(
+            cell_symbol(&Cell::Block {
+                block: "TON".into(),
+                instance: "TON0".into(),
+                preset: "T#1s".into()
+            }),
+            CellSymbol::Block
+        );
+        assert_eq!(
+            cell_symbol(&Cell::Compare {
+                op: "GT".into(),
+                left: "MW1".into(),
+                right: "5".into()
+            }),
+            CellSymbol::Compare
+        );
+        assert_eq!(
+            cell_symbol(&Cell::Compute {
+                op: "ADD".into(),
+                target: "MW2".into(),
+                left: "MW1".into(),
+                right: "5".into()
+            }),
+            CellSymbol::Compute
+        );
+        // The three coil kinds each draw differently.
+        assert_ne!(
+            CellSymbol::Coil(CoilKind::Set),
+            CellSymbol::Coil(CoilKind::Reset)
+        );
+        assert_ne!(
+            CellSymbol::Coil(CoilKind::Normal),
+            CellSymbol::Coil(CoilKind::Set)
+        );
+    }
+
+    /// A cell keeps room for its operand name beside the symbol.
+    #[test]
+    fn the_symbol_leaves_room_for_the_name() {
+        let plc = PlcUi::default();
+        let cell = Cell::Contact {
+            var: "pump".into(),
+            negated: false,
+        };
+        assert_eq!(grid_cell_label(&plc, &cell), "pump");
+        let negated = Cell::Contact {
+            var: "estop".into(),
+            negated: true,
+        };
+        assert_eq!(grid_cell_label(&plc, &negated), "/estop");
+        assert!(
+            SYMBOL_WIDTH < 64.0,
+            "the name cell is wider than the symbol"
+        );
     }
 }

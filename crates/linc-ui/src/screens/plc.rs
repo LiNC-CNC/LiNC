@@ -2200,6 +2200,82 @@ pub fn escape_closes_editor(plc: &PlcUi) -> bool {
         && plc.expr_edit.is_none()
 }
 
+/// The PLC workbench's own navigation strip: the shortcuts this editor answers to,
+/// grouped the way the main GUI's sidebar groups pages. It lists keys, not main
+/// page destinations, because the editor owns the keyboard while it is open.
+fn shortcut_nav(plc: &PlcUi, ui: &mut Ui) {
+    ui.vertical(|ui| {
+        ui.label(
+            RichText::new("SHORTCUTS")
+                .size(theme::font_size(8.5))
+                .color(theme::MUTED),
+        );
+        ui.add_space(2.0);
+        let entries: &[(&str, &str)] = &[
+            ("PAGES", ""),
+            ("POU list", "Ctrl+1"),
+            ("Ladder", "Ctrl+2"),
+            ("Symbols", "Ctrl+3"),
+            ("Simulation", "Ctrl+4"),
+            ("RUN", ""),
+            ("Run / stop", "R"),
+            ("RUNG", ""),
+            ("New row", "Ctrl+N"),
+            ("New row at cursor", "Ctrl+J"),
+            ("Delete row", "Ctrl+Del"),
+            ("SAVE", ""),
+            ("Save project", "Ctrl+S"),
+            ("ELEMENTS", ""),
+            ("Contact", "C"),
+            ("Negated contact", "X"),
+            ("Rising / falling edge", "P N"),
+            ("Wire / link", "W V"),
+            ("Timer / counter", "T F U K D"),
+            ("Compare / compute", "G M"),
+            ("Insert before", "I"),
+            ("Delete cell", "Bksp"),
+            ("COIL", ""),
+            ("Normal / set / reset", "C S R"),
+            ("TOOLS", ""),
+            ("Watch", "Ctrl+W"),
+            ("Cross references", "Ctrl+X"),
+            ("Undo / redo", "Ctrl+Z Y"),
+        ];
+        for (text, key) in entries {
+            if key.is_empty() {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(*text)
+                        .size(theme::font_size(8.5))
+                        .color(theme::C3),
+                );
+                continue;
+            }
+            let active = match *key {
+                "Ctrl+2" => plc.page == PlcPage::Edit,
+                "Ctrl+3" => plc.page == PlcPage::Symbols,
+                "Ctrl+1" => plc.page == PlcPage::PouList,
+                _ => false,
+            };
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(*text)
+                        .size(theme::font_size(9.0))
+                        .color(if active { theme::FG } else { theme::MUTED }),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(*key)
+                            .monospace()
+                            .size(theme::font_size(8.5))
+                            .color(theme::ACCENT),
+                    );
+                });
+            });
+        }
+    });
+}
+
 pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     // Escape closes the editor only when nothing is open inside it. A picker or a
     // block window owns Escape first: consuming it here left the picker's state
@@ -2344,10 +2420,30 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         ui.add_space(2.0);
 
         let height = (ui.available_height() - STATUS_BAR_HEIGHT - 4.0).max(160.0);
-        egui::ScrollArea::vertical()
-            .id_salt("plc-page")
-            .auto_shrink([false, false])
-            .show(ui, |ui| page_body(plc, ui, height, &mut actions));
+        // A fixed column for the shortcuts and the rest for the page: without
+        // allocating both sizes the page took the whole width and drew over the
+        // strip.
+        ui.horizontal_top(|ui| {
+            let nav_width = 196.0;
+            ui.allocate_ui_with_layout(
+                egui::vec2(nav_width, height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| shortcut_nav(plc, ui),
+            );
+            ui.separator();
+            let page_width = (ui.available_width() - 8.0).max(320.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(page_width, height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("plc-page")
+                        .max_width(page_width)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| page_body(plc, ui, height, &mut actions));
+                },
+            );
+        });
         status_bar(plc, ui);
     }
 
