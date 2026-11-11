@@ -433,6 +433,32 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         }
     }
 
+    // With MAIN as the entry, a POU that nothing calls never runs.
+    if let Some(main) = pous.iter().find(|pou| pou.name.eq_ignore_ascii_case("MAIN")) {
+        for pou in &pous {
+            let name = pou.name.to_ascii_uppercase();
+            if name == main.name.to_ascii_uppercase() {
+                continue;
+            }
+            let reached = calls
+                .get(&main.name.to_ascii_uppercase())
+                .map(|targets| targets.iter().any(|target| target == &name))
+                .unwrap_or(false)
+                || calls.values().flatten().any(|target| target == &name);
+            if !reached {
+                diagnostics.push(Diagnostic {
+                    severity: Severity::Warning,
+                    code: "pou_unreachable".to_string(),
+                    message: format!(
+                        "'{}' is never called, so the scan does not run it; call it from MAIN",
+                        pou.name
+                    ),
+                    path: format!("pous[{index}].name", index = pous.iter().position(|item| item.name == pou.name).unwrap_or(0)),
+                });
+            }
+        }
+    }
+
     let sections: Vec<&Section> = pous.iter().flat_map(|pou| pou.sections.iter()).collect();
 
     let edge_contacts = pous

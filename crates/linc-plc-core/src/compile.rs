@@ -269,11 +269,22 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         .iter()
         .map(|pou| (pou.name.to_ascii_uppercase(), pou))
         .collect();
-    for pou in &pous {
-        if called.contains(&pou.name.to_ascii_uppercase()) {
-            continue;
+    // MAIN is the entry point, as the ZX manual states: the scan runs MAIN and
+    // MAIN calls the rest. A project without MAIN (older files, tests) keeps
+    // the previous rule so nothing stops running silently.
+    let main = pous
+        .iter()
+        .find(|pou| pou.name.eq_ignore_ascii_case("MAIN"));
+    match main {
+        Some(main) => lower_pou(main, &by_name, &lookup, &lookup_ci, &mut ops, &mut edges, 0),
+        None => {
+            for pou in &pous {
+                if called.contains(&pou.name.to_ascii_uppercase()) {
+                    continue;
+                }
+                lower_pou(pou, &by_name, &lookup, &lookup_ci, &mut ops, &mut edges, 0);
+            }
         }
-        lower_pou(pou, &by_name, &lookup, &lookup_ci, &mut ops, &mut edges, 0);
     }
 
     let program = Program {

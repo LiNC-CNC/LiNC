@@ -890,3 +890,33 @@ fn a_forward_pin_reference_is_reported() {
         "{diagnostics:?}"
     );
 }
+
+#[test]
+fn only_main_runs_and_an_uncalled_pou_is_reported() {
+    let mut project = project_with(
+        vec![
+            IoPoint::new("a", IoDirection::In),
+            IoPoint::new("y", IoDirection::Out),
+            IoPoint::new("z", IoDirection::Out),
+        ],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut main = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Il);
+    main.il = vec!["LD a".into(), "ST y".into()];
+    let mut spare = linc_plc_core::Pou::new("SPARE", linc_plc_core::PouLanguage::Il);
+    spare.il = vec!["LD a".into(), "ST z".into()];
+    project.pous = vec![main, spare];
+
+    let diagnostics = linc_plc_core::validate(&project);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|item| item.code == "pou_unreachable"),
+        "an uncalled POU is a warning: {diagnostics:?}"
+    );
+
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan(&[true]);
+    assert_eq!(vm.outputs(), &[true, false], "only MAIN ran");
+}
