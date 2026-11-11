@@ -712,6 +712,15 @@ struct ModalKeys {
     escape: bool,
 }
 
+/// True when `key` is pressed this frame. Read-only so the caller can decide.
+fn ui_key(ctx: &egui::Context, key: egui::Key) -> bool {
+    ctx.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(event, egui::Event::Key { key: pressed, pressed: true, .. } if *pressed == key)
+        })
+    })
+}
+
 fn modal_keys(ctx: &egui::Context) -> ModalKeys {
     let mut keys = ModalKeys::default();
     for event in ctx.input(|input| input.events.clone()) {
@@ -1276,6 +1285,104 @@ fn expr_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     let Some(edit) = plc.expr_edit.clone() else {
         return;
     };
+    // Keyboard path, as the manual's step-by-step builder: Left/Right ring the
+    // operator, Enter advances, and each value stage takes typed text. The
+    // buttons stay for the mouse.
+    {
+        let mut edited = edit.clone();
+        let keys = modal_keys(ctx);
+        let mut commit = false;
+        if keys.escape {
+            plc.expr_edit = None;
+            plc.operand_filter.clear();
+            return;
+        }
+        if edited.stage == 0 {
+            let ops: &[&str] = if edited.compute {
+                &["ADD", "SUB", "MUL", "DIV", "MOD"]
+            } else {
+                &["GT", "GE", "EQ", "NE", "LE", "LT"]
+            };
+            let current = ops.iter().position(|op| *op == edited.op).unwrap_or(0);
+            let cycled = if ui_key(ctx, egui::Key::ArrowLeft) {
+                Some((current + ops.len() - 1) % ops.len())
+            } else if ui_key(ctx, egui::Key::ArrowRight) {
+                Some((current + 1) % ops.len())
+            } else {
+                None
+            };
+            if let Some(index) = cycled {
+                edited.op = ops[index].to_string();
+                plc.expr_edit = Some(edited);
+                return;
+            }
+            if keys.enter {
+                edited.stage = 1;
+                plc.operand_filter.clear();
+                plc.expr_edit = Some(edited);
+                return;
+            }
+        } else {
+            for character in &keys.typed {
+                plc.operand_filter.push(*character);
+            }
+            if keys.backspace {
+                plc.operand_filter.pop();
+            }
+            if keys.enter {
+                let value = plc.operand_filter.trim().to_string();
+                if !value.is_empty() {
+                    match edited.stage {
+                        1 => edited.left = value,
+                        2 => edited.right = value,
+                        _ => edited.target = value,
+                    }
+                    plc.operand_filter.clear();
+                    edited.stage += 1;
+                    let done = if edited.compute {
+                        edited.stage > 3
+                    } else {
+                        edited.stage > 2
+                    };
+                    if done {
+                        commit = true;
+                    }
+                    plc.expr_edit = Some(edited.clone());
+                }
+            }
+            if !commit {
+                if plc.expr_edit.is_some() {
+                    plc.expr_edit = Some(edited);
+                }
+                return;
+            }
+        }
+        if commit {
+            let cell = if edited.compute {
+                Cell::Compute {
+                    op: edited.op.clone(),
+                    target: edited.target.clone(),
+                    left: edited.left.clone(),
+                    right: edited.right.clone(),
+                }
+            } else {
+                Cell::Compare {
+                    op: edited.op.clone(),
+                    left: edited.left.clone(),
+                    right: edited.right.clone(),
+                }
+            };
+            actions.push(Action::SetCell {
+                section: edited.section,
+                rung: edited.rung,
+                position: edited.position,
+                cell,
+            });
+            plc.expr_edit = None;
+            plc.operand_filter.clear();
+            return;
+        }
+    }
     let mut close = false;
     let mut next: Option<ExprEdit> = None;
     let mut finish: Option<Cell> = None;
