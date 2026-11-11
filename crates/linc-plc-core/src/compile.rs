@@ -329,7 +329,11 @@ pub fn project_hash(project: &Project) -> String {
     const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
 
-    let bytes = serde_json::to_vec(project).unwrap_or_default();
+    // The watch list is a view, not the program: pinning an operand must not
+    // make a downloaded program look stale.
+    let mut canonical = project.clone();
+    canonical.watch.clear();
+    let bytes = serde_json::to_vec(&canonical).unwrap_or_default();
     let mut hash = OFFSET_BASIS;
     for byte in bytes {
         hash ^= u64::from(byte);

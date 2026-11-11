@@ -664,3 +664,12 @@ fn a_falling_edge_contact_is_the_mirror() {
     vm.scan(&[false]);
     assert_eq!(vm.outputs(), &[false]);
 }
+
+#[test]
+fn pinning_a_watch_operand_does_not_change_the_program_hash() {
+    let project = simple_project(Logic::contact("a", false), Coil::new("y", CoilKind::Normal));
+    let before = linc_plc_core::project_hash(&project);
+    let mut pinned = project.clone();
+    pinned.watch = vec!["a".into(), "MW0".into()];
+    assert_eq!(linc_plc_core::project_hash(&pinned), before);
+}
