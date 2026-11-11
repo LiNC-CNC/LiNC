@@ -1955,8 +1955,8 @@ mod symbol_tests {
         };
         assert_eq!(grid_cell_label(&plc, &negated), "/estop");
         assert!(
-            SYMBOL_WIDTH < 64.0,
-            "the name cell is wider than the symbol"
+            CELL_WIDTH >= 40.0,
+            "a cell has room for a symbol and its name"
         );
     }
 }
