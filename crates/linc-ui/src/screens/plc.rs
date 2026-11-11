@@ -1939,6 +1939,95 @@ fn il_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32) {
     });
 }
 
+/// Draw the lines as a diagram: inputs enter on their own rows, the block spans
+/// them, and its output leaves on the top row, which is the shape ZX draws.
+fn fbd_diagram(lines: &[FbdLine], ui: &mut Ui) {
+    if lines.is_empty() {
+        return;
+    }
+    let row = 18.0_f32;
+    for line in lines {
+        let rows = line.inputs.len().max(1) as f32;
+        let height = rows * row + 6.0;
+        let (rect, _) =
+            ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+        let painter = ui.painter();
+        painter.rect_filled(rect, 3.0, theme::SURFACE);
+        let box_left = rect.left() + 132.0;
+        let box_right = box_left + 96.0;
+        let top = rect.top() + 3.0;
+        let first_y = top + row / 2.0;
+        // Inputs and their wires.
+        for (index, input) in line.inputs.iter().enumerate() {
+            let y = top + index as f32 * row + row / 2.0;
+            painter.text(
+                pos2(rect.left() + 6.0, y),
+                egui::Align2::LEFT_CENTER,
+                input,
+                egui::FontId::monospace(theme::font_size(9.0)),
+                theme::FG,
+            );
+            painter.line_segment(
+                [pos2(rect.left() + 112.0, y), pos2(box_left, y)],
+                Stroke::new(1.0, theme::C1),
+            );
+        }
+        // The vertical bus and the block.
+        if line.inputs.len() > 1 {
+            let last_y = top + (rows - 1.0) * row + row / 2.0;
+            painter.line_segment(
+                [pos2(box_left - 8.0, first_y), pos2(box_left - 8.0, last_y)],
+                Stroke::new(1.0, theme::C1),
+            );
+        }
+        painter.rect_filled(
+            egui::Rect::from_min_max(
+                pos2(box_left, top),
+                pos2(box_right, top + (rows * row).max(row)),
+            ),
+            2.0,
+            theme::PANEL_RAISED,
+        );
+        painter.rect_stroke(
+            egui::Rect::from_min_max(
+                pos2(box_left, top),
+                pos2(box_right, top + (rows * row).max(row)),
+            ),
+            2.0,
+            Stroke::new(1.0, theme::ACCENT),
+            egui::StrokeKind::Inside,
+        );
+        painter.text(
+            pos2((box_left + box_right) / 2.0, first_y),
+            egui::Align2::CENTER_CENTER,
+            &line.block,
+            egui::FontId::monospace(theme::font_size(10.0)),
+            theme::ACCENT,
+        );
+        // Output leaves on the top row.
+        painter.line_segment(
+            [pos2(box_right, first_y), pos2(rect.right() - 74.0, first_y)],
+            Stroke::new(1.0, theme::SUCCESS),
+        );
+        painter.text(
+            pos2(rect.right() - 6.0, first_y),
+            egui::Align2::RIGHT_CENTER,
+            &line.output,
+            egui::FontId::monospace(theme::font_size(9.0)),
+            theme::SUCCESS,
+        );
+        if !line.comment.is_empty() {
+            painter.text(
+                pos2(rect.left() + 6.0, rect.bottom() - 5.0),
+                egui::Align2::LEFT_BOTTOM,
+                &line.comment,
+                egui::FontId::monospace(theme::font_size(8.0)),
+                theme::MUTED,
+            );
+        }
+    }
+}
+
 /// The value list for an FBD output or input: declared symbols (with their
 /// comments), the word bank, block members, booleans, numbers and times.
 fn fbd_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
@@ -2048,6 +2137,8 @@ fn fbd_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
     ];
     let mut lines = plc.current_pou().map(|pou| pou.fbd).unwrap_or_default();
     let mut changed = false;
+    fbd_diagram(&lines, ui);
+    ui.add_space(6.0);
     ui.label(
         RichText::new("output := BLOCK(inputs)   ·   click the block to cycle it")
             .size(theme::font_size(9.0))
