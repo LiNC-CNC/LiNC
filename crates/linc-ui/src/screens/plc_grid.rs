@@ -467,7 +467,12 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
 
 /// The element picker and, after it, the operand list.
 pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
-    element_picker(plc, ctx, actions);
+    // One picker owns a frame's keys: the element list is drawn before the
+    // operand list, and when its letter chose an item the same keystroke must
+    // not also land in the operand filter.
+    if element_picker(plc, ctx, actions) {
+        return;
+    }
     operand_picker(plc, ctx, actions);
     coil_picker(plc, ctx, actions);
     expr_editor(plc, ctx, actions);
@@ -621,9 +626,65 @@ fn xref_window(plc: &mut PlcUi, ctx: &egui::Context) {
     }
 }
 
-fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+
+/// What a modal picker does with the keys pressed this frame.
+///
+/// The pickers read events themselves rather than a text field: a field needs a
+/// frame to take focus, and a letter typed inside that frame was lost, which is
+/// how a typed `estop` once became the list's first entry. These keys work on
+/// the frame they arrive.
+#[derive(Default)]
+struct ModalKeys {
+    typed: Vec<char>,
+    backspace: bool,
+    enter: bool,
+    escape: bool,
+}
+
+fn modal_keys(ctx: &egui::Context) -> ModalKeys {
+    let mut keys = ModalKeys::default();
+    for event in ctx.input(|input| input.events.clone()) {
+        match event {
+            egui::Event::Text(text) => {
+                keys.typed.extend(text.chars().filter(|c| c.is_ascii_graphic() || *c == ' '));
+            }
+            egui::Event::Key {
+                key,
+                pressed: true,
+                ..
+            } => match key {
+                egui::Key::Backspace => keys.backspace = true,
+                egui::Key::Enter => keys.enter = true,
+                egui::Key::Escape => keys.escape = true,
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    keys
+}
+
+/// The element a letter stands for, as the ZX front panel labels it.
+fn element_for_key(character: char) -> Option<&'static str> {
+    Some(match character.to_ascii_uppercase() {
+        'W' | '-' => "wire",
+        'C' => "contact",
+        'X' | '/' => "negated",
+        'V' => "link",
+        'T' => "TON",
+        'F' => "TOF",
+        'U' => "TP",
+        'K' => "CTU",
+        'D' => "CTD",
+        'G' => "compare",
+        'M' => "compute",
+        _ => return None,
+    })
+}
+
+fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) -> bool {
     let Some((section, rung, position)) = plc.picker else {
-        return;
+        return false;
     };
     let first = plc
         .project
@@ -636,6 +697,73 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
     let coil_position = position >= POSITIONS;
     let mut close = false;
     let mut next_operand = None;
+    let keys = modal_keys(ctx);
+    let mut key_cell: Option<Cell> = None;
+    let mut key_coil: Option<CoilKind> = None;
+    if let Some(character) = keys.typed.first().copied() {
+        if let Some(element) = element_for_key(character) {
+            match (coil_position, element) {
+                (true, "contact") => key_coil = Some(CoilKind::Normal),
+                (true, "negated") => key_coil = Some(CoilKind::Set),
+                (true, _) => key_coil = Some(CoilKind::Normal),
+                (false, "wire") => key_cell = Some(Cell::Wire),
+                (false, "link") => key_cell = Some(Cell::Link),
+                (false, "contact") => key_cell = Some(Cell::Contact {
+                    var: first.clone(),
+                    negated: false,
+                }),
+                (false, "negated") => key_cell = Some(Cell::Contact {
+                    var: first.clone(),
+                    negated: true,
+                }),
+                (false, "compare") => {
+                    plc.expr_edit = Some(ExprEdit {
+                        section,
+                        rung,
+                        position,
+                        compute: false,
+                        stage: 0,
+                        op: "GT".to_string(),
+                        left: "MW0".to_string(),
+                        right: "0".to_string(),
+                        target: "MW0".to_string(),
+                    });
+                    close = true;
+                }
+                (false, "compute") => {
+                    plc.expr_edit = Some(ExprEdit {
+                        section,
+                        rung,
+                        position,
+                        compute: true,
+                        stage: 0,
+                        op: "ADD".to_string(),
+                        left: "MW0".to_string(),
+                        right: "1".to_string(),
+                        target: "MW1".to_string(),
+                    });
+                    close = true;
+                }
+                (false, block) => {
+                    let (name, preset) = if block.starts_with("CT") {
+                        ("10", "10")
+                    } else {
+                        ("T#1s", "T#1s")
+                    };
+                    key_cell = Some(Cell::Block {
+                        block: block.to_string(),
+                        instance: format!("{block}0"),
+                        preset: preset.to_string(),
+                    });
+                    let _ = name;
+                }
+            }
+        }
+    }
+    if keys.escape {
+        plc.picker = None;
+        return true;
+    }
     egui::Window::new("ELEMENT")
         .order(egui::Order::Foreground)
         .collapsible(false)
@@ -781,15 +909,45 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 close = true;
             }
         });
+    if let Some(cell) = key_cell {
+        match cell {
+            Cell::Contact { .. } => {
+                plc.operand_pick = Some((section, rung, position, cell));
+            }
+            other => actions.push(Action::SetCell {
+                section,
+                rung,
+                position,
+                cell: other,
+            }),
+        }
+        plc.picker = None;
+        return true;
+    }
+    if let Some(kind) = key_coil {
+        let var = plc
+            .current_pou_sections()
+            .get(section)
+            .and_then(|section| section.rungs.get(rung))
+            .map(|rung| rung.coil.var.clone())
+            .filter(|var| !var.is_empty())
+            .unwrap_or_else(|| first.clone());
+        actions.push(Action::SetCoil {
+            section,
+            rung,
+            coil: Coil::new(var, kind),
+        });
+        plc.picker = None;
+        return true;
+    }
     if let Some(pick) = next_operand {
         plc.operand_pick = Some(pick);
     }
     if close {
         plc.picker = None;
+        return true;
     }
-    if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
-        plc.picker = None;
-    }
+    false
 }
 
 fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
@@ -812,6 +970,18 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
         plc.operand_filter.clear();
     }
     let mut close = false;
+    let keys = modal_keys(ctx);
+    for character in &keys.typed {
+        plc.operand_filter.push(*character);
+    }
+    if keys.backspace {
+        plc.operand_filter.pop();
+    }
+    if keys.escape {
+        plc.operand_pick = None;
+        plc.operand_filter.clear();
+        return;
+    }
     egui::Window::new("OPERAND")
         .order(egui::Order::Foreground)
         .collapsible(false)
@@ -823,18 +993,18 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
             }
             // Type to narrow, Enter takes a single match: with a dozen symbols
             // the list is long and clicking it is a coordinate game.
-            let enter_pressed = ui.input(|input| input.key_pressed(egui::Key::Enter));
-            let filter = ui.add(
-                egui::TextEdit::singleline(&mut plc.operand_filter)
-                    .hint_text("type to narrow, Enter picks the first match")
-                    .desired_width(240.0),
+            // The filter is text the picker collected itself, so it shows what
+            // was actually typed on the frame it arrived.
+            ui.label(
+                RichText::new(if plc.operand_filter.is_empty() {
+                    "type to narrow, Enter picks the first match".to_string()
+                } else {
+                    plc.operand_filter.clone()
+                })
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
             );
-            // The picker is modal for this cell, so the filter owns the keys
-            // from the first frame: typing a name and pressing Enter is the
-            // quickest way through a list of a dozen symbols.
-            if !filter.has_focus() {
-                filter.request_focus();
-            }
             let needle = plc.operand_filter.trim().to_ascii_lowercase();
             let matches = names
                 .iter()
@@ -842,9 +1012,7 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     needle.is_empty() || name.to_ascii_lowercase().contains(&needle)
                 })
                 .collect::<Vec<_>>();
-            // The picker is modal, so Enter always takes the first match; the
-            // focus test made it depend on a frame the field had already lost.
-            if enter_pressed {
+            if keys.enter {
                 if let Some((name, _)) = matches.first() {
                     let chosen = with_operand(&cell, name);
                     actions.push(Action::SetCell {
@@ -879,7 +1047,7 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 close = true;
             }
         });
-    if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+    if close {
         plc.operand_pick = None;
         plc.operand_filter.clear();
     }
@@ -914,21 +1082,34 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
         .chain(plc.project.vars.iter().map(|var| var.name.clone()))
         .collect::<Vec<_>>();
     let mut close = false;
+    let keys = modal_keys(ctx);
+    for character in &keys.typed {
+        plc.operand_filter.push(*character);
+    }
+    if keys.backspace {
+        plc.operand_filter.pop();
+    }
+    if keys.escape {
+        plc.coil_pick = None;
+        plc.operand_filter.clear();
+        return;
+    }
     egui::Window::new("COIL OPERAND")
         .order(egui::Order::Foreground)
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
-            let enter_pressed = ui.input(|input| input.key_pressed(egui::Key::Enter));
-            let filter = ui.add(
-                egui::TextEdit::singleline(&mut plc.operand_filter)
-                    .hint_text("type to narrow, Enter picks the first match")
-                    .desired_width(240.0),
+            ui.label(
+                RichText::new(if plc.operand_filter.is_empty() {
+                    "type to narrow, Enter picks the first match".to_string()
+                } else {
+                    plc.operand_filter.clone()
+                })
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
             );
-            if !filter.has_focus() {
-                filter.request_focus();
-            }
             let needle = plc.operand_filter.trim().to_ascii_lowercase();
             let matches = names
                 .iter()
@@ -936,7 +1117,7 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
                 .collect::<Vec<_>>();
             // The picker is modal, so Enter always takes the first match; the
             // focus test made it depend on a frame the field had already lost.
-            if enter_pressed {
+            if keys.enter {
                 if let Some(name) = matches.first() {
                     actions.push(Action::SetCoilVar {
                         section,
@@ -960,7 +1141,7 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
                 close = true;
             }
         });
-    if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+    if close {
         plc.coil_pick = None;
         plc.operand_filter.clear();
     }

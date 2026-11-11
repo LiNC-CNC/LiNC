@@ -5578,3 +5578,107 @@ mod block_field_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod picker_key_tests {
+    use super::*;
+    use linc_plc_core::{IoDirection, IoKind, IoPoint};
+
+    fn plc_with_symbols() -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.project.io = vec![
+            IoPoint {
+                name: "pump".into(),
+                direction: IoDirection::In,
+                kind: IoKind::Bit,
+                comment: String::new(),
+            },
+            IoPoint {
+                name: "estop".into(),
+                direction: IoDirection::In,
+                kind: IoKind::Bit,
+                comment: String::new(),
+            },
+        ];
+        plc
+    }
+
+    fn frame(plc: &mut PlcUi, events: Vec<egui::Event>) -> Vec<Action> {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        let mut actions = Vec::new();
+        let mut output = ctx.run_pass(input, |ctx| {
+            crate::screens::plc_grid::pickers(plc, ctx, &mut actions);
+        });
+        output.textures_delta.clear();
+        actions
+    }
+
+    fn text(value: &str) -> Vec<egui::Event> {
+        vec![egui::Event::Text(value.to_string())]
+    }
+
+    /// A letter pressed while the element list is open picks the item, exactly
+    /// as clicking it does. Before this the list ignored the keyboard, so the
+    /// manual's element letters looked dead whenever the list was up.
+    #[test]
+    fn a_letter_opens_the_operand_list_from_the_element_picker() {
+        let mut plc = plc_with_symbols();
+        plc.picker = Some((0, 0, 1));
+        let _ = frame(&mut plc, text("c"));
+        assert!(plc.picker.is_none(), "element list closed after the letter");
+        match plc.operand_pick {
+            Some((_, _, position, Cell::Contact { var, negated })) => {
+                assert_eq!(position, 1);
+                assert_eq!(var, "pump");
+                assert!(!negated);
+            }
+            ref other => panic!("expected a contact pick, got {other:?}"),
+        }
+    }
+
+    /// Typing narrows the operand list and Enter commits the typed name on the
+    /// frame it arrives, with the kind the letter chose.
+    #[test]
+    fn typing_then_enter_commits_the_typed_operand() {
+        let mut plc = plc_with_symbols();
+        plc.picker = Some((0, 0, 1));
+        let _ = frame(&mut plc, text("x"));
+        assert!(plc.operand_pick.is_some(), "negated contact list open");
+        let mut events = text("estop");
+        events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let actions = frame(&mut plc, events);
+        assert!(
+            !actions.is_empty(),
+            "no action; filter was {:?}, pick {}",
+            plc.operand_filter,
+            plc.operand_pick.is_some()
+        );
+        let cell = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::SetCell { cell, position, .. } => {
+                    assert_eq!(*position, 1);
+                    Some(cell.clone())
+                }
+                _ => None,
+            })
+            .expect("a cell was set");
+        assert_eq!(
+            cell,
+            Cell::Contact {
+                var: "estop".into(),
+                negated: true
+            }
+        );
+    }
+}
