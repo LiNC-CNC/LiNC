@@ -25,6 +25,10 @@ pub enum Request {
     },
     Start,
     Stop,
+    /// One scan while the ladder is paused: the manual's `S`.
+    Step,
+    /// Clear the VM's data (images, timers, counters) and every force.
+    ResetData,
     Snapshot,
     /// The watch list sampled into a window of this many milliseconds. Asking
     /// for a different window clears the history, so the chart restarts.

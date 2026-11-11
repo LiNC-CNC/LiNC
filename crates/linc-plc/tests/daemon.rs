@@ -664,3 +664,77 @@ fn retained_values_survive_a_daemon_restart() {
         client.call(&Request::Shutdown).expect("shutdown");
     }
 }
+
+/// One Step is exactly one scan, and it pauses a running ladder first so the
+/// scheduler cannot also scan on that tick.
+#[test]
+fn step_is_exactly_one_scan_and_pauses() {
+    let mut harness = Harness::start(&Project::example(), false);
+    let mut client = harness.client();
+    client.call(&Request::Hello { protocol: PROTOCOL_VERSION }).expect("hello");
+    client
+        .call(&Request::Load {
+            project: Project::example(),
+        })
+        .expect("load");
+    let running = expect_state(client.call(&Request::Start).expect("start"));
+    assert_eq!(state_name(&running), "running");
+
+    // The first step pauses a running ladder, so the exactness is measured from
+    // the paused state onwards, where the scheduler cannot add scans.
+    let paused = expect_state(client.call(&Request::Step).expect("step"));
+    assert_eq!(state_name(&paused), "loaded", "a step leaves the ladder paused");
+    assert!(!paused.alive, "a paused ladder has no heartbeat");
+
+    let first = expect_state(client.call(&Request::Step).expect("step"));
+    assert_eq!(
+        first.scan_count,
+        paused.scan_count + 1,
+        "one press is one scan, no more"
+    );
+    let second = expect_state(client.call(&Request::Step).expect("step"));
+    assert_eq!(second.scan_count, first.scan_count + 1, "and the next is too");
+
+    // The pause holds: scans stop climbing on their own.
+    thread::sleep(Duration::from_millis(120));
+    let after = expect_state(client.call(&Request::Snapshot).expect("snapshot"));
+    assert_eq!(
+        after.scan_count, second.scan_count,
+        "the scheduler stayed idle"
+    );
+    assert_eq!(state_name(&after), "loaded");
+}
+
+/// Reset clears the VM's data and the forces and leaves a defined paused state.
+#[test]
+fn reset_clears_data_and_forces() {
+    let mut harness = Harness::start(&Project::example(), true);
+    let mut client = harness.client();
+    client.call(&Request::Hello { protocol: PROTOCOL_VERSION }).expect("hello");
+    client
+        .call(&Request::Load {
+            project: Project::example(),
+        })
+        .expect("load");
+    client.call(&Request::Start).expect("start");
+    wait_for_scans(&mut client);
+    client
+        .call(&Request::Force {
+            name: "start".to_string(),
+            value: true,
+            ttl_ms: 0,
+        })
+        .expect("force");
+
+    let reset = expect_state(client.call(&Request::ResetData).expect("reset"));
+    assert_eq!(state_name(&reset), "loaded", "reset leaves the ladder paused");
+    assert!(reset.forced.is_empty(), "the forces are cleared");
+    assert!(
+        reset.vars.iter().all(|var| !var.value),
+        "every value is back to false after a reset"
+    );
+    assert!(
+        !reset.alive,
+        "a reset ladder does not keep a heartbeat"
+    );
+}

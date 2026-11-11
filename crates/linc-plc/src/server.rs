@@ -152,6 +152,10 @@ fn handle_request(request: Request, shared: &Shared) -> Result<Outcome, Error> {
         Request::Load { project } => Outcome::Reply(load(project, shared)?),
 
         Request::Start => Outcome::Reply(dispatch(shared, |reply| Command::Start { reply })),
+        Request::Step => Outcome::Reply(dispatch(shared, |reply| Command::Step { reply })),
+        Request::ResetData => {
+            Outcome::Reply(dispatch(shared, |reply| Command::ResetData { reply }))
+        }
 
         Request::Stop => Outcome::Reply(dispatch(shared, |reply| Command::Stop { reply })),
 

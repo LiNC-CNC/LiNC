@@ -1565,6 +1565,7 @@ pub fn grid_rung(
                 matches!(cell, Cell::Wire),
                 cell_symbol(&cell),
                 if commented { 18.0 } else { 10.0 },
+                cell_active(plc, &cell),
             );
         }
         let coil = plc.operand_label(&rung.coil.var);
@@ -1578,6 +1579,7 @@ pub fn grid_rung(
             rung.coil.var.is_empty(),
             CellSymbol::Coil(rung.coil.kind),
             if commented { 18.0 } else { 10.0 },
+            plc.bit_value(&rung.coil.var),
         );
     });
     if commented {
@@ -1761,6 +1763,30 @@ fn draw_cell_symbol(painter: &egui::Painter, rect: egui::Rect, symbol: CellSymbo
     }
 }
 
+/// The element's live state, when the snapshot can answer for it. `None` means the
+/// value is not in the snapshot — a block's `Q` is not published yet — so the
+/// renderer leaves the element neutral instead of guessing.
+pub fn cell_active(plc: &PlcUi, cell: &Cell) -> Option<bool> {
+    match cell {
+        Cell::Contact { var, negated } => plc.bit_value(var).map(|value| value != *negated),
+        Cell::Edge { var, .. } => plc.bit_value(var),
+        Cell::Compare { op, left, right } => {
+            let a = plc.word_value(left)?;
+            let b = plc.word_value(right)?;
+            Some(match op.to_ascii_uppercase().as_str() {
+                "GT" => a > b,
+                "GE" => a >= b,
+                "EQ" => a == b,
+                "NE" => a != b,
+                "LE" => a <= b,
+                "LT" => a < b,
+                _ => a > b,
+            })
+        }
+        Cell::Wire | Cell::Link | Cell::Block { .. } | Cell::Compute { .. } => None,
+    }
+}
+
 fn cell_box(
     plc: &PlcUi,
     ui: &mut Ui,
@@ -1771,6 +1797,7 @@ fn cell_box(
     quiet: bool,
     symbol: CellSymbol,
     name_y: f32,
+    live: Option<bool>,
 ) {
     let size = Vec2::new(CELL_WIDTH, CELL_HEIGHT);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
@@ -1779,7 +1806,10 @@ fn cell_box(
     // No per-cell background or border: the strip is bare and the conductor is
     // what the eye follows. Selection tints the element and marks the cell with
     // two small ticks, never a box.
-    let color: Color32 = if quiet {
+    let color: Color32 = if live == Some(true) {
+        // A true element is green, as the manual's monitor shows it.
+        theme::C4
+    } else if quiet {
         theme::MUTED
     } else if selected {
         theme::ACCENT

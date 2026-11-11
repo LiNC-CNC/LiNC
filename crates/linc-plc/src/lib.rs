@@ -125,6 +125,14 @@ pub(crate) enum Command {
     Start {
         reply: mpsc::Sender<linc_plc_core::protocol::Response>,
     },
+    /// Run exactly one scan and stay paused.
+    Step {
+        reply: mpsc::Sender<linc_plc_core::protocol::Response>,
+    },
+    /// Clear the VM data and all forces.
+    ResetData {
+        reply: mpsc::Sender<linc_plc_core::protocol::Response>,
+    },
     Stop {
         reply: mpsc::Sender<linc_plc_core::protocol::Response>,
     },

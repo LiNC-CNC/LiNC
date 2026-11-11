@@ -142,7 +142,6 @@ impl Daemon {
                 );
             }
 
-            self.scan_count = self.scan_count.wrapping_add(1);
             self.scan_time_us = u32::try_from(started.elapsed().as_micros()).unwrap_or(u32::MAX);
 
             // The snapshot is a convenience for the UI, not the scan itself:
@@ -247,6 +246,42 @@ impl Daemon {
                 answer(reply, Response::State(self.snapshot()));
             }
 
+            Command::Step { reply } => {
+                // Pause before scanning: the scheduler must not also scan this
+                // tick, or one press becomes two scans and the timers run fast.
+                if self.vm.is_none() {
+                    answer(
+                        reply,
+                        Response::Error {
+                            code: "state".to_string(),
+                            message: "step needs a loaded project (Load first)".to_string(),
+                        },
+                    );
+                    return;
+                }
+                self.phase = Phase::Loaded;
+                let failed = self.execute(hal, shared).err();
+                self.alive = false;
+                let _ = hal.ctl().set_alive(false);
+                if let Some(message) = failed {
+                    self.fail(message, hal, shared);
+                }
+                self.publish(shared);
+                answer(reply, Response::State(self.snapshot()));
+            }
+            Command::ResetData { reply } => {
+                if let Some(vm) = self.vm.as_mut() {
+                    vm.reset();
+                    vm.clear_forces();
+                }
+                self.forces.clear();
+                if self.phase == Phase::Running {
+                    self.phase = Phase::Loaded;
+                }
+                let _ = hal.drive_outputs_false();
+                self.publish(shared);
+                answer(reply, Response::State(self.snapshot()));
+            }
             Command::Stop { reply } => {
                 if self.vm.is_none() {
                     answer(
@@ -380,6 +415,8 @@ impl Daemon {
             .unwrap_or(20);
         self.last_scan = Some(Instant::now());
         vm.scan_with_dt(&inputs, dt_ms.max(1));
+        // The counter counts scans, not loop ticks: a paused ladder must not climb.
+        self.scan_count = self.scan_count.wrapping_add(1);
         let packed = if retain_wanted {
             Some(linc_plc_core::retain::pack(
                 &retain_hash,

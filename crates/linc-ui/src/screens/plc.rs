@@ -638,6 +638,8 @@ enum Tag {
     Load,
     Start,
     Stop,
+    Step,
+    ResetData,
     Snapshot,
     Force,
     ClearForces,
@@ -914,6 +916,8 @@ pub struct PlcUi {
     /// A POU is being renamed or copied.
     pub pou_edit: Option<PouEdit>,
     /// The trend window in milliseconds: 4 s, 20 s or 100 s.
+    /// The simulation's selected input byte: 0 or 1, as the manual's `B` picks.
+    pub sim_byte: u8,
     pub trend_window_ms: u32,
     /// A property text field is being typed into, so the ladder keys stand down.
     /// Cleared by Escape, by a click on the canvas, or by leaving the field.
@@ -993,6 +997,7 @@ impl Default for PlcUi {
             fbd_grid_pick: None,
             fbd_operand_pick: None,
             pou_edit: None,
+            sim_byte: 0,
             trend_window_ms: 20_000,
             text_editing: false,
             view_addresses: false,
@@ -1399,6 +1404,22 @@ impl PlcUi {
             .iter()
             .find(|value| value.name == name)
             .map(|value| value.value)
+    }
+
+    /// The live value of a bit operand, if the snapshot carries it.
+    pub fn bit_value(&self, name: &str) -> Option<bool> {
+        self.vars
+            .iter()
+            .find(|var| var.name == name)
+            .map(|var| var.value)
+    }
+
+    /// The live value of a word operand (`MW3`, `TON0.ET`, `CTU1.CV`).
+    pub fn word_value(&self, name: &str) -> Option<i16> {
+        self.words
+            .iter()
+            .find(|word| word.name == name)
+            .map(|word| word.value)
     }
 
     pub fn is_forced(&self, name: &str) -> bool {
@@ -2291,6 +2312,19 @@ fn shortcut_nav(plc: &PlcUi, ui: &mut Ui) {
     }
     heading(ui, "COIL", false);
     row(ui, "Normal / set / reset", "C S R", false);
+    heading(ui, "SIMULATION", false);
+    for (text, key) in [
+        ("Toggle input bit", "0-7"),
+        ("Select input byte", "B"),
+        ("Run / stop", "R"),
+        ("Step one scan", "S"),
+        ("Reset data", "E"),
+        ("Watch page", "W"),
+        ("Trend page", "G"),
+    ] {
+        row(ui, text, key, false);
+        ui.add_space(RAIL_INNER_GAP);
+    }
     heading(ui, "TOOLS", false);
     for (text, key) in [
         ("Watch", "Ctrl+W"),
@@ -2392,26 +2426,73 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     if to_sim {
         app.plc.page = PlcPage::Sim;
     }
-    // R runs and stops the ladder on the simulation page, as the manual's §10
-    // does, so the acceptance does not depend on the menu taking a click.
-    if app.plc.page == PlcPage::Sim
-        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::R))
-    {
-        let action = if matches!(app.plc.state, RunState::Running) {
-            Action::Stop
-        } else {
-            Action::Start
-        };
-        if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
-            eprintln!(
-                "sim R: page={:?} state={:?} online={} stop={}",
-                app.plc.page,
-                app.plc.state,
-                app.plc.online,
-                matches!(action, Action::Stop)
-            );
+    // The simulation page owns its keys as the manual describes them, and the
+    // input and run keys keep working on the watch and trend pages so a program can
+    // be tried while its signals are compared in time.
+    let sim_keys = matches!(app.plc.page, PlcPage::Sim | PlcPage::Watch | PlcPage::Trend);
+    if sim_keys {
+        let mut bit: Option<u8> = None;
+        let mut byte = false;
+        let (step, reset, watch, trend, run) = ui.input_mut(|input| {
+            let digit = [
+                egui::Key::Num0,
+                egui::Key::Num1,
+                egui::Key::Num2,
+                egui::Key::Num3,
+                egui::Key::Num4,
+                egui::Key::Num5,
+                egui::Key::Num6,
+                egui::Key::Num7,
+            ]
+            .iter()
+            .position(|key| input.consume_key(egui::Modifiers::NONE, *key));
+            if let Some(index) = digit {
+                bit = Some(index as u8);
+            }
+            byte = input.consume_key(egui::Modifiers::NONE, egui::Key::B);
+            (
+                input.consume_key(egui::Modifiers::NONE, egui::Key::S),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::E),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::W),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::G),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::R),
+            )
+        });
+        if byte {
+            app.plc.sim_byte = if app.plc.sim_byte == 0 { 1 } else { 0 };
         }
-        app.plc.apply(action);
+        if let Some(index) = bit {
+            if let Some(name) = sim_input_name(&app.plc, app.plc.sim_byte, index) {
+                let current = app
+                    .plc
+                    .vars
+                    .iter()
+                    .find(|var| var.name == name)
+                    .map(|var| var.value)
+                    .unwrap_or(false);
+                app.plc.apply(Action::Force(name, !current));
+            }
+        }
+        if step {
+            app.plc.send(Tag::Step, Request::Step);
+        }
+        if reset {
+            app.plc.send(Tag::ResetData, Request::ResetData);
+        }
+        if watch {
+            app.plc.page = PlcPage::Watch;
+        }
+        if trend {
+            app.plc.page = PlcPage::Trend;
+        }
+        if run {
+            let action = if matches!(app.plc.state, RunState::Running) {
+                Action::Stop
+            } else {
+                Action::Start
+            };
+            app.plc.apply(action);
+        }
     }
     if add_rung {
         let (section, row) = app
@@ -4193,8 +4274,109 @@ fn draw_remote_trend(plc: &PlcUi, ui: &mut Ui) {
 /// The simulation panel: one LED per declared I/O point. A click on an input
 /// forces it for the daemon's force TTL, which is how the ZX simulation's LED
 /// panel sets an input. Outputs are read-only.
+/// The configured input at `bit` of the selected byte, if that slot is bound. The
+/// panel shows unbound slots disabled rather than inventing names, as the manual's
+/// 16 fixed inputs do.
+fn sim_input_name(plc: &PlcUi, byte: u8, bit: u8) -> Option<String> {
+    let index = usize::from(byte) * 8 + usize::from(bit);
+    plc.project
+        .io
+        .iter()
+        .filter(|point| point.direction == IoDirection::In)
+        .nth(index)
+        .map(|point| point.name.clone())
+}
+
+/// The manual's 16 input bit positions and the output row: a bound slot shows the
+/// operand name and its value, an unbound one is drawn disabled. The selected byte
+/// has the brighter paper, and a click toggles a bound input.
+fn sim_bit_panel(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
+    for (title, direction) in [("IN", IoDirection::In), ("OUT", IoDirection::Out)] {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(title)
+                    .monospace()
+                    .size(theme::font_size(8.0))
+                    .color(theme::MUTED),
+            );
+            for bit in 0..16u8 {
+                let index = usize::from(bit);
+                let point = plc
+                    .project
+                    .io
+                    .iter()
+                    .filter(|point| point.direction == direction)
+                    .nth(index);
+                let selected_byte =
+                    direction == IoDirection::In && (usize::from(bit) / 8) as u8 == plc.sim_byte;
+                let (rect, response) =
+                    ui.allocate_exact_size(egui::vec2(30.0, 22.0), egui::Sense::click());
+                let paper = if selected_byte {
+                    theme::PANEL_RAISED
+                } else {
+                    theme::PANEL
+                };
+                ui.painter().rect_filled(rect, 2.0, paper);
+                match point {
+                    Some(point) => {
+                        let value = plc
+                            .vars
+                            .iter()
+                            .find(|var| var.name == point.name)
+                            .map(|var| var.value)
+                            .unwrap_or(false);
+                        let forced = plc.is_forced(&point.name);
+                        let colour = if value {
+                            if direction == IoDirection::In {
+                                theme::C4
+                            } else {
+                                theme::C5
+                            }
+                        } else {
+                            theme::MUTED
+                        };
+                        ui.painter().text(
+                            egui::pos2(rect.center().x, rect.top() + 7.0),
+                            Align2::CENTER_CENTER,
+                            format!("{bit}"),
+                            FontId::monospace(7.0),
+                            theme::MUTED,
+                        );
+                        ui.painter().circle_filled(
+                            egui::pos2(rect.center().x, rect.center().y + 3.0),
+                            3.0,
+                            colour,
+                        );
+                        ui.painter().text(
+                            egui::pos2(rect.center().x, rect.bottom() - 2.0),
+                            Align2::CENTER_BOTTOM,
+                            if forced { format!("F {}", point.name) } else { point.name.clone() },
+                            FontId::monospace(6.5),
+                            colour,
+                        );
+                        if direction == IoDirection::In && response.clicked() {
+                            actions.push(Action::Force(point.name.clone(), !value));
+                        }
+                    }
+                    None => {
+                        ui.painter().text(
+                            rect.center(),
+                            Align2::CENTER_CENTER,
+                            format!("{bit}"),
+                            FontId::monospace(7.0),
+                            theme::C3,
+                        );
+                    }
+                }
+            }
+        });
+    }
+    ui.add_space(3.0);
+}
+
 fn sim_view(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
     common::card_title(ui, "SIMULATION");
+    sim_bit_panel(plc, ui, actions);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
         for point in &plc.project.io {
@@ -6345,5 +6527,38 @@ mod rail_spacing_tests {
             "a group gap reads as a gap, not as a row"
         );
         assert_eq!(theme::NAV_ROW_GAP, 2.0);
+    }
+}
+
+#[cfg(test)]
+mod sim_keys_tests {
+    use super::*;
+
+    fn plc_with_inputs() -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.project.io = (0..10)
+            .map(|index| linc_plc_core::IoPoint {
+                name: format!("in{index}"),
+                direction: linc_plc_core::IoDirection::In,
+                kind: linc_plc_core::IoKind::Bit,
+                comment: String::new(),
+            })
+            .collect();
+        plc
+    }
+
+    /// The selected byte maps to the manual's 16 bit positions: slot 4 of byte 0 is
+    /// the fifth input, and `B` moves the same slot to the twelfth.
+    #[test]
+    fn the_bit_panel_maps_bytes_to_configured_inputs() {
+        let plc = plc_with_inputs();
+        assert_eq!(sim_input_name(&plc, 0, 0).as_deref(), Some("in0"));
+        assert_eq!(sim_input_name(&plc, 0, 4).as_deref(), Some("in4"));
+        // Byte 1 starts at absolute position 8: slot 1 is the tenth input.
+        assert_eq!(sim_input_name(&plc, 1, 1).as_deref(), Some("in9"));
+        // Slots past the configured inputs have no name, so they are drawn disabled
+        // rather than faked.
+        assert_eq!(sim_input_name(&plc, 1, 4), None);
+        assert_eq!(sim_input_name(&plc, 1, 7), None);
     }
 }
