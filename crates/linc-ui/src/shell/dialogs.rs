@@ -250,16 +250,17 @@ impl LincApp {
             return;
         }
         let screen = ctx.input(|input| input.viewport_rect());
+        // Middle, not Foreground: the overlay's own menus and dialogs are
+        // `Order::Foreground`, and a Foreground overlay paints over its own
+        // dropdowns and pickers, which reads as "the button does nothing".
         egui::Area::new(egui::Id::unique("linc-plc-editor"))
-            .order(egui::Order::Foreground)
+            .order(egui::Order::Middle)
             .fixed_pos(screen.min)
             .show(ctx, |ui| {
-                // Swallow pointer input aimed at the page underneath.
-                ui.interact(
-                    screen,
-                    egui::Id::unique("linc-plc-editor-backdrop"),
-                    egui::Sense::click_and_drag(),
-                );
+                // No full-screen click target here: it made egui treat the
+                // click that opened a dropdown as a click outside it, so every
+                // menu opened and shut in one frame. The overlay is opaque and
+                // covers the page, so nothing underneath is reachable anyway.
                 ui.painter().rect_filled(screen, 0.0, theme::PANEL);
                 egui::Frame::new()
                     .fill(theme::PANEL)

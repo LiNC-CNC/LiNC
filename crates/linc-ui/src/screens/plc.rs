@@ -1934,22 +1934,52 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
 
     app.plc.poll();
     common::focus_anchor(ui, "plc-editor-focus");
+    // The menu bar does not take clicks in this build, so the pages and the
+    // two actions the workflow needs every minute have keys as well.
+    let (to_pous, to_edit, to_symbols, to_sim, add_rung, save) = ui.input_mut(|input| {
+        (
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::Num1),
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::Num2),
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::Num3),
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::Num4),
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::N),
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::S),
+        )
+    });
+    if to_pous {
+        app.plc.page = PlcPage::PouList;
+    }
+    if to_edit {
+        app.plc.page = PlcPage::Edit;
+    }
+    if to_symbols {
+        app.plc.page = PlcPage::Symbols;
+    }
+    if to_sim {
+        app.plc.page = PlcPage::Sim;
+    }
+    if add_rung {
+        app.plc.apply(Action::AddRung);
+    }
+    if save {
+        app.plc.apply(Action::Save);
+    }
     let mut actions: Vec<Action> = Vec::new();
     crate::screens::plc_grid::editor_keys(app, ui, &mut actions);
     il_keys(&mut app.plc, ui, &mut actions);
     fbd_keys(&mut app.plc, ui, &mut actions);
     {
-    let plc = &mut app.plc;
+        let plc = &mut app.plc;
 
-    menu_bar(plc, ui, &mut actions);
-    ui.add_space(2.0);
+        menu_bar(plc, ui, &mut actions);
+        ui.add_space(2.0);
 
-    let height = (ui.available_height() - STATUS_BAR_HEIGHT - 4.0).max(160.0);
-    egui::ScrollArea::vertical()
-        .id_salt("plc-page")
-        .auto_shrink([false, false])
-        .show(ui, |ui| page_body(plc, ui, height, &mut actions));
-    status_bar(plc, ui);
+        let height = (ui.available_height() - STATUS_BAR_HEIGHT - 4.0).max(160.0);
+        egui::ScrollArea::vertical()
+            .id_salt("plc-page")
+            .auto_shrink([false, false])
+            .show(ui, |ui| page_body(plc, ui, height, &mut actions));
+        status_bar(plc, ui);
     }
 
     // Windows last: egui paints in call order, so a picker drawn before the
@@ -3368,15 +3398,21 @@ fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Act
                         let response = ui.add(
                             egui::TextEdit::singleline(&mut name)
                                 .desired_width(140.0)
-                                .hint_text("a new output name"),
+                                .hint_text("new symbol name"),
                         );
                         if response.changed() {
                             plc.symbol_new = name.clone();
                         }
-                        if theme::action_button(ui, "add", true).clicked()
+                        if theme::action_button(ui, "add out", true).clicked()
                             && !name.trim().is_empty()
                         {
                             actions.push(Action::AddSymbol(name.trim().to_string()));
+                            plc.symbol_new.clear();
+                        }
+                        if theme::action_button(ui, "add in", true).clicked()
+                            && !name.trim().is_empty()
+                        {
+                            actions.push(Action::AddInput(name.trim().to_string()));
                             plc.symbol_new.clear();
                         }
                     });

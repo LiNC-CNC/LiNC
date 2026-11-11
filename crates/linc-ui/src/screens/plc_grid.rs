@@ -449,7 +449,6 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
 
 /// The element picker and, after it, the operand list.
 pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
-
     element_picker(plc, ctx, actions);
     operand_picker(plc, ctx, actions);
     expr_editor(plc, ctx, actions);

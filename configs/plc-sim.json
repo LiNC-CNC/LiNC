@@ -20,6 +20,54 @@
       "direction": "out",
       "kind": "bit",
       "comment": ""
+    },
+    {
+      "name": "pump",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "estop",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "alert_p",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "alert_n",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "fan",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "lamp",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "blink_a",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "blink_b",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
     }
   ],
   "vars": [
@@ -72,7 +120,81 @@
             "var": "seal",
             "kind": "normal"
           },
-          "cells": []
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "start",
+              "negated": false
+            },
+            {
+              "cell": "link"
+            },
+            {
+              "cell": "link"
+            },
+            {
+              "cell": "contact",
+              "var": "stop",
+              "negated": true
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "comment": "branch of seal",
+          "logic": {
+            "op": "const",
+            "value": true
+          },
+          "coil": {
+            "var": "",
+            "kind": "normal"
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "seal",
+              "negated": false
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
         },
         {
           "comment": "The seal drives the run output.",
@@ -85,7 +207,37 @@
             "var": "run",
             "kind": "normal"
           },
-          "cells": []
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "seal",
+              "negated": false
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
         },
         {
           "comment": "Stopping while running latches the alarm.",
@@ -108,10 +260,263 @@
             "var": "alarm",
             "kind": "set"
           },
-          "cells": []
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "stop",
+              "negated": false
+            },
+            {
+              "cell": "contact",
+              "var": "run",
+              "negated": false
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
         }
       ]
     }
   ],
-  "pous": []
+  "pous": [
+    {
+      "name": "MAIN",
+      "language": "ld",
+      "comment": "Two buttons latch a run output and reset an alarm.",
+      "sections": [
+        {
+          "name": "main",
+          "rungs": [
+            {
+              "comment": "Seal in: start picks the seal up, stop breaks it.",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "parallel",
+                    "items": [
+                      {
+                        "op": "contact",
+                        "var": "start",
+                        "negated": false
+                      },
+                      {
+                        "op": "contact",
+                        "var": "seal",
+                        "negated": false
+                      }
+                    ]
+                  },
+                  {
+                    "op": "contact",
+                    "var": "stop",
+                    "negated": true
+                  }
+                ]
+              },
+              "coil": {
+                "var": "seal",
+                "kind": "normal"
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "start",
+                  "negated": false
+                },
+                {
+                  "cell": "link"
+                },
+                {
+                  "cell": "link"
+                },
+                {
+                  "cell": "contact",
+                  "var": "stop",
+                  "negated": true
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "comment": "branch of seal",
+              "logic": {
+                "op": "const",
+                "value": true
+              },
+              "coil": {
+                "var": "",
+                "kind": "normal"
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "seal",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "comment": "The seal drives the run output.",
+              "logic": {
+                "op": "contact",
+                "var": "seal",
+                "negated": false
+              },
+              "coil": {
+                "var": "run",
+                "kind": "normal"
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "seal",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "comment": "Stopping while running latches the alarm.",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "stop",
+                    "negated": false
+                  },
+                  {
+                    "op": "contact",
+                    "var": "run",
+                    "negated": false
+                  }
+                ]
+              },
+              "coil": {
+                "var": "alarm",
+                "kind": "set"
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "stop",
+                  "negated": false
+                },
+                {
+                  "cell": "contact",
+                  "var": "run",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "il": [],
+      "fbd": [],
+      "fbd_grid": null
+    }
+  ]
 }
