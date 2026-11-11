@@ -24,8 +24,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::model::{Coil, CoilKind, IoDirection, IoPoint, Logic, Pou, PouLanguage, Project, Rung, Section, VarDecl};
-use crate::validate::{Diagnostic, Severity};
-use crate::{SCHEMA_VERSION};
+use crate::validate::Diagnostic;
+use crate::SCHEMA_VERSION;
 
 /// One parsed XML element. A small tree is enough for a ladder and keeps the
 /// "refuse what is not understood" rule in one place.
@@ -762,24 +762,4 @@ fn build_block(
         instance: String::new(),
         preset,
     })
-}
-
-/// Refuse a file whose schema is not the one the model writes.
-pub fn checked_import(xml: &str, schema: u32) -> Result<Project, Vec<Diagnostic>> {
-    if schema != SCHEMA_VERSION {
-        return Err(vec![error(
-            "plcopen_unsupported_element",
-            format!("the model writes schema {SCHEMA_VERSION}, not {schema}"),
-            "xml",
-        )]);
-    }
-    import(xml)
-}
-
-#[allow(dead_code)]
-fn severity_name(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-    }
 }
