@@ -58,6 +58,14 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             input.consume_key(egui::Modifiers::CTRL, egui::Key::Y),
         )
     });
+    let mark = ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::A));
+    if mark {
+        app.plc.cell_mark = if app.plc.cell_mark.is_some() {
+            None
+        } else {
+            Some(cursor)
+        };
+    }
     let (copy, paste, xref, watch) = ui.input_mut(|input| {
         (
             input.consume_key(egui::Modifiers::CTRL, egui::Key::C),
@@ -212,15 +220,50 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
     }
     app.plc.cell_cursor = Some(cursor);
     if copy {
-        let cell = sections
+        // A mark on the same rung copies the whole span; without one, just the
+        // cell under the cursor.
+        let rung = sections
             .get(cursor.0)
-            .and_then(|section| section.rungs.get(cursor.1))
-            .and_then(|rung| rung.cells.get(cursor.2))
-            .cloned();
-        app.plc.cell_clipboard = cell;
+            .and_then(|section| section.rungs.get(cursor.1));
+        let span = match (app.plc.cell_mark, rung) {
+            (Some((mark_section, mark_rung, mark)), Some(rung))
+                if mark_section == cursor.0 && mark_rung == cursor.1 =>
+            {
+                let (low, high) = if mark <= cursor.2 {
+                    (mark, cursor.2)
+                } else {
+                    (cursor.2, mark)
+                };
+                (low..=high)
+                    .map(|position| rung.cells.get(position).cloned().unwrap_or(Cell::Wire))
+                    .collect::<Vec<_>>()
+            }
+            _ => Vec::new(),
+        };
+        if span.is_empty() {
+            app.plc.cell_clipboard = rung
+                .and_then(|rung| rung.cells.get(cursor.2))
+                .cloned();
+            app.plc.cell_span.clear();
+        } else {
+            app.plc.cell_span = span;
+            app.plc.cell_clipboard = None;
+        }
     }
     if paste {
-        if let (Some(cell), true) = (app.plc.cell_clipboard.clone(), cursor.2 < POSITIONS) {
+        if !app.plc.cell_span.is_empty() {
+            for (offset, cell) in app.plc.cell_span.clone().into_iter().enumerate() {
+                let position = cursor.2 + offset;
+                if position < POSITIONS {
+                    actions.push(Action::SetCell {
+                        section: cursor.0,
+                        rung: cursor.1,
+                        position,
+                        cell,
+                    });
+                }
+            }
+        } else if let (Some(cell), true) = (app.plc.cell_clipboard.clone(), cursor.2 < POSITIONS) {
             actions.push(Action::SetCell {
                 section: cursor.0,
                 rung: cursor.1,

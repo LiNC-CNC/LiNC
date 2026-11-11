@@ -764,6 +764,10 @@ pub struct PlcUi {
     pub redo_stack: Vec<Vec<Pou>>,
     /// The cell copied with Ctrl+C.
     pub cell_clipboard: Option<Cell>,
+    /// Cells copied from a marked span, pasted at the cursor.
+    pub cell_span: Vec<Cell>,
+    /// Mark start for a span copy: section, rung, position.
+    pub cell_mark: Option<(usize, usize, usize)>,
     /// The operand whose cross references are shown.
     pub xref: Option<String>,
     /// A timer or counter box is being edited at this cell.
@@ -820,6 +824,8 @@ impl Default for PlcUi {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             cell_clipboard: None,
+            cell_span: Vec::new(),
+            cell_mark: None,
             xref: None,
             block_edit: None,
             fbd_pick: None,
