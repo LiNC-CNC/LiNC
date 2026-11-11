@@ -191,6 +191,34 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         .and_then(|section| section.rungs.get(cursor.1))
         .and_then(|rung| rung.cells.get(cursor.2))
         .cloned();
+    // Movement comes first: the coil branch below returns, and while it did so
+    // before the arrow handling the cursor could never leave the coil at all.
+    if left || right || up || down {
+        if right {
+            cursor.2 = (cursor.2 + 1).min(POSITIONS);
+        }
+        if left {
+            cursor.2 = cursor.2.saturating_sub(1);
+        }
+        if down {
+            if cursor.1 + 1 < rows[cursor.0] {
+                cursor.1 += 1;
+            } else if cursor.0 + 1 < rows.len() {
+                cursor.0 += 1;
+                cursor.1 = 0;
+            }
+        }
+        if up {
+            if cursor.1 > 0 {
+                cursor.1 -= 1;
+            } else if cursor.0 > 0 {
+                cursor.0 -= 1;
+                cursor.1 = rows[cursor.0].saturating_sub(1);
+            }
+        }
+        app.plc.cell_cursor = Some(cursor);
+        return;
+    }
     if cursor.2 >= POSITIONS {
         let kind = if contact {
             Some(CoilKind::Normal)
