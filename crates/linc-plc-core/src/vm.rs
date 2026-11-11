@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-use crate::compile::{Binding, Compiled, FbKind, MathOp, Op, Program, SymbolKind, WordValue};
+use crate::compile::{Binding, Compiled, FbKind, MathOp, Op, Program, SymbolKind, WordOperand};
 
 /// Operand-stack depth. Validation caps logic nesting at 64, so this is slack.
 const STACK_DEPTH: usize = 128;
@@ -22,6 +22,13 @@ pub const DEFAULT_DT_MS: u16 = 20;
 pub struct ScanStats {
     pub scan_us: u32,
     pub scan_count: u64,
+}
+
+/// One word of the bank in a snapshot: `MW3`, or a block member `TON0.ET`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WordValue {
+    pub name: String,
+    pub value: i16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -293,11 +300,11 @@ impl Vm {
         &self.output_image
     }
 
-    fn word_value(&self, value: WordValue) -> i16 {
+    fn word_value(&self, value: WordOperand) -> i16 {
         match value {
-            WordValue::Word(index) => self.word(index),
-            WordValue::Const(value) => value,
-            WordValue::Block(instance) => self.block_value(instance),
+            WordOperand::Word(index) => self.word(index),
+            WordOperand::Const(value) => value,
+            WordOperand::Block(instance) => self.block_value(instance),
         }
     }
 
@@ -332,6 +339,39 @@ impl Vm {
     /// The whole word bank, for the snapshot.
     pub fn words(&self) -> &[i16] {
         &self.words
+    }
+
+    /// Words and block members with their names, in a stable order.
+    pub fn word_snapshot(&self) -> Vec<WordValue> {
+        let mut values = self
+            .words
+            .iter()
+            .enumerate()
+            .map(|(index, value)| WordValue {
+                name: format!("MW{index}"),
+                value: *value,
+            })
+            .collect::<Vec<_>>();
+        for (index, state) in self.blocks.iter().enumerate() {
+            let kind = match index / usize::from(crate::compile::FB_PER_TYPE) {
+                0 => "TON",
+                1 => "TOF",
+                2 => "TP",
+                3 => "CTU",
+                _ => "CTD",
+            };
+            let number = index % usize::from(crate::compile::FB_PER_TYPE);
+            let member = if matches!(kind, "CTU" | "CTD") {
+                "CV"
+            } else {
+                "ET"
+            };
+            values.push(WordValue {
+                name: format!("{kind}{number}.{member}"),
+                value: state.value,
+            });
+        }
+        values
     }
 
     pub fn get(&self, name: &str) -> Option<bool> {

@@ -151,8 +151,8 @@ pub enum Op {
     Compute {
         op: MathOp,
         target: u16,
-        left: WordValue,
-        right: WordValue,
+        left: WordOperand,
+        right: WordOperand,
     },
 }
 
@@ -499,14 +499,14 @@ fn lower_grid_rung(
 
 /// A word-valued operand of a compare contact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WordValue {
+pub enum WordOperand {
     Word(u16),
     Const(i16),
     Block(u16),
 }
 
 /// Resolve `MW3`, `T#4s`, `-12`, `TON0.ET` or `CTU1.CV`.
-pub fn word_operand_value(text: &str) -> Option<WordValue> {
+pub fn word_operand_value(text: &str) -> Option<WordOperand> {
     let text = text.trim();
     if let Some(rest) = text
         .strip_suffix(".ET")
@@ -518,22 +518,22 @@ pub fn word_operand_value(text: &str) -> Option<WordValue> {
         if !kind.is_timer() {
             // `.ET` of a counter and `.CV` of a timer are the same field.
         }
-        return Some(WordValue::Block(instance));
+        return Some(WordOperand::Block(instance));
     }
     if let Some(index) = crate::il::word_operand(text) {
-        return Some(WordValue::Word(index));
+        return Some(WordOperand::Word(index));
     }
     if text.starts_with("T#") || text.starts_with("t#") {
-        return Some(WordValue::Const(parse_preset(text, true)?));
+        return Some(WordOperand::Const(parse_preset(text, true)?));
     }
-    text.parse::<i16>().ok().map(WordValue::Const)
+    text.parse::<i16>().ok().map(WordOperand::Const)
 }
 
-fn emit_word(ops: &mut Vec<Op>, value: WordValue) {
+fn emit_word(ops: &mut Vec<Op>, value: WordOperand) {
     match value {
-        WordValue::Word(index) => ops.push(Op::LoadWord(index)),
-        WordValue::Const(value) => ops.push(Op::LoadConst(value)),
-        WordValue::Block(index) => ops.push(Op::FbWord(index)),
+        WordOperand::Word(index) => ops.push(Op::LoadWord(index)),
+        WordOperand::Const(value) => ops.push(Op::LoadConst(value)),
+        WordOperand::Block(index) => ops.push(Op::FbWord(index)),
     }
 }
 

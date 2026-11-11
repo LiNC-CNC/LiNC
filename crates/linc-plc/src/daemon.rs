@@ -363,9 +363,9 @@ impl Daemon {
     }
 
     fn snapshot(&self) -> StateSnapshot {
-        let (vars, forced) = match &self.vm {
-            Some(vm) => (vm.snapshot(), vm.forced()),
-            None => (Vec::new(), Vec::new()),
+        let (vars, words, forced) = match &self.vm {
+            Some(vm) => (vm.snapshot(), vm.word_snapshot(), vm.forced()),
+            None => (Vec::new(), Vec::new(), Vec::new()),
         };
         StateSnapshot {
             state: self.phase.run_state(),
@@ -382,6 +382,7 @@ impl Daemon {
             alive: self.phase == Phase::Running && self.fault.is_none(),
             fault: self.fault.clone(),
             vars,
+            words,
             forced,
         }
     }

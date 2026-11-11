@@ -14,6 +14,7 @@ use egui::{pos2, vec2, Align, Color32, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_client::Client;
 use linc_plc_core::grid::{Cell, POSITIONS};
 use linc_plc_core::protocol::{Request, Response, RunState, StateSnapshot, PROTOCOL_VERSION};
+use linc_plc_core::WordValue;
 use linc_plc_core::{
     validate, Coil, CoilKind, Diagnostic, IoDirection, Logic, Pou, PouLanguage, Project, Rung,
     Section, Severity, VarValue,
@@ -608,6 +609,9 @@ pub struct ExprEdit {
 pub struct TrendBuffer {
     pub channels: Vec<String>,
     pub lanes: Vec<Vec<bool>>,
+    /// Block members (`ET`/`CV`) as analog lanes, up to four.
+    pub word_channels: Vec<String>,
+    pub word_lanes: Vec<Vec<i16>>,
     pub samples: usize,
 }
 
@@ -615,7 +619,9 @@ impl TrendBuffer {
     pub const DEPTH: usize = 512;
     pub const CHANNELS: usize = 8;
 
-    pub fn sample(&mut self, vars: &[VarValue]) {
+    pub const WORD_CHANNELS: usize = 4;
+
+    pub fn sample(&mut self, vars: &[VarValue], words: &[WordValue]) {
         let names = vars
             .iter()
             .take(Self::CHANNELS)
@@ -627,6 +633,23 @@ impl TrendBuffer {
         }
         for (lane, var) in self.lanes.iter_mut().zip(vars.iter()) {
             lane.push(var.value);
+            if lane.len() > Self::DEPTH {
+                lane.remove(0);
+            }
+        }
+        let word_names = words
+            .iter()
+            .filter(|word| word.name.contains('.'))
+            .take(Self::WORD_CHANNELS)
+            .map(|word| word.name.clone())
+            .collect::<Vec<_>>();
+        if word_names != self.word_channels {
+            self.word_channels = word_names;
+            self.word_lanes = vec![Vec::new(); self.word_channels.len()];
+        }
+        let members = words.iter().filter(|word| word.name.contains('.'));
+        for (lane, word) in self.word_lanes.iter_mut().zip(members) {
+            lane.push(word.value);
             if lane.len() > Self::DEPTH {
                 lane.remove(0);
             }
@@ -693,6 +716,8 @@ pub struct PlcUi {
     pub xref: Option<String>,
     /// Boolean traces for the trend page.
     pub trend: TrendBuffer,
+    /// The word bank and block members from the last snapshot.
+    pub words: Vec<WordValue>,
     /// Buffer for the IL editor; synced when the selected POU changes.
     il_text: String,
     il_for: Option<usize>,
@@ -741,6 +766,7 @@ impl Default for PlcUi {
             cell_clipboard: None,
             xref: None,
             trend: TrendBuffer::default(),
+            words: Vec::new(),
             il_text: String::new(),
             il_for: None,
             next_poll: Instant::now(),
@@ -977,8 +1003,9 @@ impl PlcUi {
         self.alive = snapshot.alive;
         self.fault = snapshot.fault;
         self.vars = snapshot.vars;
+        self.words = snapshot.words;
         // One sample per received snapshot, so the traces follow the scan.
-        self.trend.sample(&self.vars);
+        self.trend.sample(&self.vars, &self.words);
         self.forced = snapshot.forced;
     }
 
@@ -1782,9 +1809,11 @@ fn trend_page(plc: &PlcUi, ui: &mut Ui) {
     common::card_title(ui, "TREND");
     if trend.channels.is_empty() || trend.samples == 0 {
         ui.label(
-            RichText::new("No samples yet. Start the PLC and the first eight symbols are traced.")
-                .size(theme::font_size(10.0))
-                .color(theme::MUTED),
+            RichText::new(
+                "No samples yet. Start the PLC: the first eight symbols and four block values are traced.",
+            )
+            .size(theme::font_size(10.0))
+            .color(theme::MUTED),
         );
         return;
     }
@@ -1804,7 +1833,12 @@ fn trend_page(plc: &PlcUi, ui: &mut Ui) {
         let (rect, _) = ui.allocate_exact_size(vec2(width, lane_height), Sense::hover());
         let painter = ui.painter();
         painter.rect_filled(rect, 2.0, theme::SURFACE);
-        painter.rect_stroke(rect, 2.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            rect,
+            2.0,
+            Stroke::new(1.0, theme::BORDER),
+            egui::StrokeKind::Inside,
+        );
         painter.text(
             pos2(rect.left() + 4.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
@@ -1830,11 +1864,14 @@ fn trend_page(plc: &PlcUi, ui: &mut Ui) {
         if points.len() > 1 {
             painter.add(egui::Shape::line(
                 points,
-                Stroke::new(1.2, if lane.last().copied().unwrap_or(false) {
-                    theme::SUCCESS
-                } else {
-                    theme::C1
-                }),
+                Stroke::new(
+                    1.2,
+                    if lane.last().copied().unwrap_or(false) {
+                        theme::SUCCESS
+                    } else {
+                        theme::C1
+                    },
+                ),
             ));
         }
     }
@@ -3034,6 +3071,7 @@ mod tests {
                     kind: linc_plc_core::SymbolKind::Var,
                     forced: false,
                 }],
+                words: Vec::new(),
                 forced: vec!["start".into()],
             });
             while let Ok(request) = linc_plc_core::protocol::read_message::<_, Request>(&mut stream)

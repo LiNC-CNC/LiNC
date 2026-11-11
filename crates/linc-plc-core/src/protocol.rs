@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::Project;
 use crate::validate::Diagnostic;
-use crate::vm::VarValue;
+use crate::vm::{VarValue, WordValue};
 
 pub use crate::{MAX_FRAME, PROTOCOL_VERSION};
 
@@ -71,6 +71,9 @@ pub struct StateSnapshot {
     pub alive: bool,
     pub fault: Option<String>,
     pub vars: Vec<VarValue>,
+    /// The word bank and the block members (`MW3`, `TON0.ET`, `CTU1.CV`).
+    #[serde(default)]
+    pub words: Vec<WordValue>,
     pub forced: Vec<String>,
 }
 

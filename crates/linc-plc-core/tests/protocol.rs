@@ -4,7 +4,9 @@ use linc_plc_core::protocol::{
     read_frame, read_message, write_frame, write_message, ProtocolError, Request, Response,
     RunState, StateSnapshot,
 };
-use linc_plc_core::{Diagnostic, Severity, SymbolKind, VarValue, MAX_FRAME, PROTOCOL_VERSION};
+use linc_plc_core::{
+    Diagnostic, Severity, SymbolKind, VarValue, WordValue, MAX_FRAME, PROTOCOL_VERSION,
+};
 
 fn snapshot() -> StateSnapshot {
     StateSnapshot {
@@ -21,6 +23,10 @@ fn snapshot() -> StateSnapshot {
             value: true,
             kind: SymbolKind::Output,
             forced: false,
+        }],
+        words: vec![WordValue {
+            name: "MW0".to_string(),
+            value: -7,
         }],
         forced: Vec::new(),
     }
@@ -173,8 +179,11 @@ fn protocol_error_kinds_are_stable() {
 #[test]
 fn wire_envelope_uses_adjacent_tagging() {
     assert_eq!(
-        serde_json::to_value(Request::Hello { protocol: 1 }).expect("json"),
-        serde_json::json!({"request": "hello", "data": {"protocol": 1}})
+        serde_json::to_value(Request::Hello {
+            protocol: PROTOCOL_VERSION
+        })
+        .expect("json"),
+        serde_json::json!({"request": "hello", "data": {"protocol": PROTOCOL_VERSION}})
     );
     assert_eq!(
         serde_json::to_value(Request::Start).expect("json"),
@@ -194,6 +203,7 @@ fn wire_envelope_uses_adjacent_tagging() {
                 "alive": true,
                 "fault": null,
                 "vars": [{"name": "run", "value": true, "kind": "output", "forced": false}],
+                "words": [{"name": "MW0", "value": -7}],
                 "forced": [],
             }
         })
@@ -208,9 +218,10 @@ fn wire_envelope_uses_adjacent_tagging() {
     );
 
     // The adjacent envelope must also decode.
-    let hello: Request =
-        serde_json::from_value(serde_json::json!({"request": "hello", "data": {"protocol": 1}}))
-            .expect("decode hello");
+    let hello: Request = serde_json::from_value(
+        serde_json::json!({"request": "hello", "data": {"protocol": PROTOCOL_VERSION}}),
+    )
+    .expect("decode hello");
     assert_eq!(
         hello,
         Request::Hello {

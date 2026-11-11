@@ -26,13 +26,15 @@ pub use model::{
 };
 pub use protocol::{ProtocolError, Request, Response, RunState, StateSnapshot};
 pub use validate::{validate, Diagnostic, Severity};
-pub use vm::{ScanStats, VarValue, Vm};
+pub use vm::{ScanStats, VarValue, Vm, WordValue};
 
 /// Schema version written by this crate and accepted by the validator.
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// Wire protocol version spoken by the daemon and the client.
-pub const PROTOCOL_VERSION: u32 = 1;
+/// Bumped when a snapshot gains a field the other side must understand. 2 adds
+/// the word bank.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Largest accepted frame payload, in bytes.
 pub const MAX_FRAME: usize = 4 * 1024 * 1024;

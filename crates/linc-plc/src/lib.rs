@@ -214,6 +214,7 @@ pub fn run(config: Config, shutdown: Arc<AtomicBool>) -> Result<(), Error> {
             alive: false,
             fault: None,
             vars: Vec::new(),
+            words: Vec::new(),
             forced: Vec::new(),
         })),
         shutdown: Arc::clone(&shutdown),
