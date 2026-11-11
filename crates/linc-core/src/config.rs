@@ -1000,6 +1000,8 @@ impl Profile {
                     )
                 } else {
                     "off".into()
+                },
+            ),
             (
                 "PLC".into(),
                 if self.config.plc.enabled {

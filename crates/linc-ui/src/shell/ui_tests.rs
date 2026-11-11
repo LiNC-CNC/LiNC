@@ -1261,13 +1261,13 @@ fn the_navigation_rows_are_tight_and_the_pill_fills_them() {
     assert!(theme::NAV_ROW_HEIGHT < theme::MIN_TARGET);
 }
 
-/// Measured at 1280x720, from the frame's own shapes: six rows, four primary
-/// pills of 26 px and two one-line pills of 20 px. DIAGNOSTICS and G-CODE HELP
-/// are one-line rows whose labels start where the pill does, with no icon and
-/// no keycap under them; SETTINGS has no row at all and is reached with its
-/// chord.
+/// Measured at 1280x720, from the frame's own shapes: seven rows, four primary
+/// pills of 26 px and three one-line pills of 20 px. DIAGNOSTICS, PLC and
+/// G-CODE HELP are one-line rows whose labels start where the pill does, with
+/// no icon and no keycap under them; SETTINGS has no row at all and is reached
+/// with its chord.
 #[test]
-fn the_navigation_is_compact_and_lists_six_pages() {
+fn the_navigation_is_compact_and_lists_seven_pages() {
     let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
     harness.frame(&[]);
     let output = harness.frame_full(Vec::new());
@@ -1280,7 +1280,9 @@ fn the_navigation_is_compact_and_lists_six_pages() {
             .map(|(_, rect)| *rect)
             .unwrap_or_else(|| panic!("{text} is a navigation row"))
     };
-    for label in ["MACHINE", "PROGRAM", "TOOLS", "OFFSETS", "DIAG", "G-CODE"] {
+    for label in [
+        "MACHINE", "PROGRAM", "TOOLS", "OFFSETS", "DIAG", "PLC", "G-CODE",
+    ] {
         in_nav(label);
     }
     assert!(
@@ -1303,7 +1305,7 @@ fn the_navigation_is_compact_and_lists_six_pages() {
             "{keycap} sits to the right of {label}"
         );
     }
-    // Six pills: four that carry an icon and a keycap, two one-liners.
+    // Seven pills: four that carry an icon and a keycap, three one-liners.
     let mut heights: Vec<f32> = painted_rects(&output)
         .into_iter()
         .filter(|rect| {
@@ -1313,8 +1315,8 @@ fn the_navigation_is_compact_and_lists_six_pages() {
         .filter(|height| *height > 10.0 && *height < 40.0)
         .collect();
     heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    assert_eq!(heights.len(), 6, "six painted rows, got {heights:?}");
-    // One list: the four primary rows paint one pill height and the two
+    assert_eq!(heights.len(), 7, "seven painted rows, got {heights:?}");
+    // One list: the four primary rows paint one pill height and the three
     // one-line rows a shorter pill, so the one-line labels do not sit in a
     // 26 px band of empty space.
     assert_eq!(
@@ -1330,7 +1332,7 @@ fn the_navigation_is_compact_and_lists_six_pages() {
             .iter()
             .filter(|height| (**height - theme::NAV_PILL_SECONDARY).abs() < 0.5)
             .count(),
-        2,
+        3,
         "{heights:?}"
     );
     assert!(
@@ -1584,17 +1586,17 @@ fn in_nav_top(texts: &[(String, egui::Rect)], label: &str) -> f32 {
         .unwrap_or_else(|| panic!("{label} is painted in the sidebar"))
 }
 
-/// The arrows walk the navigation over all six rows, and Enter opens the
+/// The arrows walk the navigation over all seven rows, and Enter opens the
 /// page the highlighted row names.
 #[test]
-fn the_arrow_keys_walk_all_six_navigation_rows() {
+fn the_arrow_keys_walk_all_seven_navigation_rows() {
     let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
     harness.app.set_page(Page::Machine);
     harness.app.focus_nav();
     harness.frame(&[]);
-    assert_eq!(harness.app.nav.pages.len(), 6, "six rows to walk");
+    assert_eq!(harness.app.nav.pages.len(), 7, "seven rows to walk");
     assert_eq!(harness.app.nav.nav_focus, 0);
-    for expected in 1..6 {
+    for expected in 1..7 {
         harness.frame(&[egui::Key::ArrowDown]);
         assert_eq!(
             harness.app.nav.nav_focus, expected,
@@ -1604,15 +1606,15 @@ fn the_arrow_keys_walk_all_six_navigation_rows() {
     }
     harness.frame(&[egui::Key::ArrowDown]);
     assert_eq!(
-        harness.app.nav.nav_focus, 5,
+        harness.app.nav.nav_focus, 6,
         "the last row is the end of the list"
     );
-    harness.app.nav.nav_focus = 5;
+    harness.app.nav.nav_focus = 6;
     harness.frame(&[egui::Key::Enter]);
     assert_eq!(harness.app.nav.page, Page::Help, "Enter opens G-CODE HELP");
     harness.app.focus_nav();
     harness.frame(&[egui::Key::ArrowUp]);
-    assert_eq!(harness.app.nav.nav_focus, 4, "ArrowUp walks back");
+    assert_eq!(harness.app.nav.nav_focus, 5, "ArrowUp walks back");
 }
 
 /// A shell region's rect, from the frame's own report to the diagnostic
@@ -1777,30 +1779,30 @@ fn the_main_page_cards_end_on_the_page_bottom_edge() {
 
 #[test]
 fn configure_plc_sets_the_service_fields_and_names_the_disabled_hint() {
-let (_dir, mut app) = make_app(PanelMode::Auto);
-assert!(!app.plc.enabled, "the page starts with the PLC off");
-app.configure_plc(
-true,
-std::path::PathBuf::from("/run/linc/plc.sock"),
-std::path::PathBuf::from("/profiles/plc-sim.json"),
-);
-assert!(app.plc.enabled);
-assert_eq!(app.plc.socket_text, "/run/linc/plc.sock");
-assert_eq!(app.plc.path_text, "/profiles/plc-sim.json");
+    let (_dir, mut app) = make_app(PanelMode::Auto);
+    assert!(!app.plc.enabled, "the page starts with the PLC off");
+    app.configure_plc(
+        true,
+        std::path::PathBuf::from("/run/linc/plc.sock"),
+        std::path::PathBuf::from("/profiles/plc-sim.json"),
+    );
+    assert!(app.plc.enabled);
+    assert_eq!(app.plc.socket_text, "/run/linc/plc.sock");
+    assert_eq!(app.plc.path_text, "/profiles/plc-sim.json");
 
-// The hint is what the status and diagnostics cards show when the
-// profile leaves the service off, so both parts must be spelled out.
-let hint = crate::screens::plc::DISABLED_HINT;
-assert!(hint.contains("[plc] enabled = true"), "{hint}");
-assert!(hint.contains("start-sim.sh --plc"), "{hint}");
+    // The hint is what the status and diagnostics cards show when the
+    // profile leaves the service off, so both parts must be spelled out.
+    let hint = crate::screens::plc::DISABLED_HINT;
+    assert!(hint.contains("[plc] enabled = true"), "{hint}");
+    assert!(hint.contains("start-sim.sh --plc"), "{hint}");
 
-app.configure_plc(
-false,
-std::path::PathBuf::from("/run/linc/plc.sock"),
-std::path::PathBuf::new(),
-);
-assert!(!app.plc.enabled);
-assert_eq!(app.plc.socket_text, "/run/linc/plc.sock");
+    app.configure_plc(
+        false,
+        std::path::PathBuf::from("/run/linc/plc.sock"),
+        std::path::PathBuf::new(),
+    );
+    assert!(!app.plc.enabled);
+    assert_eq!(app.plc.socket_text, "/run/linc/plc.sock");
 }
 
 #[test]

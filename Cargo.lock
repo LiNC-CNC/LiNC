@@ -1861,6 +1861,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "linc-plc"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "linc-hal",
+ "linc-plc-client",
+ "linc-plc-core",
+ "log",
+ "serde_json",
+ "signal-hook",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "linc-plc-client"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "linc-plc-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "linc-plc-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "linc-sim3d"
 version = "0.1.0"
 dependencies = [
@@ -1891,9 +1928,12 @@ dependencies = [
  "libc",
  "linc-core",
  "linc-hal",
+ "linc-plc-client",
+ "linc-plc-core",
  "linc-view",
  "log",
  "resvg",
+ "serde_json",
  "tempfile",
  "zbus",
 ]

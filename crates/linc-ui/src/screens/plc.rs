@@ -1186,7 +1186,7 @@ fn status_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
     common::card_title(ui, "PLC SERVICE");
     ui.horizontal(|ui| {
         ui.add_space(2.0);
-        theme::status_dot(ui, dot_color, dot_text);
+        theme::status_dot(ui, dot_color, dot_text, &status_text);
         ui.add_space(10.0);
         common::nav_badge(ui, state_label, state_color);
         ui.add_space(10.0);
@@ -1411,7 +1411,7 @@ fn draw_rung(
     let response = coil.add_sized(
         BOX,
         ladder_box(
-            &format!("{}\n{}", rung.coil.var, coil_label(rung.coil.kind.clone())),
+            &format!("{}\n{}", rung.coil.var, coil_label(rung.coil.kind)),
             live,
             selected,
             plc.is_forced(&rung.coil.var),
@@ -1671,7 +1671,7 @@ fn property_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
                 let response = ui.add_sized(
                     [60.0, theme::MIN_TARGET],
                     egui::Button::new(
-                        RichText::new(coil_label(candidate.clone()))
+                        RichText::new(coil_label(candidate))
                             .monospace()
                             .size(theme::font_size(10.0))
                             .color(if is_active { theme::FG } else { theme::MUTED }),
