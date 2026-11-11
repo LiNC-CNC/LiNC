@@ -6,31 +6,37 @@
     {
       "name": "start",
       "direction": "in",
-      "kind": "bit"
+      "kind": "bit",
+      "comment": ""
     },
     {
       "name": "stop",
       "direction": "in",
-      "kind": "bit"
+      "kind": "bit",
+      "comment": ""
     },
     {
       "name": "run",
       "direction": "out",
-      "kind": "bit"
+      "kind": "bit",
+      "comment": ""
     }
   ],
   "vars": [
     {
       "name": "seal",
       "kind": "bit",
-      "retain": false
+      "retain": false,
+      "comment": ""
     },
     {
       "name": "alarm",
       "kind": "bit",
-      "retain": false
+      "retain": false,
+      "comment": ""
     }
   ],
+  "watch": [],
   "sections": [
     {
       "name": "main",
@@ -65,7 +71,8 @@
           "coil": {
             "var": "seal",
             "kind": "normal"
-          }
+          },
+          "cells": []
         },
         {
           "comment": "The seal drives the run output.",
@@ -77,7 +84,8 @@
           "coil": {
             "var": "run",
             "kind": "normal"
-          }
+          },
+          "cells": []
         },
         {
           "comment": "Stopping while running latches the alarm.",
@@ -99,9 +107,11 @@
           "coil": {
             "var": "alarm",
             "kind": "set"
-          }
+          },
+          "cells": []
         }
       ]
     }
-  ]
+  ],
+  "pous": []
 }
