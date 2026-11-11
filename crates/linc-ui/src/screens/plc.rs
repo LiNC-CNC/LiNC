@@ -2038,13 +2038,17 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     }
 
     app.plc.poll();
-    // The grid owns the keyboard unless a text field actually has focus. This is
-    // derived every frame: the property fields that set the flag are only drawn
-    // on some pages, so a click that opened one and then changed page left the
-    // flag set forever and the whole editor deaf to the manual's keys.
-    let derived = text_field_focused(ui.ctx());
-    if app.plc.text_editing != derived {
-        app.plc.text_editing = derived;
+    // `text_editing` is owned explicitly: a click on a visible field claims the
+    // keyboard, Escape, a click on the grid, a page entry and the field losing
+    // focus all give it back. It is deliberately not derived from "some TextEdit
+    // has focus", because egui can hand focus to a field on a plain key press and
+    // then the grid went deaf without the operator ever clicking a field.
+    if app.plc.text_editing {
+        let still_focused = text_field_focused(ui.ctx());
+        let page_lost_owner = app.plc.page != PlcPage::Edit;
+        if page_lost_owner || !still_focused {
+            app.plc.text_editing = false;
+        }
     }
     if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
         // Every frame, not only key frames: a click changes the cursor without a
@@ -2052,9 +2056,10 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         // behind, which is how a correct driver loop kept pressing arrows.
         {
             eprintln!(
-                "plc keys: page={:?} text_editing={} picker={} operand_pick={} coil_pick={} cursor={:?}",
+                "plc keys: page={:?} text_editing={} focus={:?} picker={} operand_pick={} coil_pick={} cursor={:?}",
                 app.plc.page,
                 app.plc.text_editing,
+                ui.ctx().memory(|memory| memory.focused()),
                 app.plc.picker.is_some(),
                 app.plc.operand_pick.is_some(),
                 app.plc.coil_pick.is_some(),
@@ -5671,6 +5676,43 @@ mod picker_key_tests {
             }
             ref other => panic!("expected a contact pick, got {other:?}"),
         }
+    }
+
+    /// Escape closes every picker before the editor's own Escape: a list left
+    /// open used to keep its window while the page still believed in it, and the
+    /// keyboard went nowhere.
+    #[test]
+    fn escape_closes_every_picker() {
+        let mut plc = plc_with_symbols();
+        plc.picker = Some((0, 0, 1));
+        plc.operand_pick = Some((0, 0, 1, Cell::Wire));
+        plc.coil_pick = Some((0, 0));
+        plc.operand_filter = "half".into();
+        let _ = frame(
+            &mut plc,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(plc.picker.is_none());
+        assert!(plc.operand_pick.is_none());
+        assert!(plc.coil_pick.is_none());
+        assert!(plc.operand_filter.is_empty());
+    }
+
+    /// A state flag whose window did not draw is stale, and the page drops it:
+    /// nothing can render or dismiss such a picker, so keeping it only makes the
+    /// editor deaf. A drawn window is kept.
+    #[test]
+    fn only_an_undrawn_picker_is_stale() {
+        use crate::screens::plc_grid::picker_is_stale;
+        assert!(picker_is_stale(true, false), "state without a window is stale");
+        assert!(!picker_is_stale(true, true), "a drawn picker stays");
+        assert!(!picker_is_stale(false, false), "no state, nothing to drop");
     }
 
     /// The coil list commits on Enter too: at a coil position `C` sets the

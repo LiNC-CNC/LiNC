@@ -480,14 +480,34 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
 
 /// The element picker and, after it, the operand list.
 pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    // Escape closes any picker here, before the editor's own Escape, so leaving
+    // a list never also leaves the editor.
+    if modal_keys(ctx).escape {
+        clear_pickers(plc);
+        return;
+    }
     // One picker owns a frame's keys: the element list is drawn before the
     // operand list, and when its letter chose an item the same keystroke must
     // not also land in the operand filter.
-    if element_picker(plc, ctx, actions) {
+    let element = element_picker(plc, ctx, actions);
+    if element.handled {
         return;
     }
-    operand_picker(plc, ctx, actions);
-    coil_picker(plc, ctx, actions);
+    let operand_drawn = operand_picker(plc, ctx, actions);
+    let coil_drawn = coil_picker(plc, ctx, actions);
+    // A state flag without a window this frame is a stuck picker: nothing can
+    // draw it and nothing can close it with the keyboard, so drop it.
+    if picker_is_stale(plc.picker.is_some(), element.drawn) {
+        plc.picker = None;
+    }
+    if picker_is_stale(plc.operand_pick.is_some(), operand_drawn) {
+        plc.operand_pick = None;
+        plc.operand_filter.clear();
+    }
+    if picker_is_stale(plc.coil_pick.is_some(), coil_drawn) {
+        plc.coil_pick = None;
+        plc.operand_filter.clear();
+    };
     expr_editor(plc, ctx, actions);
     block_editor(plc, ctx, actions);
     xref_window(plc, ctx);
@@ -693,9 +713,32 @@ fn element_for_key(character: char) -> Option<&'static str> {
     })
 }
 
-fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) -> bool {
+/// A picker state whose window did not draw this frame: nothing can render it
+/// and nothing can close it with the keyboard, so the page must drop it.
+pub fn picker_is_stale(state: bool, drawn: bool) -> bool {
+    state && !drawn
+}
+
+/// Drop every modal picker and the text they were collecting.
+fn clear_pickers(plc: &mut PlcUi) {
+    plc.picker = None;
+    plc.operand_pick = None;
+    plc.coil_pick = None;
+    plc.operand_filter.clear();
+}
+
+/// What one picker frame did: whether it took the keys, and whether it drew.
+struct PickerFrame {
+    handled: bool,
+    drawn: bool,
+}
+
+fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) -> PickerFrame {
     let Some((section, rung, position)) = plc.picker else {
-        return false;
+        return PickerFrame {
+            handled: false,
+            drawn: false,
+        };
     };
     let first = plc
         .project
@@ -777,10 +820,13 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
     }
     if keys.escape {
         plc.picker = None;
-        return true;
+        return PickerFrame {
+            handled: true,
+            drawn: true,
+        };
     }
     let mut visible = true;
-    egui::Window::new("ELEMENT")
+    let shown = egui::Window::new("ELEMENT")
         .open(&mut visible)
         .order(egui::Order::Foreground)
         .collapsible(false)
@@ -939,7 +985,10 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
             }),
         }
         plc.picker = None;
-        return true;
+        return PickerFrame {
+            handled: true,
+            drawn: true,
+        };
     }
     if let Some(kind) = key_coil {
         let var = plc
@@ -955,21 +1004,27 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
             coil: Coil::new(var, kind),
         });
         plc.picker = None;
-        return true;
+        return PickerFrame {
+            handled: true,
+            drawn: true,
+        };
     }
     if let Some(pick) = next_operand {
         plc.operand_pick = Some(pick);
     }
+    let drawn = shown.is_some() && visible;
     if close || !visible {
         plc.picker = None;
-        return true;
     }
-    false
+    PickerFrame {
+        handled: close || !visible,
+        drawn,
+    }
 }
 
-fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) -> bool {
     let Some((section, rung, position, cell)) = plc.operand_pick.clone() else {
-        return;
+        return false;
     };
     let names = plc
         .project
@@ -997,10 +1052,10 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
     if keys.escape {
         plc.operand_pick = None;
         plc.operand_filter.clear();
-        return;
+        return false;
     }
     let mut visible = true;
-    egui::Window::new("OPERAND")
+    let shown = egui::Window::new("OPERAND")
         .open(&mut visible)
         .order(egui::Order::Foreground)
         .collapsible(false)
@@ -1066,10 +1121,12 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 close = true;
             }
         });
+    let drawn = shown.is_some() && visible;
     if close || !visible {
         plc.operand_pick = None;
         plc.operand_filter.clear();
     }
+    drawn
 }
 
 /// The cell with its operand replaced, keeping its kind and negation.
@@ -1088,9 +1145,9 @@ pub fn with_operand(cell: &Cell, name: &str) -> Cell {
 }
 
 /// The coil's operand: same filtered list as a contact, different target.
-fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) -> bool {
     let Some((section, rung)) = plc.coil_pick else {
-        return;
+        return false;
     };
     // Every symbol, not only the outputs: a coil may drive a variable, and a
     // list that filtered them out could be empty, which left Enter with nothing
@@ -1113,10 +1170,10 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     if keys.escape {
         plc.coil_pick = None;
         plc.operand_filter.clear();
-        return;
+        return false;
     }
     let mut visible = true;
-    egui::Window::new("COIL OPERAND")
+    let shown = egui::Window::new("COIL OPERAND")
         .open(&mut visible)
         .order(egui::Order::Foreground)
         .collapsible(false)
@@ -1166,10 +1223,12 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
                 close = true;
             }
         });
+    let drawn = shown.is_some() && visible;
     if close || !visible {
         plc.coil_pick = None;
         plc.operand_filter.clear();
     }
+    drawn
 }
 
 /// Compare and compute are built in steps, as ZX asks: operator, then the
