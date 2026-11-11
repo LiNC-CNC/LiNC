@@ -231,6 +231,31 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         for (rung_index, rung) in section.rungs.iter().enumerate() {
             let rung_path = format!("{section_path}.rungs[{rung_index}]");
             let logic_path = format!("{rung_path}.logic");
+            // The ladder grid, when the editor wrote one, is compiled instead
+            // of the tree. A cell kind without a compiler is named here.
+            for (cell_index, cell) in rung.cells.iter().enumerate() {
+                if let Some(feature) = cell.unsupported() {
+                    diagnostics.push(Diagnostic::error(
+                        "cell_unsupported",
+                        format!("{feature} are not implemented yet"),
+                        format!("{rung_path}.cells[{cell_index}]"),
+                    ));
+                }
+                if let Some(operand) = cell.operand() {
+                    let known = symbols
+                        .keys()
+                        .any(|name| name.eq_ignore_ascii_case(operand));
+                    if !known {
+                        diagnostics.push(Diagnostic::error(
+                            "cell_operand",
+                            format!(
+                                "'{operand}' is not a declared input, output or variable"
+                            ),
+                            format!("{rung_path}.cells[{cell_index}]"),
+                        ));
+                    }
+                }
+            }
             if logic_depth(&rung.logic) > MAX_DEPTH {
                 diagnostics.push(Diagnostic::error(
                     "too_deep",

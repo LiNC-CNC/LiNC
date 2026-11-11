@@ -133,7 +133,12 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
             PouLanguage::Ld => {
                 for section in &pou.sections {
                     for rung in &section.rungs {
-                        lower_logic(&rung.logic, &lookup, &mut ops);
+                        let logic = if rung.cells.is_empty() {
+                            rung.logic.clone()
+                        } else {
+                            crate::grid::lower_row(&rung.cells)
+                        };
+                        lower_logic(&logic, &lookup, &mut ops);
                         let index = lookup.get(rung.coil.var.as_str()).copied().unwrap_or(0);
                         ops.push(match rung.coil.kind {
                             CoilKind::Normal => Op::Store(index),

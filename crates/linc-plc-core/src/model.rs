@@ -118,6 +118,10 @@ pub struct Rung {
     pub comment: String,
     pub logic: Logic,
     pub coil: Coil,
+    /// The ladder grid this row was drawn on. Empty means the rung is still the
+    /// version-2 tree in `logic`; a non-empty grid is lowered by the compiler.
+    #[serde(default)]
+    pub cells: Vec<crate::grid::Cell>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -215,6 +219,7 @@ impl Project {
             name: "main".to_string(),
             rungs: vec![
                 Rung {
+                    cells: Vec::new(),
                     comment: "Seal in: start picks the seal up, stop breaks it.".to_string(),
                     logic: Logic::series(vec![
                         Logic::parallel(vec![
@@ -226,11 +231,13 @@ impl Project {
                     coil: Coil::new("seal", CoilKind::Normal),
                 },
                 Rung {
+                    cells: Vec::new(),
                     comment: "The seal drives the run output.".to_string(),
                     logic: Logic::contact("seal", false),
                     coil: Coil::new("run", CoilKind::Normal),
                 },
                 Rung {
+                    cells: Vec::new(),
                     comment: "Stopping while running latches the alarm.".to_string(),
                     logic: Logic::series(vec![
                         Logic::contact("stop", false),
@@ -279,6 +286,7 @@ impl Rung {
             comment: String::new(),
             logic,
             coil,
+            cells: Vec::new(),
         }
     }
 }

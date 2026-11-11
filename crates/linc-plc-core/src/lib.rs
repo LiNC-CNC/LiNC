@@ -11,6 +11,7 @@
 #![forbid(unsafe_code)]
 
 pub mod compile;
+pub mod grid;
 pub mod il;
 pub mod model;
 pub mod protocol;
@@ -18,6 +19,7 @@ pub mod validate;
 pub mod vm;
 
 pub use compile::{compile, project_hash, Binding, Compiled, Op, Program, Symbol, SymbolKind};
+pub use grid::{Cell, POSITIONS};
 pub use model::{
     Coil, CoilKind, IoDirection, IoKind, IoPoint, Logic, Pou, PouLanguage, Project, Rung, Section,
     VarDecl, VarKind,

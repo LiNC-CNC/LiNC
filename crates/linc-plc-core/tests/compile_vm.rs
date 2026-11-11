@@ -423,3 +423,37 @@ fn project_hash_is_stable_and_sixteen_hex_digits() {
         project_hash(&project)
     );
 }
+
+#[test]
+fn a_grid_rung_compiles_like_its_tree() {
+    let mut project = simple_project(Logic::contact("a", false), Coil::new("y", CoilKind::Normal));
+    project.sections[0].rungs[0].cells = vec![
+        linc_plc_core::Cell::Contact {
+            var: "a".into(),
+            negated: false,
+        },
+        linc_plc_core::Cell::Contact {
+            var: "b".into(),
+            negated: true,
+        },
+    ];
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+
+    vm.scan(&[true, false]);
+    assert_eq!(vm.outputs(), &[true], "a and not b");
+    vm.scan(&[true, true]);
+    assert_eq!(vm.outputs(), &[false]);
+}
+
+#[test]
+fn an_unsupported_grid_cell_is_named_by_validation() {
+    let mut project = simple_project(Logic::contact("a", false), Coil::new("y", CoilKind::Normal));
+    project.sections[0].rungs[0].cells = vec![linc_plc_core::Cell::Link];
+    let diagnostics = linc_plc_core::validate(&project);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|item| item.code == "cell_unsupported"),
+        "{diagnostics:?}"
+    );
+}

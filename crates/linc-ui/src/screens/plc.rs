@@ -323,6 +323,7 @@ pub fn add_rung(project: &mut Project, section: usize, after: Option<usize>) -> 
     target.rungs.insert(
         at,
         Rung {
+            cells: Vec::new(),
             comment: String::new(),
             logic: Logic::Contact {
                 var: input,
@@ -1178,9 +1179,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             open_editor = true;
         }
         ui.label(
-            RichText::new("The editor opens in its own window and takes the keyboard; Esc closes it.")
-                .size(theme::font_size(10.0))
-                .color(theme::MUTED),
+            RichText::new(
+                "The editor opens in its own window and takes the keyboard; Esc closes it.",
+            )
+            .size(theme::font_size(10.0))
+            .color(theme::MUTED),
         );
     });
     ui.add_space(4.0);
@@ -1193,7 +1196,9 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             vec2(left_width, 220.0),
             egui::Layout::top_down(Align::Min),
             |ui| {
-                card(ui, vec2(left_width, 220.0), |ui, _| status_card(plc, ui, &mut actions));
+                card(ui, vec2(left_width, 220.0), |ui, _| {
+                    status_card(plc, ui, &mut actions)
+                });
             },
         );
         ui.add_space(6.0);
@@ -1214,8 +1219,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 
 /// The popped-out workbench: menu bar, pages, status bar, keyboard owner.
 pub fn editor(app: &mut LincApp, ui: &mut Ui) {
-    if ui
-        .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         && !ui.ctx().text_edit_focused()
     {
         app.overlay.plc_editor = false;
@@ -1298,18 +1302,30 @@ fn menu_bar(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
         });
         ui.menu_button("Edit", |ui| {
             let selected = plc.selection.is_some();
-            if ui.add_enabled(selected, egui::Button::new("Delete")).clicked() {
+            if ui
+                .add_enabled(selected, egui::Button::new("Delete"))
+                .clicked()
+            {
                 actions.push(Action::Delete);
             }
-            if ui.add_enabled(selected, egui::Button::new("Negate")).clicked() {
+            if ui
+                .add_enabled(selected, egui::Button::new("Negate"))
+                .clicked()
+            {
                 if let Some(node) = plc.selection.clone() {
                     actions.push(Action::ToggleContact(node));
                 }
             }
-            if ui.add_enabled(selected, egui::Button::new("Series")).clicked() {
+            if ui
+                .add_enabled(selected, egui::Button::new("Series"))
+                .clicked()
+            {
                 actions.push(Action::WrapSeries);
             }
-            if ui.add_enabled(selected, egui::Button::new("Parallel")).clicked() {
+            if ui
+                .add_enabled(selected, egui::Button::new("Parallel"))
+                .clicked()
+            {
                 actions.push(Action::WrapParallel);
             }
             ui.separator();
@@ -1337,10 +1353,16 @@ fn menu_bar(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
         });
         ui.menu_button("Run", |ui| {
             let running = matches!(plc.state, RunState::Running);
-            if ui.add_enabled(plc.online && !running, egui::Button::new("Run")).clicked() {
+            if ui
+                .add_enabled(plc.online && !running, egui::Button::new("Run"))
+                .clicked()
+            {
                 actions.push(Action::Start);
             }
-            if ui.add_enabled(plc.online && running, egui::Button::new("Stop")).clicked() {
+            if ui
+                .add_enabled(plc.online && running, egui::Button::new("Stop"))
+                .clicked()
+            {
                 actions.push(Action::Stop);
             }
             ui.separator();
@@ -1446,14 +1468,10 @@ fn pou_list_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, _actions: &mut Vec<A
         });
     ui.add_space(6.0);
     ui.label(
-        RichText::new(format!(
-            "{} POU · Free {} B",
-            pous.len(),
-            height as usize
-        ))
-        .monospace()
-        .size(theme::font_size(9.0))
-        .color(theme::MUTED),
+        RichText::new(format!("{} POU · Free {} B", pous.len(), height as usize))
+            .monospace()
+            .size(theme::font_size(9.0))
+            .color(theme::MUTED),
     );
 }
 
@@ -1571,9 +1589,11 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
 
 fn trend_page(plc: &PlcUi, ui: &mut Ui) {
     ui.label(
-        RichText::new("No samples yet: the trend page follows the watch list once the model carries it.")
-            .size(theme::font_size(10.0))
-            .color(theme::MUTED),
+        RichText::new(
+            "No samples yet: the trend page follows the watch list once the model carries it.",
+        )
+        .size(theme::font_size(10.0))
+        .color(theme::MUTED),
     );
     let _ = plc;
 }
