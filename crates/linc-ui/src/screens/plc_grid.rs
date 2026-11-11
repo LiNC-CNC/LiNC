@@ -1555,7 +1555,8 @@ pub fn grid_rung(
         );
     }
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
+        // Zero spacing: neighbouring cells share one conductor with no joint.
+        ui.spacing_mut().item_spacing.x = 0.0;
         for position in 0..POSITIONS {
             let cell = cells.get(position).cloned().unwrap_or(Cell::Wire);
             let label = grid_cell_label(plc, &cell);
@@ -1570,12 +1571,6 @@ pub fn grid_rung(
                 cell_symbol(&cell),
             );
         }
-        ui.label(
-            RichText::new("—")
-                .monospace()
-                .size(theme::font_size(10.0))
-                .color(theme::MUTED),
-        );
         let coil = plc.operand_label(&rung.coil.var);
         cell_box(
             plc,
@@ -1630,123 +1625,99 @@ pub fn cell_symbol(cell: &Cell) -> CellSymbol {
     }
 }
 
-/// How wide the symbol part of a cell is; the operand name takes the rest.
-pub const SYMBOL_WIDTH: f32 = 26.0;
+/// ZX geometry: one continuous conductor per rung, name above the symbol, no
+/// cell borders and no spacing between cells. A row is a strip whose conductor
+/// runs along `CONDUCTOR_Y` from its left edge to its right edge.
+pub const CELL_WIDTH: f32 = 56.0;
+pub const CELL_HEIGHT: f32 = 36.0;
+pub const CONDUCTOR_Y: f32 = 24.0;
+pub const ROW_GAP: f32 = 0.0;
+/// Distance from one row's conductor to the next row's conductor.
+pub const ROW_STRIDE: f32 = CELL_HEIGHT + ROW_GAP;
+
+fn arc_points(centre: egui::Pos2, radius: f32, from: f32, to: f32, steps: usize) -> Vec<egui::Pos2> {
+    (0..=steps)
+        .map(|step| {
+            let t = from + (to - from) * (step as f32 / steps as f32);
+            egui::pos2(centre.x + radius * t.cos(), centre.y + radius * t.sin())
+        })
+        .collect()
+}
 
 fn draw_cell_symbol(painter: &egui::Painter, rect: egui::Rect, symbol: CellSymbol, color: Color32) {
-    let line = Stroke::new(1.4, color);
-    let thin = Stroke::new(1.0, color);
-    let left = rect.left() + 2.0;
-    let right = rect.left() + SYMBOL_WIDTH - 2.0;
-    let mid = rect.center().y;
-    let top = rect.top() + 5.0;
-    let bottom = rect.bottom() - 5.0;
-    let centre = rect.left() + SYMBOL_WIDTH / 2.0;
+    let line = Stroke::new(1.6, color);
+    let thin = Stroke::new(1.2, color);
+    let y = rect.top() + CONDUCTOR_Y;
+    let cx = rect.center().x;
+    // Every element's leads run to the strip edges, so neighbouring cells share
+    // one unbroken conductor with no visible joint.
+    let left = rect.left();
+    let right = rect.right();
     match symbol {
         CellSymbol::Wire => {
-            painter.line_segment([egui::pos2(left, mid), egui::pos2(right, mid)], thin);
+            painter.line_segment([egui::pos2(left, y), egui::pos2(right, y)], thin);
         }
         CellSymbol::Link => {
-            painter.line_segment([egui::pos2(left, mid), egui::pos2(right, mid)], line);
-            // The junction drops to the branch row below.
-            painter.line_segment(
-                [egui::pos2(centre, mid), egui::pos2(centre, rect.bottom())],
-                line,
-            );
+            painter.line_segment([egui::pos2(left, y), egui::pos2(right, y)], thin);
+            // The junction reaches the branch row's conductor exactly.
+            painter.line_segment([egui::pos2(cx, y), egui::pos2(cx, y + ROW_STRIDE)], line);
         }
         CellSymbol::Contact | CellSymbol::ContactNc | CellSymbol::Edge(_) => {
-            painter.line_segment([egui::pos2(left, mid), egui::pos2(centre - 5.0, mid)], thin);
-            painter.line_segment(
-                [egui::pos2(centre + 5.0, mid), egui::pos2(right, mid)],
-                thin,
-            );
-            painter.line_segment(
-                [
-                    egui::pos2(centre - 5.0, top),
-                    egui::pos2(centre - 5.0, bottom),
-                ],
-                line,
-            );
-            painter.line_segment(
-                [
-                    egui::pos2(centre + 5.0, top),
-                    egui::pos2(centre + 5.0, bottom),
-                ],
-                line,
-            );
+            let bar = 6.5;
+            painter.line_segment([egui::pos2(left, y), egui::pos2(cx - bar, y)], thin);
+            painter.line_segment([egui::pos2(cx + bar, y), egui::pos2(right, y)], thin);
+            painter.line_segment([egui::pos2(cx - bar, y - 8.0), egui::pos2(cx - bar, y + 8.0)], line);
+            painter.line_segment([egui::pos2(cx + bar, y - 8.0), egui::pos2(cx + bar, y + 8.0)], line);
             if symbol == CellSymbol::ContactNc {
                 painter.line_segment(
-                    [
-                        egui::pos2(centre - 7.0, bottom),
-                        egui::pos2(centre + 7.0, top),
-                    ],
+                    [egui::pos2(cx - 9.0, y + 8.0), egui::pos2(cx + 9.0, y - 8.0)],
                     line,
                 );
             }
             if let CellSymbol::Edge(rising) = symbol {
-                // A small arrow on the bar: up for a rising edge, down for a fall.
-                let tip = if rising {
-                    egui::pos2(centre - 1.0, top - 1.0)
+                let (tip, tail) = if rising {
+                    (egui::pos2(cx + bar, y - 9.0), egui::pos2(cx + bar, y - 2.0))
                 } else {
-                    egui::pos2(centre - 1.0, bottom + 1.0)
-                };
-                let tail = if rising {
-                    egui::pos2(centre - 1.0, top + 6.0)
-                } else {
-                    egui::pos2(centre - 1.0, bottom - 6.0)
+                    (egui::pos2(cx + bar, y + 9.0), egui::pos2(cx + bar, y + 2.0))
                 };
                 painter.line_segment([tail, tip], line);
-                let wing = 3.0;
-                let (a, b) = if rising {
-                    (
-                        egui::pos2(tip.x - wing, tip.y + wing),
-                        egui::pos2(tip.x + wing, tip.y + wing),
-                    )
-                } else {
-                    (
-                        egui::pos2(tip.x - wing, tip.y - wing),
-                        egui::pos2(tip.x + wing, tip.y - wing),
-                    )
-                };
-                painter.line_segment([a, tip], line);
-                painter.line_segment([b, tip], line);
+                let wing = 3.5;
+                let sign = if rising { 1.0 } else { -1.0 };
+                painter.line_segment(
+                    [
+                        egui::pos2(tip.x - wing, tip.y + wing * sign),
+                        egui::pos2(tip.x + wing, tip.y + wing * sign),
+                    ],
+                    line,
+                );
             }
         }
         CellSymbol::Coil(kind) => {
-            painter.line_segment([egui::pos2(left, mid), egui::pos2(centre - 7.0, mid)], thin);
-            painter.line_segment(
-                [egui::pos2(centre + 7.0, mid), egui::pos2(right, mid)],
-                thin,
-            );
-            let body =
-                egui::Rect::from_center_size(egui::pos2(centre, mid), egui::vec2(14.0, 16.0));
-            // Two arcs is the IEC coil; a rounded box reads the same at this size
-            // and survives a 1 px stroke.
-            painter.rect_stroke(body, 7.0, line, egui::StrokeKind::Middle);
+            // Two curved parentheses, as the reference draws a coil.
+            let radius = 9.0;
+            let centre = egui::pos2(cx, y);
+            painter.line_segment([egui::pos2(left, y), egui::pos2(cx - radius, y)], thin);
+            painter.line_segment([egui::pos2(cx + radius, y), egui::pos2(right, y)], thin);
+            let left_arc = arc_points(centre, radius, 1.9, 4.4, 12);
+            let right_arc = arc_points(centre, radius, -1.25, 1.25, 12);
+            painter.add(egui::Shape::line(left_arc, line));
+            painter.add(egui::Shape::line(right_arc, line));
             match kind {
-                CoilKind::Set => {
+                CoilKind::Set | CoilKind::Reset => {
+                    let letter = if kind == CoilKind::Set { "S" } else { "R" };
                     painter.text(
-                        egui::pos2(body.right() + 6.0, body.top()),
+                        egui::pos2(cx - radius - 5.0, y - 9.0),
                         Align2::CENTER_CENTER,
-                        "S",
-                        FontId::monospace(8.0),
-                        color,
-                    );
-                }
-                CoilKind::Reset => {
-                    painter.text(
-                        egui::pos2(body.right() + 6.0, body.top()),
-                        Align2::CENTER_CENTER,
-                        "R",
-                        FontId::monospace(8.0),
+                        letter,
+                        FontId::monospace(8.5),
                         color,
                     );
                 }
                 CoilKind::Negated => {
                     painter.line_segment(
                         [
-                            egui::pos2(body.right() + 2.0, body.top() - 2.0),
-                            egui::pos2(body.right() + 8.0, body.bottom() + 2.0),
+                            egui::pos2(cx + radius + 2.0, y - 7.0),
+                            egui::pos2(cx + radius + 8.0, y + 7.0),
                         ],
                         line,
                     );
@@ -1754,36 +1725,23 @@ fn draw_cell_symbol(painter: &egui::Painter, rect: egui::Rect, symbol: CellSymbo
                 CoilKind::Normal => {}
             }
         }
-        CellSymbol::Block => {
-            let body = egui::Rect::from_min_max(egui::pos2(left, top), egui::pos2(right, bottom));
-            painter.rect_stroke(body, 1.0, line, egui::StrokeKind::Middle);
-            painter.line_segment(
-                [egui::pos2(body.left(), mid), egui::pos2(body.right(), mid)],
-                thin,
-            );
-        }
-        CellSymbol::Compare => {
+        CellSymbol::Block | CellSymbol::Compare | CellSymbol::Compute => {
             let body = egui::Rect::from_min_max(
-                egui::pos2(left + 3.0, top),
-                egui::pos2(right - 3.0, bottom),
+                egui::pos2(cx - 16.0, y - 9.0),
+                egui::pos2(cx + 16.0, y + 9.0),
             );
-            painter.rect_stroke(body, 1.0, line, egui::StrokeKind::Middle);
-            painter.line_segment([egui::pos2(left, mid), egui::pos2(body.left(), mid)], thin);
-            painter.line_segment(
-                [egui::pos2(body.right(), mid), egui::pos2(right, mid)],
-                thin,
-            );
-        }
-        CellSymbol::Compute => {
-            let body = egui::Rect::from_min_max(egui::pos2(left, top), egui::pos2(right, bottom));
-            painter.rect_stroke(body, 1.0, line, egui::StrokeKind::Middle);
-            painter.text(
-                body.center(),
-                Align2::CENTER_CENTER,
-                ":=",
-                FontId::monospace(9.0),
-                color,
-            );
+            painter.rect_stroke(body, 0.0, line, egui::StrokeKind::Middle);
+            painter.line_segment([egui::pos2(left, y), egui::pos2(body.left(), y)], thin);
+            painter.line_segment([egui::pos2(body.right(), y), egui::pos2(right, y)], thin);
+            if symbol == CellSymbol::Compute {
+                painter.text(
+                    body.center(),
+                    Align2::CENTER_CENTER,
+                    ":=",
+                    FontId::monospace(9.0),
+                    color,
+                );
+            }
         }
     }
 }
@@ -1798,17 +1756,13 @@ fn cell_box(
     quiet: bool,
     symbol: CellSymbol,
 ) {
-    let size = Vec2::new(64.0, 26.0);
+    let size = Vec2::new(CELL_WIDTH, CELL_HEIGHT);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let selected = plc.cell_cursor == Some((section, rung, position));
     let painter = ui.painter();
-    painter.rect_filled(rect, 2.0, theme::PANEL_RAISED);
-    let stroke = if selected {
-        Stroke::new(1.6, theme::ACCENT)
-    } else {
-        Stroke::new(1.0, theme::C3)
-    };
-    painter.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
+    // No per-cell background or border: the strip is bare and the conductor is
+    // what the eye follows. Selection tints the element and marks the cell with
+    // two small ticks, never a box.
     let color: Color32 = if quiet {
         theme::MUTED
     } else if selected {
@@ -1816,14 +1770,22 @@ fn cell_box(
     } else {
         theme::FG
     };
+    if selected {
+        let tick = Stroke::new(1.6, theme::ACCENT);
+        let y = rect.top() + CONDUCTOR_Y;
+        painter.line_segment(
+            [egui::pos2(rect.left() + 1.0, y - 13.0), egui::pos2(rect.left() + 1.0, y - 7.0)],
+            tick,
+        );
+        painter.line_segment(
+            [egui::pos2(rect.right() - 1.0, y - 13.0), egui::pos2(rect.right() - 1.0, y - 7.0)],
+            tick,
+        );
+    }
     draw_cell_symbol(painter, rect, symbol, color);
     if !label.is_empty() {
-        let name_rect = egui::Rect::from_min_max(
-            egui::pos2(rect.left() + SYMBOL_WIDTH, rect.top()),
-            egui::pos2(rect.right() - 2.0, rect.bottom()),
-        );
         painter.text(
-            name_rect.center(),
+            egui::pos2(rect.center().x, rect.top() + 8.0),
             Align2::CENTER_CENTER,
             label,
             FontId::monospace(theme::font_size(8.5)),
