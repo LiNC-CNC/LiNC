@@ -841,6 +841,8 @@ pub struct PlcUi {
     pub pou_edit: Option<PouEdit>,
     /// The trend window in milliseconds: 4 s, 20 s or 100 s.
     pub trend_window_ms: u32,
+    /// Show operands by IEC address instead of symbol name.
+    pub view_addresses: bool,
     /// The name typed into the symbols table's new row.
     pub symbol_new: String,
     /// The comment row being typed into, with its text.
@@ -907,6 +909,7 @@ impl Default for PlcUi {
             fbd_negate: false,
             pou_edit: None,
             trend_window_ms: 20_000,
+            view_addresses: false,
             symbol_new: String::new(),
             comment_row: None,
             comment_buffer: String::new(),
@@ -945,6 +948,43 @@ impl PlcUi {
             self.undo_stack.push(self.project.all_pous());
             self.project.set_pous(next);
         }
+    }
+
+    /// The label to draw for an operand: the name, or its IEC address when
+    /// View > Addresses is on. Words and block members keep their spelling.
+    pub fn operand_label(&self, name: &str) -> String {
+        if !self.view_addresses {
+            return name.to_string();
+        }
+        if name.contains('.') || name.starts_with("MW") {
+            return name.to_string();
+        }
+        let inputs = self
+            .project
+            .io
+            .iter()
+            .filter(|point| point.direction == IoDirection::In);
+        for (index, point) in inputs.enumerate() {
+            if point.name == name {
+                return format!("%IX{}.{}", index / 8, index % 8);
+            }
+        }
+        let outputs = self
+            .project
+            .io
+            .iter()
+            .filter(|point| point.direction == IoDirection::Out);
+        for (index, point) in outputs.enumerate() {
+            if point.name == name {
+                return format!("%QX{}.{}", index / 8, index % 8);
+            }
+        }
+        for (index, var) in self.project.vars.iter().enumerate() {
+            if var.name == name {
+                return format!("%MX{}.{}", index / 8, index % 8);
+            }
+        }
+        name.to_string()
     }
 
     /// The comment declared for a symbol, if it has one.
@@ -1981,6 +2021,19 @@ fn menu_bar(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
                 }
             }
             ui.separator();
+            if ui
+                .selectable_label(!plc.view_addresses, "Symbols")
+                .clicked()
+            {
+                plc.view_addresses = false;
+            }
+            if ui
+                .selectable_label(plc.view_addresses, "Addresses")
+                .clicked()
+            {
+                plc.view_addresses = true;
+            }
+            ui.separator();
             if ui.button("Messages").clicked() {
                 plc.page = PlcPage::Messages;
             }
@@ -2226,7 +2279,7 @@ fn fbd_diagram(plc: &mut PlcUi, lines: &[FbdLine], ui: &mut Ui) {
             painter.text(
                 pos2(rect.left() + 6.0, y),
                 egui::Align2::LEFT_CENTER,
-                input,
+                plc.operand_label(input.trim_start_matches(['!', '@'])),
                 egui::FontId::monospace(theme::font_size(9.0)),
                 theme::FG,
             );
@@ -2281,7 +2334,7 @@ fn fbd_diagram(plc: &mut PlcUi, lines: &[FbdLine], ui: &mut Ui) {
         painter.text(
             pos2(rect.right() - 6.0, first_y),
             egui::Align2::RIGHT_CENTER,
-            &line.output,
+            plc.operand_label(line.output.trim_start_matches('!')),
             egui::FontId::monospace(theme::font_size(9.0)),
             theme::SUCCESS,
         );
@@ -2983,7 +3036,7 @@ fn draw_remote_trend(plc: &PlcUi, ui: &mut Ui) {
             painter.text(
                 pos2(rect.left() + 4.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
-                format!("{name} {low}..{high}"),
+                format!("{} {low}..{high}", plc.operand_label(name)),
                 egui::FontId::monospace(theme::font_size(8.5)),
                 theme::MUTED,
             );
@@ -3007,7 +3060,7 @@ fn draw_remote_trend(plc: &PlcUi, ui: &mut Ui) {
             painter.text(
                 pos2(rect.left() + 4.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
-                name,
+                plc.operand_label(name),
                 egui::FontId::monospace(theme::font_size(9.0)),
                 theme::MUTED,
             );
@@ -3248,7 +3301,7 @@ fn status_bar(plc: &PlcUi, ui: &mut Ui) {
         ui.spacing_mut().item_spacing.x = 6.0;
         match &selected {
             Some((operand, comment)) => {
-                common::nav_badge(ui, operand, theme::ACCENT);
+                common::nav_badge(ui, &plc.operand_label(operand), theme::ACCENT);
                 if !comment.is_empty() {
                     ui.label(
                         RichText::new(comment.clone())

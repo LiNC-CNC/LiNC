@@ -1015,13 +1015,21 @@ pub fn grid_rung(
         ui.spacing_mut().item_spacing.x = 2.0;
         for position in 0..POSITIONS {
             let cell = cells.get(position).cloned().unwrap_or(Cell::Wire);
+            let label = match &cell {
+                Cell::Contact { var, .. }
+                | Cell::Edge { var, .. }
+                | Cell::Block {
+                    instance: var, ..
+                } => plc.operand_label(var),
+                other => cell_label(other),
+            };
             cell_box(
                 plc,
                 ui,
                 section,
                 rung_index,
                 position,
-                &cell_label(&cell),
+                &label,
                 matches!(cell, Cell::Wire),
             );
         }
@@ -1031,7 +1039,7 @@ pub fn grid_rung(
                 .size(theme::font_size(10.0))
                 .color(theme::MUTED),
         );
-        let coil = format!("({})", rung.coil.var);
+        let coil = format!("({})", plc.operand_label(&rung.coil.var));
         cell_box(
             plc,
             ui,
