@@ -1848,6 +1848,24 @@ fn menu_bar(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
             }
         });
         ui.menu_button("Edit", |ui| {
+            if ui.button("Undo").clicked() {
+                plc.undo();
+            }
+            if ui.button("Redo").clicked() {
+                plc.redo();
+            }
+            ui.separator();
+            if ui.button("Copy").clicked() {
+                plic_copy(plc);
+            }
+            if ui.button("Cut").clicked() {
+                plic_cut(plc, actions);
+            }
+            ui.separator();
+            if ui.button("Symbols").clicked() {
+                plc.page = PlcPage::Symbols;
+            }
+            ui.separator();
             let selected = plc.selection.is_some();
             if ui
                 .add_enabled(selected, egui::Button::new("Delete"))
@@ -3042,6 +3060,71 @@ fn pou_edit_dialog(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Actio
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
         plc.pou_edit = None;
     }
+}
+
+/// Copy the marked block (or the cell under the cursor) without a keyboard.
+fn plic_copy(plc: &mut PlcUi) {
+    let Some((section, rung, position)) = plc.cell_cursor else {
+        return;
+    };
+    let sections = plc.current_pou_sections();
+    let cells = match plc.cell_mark {
+        Some((mark_section, mark_rung, mark_position)) if mark_section == section => {
+            let (low_rung, high_rung) = if mark_rung <= rung {
+                (mark_rung, rung)
+            } else {
+                (rung, mark_rung)
+            };
+            let (low, high) = if mark_position <= position {
+                (mark_position, position)
+            } else {
+                (position, mark_position)
+            };
+            (low_rung..=high_rung)
+                .filter_map(|index| sections.get(section).and_then(|s| s.rungs.get(index)))
+                .map(|row| {
+                    (low..=high)
+                        .map(|slot| row.cells.get(slot).cloned().unwrap_or(Cell::Wire))
+                        .collect::<Vec<Cell>>()
+                })
+                .collect::<Vec<_>>()
+        }
+        _ => Vec::new(),
+    };
+    if cells.is_empty() {
+        plc.cell_clipboard = sections
+            .get(section)
+            .and_then(|section| section.rungs.get(rung))
+            .and_then(|row| row.cells.get(position))
+            .cloned();
+        plc.cell_block.clear();
+    } else {
+        plc.cell_block = cells;
+        plc.cell_clipboard = None;
+    }
+}
+
+/// Copy the block and empty it, which is Cut in the manual's Edit menu.
+fn plic_cut(plc: &mut PlcUi, actions: &mut Vec<Action>) {
+    plic_copy(plc);
+    let Some((section, rung, position)) = plc.cell_cursor else {
+        return;
+    };
+    let rows = plc.cell_block.len();
+    let columns = plc.cell_block.first().map(Vec::len).unwrap_or(1);
+    for row in 0..rows.max(1) {
+        for column in 0..columns {
+            if position + column < POSITIONS {
+                actions.push(Action::SetCell {
+                    section,
+                    rung: rung + row,
+                    position: position + column,
+                    cell: Cell::Wire,
+                });
+            }
+        }
+    }
+    plc.cell_block.clear();
 }
 
 fn status_bar(plc: &PlcUi, ui: &mut Ui) {
