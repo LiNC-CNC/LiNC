@@ -1227,3 +1227,75 @@ fn a_linked_branch_parallels_one_cell_and_not_the_estop() {
     vm.scan(&[false, true]);
     assert_eq!(vm.outputs(), &[false], "the estop breaks the branch");
 }
+
+/// Two cross-coupled `TP` blocks make the classic blinker: exactly one output is
+/// on at a time and they swap about once per preset, never both steady.
+// Cross-coupled blinkers need a rung to see the coil an earlier rung just wrote.
+// This VM evaluates the whole ladder against the previous scan's image (see
+// `rung_sees_the_previous_scan_image`), so both halves fire on the same scan and
+// the outputs stay in phase. Recorded here, and ignored until the demo's blinker
+// is either authored around the image model or the model offers scan-order reads.
+#[ignore = "needs sequential scan semantics for cross-coupled blocks"]
+#[test]
+fn cross_coupled_tp_blocks_alternate() {
+    use linc_plc_core::grid::Cell;
+    let contact = |name: &str, negated: bool| Cell::Contact {
+        var: name.to_string(),
+        negated,
+    };
+    let block = |instance: &str| Cell::Block {
+        block: "TP".to_string(),
+        instance: instance.to_string(),
+        preset: "T#1s".to_string(),
+    };
+    let mut first = Rung::new(Logic::Const { value: true }, Coil::new("blink_a", CoilKind::Normal));
+    first.cells = vec![
+        contact("alarm", false),
+        contact("blink_b", true),
+        block("TP0"),
+    ];
+    let mut second = Rung::new(Logic::Const { value: true }, Coil::new("blink_b", CoilKind::Normal));
+    second.cells = vec![
+        contact("alarm", false),
+        contact("blink_a", true),
+        block("TP1"),
+    ];
+    let project = project_with(
+        vec![
+            IoPoint::new("alarm", IoDirection::In),
+            IoPoint::new("blink_a", IoDirection::Out),
+            IoPoint::new("blink_b", IoDirection::Out),
+        ],
+        Vec::new(),
+        vec![section("main", vec![first, second])],
+    );
+    let compiled = compile(&project).expect("compile");
+    let mut vm = Vm::new(&compiled);
+
+    vm.scan_with_dt(&[false], 1);
+    let idle = vm.outputs().to_vec();
+    assert_eq!(idle, vec![false, false], "no alarm, no blinkers: {idle:?}");
+
+    // alarm on: TP0 rises, so blink_a starts and blink_b must stay off.
+    vm.scan(&[true]);
+    let first_scan = vm.outputs().to_vec();
+    assert_eq!(
+        first_scan,
+        vec![true, false],
+        "exactly one blinker starts: {first_scan:?}"
+    );
+
+    // Half a second later the pulse is still running: no swap yet.
+    vm.scan_with_dt(&[true], 500);
+    let mid = vm.outputs().to_vec();
+    assert_eq!(mid, vec![true, false], "still the first half: {mid:?}");
+
+    // Past the preset TP0 falls and TP1 takes over.
+    vm.scan_with_dt(&[true], 700);
+    let swapped = vm.outputs().to_vec();
+    assert_eq!(
+        swapped,
+        vec![false, true],
+        "past T#1s the blinkers swap: {swapped:?}"
+    );
+}
