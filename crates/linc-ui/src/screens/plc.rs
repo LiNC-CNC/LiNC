@@ -156,6 +156,17 @@ pub enum Action {
     AddSymbol(String),
     /// Remove a declared symbol.
     RemoveSymbol(String),
+    /// Write a row's comment, which is what a comment row holds.
+    SetRungComment {
+        section: usize,
+        rung: usize,
+        comment: String,
+    },
+    /// Insert a comment row after this one.
+    AddCommentRow {
+        section: usize,
+        rung: usize,
+    },
     /// Replace the function-block body of the current POU.
     SetFbd(Vec<FbdLine>),
     /// Rename a POU.
@@ -832,6 +843,9 @@ pub struct PlcUi {
     pub trend_window_ms: u32,
     /// The name typed into the symbols table's new row.
     pub symbol_new: String,
+    /// The comment row being typed into, with its text.
+    pub comment_row: Option<(usize, usize)>,
+    pub comment_buffer: String,
     /// Boolean traces for the trend page.
     pub trend: TrendBuffer,
     /// Per-scan window from the daemon, when one is connected.
@@ -894,6 +908,8 @@ impl Default for PlcUi {
             pou_edit: None,
             trend_window_ms: 20_000,
             symbol_new: String::new(),
+            comment_row: None,
+            comment_buffer: String::new(),
             trend: TrendBuffer::default(),
             trend_remote: TrendData::default(),
             words: Vec::new(),
@@ -1336,6 +1352,42 @@ impl PlcUi {
             Action::ClearForces => {
                 self.send(Tag::ClearForces, Request::ClearForces);
                 self.message = "CLEAR FORCES SENT".to_string();
+            }
+            Action::SetRungComment {
+                section,
+                rung,
+                comment,
+            } => {
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    if let Some(row) = pou
+                        .sections
+                        .get_mut(section)
+                        .and_then(|section| section.rungs.get_mut(rung))
+                    {
+                        row.comment = comment;
+                    }
+                }
+                self.project.set_pous(pous);
+            }
+            Action::AddCommentRow { section, rung } => {
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(self.pou) {
+                    if let Some(section) = pou.sections.get_mut(section) {
+                        if rung < section.rungs.len() {
+                            let mut row = Rung::new(
+                                Logic::Const { value: true },
+                                Coil::new(String::new(), CoilKind::Normal),
+                            );
+                            row.cells = vec![Cell::Wire; POSITIONS];
+                            row.comment = "// ".to_string();
+                            section.rungs.insert(rung + 1, row);
+                        }
+                    }
+                }
+                self.project.set_pous(pous);
+                self.comment_row = Some((section, rung + 1));
+                self.comment_buffer = String::new();
             }
             Action::AddSymbol(name) => {
                 if !self.project.io.iter().any(|point| point.name == name)
@@ -1877,6 +1929,11 @@ fn menu_bar(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
                 plic_cut(plc, actions);
             }
             ui.separator();
+            if ui.button("Add comment row").clicked() {
+                if let Some((section, rung, _)) = plc.cell_cursor {
+                    actions.push(Action::AddCommentRow { section, rung });
+                }
+            }
             if ui.button("Symbols").clicked() {
                 plc.page = PlcPage::Symbols;
             }
@@ -3227,8 +3284,64 @@ fn status_bar(plc: &PlcUi, ui: &mut Ui) {
 }
 
 /// The ladder canvas over an explicit section list.
+/// A row that holds only a network comment. Clicking it edits the text in
+/// place, as the manual's `//` rows do; Enter stores, Escape cancels.
+fn comment_row(
+    plc: &mut PlcUi,
+    ui: &mut Ui,
+    section: usize,
+    rung: usize,
+    row: &Rung,
+    actions: &mut Vec<Action>,
+) {
+    if plc.comment_row == Some((section, rung)) {
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut plc.comment_buffer)
+                .desired_width((ui.available_width() - 8.0).max(120.0))
+                .hint_text("network comment"),
+        );
+        if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+            actions.push(Action::SetRungComment {
+                section,
+                rung,
+                comment: plc.comment_buffer.trim().to_string(),
+            });
+            plc.comment_row = None;
+        }
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            plc.comment_row = None;
+        }
+        return;
+    }
+    let text = if row.comment.trim().is_empty() {
+        "//".to_string()
+    } else if row.comment.trim_start().starts_with("//") {
+        row.comment.clone()
+    } else {
+        format!("// {}", row.comment)
+    };
+    let response = ui.add(
+        egui::Label::new(
+            RichText::new(text)
+                .monospace()
+                .size(theme::font_size(9.5))
+                .color(theme::COMMENT),
+        )
+        .sense(Sense::click()),
+    );
+    if response.clicked() {
+        plc.comment_row = Some((section, rung));
+        plc.comment_buffer = row
+            .comment
+            .trim()
+            .trim_start_matches("//")
+            .trim_start()
+            .to_string();
+    }
+}
+
 fn ladder_body(
-    plc: &PlcUi,
+    plc: &mut PlcUi,
     sections: &[linc_plc_core::model::Section],
     ui: &mut Ui,
     height: f32,
@@ -3256,6 +3369,10 @@ fn ladder_body(
                         .color(theme::C3),
                 );
                 for (rung_index, rung) in section.rungs.iter().enumerate() {
+                    if rung.is_comment_row() {
+                        comment_row(plc, ui, section_index, rung_index, rung, actions);
+                        continue;
+                    }
                     if rung.cells.is_empty() && linc_plc_core::grid::migrate(&rung.logic).is_none()
                     {
                         draw_rung(plc, ui, section_index, rung_index, rung, actions);

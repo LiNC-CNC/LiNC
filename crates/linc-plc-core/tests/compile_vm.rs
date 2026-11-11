@@ -1019,3 +1019,22 @@ fn a_counter_resets_from_a_coil_and_its_pv_can_be_read() {
     vm.scan(&[false, true]);
     assert_eq!(vm.block_value(12), 0, "the reset coil cleared CV");
 }
+
+#[test]
+fn a_comment_row_compiles_to_nothing() {
+    let mut project = simple_project(Logic::contact("a", false), Coil::new("y", CoilKind::Normal));
+    let mut comment = Rung::new(Logic::Const { value: true }, Coil::new(String::new(), CoilKind::Normal));
+    comment.cells = vec![linc_plc_core::Cell::Wire; 9];
+    comment.comment = "// starts the pump".into();
+    project.sections[0].rungs.insert(0, comment);
+
+    assert!(project.sections[0].rungs[0].is_comment_row());
+    let diagnostics = linc_plc_core::validate(&project);
+    assert!(
+        diagnostics.iter().all(|item| item.severity != linc_plc_core::Severity::Error),
+        "{diagnostics:?}"
+    );
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan(&[true]);
+    assert_eq!(vm.outputs(), &[true], "the comment row changed nothing");
+}

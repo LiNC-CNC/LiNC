@@ -335,6 +335,16 @@ impl Section {
 }
 
 impl Rung {
+    /// A row with nothing but a comment: no cells and no coil. It is drawn and
+    /// compiled as a comment, not as a rung.
+    pub fn is_comment_row(&self) -> bool {
+        self.coil.var.trim().is_empty()
+            && self
+                .cells
+                .iter()
+                .all(|cell| matches!(cell, crate::grid::Cell::Wire))
+    }
+
     pub fn new(logic: Logic, coil: Coil) -> Self {
         Self {
             comment: String::new(),

@@ -659,6 +659,9 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 check_logic(&rung.logic, &logic_path, &symbols, &mut diagnostics);
             }
 
+            if rung.is_comment_row() {
+                continue;
+            }
             let coil_path = format!("{rung_path}.coil.var");
             // A counter's reset/load is a coil on the instance, not on a bit.
             let counter_coil = rung

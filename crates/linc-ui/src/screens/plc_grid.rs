@@ -131,6 +131,28 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         )
     });
     let insert = ui.input_mut(|input| letter(input, egui::Key::I));
+    // `/` on an empty row starts a network comment row, as the manual does.
+    let slash = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Slash));
+    if slash {
+        let empty = sections
+            .get(cursor.0)
+            .and_then(|section| section.rungs.get(cursor.1))
+            .map(|rung| {
+                rung.coil.var.trim().is_empty()
+                    && rung
+                        .cells
+                        .iter()
+                        .all(|cell| matches!(cell, Cell::Wire))
+            })
+            .unwrap_or(false);
+        if empty {
+            actions.push(Action::AddCommentRow {
+                section: cursor.0,
+                rung: cursor.1,
+            });
+            return;
+        }
+    }
     let first = sections
         .get(cursor.0)
         .and_then(|section| section.rungs.get(cursor.1))
