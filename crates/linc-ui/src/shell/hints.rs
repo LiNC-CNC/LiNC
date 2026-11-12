@@ -454,6 +454,7 @@ impl LincApp {
                             ("C/X/V/W".into(), "CONTACT / EDGE / LINK / WIRE"),
                             ("Ctrl+Enter".into(), "INSERT ROW"),
                             (k.save.label(), "SAVE"),
+                            ("Ctrl+Shift+S".into(), "SAVE AS"),
                             ("Esc".into(), "CLOSE"),
                         ],
                     });

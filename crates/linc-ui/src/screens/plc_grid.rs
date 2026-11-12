@@ -279,7 +279,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                 .and_then(|section| section.rungs.get(cursor.1))
                 .map(|rung| rung.coil.var.clone())
                 .unwrap_or_default();
-            app.plc.operand_cursor = operand_position(&app.plc, &var);
+            app.plc.operand_cursor = coil_position(&app.plc, &var);
             app.plc.operand_filter.clear();
             app.plc.coil_pick = Some((cursor.0, cursor.1));
         }
@@ -606,7 +606,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                     .and_then(|section| section.rungs.get(rung))
                     .map(|rung| rung.coil.var.clone())
                     .unwrap_or_default();
-                app.plc.operand_cursor = operand_position(&app.plc, &var);
+                app.plc.operand_cursor = coil_position(&app.plc, &var);
                 app.plc.operand_filter.clear();
                 app.plc.coil_pick = Some((section, rung));
             }
@@ -1713,7 +1713,9 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
         .iter()
         .filter(|(name, _)| needle.is_empty() || name.to_ascii_lowercase().contains(&needle))
         .collect::<Vec<_>>();
-    plc.operand_cursor = plc.operand_cursor.min(matches.len().saturating_sub(1));
+    if plc.operand_cursor >= matches.len() {
+        plc.operand_cursor = 0;
+    }
     if keys.up {
         plc.operand_cursor = plc.operand_cursor.saturating_sub(1);
     }
@@ -1833,30 +1835,50 @@ pub fn with_operand(cell: &Cell, name: &str) -> Cell {
 }
 
 /// The coil's operand: same filtered list as a contact, different target.
-fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) -> bool {
-    let Some((section, rung)) = plc.coil_pick else {
-        return false;
-    };
-    // Every symbol, not only the outputs: a coil may drive a variable, and a
-    // list that filtered them out could be empty.
-    let names = plc
-        .project
+/// The symbols a coil can write: every output and every variable, never an
+/// input. The validator rejects an input as a coil target, so the list must not
+/// offer one.
+fn coil_position(plc: &PlcUi, name: &str) -> usize {
+    coil_choices(plc)
+        .iter()
+        .position(|(candidate, _)| candidate == name)
+        .unwrap_or(0)
+}
+
+fn coil_choices(plc: &PlcUi) -> Vec<(String, String)> {
+    plc.project
         .io
         .iter()
-        .map(|point| {
-            let kind = match point.direction {
-                linc_plc_core::model::IoDirection::In => "IN",
-                linc_plc_core::model::IoDirection::Out => "OUT",
-            };
-            (point.name.clone(), kind.to_string())
-        })
+        .filter(|point| point.direction == linc_plc_core::model::IoDirection::Out)
+        .map(|point| (point.name.clone(), "OUT".to_string()))
         .chain(
             plc.project
                 .vars
                 .iter()
                 .map(|var| (var.name.clone(), "VAR".to_string())),
         )
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) -> bool {
+    let Some((section, rung)) = plc.coil_pick else {
+        return false;
+    };
+    // A coil writes, so only writable symbols are offered: outputs and
+    // variables. An input pin is driven by the machine, and the validator
+    // refuses it as a coil target; listing it here only produced broken cells.
+    // The current operand stays in the list even if it is invalid, so opening
+    // the window shows what the ladder holds instead of silently moving it.
+    let current = plc
+        .current_pou_sections()
+        .get(section)
+        .and_then(|section| section.rungs.get(rung))
+        .map(|rung| rung.coil.var.clone())
+        .unwrap_or_default();
+    let mut names = coil_choices(plc);
+    if !current.is_empty() && !names.iter().any(|(name, _)| *name == current) {
+        names.insert(0, (current.clone(), "IN".to_string()));
+    }
     let mut close = false;
     let keys = modal_keys(ctx);
     // Filter first, then read the rows, so a name typed and confirmed in one
@@ -3829,6 +3851,36 @@ mod compare_window_tests {
             EnterTarget::Operand(_)
         ));
         assert!(matches!(enter_target(cursor, None), EnterTarget::Picker));
+    }
+
+    /// A coil writes, so inputs are not choices: the validator refuses them as a
+    /// coil target, and offering one only made a cell that cannot compile.
+    #[test]
+    fn a_coil_can_only_be_given_a_writable_symbol() {
+        let mut plc = PlcUi::default();
+        let mut point = |name: &str, direction| {
+            plc.project.io.push(linc_plc_core::model::IoPoint {
+                name: name.into(),
+                direction,
+                kind: linc_plc_core::model::IoKind::Bit,
+                comment: String::new(),
+            })
+        };
+        point("pump", linc_plc_core::model::IoDirection::In);
+        point("run", linc_plc_core::model::IoDirection::Out);
+        plc.project.vars.push(linc_plc_core::model::VarDecl {
+            name: "seal".into(),
+            kind: linc_plc_core::model::VarKind::Bit,
+            retain: false,
+            comment: String::new(),
+        });
+        let names: Vec<String> = coil_choices(&plc)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert!(!names.contains(&"pump".to_string()), "input offered: {names:?}");
+        assert!(names.contains(&"run".to_string()));
+        assert!(names.contains(&"seal".to_string()));
     }
 
     /// The coil slot and a contact each have their own Enter target: the operand

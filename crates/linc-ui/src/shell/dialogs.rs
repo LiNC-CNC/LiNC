@@ -72,10 +72,25 @@ impl LincApp {
     /// The extension an unnamed program gets: the first configured G-code
     /// extension, so the file the operator just saved is one the Files page
     /// will load.
-    /// `SAVE` on the PLC screen: ask where in the PLC folder the project goes.
-    /// The dialog is the same one the program pane uses, with the PLC folder as
-    /// its root and `.json` as its extension.
+    /// `SAVE` on the PLC screen: write the project to the file it already has,
+    /// and ask only when it has none. Asking every time made the comment the
+    /// operator just typed land in a copy, while the page kept reading the old
+    /// file.
     pub fn request_plc_save(&mut self) {
+        if self.plc.project.all_pous().is_empty() {
+            self.toast("nothing to save: the project has no POUs", theme::ERROR);
+            return;
+        }
+        if !self.plc.path_text.trim().is_empty() {
+            self.plc.save();
+            self.toast("saved the PLC project", theme::SUCCESS);
+            return;
+        }
+        self.request_plc_save_as();
+    }
+
+    /// `SAVE AS` on the PLC screen: ask where in the PLC folder the copy goes.
+    pub fn request_plc_save_as(&mut self) {
         if self.plc.project.all_pous().is_empty() {
             self.toast("nothing to save: the project has no POUs", theme::ERROR);
             return;
