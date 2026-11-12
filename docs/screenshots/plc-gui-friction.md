@@ -45,6 +45,37 @@ Screenshots:
 - `plc-trend-window-4s.png` — 4 s daemon window, boolean lanes, scaled `TOF0.ET`.
 - `plc-trend-window-100s.png` — the same traces over 100 s.
 
+## Phase 3 — IL jumps and conditional calls
+
+- **The run pages called an IL program empty.** The "nothing to run" gate counted
+  ladder rungs only, so a real instruction list showed `EMPTY PROGRAM — ADD A
+  RUNG` and never loaded. The gate asks the body language now.
+- **The shortcut rail still offered ladder element keys in the IL editor**
+  (`Contact C`, `Compare G M`, `Hold contact Space`). It lists the IL keys now:
+  Space finishes an instruction, Enter stores, Ctrl+Enter inserts below, Delete
+  removes an empty line.
+- **The TEST RUN input panel was under the window edge in an IL POU.** The
+  monitor reserve assumed the ladder's own header; an IL or FBD monitor carries
+  a legend too, so its reserve is taller and the lamps stay reachable.
+- **Typing the program needs the instruction-list language.** `L` on the
+  program list switches an empty POU between LD and IL; a body with lines keeps
+  its language, because switching would discard them.
+- **Labels look like operands to the old validator.** `LOOP:` used to be an
+  error; it is a jump target now, checked per POU, with a missing target and a
+  duplicate both reported.
+- **An endless jump loop would freeze the scan.** The VM stops at an op budget
+  (100 000) and returns; the program keeps its last state instead of hanging the
+  scheduler.
+- **A conditional call is an inlined block with a skip in front.** RET inside a
+  callee jumps to the end of that callee's inlined block, not the end of the
+  program, so nested conditional returns exit the right POU.
+
+Screenshots:
+
+- `plc-il-labels.png` — the keyboard-authored jump program, labels stored.
+- `plc-il-jump-fallthrough.png` — start false: JMPC not taken, LDN writes TRUE.
+- `plc-il-jump-taken.png` — start true: JMPC jumps to ON, STN writes FALSE.
+
 ## Open
 
 - `linc-plc` still treats a non-compiling project as a warning and publishes
