@@ -3695,6 +3695,12 @@ fn il_editor(plc: &mut PlcUi, ui: &mut Ui, height: f32) {
         .id_salt("plc-il")
         .max_height((height - 8.0).max(120.0))
         .show(ui, |ui| {
+            // One line of text is one row: egui's default item spacing made the
+            // instruction list read like a table with empty lines between.
+            ui.spacing_mut().item_spacing.y = 0.0;
+            // The theme's 44 px touch target is right for buttons, not for a
+            // line of text: it turned twelve instructions into two screens.
+            ui.spacing_mut().interact_size.y = 16.0;
             for (index, line) in lines.iter().enumerate() {
                 let active = index == plc.il_cursor;
                 ui.horizontal(|ui| {
@@ -5402,14 +5408,29 @@ fn watch_operand_error(plc: &PlcUi, text: &str) -> Option<String> {
         let member = member.to_ascii_uppercase();
         if matches!(member.as_str(), "ET" | "CV" | "PT" | "PV") {
             let declared = plc.project.all_pous().iter().any(|pou| {
-                pou.sections.iter().any(|section| {
+                let in_ladder = pou.sections.iter().any(|section| {
                     section.rungs.iter().any(|rung| {
                         rung.cells.iter().any(|cell| {
                             matches!(cell, linc_plc_core::grid::Cell::Block { instance: block, .. }
                                 if block.eq_ignore_ascii_case(instance))
                         })
                     })
-                })
+                });
+                // An IL `CAL TON0(..)` declares the same block instance; the
+                // watch list must accept it or the demo's timer ETs cannot be
+                // pinned.
+                let in_il = pou.il.iter().any(|line| {
+                    let line = line.trim();
+                    if !line.to_ascii_uppercase().starts_with("CAL ") {
+                        return false;
+                    }
+                    line[4..]
+                        .split(['(', ' '])
+                        .next()
+                        .map(|callee| callee.eq_ignore_ascii_case(instance))
+                        .unwrap_or(false)
+                });
+                in_ladder || in_il
             });
             if declared {
                 return None;
@@ -9355,6 +9376,18 @@ mod watch_page_tests {
         });
         assert_eq!(plc.project.watch.len(), 16, "the seventeenth is refused");
         assert!(plc.message.contains("16"), "{:?}", plc.message);
+    }
+
+    /// A block declared by an IL `CAL` is watchable: the demo's timer ETs have
+    /// no ladder cell, and the watch list used to refuse them.
+    #[test]
+    fn an_il_cal_declares_a_watchable_block() {
+        let mut plc = watched(&[]);
+        let mut pou = Pou::new("DEMO_IL", PouLanguage::Il);
+        pou.il = vec!["CAL TON0(IN:=run, PT:=T#2s)".into()];
+        plc.project.pous = vec![pou];
+        assert_eq!(watch_operand_error(&plc, "TON0.ET"), None);
+        assert!(watch_operand_error(&plc, "TON1.ET").is_some());
     }
 
     /// Z cycles 4 s, 20 s and 100 s, the three windows the manual offers.
