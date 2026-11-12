@@ -5122,6 +5122,9 @@ fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Act
         .max_height(list_height)
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            // Rows are bands, not cards: with a gap the brighter unstriped rows
+            // merged with the gap and read taller than the striped ones.
+            ui.spacing_mut().item_spacing.y = 0.0;
             for (index, (name, area, comment)) in rows.iter().enumerate() {
                 let selected = index == plc.symbol_cursor;
                 let (rect, response) = ui.allocate_exact_size(
@@ -5703,6 +5706,9 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
         .max_height((height - 150.0).max(80.0))
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            // A row band includes no gap: the selected row must be exactly as
+            // tall as a striped one.
+            ui.spacing_mut().item_spacing.y = 0.0;
             let names = plc.project.watch.clone();
             for (index, name) in names.iter().enumerate() {
                 let editing = plc.watch_edit.is_some() && plc.watch_edit_row == index;
