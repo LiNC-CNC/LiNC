@@ -1509,3 +1509,202 @@ fn block_outputs_are_published_with_the_snapshot() {
         .expect("the snapshot carries the block output");
     assert!(q.value, "the timer's Q is true once its preset elapses");
 }
+
+/// An unconditional jump skips the lines under it; execution resumes at the
+/// label.
+#[test]
+fn a_jump_skips_to_its_label() {
+    let mut project = project_with(
+        vec![
+            IoPoint::new("start", IoDirection::In),
+            IoPoint::new("stop", IoDirection::In),
+            IoPoint::new("skipped", IoDirection::Out),
+            IoPoint::new("out", IoDirection::Out),
+        ],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Il);
+    pou.il = vec![
+        "LD start".into(),
+        "JMP SKIP".into(),
+        "ST skipped".into(),
+        "SKIP:".into(),
+        "LD stop".into(),
+        "ST out".into(),
+    ];
+    project.pous = vec![pou];
+    let mut vm = Vm::new(&compile(&project).expect("jumps compile"));
+    vm.scan(&[true, true]);
+    assert_eq!(vm.outputs(), &[false, true], "skipped stays false, out follows stop");
+}
+
+/// JMPC jumps on a true result and JMPCN on a false one; the lines under the
+/// jump are the path that was not taken.
+#[test]
+fn conditional_jumps_test_the_result_bit() {
+    let program = |jump: &str| {
+        let mut project = project_with(
+            vec![
+                IoPoint::new("test", IoDirection::In),
+                IoPoint::new("value", IoDirection::In),
+                IoPoint::new("out", IoDirection::Out),
+            ],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Il);
+        pou.il = vec![
+            "LD test".into(),
+            format!("{jump} TAKEN"),
+            "JMP END".into(),
+            "TAKEN:".into(),
+            "LD value".into(),
+            "ST out".into(),
+            "END:".into(),
+        ];
+        project.pous = vec![pou];
+        project
+    };
+    for (jump, jumps_on_true) in [("JMPC", true), ("JMPCN", false)] {
+        for test in [true, false] {
+            let mut vm = Vm::new(&compile(&program(jump)).expect("conditional jump compiles"));
+            vm.scan(&[test, true]);
+            let jumped = test == jumps_on_true;
+            assert_eq!(
+                vm.outputs(),
+                &[jumped],
+                "{jump} with test {test} must {} the jump",
+                if jumped { "take" } else { "skip" }
+            );
+        }
+    }
+}
+
+/// RETC returns from an inlined POU when the result bit is true, RETCN when it
+/// is false; the lines under the return do not run.
+#[test]
+fn conditional_returns_end_a_subroutine_early() {
+    let program = |ret: &str| {
+        let mut project = project_with(
+            vec![
+                IoPoint::new("gate", IoDirection::In),
+                IoPoint::new("body", IoDirection::In),
+                IoPoint::new("out", IoDirection::Out),
+            ],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut main = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Il);
+        main.il = vec!["CAL SUB".into(), "RET".into()];
+        let mut sub = linc_plc_core::Pou::new("SUB", linc_plc_core::PouLanguage::Il);
+        sub.il = vec![
+            "LD gate".into(),
+            ret.into(),
+            "LD body".into(),
+            "ST out".into(),
+            "RET".into(),
+        ];
+        project.pous = vec![main, sub];
+        project
+    };
+    for (ret, returns_on_true) in [("RETC", true), ("RETCN", false)] {
+        for gate in [true, false] {
+            let mut vm = Vm::new(&compile(&program(ret)).expect("conditional return compiles"));
+            vm.scan(&[gate, true]);
+            let returned = gate == returns_on_true;
+            assert_eq!(
+                vm.outputs(),
+                &[!returned],
+                "{ret} with gate {gate} must {} the body",
+                if returned { "skip" } else { "run" }
+            );
+        }
+    }
+}
+
+/// CALC runs a POU only when the result bit is true; CALCN only when it is
+/// false. The callee's coils are the ones it owns when called.
+#[test]
+fn conditional_calls_run_the_pou_only_on_their_bit() {
+    let program = |call: &str| {
+        let mut project = project_with(
+            vec![
+                IoPoint::new("call_it", IoDirection::In),
+                IoPoint::new("body", IoDirection::In),
+                IoPoint::new("out", IoDirection::Out),
+            ],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut main = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Il);
+        main.il = vec!["LD call_it".into(), format!("{call} SUB"), "RET".into()];
+        let mut sub = linc_plc_core::Pou::new("SUB", linc_plc_core::PouLanguage::Il);
+        sub.il = vec!["LD body".into(), "ST out".into(), "RET".into()];
+        project.pous = vec![main, sub];
+        project
+    };
+    for (call, runs_on_true) in [("CALC", true), ("CALCN", false)] {
+        for call_it in [true, false] {
+            let mut vm = Vm::new(&compile(&program(call)).expect("conditional call compiles"));
+            vm.scan(&[call_it, true]);
+            let ran = call_it == runs_on_true;
+            assert_eq!(
+                vm.outputs(),
+                &[ran],
+                "{call} with call_it {call_it} must {} the callee",
+                if ran { "run" } else { "skip" }
+            );
+        }
+    }
+}
+
+/// A label that no line declares is a validation error, and so is declaring one
+/// twice. Jumps may point forward or back within their own POU.
+#[test]
+fn jump_labels_are_checked() {
+    let il_project = |lines: Vec<&str>| {
+        let mut project = project_with(Vec::new(), Vec::new(), Vec::new());
+        let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Il);
+        pou.il = lines.into_iter().map(str::to_string).collect();
+        project.pous = vec![pou];
+        project
+    };
+    let missing = il_project(vec!["JMP NOWHERE"]);
+    assert!(
+        codes(&validate(&missing))
+            .iter()
+            .any(|code| code == "il_label_missing"),
+        "{:?}",
+        validate(&missing)
+    );
+    let duplicate = il_project(vec!["LOOP:", "LOOP:"]);
+    assert!(
+        validate(&duplicate)
+            .iter()
+            .any(|item| item.code == "il_label" && item.message.contains("twice")),
+        "{:?}",
+        validate(&duplicate)
+    );
+    let backwards = il_project(vec!["LOOP:", "LD start", "JMP LOOP"]);
+    assert!(
+        !validate(&backwards)
+            .iter()
+            .any(|item| item.code == "il_label_missing"),
+        "{:?}",
+        validate(&backwards)
+    );
+}
+
+/// A jump loop that never ends stops at the op budget instead of freezing the
+/// scan.
+#[test]
+fn an_endless_jump_loop_stops_at_the_budget() {
+    let mut project = project_with(Vec::new(), Vec::new(), Vec::new());
+    let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Il);
+    pou.il = vec!["LOOP:".into(), "JMP LOOP".into()];
+    project.pous = vec![pou];
+    let mut vm = Vm::new(&compile(&project).expect("the loop compiles"));
+    let stats = vm.scan(&[]);
+    assert_eq!(stats.scan_count, 1, "the scan returned");
+}

@@ -26,13 +26,15 @@ pub enum IlLine {
 }
 
 /// Mnemonics this compiler can lower into the scan VM.
-pub const SUPPORTED: [&str; 26] = [
+pub const SUPPORTED: [&str; 33] = [
     "LD", "LDN", "AND", "ANDN", "OR", "ORN", "XOR", "XORN", "NOT", "ST", "STN", "S", "R", "=",
-    "ADD", "SUB", "MUL", "DIV", "MOD", "GT", "GE", "EQ", "NE", "LE", "CAL", "RET",
+    "ADD", "SUB", "MUL", "DIV", "MOD", "GT", "GE", "EQ", "NE", "LE", "CAL", "RET", "JMP", "JMPC",
+    "JMPCN", "CALC", "CALCN", "RETC", "RETCN",
 ];
 
-/// Mnemonics that need a feature this compiler does not have yet.
-pub const UNSUPPORTED: [&str; 7] = ["CALC", "CALCN", "JMP", "JMPC", "JMPCN", "RETC", "RETCN"];
+/// Mnemonics the compiler knows but cannot lower. Empty: every listed
+/// instruction has an operation and a test.
+pub const UNSUPPORTED: [&str; 0] = [];
 
 /// Parse a function-block call: `TON0(IN:=start, PT:=T#4s)`.
 pub fn parse_call(operand: &str) -> Option<(String, Vec<(String, String)>)> {
@@ -98,10 +100,14 @@ pub fn parse_line(line: &str) -> IlLine {
     if !SUPPORTED.contains(&mnemonic.as_str()) && !UNSUPPORTED.contains(&mnemonic.as_str()) {
         return IlLine::Bad(format!("unknown instruction '{mnemonic}'"));
     }
-    if !matches!(mnemonic.as_str(), "NOT" | "RET") && operand.is_empty() {
+    let no_operand = matches!(
+        mnemonic.as_str(),
+        "NOT" | "RET" | "RETC" | "RETCN"
+    );
+    if !no_operand && operand.is_empty() {
         return IlLine::Bad(format!("'{mnemonic}' needs an operand"));
     }
-    if matches!(mnemonic.as_str(), "NOT" | "RET") && !operand.is_empty() {
+    if no_operand && !operand.is_empty() {
         return IlLine::Bad(format!("'{mnemonic}' takes no operand"));
     }
     IlLine::Instruction { mnemonic, operand }
@@ -272,8 +278,28 @@ mod tests {
     }
 
     #[test]
-    fn a_label_parses_and_is_refused_later() {
+    fn a_label_parses_as_its_own_line() {
         assert_eq!(parse_line("LOOP:"), IlLine::Label("LOOP".into()));
+    }
+
+    #[test]
+    fn the_jump_and_call_instructions_parse() {
+        for line in [
+            "JMP LOOP",
+            "JMPC LOOP",
+            "JMPCN LOOP",
+            "CALC POU2",
+            "CALCN POU2",
+        ] {
+            assert!(
+                matches!(parse_line(line), IlLine::Instruction { .. }),
+                "{line}"
+            );
+        }
+        assert!(matches!(parse_line("RETC"), IlLine::Instruction { .. }));
+        assert!(matches!(parse_line("RETCN"), IlLine::Instruction { .. }));
+        assert!(matches!(parse_line("JMP"), IlLine::Bad(_)));
+        assert!(matches!(parse_line("RETC now"), IlLine::Bad(_)));
     }
 
     #[test]

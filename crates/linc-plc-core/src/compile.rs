@@ -190,6 +190,11 @@ pub enum Op {
         left: WordOperand,
         right: WordOperand,
     },
+    /// Continue at `target` in the instruction list.
+    Jump(u16),
+    /// Pop the result bit and jump to `target` when it equals `when`:
+    /// `JMPC` is `when: true`, `JMPCN` is `when: false`.
+    JumpIf { target: u16, when: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -379,6 +384,15 @@ fn intern(
     index
 }
 
+/// Point a jump at its target; `at` was reserved when the line was lowered.
+fn patch_jump(ops: &mut [Op], at: usize, target: u16) {
+    match &mut ops[at] {
+        Op::Jump(slot) => *slot = target,
+        Op::JumpIf { target: slot, .. } => *slot = target,
+        _ => {}
+    }
+}
+
 /// Lower one POU. `CAL` reaches another POU by lowering its body here, which is
 /// what a call means in a scan-based PLC: no locals, no stack frame, the
 /// callee's coils and timers are the same ones it owns when it runs alone.
@@ -429,14 +443,59 @@ fn lower_pou(
             }
         }
         PouLanguage::Il => {
+            // Labels are local to the POU. Calls are inlined, so a RET inside a
+            // callee jumps to the end of that callee's inlined block, and a
+            // CALC wraps the whole block in one conditional skip.
+            let mut labels: HashMap<String, usize> = HashMap::new();
+            let mut label_jumps: Vec<(usize, String)> = Vec::new();
+            let mut returns: Vec<usize> = Vec::new();
             for line in &pou.il {
-                if let IlLine::Instruction { mnemonic, operand } = parse_line(line) {
-                    if mnemonic == "RET" {
-                        // Inlining already ends at the end of the body, so a
-                        // trailing RET needs no op.
-                        continue;
+                let IlLine::Instruction { mnemonic, operand } = parse_line(line) else {
+                    if let IlLine::Label(name) = parse_line(line) {
+                        labels.insert(name.to_ascii_uppercase(), ops.len());
                     }
-                    if mnemonic == "CAL" {
+                    continue;
+                };
+                match mnemonic.as_str() {
+                    "RET" => {
+                        returns.push(ops.len());
+                        ops.push(Op::Jump(0));
+                    }
+                    "RETC" | "RETCN" => {
+                        returns.push(ops.len());
+                        ops.push(Op::JumpIf {
+                            target: 0,
+                            when: mnemonic == "RETC",
+                        });
+                    }
+                    "JMP" | "JMPC" | "JMPCN" => {
+                        label_jumps.push((ops.len(), operand.trim().to_ascii_uppercase()));
+                        if mnemonic == "JMP" {
+                            ops.push(Op::Jump(0));
+                        } else {
+                            ops.push(Op::JumpIf {
+                                target: 0,
+                                when: mnemonic == "JMPC",
+                            });
+                        }
+                    }
+                    "CALC" | "CALCN" => {
+                        // Execute the callee when CR says so; skip its inlined
+                        // block otherwise. `when` is the condition that skips.
+                        if let Some(callee) = pous.get(&operand.trim().to_ascii_uppercase()) {
+                            let skip = ops.len();
+                            ops.push(Op::JumpIf {
+                                target: 0,
+                                when: mnemonic == "CALCN",
+                            });
+                            lower_pou(callee, pous, lookup, lookup_ci, ops, edges, depth + 1);
+                            let after = ops.len() as u16;
+                            if let Op::JumpIf { target, .. } = &mut ops[skip] {
+                                *target = after;
+                            }
+                        }
+                    }
+                    "CAL" => {
                         // `CAL TON0(IN:=x, PT:=T#1s)` runs a block; a bare name
                         // is a POU call.
                         if let Some((name, args)) = crate::il::parse_call(&operand) {
@@ -461,15 +520,24 @@ fn lower_pou(
                                     preset,
                                 });
                             }
-                            continue;
-                        }
-                        if let Some(callee) = pous.get(&operand.trim().to_ascii_uppercase()) {
+                        } else if let Some(callee) = pous.get(&operand.trim().to_ascii_uppercase())
+                        {
                             lower_pou(callee, pous, lookup, lookup_ci, ops, edges, depth + 1);
                         }
-                        continue;
                     }
-                    lower_line(&mnemonic, il_operand(&operand, lookup, lookup_ci), ops);
+                    _ => {
+                        lower_line(&mnemonic, il_operand(&operand, lookup, lookup_ci), ops);
+                    }
                 }
+            }
+            let end = ops.len() as u16;
+            for (at, label) in label_jumps {
+                if let Some(target) = labels.get(&label) {
+                    patch_jump(ops, at, *target as u16);
+                }
+            }
+            for at in returns {
+                patch_jump(ops, at, end);
             }
         }
         PouLanguage::Fbd => match pou.fbd_grid.as_ref().filter(|grid| !grid.blocks.is_empty()) {

@@ -2750,6 +2750,7 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
             entries.push(Heading("PROGRAM LIST"));
             entries.push(row("Open", "Enter", false));
             entries.push(row("New POU", "N", false));
+            entries.push(row("Language LD / IL", "L", false));
             entries.push(row("Rename", "R", false));
             entries.push(row("Duplicate", "D", false));
             entries.push(row("Delete POU", "Bksp", false));
@@ -3319,6 +3320,31 @@ fn pou_list_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
             actions.push(Action::AddPou(PouLanguage::Ld));
             redraw = true;
         }
+        // The instruction list is a first-class body language: L switches an
+        // empty POU between LD and IL, so a jump program can be typed without
+        // hand-editing a file.
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::L) {
+            let pou = pous[selected].clone();
+            let empty = match pou.language {
+                PouLanguage::Ld => pou.sections.iter().all(|section| section.rungs.is_empty()),
+                PouLanguage::Il => pou.il.iter().all(|line| line.trim().is_empty()),
+                PouLanguage::Fbd => pou.fbd.iter().all(|line| line.output.trim().is_empty()),
+            };
+            if empty {
+                let language = if pou.language == PouLanguage::Il {
+                    PouLanguage::Ld
+                } else {
+                    PouLanguage::Il
+                };
+                actions.push(Action::SetPouLanguage {
+                    index: selected,
+                    language,
+                });
+                redraw = true;
+            } else {
+                plc.message = format!("{} IS NOT EMPTY: L CHANGES AN EMPTY POU", pou.name);
+            }
+        }
         // Rename and duplicate ask for the name; pushing the action with the
         // current name renamed the POU to itself, which is why R looked dead.
         if input.consume_key(egui::Modifiers::NONE, egui::Key::R) {
@@ -3376,7 +3402,7 @@ fn pou_list_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Ac
             });
         });
         ui.label(
-            RichText::new("LADDER ONLY")
+            RichText::new("N NEW · L LANGUAGE · ENTER OPENS")
                 .monospace()
                 .size(theme::font_size(9.0))
                 .color(theme::MUTED),
@@ -8198,6 +8224,25 @@ mod il_editor_tests {
         );
     }
 
+    /// A label and a jump are ordinary lines: `LOOP:` is stored, and `JMP LOOP`
+    /// passes the line check because the label exists in this POU.
+    #[test]
+    fn a_label_and_a_jump_are_typed_and_stored() {
+        let mut plc = il_plc();
+        for events in [
+            vec![egui::Event::Text("LOOP:".into())],
+            vec![key(egui::Key::Enter)],
+            vec![egui::Event::Text("JMP LOOP".into())],
+            vec![key(egui::Key::Enter)],
+        ] {
+            frame(&mut plc, events);
+        }
+        let lines = plc.il_lines();
+        assert_eq!(lines[0], "LOOP:");
+        assert_eq!(lines[1], "JMP LOOP");
+        assert!(plc.il_message.is_none(), "{:?}", plc.il_message);
+    }
+
     /// Backspace edits the line being typed, however many times it is pressed.
     #[test]
     fn backspace_clears_the_typed_text() {
@@ -8653,6 +8698,46 @@ mod pou_list_n_tests {
             matches!(actions.first(), Some(Action::AddPou(PouLanguage::Ld))),
             "N must ask for a ladder POU, got {actions:?}"
         );
+    }
+
+    /// `L` switches an empty POU between LD and IL, and refuses a body that
+    /// already has lines: changing the language of a ladder would lose it.
+    #[test]
+    fn l_switches_an_empty_pou_between_ld_and_il() {
+        let mut plc = plc_with_two_pous();
+        let actions = press(&mut plc, egui::Key::L);
+        assert!(
+            matches!(
+                actions.first(),
+                Some(Action::SetPouLanguage {
+                    index: 1,
+                    language: PouLanguage::Il
+                })
+            ),
+            "L must switch the empty POU to IL: {actions:?}"
+        );
+        for action in actions {
+            plc.apply(action);
+        }
+        assert_eq!(plc.project.all_pous()[1].language, PouLanguage::Il);
+        let actions = press(&mut plc, egui::Key::L);
+        assert!(
+            matches!(
+                actions.first(),
+                Some(Action::SetPouLanguage {
+                    index: 1,
+                    language: PouLanguage::Ld
+                })
+            ),
+            "L switches back: {actions:?}"
+        );
+
+        let mut full = PlcUi::default();
+        full.page = PlcPage::PouList;
+        full.pou = 0;
+        let actions = press(&mut full, egui::Key::L);
+        assert!(actions.is_empty(), "a full ladder keeps its language");
+        assert!(full.message.contains("NOT EMPTY"), "{:?}", full.message);
     }
 
     /// `R` asks for a name instead of renaming the POU to itself, which is what

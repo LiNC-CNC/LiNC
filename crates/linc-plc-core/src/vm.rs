@@ -15,6 +15,10 @@ use crate::compile::{Binding, Compiled, FbKind, MathOp, Op, Program, SymbolKind,
 /// Operand-stack depth. Validation caps logic nesting at 64, so this is slack.
 const STACK_DEPTH: usize = 128;
 
+/// A guard against a jump loop that never terminates. A scan that reaches it
+/// stops executing instructions instead of hanging the scheduler.
+const MAX_OPS_PER_SCAN: usize = 100_000;
+
 /// One 20 ms tick, ZX-PLC's scan period.
 pub const DEFAULT_DT_MS: u16 = 20;
 
@@ -145,7 +149,18 @@ impl Vm {
         let mut depth = 0usize;
         let mut word_stack = [0i16; STACK_DEPTH];
         let mut word_depth = 0usize;
-        for op_index in 0..self.program.ops.len() {
+        let mut pc = 0usize;
+        let mut executed = 0usize;
+        while pc < self.program.ops.len() {
+            executed += 1;
+            if executed > MAX_OPS_PER_SCAN {
+                // A jump loop that never ends would freeze the scan. The limit
+                // is far above a real program's op count; the rest of the scan
+                // is skipped and the ladder keeps its last state.
+                break;
+            }
+            let op_index = pc;
+            pc += 1;
             match self.program.ops[op_index] {
                 Op::PushConst(value) => push(&mut stack, &mut depth, value),
                 Op::Push(index) => {
@@ -382,6 +397,15 @@ impl Vm {
                         .map(|state| state.q)
                         .unwrap_or(false);
                     push(&mut stack, &mut depth, value);
+                }
+                Op::Jump(target) => pc = target as usize,
+                Op::JumpIf { target, when } => {
+                    // Conditional jumps consume the result bit: the next line
+                    // starts a new expression, as on the ZX.
+                    let value = pop(&mut stack, &mut depth);
+                    if value == when {
+                        pc = target as usize;
+                    }
                 }
             }
         }

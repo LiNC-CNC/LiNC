@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::il::{parse_line, word_operand, IlLine, UNSUPPORTED};
+use crate::il::{parse_line, word_operand, IlLine};
 use crate::model::{IoDirection, Logic, PouLanguage, Project, Section};
 use crate::SCHEMA_VERSION;
 
@@ -158,6 +158,20 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 // Type flow: a word operation on a bit accumulator computes
                 // garbage, so it is reported rather than silently run.
                 let mut accumulator: Option<bool> = None;
+                // Jumps may point forward, so every label is known before the
+                // instructions are checked.
+                let mut labels: HashSet<String> = HashSet::new();
+                for (line_index, line) in pou.il.iter().enumerate() {
+                    if let IlLine::Label(name) = parse_line(line) {
+                        if !labels.insert(name.to_ascii_uppercase()) {
+                            diagnostics.push(Diagnostic::error(
+                                "il_label",
+                                format!("label '{name}' is declared twice in this POU"),
+                                format!("pous[{index}].il[{line_index}]"),
+                            ));
+                        }
+                    }
+                }
                 for (line_index, line) in pou.il.iter().enumerate() {
                     let path = format!("pous[{index}].il[{line_index}]");
                     match parse_line(line) {
@@ -194,17 +208,63 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                 }
                             }
                             if mnemonic == "RET" {
-                                // A trailing RET returns from the POU; inlining
-                                // already ends there, so it has no effect.
                                 continue;
                             }
-                            if UNSUPPORTED.contains(&mnemonic.as_str()) {
-                                diagnostics.push(Diagnostic::error(
-                                    "il_unsupported",
-                                    format!("'{mnemonic}' is not implemented yet"),
-                                    path,
-                                ));
-                            } else if mnemonic == "CAL" {
+                            if matches!(mnemonic.as_str(), "JMP" | "JMPC" | "JMPCN") {
+                                if accumulator == Some(true) {
+                                    diagnostics.push(Diagnostic::error(
+                                        "il_type",
+                                        format!(
+                                            "'{mnemonic}' needs a bit result to test, not a word"
+                                        ),
+                                        path.clone(),
+                                    ));
+                                }
+                                if !labels.contains(&operand.trim().to_ascii_uppercase()) {
+                                    diagnostics.push(Diagnostic::error(
+                                        "il_label_missing",
+                                        format!(
+                                            "'{operand}' is not a label in this POU; declare it as `LABEL:`"
+                                        ),
+                                        path.clone(),
+                                    ));
+                                }
+                                continue;
+                            }
+                            if matches!(mnemonic.as_str(), "RETC" | "RETCN") {
+                                if accumulator == Some(true) {
+                                    diagnostics.push(Diagnostic::error(
+                                        "il_type",
+                                        format!(
+                                            "'{mnemonic}' needs a bit result to test, not a word"
+                                        ),
+                                        path.clone(),
+                                    ));
+                                }
+                                continue;
+                            }
+                            if matches!(mnemonic.as_str(), "CALC" | "CALCN") {
+                                if accumulator == Some(true) {
+                                    diagnostics.push(Diagnostic::error(
+                                        "il_type",
+                                        format!(
+                                            "'{mnemonic}' needs a bit result to test, not a word"
+                                        ),
+                                        path.clone(),
+                                    ));
+                                }
+                                if !pou_names.contains(&operand.trim().to_ascii_uppercase()) {
+                                    diagnostics.push(Diagnostic::error(
+                                        "cal_target",
+                                        format!(
+                                            "'{operand}' is not a POU in this project; CALC calls a POU, not a block"
+                                        ),
+                                        path.clone(),
+                                    ));
+                                }
+                                continue;
+                            }
+                            if mnemonic == "CAL" {
                                 if let Some((name, args)) = crate::il::parse_call(&operand) {
                                     let block = crate::compile::parse_block(&name, &name, "");
                                     if block.is_none() {
@@ -299,11 +359,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                 ));
                             }
                         }
-                        IlLine::Label(name) => diagnostics.push(Diagnostic::error(
-                            "il_label",
-                            format!("label '{name}' needs jumps, which are not implemented yet"),
-                            path,
-                        )),
+                        IlLine::Label(_) => {}
                         IlLine::Bad(message) => {
                             diagnostics.push(Diagnostic::error("il", message, path))
                         }
@@ -443,8 +499,12 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 .il
                 .iter()
                 .filter_map(|line| match parse_line(line) {
-                    IlLine::Instruction { mnemonic, operand } if mnemonic == "CAL" => {
-                        Some(operand.trim().to_ascii_uppercase())
+                    IlLine::Instruction { mnemonic, operand }
+                        if matches!(mnemonic.as_str(), "CAL" | "CALC" | "CALCN") =>
+                    {
+                        let target = operand.trim();
+                        // `CAL TON0(IN:=..)` is a block, not a POU.
+                        (!target.contains('(')).then(|| target.to_ascii_uppercase())
                     }
                     _ => None,
                 })
