@@ -185,44 +185,27 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         app.plc.cell_cursor = Some((cursor.0, cursor.1 + 1, 0));
         return;
     }
-    // Preview toggles: the digits hold an input bit for the drawing, so a rung
-    // can be followed without touching the machine or the daemon.
-    if app.plc.page == PlcPage::Edit && !app.plc.text_editing {
-        let (bit, byte) = ui.input_mut(|input| {
-            let digit = [
-                egui::Key::Num0,
-                egui::Key::Num1,
-                egui::Key::Num2,
-                egui::Key::Num3,
-                egui::Key::Num4,
-                egui::Key::Num5,
-                egui::Key::Num6,
-                egui::Key::Num7,
-            ]
-            .iter()
-            .position(|key| input.consume_key(egui::Modifiers::NONE, *key));
-            (
-                digit,
-                input.consume_key(egui::Modifiers::NONE, egui::Key::B),
-            )
-        });
-        if byte {
-            app.plc.preview_byte = if app.plc.preview_byte == 0 { 1 } else { 0 };
-        }
-        if let Some(bit) = bit {
-            if let Some(name) =
-                crate::screens::plc::sim_input_name(&app.plc, app.plc.preview_byte, bit as u8)
-            {
-                let held = app
-                    .plc
-                    .preview
-                    .iter()
-                    .find(|(held, _)| *held == name)
-                    .map(|(_, value)| *value)
-                    .unwrap_or(false);
-                app.plc.preview.retain(|(held, _)| *held != name);
-                app.plc.preview.push((name, !held));
-            }
+    // Space holds a contact's bit for the preview: the key lives on the cell, so
+    // no bank select or bit number is needed.
+    let space = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space));
+    if space && cursor.2 < POSITIONS {
+        let operand = sections
+            .get(cursor.0)
+            .and_then(|section| section.rungs.get(cursor.1))
+            .and_then(|rung| rung.cells.get(cursor.2))
+            .and_then(|cell| cell.operand())
+            .map(str::to_string);
+        if let Some(name) = operand {
+            let held = app
+                .plc
+                .preview
+                .iter()
+                .find(|(held, _)| *held == name)
+                .map(|(_, value)| *value)
+                .or_else(|| app.plc.bit_value(&name))
+                .unwrap_or(false);
+            app.plc.preview.retain(|(held, _)| *held != name);
+            app.plc.preview.push((name, !held));
         }
     }
     let insert = ui.input_mut(|input| letter(input, egui::Key::I));
@@ -288,6 +271,18 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         return;
     }
     if cursor.2 >= POSITIONS {
+        // Enter on the coil edits its operand. This branch returns before the
+        // general Enter handling, so the coil's Enter lives here.
+        if enter {
+            let var = sections
+                .get(cursor.0)
+                .and_then(|section| section.rungs.get(cursor.1))
+                .map(|rung| rung.coil.var.clone())
+                .unwrap_or_default();
+            app.plc.operand_cursor = operand_position(&app.plc, &var);
+            app.plc.operand_filter.clear();
+            app.plc.coil_pick = Some((cursor.0, cursor.1));
+        }
         let kind = if contact {
             Some(CoilKind::Normal)
         } else if negated {
@@ -308,8 +303,9 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             actions.push(Action::SetCoil {
                 section: cursor.0,
                 rung: cursor.1,
-                coil: Coil::new(var, kind),
+                coil: Coil::new(var.clone(), kind),
             });
+            app.plc.operand_cursor = operand_position(&app.plc, &var);
             app.plc.operand_filter.clear();
             app.plc.coil_pick = Some((cursor.0, cursor.1));
         }
@@ -442,6 +438,8 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
     }
     if let Some(cell) = pick_operand {
         if cursor.2 < POSITIONS {
+            let name = cell.operand().unwrap_or("").to_string();
+            app.plc.operand_cursor = operand_position(&app.plc, &name);
             app.plc.operand_filter.clear();
             app.plc.operand_pick = Some((cursor.0, cursor.1, cursor.2, cell));
         }
@@ -596,6 +594,22 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             EnterTarget::Block(cell) => app.plc.block_edit = Some(cell),
             EnterTarget::Compare(edit) => app.plc.compare_edit = Some(edit),
             EnterTarget::Compute(edit) => app.plc.compute_edit = Some(edit),
+            EnterTarget::Operand((section, rung, position, cell)) => {
+                let name = cell.operand().unwrap_or("").to_string();
+                app.plc.operand_cursor = operand_position(&app.plc, &name);
+                app.plc.operand_filter.clear();
+                app.plc.operand_pick = Some((section, rung, position, cell));
+            }
+            EnterTarget::Coil((section, rung, _)) => {
+                let var = sections
+                    .get(section)
+                    .and_then(|section| section.rungs.get(rung))
+                    .map(|rung| rung.coil.var.clone())
+                    .unwrap_or_default();
+                app.plc.operand_cursor = operand_position(&app.plc, &var);
+                app.plc.operand_filter.clear();
+                app.plc.coil_pick = Some((section, rung));
+            }
             EnterTarget::Picker => {
                 app.plc.picker = Some(cursor);
                 app.plc.picker_cursor = 0;
@@ -1941,6 +1955,18 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     shown.is_some()
 }
 
+/// The row a symbol holds in the picker list, so the picker opens on the value
+/// the cell already has rather than at the top.
+fn operand_position(plc: &PlcUi, name: &str) -> usize {
+    plc.project
+        .io
+        .iter()
+        .map(|point| point.name.as_str())
+        .chain(plc.project.vars.iter().map(|var| var.name.as_str()))
+        .position(|candidate| candidate == name)
+        .unwrap_or(0)
+}
+
 /// What Enter on a ladder cell opens. The cell decides: a box and a compare have
 /// their own windows and their own values, so Enter edits what is there instead
 /// of offering to replace it.
@@ -1949,10 +1975,17 @@ enum EnterTarget {
     Block((usize, usize, usize)),
     Compare(CompareEdit),
     Compute(ComputeEdit),
+    /// A contact or edge: Enter edits its operand, not the element kind.
+    Operand((usize, usize, usize, Cell)),
+    /// The coil slot: Enter picks the coil's operand.
+    Coil((usize, usize, usize)),
     Picker,
 }
 
 fn enter_target(cursor: (usize, usize, usize), cell: Option<&Cell>) -> EnterTarget {
+    if cursor.2 >= POSITIONS {
+        return EnterTarget::Coil(cursor);
+    }
     match cell {
         Some(Cell::Block { .. }) => EnterTarget::Block(cursor),
         Some(Cell::Compare { op, left, right }) => EnterTarget::Compare(CompareEdit {
@@ -1965,6 +1998,12 @@ fn enter_target(cursor: (usize, usize, usize), cell: Option<&Cell>) -> EnterTarg
             focus: 0,
             error: None,
         }),
+        Some(Cell::Contact { .. }) | Some(Cell::Edge { .. }) => EnterTarget::Operand((
+            cursor.0,
+            cursor.1,
+            cursor.2,
+            cell.cloned().unwrap_or(Cell::Wire),
+        )),
         Some(Cell::Compute {
             op,
             target,
@@ -2839,6 +2878,50 @@ fn compute_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
     }
 }
 
+/// One scan of a rung for the preview: the power flow a held input produces, so
+/// contacts and the coil light together. Blocks are opaque; they pass the power
+/// they were given because their logic is not evaluated here.
+fn preview_scan(plc: &PlcUi, cells: &[Cell]) -> (Vec<Option<bool>>, Option<bool>) {
+    let mut local = vec![None; POSITIONS];
+    let mut power = true;
+    for (position, cell) in cells.iter().enumerate() {
+        let value = match cell {
+            Cell::Contact { var, negated } => {
+                let bit = plc.bit_value(var).unwrap_or(false);
+                power = power && (bit != *negated);
+                Some(power)
+            }
+            Cell::Edge { var, .. } => {
+                let bit = plc.bit_value(var).unwrap_or(false);
+                power = power && bit;
+                Some(power)
+            }
+            Cell::Compare { op, left, right } => {
+                let result = match (plc.word_value(left), plc.word_value(right)) {
+                    (Some(a), Some(b)) => match op.to_ascii_uppercase().as_str() {
+                        "GT" => a > b,
+                        "GE" => a >= b,
+                        "EQ" => a == b,
+                        "NE" => a != b,
+                        "LE" => a <= b,
+                        "LT" => a < b,
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                power = power && result;
+                Some(power)
+            }
+            Cell::Compute { .. } | Cell::Block { .. } => Some(power),
+            Cell::Wire | Cell::Link => Some(power),
+        };
+        if let Some(slot) = local.get_mut(position) {
+            *slot = value;
+        }
+    }
+    (local, Some(power))
+}
+
 /// One grid rung: nine element positions, the rail, and the coil.
 pub fn grid_rung(
     plc: &PlcUi,
@@ -2858,6 +2941,11 @@ pub fn grid_rung(
     } else {
         rung.cells.clone()
     };
+    // With a preview bit held, the rung is evaluated locally so the rest of the
+    // logic follows the held input: only the toggled contact turning green said
+    // nothing about what the rung would do.
+    let previewing = !plc.preview.is_empty();
+    let local = previewing.then(|| preview_scan(plc, &cells));
     // The comment sits inside the strip's upper band so every rung is exactly
     // `CELL_HEIGHT` tall: the link's drop to the branch row stays exact.
     let commented = !rung.comment.is_empty();
@@ -2877,7 +2965,10 @@ pub fn grid_rung(
                 matches!(cell, Cell::Wire),
                 cell_symbol(&cell),
                 if commented { 18.0 } else { 16.0 },
-                cell_active(plc, &cell),
+                local
+                    .as_ref()
+                    .and_then(|(values, _)| values.get(position).copied().flatten())
+                    .or_else(|| cell_active(plc, &cell)),
             );
             if plc.cell_cursor == Some((section, rung_index, position)) {
                 *cursor_rect = Some(rect);
@@ -2896,7 +2987,9 @@ pub fn grid_rung(
             if commented { 18.0 } else { 16.0 },
             // A compute rung writes through its cell, so its coil slot is unused
             // and must not light up from a variable of the same name.
-            if cells
+            if let Some((_, coil)) = &local {
+                *coil
+            } else if cells
                 .iter()
                 .any(|cell| matches!(cell, linc_plc_core::grid::Cell::Compute { .. }))
             {
@@ -2909,6 +3002,16 @@ pub fn grid_rung(
             *cursor_rect = Some(coil_rect);
         }
     });
+    if plc.cell_cursor == Some((section, rung_index, POSITIONS)) {
+        // A faint edge says the whole rung is the unit being addressed while the
+        // coil is the cell with the cursor.
+        let rect = strip.response.rect;
+        ui.painter().rect_filled(
+            egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height())),
+            1.0,
+            Color32::from_rgba_unmultiplied(0x4d, 0xa3, 0xff, 36),
+        );
+    }
     if commented {
         // Inside the strip: the rung stays exactly CELL_HEIGHT tall, so the link's
         // drop to the branch row lands on that row's conductor.
@@ -3723,9 +3826,54 @@ mod compare_window_tests {
                     negated: false
                 })
             ),
-            EnterTarget::Picker
+            EnterTarget::Operand(_)
         ));
         assert!(matches!(enter_target(cursor, None), EnterTarget::Picker));
+    }
+
+    /// The coil slot and a contact each have their own Enter target: the operand
+    /// list, not the element picker.
+    #[test]
+    fn enter_targets_the_coil_and_the_contact_operand() {
+        let cursor = (0, 3, 0);
+        assert!(matches!(
+            enter_target((0, 3, POSITIONS), None),
+            EnterTarget::Coil((0, 3, POSITIONS))
+        ));
+        assert!(matches!(
+            enter_target(
+                cursor,
+                Some(&Cell::Contact {
+                    var: "start".into(),
+                    negated: false
+                })
+            ),
+            EnterTarget::Operand(_)
+        ));
+    }
+
+    /// A held input lights the rest of the rung: the local scan must carry power
+    /// through the series contacts to the coil, not just colour the contact.
+    #[test]
+    fn the_preview_scan_carries_power_to_the_coil() {
+        let mut plc = PlcUi::default();
+        let cells = vec![
+            Cell::Contact {
+                var: "start".into(),
+                negated: false,
+            },
+            Cell::Wire,
+        ];
+        plc.preview = vec![("start".into(), true)];
+        let (local, coil) = preview_scan(&plc, &cells);
+        assert_eq!(local[0], Some(true));
+        assert_eq!(local[1], Some(true));
+        assert_eq!(coil, Some(true), "the coil follows the held contact");
+
+        plc.preview = vec![("start".into(), false)];
+        let (local, coil) = preview_scan(&plc, &cells);
+        assert_eq!(local[0], Some(false));
+        assert_eq!(coil, Some(false));
     }
 
     /// A value outside the list still reads as what it is: a word, a time, a

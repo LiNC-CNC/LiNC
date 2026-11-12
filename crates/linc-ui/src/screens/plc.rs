@@ -158,6 +158,11 @@ pub enum Action {
     Unforce(String),
     /// Set the comment of a declared symbol.
     SetSymbolComment(String, String),
+    /// Rename a symbol and every cell or coil that names it.
+    RenameSymbol {
+        from: String,
+        to: String,
+    },
     /// Add an output symbol.
     AddSymbol(String),
     /// Add an input symbol, which the DEMO ladder needs as much as outputs.
@@ -1001,6 +1006,10 @@ pub struct PlcUi {
     pub view_addresses: bool,
     /// The name typed into the symbols table's new row.
     pub symbol_new: String,
+    /// Symbols table cursor, the row being renamed, and its typed name.
+    pub symbol_cursor: usize,
+    pub symbol_edit_row: usize,
+    pub symbol_edit: Option<String>,
     /// The comment row being typed into, with its text.
     pub comment_row: Option<(usize, usize)>,
     pub comment_buffer: String,
@@ -1097,6 +1106,9 @@ impl Default for PlcUi {
             text_editing: false,
             view_addresses: false,
             symbol_new: String::new(),
+            symbol_cursor: 0,
+            symbol_edit_row: 0,
+            symbol_edit: None,
             comment_row: None,
             comment_buffer: String::new(),
             trend: TrendBuffer::default(),
@@ -1938,6 +1950,50 @@ impl PlcUi {
                     }
                 }
             }
+            Action::RenameSymbol { from, to } => {
+                let to = to.trim().to_string();
+                if !to.is_empty() && to != from {
+                    // The symbol and every reference to it move together; a table
+                    // that renamed only the row would leave the ladder pointing at
+                    // a name that no longer exists.
+                    for point in self.project.io.iter_mut() {
+                        if point.name == from {
+                            point.name = to.clone();
+                        }
+                    }
+                    for var in self.project.vars.iter_mut() {
+                        if var.name == from {
+                            var.name = to.clone();
+                        }
+                    }
+                    for operand in self.project.watch.iter_mut() {
+                        if *operand == from {
+                            *operand = to.clone();
+                        }
+                    }
+                    let mut pous = self.project.all_pous();
+                    for pou in pous.iter_mut() {
+                        for section in pou.sections.iter_mut() {
+                            for rung in section.rungs.iter_mut() {
+                                if rung.coil.var == from {
+                                    rung.coil.var = to.clone();
+                                }
+                                for cell in rung.cells.iter_mut() {
+                                    match cell {
+                                        Cell::Contact { var, .. } | Cell::Edge { var, .. }
+                                            if *var == from =>
+                                        {
+                                            *var = to.clone();
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    self.project.set_pous(pous);
+                }
+            }
             Action::AddRowAfter { section, rung } => {
                 let mut pous = self.project.all_pous();
                 if let Some(pou) = pous.get_mut(self.pou) {
@@ -2467,11 +2523,11 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
     let row = |text: &'static str, key: &'static str, active: bool| Row { text, key, active };
     let mut entries = vec![
         Heading("PAGES"),
-        row("Ladder", "Ctrl+L", plc.page == PlcPage::Edit),
-        row("Symbols", "Ctrl+1", plc.page == PlcPage::Symbols),
-        row("Test run", "Ctrl+2", plc.page == PlcPage::Sim),
-        row("Watch", "Ctrl+3", plc.page == PlcPage::Watch),
-        row("Trend", "Ctrl+4", plc.page == PlcPage::Trend),
+        row("Ladder", "Ctrl+1", plc.page == PlcPage::Edit),
+        row("Symbols", "Ctrl+2", plc.page == PlcPage::Symbols),
+        row("Test run", "Ctrl+3", plc.page == PlcPage::Sim),
+        row("Watch", "Ctrl+4", plc.page == PlcPage::Watch),
+        row("Trend", "Ctrl+5", plc.page == PlcPage::Trend),
     ];
     match plc.page {
         // The list has its own keys; the editor's element letters do not work
@@ -2752,30 +2808,41 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     // two actions the workflow needs every minute have keys as well.
     // A shell dialog owns every key; the page keys wait until it closes.
     let dialog_open = app.overlay.modal.is_some();
-    let (to_symbols, to_sim, to_watch, to_trend, add_rung, save, new_project, add_row, delete_row) =
-        if dialog_open {
-            (
-                false, false, false, false, false, false, false, false, false,
-            )
-        } else {
-            (
-                ctrl_key(ui, egui::Key::Num1),
-                ctrl_key(ui, egui::Key::Num2),
-                ctrl_key(ui, egui::Key::Num3),
-                ctrl_key(ui, egui::Key::Num4),
-                ctrl_key(ui, egui::Key::N),
-                ctrl_key(ui, egui::Key::S),
-                // Ctrl+Shift+N is the keyboard path to File > New: the menu popup is not
-                // reachable by keyboard in this build, and a new project must be.
-                ctrl_shift_key(ui, egui::Key::N),
-                // The manual's SS+ENTER substitute, plus Ctrl+J for terminals that
-                // cannot send Ctrl+Enter.
-                ctrl_key(ui, egui::Key::Enter) || ctrl_key(ui, egui::Key::J),
-                // The panel keyboard has no Delete key: Bksp is the delete it has.
-                ctrl_key(ui, egui::Key::Backspace),
-            )
-        };
-    if !dialog_open && ctrl_key(ui, egui::Key::L) {
+    let (
+        to_ladder,
+        to_symbols,
+        to_sim,
+        to_watch,
+        to_trend,
+        add_rung,
+        save,
+        new_project,
+        add_row,
+        delete_row,
+    ) = if dialog_open {
+        (
+            false, false, false, false, false, false, false, false, false, false,
+        )
+    } else {
+        (
+            ctrl_key(ui, egui::Key::Num1),
+            ctrl_key(ui, egui::Key::Num2),
+            ctrl_key(ui, egui::Key::Num3),
+            ctrl_key(ui, egui::Key::Num4),
+            ctrl_key(ui, egui::Key::Num5),
+            ctrl_key(ui, egui::Key::N),
+            ctrl_key(ui, egui::Key::S),
+            // Ctrl+Shift+N is the keyboard path to File > New: the menu popup is not
+            // reachable by keyboard in this build, and a new project must be.
+            ctrl_shift_key(ui, egui::Key::N),
+            // The manual's SS+ENTER substitute, plus Ctrl+J for terminals that
+            // cannot send Ctrl+Enter.
+            ctrl_key(ui, egui::Key::Enter) || ctrl_key(ui, egui::Key::J),
+            // The panel keyboard has no Delete key: Bksp is the delete it has.
+            ctrl_key(ui, egui::Key::Backspace),
+        )
+    };
+    if to_ladder {
         app.plc.page = PlcPage::Edit;
     }
     if to_symbols {
@@ -4563,179 +4630,303 @@ fn fbd_notice(ui: &mut Ui) {
 fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
     common::card_title(ui, "SYMBOLS");
     ui.label(
-        RichText::new(
-            "Names as the operand picker and the status bar show them, with their comments.",
-        )
-        .size(theme::font_size(9.0))
-        .color(theme::MUTED),
+        RichText::new("ENTER EDITS A NAME · BACKSPACE REMOVES · ARROWS SELECT")
+            .monospace()
+            .size(theme::font_size(9.0))
+            .color(theme::MUTED),
     );
     ui.add_space(4.0);
+    let mut rows = plc
+        .project
+        .io
+        .iter()
+        .map(|point| {
+            (
+                point.name.clone(),
+                match point.direction {
+                    IoDirection::In => "input",
+                    IoDirection::Out => "output",
+                }
+                .to_string(),
+                point.comment.clone(),
+            )
+        })
+        .chain(plc.project.vars.iter().map(|var| {
+            (
+                var.name.clone(),
+                if var.retain {
+                    "retained var".to_string()
+                } else {
+                    "var".to_string()
+                },
+                var.comment.clone(),
+            )
+        }))
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        (left.1.as_str(), left.0.as_str()).cmp(&(right.1.as_str(), right.0.as_str()))
+    });
+    plc.symbol_cursor = plc.symbol_cursor.min(rows.len().saturating_sub(1));
+
     let mut edits: Vec<(String, String)> = Vec::new();
     let mut remove: Option<String> = None;
-    egui::ScrollArea::vertical()
-        .max_height((height - 140.0).max(120.0))
-        .show(ui, |ui| {
-            egui::Grid::new("plc-symbols")
-                .num_columns(4)
-                .spacing([12.0, 4.0])
-                .show(ui, |ui| {
-                    for heading in ["symbol", "area", "value", "comment"] {
-                        ui.label(
-                            RichText::new(heading)
-                                .size(theme::font_size(9.0))
-                                .color(theme::MUTED),
-                        );
+    let mut rename: Option<(String, String)> = None;
+    // The name field is the page's own buffer, like the box preset: no egui
+    // TextEdit, so there is no focus ring to lose and every keystroke counts.
+    let mut commit_edit = false;
+    let mut cancel_edit = false;
+    if let Some(mut buffer) = plc.symbol_edit.clone() {
+        for event in ui.input(|input| input.events.clone()) {
+            match event {
+                egui::Event::Text(text) => buffer.push_str(&text),
+                egui::Event::Key {
+                    key, pressed: true, ..
+                } => match key {
+                    egui::Key::Backspace => {
+                        buffer.pop();
                     }
-                    ui.end_row();
-                    let mut rows = plc
-                        .project
-                        .io
-                        .iter()
-                        .map(|point| {
-                            (
-                                point.name.clone(),
-                                match point.direction {
-                                    IoDirection::In => "input",
-                                    IoDirection::Out => "output",
-                                }
-                                .to_string(),
-                                point.comment.clone(),
-                            )
-                        })
-                        .chain(plc.project.vars.iter().map(|var| {
-                            (
-                                var.name.clone(),
-                                if var.retain {
-                                    "retained var".to_string()
-                                } else {
-                                    "var".to_string()
-                                },
-                                var.comment.clone(),
-                            )
-                        }))
-                        .collect::<Vec<_>>();
-                    rows.sort_by(|left, right| {
-                        (left.1.as_str(), left.0.as_str())
-                            .cmp(&(right.1.as_str(), right.0.as_str()))
-                    });
-                    for (name, area, comment) in rows {
-                        ui.label(
-                            RichText::new(&name)
-                                .monospace()
-                                .size(theme::font_size(10.0))
-                                .color(theme::FG),
-                        );
-                        ui.label(
-                            RichText::new(area)
-                                .size(theme::font_size(9.0))
-                                .color(theme::MUTED),
-                        );
-                        let value = plc
-                            .vars
-                            .iter()
-                            .find(|var| var.name == name)
-                            .map(|var| if var.value { "TRUE" } else { "FALSE" })
-                            .unwrap_or("-");
-                        ui.label(
-                            RichText::new(value)
-                                .monospace()
-                                .size(theme::font_size(9.0))
-                                .color(if value == "TRUE" {
-                                    theme::SUCCESS
-                                } else {
-                                    theme::MUTED
-                                }),
-                        );
-                        let mut buffer = comment;
-                        if ui
-                            .add(
-                                egui::TextEdit::singleline(&mut buffer)
-                                    .desired_width(180.0)
-                                    .font(egui::TextStyle::Small),
-                            )
-                            .changed()
-                        {
-                            edits.push((name.clone(), buffer));
-                        }
-                        if theme::action_button(ui, "remove", true).clicked() {
-                            remove = Some(name);
-                        }
-                        ui.end_row();
-                    }
+                    egui::Key::Enter => commit_edit = true,
+                    egui::Key::Escape => cancel_edit = true,
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        if cancel_edit {
+            plc.symbol_edit = None;
+            plc.text_editing = false;
+        } else {
+            plc.symbol_edit = Some(buffer);
+        }
+    }
+    if plc.symbol_edit.is_none() && !plc.text_editing {
+        let (up, down, page_up, page_down, enter, delete, escape) = ui.input_mut(|input| {
+            (
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+            )
+        });
+        if up {
+            plc.symbol_cursor = plc.symbol_cursor.saturating_sub(1);
+        }
+        if down {
+            plc.symbol_cursor = (plc.symbol_cursor + 1).min(rows.len().saturating_sub(1));
+        }
+        if page_up {
+            plc.symbol_cursor = plc.symbol_cursor.saturating_sub(8);
+        }
+        if page_down {
+            plc.symbol_cursor = (plc.symbol_cursor + 8).min(rows.len().saturating_sub(1));
+        }
+        if enter {
+            if let Some((name, _, _)) = rows.get(plc.symbol_cursor) {
+                plc.symbol_edit_row = plc.symbol_cursor;
+                plc.symbol_edit = Some(name.clone());
+                // The grid anchor must not take the ring back from the row's
+                // field: `text_editing` is what the editor's focus logic reads.
+                plc.text_editing = true;
+            }
+        }
+        if delete {
+            if let Some((name, _, _)) = rows.get(plc.symbol_cursor) {
+                remove = Some(name.clone());
+            }
+        }
+        if escape {
+            plc.symbol_cursor = plc.symbol_cursor.min(rows.len().saturating_sub(1));
+        }
+    }
+
+    let name_width = 150.0;
+    let area_width = 90.0;
+    let value_width = 70.0;
+    let gap = 10.0;
+    let comment_width =
+        (ui.available_width() - name_width - area_width - value_width - gap * 3.0).max(80.0);
+    ui.horizontal(|ui| {
+        for (heading, width) in [
+            ("SYMBOL", name_width),
+            ("AREA", area_width),
+            ("VALUE", value_width),
+            ("COMMENT", comment_width),
+        ] {
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, 18.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
                     ui.label(
-                        RichText::new("new")
+                        RichText::new(heading)
+                            .monospace()
                             .size(theme::font_size(9.0))
                             .color(theme::MUTED),
                     );
-                    ui.label("");
-                    ui.label("");
-                    ui.horizontal(|ui| {
-                        // Keyboard-only add: `N` claims the field (focus by stable
-                        // id), typed text goes to the buffer, `I` commits an input
-                        // and `O` an output, Escape cancels.
-                        let field_id = egui::Id::unique("linc-new-symbol");
-                        if ui.input_mut(|input| {
-                            input.consume_key(egui::Modifiers::NONE, egui::Key::N)
-                        }) {
-                            plc.text_editing = true;
-                            ui.memory_mut(|memory| memory.request_focus(field_id));
-                        }
-                        let mut name = plc.symbol_new.clone();
-                        let response = ui.add(
-                            egui::TextEdit::singleline(&mut name)
-                                .id(field_id)
-                                .desired_width(140.0)
-                                .hint_text("new symbol name"),
-                        );
-                        if plc.text_editing && !response.has_focus() {
-                            response.request_focus();
-                        }
-                        if response.changed() {
-                            plc.symbol_new = name.clone();
-                        }
-                        if plc.text_editing {
-                            let (commit_in, commit_out, cancel) = ui.input_mut(|input| {
-                                (
-                                    input.consume_key(egui::Modifiers::NONE, egui::Key::I),
-                                    input.consume_key(egui::Modifiers::NONE, egui::Key::O),
-                                    input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
-                                )
-                            });
-                            let trimmed = plc.symbol_new.trim().to_string();
-                            if commit_in && !trimmed.is_empty() {
-                                actions.push(Action::AddInput(trimmed));
-                                plc.symbol_new.clear();
-                                plc.text_editing = false;
-                            } else if commit_out && !trimmed.is_empty() {
-                                actions.push(Action::AddSymbol(trimmed));
-                                plc.symbol_new.clear();
-                                plc.text_editing = false;
-                            } else if cancel {
-                                plc.symbol_new.clear();
-                                plc.text_editing = false;
-                            }
-                        }
-                        if theme::action_button(ui, "add out", true).clicked()
-                            && !name.trim().is_empty()
-                        {
-                            actions.push(Action::AddSymbol(name.trim().to_string()));
-                            plc.symbol_new.clear();
-                        }
-                        if theme::action_button(ui, "add in", true).clicked()
-                            && !name.trim().is_empty()
-                        {
-                            actions.push(Action::AddInput(name.trim().to_string()));
-                            plc.symbol_new.clear();
-                        }
-                    });
-                    ui.end_row();
-                });
+                },
+            );
+            ui.add_space(gap);
+        }
+    });
+    ui.separator();
+
+    let list_height = (height - 180.0).max(120.0);
+    egui::ScrollArea::vertical()
+        .id_salt("plc-symbols")
+        .max_height(list_height)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for (index, (name, area, comment)) in rows.iter().enumerate() {
+                let selected = index == plc.symbol_cursor;
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 22.0),
+                    egui::Sense::click(),
+                );
+                if response.clicked() {
+                    plc.symbol_cursor = index;
+                }
+                let painter = ui.painter().clone();
+                if selected {
+                    painter.rect_filled(rect, egui::CornerRadius::ZERO, theme::PANEL_RAISED);
+                    painter.rect_filled(
+                        egui::Rect::from_min_size(
+                            rect.min,
+                            egui::vec2(theme::SELECTION_BAR, rect.height()),
+                        ),
+                        egui::CornerRadius::ZERO,
+                        theme::ACCENT,
+                    );
+                } else if index % 2 == 1 {
+                    painter.rect_filled(rect, egui::CornerRadius::ZERO, theme::SURFACE);
+                }
+                let mut x = rect.left() + theme::SELECTION_BAR + 6.0;
+                // The row being renamed is the one selected when Enter was
+                // pressed, not the row whose name still matches the buffer: once a
+                // character is typed the text differs and the edit disappeared.
+                let editing = plc.symbol_edit.is_some() && plc.symbol_edit_row == index;
+                if editing {
+                    let text = plc.symbol_edit.clone().unwrap_or_default();
+                    painter.text(
+                        egui::pos2(x, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        format!("{text}▌"),
+                        egui::FontId::monospace(theme::font_size(10.0)),
+                        theme::FG,
+                    );
+                    if commit_edit && !text.trim().is_empty() {
+                        rename = Some((name.clone(), text));
+                        plc.symbol_edit = None;
+                        plc.text_editing = false;
+                    }
+                } else {
+                    painter.text(
+                        egui::pos2(x, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        name,
+                        egui::FontId::monospace(theme::font_size(10.0)),
+                        theme::FG,
+                    );
+                }
+                x += name_width + gap;
+                painter.text(
+                    egui::pos2(x, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    area,
+                    egui::FontId::proportional(theme::font_size(9.0)),
+                    theme::MUTED,
+                );
+                x += area_width + gap;
+                let value = plc
+                    .vars
+                    .iter()
+                    .find(|var| var.name == *name)
+                    .map(|var| if var.value { "TRUE" } else { "FALSE" })
+                    .unwrap_or("-");
+                painter.text(
+                    egui::pos2(x, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    value,
+                    egui::FontId::monospace(theme::font_size(9.0)),
+                    if value == "TRUE" {
+                        theme::SUCCESS
+                    } else {
+                        theme::MUTED
+                    },
+                );
+                x += value_width + gap;
+                let comment_rect = egui::Rect::from_min_size(
+                    egui::pos2(x, rect.top() + 1.0),
+                    egui::vec2(comment_width - 4.0, rect.height() - 2.0),
+                );
+                let mut buffer = comment.clone();
+                let field = ui.put(
+                    comment_rect,
+                    egui::TextEdit::singleline(&mut buffer)
+                        .id(egui::Id::unique(format!("linc-symbol-comment-{index}")))
+                        .font(egui::TextStyle::Small),
+                );
+                if field.changed() {
+                    edits.push((name.clone(), buffer));
+                }
+            }
         });
+
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        // Keyboard-only add: `N` claims the field, typed text goes to the buffer,
+        // `I` commits an input and `O` an output, Escape cancels.
+        let field_id = egui::Id::unique("linc-new-symbol");
+        if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::N)) {
+            plc.text_editing = true;
+            ui.memory_mut(|memory| memory.request_focus(field_id));
+        }
+        let mut name = plc.symbol_new.clone();
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut name)
+                .id(field_id)
+                .desired_width(140.0)
+                .hint_text("new symbol name"),
+        );
+        if plc.text_editing && !response.has_focus() {
+            response.request_focus();
+        }
+        if response.changed() {
+            plc.symbol_new = name.clone();
+        }
+        if plc.text_editing {
+            let (commit_in, commit_out, cancel) = ui.input_mut(|input| {
+                (
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::I),
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::O),
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+                )
+            });
+            let trimmed = plc.symbol_new.trim().to_string();
+            if commit_in && !trimmed.is_empty() {
+                actions.push(Action::AddInput(trimmed));
+                plc.symbol_new.clear();
+                plc.text_editing = false;
+            } else if commit_out && !trimmed.is_empty() {
+                actions.push(Action::AddSymbol(trimmed));
+                plc.symbol_new.clear();
+                plc.text_editing = false;
+            } else if cancel {
+                plc.symbol_new.clear();
+                plc.text_editing = false;
+            }
+        }
+    });
+
     if let Some(name) = remove {
         actions.push(Action::RemoveSymbol(name));
     }
     for (name, comment) in edits {
         actions.push(Action::SetSymbolComment(name, comment));
+    }
+    if let Some((from, to)) = rename {
+        actions.push(Action::RenameSymbol { from, to });
     }
 }
 
@@ -7620,8 +7811,8 @@ mod rail_tests {
         assert!(edit.contains(&("Insert row", "Ctrl+Enter")), "{edit:?}");
         assert!(edit.contains(&("Delete row", "Ctrl+Bksp")), "{edit:?}");
         assert!(edit.contains(&("Close editor", "Esc")), "{edit:?}");
-        assert!(edit.contains(&("Ladder", "Ctrl+L")), "{edit:?}");
-        assert!(edit.contains(&("Test run", "Ctrl+2")), "{edit:?}");
+        assert!(edit.contains(&("Ladder", "Ctrl+1")), "{edit:?}");
+        assert!(edit.contains(&("Test run", "Ctrl+3")), "{edit:?}");
         assert!(
             !edit.iter().any(|(text, _)| *text == "Program list"),
             "the list is not a page of this window: {edit:?}"
@@ -7749,6 +7940,49 @@ mod pou_list_n_tests {
         assert!(
             actions.is_empty(),
             "MAIN cannot be deleted, got {actions:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod symbol_rename_tests {
+    use super::*;
+
+    /// Renaming a symbol moves every cell and coil that names it, so the ladder
+    /// never points at a name the symbol table no longer has.
+    #[test]
+    fn a_rename_updates_the_ladder() {
+        let mut plc = PlcUi::default();
+        let mut pou = linc_plc_core::model::Pou::new("main", PouLanguage::Ld);
+        pou.sections = vec![linc_plc_core::model::Section {
+            name: String::new(),
+            rungs: vec![linc_plc_core::model::Rung {
+                comment: String::new(),
+                logic: linc_plc_core::model::Logic::Const { value: true },
+                coil: linc_plc_core::model::Coil::new(
+                    "pump",
+                    linc_plc_core::model::CoilKind::Normal,
+                ),
+                cells: vec![Cell::Contact {
+                    var: "pump".into(),
+                    negated: false,
+                }],
+            }],
+        }];
+        plc.project.pous = vec![pou];
+        plc.apply(Action::RenameSymbol {
+            from: "pump".into(),
+            to: "vacuum".into(),
+        });
+        let pou = &plc.project.all_pous()[0];
+        let rung = &pou.sections[0].rungs[0];
+        assert_eq!(rung.coil.var, "vacuum");
+        assert_eq!(
+            rung.cells[0],
+            Cell::Contact {
+                var: "vacuum".into(),
+                negated: false
+            }
         );
     }
 }
