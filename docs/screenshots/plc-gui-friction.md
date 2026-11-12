@@ -76,6 +76,40 @@ Screenshots:
 - `plc-il-jump-fallthrough.png` — start false: JMPC not taken, LDN writes TRUE.
 - `plc-il-jump-taken.png` — start true: JMPC jumps to ON, STN writes FALSE.
 
+## Phase 4 — the demo project
+
+- **Case matters more than the GUI showed.** The symbol field accepted
+  `TL_Start`, `TL_Stop`, `Red`, `Amber` and `Green`; the validator then refused
+  the project (`must match ^[a-z][a-z0-9_-]{0,31}$`) and the daemon bound no I/O.
+  The names are lowercase in the demo (`tl_start`, `red`, ...).
+- **The watch list could not pin a block that only an IL `CAL` declares.** It
+  looked for a ladder cell with the instance, so `TON0.ET` from DEMO_IL was
+  refused and the typed row stayed open. An IL CAL now counts.
+- **The IL editor inherited button metrics.** The theme's 44 px target gave each
+  instruction line 47 px of row, so twelve lines needed two screens; the list
+  sets 16 px rows now.
+- **The FBD demo is parked, not delivered.** `plc/fbd-demo-parked` holds the
+  in-progress GUI authoring plus its symbols; the code-side FBD experiments were
+  never committed. The final demo is MAIN + DEMO_IL + DEMO_LD.
+- **DEMO_IL approximates the manual's step sequence.** This PLC has no step
+  bytes (`S0.0`), so three TONs (red 2 s, green 2 s, amber 1 s) are chained with
+  the reset bit `run2 AND NOT q2`; the manual uses four timers and step flags.
+  The lights are the same: one lamp per phase.
+- **The TEST RUN panel is clipped under a long ladder.** Eleven rungs leave the
+  bottom output row partly under the window edge; the input lamps and the live
+  coils are still visible, and the HAL pins carry the full evidence.
+- **Ctrl+S writes the project the page is reading** (`configs/plc-sim.json`),
+  which is why the demo is the file itself rather than a copy.
+
+Screenshots:
+
+- `plc-demo-main.png` — the three-POU demo: DEMO_LD, MAIN, DEMO_IL.
+- `plc-demo-il-red.png` — tl_start held, red lamp, all 22 lines on one screen.
+- `plc-demo-il-green.png` — TON0 elapsed, green phase.
+- `plc-demo-il-amber.png` — TON1 elapsed, amber phase.
+- `plc-demo-ld.png` — pump and estop held: seal, run and fan live, TOF block in
+  the rung.
+
 ## Open
 
 - `linc-plc` still treats a non-compiling project as a warning and publishes

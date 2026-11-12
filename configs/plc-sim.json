@@ -68,6 +68,36 @@
       "direction": "out",
       "kind": "bit",
       "comment": ""
+    },
+    {
+      "name": "tl_start",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "tl_stop",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "red",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "amber",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "green",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
     }
   ],
   "vars": [
@@ -88,9 +118,53 @@
       "kind": "bit",
       "retain": false,
       "comment": ""
+    },
+    {
+      "name": "run2",
+      "kind": "bit",
+      "retain": false,
+      "comment": ""
+    },
+    {
+      "name": "cyc",
+      "kind": "bit",
+      "retain": false,
+      "comment": ""
+    },
+    {
+      "name": "q0",
+      "kind": "bit",
+      "retain": false,
+      "comment": ""
+    },
+    {
+      "name": "q1",
+      "kind": "bit",
+      "retain": false,
+      "comment": ""
+    },
+    {
+      "name": "q2",
+      "kind": "bit",
+      "retain": false,
+      "comment": ""
     }
   ],
-  "watch": [],
+  "watch": [
+    "TON0.ET",
+    "TON1.ET",
+    "TON2.ET",
+    "TOF0.ET",
+    "run",
+    "pump",
+    "fan",
+    "lamp",
+    "red",
+    "amber",
+    "green",
+    "tl_start",
+    "tl_stop"
+  ],
   "sections": [
     {
       "name": "main",
@@ -623,7 +697,7 @@
   ],
   "pous": [
     {
-      "name": "MAIN",
+      "name": "DEMO_LD",
       "language": "ld",
       "comment": "Two buttons latch a run output and reset an alarm.",
       "sections": [
@@ -1157,6 +1231,50 @@
         }
       ],
       "il": [],
+      "fbd": [],
+      "fbd_grid": null
+    },
+    {
+      "name": "MAIN",
+      "language": "il",
+      "comment": "",
+      "sections": [],
+      "il": [
+        "CAL DEMO_IL",
+        "CAL DEMO_LD"
+      ],
+      "fbd": [],
+      "fbd_grid": null
+    },
+    {
+      "name": "DEMO_IL",
+      "language": "il",
+      "comment": "",
+      "sections": [],
+      "il": [
+        "LD tl_start",
+        "OR run2",
+        "ANDN tl_stop",
+        "ST run2",
+        "LD run2",
+        "ANDN q2",
+        "ST cyc",
+        "CAL TON0(IN:=cyc, PT:=T#2s)",
+        "ST q0",
+        "CAL TON1(IN:=q0, PT:=T#2s)",
+        "ST q1",
+        "CAL TON2(IN:=q1, PT:=T#1s)",
+        "ST q2",
+        "LD run2",
+        "ANDN q0",
+        "ST red",
+        "LD q0",
+        "ANDN q1",
+        "ST green",
+        "LD q1",
+        "ANDN q2",
+        "ST amber"
+      ],
       "fbd": [],
       "fbd_grid": null
     }
