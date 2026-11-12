@@ -291,7 +291,6 @@ impl LincApp {
                     },
                 );
             });
-
     }
 
     pub(super) fn draw_modal(&mut self, ctx: &egui::Context) {

@@ -9,7 +9,7 @@ use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_core::grid::{Cell, POSITIONS};
 use linc_plc_core::{Coil, CoilKind, PouLanguage, Rung};
 
-use crate::screens::plc::{Action, ExprEdit, PlcPage, PlcUi};
+use crate::screens::plc::{Action, ExprEdit, PlcPage, PlcUi, RAIL_GROUP_GAP};
 use crate::shell::LincApp;
 use crate::theme;
 
@@ -510,6 +510,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             app.plc.block_edit = Some(cursor);
         } else {
             app.plc.picker = Some(cursor);
+            app.plc.picker_cursor = 0;
         }
     }
     if delete && cursor.2 < POSITIONS {
@@ -523,6 +524,37 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
 }
 
 /// The element picker and, after it, the operand list.
+
+/// A picker row reads like a navigation row: the symbol on the left, its keyboard
+/// chord on the right, no button chrome. The chord is the hint, so the element
+/// name never carries a bracketed key and the two never disagree.
+fn picker_row(ui: &mut Ui, symbol: &str, chord: &str) -> egui::Response {
+    let width = 280.0_f32.max(ui.available_width());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(width, theme::NAV_ROW_HEIGHT_SECONDARY),
+        egui::Sense::click(),
+    );
+    let painter = ui.painter();
+    if response.hovered() {
+        painter.rect_filled(rect, 4.0, theme::C1.gamma_multiply(0.10));
+    }
+    painter.text(
+        egui::pos2(rect.left() + 12.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        symbol,
+        egui::FontId::proportional(theme::font_size(11.0)),
+        theme::FG,
+    );
+    painter.text(
+        egui::pos2(rect.right() - 12.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        chord,
+        egui::FontId::monospace(theme::font_size(8.5)),
+        theme::MUTED,
+    );
+    response
+}
+
 pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
     // Escape closes any picker here, before the editor's own Escape, so leaving
     // a list never also leaves the editor.
@@ -717,6 +749,8 @@ struct ModalKeys {
     backspace: bool,
     enter: bool,
     escape: bool,
+    up: bool,
+    down: bool,
 }
 
 /// True when `key` is pressed this frame. Read-only so the caller can decide.
@@ -742,6 +776,8 @@ fn modal_keys(ctx: &egui::Context) -> ModalKeys {
                 egui::Key::Backspace => keys.backspace = true,
                 egui::Key::Enter => keys.enter = true,
                 egui::Key::Escape => keys.escape = true,
+                egui::Key::ArrowUp => keys.up = true,
+                egui::Key::ArrowDown => keys.down = true,
                 _ => {}
             },
             _ => {}
@@ -882,6 +918,132 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
             drawn: true,
         };
     }
+    // One table drives the drawing, the cursor and the chord keys, so the list,
+    // the highlight and the action cannot disagree. A row reads like a
+    // navigation row: ladder glyph on the left, chord on the right.
+    #[derive(Clone)]
+    enum Act {
+        Cell(Cell),
+        Coil(CoilKind),
+        Compare,
+        Compute,
+    }
+    struct Item {
+        group: &'static str,
+        symbol: CellSymbol,
+        label: &'static str,
+        chord: &'static str,
+        act: Act,
+    }
+    let mut items: Vec<Item> = Vec::new();
+    if coil_position {
+        let var = plc
+            .selection
+            .as_ref()
+            .and_then(|node| {
+                plc.current_pou_sections()
+                    .get(node.section)
+                    .and_then(|section| section.rungs.get(node.rung))
+                    .map(|rung| rung.coil.var.clone())
+            })
+            .filter(|var| !var.is_empty())
+            .unwrap_or_else(|| first.clone());
+        for (label, kind) in [
+            ("Coil", CoilKind::Normal),
+            ("Set coil", CoilKind::Set),
+            ("Reset coil", CoilKind::Reset),
+        ] {
+            let chord = match kind {
+                CoilKind::Normal => "C",
+                CoilKind::Set => "S",
+                CoilKind::Reset => "R",
+                CoilKind::Negated => "N",
+            };
+            items.push(Item {
+                group: "COIL",
+                symbol: CellSymbol::Coil(kind),
+                label,
+                chord,
+                act: Act::Coil(kind),
+            });
+        }
+        let _ = var;
+    } else {
+        for (symbol, label, chord, cell) in [
+            (CellSymbol::Wire, "Wire", "-", Cell::Wire),
+            (
+                CellSymbol::Contact,
+                "Contact",
+                "C",
+                Cell::Contact {
+                    var: first.clone(),
+                    negated: false,
+                },
+            ),
+            (
+                CellSymbol::ContactNc,
+                "Negated contact",
+                "X",
+                Cell::Contact {
+                    var: first.clone(),
+                    negated: true,
+                },
+            ),
+            (CellSymbol::Link, "Link", "V", Cell::Link),
+        ] {
+            items.push(Item {
+                group: "CONTACTS",
+                symbol,
+                label,
+                chord,
+                act: Act::Cell(cell),
+            });
+        }
+        for (label, chord, block, instance, preset) in [
+            ("TON", "T", "TON", "TON0", "T#1s"),
+            ("TOF", "F", "TOF", "TOF0", "T#1s"),
+            ("TP", "U", "TP", "TP0", "T#1s"),
+            ("CTU", "K", "CTU", "CTU0", "10"),
+            ("CTD", "D", "CTD", "CTD0", "10"),
+        ] {
+            items.push(Item {
+                group: "BOXES",
+                symbol: CellSymbol::Block,
+                label,
+                chord,
+                act: Act::Cell(Cell::Block {
+                    block: block.to_string(),
+                    instance: instance.to_string(),
+                    preset: preset.to_string(),
+                }),
+            });
+        }
+        items.push(Item {
+            group: "EXPRESSIONS",
+            symbol: CellSymbol::Compare,
+            label: "Compare",
+            chord: "G",
+            act: Act::Compare,
+        });
+        items.push(Item {
+            group: "EXPRESSIONS",
+            symbol: CellSymbol::Compute,
+            label: "Compute",
+            chord: "M",
+            act: Act::Compute,
+        });
+    }
+    plc.picker_cursor = plc.picker_cursor.min(items.len().saturating_sub(1));
+    if keys.up {
+        plc.picker_cursor = plc.picker_cursor.saturating_sub(1);
+    }
+    if keys.down && plc.picker_cursor + 1 < items.len() {
+        plc.picker_cursor += 1;
+    }
+    let mut chosen: Option<usize> = None;
+    if keys.enter {
+        chosen = Some(plc.picker_cursor);
+    }
     let mut visible = true;
     let shown = egui::Window::new("ELEMENT")
         .open(&mut visible)
@@ -891,147 +1053,131 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
-            ui.label(
-                RichText::new(if coil_position {
-                    "coil position"
-                } else {
-                    "element position"
-                })
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-            );
-            ui.add_space(4.0);
-            if coil_position {
-                let var = plc
-                    .selection
-                    .as_ref()
-                    .and_then(|node| {
-                        plc.current_pou_sections()
-                            .get(node.section)
-                            .and_then(|section| section.rungs.get(node.rung))
-                            .map(|rung| rung.coil.var.clone())
-                    })
-                    .filter(|var| !var.is_empty())
-                    .unwrap_or_else(|| first.clone());
-                for (label, kind) in [
-                    ("Coil", CoilKind::Normal),
-                    ("Set coil  S", CoilKind::Set),
-                    ("Reset coil  R", CoilKind::Reset),
-                ] {
-                    if theme::action_button(ui, label, true).clicked() {
-                        actions.push(Action::SetCoil {
-                            section,
-                            rung,
-                            coil: Coil::new(var.clone(), kind),
-                        });
-                        close = true;
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_min_width(240.0);
+            let mut last_group = "";
+            for (index, item) in items.iter().enumerate() {
+                if item.group != last_group {
+                    if !last_group.is_empty() {
+                        ui.add_space(RAIL_GROUP_GAP);
                     }
-                }
-            } else {
-                for (label, cell) in [
-                    ("Wire  -", Cell::Wire),
-                    (
-                        "Contact  C",
-                        Cell::Contact {
-                            var: first.clone(),
-                            negated: false,
-                        },
-                    ),
-                    (
-                        "Negated contact  /",
-                        Cell::Contact {
-                            var: first.clone(),
-                            negated: true,
-                        },
-                    ),
-                    ("Link  V", Cell::Link),
-                ] {
-                    if theme::action_button(ui, label, true).clicked() {
-                        match cell {
-                            Cell::Contact { .. } => {
-                                next_operand = Some((section, rung, position, cell));
-                            }
-                            other => actions.push(Action::SetCell {
-                                section,
-                                rung,
-                                position,
-                                cell: other,
-                            }),
-                        }
-                        close = true;
-                    }
-                }
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new("boxes")
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-                for (label, block, instance, preset) in [
-                    ("TON  T", "TON", "TON0", "T#1s"),
-                    ("TOF  F", "TOF", "TOF0", "T#1s"),
-                    ("TP   U", "TP", "TP0", "T#1s"),
-                    ("CTU  K", "CTU", "CTU0", "10"),
-                    ("CTD  D", "CTD", "CTD0", "10"),
-                ] {
-                    if theme::action_button(ui, label, true).clicked() {
-                        actions.push(Action::SetCell {
-                            section,
-                            rung,
-                            position,
-                            cell: Cell::Block {
-                                block: block.to_string(),
-                                instance: instance.to_string(),
-                                preset: preset.to_string(),
-                            },
-                        });
-                        close = true;
-                    }
-                }
-                ui.add_space(4.0);
-                if theme::action_button(ui, "Compare  G", true).clicked() {
-                    plc.expr_edit = Some(ExprEdit {
-                        section,
-                        rung,
-                        position,
-                        compute: false,
-                        stage: 0,
-                        op: "GT".to_string(),
-                        left: "MW0".to_string(),
-                        right: "0".to_string(),
-                        target: "MW0".to_string(),
-                        text: String::new(),
-                    });
-                    close = true;
-                }
-                if theme::action_button(ui, "Compute  M", true).clicked() {
-                    plc.expr_edit = Some(ExprEdit {
-                        section,
-                        rung,
-                        position,
-                        compute: true,
-                        stage: 0,
-                        op: "ADD".to_string(),
-                        left: "MW0".to_string(),
-                        right: "1".to_string(),
-                        target: "MW1".to_string(),
-                        text: String::new(),
-                    });
-                    close = true;
-                }
-                {
-                    let (label, reason) = ("Edge contact  P N", "edge contacts");
-                    ui.add_enabled(
-                        false,
-                        egui::Button::new(format!("{label} — {reason} not implemented")),
+                    last_group = item.group;
+                    let (rect, _) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
+                        egui::Sense::hover(),
+                    );
+                    ui.painter().text(
+                        egui::pos2(rect.left() + 6.0, rect.center().y),
+                        Align2::LEFT_CENTER,
+                        item.group,
+                        FontId::proportional(theme::font_size(8.0)),
+                        theme::C3,
                     );
                 }
-            }
-            ui.add_space(4.0);
-            if theme::action_button(ui, "Cancel", true).clicked() {
-                close = true;
+                let selected = index == plc.picker_cursor;
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
+                    egui::Sense::click(),
+                );
+                if selected {
+                    ui.painter().rect_filled(rect, 2.0, theme::PANEL_RAISED);
+                } else if response.hovered() {
+                    ui.painter().rect_filled(rect, 2.0, theme::SURFACE);
+                }
+                // The glyph says what the element looks like on the ladder; the
+                // label and chord say what it reads and what types it.
+                // The ladder painters place the conductor at `CONDUCTOR_Y`
+                // below the rect they are given, so the rect is pushed up until
+                // that conductor lands on this row's centre; a clip box keeps the
+                // long leads out of the neighbouring rows and the label column.
+                let centre = egui::pos2(rect.left() + 21.0, rect.center().y);
+                let symbol_rect = egui::Rect::from_min_size(
+                    egui::pos2(centre.x - 15.0, centre.y - CONDUCTOR_Y),
+                    egui::vec2(30.0, CONDUCTOR_Y + 6.0),
+                );
+                let clip = egui::Rect::from_center_size(centre, egui::vec2(34.0, 18.0));
+                let painter = ui.painter().with_clip_rect(clip);
+                draw_cell_symbol(
+                    &painter,
+                    symbol_rect,
+                    item.symbol,
+                    if selected { theme::FG } else { theme::MUTED },
+                );
+                ui.painter().text(
+                    egui::pos2(rect.left() + 44.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    item.label,
+                    FontId::proportional(theme::font_size(9.5)),
+                    if selected { theme::FG } else { theme::MUTED },
+                );
+                ui.painter().text(
+                    egui::pos2(rect.right() - 6.0, rect.center().y),
+                    Align2::RIGHT_CENTER,
+                    item.chord,
+                    FontId::monospace(theme::font_size(8.5)),
+                    theme::ACCENT,
+                );
+                if response.clicked() {
+                    chosen = Some(index);
+                }
             }
         });
+    if let Some(index) = chosen {
+        match items[index].act.clone() {
+            Act::Cell(cell @ Cell::Contact { .. }) => {
+                next_operand = Some((section, rung, position, cell));
+            }
+            Act::Cell(cell) => actions.push(Action::SetCell {
+                section,
+                rung,
+                position,
+                cell,
+            }),
+            Act::Coil(kind) => {
+                let var = plc
+                    .current_pou_sections()
+                    .get(section)
+                    .and_then(|section| section.rungs.get(rung))
+                    .map(|rung| rung.coil.var.clone())
+                    .filter(|var| !var.is_empty())
+                    .unwrap_or_else(|| first.clone());
+                actions.push(Action::SetCoil {
+                    section,
+                    rung,
+                    coil: Coil::new(var, kind),
+                });
+            }
+            Act::Compare => {
+                plc.expr_edit = Some(ExprEdit {
+                    section,
+                    rung,
+                    position,
+                    compute: false,
+                    stage: 0,
+                    op: "GT".to_string(),
+                    left: "MW0".to_string(),
+                    right: "0".to_string(),
+                    target: "MW0".to_string(),
+                    text: String::new(),
+                });
+            }
+            Act::Compute => {
+                plc.expr_edit = Some(ExprEdit {
+                    section,
+                    rung,
+                    position,
+                    compute: true,
+                    stage: 0,
+                    op: "ADD".to_string(),
+                    left: "MW0".to_string(),
+                    right: "1".to_string(),
+                    target: "MW1".to_string(),
+                    text: String::new(),
+                });
+            }
+        }
+        close = true;
+    }
     if let Some(cell) = key_cell {
         match cell {
             Cell::Contact { .. } => {
@@ -1406,7 +1552,7 @@ fn expr_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
         "COMPARE CONTACT  G"
     })
     // Above the workbench overlay (Foreground), which is itself above the page.
-        .order(egui::Order::Tooltip)
+    .order(egui::Order::Tooltip)
     .collapsible(false)
     .resizable(false)
     .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
@@ -1676,7 +1822,7 @@ fn arc_points(
         .collect()
 }
 
-fn draw_cell_symbol(painter: &egui::Painter, rect: egui::Rect, symbol: CellSymbol, color: Color32) {
+pub(crate) fn draw_cell_symbol(painter: &egui::Painter, rect: egui::Rect, symbol: CellSymbol, color: Color32) {
     let line = Stroke::new(1.6, color);
     let thin = Stroke::new(1.2, color);
     let y = rect.top() + CONDUCTOR_Y;

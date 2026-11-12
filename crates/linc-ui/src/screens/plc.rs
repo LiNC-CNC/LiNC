@@ -900,6 +900,8 @@ pub struct PlcUi {
     pub cell_cursor: Option<(usize, usize, usize)>,
     /// The element picker is open on this cell.
     pub picker: Option<(usize, usize, usize)>,
+    /// The row the element picker's cursor sits on; arrows move it, Enter takes it.
+    pub picker_cursor: usize,
     /// The operand list is open for the cell a kind was just chosen for.
     pub operand_pick: Option<(usize, usize, usize, Cell)>,
     /// Filter typed into the operand list; Enter takes the only match.
@@ -1008,6 +1010,7 @@ impl Default for PlcUi {
             close_requested: false,
             cell_cursor: None,
             picker: None,
+            picker_cursor: 0,
             operand_pick: None,
             operand_filter: String::new(),
             coil_pick: None,
@@ -3196,18 +3199,14 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
                     .color(theme::FG),
             );
         }
-        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            if theme::action_button(ui, "POU LIST", true).clicked() {
-                plc.page = PlcPage::PouList;
-            }
-        });
     });
     if language == PouLanguage::Fbd {
         fbd_box_editor(plc, ui.ctx(), actions);
     }
     ui.add_space(2.0);
-    let right_width = 296.0_f32.min(ui.available_width() * 0.34);
-    let left_width = (ui.available_width() - right_width - 6.0).max(220.0);
+    // The editor owns the pane: the properties card and its POU LIST button are
+    // gone, so the ladder, IL text and FBD grid use the whole width.
+    let left_width = ui.available_width().max(220.0);
     let body_height = (height - 32.0).max(120.0);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
@@ -3228,19 +3227,6 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
                 }
                 PouLanguage::Il => il_editor(plc, ui, body_height),
                 PouLanguage::Fbd => fbd_editor(plc, ui, body_height, actions),
-            },
-        );
-        ui.add_space(6.0);
-        ui.allocate_ui_with_layout(
-            vec2(right_width, body_height),
-            egui::Layout::top_down(Align::Min),
-            |ui| {
-                card(ui, vec2(right_width, body_height), |ui, _| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("plc-properties")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| property_card(plc, ui, actions));
-                });
             },
         );
     });
@@ -3659,7 +3645,11 @@ fn is_hidden(grid: &FbdGrid, row: usize, col: usize) -> bool {
 /// Live output of an FBD block. A named function block publishes its `Q`; a generic
 /// gate is evaluated from the input cells on its rows. A block whose inputs are not
 /// readable answers `None` rather than guessing.
-fn fbd_block_active(plc: &PlcUi, grid: &FbdGrid, block: &linc_plc_core::model::FbdBlock) -> Option<bool> {
+fn fbd_block_active(
+    plc: &PlcUi,
+    grid: &FbdGrid,
+    block: &linc_plc_core::model::FbdBlock,
+) -> Option<bool> {
     if !block.instance.is_empty() {
         return plc.bit_value(&format!("{}.Q", block.instance));
     }
@@ -3771,7 +3761,7 @@ fn fbd_grid_view(
                 );
                 // A block is coloured by its own output, which the snapshot now
                 // publishes as `TON0.Q` etc.
-                let q = fbd_block_active(plc, &grid, block).unwrap_or(false);
+                let q = fbd_block_active(plc, grid, block).unwrap_or(false);
                 let block_colour = if q { theme::C4 } else { theme::ACCENT };
                 painter.text(
                     block_rect.center(),
@@ -5775,6 +5765,7 @@ fn ladder_box(label: &str, live: bool, selected: bool, forced: bool) -> egui::Bu
     .min_size(BOX)
 }
 
+#[allow(dead_code)]
 fn property_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
     common::card_title(ui, "SELECTED RUNG / NODE");
     let Some(node) = plc.selection.clone() else {
@@ -7858,7 +7849,9 @@ mod fbd_filter_tests {
         let _ = frame(&mut plc, vec![egui::Event::Text("pump".into())]);
         let actions = frame(&mut plc, vec![key(egui::Key::Enter)]);
         assert!(
-            actions.iter().any(|action| matches!(action, Action::SetFbdGrid(_))),
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::SetFbdGrid(_))),
             "the cell is written"
         );
         assert!(plc.fbd_operand_pick.is_none(), "the list closed");
@@ -7896,9 +7889,15 @@ mod fbd_active_tests {
             cells: vec![vec![FbdCell::Empty; 3]; 2],
             blocks: Vec::new(),
         };
-        grid.cells[0][0] = FbdCell::In { operand: "pump".into() };
-        grid.cells[1][0] = FbdCell::In { operand: "stop".into() };
-        grid.cells[0][2] = FbdCell::Out { operand: "run".into() };
+        grid.cells[0][0] = FbdCell::In {
+            operand: "pump".into(),
+        };
+        grid.cells[1][0] = FbdCell::In {
+            operand: "stop".into(),
+        };
+        grid.cells[0][2] = FbdCell::Out {
+            operand: "run".into(),
+        };
         let block = FbdBlock {
             row: 0,
             col: 1,
