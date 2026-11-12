@@ -273,6 +273,19 @@ impl NmlBackend {
             .as_ref()
             .and_then(|hal| hal.read("linc.machine-on"))
             .and_then(|value| value.as_bool());
+        // Per-axis load. LinuxCNC's status carries no servo load, so the only
+        // source is a HAL pin, and SnapshotBuilder owns no HAL reader: the pins
+        // are read here and replace the zeros the builder seeded. An axis with
+        // no configured pin keeps its 0%, which is what the machine really
+        // publishes for it.
+        for (axis, pin) in &self.profile.config.hal.pins.axis_load {
+            if let Some(load) = self.hal.as_ref().and_then(|hal| hal.float(pin)) {
+                snapshot
+                    .machine
+                    .servo_load
+                    .insert(axis.trim().to_ascii_uppercase(), load);
+            }
+        }
         if let Some(stored) = self.last_snapshot.as_mut() {
             carry_hal_selections(&mut snapshot, stored);
         }

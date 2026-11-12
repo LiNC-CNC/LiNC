@@ -629,6 +629,11 @@ pub struct HalPinsConfig {
     pub spindle_override: String,
     pub spindle_load: String,
     pub spindle_speed: String,
+    /// Per-axis load pins for the Machine page's SERVO LOAD bars, keyed by axis
+    /// letter. LinuxCNC's status carries no per-axis servo load, so a bar
+    /// without a pin here reads 0%.
+    #[serde(default)]
+    pub axis_load: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1208,6 +1213,33 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
             )));
         }
         servo_labels.push(label);
+    }
+    // `[hal.pins] axis_load` names the HAL pins behind those bars. An unknown
+    // axis letter would read nothing and leave its bar at 0% for ever, which
+    // looks like a wiring fault, so reject it here instead.
+    let mut load_labels: Vec<String> = Vec::new();
+    for (axis, pin) in &config.hal.pins.axis_load {
+        let label = axis.trim().to_ascii_uppercase();
+        let known = ini
+            .axes
+            .iter()
+            .any(|entry| entry.name.eq_ignore_ascii_case(&label));
+        if label.is_empty() || !known {
+            return Err(ConfigError::Invalid(format!(
+                "hal.pins.axis_load names '{axis}'; use a machine axis"
+            )));
+        }
+        if pin.trim().is_empty() {
+            return Err(ConfigError::Invalid(format!(
+                "hal.pins.axis_load.{axis} is empty"
+            )));
+        }
+        if load_labels.contains(&label) {
+            return Err(ConfigError::Invalid(format!(
+                "hal.pins.axis_load lists '{label}' more than once"
+            )));
+        }
+        load_labels.push(label);
     }
     if config.panel.owner != "linc-panel" {
         return Err(ConfigError::Invalid(

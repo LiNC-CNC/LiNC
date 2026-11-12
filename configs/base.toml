@@ -313,6 +313,12 @@ rapid_override = "cnc_panel.rapid_override"
 spindle_override = "cnc_panel.spindle_override"
 spindle_load = "rio.spindle-modbus.spindle_load-abs"
 spindle_speed = "spindle.0.speed-in"
+# Per-axis load pins for the Machine page's SERVO LOAD bars, axis letter -> HAL
+# pin. LinuxCNC's status carries no per-axis servo load, so an axis without an
+# entry reads 0%. Machines that publish one (the BaierMill takes Z thrust load
+# from the spindle VFD's Modbus link) name it here.
+# [hal.pins.axis_load]
+# Z = "rio.spindle-modbus.z_load-abs"
 
 [panel]
 # Panel I/O is owned by the linc-panel service. The HMI never opens the serial
