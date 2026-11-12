@@ -49,6 +49,24 @@ const FORCE_TTL_MS: u32 = 0;
 /// The watch list holds at most this many operands (manual §11).
 pub const WATCH_ROWS: usize = 16;
 
+/// Does the project have a body to run? An IL or FBD POU has no ladder rungs,
+/// so counting rungs alone called a real instruction list an empty program and
+/// refused to load it.
+pub fn project_has_body(project: &Project) -> bool {
+    project.all_pous().iter().any(|pou| match pou.language {
+        PouLanguage::Ld => pou.sections.iter().any(|section| !section.rungs.is_empty()),
+        PouLanguage::Il => pou.il.iter().any(|line| !line.trim().is_empty()),
+        PouLanguage::Fbd => {
+            !pou.fbd.is_empty()
+                || pou
+                    .fbd_grid
+                    .as_ref()
+                    .map(|grid| !grid.blocks.is_empty())
+                    .unwrap_or(false)
+        }
+    })
+}
+
 /// The three trend windows the manual offers, in the order Z cycles them.
 pub fn next_trend_window(window_ms: u32) -> u32 {
     match window_ms {
@@ -2760,6 +2778,23 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
             entries.push(Heading("SAVE"));
             entries.push(row("Save project", "Ctrl+S", false));
         }
+        PlcPage::Edit
+            if plc
+                .current_pou()
+                .map(|pou| pou.language == PouLanguage::Il)
+                .unwrap_or(false) =>
+        {
+            entries.push(Heading("IL"));
+            entries.push(row("Finish instruction", "Space", false));
+            entries.push(row("Store / check line", "Enter", false));
+            entries.push(row("New line below", "Ctrl+Enter", false));
+            entries.push(row("Remove empty line", "Del", false));
+            entries.push(row("Label", "NAME:", false));
+            entries.push(Heading("SAVE"));
+            entries.push(row("Save project", "Ctrl+S", false));
+            entries.push(row("Save as", "Ctrl+Shift+S", false));
+            entries.push(row("Close editor", "Esc", false));
+        }
         PlcPage::Edit => {
             entries.push(Heading("ELEMENTS"));
             entries.push(row("Contact", "C", false));
@@ -3119,16 +3154,9 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     // the moment it was opened.
     let run_page = matches!(app.plc.page, PlcPage::Sim | PlcPage::Watch | PlcPage::Trend);
     if run_page && !app.plc.sim_running {
-        let has_rungs = app
-            .plc
-            .project
-            .all_pous()
-            .iter()
-            .flat_map(|pou| pou.sections.iter())
-            .any(|section| !section.rungs.is_empty());
-        if !has_rungs {
+        if !project_has_body(&app.plc.project) {
             // A new, empty program is not a fault: there is simply nothing to
-            // run until a rung exists.
+            // run until a body exists.
             app.plc.message = "EMPTY PROGRAM — ADD A RUNG TO RUN IT".to_string();
             app.plc.sim_running = false;
             app.plc.last_error = None;
@@ -5318,7 +5346,6 @@ fn sim_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>
     // them past the fold, and the wheel did not reach them.
     // The ladder takes everything the signal panel does not: a fixed share of
     // the window left most of it empty and cut long programs short.
-    let monitor = (height - 132.0).max(180.0);
     // The monitor shows the current POU in its own language. Rendering the ladder
     // unconditionally made an IL or FBD POU read "No sections" while the program was
     // running and the header said otherwise.
@@ -5326,6 +5353,14 @@ fn sim_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>
         .current_pou()
         .map(|pou| pou.language)
         .unwrap_or(PouLanguage::Ld);
+    // An IL or FBD monitor carries its own legend above the scroll area, so it
+    // needs a taller reserve or the input panel lands under the window edge.
+    let reserve = if language == PouLanguage::Ld {
+        132.0
+    } else {
+        210.0
+    };
+    let monitor = (height - reserve).max(180.0);
     let sections = plc.current_pou_sections();
     egui::ScrollArea::vertical()
         .id_salt("plc-sim-monitor")
@@ -8599,6 +8634,23 @@ mod rail_tests {
             "element and coil keys belong to the ladder: {list:?}"
         );
 
+        // An IL body has no ladder element keys: its pane names the line
+        // editor's own keys instead.
+        let mut il = PlcUi::default();
+        let mut pous = il.project.all_pous();
+        pous[0].language = PouLanguage::Il;
+        il.project.set_pous(pous);
+        il.page = PlcPage::Edit;
+        let il_keys = rows(&il);
+        assert!(
+            il_keys.contains(&("Finish instruction", "Space")),
+            "{il_keys:?}"
+        );
+        assert!(
+            !il_keys.iter().any(|(text, _)| *text == "Contact"),
+            "the ladder's keys are not the IL editor's: {il_keys:?}"
+        );
+
         let mut plc = PlcUi::default();
         plc.page = PlcPage::Edit;
         let edit = rows(&plc);
@@ -8937,6 +8989,18 @@ mod trend_tests {
                 });
         });
         output.textures_delta.clear();
+    }
+
+    /// An IL POU with one instruction is a program; counting ladder rungs called
+    /// it empty and the run pages refused to load it.
+    #[test]
+    fn an_instruction_list_counts_as_a_body() {
+        let mut project = Project::new("il");
+        assert!(!project_has_body(&project), "an empty POU has no body");
+        let mut pou = Pou::new("MAIN", PouLanguage::Il);
+        pou.il = vec!["LD start".into()];
+        project.pous = vec![pou];
+        assert!(project_has_body(&project));
     }
 
     #[test]
