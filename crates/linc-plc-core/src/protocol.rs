@@ -40,8 +40,19 @@ pub enum Request {
         value: bool,
         ttl_ms: u32,
     },
+    /// Hold a marker word (`%MW0`..`%MW15`) at a value. Block members cannot
+    /// be forced: they follow their block.
+    ForceWord {
+        name: String,
+        value: i16,
+        ttl_ms: u32,
+    },
     /// Release one operand's force, leaving the others.
     Unforce {
+        name: String,
+    },
+    /// Release one marker word's force.
+    UnforceWord {
         name: String,
     },
     ClearForces,

@@ -45,6 +45,14 @@ struct Force {
     expires: Option<Instant>,
 }
 
+/// A marker word held at a value. Block members are not words: they own no
+/// bank slot, so they cannot be forced.
+struct WordForce {
+    name: String,
+    value: i16,
+    expires: Option<Instant>,
+}
+
 pub(crate) struct Daemon {
     project: PathBuf,
     phase: Phase,
@@ -52,6 +60,8 @@ pub(crate) struct Daemon {
     vm: Option<Vm>,
     hash: String,
     forces: Vec<Force>,
+    /// Forced marker words, applied before and after every scan.
+    word_forces: Vec<WordForce>,
     scan_count: u64,
     scan_time_us: u32,
     overruns: u64,
@@ -89,6 +99,7 @@ impl Daemon {
             vm: None,
             hash: String::new(),
             forces: Vec::new(),
+            word_forces: Vec::new(),
             scan_count: 0,
             scan_time_us: 0,
             overruns: 0,
@@ -212,6 +223,7 @@ impl Daemon {
                 self.hash = compiled.hash.clone();
                 self.restore_retained();
                 self.forces.clear();
+                self.word_forces.clear();
                 self.phase = Phase::Loaded;
                 self.fault = None;
                 self.alive = false;
@@ -275,6 +287,7 @@ impl Daemon {
                     vm.clear_forces();
                 }
                 self.forces.clear();
+                self.word_forces.clear();
                 if self.phase == Phase::Running {
                     self.phase = Phase::Loaded;
                 }
@@ -310,6 +323,7 @@ impl Daemon {
                     vm.clear_forces();
                 }
                 self.forces.clear();
+                self.word_forces.clear();
                 self.phase = Phase::Loaded;
                 self.fault = None;
                 self.alive = false;
@@ -378,6 +392,72 @@ impl Daemon {
                 answer(reply, Response::State(self.snapshot()));
             }
 
+            Command::ForceWord {
+                name,
+                value,
+                ttl_ms,
+                reply,
+            } => {
+                let Some(vm) = self.vm.as_mut() else {
+                    answer(
+                        reply,
+                        Response::Error {
+                            code: "state".to_string(),
+                            message: "force needs a loaded project".to_string(),
+                        },
+                    );
+                    return;
+                };
+                if matches!(self.phase, Phase::Idle | Phase::Fault) {
+                    answer(
+                        reply,
+                        Response::Error {
+                            code: "state".to_string(),
+                            message: "force needs a loaded project".to_string(),
+                        },
+                    );
+                    return;
+                }
+                let Some(index) = linc_plc_core::il::word_operand(&name) else {
+                    let message = if name.contains('.') {
+                        format!("{name} is a block value and cannot be forced")
+                    } else {
+                        format!("{name} is not a marker word: MW0 to MW15")
+                    };
+                    answer(
+                        reply,
+                        Response::Error {
+                            code: "invalid_force".to_string(),
+                            message,
+                        },
+                    );
+                    return;
+                };
+                vm.set_word(index, value);
+                let expires = if ttl_ms == 0 {
+                    None
+                } else {
+                    Some(Instant::now() + Duration::from_millis(u64::from(ttl_ms)))
+                };
+                match self
+                    .word_forces
+                    .iter_mut()
+                    .find(|force| force.name == name)
+                {
+                    Some(existing) => {
+                        existing.value = value;
+                        existing.expires = expires;
+                    }
+                    None => self.word_forces.push(WordForce {
+                        name,
+                        value,
+                        expires,
+                    }),
+                }
+                self.publish(shared);
+                answer(reply, Response::State(self.snapshot()));
+            }
+
             Command::Unforce { name, reply } => {
                 if let Some(vm) = self.vm.as_mut() {
                     vm.clear_force(&name);
@@ -386,11 +466,17 @@ impl Daemon {
                 self.publish(shared);
                 answer(reply, Response::State(self.snapshot()));
             }
+            Command::UnforceWord { name, reply } => {
+                self.word_forces.retain(|force| force.name != name);
+                self.publish(shared);
+                answer(reply, Response::State(self.snapshot()));
+            }
             Command::ClearForces { reply } => {
                 if let Some(vm) = self.vm.as_mut() {
                     vm.clear_forces();
                 }
                 self.forces.clear();
+                self.word_forces.clear();
                 self.publish(shared);
                 answer(reply, Response::State(self.snapshot()));
             }
@@ -414,7 +500,19 @@ impl Daemon {
             .map(|last| last.elapsed().as_millis().min(1000) as u16)
             .unwrap_or(20);
         self.last_scan = Some(Instant::now());
+        // A forced word is what the program reads, and it holds against the
+        // program's own writes: the loop runs before and after the scan.
+        for force in &self.word_forces {
+            if let Some(index) = linc_plc_core::il::word_operand(&force.name) {
+                vm.set_word(index, force.value);
+            }
+        }
         vm.scan_with_dt(&inputs, dt_ms.max(1));
+        for force in &self.word_forces {
+            if let Some(index) = linc_plc_core::il::word_operand(&force.name) {
+                vm.set_word(index, force.value);
+            }
+        }
         // The counter counts scans, not loop ticks: a paused ladder must not climb.
         self.scan_count = self.scan_count.wrapping_add(1);
         let packed = if retain_wanted {
@@ -481,7 +579,10 @@ impl Daemon {
         let before = self.forces.len();
         self.forces
             .retain(|force| force.expires.is_none_or(|deadline| deadline > now));
-        if self.forces.len() == before {
+        let words_before = self.word_forces.len();
+        self.word_forces
+            .retain(|force| force.expires.is_none_or(|deadline| deadline > now));
+        if self.forces.len() == before && self.word_forces.len() == words_before {
             return;
         }
         if let Some(vm) = self.vm.as_mut() {
@@ -594,10 +695,11 @@ impl Daemon {
     }
 
     fn snapshot(&self) -> StateSnapshot {
-        let (vars, words, forced) = match &self.vm {
+        let (vars, words, mut forced) = match &self.vm {
             Some(vm) => (vm.snapshot(), vm.word_snapshot(), vm.forced()),
             None => (Vec::new(), Vec::new(), Vec::new()),
         };
+        forced.extend(self.word_forces.iter().map(|force| force.name.clone()));
         StateSnapshot {
             state: self.phase.run_state(),
             project: self.project.display().to_string(),

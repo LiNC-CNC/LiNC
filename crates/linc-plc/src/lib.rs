@@ -142,7 +142,17 @@ pub(crate) enum Command {
         ttl_ms: u32,
         reply: mpsc::Sender<linc_plc_core::protocol::Response>,
     },
+    ForceWord {
+        name: String,
+        value: i16,
+        ttl_ms: u32,
+        reply: mpsc::Sender<linc_plc_core::protocol::Response>,
+    },
     Unforce {
+        name: String,
+        reply: mpsc::Sender<linc_plc_core::protocol::Response>,
+    },
+    UnforceWord {
         name: String,
         reply: mpsc::Sender<linc_plc_core::protocol::Response>,
     },

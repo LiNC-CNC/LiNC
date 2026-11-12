@@ -46,6 +46,14 @@ fn request_and_response_frames_round_trip() {
             value: true,
             ttl_ms: 500,
         },
+        Request::ForceWord {
+            name: "MW2".to_string(),
+            value: -12,
+            ttl_ms: 0,
+        },
+        Request::UnforceWord {
+            name: "MW2".to_string(),
+        },
         Request::Validate {
             project: linc_plc_core::Project::example(),
         },
@@ -99,6 +107,15 @@ fn message_tags_are_snake_case() {
         })
         .expect("json"),
         serde_json::json!({"request": "force", "data": {"name": "run", "value": true, "ttl_ms": 0}})
+    );
+    assert_eq!(
+        serde_json::to_value(Request::ForceWord {
+            name: "MW2".to_string(),
+            value: 12,
+            ttl_ms: 0,
+        })
+        .expect("json"),
+        serde_json::json!({"request": "force_word", "data": {"name": "MW2", "value": 12, "ttl_ms": 0}})
     );
     assert_eq!(
         serde_json::to_value(Response::Bye).expect("json"),

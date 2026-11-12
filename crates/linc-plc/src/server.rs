@@ -179,8 +179,32 @@ fn handle_request(request: Request, shared: &Shared) -> Result<Outcome, Error> {
             }
         }
 
+        Request::ForceWord {
+            name,
+            value,
+            ttl_ms,
+        } => {
+            if !shared.allow_force {
+                Outcome::Reply(Response::Error {
+                    code: "force_disabled".to_string(),
+                    message: "force is disabled; restart linc-plc with --allow-force".to_string(),
+                })
+            } else {
+                Outcome::Reply(dispatch(shared, |reply| Command::ForceWord {
+                    name,
+                    value,
+                    ttl_ms,
+                    reply,
+                }))
+            }
+        }
+
         Request::Unforce { name } => {
             Outcome::Reply(dispatch(shared, |reply| Command::Unforce { name, reply }))
+        }
+
+        Request::UnforceWord { name } => {
+            Outcome::Reply(dispatch(shared, |reply| Command::UnforceWord { name, reply }))
         }
 
         Request::ClearForces => {

@@ -738,3 +738,114 @@ fn reset_clears_data_and_forces() {
         "a reset ladder does not keep a heartbeat"
     );
 }
+
+/// A forced marker word holds even when the program writes the slot every
+/// scan, is listed as forced, and returns to the program's value on release.
+/// Block members refuse: they own no bank slot.
+#[test]
+fn a_forced_word_holds_against_the_program_and_releases() {
+    let mut project = Project::new("word-force");
+    project.io = vec![IoPoint::new("out", IoDirection::Out)];
+    project.sections = vec![Section {
+        name: "main".to_string(),
+        rungs: vec![Rung {
+            comment: String::new(),
+            logic: Logic::Const { value: true },
+            coil: Coil::new("out", CoilKind::Normal),
+            cells: vec![linc_plc_core::Cell::Compute {
+                op: "MOVE".to_string(),
+                target: "MW2".to_string(),
+                left: "7".to_string(),
+                right: "0".to_string(),
+            }],
+        }],
+    }];
+    let mut harness = Harness::start(&project, true);
+    let mut client = harness.client();
+    match client
+        .call(&Request::Load {
+            project: project.clone(),
+        })
+        .expect("load")
+    {
+        Response::Loaded { .. } => {}
+        other => panic!("expected loaded, got {}", describe(&other)),
+    }
+    expect_state(client.call(&Request::Start).expect("start"));
+    let running = wait_for_scans(&mut client);
+    let word = |snapshot: &StateSnapshot, name: &str| {
+        snapshot
+            .words
+            .iter()
+            .find(|word| word.name == name)
+            .map(|word| word.value)
+    };
+    assert_eq!(word(&running, "MW2"), Some(7), "the program writes the slot");
+
+    let forced = expect_state(
+        client
+            .call(&Request::ForceWord {
+                name: "MW2".to_string(),
+                value: 123,
+                ttl_ms: 0,
+            })
+            .expect("force word"),
+    );
+    assert_eq!(word(&forced, "MW2"), Some(123));
+    assert!(
+        forced.forced.iter().any(|name| name == "MW2"),
+        "the snapshot lists the forced word"
+    );
+
+    // The program keeps writing 7 in every scan; the force must still win.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let snapshot = expect_state(client.call(&Request::Snapshot).expect("snapshot"));
+        assert_eq!(
+            word(&snapshot, "MW2"),
+            Some(123),
+            "the forced word holds against the program"
+        );
+        if snapshot.scan_count > forced.scan_count + 3 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the scan never advanced");
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    let released = expect_state(
+        client
+            .call(&Request::UnforceWord {
+                name: "MW2".to_string(),
+            })
+            .expect("unforce word"),
+    );
+    assert!(
+        !released.forced.iter().any(|name| name == "MW2"),
+        "the word is no longer listed as forced"
+    );
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let snapshot = expect_state(client.call(&Request::Snapshot).expect("snapshot"));
+        if word(&snapshot, "MW2") == Some(7) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the program never wrote again");
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    let (code, message) = expect_error(
+        client
+            .call(&Request::ForceWord {
+                name: "TON0.ET".to_string(),
+                value: 5,
+                ttl_ms: 0,
+            })
+            .expect("force block value"),
+    );
+    assert_eq!(code, "invalid_force");
+    assert!(message.contains("block value"), "{message:?}");
+
+    client.call(&Request::Shutdown).expect("shutdown");
+    harness.finish();
+}

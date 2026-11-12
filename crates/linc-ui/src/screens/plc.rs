@@ -155,6 +155,13 @@ pub enum Action {
     Stop,
     ClearForces,
     Force(String, bool),
+    /// Hold a marker word at a value, typed in the watch row.
+    ForceWord {
+        name: String,
+        value: i16,
+    },
+    /// Release a marker word's force.
+    UnforceWord(String),
     /// Pin an operand to the watch list, or unpin it.
     ToggleWatch(String),
     /// Write one watch row from the page's inline editor: `index == len`
@@ -1071,6 +1078,8 @@ pub struct PlcUi {
     /// The operand being typed into the watch row `watch_edit_row`; `len` adds.
     pub watch_edit_row: usize,
     pub watch_edit: Option<String>,
+    /// A marker word's new value, typed in the watch row's INT prompt.
+    pub watch_value_edit: Option<String>,
     /// Why the typed watch operand cannot be used, in the row's own words.
     pub watch_error: Option<String>,
     /// Buffer for the IL editor; synced when the selected POU changes.
@@ -1176,6 +1185,7 @@ impl Default for PlcUi {
             watch_cursor: 0,
             watch_edit_row: 0,
             watch_edit: None,
+            watch_value_edit: None,
             watch_error: None,
             il_cursor: 0,
             il_buffer: String::new(),
@@ -1948,6 +1958,19 @@ impl PlcUi {
             Action::Unforce(name) => {
                 self.send(Tag::Force, Request::Unforce { name });
             }
+            Action::ForceWord { name, value } => {
+                self.send(
+                    Tag::Force,
+                    Request::ForceWord {
+                        name,
+                        value,
+                        ttl_ms: FORCE_TTL_MS,
+                    },
+                );
+            }
+            Action::UnforceWord(name) => {
+                self.send(Tag::Force, Request::UnforceWord { name });
+            }
             Action::ClearForces => {
                 self.send(Tag::ClearForces, Request::ClearForces);
                 self.message = "CLEAR FORCES SENT".to_string();
@@ -2669,6 +2692,7 @@ pub fn escape_closes_editor(plc: &PlcUi) -> bool {
         && plc.xref.is_none()
         && !plc.symbol_new_dialog
         && plc.watch_edit.is_none()
+        && plc.watch_value_edit.is_none()
 }
 
 /// The PLC workbench's navigation strip, built with the main GUI's row metrics:
@@ -5351,6 +5375,59 @@ fn watch_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
     if plc.page != PlcPage::Watch || plc.keys_blocked {
         return;
     }
+    // The INT prompt is the same kind of page-owned field as the operand
+    // editor: F opens it on a marker word and Enter sends the number.
+    if let Some(mut buffer) = plc.watch_value_edit.clone() {
+        for event in ui.input(|input| input.events.clone()) {
+            match event {
+                egui::Event::Text(text) => {
+                    if text
+                        .chars()
+                        .all(|character| character.is_ascii_digit() || character == '-')
+                    {
+                        buffer.push_str(&text);
+                    }
+                }
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    ..
+                } => match key {
+                    egui::Key::Backspace => {
+                        buffer.pop();
+                    }
+                    egui::Key::Escape => {
+                        plc.watch_value_edit = None;
+                        plc.watch_error = None;
+                        plc.text_editing = false;
+                    }
+                    egui::Key::Enter => {
+                        if let Some(name) = plc.project.watch.get(plc.watch_cursor).cloned() {
+                            match buffer.trim().parse::<i16>() {
+                                Ok(value) => {
+                                    actions.push(Action::ForceWord { name, value });
+                                    plc.watch_value_edit = None;
+                                    plc.watch_error = None;
+                                    plc.text_editing = false;
+                                }
+                                Err(_) => {
+                                    plc.watch_error = Some(
+                                        "needs a whole number: -32768 to 32767".to_string(),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        if plc.watch_value_edit.is_some() {
+            plc.watch_value_edit = Some(buffer);
+        }
+        return;
+    }
     // The page owns its typed field: a TextEdit here would lose the ring to the
     // grid anchor every frame, so the buffer is read from the frame's events.
     if let Some(mut buffer) = plc.watch_edit.clone() {
@@ -5451,11 +5528,23 @@ fn watch_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
     // marker word takes are written later, from the same row.
     if force {
         if let Some(name) = plc.project.watch.get(plc.watch_cursor).cloned() {
-            let word = plc.words.iter().any(|word| word.name == name)
-                || linc_plc_core::il::word_operand(&name).is_some()
-                || name.contains('.');
-            if word {
-                plc.message = format!("{name} IS A WORD: F TAKES A WHOLE NUMBER");
+            let marker = linc_plc_core::il::word_operand(&name).is_some();
+            let block_value = name.contains('.');
+            if marker {
+                // An INT asks for a value, and F again releases it (manual §11).
+                if plc.forced.iter().any(|item| item == &name) {
+                    actions.push(Action::UnforceWord(name));
+                } else {
+                    let current = plc
+                        .word_value(&name)
+                        .map(|value| value.to_string())
+                        .unwrap_or_default();
+                    plc.watch_value_edit = Some(current);
+                    plc.watch_error = None;
+                    plc.text_editing = true;
+                }
+            } else if block_value {
+                plc.message = format!("{name} IS A BLOCK VALUE AND CANNOT BE FORCED");
             } else {
                 let forced = plc.forced.iter().any(|item| item == &name);
                 let value = plc
@@ -5488,7 +5577,7 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
     common::card_title(ui, "WATCH");
     ui.label(
         RichText::new(
-            "↑ ↓ MOVE · ENTER EDITS · F FORCES TRUE → FALSE → RELEASE · BACKSPACE REMOVES · 16 OPERANDS",
+            "↑ ↓ MOVE · ENTER EDITS · F FORCES: BOOL TRUE→FALSE→RELEASE, MW TAKES A NUMBER · BACKSPACE REMOVES",
         )
         .monospace()
         .size(theme::font_size(9.0))
@@ -5511,6 +5600,8 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
             let names = plc.project.watch.clone();
             for (index, name) in names.iter().enumerate() {
                 let editing = plc.watch_edit.is_some() && plc.watch_edit_row == index;
+                let value_editing =
+                    plc.watch_value_edit.is_some() && plc.watch_cursor == index;
                 let text = if editing {
                     format!("{}_", plc.watch_edit.clone().unwrap_or_default())
                 } else {
@@ -5518,6 +5609,11 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
                 };
                 let state = if editing {
                     "ENTER SAVES · ESC CANCELS".to_string()
+                } else if value_editing {
+                    format!(
+                        "{}_  ENTER FORCES · ESC CANCELS",
+                        plc.watch_value_edit.clone().unwrap_or_default()
+                    )
                 } else if let Some(value) = plc.words.iter().find(|word| word.name == *name) {
                     let forced = plc.forced.iter().any(|item| item == name);
                     if forced {
@@ -5537,7 +5633,14 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
                     "-".to_string()
                 };
                 let selected = plc.watch_cursor == index;
-                let response = watch_row(ui, &text, &state, selected, index % 2 == 1, editing);
+                let response = watch_row(
+                    ui,
+                    &text,
+                    &state,
+                    selected,
+                    index % 2 == 1,
+                    editing || value_editing,
+                );
                 if selected {
                     selected_rect = Some(response.rect);
                 }
@@ -8102,8 +8205,6 @@ mod menu_ownership_tests {
 
 #[cfg(test)]
 mod launcher_tests {
-    use super::*;
-
     /// Ctrl+E opens the workbench from the keyboard, so acceptance does not hinge on
     /// the pointer landing inside the OPEN EDITOR button.
     #[test]
@@ -8814,10 +8915,10 @@ mod watch_page_tests {
         );
     }
 
-    /// F on a word row does not force a bit: a word takes a typed number from
-    /// its own prompt.
+    /// F on a marker word opens an INT prompt instead of forcing a bit: the
+    /// typed number becomes the force, and F again releases it.
     #[test]
-    fn f_on_a_word_row_does_not_force_it() {
+    fn f_on_a_word_row_asks_for_a_number() {
         let mut plc = watched(&[]);
         plc.project.watch = vec!["MW2".into()];
         plc.words = vec![linc_plc_core::WordValue {
@@ -8828,11 +8929,71 @@ mod watch_page_tests {
         assert!(
             !actions.iter().any(|action| matches!(
                 action,
-                Action::Force(..) | Action::Unforce(..)
+                Action::Force(..) | Action::ForceWord { .. } | Action::Unforce(..)
             )),
-            "a word is not forced as a bit: {actions:?}"
+            "the prompt opens before anything is sent: {actions:?}"
         );
-        assert!(plc.message.contains("WORD"), "{:?}", plc.message);
+        assert_eq!(plc.watch_value_edit.as_deref(), Some("5"), "seeded with the value");
+
+        frame(&mut plc, vec![key(egui::Key::Backspace)]);
+        let _ = frame(&mut plc, vec![egui::Event::Text("123".into())]);
+        let actions = frame(&mut plc, vec![key(egui::Key::Enter)]);
+        assert!(
+            actions.iter().any(|action| matches!(
+                action,
+                Action::ForceWord { name, value } if name == "MW2" && *value == 123
+            )),
+            "Enter sends the typed value: {actions:?}"
+        );
+
+        plc.forced = vec!["MW2".into()];
+        let actions = frame(&mut plc, vec![key(egui::Key::F)]);
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::UnforceWord(name) if name == "MW2")),
+            "F on a forced word releases it: {actions:?}"
+        );
+    }
+
+    /// A typed prompt that is not a whole number keeps the field open and says
+    /// what it wants.
+    #[test]
+    fn the_int_prompt_refuses_a_non_number() {
+        let mut plc = watched(&[]);
+        plc.project.watch = vec!["MW2".into()];
+        plc.words = vec![linc_plc_core::WordValue {
+            name: "MW2".into(),
+            value: 5,
+        }];
+        frame(&mut plc, vec![key(egui::Key::F)]);
+        frame(&mut plc, vec![key(egui::Key::Backspace)]);
+        frame(&mut plc, vec![egui::Event::Text("-".into())]);
+        let actions = frame(&mut plc, vec![key(egui::Key::Enter)]);
+        assert!(actions.is_empty(), "nothing is sent: {actions:?}");
+        assert!(plc.watch_value_edit.is_some(), "the prompt stays open");
+        let error = plc.watch_error.clone().unwrap_or_default();
+        assert!(error.contains("whole number"), "{error:?}");
+    }
+
+    /// ET and CV follow their block: F says so instead of forcing them.
+    #[test]
+    fn f_refuses_a_block_value() {
+        let mut plc = watched(&[]);
+        plc.project.watch = vec!["TON0.ET".into()];
+        plc.words = vec![linc_plc_core::WordValue {
+            name: "TON0.ET".into(),
+            value: 40,
+        }];
+        let actions = frame(&mut plc, vec![key(egui::Key::F)]);
+        assert!(
+            !actions.iter().any(|action| matches!(
+                action,
+                Action::Force(..) | Action::ForceWord { .. } | Action::Unforce(..) | Action::UnforceWord(..)
+            )),
+            "a block value is not forced: {actions:?}"
+        );
+        assert!(plc.message.contains("BLOCK VALUE"), "{:?}", plc.message);
     }
 
     /// The list stops at sixteen operands and says so.
