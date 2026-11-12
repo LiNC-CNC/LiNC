@@ -1,0 +1,175 @@
+{
+  "schema": 1,
+  "name": "example",
+  "description": "Two buttons latch a run output and reset an alarm.",
+  "io": [
+    {
+      "name": "start",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "stop",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "run",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "pump",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "estop",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "alert_p",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "alert_n",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "fan",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "lamp",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "blink_a",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "blink_b",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    }
+  ],
+  "vars": [
+    {
+      "name": "seal",
+      "kind": "bit",
+      "retain": false,
+      "comment": ""
+    },
+    {
+      "name": "alarm",
+      "kind": "bit",
+      "retain": false,
+      "comment": ""
+    }
+  ],
+  "watch": [],
+  "sections": [
+    {
+      "name": "main",
+      "rungs": []
+    }
+  ],
+  "pous": [
+    {
+      "name": "MAIN",
+      "language": "il",
+      "comment": "Two buttons latch a run output and reset an alarm.",
+      "sections": [
+        {
+          "name": "main",
+          "rungs": []
+        }
+      ],
+      "il": [
+        "CAL POU2",
+        "CAL POU3"
+      ],
+      "fbd": [],
+      "fbd_grid": null
+    },
+    {
+      "name": "POU2",
+      "language": "il",
+      "comment": "",
+      "sections": [],
+      "il": [
+        "LD pump",
+        "ST run",
+        "CAL TON0(IN:=pump,PT:=T#1s)"
+      ],
+      "fbd": [],
+      "fbd_grid": null
+    },
+    {
+      "name": "POU3",
+      "language": "fbd",
+      "comment": "",
+      "sections": [],
+      "il": [],
+      "fbd": [],
+      "fbd_grid": {
+        "columns": 3,
+        "rows": 2,
+        "cells": [
+          [
+            {
+              "cell": "in",
+              "operand": "pump"
+            },
+            {
+              "cell": "empty"
+            },
+            {
+              "cell": "out",
+              "operand": "run"
+            }
+          ],
+          [
+            {
+              "cell": "in",
+              "operand": "stop"
+            },
+            {
+              "cell": "empty"
+            },
+            {
+              "cell": "empty"
+            }
+          ]
+        ],
+        "blocks": [
+          {
+            "row": 0,
+            "col": 1,
+            "ins": 2,
+            "kind": "AND",
+            "instance": "",
+            "preset": ""
+          }
+        ]
+      }
+    }
+  ]
+}

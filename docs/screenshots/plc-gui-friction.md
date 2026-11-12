@@ -78,3 +78,33 @@ alternating (`plc-sim-blink-a`, `plc-sim-blink-b`), and live symbol values with
   size but is not the exact IEC curve.
 - **Menu clicks** still do not open dropdowns in the workbench; the keyboard paths
   (View/Run with Down+Enter, Ctrl+1..4) are the supported route.
+
+## Resolved: keyboard authoring, overlay and Sim (Phase 1 close)
+
+- **Workbench invisible / frozen.** Two causes found with per-function checkpoints: the
+  `menu_bar` popup id was built inside `ctx.data_mut` (deadlocked the frame), and the
+  overlay painted at `Order::Middle` under the central page. The Area is `Foreground`
+  with the page scrolling inside the viewport, windows sit on `Tooltip`, and the popup
+  id is computed before the data borrow.
+- **Keyboard-only project management.** `Ctrl+E` opens the workbench, plain `N` on the
+  service page asks `NEW PROJECT?` (only `Y` confirms, so a stray `N` cannot wipe a
+  project), `Ctrl+Shift+N` is the chord, and the POU list answers arrows, `Enter`,
+  `N`/`I`/`F` for new LD/IL/FBD POUs, `L` to cycle an empty POU's language, plus
+  rename/duplicate/delete.
+- **IL authoring.** ENTER commits one line and clears the buffer (the old code left the
+  text in place and glued `LD pumpST run`), Backspace edits reliably, and both are
+  covered by frame regressions.
+- **FBD authoring.** `FbdGrid::set_cell` grew rows but never columns, so a zero-column
+  grid dropped every cell while still emitting `SetFbdGrid`; it now grows `columns`
+  first. The picker reads typed letters (`Event::Text`), an open picker owns the
+  keyboard, and a block lands on the picker cell rather than a missing cursor.
+- **Save lost the POU list.** Saving serialised `pous` alone; `save()` and
+  `project_to_json` now canonicalise through `all_pous`/`set_pous`/`normalise`.
+- **Forces expired mid-session.** A simulation force now has TTL 0 and holds until it is
+  released or the data is reset.
+- **Sim monitor ignored the POU language**, so IL and FBD POUs read "No sections" while
+  running; `sim_page` now draws LD, IL (live values and ET) or the FBD grid for the
+  current POU.
+
+Evidence: `plc-sim-il-live.png`, `plc-sim-fbd-live.png`, and the project
+`configs/plc-il-fbd-sim.json` (MAIN calls POU2 and POU3, authored through the GUI).
