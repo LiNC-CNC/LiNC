@@ -880,6 +880,11 @@ pub struct PlcUi {
     buffer_key: Option<NodePath>,
     link: Option<Link>,
     pub online: bool,
+    /// Start the ladder once the daemon answers: `--plc` asks for a running
+    /// service, not one that waits for START. A STOP from the operator is not
+    /// undone, because this fires once.
+    pub autostart: bool,
+    autostarted: bool,
     /// Effective service state from the profile (or `LINC_PLC`). False means no
     /// daemon was started at all, which is not the same as a daemon gone away.
     pub enabled: bool,
@@ -968,9 +973,6 @@ pub struct PlcUi {
     /// A POU is being renamed or copied.
     pub pou_edit: Option<PouEdit>,
     /// The trend window in milliseconds: 4 s, 20 s or 100 s.
-    /// True while the NEW PROJECT? question is waiting for an answer: a stray `N`
-    /// must not replace the project under the operator's hands.
-    pub new_confirm: bool,
     /// The frame the workbench was opened on: Escape and a close request are
     /// ignored on that frame, because the click or chord that opened it can arrive
     /// with a stale Escape in the same input batch and shut it instantly.
@@ -1070,11 +1072,12 @@ impl Default for PlcUi {
             fbd_grid_pick: None,
             fbd_operand_pick: None,
             pou_edit: None,
-            new_confirm: false,
             opened_frame: 0,
             menu_open: false,
             sim_byte: 0,
             trend_window_ms: 20_000,
+            autostart: false,
+            autostarted: false,
             text_editing: false,
             view_addresses: false,
             symbol_new: String::new(),
@@ -1298,6 +1301,17 @@ impl PlcUi {
         }
         for event in events {
             self.apply_event(event);
+        }
+        if self.autostart && !self.autostarted && self.link.is_some() && self.online {
+            self.autostarted = true;
+            self.send(
+                Tag::Load,
+                Request::Load {
+                    project: self.project.clone(),
+                },
+            );
+            self.send(Tag::Start, Request::Start);
+            self.message = "STARTED WITH THE SERVICE".to_string();
         }
         let now = Instant::now();
         if self.link.is_some() && now >= self.next_poll {
@@ -2309,6 +2323,15 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // fire while the workbench owns the keyboard: plain `N` there opened the NEW
     // PROJECT? dialog over the IL editor and swallowed the next Enter.
     let workbench_open = app.overlay.plc_editor;
+    // The mode switch needs keys: the buttons sit on the service pane below the
+    // list, and the panel keyboard has no Tab to reach them with.
+    if !workbench_open {
+        if ctrl_shift_key(ui, egui::Key::Enter) {
+            actions.push(Action::Stop);
+        } else if ctrl_key(ui, egui::Key::Enter) {
+            actions.push(Action::Start);
+        }
+    }
     // The rail advertises Ctrl+S on this screen, so the screen answers it: the
     // program list's Save asks for the same dialog the editor does.
     if !workbench_open && ctrl_key(ui, egui::Key::S) {
@@ -2319,18 +2342,10 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     {
         open_frame = Some(ui.ctx().cumulative_frame_nr());
     }
-    // Plain `N` starts a new empty project and opens the workbench. The PLC service
-    // page has no ladder bindings, so the letter is free here and needs no modifier.
-    if !workbench_open
-        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::N))
-    {
-        // Ask first, as the manual does: a stray N must not replace the project.
-        app.plc.new_confirm = true;
-    }
     // Anything on top of the list — a dialog or the editor window — owns Enter,
     // the arrows and the letters. Without this the list ate the Enter that should
     // have confirmed the save dialog, and every arrow aimed at the ladder.
-    let dialog_open = app.overlay.modal.is_some() || workbench_open;
+    let dialog_open = app.overlay.modal.is_some() || workbench_open || app.plc.pou_edit.is_some();
     let plc = &mut app.plc;
     plc.keys_blocked = dialog_open;
 
@@ -2349,6 +2364,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     card(ui, vec2(width, pane_height), |ui, _| {
         status_card(plc, ui, &mut actions)
     });
+
+    // The list's rename and duplicate windows belong to this screen: drawing
+    // them only in the workbench left the list's copies invisible and its keys
+    // blocked for as long as the state stayed set.
+    pou_edit_dialog(plc, ui.ctx(), &mut actions);
 
     for action in actions {
         plc.apply(action);
@@ -2413,180 +2433,71 @@ enum RailEntry {
 /// The rail's rows as data, so they can be laid out in one column or two.
 fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
     use RailEntry::{Heading, Row};
-    let edit = plc.page == PlcPage::Edit;
+    let row = |text: &'static str, key: &'static str, active: bool| Row { text, key, active };
     let mut entries = vec![
         Heading("PAGES"),
-        // The rail lists what this window can do. The menu and the program list
-        // live on the PLC screen behind it, so Ctrl+1 leaves for that screen
-        // rather than pretending it opens a page here.
-        Row {
-            text: "Program list",
-            key: "Ctrl+1",
-            active: false,
-        },
-        Row {
-            text: "New project",
-            key: "N",
-            active: false,
-        },
-        Row {
-            text: "POU list",
-            key: "Ctrl+1",
-            active: plc.page == PlcPage::PouList,
-        },
-        Row {
-            text: "Ladder",
-            key: "Ctrl+2",
-            active: edit,
-        },
-        Row {
-            text: "Symbols",
-            key: "Ctrl+3",
-            active: plc.page == PlcPage::Symbols,
-        },
-        Row {
-            text: "Simulation",
-            key: "Ctrl+4",
-            active: plc.page == PlcPage::Sim,
-        },
-        Row {
-            text: "Watch",
-            key: "Ctrl+W",
-            active: plc.page == PlcPage::Watch,
-        },
-        Row {
-            text: "Trend",
-            key: "Ctrl+T",
-            active: plc.page == PlcPage::Trend,
-        },
-        Heading("RUN"),
-        Row {
-            text: "Run / stop",
-            key: "R",
-            active: false,
-        },
-        Heading("RUNG"),
-        Row {
-            text: "New row",
-            key: "Ctrl+N",
-            active: false,
-        },
-        Row {
-            text: "New row at cursor",
-            key: "Ctrl+J",
-            active: false,
-        },
-        Row {
-            text: "Delete row",
-            key: "Ctrl+Del",
-            active: false,
-        },
-        Heading("SAVE"),
-        Row {
-            text: "Save project",
-            key: "Ctrl+S",
-            active: false,
-        },
-        Heading("ELEMENTS"),
-        Row {
-            text: "Contact",
-            key: "C",
-            active: false,
-        },
-        Row {
-            text: "Negated contact",
-            key: "X",
-            active: false,
-        },
-        Row {
-            text: "Rising / falling edge",
-            key: "P N",
-            active: false,
-        },
-        Row {
-            text: "Wire / link",
-            key: "W V",
-            active: false,
-        },
-        Row {
-            text: "Timer / counter",
-            key: "T F U K D",
-            active: false,
-        },
-        Row {
-            text: "Compare / compute",
-            key: "G M",
-            active: false,
-        },
-        Row {
-            text: "Insert before",
-            key: "I",
-            active: false,
-        },
-        Row {
-            text: "Delete cell",
-            key: "Bksp",
-            active: false,
-        },
-        Heading("COIL"),
-        Row {
-            text: "Normal / set / reset",
-            key: "C S R",
-            active: false,
-        },
-        Heading("SIMULATION"),
-        Row {
-            text: "Toggle input bit",
-            key: "0-7",
-            active: false,
-        },
-        Row {
-            text: "Select input byte",
-            key: "B",
-            active: false,
-        },
-        Row {
-            text: "Step one scan",
-            key: "S",
-            active: false,
-        },
-        Row {
-            text: "Reset data",
-            key: "E",
-            active: false,
-        },
-        Heading("TOOLS"),
-        Row {
-            text: "Watch page",
-            key: "W",
-            active: false,
-        },
-        Row {
-            text: "Trend page",
-            key: "G",
-            active: false,
-        },
-        Row {
-            text: "Cross references",
-            key: "Ctrl+X",
-            active: false,
-        },
-        Row {
-            text: "Undo / redo",
-            key: "Ctrl+Z Y",
-            active: false,
-        },
+        // The menu and the program list live on the PLC screen behind the
+        // editor, so Ctrl+1 leaves for that screen rather than opening a page.
+        row("Program list", "Ctrl+1", plc.page == PlcPage::PouList),
+        row("Ladder", "Ctrl+2", plc.page == PlcPage::Edit),
+        row("Symbols", "Ctrl+3", plc.page == PlcPage::Symbols),
+        row("Simulation", "Ctrl+4", plc.page == PlcPage::Sim),
+        row("Watch", "Ctrl+W", plc.page == PlcPage::Watch),
+        row("Trend", "Ctrl+T", plc.page == PlcPage::Trend),
     ];
-    if edit {
-        entries.retain(|entry| !matches!(entry, RailEntry::Row { text: "Ladder", .. }));
-        entries.insert(
-            5,
-            RailEntry::Row {
-                text: "Ladder",
-                key: "Ctrl+2",
-                active: true,
-            },
-        );
+    match plc.page {
+        // The list has its own keys; the editor's element letters do not work
+        // here, and listing them made the pane a lie.
+        PlcPage::PouList => {
+            entries.push(Heading("PROGRAM LIST"));
+            entries.push(row("Open", "Enter", false));
+            entries.push(row("New POU", "N", false));
+            entries.push(row("Rename", "R", false));
+            entries.push(row("Duplicate", "D", false));
+            entries.push(row("Delete POU", "Bksp", false));
+            entries.push(Heading("RUN"));
+            entries.push(row("Start", "Ctrl+Enter", false));
+            entries.push(row("Stop", "Ctrl+Shift+Enter", false));
+            entries.push(Heading("SAVE"));
+            entries.push(row("Save project", "Ctrl+S", false));
+        }
+        PlcPage::Edit => {
+            entries.push(Heading("ELEMENTS"));
+            entries.push(row("Contact", "C", false));
+            entries.push(row("Negated contact", "X", false));
+            entries.push(row("Rising / falling edge", "P N", false));
+            entries.push(row("Wire / link", "W V", false));
+            entries.push(row("Timer / counter", "T F U K D", false));
+            entries.push(row("Compare / compute", "G M", false));
+            entries.push(row("Insert before", "I", false));
+            entries.push(row("Delete cell", "Bksp", false));
+            entries.push(Heading("COIL"));
+            entries.push(row("Normal / set / reset", "C S R", false));
+            entries.push(Heading("RUNG"));
+            entries.push(row("New row", "Ctrl+N", false));
+            entries.push(row("Insert row", "Ctrl+Enter", false));
+            entries.push(row("Delete row", "Ctrl+Del", false));
+            entries.push(Heading("SIMULATION"));
+            entries.push(row("Toggle input bit", "0-7", false));
+            entries.push(row("Select input byte", "B", false));
+            entries.push(row("Step one scan", "S", false));
+            entries.push(row("Reset data", "E", false));
+            entries.push(Heading("TOOLS"));
+            entries.push(row("Watch page", "Ctrl+W", false));
+            entries.push(row("Trend page", "Ctrl+T", false));
+            entries.push(row("Cross references", "Ctrl+X", false));
+            entries.push(row("Undo / redo", "Ctrl+Z Y", false));
+            entries.push(Heading("SAVE"));
+            entries.push(row("Save project", "Ctrl+S", false));
+        }
+        // Every other page keeps the mode switch and the save in reach.
+        _ => {
+            entries.push(Heading("RUN"));
+            entries.push(row("Start", "Ctrl+Enter", false));
+            entries.push(row("Stop", "Ctrl+Shift+Enter", false));
+            entries.push(Heading("SAVE"));
+            entries.push(row("Save project", "Ctrl+S", false));
+        }
     }
     entries
 }
@@ -2795,27 +2706,6 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
 
     // The menu bar does not take clicks in this build, so the pages and the
     // two actions the workflow needs every minute have keys as well.
-    // The NEW PROJECT? question owns the keyboard while it is up.
-    if app.plc.new_confirm {
-        let (yes, no) = ui.input_mut(|input| {
-            (
-                // Only `Y` confirms: Enter is the editor's own key and must never
-                // answer this question, or opening a POU would wipe the project.
-                input.consume_key(egui::Modifiers::NONE, egui::Key::Y),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::N)
-                    || input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
-            )
-        });
-        if yes {
-            app.plc.new_confirm = false;
-            app.plc.apply(Action::New);
-            app.overlay.plc_editor = true;
-            app.plc.opened_frame = ui.ctx().cumulative_frame_nr();
-        } else if no {
-            app.plc.new_confirm = false;
-        }
-        return;
-    }
     let (to_pous, to_edit, to_symbols, to_sim, add_rung, save, new_project, add_row, delete_row) = (
         ctrl_key(ui, egui::Key::Num1),
         ctrl_key(ui, egui::Key::Num2),
@@ -3007,7 +2897,6 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     let windows_plc = &mut app.plc;
     fbd_grid_menu(windows_plc, ui.ctx(), &mut actions);
     fbd_operand_menu(windows_plc, ui.ctx(), &mut actions);
-    pou_edit_dialog(windows_plc, ui.ctx(), &mut actions);
 
     for action in actions {
         app.plc.apply(action);
@@ -3087,25 +2976,29 @@ fn pou_list_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
             actions.push(Action::AddPou(PouLanguage::Ld));
             redraw = true;
         }
+        // Rename and duplicate ask for the name; pushing the action with the
+        // current name renamed the POU to itself, which is why R looked dead.
         if input.consume_key(egui::Modifiers::NONE, egui::Key::R) {
-            actions.push(Action::RenamePou {
+            plc.pou_edit = Some(PouEdit {
                 index: selected,
+                duplicate: false,
                 name: pous[selected].name.clone(),
             });
         }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::U) {
-            actions.push(Action::DuplicatePou {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::D) {
+            plc.pou_edit = Some(PouEdit {
                 index: selected,
-                name: format!("{}_2", pous[selected].name),
+                duplicate: true,
+                // Eight characters is the name cap; `_2` keeps it readable.
+                name: format!(
+                    "{}_2",
+                    &pous[selected].name[..pous[selected].name.len().min(6)]
+                ),
             });
         }
         // Backspace deletes, as in the tool table. MAIN stays: the project needs
         // one POU to open into, and index 0 is the one every caller assumes.
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace) && selected > 0 {
-            actions.push(Action::DeletePou { index: selected });
-            redraw = true;
-        }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::D) && selected > 0 {
             actions.push(Action::DeletePou { index: selected });
             redraw = true;
         }
@@ -3143,7 +3036,7 @@ fn pou_list_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Ac
             });
         });
         ui.label(
-            RichText::new("LADDER ONLY · ENTER OPENS · BACKSPACE DELETES")
+            RichText::new("LADDER ONLY")
                 .monospace()
                 .size(theme::font_size(9.0))
                 .color(theme::MUTED),
@@ -3265,12 +3158,10 @@ fn pou_list_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Ac
             });
         ui.add_space(4.0);
         ui.label(
-            RichText::new(
-                "↑ ↓ SELECT · PGUP PGDN PAGE · ENTER OPEN · N NEW · R RENAME · U DUPLICATE",
-            )
-            .monospace()
-            .size(theme::font_size(9.0))
-            .color(theme::MUTED),
+            RichText::new("ENTER OPEN · N NEW · R RENAME · D DUPLICATE · BKSP DELETE")
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
         );
     });
     if let Some(index) = open {
@@ -5152,7 +5043,7 @@ fn sim_view(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
 /// free space and the run state on the right.
 /// Rename or copy a POU: the name is typed once and applied on Enter.
 fn pou_edit_dialog(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
-    let Some(edit) = plc.pou_edit.clone() else {
+    let Some(mut edit) = plc.pou_edit.clone() else {
         return;
     };
     let mut close = false;
@@ -5162,33 +5053,50 @@ fn pou_edit_dialog(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Actio
     } else {
         "RENAME POU"
     })
+    // Above the page: the PLC screen's cards are painted in the shell layer and
+    // a default-order window ends up underneath them.
+    .order(egui::Order::Tooltip)
     .collapsible(false)
     .resizable(false)
     .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
     .show(ctx, |ui| {
+        ui.set_min_width(260.0);
         ui.label(
-            RichText::new("name, up to eight characters")
+            RichText::new("POU NAME, UP TO 8 CHARACTERS")
                 .size(theme::font_size(9.0))
                 .color(theme::MUTED),
         );
-        let mut name = edit.name.clone();
+        // The field writes into the dialog's own buffer: a fresh String per
+        // frame would throw every typed character away before the next draw.
         let response = ui.add(
-            egui::TextEdit::singleline(&mut name)
-                .desired_width(160.0)
+            egui::TextEdit::singleline(&mut edit.name)
+                .id(egui::Id::unique("linc-plc-pou-name"))
+                .desired_width(220.0)
                 .char_limit(8),
         );
-        if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
-            apply = Some(name.clone());
+        // The window owns the keyboard while it is up, so the name can be typed
+        // straight away. A singleline field keeps focus on Enter in egui, so the
+        // apply is a plain key test rather than a lost-focus one.
+        if !response.has_focus() {
+            response.request_focus();
+        }
+        if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+            apply = Some(edit.name.clone());
         }
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             if theme::action_button(ui, "Apply", true).clicked() {
-                apply = Some(name.clone());
+                apply = Some(edit.name.clone());
             }
             if theme::action_button(ui, "Cancel", true).clicked() {
                 close = true;
             }
         });
+        ui.label(
+            RichText::new("ENTER APPLIES · ESC CANCELS")
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
     });
     if let Some(name) = apply {
         let name = name.trim().to_string();
@@ -5209,6 +5117,8 @@ fn pou_edit_dialog(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Actio
     }
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
         plc.pou_edit = None;
+    } else {
+        plc.pou_edit = Some(edit);
     }
 }
 
@@ -5439,7 +5349,6 @@ fn status_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
         banner
     };
     let running = matches!(plc.state, RunState::Running);
-    let any_force = !plc.forced.is_empty();
     common::card_title(ui, "PLC SERVICE");
     // Facts get their own line. Sharing one row with a right-to-left block is
     // what made the badge, the banner and the counters paint over each other.
@@ -5473,73 +5382,34 @@ fn status_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
         .size(theme::font_size(9.0))
         .color(theme::MUTED),
     );
-    ui.add_space(4.0);
-    field(ui, "SOCKET", "linc-plc-socket", &mut plc.socket_text);
-    field(ui, "FILE", "linc-plc-file", &mut plc.path_text);
-    ui.add_space(4.0);
-    ui.horizontal_wrapped(|ui| {
+    ui.add_space(6.0);
+    // The ladder's only controls are its mode: loading is part of START, and a
+    // running ladder stops when asked. The socket, the project path and the
+    // program files are the application's business; the operator sees the
+    // program list and the daemon's own state here.
+    ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        if theme::action_button(ui, "CONNECT", true).clicked() {
-            actions.push(Action::Connect);
-        }
-        if theme::action_button(ui, "NEW", true).clicked() {
-            actions.push(Action::New);
-        }
-        if theme::action_button(ui, "OPEN", true).clicked() {
-            actions.push(Action::Open);
-        }
-        if theme::action_button(ui, "SAVE", true).clicked() {
-            plc.save_requested = true;
-        }
-        if theme::action_button(ui, "VALIDATE", true).clicked() {
-            actions.push(Action::Validate);
-        }
-        // Load sets the daemon phase to Loaded and drives every output false:
-        // it does not resume a running ladder, so the label says so.
-        let download = if running {
-            "DOWNLOAD (STOPS)"
-        } else {
-            "DOWNLOAD"
-        };
-        if theme::accent_button(ui, download, online).clicked() {
-            actions.push(Action::Download);
-        }
-        if theme::action_button(ui, "START", online && !running).clicked() {
+        if theme::accent_button(ui, "START", online && !running).clicked() {
             actions.push(Action::Start);
         }
         if theme::action_button(ui, "STOP", online && running).clicked() {
             actions.push(Action::Stop);
         }
-        if theme::action_button(ui, "CLEAR FORCES", online && any_force).clicked() {
-            actions.push(Action::ClearForces);
-        }
     });
-}
-
-fn field(ui: &mut Ui, label: &str, id: &str, text: &mut String) {
-    ui.horizontal(|ui| {
-        ui.allocate_ui_with_layout(
-            vec2(52.0, theme::MIN_TARGET),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.label(
-                    RichText::new(label)
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-            },
-        );
-        // A field takes the rest of its own row. Two fields on one row halved the
-        // width and both paths came out with an ellipsis.
-        let width = ui.available_width().max(120.0);
-        let response = ui.add_sized(
-            [width, theme::MIN_TARGET],
-            egui::TextEdit::singleline(text)
-                .id(egui::Id::unique(id))
-                .font(egui::FontId::monospace(theme::font_size(10.0))),
-        );
-        theme::focus_ring(ui, &response);
-    });
+    ui.label(
+        RichText::new(if running {
+            "the ladder is scanning · output follows the program"
+        } else {
+            "START loads the program and runs it"
+        })
+        .size(theme::font_size(9.0))
+        .color(theme::MUTED),
+    );
+    ui.label(
+        RichText::new("Ctrl+Enter START · Ctrl+Shift+Enter STOP")
+            .size(theme::font_size(9.0))
+            .color(theme::MUTED),
+    );
 }
 
 #[allow(dead_code)]
@@ -6122,14 +5992,6 @@ fn diagnostics_card(plc: &PlcUi, ui: &mut Ui, height: f32) {
                         .color(theme::WARNING),
                 );
             }
-            if matches!(plc.state, RunState::Running) {
-                ui.label(
-                    RichText::new("RUNNING: DOWNLOAD STOPS THE LADDER. PRESS START AFTERWARDS.")
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::WARNING),
-                );
-            }
             if let Some(error) = &plc.last_error {
                 ui.label(
                     RichText::new(format!("LINK {error}"))
@@ -6167,7 +6029,7 @@ fn diagnostics_card(plc: &PlcUi, ui: &mut Ui, height: f32) {
             }
             if plc.daemon_diags.is_empty() && plc.local_diags.is_empty() {
                 ui.label(
-                    RichText::new("No diagnostics. VALIDATE runs the library locally.")
+                    RichText::new("No diagnostics. START checks the program before loading it.")
                         .size(theme::font_size(9.0))
                         .color(theme::MUTED),
                 );
@@ -7584,6 +7446,171 @@ mod pou_guard_tests {
             plc.project.all_pous().len(),
             before,
             "no POU added or removed"
+        );
+    }
+}
+
+#[cfg(test)]
+mod rail_tests {
+    use super::*;
+
+    fn rows(plc: &PlcUi) -> Vec<(&'static str, &'static str)> {
+        rail_entries(plc)
+            .into_iter()
+            .filter_map(|entry| match entry {
+                RailEntry::Row { text, key, .. } => Some((text, key)),
+                RailEntry::Heading(_) => None,
+            })
+            .collect()
+    }
+
+    /// The pane lists the keys the page in front actually has: the editor's
+    /// element letters must not appear on the program list, and the list's
+    /// rename and duplicate must.
+    #[test]
+    fn the_shortcut_pane_follows_the_page() {
+        let mut plc = PlcUi::default();
+        plc.page = PlcPage::PouList;
+        let list = rows(&plc);
+        for wanted in [
+            ("Open", "Enter"),
+            ("New POU", "N"),
+            ("Rename", "R"),
+            ("Duplicate", "D"),
+            ("Delete POU", "Bksp"),
+            ("Start", "Ctrl+Enter"),
+            ("Stop", "Ctrl+Shift+Enter"),
+            ("Save project", "Ctrl+S"),
+        ] {
+            assert!(list.contains(&wanted), "{wanted:?} missing from {list:?}");
+        }
+        assert!(
+            !list.iter().any(|(_, key)| *key == "G M" || *key == "C S R"),
+            "element and coil keys belong to the ladder: {list:?}"
+        );
+
+        let mut plc = PlcUi::default();
+        plc.page = PlcPage::Edit;
+        let edit = rows(&plc);
+        assert!(edit.contains(&("Compare / compute", "G M")), "{edit:?}");
+        assert!(edit.contains(&("Insert row", "Ctrl+Enter")), "{edit:?}");
+        assert!(
+            !edit.iter().any(|(text, _)| *text == "Duplicate"),
+            "the list's keys do not work in the editor: {edit:?}"
+        );
+    }
+
+    /// Run / stop used to be printed as `R`, which renames on the list and does
+    /// nothing in the editor. The real chords are the ones the screen handles.
+    #[test]
+    fn the_pane_does_not_name_a_key_the_page_ignores() {
+        for page in [PlcPage::PouList, PlcPage::Edit, PlcPage::Service] {
+            let mut plc = PlcUi::default();
+            plc.page = page;
+            let keys = rows(&plc);
+            assert!(
+                !keys
+                    .iter()
+                    .any(|(text, key)| *text == "Run / stop" && *key == "R"),
+                "{page:?} still prints Run / stop = R"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod pou_list_n_tests {
+    use super::*;
+
+    fn press(plc: &mut PlcUi, key: egui::Key) -> Vec<Action> {
+        let ctx = egui::Context::default();
+        let mut actions = Vec::new();
+        let input = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Area::new(egui::Id::unique("pou-keys"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    pou_list_keys(plc, ui, &mut actions);
+                });
+        });
+        output.textures_delta.clear();
+        actions
+    }
+
+    fn plc_with_two_pous() -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.add_pou(PouLanguage::Ld);
+        // `add_pou` opens the new body; the list fixture puts the list back.
+        plc.page = PlcPage::PouList;
+        plc.pou = 1;
+        plc
+    }
+
+    /// `N` on the program list adds a POU. The key used to be taken by the page
+    /// behind the list as "new project", which showed no question and did
+    /// nothing, so the list's own footer was a lie.
+    #[test]
+    fn n_on_the_list_asks_for_a_new_pou() {
+        let mut plc = PlcUi::default();
+        plc.page = PlcPage::PouList;
+        let actions = press(&mut plc, egui::Key::N);
+        assert!(
+            matches!(actions.first(), Some(Action::AddPou(PouLanguage::Ld))),
+            "N must ask for a ladder POU, got {actions:?}"
+        );
+    }
+
+    /// `R` asks for a name instead of renaming the POU to itself, which is what
+    /// the list used to do: the action carried the current name, so R was dead.
+    #[test]
+    fn r_opens_the_rename_window() {
+        let mut plc = plc_with_two_pous();
+        let actions = press(&mut plc, egui::Key::R);
+        assert!(actions.is_empty(), "no silent rename, got {actions:?}");
+        let edit = plc.pou_edit.expect("the name window is up");
+        assert_eq!(edit.index, 1);
+        assert!(!edit.duplicate);
+        assert_eq!(
+            edit.name,
+            plc.project.all_pous()[1].name,
+            "the name is prefilled"
+        );
+    }
+
+    /// `D` duplicates, `Backspace` deletes; the old table had `D` deleting and a
+    /// duplicate key that the footer also called duplicate.
+    #[test]
+    fn d_duplicates_and_backspace_deletes() {
+        let mut plc = plc_with_two_pous();
+        let actions = press(&mut plc, egui::Key::D);
+        assert!(actions.is_empty(), "D asks for a copy, got {actions:?}");
+        let edit = plc.pou_edit.expect("the copy window is up");
+        assert!(edit.duplicate);
+        assert!(edit.name.ends_with("_2"), "got {}", edit.name);
+
+        let mut plc = plc_with_two_pous();
+        let actions = press(&mut plc, egui::Key::Backspace);
+        assert!(
+            matches!(actions.first(), Some(Action::DeletePou { index: 1 })),
+            "Backspace deletes the selected POU, got {actions:?}"
+        );
+
+        // MAIN stays: the project needs one POU to open into.
+        let mut plc = plc_with_two_pous();
+        plc.pou = 0;
+        let actions = press(&mut plc, egui::Key::Backspace);
+        assert!(
+            actions.is_empty(),
+            "MAIN cannot be deleted, got {actions:?}"
         );
     }
 }

@@ -122,8 +122,15 @@ impl LincApp {
     /// Effective PLC service state, decided in `main` from the profile and the
     /// `LINC_PLC` override. `LincApp::new` keeps its signature, so the page
     /// starts from its defaults and is told here where the daemon listens.
-    pub fn configure_plc(&mut self, enabled: bool, socket: PathBuf, project: PathBuf) {
+    pub fn configure_plc(
+        &mut self,
+        enabled: bool,
+        autostart: bool,
+        socket: PathBuf,
+        project: PathBuf,
+    ) {
         self.plc.enabled = enabled;
+        self.plc.autostart = enabled && autostart;
         if !socket.as_os_str().is_empty() {
             self.plc.socket_text = socket.display().to_string();
         }

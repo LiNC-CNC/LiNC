@@ -21,16 +21,15 @@ pub(super) const CUT_SHORTCUT: Binding = Binding::new(egui::Key::X, egui::Modifi
 
 /// True when the PLC page's open chord is pressed: Ctrl+E, in either spelling egui
 /// reports for Ctrl on Linux, and only on the PLC page with the workbench closed.
-pub(super) fn plc_open_chord(
-    page: Page,
-    overlay_open: bool,
-    input: &mut egui::InputState,
-) -> bool {
+pub(super) fn plc_open_chord(page: Page, overlay_open: bool, input: &mut egui::InputState) -> bool {
     if page != Page::Plc || overlay_open {
         return false;
     }
     input.consume_key(egui::Modifiers::CTRL, egui::Key::E)
-        || input.consume_key(egui::Modifiers::CTRL | egui::Modifiers::COMMAND, egui::Key::E)
+        || input.consume_key(
+            egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+            egui::Key::E,
+        )
 }
 
 impl LincApp {
@@ -148,8 +147,6 @@ impl LincApp {
                 || memory.has_focus(egui::Id::unique("linc-mdi-input"))
                 || memory.has_focus(egui::Id::unique("linc-diagnostics-search"))
                 || memory.has_focus(egui::Id::unique("linc-diagnostics-hal-search"))
-                || memory.has_focus(egui::Id::unique("linc-plc-socket"))
-                || memory.has_focus(egui::Id::unique("linc-plc-file"))
                 || memory.has_focus(egui::Id::unique("linc-plc-var"))
                 || memory.has_focus(egui::Id::unique("linc-plc-coil"))
                 || memory.has_focus(egui::Id::unique("linc-plc-comment"))
@@ -979,7 +976,10 @@ mod plc_open_tests {
             false,
             egui::Modifiers::CTRL | egui::Modifiers::COMMAND
         ));
-        assert!(!chord(Page::Plc, true, egui::Modifiers::CTRL), "already open");
+        assert!(
+            !chord(Page::Plc, true, egui::Modifiers::CTRL),
+            "already open"
+        );
         assert!(!chord(Page::Machine, false, egui::Modifiers::CTRL));
     }
 }

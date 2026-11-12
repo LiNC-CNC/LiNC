@@ -437,15 +437,41 @@ impl LincApp {
                 }
             }
             Page::Plc => {
-                groups.push(ShortcutGroup {
-                    title: "LADDER",
-                    items: vec![
-                        ("Enter".into(), "SELECT"),
-                        ("Bksp".into(), "DELETE"),
-                        (k.save.label(), "SAVE"),
-                        ("Ctrl+Enter".into(), "DOWNLOAD"),
-                    ],
-                });
+                // The pane follows the window in front: the list's keys are not
+                // the editor's, and neither of them is the service's.
+                let editing =
+                    self.plc.page == crate::screens::plc::PlcPage::Edit && self.overlay.plc_editor;
+                if editing {
+                    groups.push(ShortcutGroup {
+                        title: "LADDER",
+                        items: vec![
+                            ("Enter".into(), "SELECT ELEMENT"),
+                            ("Bksp".into(), "DELETE CELL"),
+                            ("G".into(), "COMPARE"),
+                            ("M".into(), "COMPUTE"),
+                            ("T/F/U".into(), "TON / TOF / TP"),
+                            ("K/D".into(), "CTU / CTD"),
+                            ("C/X/V/W".into(), "CONTACT / EDGE / LINK / WIRE"),
+                            ("Ctrl+Enter".into(), "INSERT ROW"),
+                            (k.save.label(), "SAVE"),
+                            ("Esc".into(), "CLOSE"),
+                        ],
+                    });
+                } else {
+                    groups.push(ShortcutGroup {
+                        title: "PROGRAM LIST",
+                        items: vec![
+                            ("Enter".into(), "OPEN"),
+                            ("N".into(), "NEW POU"),
+                            ("R".into(), "RENAME"),
+                            ("D".into(), "DUPLICATE"),
+                            ("Bksp".into(), "DELETE"),
+                            (k.save.label(), "SAVE"),
+                            ("Ctrl+Enter".into(), "START"),
+                            ("Ctrl+Shift+Enter".into(), "STOP"),
+                        ],
+                    });
+                }
             }
             Page::Tools => {
                 hints.push(("Arrows".into(), "SELECT"));

@@ -373,7 +373,12 @@ fn main() -> Result<()> {
         Box::new(move |cc| {
             let mut app = LincApp::new(profile.clone(), handle, &cc.egui_ctx);
             app.set_diag_bus(diag_bus.clone());
-            app.configure_plc(plc_enabled, plc_socket, plc_project);
+            app.configure_plc(
+                plc_enabled,
+                plc::plc_override() == Some(true),
+                plc_socket,
+                plc_project,
+            );
             Ok(Box::new(MachineOffGuard::new(
                 app,
                 hal_enabled,

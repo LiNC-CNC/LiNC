@@ -1783,10 +1783,12 @@ fn configure_plc_sets_the_service_fields_and_names_the_disabled_hint() {
     assert!(!app.plc.enabled, "the page starts with the PLC off");
     app.configure_plc(
         true,
+        true,
         std::path::PathBuf::from("/run/linc/plc.sock"),
         std::path::PathBuf::from("/profiles/plc-sim.json"),
     );
     assert!(app.plc.enabled);
+    assert!(app.plc.autostart, "--plc asks for a running ladder");
     assert_eq!(app.plc.socket_text, "/run/linc/plc.sock");
     assert_eq!(app.plc.path_text, "/profiles/plc-sim.json");
 
@@ -1798,10 +1800,12 @@ fn configure_plc_sets_the_service_fields_and_names_the_disabled_hint() {
 
     app.configure_plc(
         false,
+        false,
         std::path::PathBuf::from("/run/linc/plc.sock"),
         std::path::PathBuf::new(),
     );
     assert!(!app.plc.enabled);
+    assert!(!app.plc.autostart, "a disabled service never starts itself");
     assert_eq!(app.plc.socket_text, "/run/linc/plc.sock");
 }
 
