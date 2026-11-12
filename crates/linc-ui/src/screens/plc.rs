@@ -2623,9 +2623,13 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // Anything on top of the list — a dialog or the editor window — owns Enter,
     // the arrows and the letters. Without this the list ate the Enter that should
     // have confirmed the save dialog, and every arrow aimed at the ladder.
-    let dialog_open = app.overlay.modal.is_some() || workbench_open || app.plc.pou_edit.is_some();
+    // The list's key handlers only need to stand down for a dialog; the
+    // workbench gate above already keeps this screen's own chords quiet, and
+    // `keys_blocked` must not blind the pages the workbench draws (watch keys
+    // checked it and were dead for as long as the editor was open).
+    let blocking = app.overlay.modal.is_some() || app.plc.pou_edit.is_some();
     let plc = &mut app.plc;
-    plc.keys_blocked = dialog_open;
+    plc.keys_blocked = blocking;
     // The list is this screen's page, but only while it is the page in front:
     // the editor overlay draws the symbols, simulation, watch and trend pages,
     // and a list drawn behind it used to reset the page to the list every frame,
@@ -5713,6 +5717,90 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
     variables_card(plc, ui, height, actions)
 }
 
+/// The preset of the block a member belongs to, in the block's own unit:
+/// milliseconds for a timer's ET, counts for a counter's CV. This is the scale a
+/// scaled trace is drawn against.
+fn block_preset_for(plc: &PlcUi, name: &str) -> Option<i16> {
+    let (instance, member) = name.split_once('.')?;
+    if !matches!(member.to_ascii_uppercase().as_str(), "ET" | "CV") {
+        return None;
+    }
+    plc.project.all_pous().iter().find_map(|pou| {
+        pou.sections.iter().find_map(|section| {
+            section.rungs.iter().find_map(|rung| {
+                rung.cells.iter().find_map(|cell| match cell {
+                    linc_plc_core::grid::Cell::Block {
+                        block,
+                        instance: block_instance,
+                        preset,
+                    } if block_instance.eq_ignore_ascii_case(instance) => {
+                        linc_plc_core::compile::parse_block(block, block_instance, preset)
+                            .map(|(_, _, preset)| preset)
+                    }
+                    _ => None,
+                })
+            })
+        })
+    })
+}
+
+/// The vertical range of an analog lane: a block member is normalized by its
+/// preset, so a half-elapsed timer sits halfway up; a marker word has no preset
+/// and uses its own range in the window.
+fn analog_bounds(preset: Option<i16>, values: &[i32]) -> (i32, i32) {
+    if let Some(preset) = preset.filter(|preset| *preset > 0) {
+        return (0, i32::from(preset));
+    }
+    let low = values.iter().copied().min().unwrap_or(0);
+    let high = values.iter().copied().max().unwrap_or(0);
+    (low, high.max(low + 1))
+}
+
+fn analog_y(value: i32, low: i32, high: i32, top: f32, bottom: f32) -> f32 {
+    let span = (high - low).max(1) as f32;
+    let value = value.clamp(low, high) as f32;
+    bottom - (value - low as f32) / span * (bottom - top)
+}
+
+/// One scaled trace: label and range on the left, the line in the window.
+fn draw_analog_lane(ui: &mut Ui, name: &str, values: &[i32], preset: Option<i16>) {
+    let width = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 26.0), Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(rect, 2.0, theme::SURFACE);
+    painter.rect_stroke(
+        rect,
+        2.0,
+        Stroke::new(1.0, theme::BORDER),
+        egui::StrokeKind::Inside,
+    );
+    let (low, high) = analog_bounds(preset, values);
+    painter.text(
+        pos2(rect.left() + 4.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        format!("{name} {low}..{high}"),
+        egui::FontId::monospace(theme::font_size(8.5)),
+        theme::MUTED,
+    );
+    let plot_left = rect.left() + 110.0;
+    let step = (rect.right() - 4.0 - plot_left) / values.len().max(2) as f32;
+    let top = rect.top() + 3.0;
+    let bottom = rect.bottom() - 3.0;
+    let points = values
+        .iter()
+        .enumerate()
+        .map(|(position, value)| {
+            pos2(
+                plot_left + position as f32 * step,
+                analog_y(*value, low, high, top, bottom),
+            )
+        })
+        .collect::<Vec<_>>();
+    if points.len() > 1 {
+        painter.add(egui::Shape::line(points, Stroke::new(1.2, theme::C2)));
+    }
+}
+
 fn trend_page(plc: &PlcUi, ui: &mut Ui, height: f32) {
     if !plc.trend_remote.samples.is_empty() {
         egui::ScrollArea::vertical()
@@ -5727,7 +5815,7 @@ fn trend_page(plc: &PlcUi, ui: &mut Ui, height: f32) {
     if trend.channels.is_empty() || trend.samples == 0 {
         ui.label(
             RichText::new(
-                "No samples yet. Start the PLC: the first eight symbols and four block values are traced.",
+                "No samples yet. Start the PLC: every symbol gets a lane, and pinned block values are scaled.",
             )
             .size(theme::font_size(10.0))
             .color(theme::MUTED),
@@ -5738,7 +5826,7 @@ fn trend_page(plc: &PlcUi, ui: &mut Ui, height: f32) {
         RichText::new(format!(
             "{} samples, {} lanes, newest at the right",
             trend.samples,
-            trend.channels.len()
+            trend.channels.len() + trend.word_channels.len()
         ))
         .size(theme::font_size(9.0))
         .color(theme::MUTED),
@@ -5771,11 +5859,12 @@ fn trend_page(plc: &PlcUi, ui: &mut Ui, height: f32) {
                 let plot_left = rect.left() + 92.0;
                 let plot_right = rect.right() - 4.0;
                 let height = rect.height() - 6.0;
-                let step = (plot_right - plot_left) / TrendBuffer::DEPTH as f32;
-                let offset = TrendBuffer::DEPTH.saturating_sub(lane.len()) as f32 * step;
+                // The window is the samples there are: a short history fills
+                // the chart instead of hugging the right edge.
+                let step = (plot_right - plot_left) / lane.len().max(2) as f32;
                 let mut points = Vec::with_capacity(lane.len());
                 for (index, value) in lane.iter().enumerate() {
-                    let x = plot_left + offset + index as f32 * step;
+                    let x = plot_left + index as f32 * step;
                     let y = if *value {
                         rect.top() + 3.0
                     } else {
@@ -5796,6 +5885,16 @@ fn trend_page(plc: &PlcUi, ui: &mut Ui, height: f32) {
                         ),
                     ));
                 }
+            }
+            // ET and CV follow the boolean lanes, scaled by their block's
+            // preset, so a half-done timer is halfway up its lane.
+            for (name, lane) in trend
+                .word_channels
+                .iter()
+                .zip(trend.word_lanes.iter())
+            {
+                let values = lane.iter().map(|value| i32::from(*value)).collect::<Vec<_>>();
+                draw_analog_lane(ui, name, &values, block_preset_for(plc, name));
             }
         });
 }
@@ -5823,6 +5922,12 @@ fn draw_remote_trend(plc: &PlcUi, ui: &mut Ui) {
             .iter()
             .map(|row| row.get(index).copied().unwrap_or(0))
             .collect::<Vec<i32>>();
+        // A word lane draws in its own scaled clothes; only a bit lane uses the
+        // lane allocated here.
+        if data.words.get(index).copied().unwrap_or(false) {
+            draw_analog_lane(ui, &plc.operand_label(name), &column, block_preset_for(plc, name));
+            continue;
+        }
         let (rect, _) = ui.allocate_exact_size(vec2(width, lane_height), Sense::hover());
         let painter = ui.painter();
         painter.rect_filled(rect, 2.0, theme::SURFACE);
@@ -5832,58 +5937,29 @@ fn draw_remote_trend(plc: &PlcUi, ui: &mut Ui) {
             Stroke::new(1.0, theme::BORDER),
             egui::StrokeKind::Inside,
         );
-        if data.words.get(index).copied().unwrap_or(false) {
-            let low = column.iter().copied().min().unwrap_or(0);
-            let high = column.iter().copied().max().unwrap_or(0);
-            painter.text(
-                pos2(rect.left() + 4.0, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                format!("{} {low}..{high}", plc.operand_label(name)),
-                egui::FontId::monospace(theme::font_size(8.5)),
-                theme::MUTED,
-            );
-            let step = (rect.right() - 4.0 - (rect.left() + 110.0)) / 512.0;
-            let offset = 512usize.saturating_sub(column.len()) as f32 * step;
-            let span = (high - low).max(1) as f32;
-            let height = (rect.height() - 6.0).max(1.0);
-            let points = column
-                .iter()
-                .enumerate()
-                .map(|(position, value)| {
-                    let x = rect.left() + 110.0 + offset + position as f32 * step;
-                    let y = rect.bottom() - 3.0 - (*value - low) as f32 / span * height;
-                    pos2(x, y)
-                })
-                .collect::<Vec<_>>();
-            if points.len() > 1 {
-                painter.add(egui::Shape::line(points, Stroke::new(1.2, theme::C2)));
-            }
-        } else {
-            painter.text(
-                pos2(rect.left() + 4.0, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                plc.operand_label(name),
-                egui::FontId::monospace(theme::font_size(9.0)),
-                theme::MUTED,
-            );
-            let step = (rect.right() - 4.0 - (rect.left() + 92.0)) / 512.0;
-            let offset = 512usize.saturating_sub(column.len()) as f32 * step;
-            let points = column
-                .iter()
-                .enumerate()
-                .map(|(position, value)| {
-                    let x = rect.left() + 92.0 + offset + position as f32 * step;
-                    let y = if *value != 0 {
-                        rect.top() + 3.0
-                    } else {
-                        rect.bottom() - 3.0
-                    };
-                    pos2(x, y)
-                })
-                .collect::<Vec<_>>();
-            if points.len() > 1 {
-                painter.add(egui::Shape::line(points, Stroke::new(1.2, theme::C1)));
-            }
+        painter.text(
+            pos2(rect.left() + 4.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            plc.operand_label(name),
+            egui::FontId::monospace(theme::font_size(9.0)),
+            theme::MUTED,
+        );
+        let step = (rect.right() - 4.0 - (rect.left() + 92.0)) / column.len().max(2) as f32;
+        let points = column
+            .iter()
+            .enumerate()
+            .map(|(position, value)| {
+                let x = rect.left() + 92.0 + position as f32 * step;
+                let y = if *value != 0 {
+                    rect.top() + 3.0
+                } else {
+                    rect.bottom() - 3.0
+                };
+                pos2(x, y)
+            })
+            .collect::<Vec<_>>();
+        if points.len() > 1 {
+            painter.add(egui::Shape::line(points, Stroke::new(1.2, theme::C1)));
         }
     }
 }
@@ -8702,6 +8778,85 @@ mod trend_tests {
         trend.sample(&vars, &[], &[]);
         assert_eq!(trend.channels.len(), 12);
         assert_eq!(trend.lanes.len(), 12);
+    }
+
+    /// ET is scaled by the block's preset: zero at the bottom, the preset at
+    /// the top, whatever the raw milliseconds.
+    #[test]
+    fn a_block_value_is_normalized_by_its_preset() {
+        let values = [0, 500, 1000, 2000];
+        assert_eq!(analog_bounds(Some(2000), &values), (0, 2000));
+        assert_eq!(analog_y(0, 0, 2000, 10.0, 110.0), 110.0);
+        assert_eq!(analog_y(1000, 0, 2000, 10.0, 110.0), 60.0);
+        assert_eq!(analog_y(2000, 0, 2000, 10.0, 110.0), 10.0);
+        // A marker word has no preset and uses its own range in the window.
+        assert_eq!(analog_bounds(None, &values), (0, 2000));
+        assert_eq!(analog_bounds(None, &[7, 7]), (7, 8));
+    }
+
+    /// The trend page draws a scaled ET lane beside the boolean lanes, and the
+    /// preset comes from the ladder's block, not from the sample range.
+    #[test]
+    fn the_trend_draws_scaled_block_values_alongside_bits() {
+        let mut plc = PlcUi::default();
+        plc.project = Project::new("t");
+        plc.project.io = vec![linc_plc_core::IoPoint::new("start", IoDirection::In)];
+        let mut pou = Pou::new("main", PouLanguage::Ld);
+        pou.sections = vec![linc_plc_core::Section {
+            name: String::new(),
+            rungs: vec![linc_plc_core::Rung {
+                comment: String::new(),
+                logic: Logic::Const { value: true },
+                coil: Coil::new("start", CoilKind::Normal),
+                cells: vec![Cell::Block {
+                    block: "TON".into(),
+                    instance: "TON0".into(),
+                    preset: "T#2s".into(),
+                }],
+            }],
+        }];
+        plc.project.pous = vec![pou];
+        plc.trend.channels = vec!["start".into()];
+        plc.trend.lanes = vec![vec![false, true, true, false]];
+        plc.trend.word_channels = vec!["TON0.ET".into()];
+        plc.trend.word_lanes = vec![vec![0, 500, 1000, 2000]];
+        plc.trend.samples = 4;
+        plc.page = PlcPage::Trend;
+
+        assert_eq!(block_preset_for(&plc, "TON0.ET"), Some(2000));
+        assert_eq!(block_preset_for(&plc, "MW2"), None);
+
+        let ctx = egui::Context::default();
+        let input = egui::RawInput::default();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Area::new(egui::Id::new("trend-page"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    trend_page(&plc, ui, 600.0);
+                });
+        });
+        output.textures_delta.clear();
+
+        // The daemon window draws the same scaled lane, in the same order.
+        let mut remote = PlcUi::default();
+        remote.project = plc.project.clone();
+        remote.trend_remote = linc_plc_core::protocol::TrendData {
+            names: vec!["start".into(), "TON0.ET".into()],
+            words: vec![false, true],
+            samples: vec![vec![0, 0], vec![1, 500], vec![1, 2000]],
+            window_ms: 20_000,
+            stride: 1,
+        };
+        let ctx = egui::Context::default();
+        let input = egui::RawInput::default();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Area::new(egui::Id::new("trend-remote-page"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    trend_page(&remote, ui, 600.0);
+                });
+        });
+        output.textures_delta.clear();
     }
 
     #[test]
