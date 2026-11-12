@@ -735,8 +735,24 @@ fn worker(jobs: Receiver<Job>, events: Sender<Event>, path: PathBuf) {
 // Page state
 // ---------------------------------------------------------------------------
 
-/// One compare (`G`) or compute (`M`) cell being assembled: operator, then the
-/// values, then (for compute) the destination word.
+/// One compare cell (`G`) being edited: the condition and both operands are in
+/// one window, and the focus says which of the three the keys are for.
+#[derive(Debug, Clone)]
+pub struct CompareEdit {
+    pub section: usize,
+    pub rung: usize,
+    pub position: usize,
+    pub op: String,
+    pub left: String,
+    pub right: String,
+    /// 0 condition, 1 operand A, 2 operand B.
+    pub focus: u8,
+    /// Why the last Enter refused an operand.
+    pub error: Option<String>,
+}
+
+/// One compute cell (`M`) being assembled: operator, then the values, then the
+/// destination word.
 #[derive(Debug, Clone)]
 pub struct ExprEdit {
     pub section: usize,
@@ -908,7 +924,9 @@ pub struct PlcUi {
     pub operand_filter: String,
     /// The coil operand is being picked for this row.
     pub coil_pick: Option<(usize, usize)>,
-    /// A compare or compute expression is being built step by step.
+    /// A compare cell's condition and operands are being edited in one window.
+    pub compare_edit: Option<CompareEdit>,
+    /// A compute expression is being built step by step.
     pub expr_edit: Option<ExprEdit>,
     /// Set when the selection moved by a key, so the list scrolls to it once.
     pub scroll_to_pou: bool,
@@ -1031,6 +1049,7 @@ impl Default for PlcUi {
             operand_pick: None,
             operand_filter: String::new(),
             coil_pick: None,
+            compare_edit: None,
             expr_edit: None,
             scroll_to_pou: false,
             open_editor: false,
@@ -2371,6 +2390,7 @@ pub fn escape_closes_editor(plc: &PlcUi) -> bool {
         && plc.operand_pick.is_none()
         && plc.coil_pick.is_none()
         && plc.block_edit.is_none()
+        && plc.compare_edit.is_none()
         && plc.expr_edit.is_none()
 }
 
@@ -2750,7 +2770,7 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         // behind, which is how a correct driver loop kept pressing arrows.
         {
             eprintln!(
-                "plc keys: page={:?} text_editing={} focus={:?} picker={} operand_pick={} coil_pick={} expr={} block={} cursor={:?}",
+                "plc keys: page={:?} text_editing={} focus={:?} picker={} operand_pick={} coil_pick={} expr={} block={} compare={} cursor={:?}",
                 app.plc.page,
                 app.plc.text_editing,
                 ui.ctx().memory(|memory| memory.focused()),
@@ -2759,6 +2779,7 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
                 app.plc.coil_pick.is_some(),
                 app.plc.expr_edit.is_some(),
                 app.plc.block_edit.is_some(),
+                app.plc.compare_edit.is_some(),
                 app.plc.cell_cursor,
             );
         }

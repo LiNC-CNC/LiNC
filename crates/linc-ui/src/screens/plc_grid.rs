@@ -9,7 +9,7 @@ use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_core::grid::{Cell, POSITIONS};
 use linc_plc_core::{Coil, CoilKind, PouLanguage, Rung};
 
-use crate::screens::plc::{Action, ExprEdit, PlcPage, PlcUi, RAIL_GROUP_GAP};
+use crate::screens::plc::{Action, CompareEdit, ExprEdit, PlcPage, PlcUi, RAIL_GROUP_GAP};
 use crate::shell::LincApp;
 use crate::theme;
 
@@ -341,6 +341,27 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             preset: "10".to_string(),
         });
     }
+    // G on an existing compare cell opens its window, as a block letter edits
+    // the box already there instead of replacing it with defaults.
+    if compare && cursor.2 < POSITIONS {
+        let existing = sections
+            .get(cursor.0)
+            .and_then(|section| section.rungs.get(cursor.1))
+            .and_then(|rung| rung.cells.get(cursor.2));
+        if let Some(Cell::Compare { op, left, right }) = existing {
+            app.plc.compare_edit = Some(CompareEdit {
+                section: cursor.0,
+                rung: cursor.1,
+                position: cursor.2,
+                op: op.clone(),
+                left: left.clone(),
+                right: right.clone(),
+                focus: 0,
+                error: None,
+            });
+            return;
+        }
+    }
     if compare {
         element = Some(Cell::Compare {
             op: "GT".to_string(),
@@ -500,17 +521,21 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         }
     }
     if enter {
-        let block = sections
+        // Enter opens what is already in the cell: a box asks for its instance
+        // and preset, a compare asks for its condition and operands, and an
+        // empty or plain cell asks which element to put there.
+        let existing = sections
             .get(cursor.0)
             .and_then(|section| section.rungs.get(cursor.1))
             .and_then(|rung| rung.cells.get(cursor.2))
-            .map(|cell| matches!(cell, Cell::Block { .. }))
-            .unwrap_or(false);
-        if block {
-            app.plc.block_edit = Some(cursor);
-        } else {
-            app.plc.picker = Some(cursor);
-            app.plc.picker_cursor = 0;
+            .cloned();
+        match enter_target(cursor, existing.as_ref()) {
+            EnterTarget::Block(cell) => app.plc.block_edit = Some(cell),
+            EnterTarget::Compare(edit) => app.plc.compare_edit = Some(edit),
+            EnterTarget::Picker => {
+                app.plc.picker = Some(cursor);
+                app.plc.picker_cursor = 0;
+            }
         }
     }
     if delete && cursor.2 < POSITIONS {
@@ -528,12 +553,15 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
 /// Draws every window that sits on top of the grid and returns true when one of
 /// them held the keyboard this frame, so the grid's own keys stand down.
 pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) -> bool {
+    // A window that was up when the frame began owns the keys even if it closes
+    // on this frame's Enter: otherwise that Enter reached the grid and opened a
+    // picker on the cell the window had just written.
+    let owned_at_entry = modal_open(plc);
     // Escape closes any picker here, before the editor's own Escape, so leaving
     // a list never also leaves the editor.
     if modal_keys(ctx).escape {
-        let owned = modal_open(plc);
         clear_pickers(plc);
-        return owned;
+        return owned_at_entry;
     }
     // One picker owns a frame's keys: the element list is drawn before the
     // operand list, and when its letter chose an item the same keystroke must
@@ -558,9 +586,10 @@ pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
         plc.operand_filter.clear();
     };
     expr_editor(plc, ctx, actions);
+    compare_editor(plc, ctx, actions);
     block_editor(plc, ctx, actions);
     xref_window(plc, ctx);
-    modal_open(plc)
+    owned_at_entry || modal_open(plc)
 }
 
 /// True when any window of this module is up. Read after the draw, so a window
@@ -570,6 +599,7 @@ fn modal_open(plc: &PlcUi) -> bool {
         || plc.operand_pick.is_some()
         || plc.coil_pick.is_some()
         || plc.expr_edit.is_some()
+        || plc.compare_edit.is_some()
         || plc.block_edit.is_some()
 }
 
@@ -1072,6 +1102,7 @@ fn clear_pickers(plc: &mut PlcUi) {
     // straight back on the next.
     plc.block_edit = None;
     plc.block_fields = None;
+    plc.compare_edit = None;
 }
 
 /// A picker row is taller than a rail row so the glyphs keep a clear band of
@@ -1127,17 +1158,15 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     })
                 }
                 (false, "compare") => {
-                    plc.expr_edit = Some(ExprEdit {
+                    plc.compare_edit = Some(CompareEdit {
                         section,
                         rung,
                         position,
-                        compute: false,
-                        stage: 0,
                         op: "GT".to_string(),
                         left: "MW0".to_string(),
                         right: "0".to_string(),
-                        target: "MW0".to_string(),
-                        text: String::new(),
+                        focus: 0,
+                        error: None,
                     });
                     close = true;
                 }
@@ -1409,17 +1438,26 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 });
             }
             Act::Compare => {
-                plc.expr_edit = Some(ExprEdit {
+                let (op, left, right) = match plc
+                    .current_pou_sections()
+                    .get(section)
+                    .and_then(|section| section.rungs.get(rung))
+                    .and_then(|rung| rung.cells.get(position))
+                {
+                    Some(Cell::Compare { op, left, right }) => {
+                        (op.clone(), left.clone(), right.clone())
+                    }
+                    _ => ("GT".to_string(), "MW0".to_string(), "0".to_string()),
+                };
+                plc.compare_edit = Some(CompareEdit {
                     section,
                     rung,
                     position,
-                    compute: false,
-                    stage: 0,
-                    op: "GT".to_string(),
-                    left: "MW0".to_string(),
-                    right: "0".to_string(),
-                    target: "MW0".to_string(),
-                    text: String::new(),
+                    op,
+                    left,
+                    right,
+                    focus: 0,
+                    error: None,
                 });
             }
             Act::Compute => {
@@ -1700,8 +1738,529 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     drawn
 }
 
-/// Compare and compute are built in steps, as ZX asks: operator, then the
-/// values one by one, then the destination for a compute coil.
+/// What Enter on a ladder cell opens. The cell decides: a box and a compare have
+/// their own windows and their own values, so Enter edits what is there instead
+/// of offering to replace it.
+#[derive(Debug)]
+enum EnterTarget {
+    Block((usize, usize, usize)),
+    Compare(CompareEdit),
+    Picker,
+}
+
+fn enter_target(cursor: (usize, usize, usize), cell: Option<&Cell>) -> EnterTarget {
+    match cell {
+        Some(Cell::Block { .. }) => EnterTarget::Block(cursor),
+        Some(Cell::Compare { op, left, right }) => EnterTarget::Compare(CompareEdit {
+            section: cursor.0,
+            rung: cursor.1,
+            position: cursor.2,
+            op: op.clone(),
+            left: left.clone(),
+            right: right.clone(),
+            focus: 0,
+            error: None,
+        }),
+        _ => EnterTarget::Picker,
+    }
+}
+
+/// The six comparison conditions, in the order the ZX operator list shows them,
+/// with the formula the standard writes for each.
+const COMPARE_OPS: [(&str, &str); 6] = [
+    ("GT", "A > B"),
+    ("GE", "A >= B"),
+    ("EQ", "A = B"),
+    ("NE", "A <> B"),
+    ("LE", "A <= B"),
+    ("LT", "A < B"),
+];
+
+/// One operand the compare window offers: the text that goes into the cell and
+/// the word that says what kind of thing it is.
+struct Choice {
+    value: String,
+    kind: &'static str,
+}
+
+impl Choice {
+    fn new(value: impl Into<String>, kind: &'static str) -> Self {
+        Self {
+            value: value.into(),
+            kind,
+        }
+    }
+}
+
+/// Every operand the compiler accepts in a compare cell: the marker words,
+/// every timer's and counter's published value, and the literal shapes. Numbers
+/// and times are open-ended, so the list carries the common forms and the field
+/// takes any other.
+fn compare_choices(plc: &PlcUi) -> Vec<Choice> {
+    let mut choices: Vec<Choice> = (0..linc_plc_core::compile::WORD_COUNT)
+        .map(|index| Choice::new(format!("MW{index}"), "WORD"))
+        .collect();
+    for (instance, kind) in used_block_instances(plc) {
+        choices.push(Choice::new(format!("{instance}.{kind}"), "BLOCK"));
+    }
+    for value in ["0", "1", "5", "10", "25", "100", "1000"] {
+        choices.push(Choice::new(value, "NUMBER"));
+    }
+    for value in ["T#100ms", "T#250ms", "T#1s", "T#10s", "T#1m"] {
+        choices.push(Choice::new(value, "TIME"));
+    }
+    choices
+}
+
+/// The instances the project actually uses, each with the word that reads its
+/// value: `.ET` for a timer, `.CV` for a counter.
+fn used_block_instances(plc: &PlcUi) -> Vec<(String, &'static str)> {
+    let mut used: Vec<(String, &'static str)> = Vec::new();
+    for pou in plc.project.all_pous() {
+        for section in &pou.sections {
+            for rung in &section.rungs {
+                for cell in &rung.cells {
+                    if let Cell::Block {
+                        block, instance, ..
+                    } = cell
+                    {
+                        let member = if block.starts_with("CT") { "CV" } else { "ET" };
+                        if !used.iter().any(|(name, _)| name == instance) {
+                            used.push((instance.clone(), member));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    used
+}
+
+/// What an operand that is not in the list is: the same words the list uses, so
+/// a value the project only reads still says what kind of thing it is.
+fn operand_kind(text: &str) -> &'static str {
+    let value = text.trim().to_ascii_uppercase();
+    if value.starts_with("MW") || value.starts_with("%MW") {
+        "WORD"
+    } else if value.starts_with("T#") || value.starts_with("TIME#") {
+        "TIME"
+    } else if value.contains(".ET")
+        || value.contains(".CV")
+        || value.contains(".PT")
+        || value.contains(".PV")
+    {
+        "BLOCK"
+    } else {
+        "NUMBER"
+    }
+}
+
+/// Why this text cannot be a compare operand, in the words the window uses. The
+/// compiler is the judge; this only turns its refusal into a sentence.
+fn operand_error(text: &str) -> Option<String> {
+    let value = text.trim();
+    if value.is_empty() {
+        return Some("needs a value".to_string());
+    }
+    if linc_plc_core::compile::word_operand_value(value).is_some() {
+        return None;
+    }
+    let upper = value.to_ascii_uppercase();
+    Some(if upper.starts_with("MW") || upper.starts_with("%MW") {
+        format!("{value} is not a marker word: MW0 to MW15")
+    } else if upper.starts_with("T#") {
+        format!("{value} needs a unit: T#250ms, T#2s or T#1m")
+    } else if value.starts_with('-') || value.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("{value} is not a whole number inside -32768 to 32767")
+    } else {
+        format!("{value} is not an operand: a word, a number, a time or a block value")
+    })
+}
+
+/// One row of the window's tables: the value on the left, what it is on the
+/// right, the tool table's band and stripes.
+fn window_row(
+    ui: &mut Ui,
+    left: &str,
+    right: &str,
+    selected: bool,
+    keys_here: bool,
+    striped: bool,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
+        Sense::click(),
+    );
+    let painter = ui.painter();
+    if selected {
+        painter.rect_filled(rect, egui::CornerRadius::ZERO, theme::PANEL_RAISED);
+        if keys_here {
+            painter.rect_filled(
+                egui::Rect::from_min_size(
+                    rect.min,
+                    egui::vec2(theme::SELECTION_BAR, rect.height()),
+                ),
+                egui::CornerRadius::ZERO,
+                theme::ACCENT,
+            );
+        }
+    } else if striped {
+        painter.rect_filled(rect, egui::CornerRadius::ZERO, theme::SURFACE);
+    }
+    painter.text(
+        egui::pos2(rect.left() + theme::SELECTION_BAR + 6.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        left,
+        egui::FontId::monospace(theme::font_size(10.0)),
+        if selected { theme::FG } else { theme::FG },
+    );
+    painter.text(
+        egui::pos2(rect.right() - 6.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        right,
+        egui::FontId::monospace(theme::font_size(9.0)),
+        theme::MUTED,
+    );
+    response
+}
+
+/// One operand column: the field it types into, and the list of choices with the
+/// cursor visible. Returns whether the field was clicked and which choice was.
+fn operand_column(
+    ui: &mut Ui,
+    title: &str,
+    text: &mut String,
+    keys_here: bool,
+    choices: &[Choice],
+) -> (bool, Option<usize>) {
+    ui.label(
+        RichText::new(title)
+            .monospace()
+            .size(theme::font_size(9.0))
+            .color(theme::MUTED),
+    );
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), theme::MIN_TARGET),
+        Sense::click(),
+    );
+    let painter = ui.painter();
+    painter.rect_filled(rect, egui::CornerRadius::same(3), theme::SURFACE);
+    painter.rect_stroke(
+        rect,
+        egui::CornerRadius::same(3),
+        Stroke::new(
+            1.0,
+            if keys_here {
+                theme::ACCENT
+            } else {
+                theme::BORDER
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    painter.text(
+        egui::pos2(rect.left() + 8.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        if keys_here {
+            format!("{text}▌")
+        } else {
+            text.clone()
+        },
+        egui::FontId::monospace(theme::font_size(11.0)),
+        theme::FG,
+    );
+    let cursor = choices
+        .iter()
+        .position(|choice| choice.value == text.trim());
+    // A value that is not one of the listed words — a typed literal, or a block
+    // the project only reads — still gets a row of its own, so the chosen
+    // operand is visible and selected instead of missing from the list.
+    let mut rows = COMPARE_ROWS;
+    if cursor.is_none() && !text.trim().is_empty() {
+        let _ = window_row(ui, text.trim(), operand_kind(text), true, keys_here, false);
+        rows -= 1;
+    }
+    let first = cursor
+        .unwrap_or(0)
+        .saturating_sub(2)
+        .min(choices.len().saturating_sub(rows));
+    let mut clicked = None;
+    for (index, choice) in choices.iter().enumerate().skip(first).take(rows) {
+        if window_row(
+            ui,
+            &choice.value,
+            choice.kind,
+            cursor == Some(index),
+            keys_here,
+            index % 2 == 1,
+        )
+        .clicked()
+        {
+            clicked = Some(index);
+        }
+    }
+    (response.clicked(), clicked)
+}
+
+const COMPARE_ROWS: usize = 8;
+
+/// The compare window: the condition and both operands at once. The keys belong
+/// to one of the three, the arrows walk it and cross to the next at its ends, and
+/// Enter takes the highlighted choice or the typed value before moving on. The
+/// panel keyboard has no Tab, so nothing here needs it.
+fn compare_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    let Some(mut edit) = plc.compare_edit.clone() else {
+        return;
+    };
+    let choices = compare_choices(plc);
+    let keys = modal_keys(ctx);
+    let to_a = ui_key(ctx, egui::Key::ArrowLeft);
+    let to_b = ui_key(ctx, egui::Key::ArrowRight);
+    if keys.escape {
+        plc.compare_edit = None;
+        return;
+    }
+    let op_index = COMPARE_OPS
+        .iter()
+        .position(|(op, _)| *op == edit.op)
+        .unwrap_or(0);
+
+    // Typing goes to the operand that holds the keys; the condition takes no
+    // letters, so a stray key cannot redraw the rung while the window is up.
+    let editing_operand = edit.focus == 1 || edit.focus == 2;
+    let mut typed = false;
+    for character in &keys.typed {
+        if !editing_operand {
+            continue;
+        }
+        if character.is_ascii_alphanumeric() || matches!(character, '#' | '.' | ':' | '-') {
+            if edit.focus == 1 {
+                edit.left.push(*character);
+            } else {
+                edit.right.push(*character);
+            }
+            typed = true;
+        }
+    }
+    if keys.backspace && editing_operand {
+        if edit.focus == 1 {
+            edit.left.pop();
+        } else {
+            edit.right.pop();
+        }
+        typed = true;
+    }
+    if typed {
+        edit.error = None;
+    }
+
+    let left_cursor = choices.iter().position(|choice| choice.value == edit.left);
+    let right_cursor = choices.iter().position(|choice| choice.value == edit.right);
+    if keys.up {
+        match edit.focus {
+            0 => {
+                if op_index == 0 {
+                    edit.focus = 2;
+                } else {
+                    edit.op = COMPARE_OPS[op_index - 1].0.to_string();
+                }
+            }
+            1 => match left_cursor {
+                Some(0) | None => edit.focus = 0,
+                Some(index) => edit.left = choices[index - 1].value.clone(),
+            },
+            _ => match right_cursor {
+                Some(0) | None => edit.focus = 1,
+                Some(index) => edit.right = choices[index - 1].value.clone(),
+            },
+        }
+    }
+    if keys.down {
+        match edit.focus {
+            0 => {
+                if op_index + 1 >= COMPARE_OPS.len() {
+                    edit.focus = 1;
+                } else {
+                    edit.op = COMPARE_OPS[op_index + 1].0.to_string();
+                }
+            }
+            1 => match left_cursor {
+                Some(index) if index + 1 < choices.len() => {
+                    edit.left = choices[index + 1].value.clone()
+                }
+                _ => edit.focus = 2,
+            },
+            _ => match right_cursor {
+                Some(index) if index + 1 < choices.len() => {
+                    edit.right = choices[index + 1].value.clone()
+                }
+                _ => edit.focus = 0,
+            },
+        }
+    }
+    if to_a {
+        edit.focus = 1;
+    }
+    if to_b {
+        edit.focus = 2;
+    }
+
+    // Enter accepts what the field shows and moves on: condition, A, B, apply.
+    let mut apply = false;
+    if keys.enter {
+        match edit.focus {
+            0 => edit.focus = 1,
+            1 => match operand_error(&edit.left) {
+                Some(error) => edit.error = Some(format!("A {error}")),
+                None => {
+                    edit.left = edit.left.trim().to_string();
+                    edit.focus = 2;
+                    edit.error = None;
+                }
+            },
+            _ => match operand_error(&edit.right) {
+                Some(error) => edit.error = Some(format!("B {error}")),
+                None => {
+                    edit.right = edit.right.trim().to_string();
+                    apply = true;
+                }
+            },
+        }
+    }
+
+    let mut close = false;
+    let mut clicked_op: Option<usize> = None;
+    let mut clicked_operand: Option<(u8, usize)> = None;
+    let mut clicked_field: Option<u8> = None;
+    egui::Window::new("COMPARE CONTACT")
+        // Above the workbench overlay (Foreground), which is itself above the page.
+        .order(egui::Order::Tooltip)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_min_width(560.0);
+            ui.set_max_width(560.0);
+            let symbol = COMPARE_OPS[op_index].1.replace("A ", "").replace(" B", "");
+            ui.label(
+                RichText::new(format!("{} {symbol} {}", edit.left, edit.right))
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new("CONDITION")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            for (index, (op, formula)) in COMPARE_OPS.iter().enumerate() {
+                if window_row(
+                    ui,
+                    op,
+                    formula,
+                    index == op_index,
+                    edit.focus == 0,
+                    index % 2 == 1,
+                )
+                .clicked()
+                {
+                    clicked_op = Some(index);
+                }
+            }
+            ui.add_space(6.0);
+            ui.horizontal_top(|ui| {
+                let width = (ui.available_width() - 12.0) / 2.0;
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, 0.0),
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        let (field, choice) =
+                            operand_column(ui, "A", &mut edit.left, edit.focus == 1, &choices);
+                        if field {
+                            clicked_field = Some(1);
+                        }
+                        if let Some(index) = choice {
+                            clicked_operand = Some((1, index));
+                        }
+                    },
+                );
+                ui.add_space(12.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, 0.0),
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        let (field, choice) =
+                            operand_column(ui, "B", &mut edit.right, edit.focus == 2, &choices);
+                        if field {
+                            clicked_field = Some(2);
+                        }
+                        if let Some(index) = choice {
+                            clicked_operand = Some((2, index));
+                        }
+                    },
+                );
+            });
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("MW0–MW15 · 25 · T#250ms · TON0.ET · CTU0.CV")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            if let Some(error) = &edit.error {
+                ui.label(
+                    RichText::new(error)
+                        .size(theme::font_size(9.0))
+                        .color(theme::ERROR),
+                );
+            }
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("↑ ↓ WALK · ← → A / B · ENTER NEXT · ESC CANCEL")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+        });
+    if let Some(index) = clicked_op {
+        edit.op = COMPARE_OPS[index].0.to_string();
+        edit.focus = 0;
+    }
+    if let Some(field) = clicked_field {
+        edit.focus = field;
+    }
+    if let Some((field, index)) = clicked_operand {
+        if field == 1 {
+            edit.left = choices[index].value.clone();
+        } else {
+            edit.right = choices[index].value.clone();
+        }
+        edit.error = None;
+    }
+    if apply {
+        actions.push(Action::SetCell {
+            section: edit.section,
+            rung: edit.rung,
+            position: edit.position,
+            cell: Cell::Compare {
+                op: COMPARE_OPS[op_index].0.to_string(),
+                left: edit.left.clone(),
+                right: edit.right.clone(),
+            },
+        });
+        close = true;
+    }
+    if close {
+        plc.compare_edit = None;
+    } else {
+        plc.compare_edit = Some(edit);
+    }
+}
+
+/// Compute coils are built in steps, as ZX asks: operator, then the values one
+/// by one, then the destination word.
 fn expr_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
     let Some(edit) = plc.expr_edit.clone() else {
         return;
@@ -2715,5 +3274,261 @@ mod block_window_tests {
         clear_pickers(&mut plc);
         assert!(plc.block_edit.is_none());
         assert!(plc.block_fields.is_none());
+    }
+}
+
+#[cfg(test)]
+mod compare_window_tests {
+    use super::*;
+
+    fn frame(plc: &mut PlcUi, events: Vec<egui::Event>) -> Vec<Action> {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        let mut actions = Vec::new();
+        let mut output = ctx.run_pass(input, |ctx| {
+            pickers(plc, ctx, &mut actions);
+        });
+        output.textures_delta.clear();
+        actions
+    }
+
+    fn frame_owned(plc: &mut PlcUi, events: Vec<egui::Event>) -> (Vec<Action>, bool) {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        let mut actions = Vec::new();
+        let mut owned = false;
+        let mut output = ctx.run_pass(input, |ctx| {
+            owned = pickers(plc, ctx, &mut actions);
+        });
+        output.textures_delta.clear();
+        (actions, owned)
+    }
+
+    /// Enter on an existing cell opens that cell's own window, with its values
+    /// in it; only an empty or plain cell offers the element list.
+    #[test]
+    fn enter_opens_the_window_the_cell_already_has() {
+        let cursor = (1, 2, 3);
+        assert!(matches!(
+            enter_target(cursor, Some(&Cell::Block {
+                block: "TON".into(),
+                instance: "TON2".into(),
+                preset: "T#5s".into(),
+            })),
+            EnterTarget::Block(seen) if seen == cursor
+        ));
+        match enter_target(
+            cursor,
+            Some(&Cell::Compare {
+                op: "NE".into(),
+                left: "MW7".into(),
+                right: "T#2s".into(),
+            }),
+        ) {
+            EnterTarget::Compare(edit) => {
+                assert_eq!(edit.op, "NE");
+                assert_eq!(edit.left, "MW7");
+                assert_eq!(edit.right, "T#2s");
+                assert_eq!(
+                    (edit.section, edit.rung, edit.position),
+                    (1, 2, 3),
+                    "the window edits the cell Enter was pressed on"
+                );
+            }
+            other => panic!("expected the compare window, got {other:?}"),
+        }
+        assert!(matches!(
+            enter_target(
+                cursor,
+                Some(&Cell::Contact {
+                    var: "pump".into(),
+                    negated: false
+                })
+            ),
+            EnterTarget::Picker
+        ));
+        assert!(matches!(enter_target(cursor, None), EnterTarget::Picker));
+    }
+
+    /// A value outside the list still reads as what it is: a word, a time, a
+    /// block member or a number.
+    #[test]
+    fn an_unlisted_operand_says_what_it_is() {
+        assert_eq!(operand_kind("MW3"), "WORD");
+        assert_eq!(operand_kind("%MW3"), "WORD");
+        assert_eq!(operand_kind("T#250ms"), "TIME");
+        assert_eq!(operand_kind("CTU0.CV"), "BLOCK");
+        assert_eq!(operand_kind("TON1.ET"), "BLOCK");
+        assert_eq!(operand_kind("-12"), "NUMBER");
+        assert_eq!(operand_kind("12345"), "NUMBER");
+    }
+
+    /// The Enter that applies must not also reach the grid: it used to open a
+    /// picker on the cell the window had just written.
+    #[test]
+    fn the_applying_frame_still_owns_its_enter() {
+        let mut plc = PlcUi::default();
+        compare(&mut plc);
+        let _ = frame(&mut plc, key(egui::Key::Enter));
+        let _ = frame(&mut plc, key(egui::Key::Enter));
+        let (actions, owned) = frame_owned(&mut plc, key(egui::Key::Enter));
+        assert!(!actions.is_empty(), "the cell was written");
+        assert!(plc.compare_edit.is_none(), "the window closed");
+        assert!(
+            owned,
+            "and this frame's Enter belongs to the window, not the grid"
+        );
+        let (_, owned) = frame_owned(&mut plc, vec![]);
+        assert!(!owned, "the next frame is the grid's again");
+    }
+
+    fn key(key: egui::Key) -> Vec<egui::Event> {
+        vec![egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]
+    }
+
+    fn compare(plc: &mut PlcUi) {
+        plc.compare_edit = Some(CompareEdit {
+            section: 0,
+            rung: 0,
+            position: 1,
+            op: "GT".to_string(),
+            left: "MW0".to_string(),
+            right: "0".to_string(),
+            focus: 0,
+            error: None,
+        });
+    }
+
+    /// Enter walks the one window: condition, then A, then B, then writes the
+    /// cell. The operator comes from the list, the operands from their fields.
+    #[test]
+    fn enter_walks_condition_a_b_and_applies() {
+        let mut plc = PlcUi::default();
+        compare(&mut plc);
+        let _ = frame(&mut plc, key(egui::Key::Enter));
+        assert_eq!(plc.compare_edit.as_ref().unwrap().focus, 1);
+        let _ = frame(&mut plc, key(egui::Key::Enter));
+        assert_eq!(plc.compare_edit.as_ref().unwrap().focus, 2);
+        let actions = frame(&mut plc, key(egui::Key::Enter));
+        assert!(plc.compare_edit.is_none(), "the window closed on apply");
+        match &actions[0] {
+            Action::SetCell { cell, .. } => match cell {
+                Cell::Compare { op, left, right } => {
+                    assert_eq!(
+                        (op.as_str(), left.as_str(), right.as_str()),
+                        ("GT", "MW0", "0")
+                    );
+                }
+                other => panic!("expected a compare cell, got {other:?}"),
+            },
+            other => panic!("expected a cell write, got {other:?}"),
+        }
+    }
+
+    /// The condition list is the operator picker: the arrows walk it without
+    /// leaving the window, and the formula shown beside it comes from the table.
+    #[test]
+    fn the_arrows_walk_the_condition_list() {
+        let mut plc = PlcUi::default();
+        compare(&mut plc);
+        let _ = frame(&mut plc, key(egui::Key::ArrowDown));
+        assert_eq!(plc.compare_edit.as_ref().unwrap().op, "GE");
+        let _ = frame(&mut plc, key(egui::Key::ArrowUp));
+        let _ = frame(&mut plc, key(egui::Key::ArrowUp));
+        let edit = plc.compare_edit.expect("still open");
+        assert_eq!(
+            edit.op, "GT",
+            "up at the first condition does not wrap the list"
+        );
+        assert_eq!(edit.focus, 2, "it steps back into the field above it");
+    }
+
+    /// A refused operand keeps the window and says which field and why.
+    #[test]
+    fn a_bad_operand_is_refused_in_words() {
+        let mut plc = PlcUi::default();
+        compare(&mut plc);
+        {
+            let edit = plc.compare_edit.as_mut().unwrap();
+            edit.focus = 1;
+            edit.left = "MW99".into();
+        }
+        let actions = frame(&mut plc, key(egui::Key::Enter));
+        assert!(actions.is_empty(), "nothing written");
+        let edit = plc.compare_edit.as_ref().expect("window stays");
+        assert_eq!(edit.focus, 1, "the keys stay in the bad field");
+        assert_eq!(
+            edit.error.as_deref(),
+            Some("A MW99 is not a marker word: MW0 to MW15")
+        );
+    }
+
+    /// The operand list is the keyboard's way to pick a word: down takes the next
+    /// row into the field, no typing needed.
+    #[test]
+    fn the_operand_list_writes_the_highlighted_row_into_the_field() {
+        let mut plc = PlcUi::default();
+        compare(&mut plc);
+        plc.compare_edit.as_mut().unwrap().focus = 1;
+        let _ = frame(&mut plc, key(egui::Key::ArrowDown));
+        assert_eq!(plc.compare_edit.as_ref().unwrap().left, "MW1");
+        let _ = frame(&mut plc, key(egui::Key::ArrowDown));
+        assert_eq!(plc.compare_edit.as_ref().unwrap().left, "MW2");
+    }
+
+    /// The choices are what the compiler accepts, plus the words the project
+    /// actually publishes: the list carries MW0–MW15, a used timer's `.ET`, the
+    /// counters' `.CV`, numbers and times.
+    #[test]
+    fn the_list_holds_the_words_and_the_literal_shapes() {
+        let mut plc = PlcUi::default();
+        let mut pou = linc_plc_core::model::Pou::new("main", linc_plc_core::model::PouLanguage::Ld);
+        pou.sections = vec![linc_plc_core::model::Section {
+            name: String::new(),
+            rungs: vec![linc_plc_core::model::Rung {
+                comment: String::new(),
+                logic: linc_plc_core::model::Logic::Const { value: true },
+                coil: linc_plc_core::model::Coil::new("", linc_plc_core::model::CoilKind::Normal),
+                cells: vec![
+                    Cell::Block {
+                        block: "TON".into(),
+                        instance: "TON0".into(),
+                        preset: "T#1s".into(),
+                    },
+                    Cell::Block {
+                        block: "CTU".into(),
+                        instance: "CTU0".into(),
+                        preset: "10".into(),
+                    },
+                ],
+            }],
+        }];
+        plc.project.pous = vec![pou];
+        let values: Vec<String> = compare_choices(&plc)
+            .into_iter()
+            .map(|choice| choice.value)
+            .collect();
+        for wanted in ["MW0", "MW15", "TON0.ET", "CTU0.CV", "25", "T#250ms"] {
+            assert!(
+                values.iter().any(|value| value == wanted),
+                "{wanted} must be offered, list is {values:?}"
+            );
+        }
+        assert!(
+            values.iter().all(|value| value != "MW16"),
+            "only the 16 words"
+        );
     }
 }
