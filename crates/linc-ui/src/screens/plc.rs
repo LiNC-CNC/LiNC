@@ -751,24 +751,21 @@ pub struct CompareEdit {
     pub error: Option<String>,
 }
 
-/// One compute cell (`M`) being assembled: operator, then the values, then the
-/// destination word.
+/// One compute cell (`M`) being edited: the assignment's operation, its
+/// destination and both operands, in one window.
 #[derive(Debug, Clone)]
-pub struct ExprEdit {
+pub struct ComputeEdit {
     pub section: usize,
     pub rung: usize,
     pub position: usize,
-    pub compute: bool,
-    /// 0 operator, 1 left value, 2 right value, 3 destination.
-    pub stage: u8,
     pub op: String,
+    pub target: String,
     pub left: String,
     pub right: String,
-    pub target: String,
-    /// The value being typed for the current stage. It lives here, not in
-    /// `operand_filter`, so the pickers clearing their own buffer cannot wipe a
-    /// half-typed value between frames.
-    pub text: String,
+    /// 0 operation, 1 destination, 2 operand A, 3 operand B.
+    pub focus: u8,
+    /// Why the last Enter refused a value.
+    pub error: Option<String>,
 }
 
 /// A ring of boolean samples for the trend page: one lane per symbol, oldest
@@ -926,8 +923,8 @@ pub struct PlcUi {
     pub coil_pick: Option<(usize, usize)>,
     /// A compare cell's condition and operands are being edited in one window.
     pub compare_edit: Option<CompareEdit>,
-    /// A compute expression is being built step by step.
-    pub expr_edit: Option<ExprEdit>,
+    /// A compute cell's operation, destination and operands are being edited.
+    pub compute_edit: Option<ComputeEdit>,
     /// Set when the selection moved by a key, so the list scrolls to it once.
     pub scroll_to_pou: bool,
     /// Enter or a double click on a row asks for the editor window.
@@ -1050,7 +1047,7 @@ impl Default for PlcUi {
             operand_filter: String::new(),
             coil_pick: None,
             compare_edit: None,
-            expr_edit: None,
+            compute_edit: None,
             scroll_to_pou: false,
             open_editor: false,
             save_requested: false,
@@ -2391,7 +2388,7 @@ pub fn escape_closes_editor(plc: &PlcUi) -> bool {
         && plc.coil_pick.is_none()
         && plc.block_edit.is_none()
         && plc.compare_edit.is_none()
-        && plc.expr_edit.is_none()
+        && plc.compute_edit.is_none()
 }
 
 /// The PLC workbench's navigation strip, built with the main GUI's row metrics:
@@ -2770,14 +2767,14 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         // behind, which is how a correct driver loop kept pressing arrows.
         {
             eprintln!(
-                "plc keys: page={:?} text_editing={} focus={:?} picker={} operand_pick={} coil_pick={} expr={} block={} compare={} cursor={:?}",
+                "plc keys: page={:?} text_editing={} focus={:?} picker={} operand_pick={} coil_pick={} compute={} block={} compare={} cursor={:?}",
                 app.plc.page,
                 app.plc.text_editing,
                 ui.ctx().memory(|memory| memory.focused()),
                 app.plc.picker.is_some(),
                 app.plc.operand_pick.is_some(),
                 app.plc.coil_pick.is_some(),
-                app.plc.expr_edit.is_some(),
+                app.plc.compute_edit.is_some(),
                 app.plc.block_edit.is_some(),
                 app.plc.compare_edit.is_some(),
                 app.plc.cell_cursor,
@@ -6941,42 +6938,6 @@ mod picker_key_tests {
             escape_closes_editor(&plc),
             "and now Escape closes the editor"
         );
-    }
-
-    /// A value typed across several frames survives: the buffer is the editor's
-    /// own, so a picker clearing its filter cannot truncate it.
-    #[test]
-    fn a_value_typed_in_chunks_reaches_the_stage() {
-        let mut plc = plc_with_symbols();
-        plc.expr_edit = Some(ExprEdit {
-            section: 0,
-            rung: 0,
-            position: 0,
-            compute: true,
-            stage: 1,
-            op: "ADD".to_string(),
-            left: String::new(),
-            right: String::new(),
-            target: String::new(),
-            text: String::new(),
-        });
-        for chunk in ["M", "W", "2"] {
-            let _ = frame(&mut plc, text(chunk));
-        }
-        let _ = frame(
-            &mut plc,
-            vec![egui::Event::Key {
-                key: egui::Key::Enter,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::NONE,
-            }],
-        );
-        let edit = plc.expr_edit.expect("editor still open");
-        assert_eq!(edit.left, "MW2", "the whole value arrived");
-        assert_eq!(edit.stage, 2, "and the stage advanced once");
-        assert!(edit.text.is_empty(), "the buffer cleared on commit");
     }
 
     /// Escape closes every picker before the editor's own Escape: a list left

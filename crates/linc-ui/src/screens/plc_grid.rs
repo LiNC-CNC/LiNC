@@ -9,7 +9,7 @@ use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_core::grid::{Cell, POSITIONS};
 use linc_plc_core::{Coil, CoilKind, PouLanguage, Rung};
 
-use crate::screens::plc::{Action, CompareEdit, ExprEdit, PlcPage, PlcUi, RAIL_GROUP_GAP};
+use crate::screens::plc::{Action, CompareEdit, ComputeEdit, PlcPage, PlcUi, RAIL_GROUP_GAP};
 use crate::shell::LincApp;
 use crate::theme;
 
@@ -44,7 +44,8 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         || app.plc.picker.is_some()
         || app.plc.operand_pick.is_some()
         || app.plc.coil_pick.is_some()
-        || app.plc.expr_edit.is_some()
+        || app.plc.compare_edit.is_some()
+        || app.plc.compute_edit.is_some()
         || app.plc.block_edit.is_some()
     {
         return;
@@ -532,6 +533,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         match enter_target(cursor, existing.as_ref()) {
             EnterTarget::Block(cell) => app.plc.block_edit = Some(cell),
             EnterTarget::Compare(edit) => app.plc.compare_edit = Some(edit),
+            EnterTarget::Compute(edit) => app.plc.compute_edit = Some(edit),
             EnterTarget::Picker => {
                 app.plc.picker = Some(cursor);
                 app.plc.picker_cursor = 0;
@@ -585,8 +587,8 @@ pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
         plc.coil_pick = None;
         plc.operand_filter.clear();
     };
-    expr_editor(plc, ctx, actions);
     compare_editor(plc, ctx, actions);
+    compute_editor(plc, ctx, actions);
     block_editor(plc, ctx, actions);
     xref_window(plc, ctx);
     owned_at_entry || modal_open(plc)
@@ -598,8 +600,8 @@ fn modal_open(plc: &PlcUi) -> bool {
     plc.picker.is_some()
         || plc.operand_pick.is_some()
         || plc.coil_pick.is_some()
-        || plc.expr_edit.is_some()
         || plc.compare_edit.is_some()
+        || plc.compute_edit.is_some()
         || plc.block_edit.is_some()
 }
 
@@ -637,11 +639,11 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
         plc.block_instance_cursor = instance_number(&block, &instance).unwrap_or(0);
         plc.block_focus_preset = false;
     }
-    let used = used_instances(plc, &block);
+    let used = used_instances(plc, &block, (section, rung, position));
     let counters = block.starts_with("CT");
     let mut close = false;
     let mut apply = false;
-    egui::Window::new(format!("{block} BOX"))
+    egui::Window::new(box_title(&block))
         // Above the workbench overlay (Foreground), which is itself above the page.
         .order(egui::Order::Tooltip)
         .collapsible(false)
@@ -867,6 +869,20 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
     }
 }
 
+/// What the box does, in the words the standard uses, with its code so the
+/// title still matches the label on the ladder. "TON BOX" says nothing about
+/// whether the timer delays the on or the off edge.
+fn box_title(block: &str) -> String {
+    match block {
+        "TON" => "ON-DELAY TIMER (TON)".to_string(),
+        "TOF" => "OFF-DELAY TIMER (TOF)".to_string(),
+        "TP" => "PULSE TIMER (TP)".to_string(),
+        "CTU" => "UP COUNTER (CTU)".to_string(),
+        "CTD" => "DOWN COUNTER (CTD)".to_string(),
+        other => format!("{other} BOX"),
+    }
+}
+
 /// The instance index in `TON2`, when the name has the block's own prefix.
 fn instance_number(block: &str, instance: &str) -> Option<usize> {
     instance
@@ -877,12 +893,36 @@ fn instance_number(block: &str, instance: &str) -> Option<usize> {
 }
 
 /// Instances of this block type that another box in the project already holds.
-fn used_instances(plc: &PlcUi, block: &str) -> Vec<String> {
+fn used_instances(plc: &PlcUi, block: &str, editing: (usize, usize, usize)) -> Vec<String> {
     let mut used = Vec::new();
-    for pou in plc.project.all_pous() {
-        for section in &pou.sections {
-            for rung in &section.rungs {
-                for cell in &rung.cells {
+    for (pou_index, pou) in plc.project.all_pous().into_iter().enumerate() {
+        // Only the POU on screen can be the one being edited; its index is the
+        // project's own ordering, which is what `editing` indexes into.
+        if pou_index != plc.pou {
+            for section in &pou.sections {
+                for rung in &section.rungs {
+                    for cell in &rung.cells {
+                        if let Cell::Block {
+                            block: kind,
+                            instance,
+                            ..
+                        } = cell
+                        {
+                            if kind == block && !used.contains(instance) {
+                                used.push(instance.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+        for (section_index, section) in pou.sections.iter().enumerate() {
+            for (rung_index, rung) in section.rungs.iter().enumerate() {
+                for (position, cell) in rung.cells.iter().enumerate() {
+                    if (section_index, rung_index, position) == editing {
+                        continue;
+                    }
                     if let Cell::Block {
                         block: kind,
                         instance,
@@ -1103,6 +1143,7 @@ fn clear_pickers(plc: &mut PlcUi) {
     plc.block_edit = None;
     plc.block_fields = None;
     plc.compare_edit = None;
+    plc.compute_edit = None;
 }
 
 /// A picker row is taller than a rail row so the glyphs keep a clear band of
@@ -1171,17 +1212,16 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     close = true;
                 }
                 (false, "compute") => {
-                    plc.expr_edit = Some(ExprEdit {
+                    plc.compute_edit = Some(ComputeEdit {
                         section,
                         rung,
                         position,
-                        compute: true,
-                        stage: 0,
                         op: "ADD".to_string(),
+                        target: "MW1".to_string(),
                         left: "MW0".to_string(),
                         right: "1".to_string(),
-                        target: "MW1".to_string(),
-                        text: String::new(),
+                        focus: 0,
+                        error: None,
                     });
                     close = true;
                 }
@@ -1461,17 +1501,35 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 });
             }
             Act::Compute => {
-                plc.expr_edit = Some(ExprEdit {
+                let (op, target, left, right) = match plc
+                    .current_pou_sections()
+                    .get(section)
+                    .and_then(|section| section.rungs.get(rung))
+                    .and_then(|rung| rung.cells.get(position))
+                {
+                    Some(Cell::Compute {
+                        op,
+                        target,
+                        left,
+                        right,
+                    }) => (op.clone(), target.clone(), left.clone(), right.clone()),
+                    _ => (
+                        "ADD".to_string(),
+                        "MW1".to_string(),
+                        "MW0".to_string(),
+                        "1".to_string(),
+                    ),
+                };
+                plc.compute_edit = Some(ComputeEdit {
                     section,
                     rung,
                     position,
-                    compute: true,
-                    stage: 0,
-                    op: "ADD".to_string(),
-                    left: "MW0".to_string(),
-                    right: "1".to_string(),
-                    target: "MW1".to_string(),
-                    text: String::new(),
+                    op,
+                    target,
+                    left,
+                    right,
+                    focus: 0,
+                    error: None,
                 });
             }
         }
@@ -1745,6 +1803,7 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
 enum EnterTarget {
     Block((usize, usize, usize)),
     Compare(CompareEdit),
+    Compute(ComputeEdit),
     Picker,
 }
 
@@ -1756,6 +1815,22 @@ fn enter_target(cursor: (usize, usize, usize), cell: Option<&Cell>) -> EnterTarg
             rung: cursor.1,
             position: cursor.2,
             op: op.clone(),
+            left: left.clone(),
+            right: right.clone(),
+            focus: 0,
+            error: None,
+        }),
+        Some(Cell::Compute {
+            op,
+            target,
+            left,
+            right,
+        }) => EnterTarget::Compute(ComputeEdit {
+            section: cursor.0,
+            rung: cursor.1,
+            position: cursor.2,
+            op: op.clone(),
+            target: target.clone(),
             left: left.clone(),
             right: right.clone(),
             focus: 0,
@@ -2259,244 +2334,363 @@ fn compare_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
     }
 }
 
-/// Compute coils are built in steps, as ZX asks: operator, then the values one
-/// by one, then the destination word.
-fn expr_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
-    let Some(edit) = plc.expr_edit.clone() else {
+/// The compute operations the compiler implements, in the order the rail shows
+/// them, with the assignment each one writes.
+const COMPUTE_OPS: [(&str, &str); 5] = [
+    ("ADD", "D := A + B"),
+    ("SUB", "D := A - B"),
+    ("MUL", "D := A * B"),
+    ("DIV", "D := A / B"),
+    ("MOVE", "D := A"),
+];
+
+/// The destination of an assignment: a marker word, and nothing else. The
+/// compiler writes compute results to `MWn`, so offering a literal or a block
+/// member here would only produce a cell that never runs.
+fn destination_choices() -> Vec<Choice> {
+    (0..linc_plc_core::compile::WORD_COUNT)
+        .map(|index| Choice::new(format!("MW{index}"), "WORD"))
+        .collect()
+}
+
+/// Why this text cannot be an assignment destination.
+fn destination_error(text: &str) -> Option<String> {
+    let value = text.trim();
+    if value.is_empty() {
+        return Some("D needs a word".to_string());
+    }
+    if linc_plc_core::il::word_operand(value).is_some() {
+        return None;
+    }
+    Some(format!("{value} is not a marker word: MW0 to MW15"))
+}
+
+/// The compute window: the assignment and its three words, like the compare
+/// window but for `D := A op B`. MOVE has no second operand, so B stands down
+/// and the window says so instead of asking for a value nobody reads.
+fn compute_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    let Some(mut edit) = plc.compute_edit.clone() else {
         return;
     };
-    // Keyboard path, as the manual's step-by-step builder: Left/Right ring the
-    // operator, Enter advances, and each value stage takes typed text. The
-    // buttons stay for the mouse.
-    {
-        let mut edited = edit.clone();
-        let keys = modal_keys(ctx);
-        let mut commit = false;
-        if keys.escape {
-            plc.expr_edit = None;
-            return;
+    let choices = compare_choices(plc);
+    let words = destination_choices();
+    let keys = modal_keys(ctx);
+    let move_only = edit.op == "MOVE";
+    if keys.escape {
+        plc.compute_edit = None;
+        return;
+    }
+    let op_index = COMPUTE_OPS
+        .iter()
+        .position(|(op, _)| *op == edit.op)
+        .unwrap_or(0);
+    let editing_value = edit.focus >= 1;
+    let mut typed = false;
+    for character in &keys.typed {
+        if !editing_value {
+            continue;
         }
-        if edited.stage == 0 {
-            let ops: &[&str] = if edited.compute {
-                &["ADD", "SUB", "MUL", "DIV", "MOD"]
-            } else {
-                &["GT", "GE", "EQ", "NE", "LE", "LT"]
-            };
-            let current = ops.iter().position(|op| *op == edited.op).unwrap_or(0);
-            let cycled = if ui_key(ctx, egui::Key::ArrowLeft) {
-                Some((current + ops.len() - 1) % ops.len())
-            } else if ui_key(ctx, egui::Key::ArrowRight) {
-                Some((current + 1) % ops.len())
-            } else {
-                None
-            };
-            if let Some(index) = cycled {
-                edited.op = ops[index].to_string();
-                plc.expr_edit = Some(edited);
-                return;
+        if character.is_ascii_alphanumeric() || matches!(character, '#' | '.' | ':' | '-') {
+            match edit.focus {
+                1 => edit.target.push(*character),
+                2 => edit.left.push(*character),
+                _ => edit.right.push(*character),
             }
-            if keys.enter {
-                edited.stage = 1;
-                edited.text.clear();
-                plc.expr_edit = Some(edited);
-                return;
-            }
-        } else {
-            // The buffer belongs to the editor: a picker clearing its own filter
-            // used to truncate a half-typed value to its first character.
-            for character in &keys.typed {
-                edited.text.push(*character);
-            }
-            if keys.backspace {
-                edited.text.pop();
-            }
-            if keys.enter {
-                let value = edited.text.trim().to_string();
-                if !value.is_empty() {
-                    match edited.stage {
-                        1 => edited.left = value,
-                        2 => edited.right = value,
-                        _ => edited.target = value,
-                    }
-                    edited.text.clear();
-                    edited.stage += 1;
-                    let done = if edited.compute {
-                        edited.stage > 3
-                    } else {
-                        edited.stage > 2
-                    };
-                    if done {
-                        commit = true;
-                    }
-                    plc.expr_edit = Some(edited.clone());
-                }
-            }
-            if !commit {
-                if plc.expr_edit.is_some() {
-                    plc.expr_edit = Some(edited);
-                }
-                return;
-            }
-        }
-        if commit {
-            let cell = if edited.compute {
-                Cell::Compute {
-                    op: edited.op.clone(),
-                    target: edited.target.clone(),
-                    left: edited.left.clone(),
-                    right: edited.right.clone(),
-                }
-            } else {
-                Cell::Compare {
-                    op: edited.op.clone(),
-                    left: edited.left.clone(),
-                    right: edited.right.clone(),
-                }
-            };
-            actions.push(Action::SetCell {
-                section: edited.section,
-                rung: edited.rung,
-                position: edited.position,
-                cell,
-            });
-            plc.expr_edit = None;
-            return;
+            typed = true;
         }
     }
-    let mut close = false;
-    let mut next: Option<ExprEdit> = None;
-    let mut finish: Option<Cell> = None;
-    egui::Window::new(if edit.compute {
-        "COMPUTE COIL  M"
-    } else {
-        "COMPARE CONTACT  G"
-    })
-    // Above the workbench overlay (Foreground), which is itself above the page.
-    .order(egui::Order::Tooltip)
-    .collapsible(false)
-    .resizable(false)
-    .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
-    .show(ctx, |ui| {
-        let stage = if edit.compute {
-            ["operator", "left value", "right value", "destination"][edit.stage.min(3) as usize]
-        } else {
-            ["operator", "left value", "right value"][edit.stage.min(2) as usize]
-        };
-        ui.label(
-            RichText::new(format!(
-                "{}   {}   {}   {}",
-                stage, edit.op, edit.left, edit.right
-            ))
-            .monospace()
-            .size(theme::font_size(9.0))
-            .color(theme::MUTED),
-        );
-        ui.add_space(4.0);
-        match edit.stage {
-            0 => {
-                let operators: &[&str] = if edit.compute {
-                    &["ADD", "SUB", "MUL", "DIV", "MOVE"]
-                } else {
-                    &["GT", "GE", "EQ", "NE", "LE", "LT"]
-                };
-                for op in operators {
-                    if theme::action_button(ui, op, true).clicked() {
-                        let mut edited = edit.clone();
-                        edited.op = (*op).to_string();
-                        edited.stage = 1;
-                        next = Some(edited);
-                    }
-                }
+    if keys.backspace && editing_value {
+        match edit.focus {
+            1 => {
+                edit.target.pop();
             }
-            1 | 2 => {
-                let mut chosen: Option<String> = None;
-                ui.horizontal_wrapped(|ui| {
-                    for index in 0..16 {
-                        if ui.button(format!("MW{index}")).clicked() {
-                            chosen = Some(format!("MW{index}"));
-                        }
-                    }
-                });
-                ui.horizontal_wrapped(|ui| {
-                    for value in ["0", "1", "5", "10", "100", "T#1s", "T#10s"] {
-                        if ui.button(value).clicked() {
-                            chosen = Some(value.to_string());
-                        }
-                    }
-                });
-                ui.horizontal_wrapped(|ui| {
-                    for kind in ["TON", "TOF", "TP"] {
-                        for number in 0..4 {
-                            let name = format!("{kind}{number}.ET");
-                            if ui.button(&name).clicked() {
-                                chosen = Some(name);
-                            }
-                        }
-                    }
-                    for kind in ["CTU", "CTD"] {
-                        for number in 0..4 {
-                            let name = format!("{kind}{number}.CV");
-                            if ui.button(&name).clicked() {
-                                chosen = Some(name);
-                            }
-                        }
-                    }
-                });
-                if let Some(value) = chosen {
-                    let mut edited = edit.clone();
-                    if edited.stage == 1 {
-                        edited.left = value;
-                        edited.stage = 2;
-                    } else {
-                        edited.right = value;
-                        if edited.compute {
-                            edited.stage = 3;
-                        } else {
-                            finish = Some(Cell::Compare {
-                                op: edited.op.clone(),
-                                left: edited.left.clone(),
-                                right: edited.right.clone(),
-                            });
-                        }
-                    }
-                    next = Some(edited);
-                }
+            2 => {
+                edit.left.pop();
             }
             _ => {
-                for index in 0..16 {
-                    if ui.button(format!("MW{index} := result")).clicked() {
-                        finish = Some(Cell::Compute {
-                            op: edit.op.clone(),
-                            target: format!("MW{index}"),
-                            left: edit.left.clone(),
-                            right: edit.right.clone(),
-                        });
-                    }
-                }
+                edit.right.pop();
             }
         }
-        ui.add_space(4.0);
-        if theme::action_button(ui, "Cancel", true).clicked() {
-            close = true;
+        typed = true;
+    }
+    if typed {
+        edit.error = None;
+    }
+
+    let target_cursor = words.iter().position(|choice| choice.value == edit.target);
+    let left_cursor = choices.iter().position(|choice| choice.value == edit.left);
+    let right_cursor = choices.iter().position(|choice| choice.value == edit.right);
+    if keys.up {
+        match edit.focus {
+            0 => {
+                if op_index == 0 {
+                    edit.focus = if move_only { 2 } else { 3 };
+                } else {
+                    edit.op = COMPUTE_OPS[op_index - 1].0.to_string();
+                }
+            }
+            1 => match target_cursor {
+                Some(0) | None => edit.focus = 0,
+                Some(index) => edit.target = words[index - 1].value.clone(),
+            },
+            2 => match left_cursor {
+                Some(0) | None => edit.focus = 1,
+                Some(index) => edit.left = choices[index - 1].value.clone(),
+            },
+            _ => match right_cursor {
+                Some(0) | None => edit.focus = 2,
+                Some(index) => edit.right = choices[index - 1].value.clone(),
+            },
         }
-    });
-    if let Some(cell) = finish {
-        let (section, rung, position) = (edit.section, edit.rung, edit.position);
+    }
+    if keys.down {
+        match edit.focus {
+            0 => {
+                if op_index + 1 >= COMPUTE_OPS.len() {
+                    edit.focus = 1;
+                } else {
+                    edit.op = COMPUTE_OPS[op_index + 1].0.to_string();
+                }
+            }
+            1 => match target_cursor {
+                Some(index) if index + 1 < words.len() => {
+                    edit.target = words[index + 1].value.clone()
+                }
+                _ => edit.focus = 2,
+            },
+            2 => match left_cursor {
+                Some(index) if index + 1 < choices.len() => {
+                    edit.left = choices[index + 1].value.clone()
+                }
+                _ => edit.focus = if move_only { 0 } else { 3 },
+            },
+            _ => match right_cursor {
+                Some(index) if index + 1 < choices.len() => {
+                    edit.right = choices[index + 1].value.clone()
+                }
+                _ => edit.focus = 0,
+            },
+        }
+    }
+    // Left and right walk the three word fields directly.
+    let step = ui_key(ctx, egui::Key::ArrowRight) as i8 - ui_key(ctx, egui::Key::ArrowLeft) as i8;
+    if step != 0 {
+        let last = if move_only { 2 } else { 3 };
+        let current = edit.focus.clamp(1, last);
+        edit.focus = (current as i8 + step).clamp(1, last as i8) as u8;
+    }
+
+    let mut apply = false;
+    if keys.enter {
+        match edit.focus {
+            0 => edit.focus = 1,
+            1 => match destination_error(&edit.target) {
+                Some(error) => edit.error = Some(format!("D {error}")),
+                None => {
+                    edit.target = edit.target.trim().to_ascii_uppercase();
+                    edit.focus = 2;
+                    edit.error = None;
+                }
+            },
+            2 => match operand_error(&edit.left) {
+                Some(error) => edit.error = Some(format!("A {error}")),
+                None => {
+                    edit.left = edit.left.trim().to_string();
+                    edit.error = None;
+                    if move_only {
+                        apply = true;
+                    } else {
+                        edit.focus = 3;
+                    }
+                }
+            },
+            _ => match operand_error(&edit.right) {
+                Some(error) => edit.error = Some(format!("B {error}")),
+                None => {
+                    edit.right = edit.right.trim().to_string();
+                    apply = true;
+                }
+            },
+        }
+    }
+
+    let mut close = false;
+    let mut clicked_op: Option<usize> = None;
+    let mut clicked_field: Option<u8> = None;
+    let mut clicked_value: Option<(u8, usize)> = None;
+    let op = COMPUTE_OPS[op_index].0.to_string();
+    let symbol = match op.as_str() {
+        "ADD" => "+",
+        "SUB" => "-",
+        "MUL" => "*",
+        "DIV" => "/",
+        _ => "",
+    };
+    let summary = if move_only {
+        format!("{} := {}", edit.target, edit.left)
+    } else {
+        format!("{} := {} {symbol} {}", edit.target, edit.left, edit.right)
+    };
+    egui::Window::new("COMPUTE COIL")
+        .order(egui::Order::Tooltip)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_min_width(660.0);
+            ui.set_max_width(660.0);
+            ui.label(
+                RichText::new(summary.clone())
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new("OPERATION")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            for (index, (name, formula)) in COMPUTE_OPS.iter().enumerate() {
+                if window_row(
+                    ui,
+                    name,
+                    formula,
+                    index == op_index,
+                    edit.focus == 0,
+                    index % 2 == 1,
+                )
+                .clicked()
+                {
+                    clicked_op = Some(index);
+                }
+            }
+            ui.add_space(6.0);
+            ui.horizontal_top(|ui| {
+                let gap = 12.0;
+                let width = (ui.available_width() - gap * 2.0) / 3.0;
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, 0.0),
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        let (field, choice) =
+                            operand_column(ui, "D", &mut edit.target, edit.focus == 1, &words);
+                        if field {
+                            clicked_field = Some(1);
+                        }
+                        if let Some(index) = choice {
+                            clicked_value = Some((1, index));
+                        }
+                    },
+                );
+                ui.add_space(gap);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, 0.0),
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        let (field, choice) =
+                            operand_column(ui, "A", &mut edit.left, edit.focus == 2, &choices);
+                        if field {
+                            clicked_field = Some(2);
+                        }
+                        if let Some(index) = choice {
+                            clicked_value = Some((2, index));
+                        }
+                    },
+                );
+                ui.add_space(gap);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, 0.0),
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        if move_only {
+                            ui.label(
+                                RichText::new("B")
+                                    .monospace()
+                                    .size(theme::font_size(9.0))
+                                    .color(theme::MUTED),
+                            );
+                            ui.label(
+                                RichText::new("not used by MOVE")
+                                    .size(theme::font_size(10.0))
+                                    .color(theme::MUTED),
+                            );
+                            return;
+                        }
+                        let (field, choice) =
+                            operand_column(ui, "B", &mut edit.right, edit.focus == 3, &choices);
+                        if field {
+                            clicked_field = Some(3);
+                        }
+                        if let Some(index) = choice {
+                            clicked_value = Some((3, index));
+                        }
+                    },
+                );
+            });
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("D MW0–MW15 · A and B MW0–MW15, 25, T#250ms, TON0.ET, CTU0.CV")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            if let Some(error) = &edit.error {
+                ui.label(
+                    RichText::new(error)
+                        .size(theme::font_size(9.0))
+                        .color(theme::ERROR),
+                );
+            }
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("↑ ↓ WALK · ← → D / A / B · ENTER NEXT · ESC CANCEL")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+        });
+    if let Some(index) = clicked_op {
+        edit.op = COMPUTE_OPS[index].0.to_string();
+        edit.focus = 0;
+    }
+    if let Some(field) = clicked_field {
+        edit.focus = field;
+    }
+    if let Some((field, index)) = clicked_value {
+        match field {
+            1 => edit.target = words[index].value.clone(),
+            2 => edit.left = choices[index].value.clone(),
+            _ => edit.right = choices[index].value.clone(),
+        }
+        edit.error = None;
+    }
+    if apply {
+        // MOVE reads only A, but the compiler still needs a parseable B on the
+        // cell; zero is what it has always been given.
+        let right = if move_only {
+            "0".to_string()
+        } else {
+            edit.right.clone()
+        };
         actions.push(Action::SetCell {
-            section,
-            rung,
-            position,
-            cell,
+            section: edit.section,
+            rung: edit.rung,
+            position: edit.position,
+            cell: Cell::Compute {
+                op: COMPUTE_OPS[op_index].0.to_string(),
+                target: edit.target.clone(),
+                left: edit.left.clone(),
+                right,
+            },
         });
         close = true;
-    } else if let Some(next) = next {
-        plc.expr_edit = Some(next);
     }
     if close {
-        plc.expr_edit = None;
-    }
-    if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
-        plc.expr_edit = None;
+        plc.compute_edit = None;
+    } else {
+        plc.compute_edit = Some(edit);
     }
 }
 
@@ -3141,6 +3335,30 @@ mod block_window_tests {
         );
     }
 
+    /// The window title says what the box does, not just its code.
+    #[test]
+    fn the_box_window_is_titled_by_its_job() {
+        assert_eq!(box_title("TON"), "ON-DELAY TIMER (TON)");
+        assert_eq!(box_title("TOF"), "OFF-DELAY TIMER (TOF)");
+        assert_eq!(box_title("TP"), "PULSE TIMER (TP)");
+        assert_eq!(box_title("CTU"), "UP COUNTER (CTU)");
+        assert_eq!(box_title("CTD"), "DOWN COUNTER (CTD)");
+    }
+
+    /// The box being edited does not hold its own instance: showing "IN USE" for
+    /// the instance the window is editing reads as if another box had it.
+    #[test]
+    fn the_box_being_edited_does_not_use_its_own_instance() {
+        let mut plc = plc_with_timer("TON0");
+        let editing = (0, 0, 1);
+        assert!(used_instances(&plc, "TON", editing).is_empty());
+        assert_eq!(
+            used_instances(&plc, "TON", (0, 0, 0)),
+            vec!["TON0".to_string()],
+            "another cell still holds it"
+        );
+    }
+
     /// The window's instance list is the block type's four slots, named the way
     /// the ladder names them.
     #[test]
@@ -3530,5 +3748,151 @@ mod compare_window_tests {
             values.iter().all(|value| value != "MW16"),
             "only the 16 words"
         );
+    }
+}
+
+#[cfg(test)]
+mod compute_window_tests {
+    use super::*;
+
+    fn frame(plc: &mut PlcUi, events: Vec<egui::Event>) -> Vec<Action> {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        let mut actions = Vec::new();
+        let mut output = ctx.run_pass(input, |ctx| {
+            pickers(plc, ctx, &mut actions);
+        });
+        output.textures_delta.clear();
+        actions
+    }
+
+    fn key(key: egui::Key) -> Vec<egui::Event> {
+        vec![egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]
+    }
+
+    fn compute(plc: &mut PlcUi) {
+        plc.compute_edit = Some(ComputeEdit {
+            section: 0,
+            rung: 0,
+            position: 2,
+            op: "ADD".to_string(),
+            target: "MW1".to_string(),
+            left: "MW0".to_string(),
+            right: "1".to_string(),
+            focus: 0,
+            error: None,
+        });
+    }
+
+    /// The window is the assignment: operation, destination, A, B, then write.
+    #[test]
+    fn enter_walks_operation_destination_a_b_and_applies() {
+        let mut plc = PlcUi::default();
+        compute(&mut plc);
+        for focus in [1, 2, 3] {
+            let _ = frame(&mut plc, key(egui::Key::Enter));
+            assert_eq!(plc.compute_edit.as_ref().unwrap().focus, focus);
+        }
+        let actions = frame(&mut plc, key(egui::Key::Enter));
+        assert!(plc.compute_edit.is_none(), "the window closed on apply");
+        match &actions[0] {
+            Action::SetCell { cell, .. } => match cell {
+                Cell::Compute {
+                    op,
+                    target,
+                    left,
+                    right,
+                } => assert_eq!(
+                    (op.as_str(), target.as_str(), left.as_str(), right.as_str()),
+                    ("ADD", "MW1", "MW0", "1")
+                ),
+                other => panic!("expected a compute cell, got {other:?}"),
+            },
+            other => panic!("expected a cell write, got {other:?}"),
+        }
+    }
+
+    /// MOVE is `D := A`: the window offers no B for it, Enter skips straight to
+    /// the write, and the cell still carries a parseable second operand.
+    #[test]
+    fn move_takes_only_the_destination_and_a() {
+        let mut plc = PlcUi::default();
+        compute(&mut plc);
+        for _ in 0..4 {
+            let _ = frame(&mut plc, key(egui::Key::ArrowDown));
+        }
+        assert_eq!(plc.compute_edit.as_ref().unwrap().op, "MOVE");
+        let _ = frame(&mut plc, key(egui::Key::Enter));
+        assert_eq!(plc.compute_edit.as_ref().unwrap().focus, 1);
+        let _ = frame(&mut plc, key(egui::Key::Enter));
+        assert_eq!(plc.compute_edit.as_ref().unwrap().focus, 2);
+        let actions = frame(&mut plc, key(egui::Key::Enter));
+        assert!(plc.compute_edit.is_none(), "MOVE applied after A");
+        match &actions[0] {
+            Action::SetCell { cell, .. } => match cell {
+                Cell::Compute { op, right, .. } => {
+                    assert_eq!(op, "MOVE");
+                    assert_eq!(right, "0", "the compiler needs a second operand");
+                }
+                other => panic!("expected a compute cell, got {other:?}"),
+            },
+            other => panic!("expected a cell write, got {other:?}"),
+        }
+    }
+
+    /// Only marker words can be written, and a refusal says so and stays put.
+    #[test]
+    fn the_destination_is_a_word_and_a_bad_one_is_refused() {
+        let words: Vec<String> = destination_choices()
+            .into_iter()
+            .map(|choice| choice.value)
+            .collect();
+        assert_eq!(words.first().map(String::as_str), Some("MW0"));
+        assert_eq!(words.last().map(String::as_str), Some("MW15"));
+        assert!(
+            !words.iter().any(|word| word == "25"),
+            "literals cannot be written"
+        );
+
+        let mut plc = PlcUi::default();
+        compute(&mut plc);
+        {
+            let edit = plc.compute_edit.as_mut().unwrap();
+            edit.focus = 1;
+            edit.target = "MW99".into();
+        }
+        let actions = frame(&mut plc, key(egui::Key::Enter));
+        assert!(actions.is_empty());
+        let edit = plc.compute_edit.as_ref().unwrap();
+        assert_eq!(edit.focus, 1);
+        assert_eq!(
+            edit.error.as_deref(),
+            Some("D MW99 is not a marker word: MW0 to MW15")
+        );
+    }
+
+    /// The operands are the compare window's list: words, block values, numbers
+    /// and times. The destination list is words only.
+    #[test]
+    fn the_operand_lists_are_shared_with_the_compare_window() {
+        let mut plc = PlcUi::default();
+        compute(&mut plc);
+        plc.compute_edit.as_mut().unwrap().focus = 2;
+        let _ = frame(&mut plc, key(egui::Key::ArrowDown));
+        assert_eq!(plc.compute_edit.as_ref().unwrap().left, "MW1");
+        let values: Vec<String> = compare_choices(&plc)
+            .into_iter()
+            .map(|choice| choice.value)
+            .collect();
+        assert!(values.iter().any(|value| value == "T#250ms"));
     }
 }
