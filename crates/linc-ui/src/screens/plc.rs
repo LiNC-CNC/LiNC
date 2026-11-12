@@ -922,6 +922,8 @@ pub struct PlcUi {
     pub block_fields: Option<(usize, usize, usize)>,
     /// Which of the block type's four instances the window has selected.
     pub block_instance_cursor: usize,
+    /// Where the window's keys go: the instance list or the typed preset.
+    pub block_focus_preset: bool,
     /// The preset being typed, and why the last Enter refused it.
     pub block_preset_text: String,
     pub block_preset_error: Option<String>,
@@ -1036,6 +1038,7 @@ impl Default for PlcUi {
             keys_blocked: false,
             block_fields: None,
             block_instance_cursor: 0,
+            block_focus_preset: false,
             block_preset_text: String::new(),
             block_preset_error: None,
             undo_stack: Vec::new(),
@@ -2771,9 +2774,6 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
             anchor.request_focus();
         }
     }
-    if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
-        eprintln!("plc cp: after-focus");
-    }
 
     // The menu bar does not take clicks in this build, so the pages and the
     // two actions the workflow needs every minute have keys as well.
@@ -2935,31 +2935,20 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         app.request_plc_save();
     }
     let mut actions: Vec<Action> = Vec::new();
-    if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
-        eprintln!("plc cp: after-chords");
-    }
     // Pickers first: they own the keyboard while they are open, and a text field
     // drawn later in the frame would consume Enter before the picker saw it.
-    crate::screens::plc_grid::pickers(&mut app.plc, ui.ctx(), &mut actions);
-    if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
-        eprintln!("plc cp: after-pickers");
-    }
+    let modal_owned = crate::screens::plc_grid::pickers(&mut app.plc, ui.ctx(), &mut actions);
 
-    if !app.plc.menu_open {
+    // A window on top owns the letters: without this a preset's `m` or `s` also
+    // ran the grid's commands, and Backspace deleted the cell under the box.
+    if !app.plc.menu_open && !modal_owned {
         crate::screens::plc_grid::editor_keys(app, ui, &mut actions);
         il_keys(&mut app.plc, ui, &mut actions);
         fbd_keys(&mut app.plc, ui, &mut actions);
     }
-    if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
-        eprintln!("plc cp: after-keys");
-    }
 
     {
         let plc = &mut app.plc;
-
-        if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
-            eprintln!("plc cp: after-keys");
-        }
 
         let height = (ui.available_height() - STATUS_BAR_HEIGHT - 4.0).max(160.0);
         // A fixed column for the shortcuts and the rest for the page: without

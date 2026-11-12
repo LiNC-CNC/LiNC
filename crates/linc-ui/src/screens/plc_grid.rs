@@ -525,19 +525,22 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
 
 /// The element picker and, after it, the operand list.
 
-pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+/// Draws every window that sits on top of the grid and returns true when one of
+/// them held the keyboard this frame, so the grid's own keys stand down.
+pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) -> bool {
     // Escape closes any picker here, before the editor's own Escape, so leaving
     // a list never also leaves the editor.
     if modal_keys(ctx).escape {
+        let owned = modal_open(plc);
         clear_pickers(plc);
-        return;
+        return owned;
     }
     // One picker owns a frame's keys: the element list is drawn before the
     // operand list, and when its letter chose an item the same keystroke must
     // not also land in the operand filter.
     let element = element_picker(plc, ctx, actions);
     if element.handled {
-        return;
+        return true;
     }
     let operand_drawn = operand_picker(plc, ctx, actions);
     let coil_drawn = coil_picker(plc, ctx, actions);
@@ -557,6 +560,17 @@ pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     expr_editor(plc, ctx, actions);
     block_editor(plc, ctx, actions);
     xref_window(plc, ctx);
+    modal_open(plc)
+}
+
+/// True when any window of this module is up. Read after the draw, so a window
+/// that closed on this frame's Enter does not hand the same Enter to the grid.
+fn modal_open(plc: &PlcUi) -> bool {
+    plc.picker.is_some()
+        || plc.operand_pick.is_some()
+        || plc.coil_pick.is_some()
+        || plc.expr_edit.is_some()
+        || plc.block_edit.is_some()
 }
 
 /// Timer and counter boxes: pick the instance from the ones the block type has,
@@ -591,6 +605,7 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
         plc.block_preset_text = preset.clone();
         plc.block_preset_error = None;
         plc.block_instance_cursor = instance_number(&block, &instance).unwrap_or(0);
+        plc.block_focus_preset = false;
     }
     let used = used_instances(plc, &block);
     let counters = block.starts_with("CT");
@@ -618,21 +633,29 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
                 let name = format!("{block}{number}");
                 let row_selected = plc.block_instance_cursor == number;
                 let taken = used.contains(&name);
-                let (rect, _) = ui.allocate_exact_size(
+                let (rect, response) = ui.allocate_exact_size(
                     egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
-                    egui::Sense::hover(),
+                    egui::Sense::click(),
                 );
+                if response.clicked() {
+                    plc.block_instance_cursor = number;
+                    plc.block_focus_preset = false;
+                }
                 let painter = ui.painter();
                 if row_selected {
                     painter.rect_filled(rect, egui::CornerRadius::ZERO, theme::PANEL_RAISED);
-                    painter.rect_filled(
-                        egui::Rect::from_min_size(
-                            rect.min,
-                            egui::vec2(theme::SELECTION_BAR, rect.height()),
-                        ),
-                        egui::CornerRadius::ZERO,
-                        theme::ACCENT,
-                    );
+                    // The accent bar says where the keys are; the plain band keeps
+                    // saying which instance is chosen while the preset is focused.
+                    if !plc.block_focus_preset {
+                        painter.rect_filled(
+                            egui::Rect::from_min_size(
+                                rect.min,
+                                egui::vec2(theme::SELECTION_BAR, rect.height()),
+                            ),
+                            egui::CornerRadius::ZERO,
+                            theme::ACCENT,
+                        );
+                    }
                 } else if number % 2 == 1 {
                     painter.rect_filled(rect, egui::CornerRadius::ZERO, theme::SURFACE);
                 }
@@ -665,22 +688,37 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
             // The typed value is the window's own buffer: no text widget holds
             // the keyboard, so the arrows never have to be given back to the
             // instance list first.
-            let (rect, _) = ui.allocate_exact_size(
+            let (rect, response) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width(), theme::MIN_TARGET),
-                egui::Sense::hover(),
+                egui::Sense::click(),
             );
+            if response.clicked() {
+                plc.block_focus_preset = true;
+            }
+            let focused = plc.block_focus_preset;
             let painter = ui.painter();
             painter.rect_filled(rect, egui::CornerRadius::same(3), theme::SURFACE);
             painter.rect_stroke(
                 rect,
                 egui::CornerRadius::same(3),
-                egui::Stroke::new(1.0, theme::BORDER),
+                egui::Stroke::new(
+                    1.0,
+                    if focused {
+                        theme::ACCENT
+                    } else {
+                        theme::BORDER
+                    },
+                ),
                 egui::StrokeKind::Inside,
             );
             painter.text(
                 egui::pos2(rect.left() + 8.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
-                format!("{}▌", plc.block_preset_text),
+                if focused {
+                    format!("{}▌", plc.block_preset_text)
+                } else {
+                    plc.block_preset_text.clone()
+                },
                 egui::FontId::monospace(theme::font_size(11.0)),
                 theme::FG,
             );
@@ -703,13 +741,13 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
             }
             ui.add_space(8.0);
             ui.label(
-                RichText::new("↑ ↓ INSTANCE · TYPE THE PRESET")
+                RichText::new("↑ ↓ MOVE BETWEEN INSTANCES AND THE PRESET")
                     .monospace()
                     .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
             ui.label(
-                RichText::new("BACKSPACE · ENTER APPLY · ESC CANCEL")
+                RichText::new("ENTER APPLY · ESC CANCEL")
                     .monospace()
                     .size(theme::font_size(9.0))
                     .color(theme::MUTED),
@@ -717,12 +755,28 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
         });
     let keys = modal_keys(ctx);
     if keys.up {
-        plc.block_instance_cursor = plc.block_instance_cursor.saturating_sub(1);
+        // Past the first row the focus leaves the list for the preset, and from
+        // there any arrow gives the list back at the row it left.
+        if plc.block_focus_preset {
+            plc.block_focus_preset = false;
+        } else if plc.block_instance_cursor == 0 {
+            plc.block_focus_preset = true;
+        } else {
+            plc.block_instance_cursor -= 1;
+        }
     }
     if keys.down {
-        plc.block_instance_cursor = (plc.block_instance_cursor + 1).min(3);
+        if plc.block_focus_preset {
+            plc.block_focus_preset = false;
+        } else if plc.block_instance_cursor + 1 >= 4 {
+            plc.block_focus_preset = true;
+        } else {
+            plc.block_instance_cursor += 1;
+        }
     }
-    if keys.backspace {
+    // The preset edits only while it holds the keys; on the list Backspace is
+    // not a delete key for anything.
+    if keys.backspace && plc.block_focus_preset {
         plc.block_preset_text.pop();
     }
     for character in keys.typed {
@@ -744,6 +798,17 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
     if keys.escape {
         close = true;
     }
+    // The grid reads these too; a window that holds the keyboard takes them with
+    // it so nothing lands on the ladder behind.
+    ctx.input_mut(|input| {
+        for key in [
+            egui::Key::ArrowUp,
+            egui::Key::ArrowDown,
+            egui::Key::Backspace,
+        ] {
+            input.consume_key(egui::Modifiers::NONE, key);
+        }
+    });
     if apply {
         let instance = format!("{block}{}", plc.block_instance_cursor);
         let preset = plc.block_preset_text.trim().to_string();
@@ -2524,6 +2589,120 @@ mod block_window_tests {
         assert_eq!(instance_number("TON", "TON2"), Some(2));
         assert_eq!(instance_number("TON", "TOF2"), None);
         assert_eq!(instance_number("TON", "TON9"), None);
+    }
+
+    fn frame(plc: &mut PlcUi, events: Vec<egui::Event>) -> Vec<Action> {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        let mut actions = Vec::new();
+        let mut output = ctx.run_pass(input, |ctx| {
+            pickers(plc, ctx, &mut actions);
+        });
+        output.textures_delta.clear();
+        actions
+    }
+
+    fn plc_with_timer(instance: &str) -> PlcUi {
+        let mut plc = PlcUi::default();
+        let mut pou = linc_plc_core::model::Pou::new("main", linc_plc_core::model::PouLanguage::Ld);
+        pou.sections = vec![linc_plc_core::model::Section {
+            name: String::new(),
+            rungs: vec![linc_plc_core::model::Rung {
+                comment: String::new(),
+                logic: linc_plc_core::model::Logic::Const { value: true },
+                coil: linc_plc_core::model::Coil::new("", linc_plc_core::model::CoilKind::Normal),
+                cells: vec![
+                    Cell::Wire,
+                    Cell::Block {
+                        block: "TON".into(),
+                        instance: instance.into(),
+                        preset: "T#1s".into(),
+                    },
+                ],
+            }],
+        }];
+        plc.project = linc_plc_core::model::Project::new("t");
+        plc.project.pous = vec![pou];
+        plc.pou = 0;
+        plc.block_edit = Some((0, 0, 1));
+        plc
+    }
+
+    /// The arrows are the only way between the two fields, because the panel
+    /// keyboard has no Tab: walking off either end of the instance list puts the
+    /// keys in the preset, and the next arrow gives the list back where it was.
+    #[test]
+    fn the_arrows_move_focus_between_the_list_and_the_preset() {
+        let keys = |plc: &mut PlcUi, key: egui::Key| {
+            frame(
+                plc,
+                vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            )
+        };
+        let mut plc = plc_with_timer("TON0");
+        keys(&mut plc, egui::Key::ArrowUp);
+        assert!(
+            plc.block_focus_preset,
+            "up off the first row enters the preset"
+        );
+        keys(&mut plc, egui::Key::ArrowUp);
+        assert!(!plc.block_focus_preset, "an arrow gives the list back");
+        assert_eq!(plc.block_instance_cursor, 0, "it comes back where it left");
+
+        let mut plc = plc_with_timer("TON3");
+        keys(&mut plc, egui::Key::ArrowUp);
+        assert!(!plc.block_focus_preset);
+        assert_eq!(plc.block_instance_cursor, 2);
+        keys(&mut plc, egui::Key::ArrowDown);
+        assert_eq!(plc.block_instance_cursor, 3);
+        keys(&mut plc, egui::Key::ArrowDown);
+        assert!(
+            plc.block_focus_preset,
+            "down off the last row enters the preset"
+        );
+    }
+
+    /// Backspace belongs to the field being edited: on the instance list it must
+    /// not eat the preset, and it must never reach the ladder behind either.
+    #[test]
+    fn backspace_only_edits_the_preset_while_the_preset_holds_the_keys() {
+        let key = |plc: &mut PlcUi| {
+            frame(
+                plc,
+                vec![egui::Event::Key {
+                    key: egui::Key::Backspace,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            )
+        };
+        let mut plc = plc_with_timer("TON0");
+        key(&mut plc); // first frame syncs the buffer from the box
+        plc.block_preset_text = "T#5s".into();
+        key(&mut plc);
+        assert_eq!(
+            plc.block_preset_text, "T#5s",
+            "the list leaves the preset alone"
+        );
+        assert_eq!(
+            plc.block_instance_cursor, 0,
+            "and it is not a list key either"
+        );
+
+        plc.block_focus_preset = true;
+        key(&mut plc);
+        assert_eq!(plc.block_preset_text, "T#5", "the preset field edits");
     }
 
     /// Escape used to skip the window's draw for one frame and leave its state

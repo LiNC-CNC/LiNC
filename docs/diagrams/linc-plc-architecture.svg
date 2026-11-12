@@ -1,0 +1,804 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1760" height="1480" viewBox="0 0 1760 1480" role="img" aria-labelledby="title desc">
+<title id="title">LiNC program architecture: the ladder PLC beside LinuxCNC</title>
+<desc id="desc">LiNC runs three cooperating user-space processes — the egui HMI, the panel service, and the ladder PLC daemon — over a shared HAL backplane. linc-plc owns its own linc_plc.* HAL component and is driven by the HMI over a Unix socket. It does not use NML, the interpreter or motion, and it is not a safety function.</desc>
+
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#0c1014"/>
+    <stop offset="0.55" stop-color="#0a0d10"/>
+    <stop offset="1" stop-color="#080a0c"/>
+  </linearGradient>
+  <radialGradient id="glowBlue" cx="0.18" cy="0.06" r="0.5">
+    <stop offset="0" stop-color="#1c3d5c" stop-opacity="0.5"/>
+    <stop offset="1" stop-color="#1c3d5c" stop-opacity="0"/>
+  </radialGradient>
+  <radialGradient id="glowAmber" cx="0.82" cy="0.12" r="0.45">
+    <stop offset="0" stop-color="#4a3410" stop-opacity="0.45"/>
+    <stop offset="1" stop-color="#4a3410" stop-opacity="0"/>
+  </radialGradient>
+  <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+    <circle cx="1" cy="1" r="1" fill="#7f8d9b" opacity="0.13"/>
+  </pattern>
+  <linearGradient id="gTile" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#141a21"/>
+    <stop offset="1" stop-color="#0f1419"/>
+  </linearGradient>
+  <linearGradient id="gHMI" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#0f1915"/>
+    <stop offset="0.5" stop-color="#0c1311"/>
+    <stop offset="1" stop-color="#0b1110"/>
+  </linearGradient>
+  <linearGradient id="gPLC" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#1c1509"/>
+    <stop offset="0.45" stop-color="#151009"/>
+    <stop offset="1" stop-color="#110e08"/>
+  </linearGradient>
+  <linearGradient id="gPanel" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#181320"/>
+    <stop offset="0.5" stop-color="#121017"/>
+    <stop offset="1" stop-color="#0f0d13"/>
+  </linearGradient>
+  <linearGradient id="gCNC" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#101720"/>
+    <stop offset="0.55" stop-color="#0d1219"/>
+    <stop offset="1" stop-color="#0b0f14"/>
+  </linearGradient>
+  <linearGradient id="gAux" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#12161b"/>
+    <stop offset="1" stop-color="#0e1115"/>
+  </linearGradient>
+  <linearGradient id="gBus" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#0d2229"/>
+    <stop offset="0.5" stop-color="#0c1c22"/>
+    <stop offset="1" stop-color="#0b171c"/>
+  </linearGradient>
+  <linearGradient id="gHeaderRule" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#3ddc84"/>
+    <stop offset="0.55" stop-color="#4da3ff"/>
+    <stop offset="1" stop-color="#ffb020"/>
+  </linearGradient>
+
+  <filter id="softShadow" x="-40%" y="-40%" width="180%" height="200%">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="18" result="b"/>
+    <feOffset in="b" dx="0" dy="10" result="o"/>
+    <feFlood flood-color="#000000" flood-opacity="0.45" result="c"/>
+    <feComposite in="c" in2="o" operator="in" result="s"/>
+    <feMerge><feMergeNode in="s"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="plcGlow" x="-30%" y="-30%" width="160%" height="160%">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="12" result="b"/>
+    <feFlood flood-color="#ffb020" flood-opacity="0.32" result="c"/>
+    <feComposite in="c" in2="b" operator="in" result="g"/>
+    <feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="chipShadow" x="-60%" y="-80%" width="220%" height="280%">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="b"/>
+    <feOffset in="b" dx="0" dy="2" result="o"/>
+    <feFlood flood-color="#000000" flood-opacity="0.35" result="c"/>
+    <feComposite in="c" in2="o" operator="in" result="s"/>
+    <feMerge><feMergeNode in="s"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+
+  <marker id="aPurple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" fill="#c084fc"/>
+  </marker>
+  <marker id="aGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" fill="#3ddc84"/>
+  </marker>
+  <marker id="aCyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" fill="#67e8f9"/>
+  </marker>
+  <marker id="aAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" fill="#ffb020"/>
+  </marker>
+  <marker id="aBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" fill="#4da3ff"/>
+  </marker>
+  <marker id="aRed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" fill="#ff6b6b"/>
+  </marker>
+
+  <style>
+    text { font-family: "IBM Plex Sans", "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .mono { font-family: "IBM Plex Mono", "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 3px; fill: #7c8894; }
+    .brand { font-size: 41px; font-weight: 700; letter-spacing: -0.8px; fill: #f2f6fa; }
+    .standfirst { font-size: 15px; fill: #93a0ad; }
+    .band-num { font-size: 10.5px; font-weight: 700; letter-spacing: 0.5px; fill: #9fb0bf; }
+    .band-title { font-size: 11px; font-weight: 700; letter-spacing: 2.4px; fill: #aab7c4; }
+    .band-note { font-size: 10px; fill: #6f7c88; }
+    .tile-title { font-size: 15px; font-weight: 600; fill: #eef3f8; }
+    .tile-line { font-size: 11.2px; fill: #93a0ad; }
+    .tile-mono { font-size: 9.6px; fill: #6f7d8a; }
+    .proc-name { font-size: 16px; font-weight: 700; }
+    .proc-tag { font-size: 9.5px; letter-spacing: 0.4px; fill: #7c8894; }
+    .proc-sub { font-size: 10.2px; fill: #7e8b97; }
+    .card-title { font-size: 11.8px; font-weight: 600; fill: #dfe7ef; }
+    .card-sub { font-size: 9.5px; fill: #8794a1; }
+    .card-mono { font-size: 9.2px; fill: #7a8794; }
+    .body { font-size: 10.2px; fill: #94a1ad; }
+    .chip { font-size: 8.4px; font-weight: 600; letter-spacing: 0.5px; }
+    .pin { font-size: 8.8px; }
+    .seam-title { font-size: 12.5px; font-weight: 600; fill: #e8eef5; }
+    .seam-body { font-size: 10.3px; fill: #8e9ba7; }
+    .foot { font-size: 9.6px; fill: #5e6a76; }
+    .arrow-label { font-size: 8.6px; }
+  </style>
+</defs>
+
+<rect width="1760" height="1480" fill="url(#bg)"/>
+<rect width="1760" height="1480" fill="url(#glowBlue)"/>
+<rect width="1760" height="1480" fill="url(#glowAmber)"/>
+<rect width="1760" height="1480" fill="url(#dots)"/>
+
+<!-- ===================== HEADER ===================== -->
+<g>
+  <text class="eyebrow" x="60" y="50">LiNC · PROGRAM ARCHITECTURE</text>
+  <rect x="60" y="62" width="72" height="3" rx="1.5" fill="url(#gHeaderRule)"/>
+  <text class="brand" x="60" y="108">The PLC beside LinuxCNC</text>
+  <text class="standfirst" x="60" y="138">The HMI, the panel service and the ladder daemon share one HAL backplane. LinuxCNC keeps the motion authority; linc-plc keeps its own pins.</text>
+
+  <g>
+    <rect x="1180" y="40" width="520" height="88" rx="12" fill="#1a0f10" stroke="#5c2a2c" stroke-width="1.2"/>
+    <path d="M1214,60 L1228,84 L1200,84 Z" fill="none" stroke="#ff6b6b" stroke-width="1.6" stroke-linejoin="round"/>
+    <line x1="1214" y1="68" x2="1214" y2="76" stroke="#ff6b6b" stroke-width="1.6" stroke-linecap="round"/>
+    <circle cx="1214" cy="80" r="0.9" fill="#ff6b6b"/>
+    <text x="1244" y="66" font-size="12.5" font-weight="700" letter-spacing="1.7" fill="#ff9494">NOT A SAFETY FUNCTION</text>
+    <text x="1244" y="87" font-size="11.4" fill="#c9b4b5">E-stop, limits, guards, door interlocks and STO</text>
+    <text x="1244" y="104" font-size="11.4" fill="#c9b4b5">stay in the hardwired circuit. No software rates them.</text>
+    <text x="1244" y="120" font-size="9.6" class="mono" fill="#a97f82">linc-plc: ordinary HAL outputs, no redundancy, no watchdog</text>
+  </g>
+</g>
+
+<!-- ===================== BAND 01 ===================== -->
+<g>
+  <rect x="60" y="178" width="24" height="17" rx="5" fill="#151b21" stroke="#2b343d"/>
+  <text class="band-num" x="72" y="190" text-anchor="middle">01</text>
+  <text class="band-title" x="94" y="190">OPERATOR SURFACES</text>
+  <line x1="248" y1="184.5" x2="1120" y2="184.5" stroke="#232b33" stroke-width="1"/>
+  <g class="band-note">
+    <circle cx="1166" cy="184.5" r="3.5" fill="#3ddc84"/>
+    <text x="1176" y="188">linc HMI</text>
+    <circle cx="1244" cy="184.5" r="3.5" fill="#ffb020"/>
+    <text x="1254" y="188">linc-plc</text>
+    <circle cx="1316" cy="184.5" r="3.5" fill="#c084fc"/>
+    <text x="1326" y="188">linc-panel</text>
+    <circle cx="1408" cy="184.5" r="3.5" fill="#67e8f9"/>
+    <text x="1418" y="188">HAL</text>
+    <circle cx="1462" cy="184.5" r="3.5" fill="#4da3ff"/>
+    <text x="1472" y="188">NML</text>
+    <circle cx="1522" cy="184.5" r="3.5" fill="#ff6b6b"/>
+    <text x="1532" y="188">hardwired safety</text>
+  </g>
+
+  <!-- CNC panel -->
+  <g>
+    <rect x="60" y="200" width="330" height="96" rx="12" fill="url(#gTile)" stroke="#262e37"/>
+    <rect x="60" y="214" width="3" height="26" rx="1.5" fill="#c084fc"/>
+    <text class="tile-title" x="78" y="230">CNC control panel</text>
+    <text class="tile-line" x="78" y="252">58 keys · mode selector · override dials</text>
+    <text class="tile-line" x="78" y="270">status lamps · serial link to linc-panel</text>
+    <text class="tile-mono mono" x="78" y="288">/dev/ttyUSB0 · active-low</text>
+    <g opacity="0.75" transform="translate(336,212)">
+      <rect x="0" y="0" width="38" height="34" rx="5" fill="none" stroke="#c084fc" stroke-width="1.2"/>
+      <circle cx="9" cy="10" r="3.4" fill="none" stroke="#c084fc"/>
+      <circle cx="20" cy="10" r="3.4" fill="none" stroke="#c084fc"/>
+      <circle cx="31" cy="10" r="3.4" fill="none" stroke="#c084fc"/>
+      <rect x="5" y="20" width="8" height="7" rx="1.5" fill="#c084fc" opacity="0.6"/>
+      <rect x="17" y="20" width="8" height="7" rx="1.5" fill="#c084fc" opacity="0.35"/>
+      <rect x="29" y="20" width="4" height="7" rx="1.5" fill="#c084fc" opacity="0.6"/>
+    </g>
+  </g>
+
+  <!-- pendant -->
+  <g>
+    <rect x="406" y="200" width="310" height="96" rx="12" fill="url(#gTile)" stroke="#262e37"/>
+    <rect x="406" y="214" width="3" height="26" rx="1.5" fill="#67e8f9"/>
+    <text class="tile-title" x="424" y="230">Handwheel pendant</text>
+    <text class="tile-line" x="424" y="252">MPG axis select · ×1 ×10 ×100</text>
+    <text class="tile-line" x="424" y="270">emergency stop · publish HAL pins</text>
+    <text class="tile-mono mono" x="424" y="288">hal/linc-pendant.hal</text>
+    <g opacity="0.7" transform="translate(670,212)">
+      <circle cx="17" cy="17" r="14" fill="none" stroke="#67e8f9" stroke-width="1.2"/>
+      <circle cx="17" cy="17" r="5" fill="none" stroke="#67e8f9"/>
+      <line x1="17" y1="3" x2="17" y2="8" stroke="#67e8f9"/>
+      <line x1="17" y1="26" x2="17" y2="31" stroke="#67e8f9"/>
+      <line x1="3" y1="17" x2="8" y2="17" stroke="#67e8f9"/>
+      <line x1="26" y1="17" x2="31" y2="17" stroke="#67e8f9"/>
+    </g>
+  </g>
+
+  <!-- keyboard -->
+  <g>
+    <rect x="732" y="200" width="368" height="96" rx="12" fill="url(#gTile)" stroke="#262e37"/>
+    <rect x="732" y="214" width="3" height="26" rx="1.5" fill="#3ddc84"/>
+    <text class="tile-title" x="750" y="230">Industrial keyboard</text>
+    <text class="tile-line" x="750" y="252">every page, mode and command is a key</text>
+    <text class="tile-line" x="750" y="270">no touchscreen and no pointer required</text>
+    <text class="tile-mono mono" x="750" y="288">function keys · paging · soft keys</text>
+    <g opacity="0.65" transform="translate(1042,214)">
+      <rect x="0" y="0" width="42" height="30" rx="4" fill="none" stroke="#3ddc84" stroke-width="1.2"/>
+      <g fill="#3ddc84">
+        <rect x="5" y="6" width="7" height="5" rx="1" opacity="0.8"/><rect x="15" y="6" width="7" height="5" rx="1" opacity="0.5"/>
+        <rect x="25" y="6" width="7" height="5" rx="1" opacity="0.8"/><rect x="35" y="6" width="3" height="5" rx="1" opacity="0.4"/>
+        <rect x="5" y="14" width="4" height="5" rx="1" opacity="0.5"/><rect x="12" y="14" width="7" height="5" rx="1" opacity="0.8"/>
+        <rect x="22" y="14" width="7" height="5" rx="1" opacity="0.5"/><rect x="32" y="14" width="6" height="5" rx="1" opacity="0.8"/>
+        <rect x="12" y="21" width="19" height="4" rx="1" opacity="0.45"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- editorial note -->
+  <g>
+    <rect x="1116" y="200" width="584" height="96" rx="12" fill="#0e1216" stroke="#242c34" stroke-dasharray="4 5"/>
+    <rect x="1116" y="216" width="3" height="58" rx="1.5" fill="#4da3ff" opacity="0.65"/>
+    <text class="tile-title" x="1136" y="228" font-size="13.4">The panel is the control surface, not the screen.</text>
+    <text class="tile-line" x="1136" y="250">No soft E-stop, no on-screen jog pad, no override slider. A second copy on a touch</text>
+    <text class="tile-line" x="1136" y="268">screen can drift out of agreement with the hardware, so those controls stay where the</text>
+    <text class="tile-line" x="1136" y="286">operator's hands expect them and LiNC reads them back over HAL.</text>
+  </g>
+</g>
+
+<!-- connectors band 01 -> band 02 -->
+<g fill="none" stroke-width="1.5">
+  <path d="M180,296 L180,330" stroke="#c084fc" marker-end="url(#aPurple)"/>
+  <path d="M520,296 L520,330" stroke="#67e8f9" marker-end="url(#aCyan)"/>
+  <path d="M880,296 L880,330" stroke="#3ddc84" marker-end="url(#aGreen)"/>
+</g>
+<text class="arrow-label" x="188" y="318" fill="#a879d6">serial</text>
+<text class="arrow-label" x="528" y="318" fill="#6cc9d8">HAL pins</text>
+<text class="arrow-label" x="888" y="318" fill="#4fb87b">key events</text>
+
+<!-- ===================== BAND 02 ===================== -->
+<g>
+  <rect x="60" y="316" width="24" height="17" rx="5" fill="#151b21" stroke="#2b343d"/>
+  <text class="band-num" x="72" y="328" text-anchor="middle">02</text>
+  <text class="band-title" x="94" y="328">USER-SPACE PROCESSES</text>
+  <line x1="322" y1="322.5" x2="1700" y2="322.5" stroke="#232b33" stroke-width="1"/>
+  <text class="band-note" x="1690" y="318" text-anchor="end">separate processes · separate failure domains · one HAL session</text>
+</g>
+
+<!-- ============ linc-panel ============ -->
+<g>
+  <rect x="60" y="336" width="232" height="524" rx="14" fill="url(#gPanel)" stroke="#3d2f4d" stroke-width="1.2"/>
+  <rect x="60.5" y="352" width="3" height="492" rx="1.5" fill="#c084fc" opacity="0.8"/>
+  <text class="proc-name mono" x="78" y="362" fill="#d8b4fe">linc-panel</text>
+  <text class="proc-tag mono" x="274" y="361" text-anchor="end">SERVICE</text>
+  <text class="proc-sub" x="78" y="378">owns the panel link</text>
+  <line x1="78" y1="388" x2="274" y2="388" stroke="#2b2436"/>
+
+  <g>
+    <rect x="74" y="398" width="204" height="56" rx="9" fill="#0d0b11" stroke="#2a2433"/>
+    <text class="card-title" x="86" y="416">Serial driver</text>
+    <text class="card-mono mono" x="86" y="433">/dev/ttyUSB0</text>
+    <text class="card-sub" x="86" y="447">58 keys · active-low</text>
+  </g>
+  <g>
+    <rect x="74" y="462" width="204" height="56" rx="9" fill="#0d0b11" stroke="#2a2433"/>
+    <text class="card-title" x="86" y="480">Panel protocol</text>
+    <text class="card-sub" x="86" y="497">state → PanelSnapshot</text>
+    <text class="card-sub" x="86" y="511">modes · override counts</text>
+  </g>
+  <g>
+    <rect x="74" y="526" width="204" height="56" rx="9" fill="#0d0b11" stroke="#2a2433"/>
+    <text class="card-title" x="86" y="544">CncPanelHal</text>
+    <text class="card-sub" x="86" y="561">writes cnc_panel.*</text>
+    <text class="card-sub" x="86" y="575">one writer per pin</text>
+  </g>
+  <g>
+    <rect x="74" y="590" width="204" height="68" rx="9" fill="#0d0b11" stroke="#2a2433" stroke-dasharray="3 4"/>
+    <text class="card-title" x="86" y="608">Simulated face</text>
+    <text class="card-sub" x="86" y="625">--window: same keys,</text>
+    <text class="card-sub" x="86" y="639">dials and lamps on screen</text>
+    <text class="card-sub" x="86" y="653">same cnc_panel.* pins</text>
+  </g>
+
+  <g>
+    <text class="body" x="78" y="682">The HMI never opens the port</text>
+    <text class="body" x="78" y="698">and never writes cnc_panel.*.</text>
+    <text class="body" x="78" y="714">An HMI crash cannot take</text>
+    <text class="body" x="78" y="730">panel control away from the</text>
+    <text class="body" x="78" y="746">machine.</text>
+  </g>
+  <g>
+    <rect x="74" y="800" width="204" height="40" rx="9" fill="#0c1811" stroke="#26513a"/>
+    <circle cx="90" cy="820" r="4" fill="#3ddc84"/>
+    <text x="102" y="824" font-size="9.6" fill="#8fdcae">survives an HMI crash</text>
+  </g>
+</g>
+
+<!-- ============ linc HMI ============ -->
+<g>
+  <rect x="308" y="336" width="632" height="524" rx="14" fill="url(#gHMI)" stroke="#2c5c43" stroke-width="1.3"/>
+  <rect x="308.5" y="352" width="3" height="492" rx="1.5" fill="#3ddc84" opacity="0.85"/>
+  <text class="proc-name mono" x="326" y="362" fill="#74eea9">linc</text>
+  <text class="proc-tag mono" x="922" y="361" text-anchor="end">HMI PROCESS</text>
+  <text class="proc-sub" x="326" y="378">egui · Rust · in-process backend</text>
+  <text class="proc-sub mono" x="914" y="378" text-anchor="end" font-size="9">no helper · no JSON bridge</text>
+  <line x1="326" y1="388" x2="922" y2="388" stroke="#24402f"/>
+
+  <!-- row 1: egui shell -->
+  <g>
+    <rect x="322" y="398" width="604" height="72" rx="10" fill="#0a100d" stroke="#264634"/>
+    <text class="card-title" x="336" y="416">egui shell — 11 pages, one frame</text>
+    <text class="card-sub" x="922" y="416" text-anchor="end">keyboard and panel driven</text>
+    <g>
+      <rect x="336" y="428" width="46" height="18" rx="4" fill="#12211a" stroke="#2b4d3a"/><text class="chip mono" x="359" y="440.5" text-anchor="middle" fill="#9fb3a9">MACHINE</text>
+      <rect x="387" y="428" width="46" height="18" rx="4" fill="#12211a" stroke="#2b4d3a"/><text class="chip mono" x="410" y="440.5" text-anchor="middle" fill="#9fb3a9">PROGRAM</text>
+      <rect x="438" y="428" width="46" height="18" rx="4" fill="#12211a" stroke="#2b4d3a"/><text class="chip mono" x="461" y="440.5" text-anchor="middle" fill="#9fb3a9">OFFSETS</text>
+      <rect x="489" y="428" width="38" height="18" rx="4" fill="#12211a" stroke="#2b4d3a"/><text class="chip mono" x="508" y="440.5" text-anchor="middle" fill="#9fb3a9">TOOLS</text>
+      <rect x="532" y="428" width="40" height="18" rx="4" fill="#12211a" stroke="#2b4d3a"/><text class="chip mono" x="552" y="440.5" text-anchor="middle" fill="#9fb3a9">DIAG</text>
+      <rect x="577" y="428" width="34" height="18" rx="4" fill="#12211a" stroke="#2b4d3a"/><text class="chip mono" x="594" y="440.5" text-anchor="middle" fill="#9fb3a9">HELP</text>
+      <rect x="616" y="428" width="36" height="18" rx="4" fill="#12211a" stroke="#2b4d3a"/><text class="chip mono" x="634" y="440.5" text-anchor="middle" fill="#9fb3a9">FILES</text>
+      <rect x="657" y="428" width="38" height="18" rx="4" fill="#12211a" stroke="#2b4d3a"/><text class="chip mono" x="676" y="440.5" text-anchor="middle" fill="#9fb3a9">PROBE</text>
+      <rect x="700" y="428" width="44" height="18" rx="4" fill="#12211a" stroke="#2b4d3a"/><text class="chip mono" x="722" y="440.5" text-anchor="middle" fill="#9fb3a9">HOMING</text>
+      <rect x="749" y="428" width="44" height="18" rx="4" fill="#12211a" stroke="#2b4d3a"/><text class="chip mono" x="771" y="440.5" text-anchor="middle" fill="#9fb3a9">MANUAL</text>
+      <rect x="798" y="428" width="30" height="18" rx="4" fill="#2a1c05" stroke="#8a6414"/><text class="chip mono" x="813" y="440.5" text-anchor="middle" fill="#ffb020">PLC</text>
+    </g>
+    <text class="card-sub" x="336" y="462">syntax-highlighted editor · 3D toolpath · DRO · probe flows · G-code help, all drawn in the same frame</text>
+  </g>
+
+  <!-- row 2 -->
+  <g>
+    <rect x="322" y="480" width="286" height="62" rx="10" fill="#0a100d" stroke="#264634"/>
+    <text class="card-title" x="336" y="498">BackendHandle</text>
+    <text class="card-sub" x="336" y="515">worker thread · status_hz</text>
+    <text class="card-sub" x="336" y="531">snapshots out · typed commands in</text>
+
+    <rect x="618" y="480" width="308" height="62" rx="10" fill="#0a100d" stroke="#264634"/>
+    <text class="card-title" x="632" y="498">SnapshotBuilder</text>
+    <text class="card-sub" x="632" y="515">Status → MachineSnapshot</text>
+    <text class="card-sub" x="632" y="531">faults · probe trips · offsets · panel</text>
+  </g>
+
+  <!-- row 3 -->
+  <g>
+    <rect x="322" y="552" width="192" height="62" rx="10" fill="#0a100d" stroke="#264634"/>
+    <text class="card-title" x="336" y="570">NmlBackend</text>
+    <text class="card-sub" x="336" y="587">NmlClient · not thread-safe</text>
+    <text class="card-sub" x="336" y="603">emcStatus · emcCommand</text>
+
+    <rect x="524" y="552" width="192" height="62" rx="10" fill="#0a100d" stroke="#264634"/>
+    <text class="card-title" x="538" y="570">HalReader</text>
+    <text class="card-sub" x="538" y="587">read-only · no write method</text>
+    <text class="card-sub" x="538" y="603">panel · halui · pendant</text>
+
+    <rect x="726" y="552" width="200" height="62" rx="10" fill="#0a100d" stroke="#264634"/>
+    <text class="card-title" x="740" y="570">LincHal</text>
+    <text class="card-sub" x="740" y="587">fixed linc.* output set</text>
+    <text class="card-sub" x="740" y="603">no arbitrary pin writes</text>
+  </g>
+
+  <!-- row 4: startup / spawn decision -->
+  <g>
+    <rect x="322" y="624" width="604" height="48" rx="9" fill="#141006" stroke="#6b4d12" stroke-dasharray="4 4"/>
+    <text class="card-title" x="336" y="642" fill="#ffc861">linc-app · src/plc.rs</text>
+    <text class="card-sub" x="918" y="642" text-anchor="end" font-size="9">spawn · detach · reconnect</text>
+    <text class="card-sub" x="336" y="661">LINC_PLC beats [plc] enabled → start the daemon once, after the backend connects</text>
+  </g>
+
+  <!-- row 5: PLC page + client -->
+  <g>
+    <rect x="322" y="680" width="604" height="58" rx="9" fill="#171207" stroke="#8a6414"/>
+    <text class="card-title" x="336" y="699" fill="#ffcf7a">PLC page + linc-plc-client</text>
+    <text class="card-sub" x="336" y="716">ladder editor · live monitor · forces · trends · six sub-pages</text>
+    <text class="card-mono mono" x="918" y="716" text-anchor="end" fill="#c79a45">framed JSON · 2 s timeout</text>
+    <text class="card-sub" x="336" y="731" font-size="9">the page keeps working offline; a disabled PLC says so instead of looking broken</text>
+  </g>
+
+  <!-- row 6: optional backend wrappers -->
+  <g>
+    <rect x="322" y="750" width="604" height="46" rx="9" fill="#0a100d" stroke="#264634"/>
+    <text class="card-title" x="336" y="768">optional backend wrappers</text>
+    <rect x="500" y="756" width="112" height="17" rx="4" fill="#101a15" stroke="#2b4d3a"/><text class="chip mono" x="556" y="768.5" text-anchor="middle" fill="#8fb3a1">LoobricBackend</text>
+    <rect x="620" y="756" width="124" height="17" rx="4" fill="#101a15" stroke="#2b4d3a"/><text class="chip mono" x="682" y="768.5" text-anchor="middle" fill="#8fb3a1">NetworkBackend</text>
+    <text class="card-sub" x="336" y="788">tool-table sync, opt-in · external-link supervisor, opt-in · neither is in the PLC path</text>
+  </g>
+
+  <text class="card-mono mono" x="336" y="816" fill="#5f7a68">Simulator mode swaps NML and HAL for SimBackend; the page, the panel service and the UI stay.</text>
+  <text class="card-mono mono" x="336" y="832" fill="#5f7a68">The backend worker is the only thread that touches NML or HAL.</text>
+</g>
+
+<!-- ============ linc-plc ============ -->
+<g filter="url(#plcGlow)">
+  <rect x="1000" y="336" width="470" height="524" rx="14" fill="url(#gPLC)" stroke="#8a6414" stroke-width="1.6"/>
+</g>
+<g>
+  <rect x="1000.5" y="352" width="3" height="492" rx="1.5" fill="#ffb020"/>
+  <text class="proc-name mono" x="1018" y="362" fill="#ffc861">linc-plc</text>
+  <text class="proc-tag mono" x="1452" y="361" text-anchor="end">SEPARATE PROCESS</text>
+  <text class="proc-sub" x="1018" y="378">userspace ladder PLC</text>
+  <text class="proc-sub mono" x="1452" y="378" text-anchor="end" font-size="9" fill="#a8823c">no NML · no interpreter · no motion</text>
+  <line x1="1018" y1="388" x2="1452" y2="388" stroke="#4a3710"/>
+
+  <!-- mini ladder glyph -->
+  <g transform="translate(1288,332)" opacity="0.9">
+    <line x1="0" y1="0" x2="0" y2="28" stroke="#8a6414" stroke-width="1.2"/>
+    <line x1="46" y1="0" x2="46" y2="28" stroke="#8a6414" stroke-width="1.2"/>
+    <line x1="0" y1="7" x2="16" y2="7" stroke="#ffb020" stroke-width="1.2"/>
+    <line x1="26" y1="7" x2="46" y2="7" stroke="#ffb020" stroke-width="1.2"/>
+    <line x1="16" y1="2" x2="16" y2="12" stroke="#ffb020" stroke-width="1.2"/>
+    <line x1="26" y1="2" x2="26" y2="12" stroke="#ffb020" stroke-width="1.2"/>
+    <line x1="0" y1="20" x2="18" y2="20" stroke="#ffb020" stroke-width="1.2"/>
+    <line x1="28" y1="20" x2="46" y2="20" stroke="#ffb020" stroke-width="1.2"/>
+    <circle cx="23" cy="20" r="5" fill="none" stroke="#ffb020" stroke-width="1.2"/>
+  </g>
+
+  <g>
+    <rect x="1014" y="396" width="442" height="42" rx="8" fill="#141006" stroke="#4a3710"/>
+    <text class="card-title" x="1026" y="414" fill="#ffcf7a">start switch</text>
+    <text class="card-mono mono" x="1026" y="430" fill="#b08a45">LINC_PLC=1|0 &gt; --plc &gt; [plc] enabled</text>
+    <text class="card-sub" x="1444" y="421" text-anchor="end" font-size="8.6">off by default</text>
+  </g>
+  <g>
+    <rect x="1014" y="444" width="442" height="42" rx="8" fill="#12100a" stroke="#3d2f10"/>
+    <text class="card-title" x="1026" y="462">project.json</text>
+    <text class="card-sub" x="1026" y="478">schema 1 · I/O bindings · vars · rungs</text>
+    <text class="card-mono mono" x="1444" y="470" text-anchor="end" fill="#8f7440">validated offline</text>
+  </g>
+  <g>
+    <rect x="1014" y="492" width="442" height="42" rx="8" fill="#12100a" stroke="#3d2f10"/>
+    <text class="card-title" x="1026" y="510">validate → compile → IL</text>
+    <text class="card-sub" x="1026" y="526">TON TOF TP CTU CTD · compare · compute</text>
+    <text class="card-mono mono" x="1444" y="518" text-anchor="end" fill="#8f7440">VM bytecode</text>
+  </g>
+
+  <g>
+    <rect x="1014" y="540" width="442" height="70" rx="8" fill="#171207" stroke="#8a6414"/>
+    <text class="card-title" x="1026" y="558" fill="#ffcf7a">scan loop</text>
+    <text class="card-sub" x="1026" y="574">anchored schedule · default 2000 µs</text>
+    <text class="card-sub" x="1026" y="590">overrun = wake-up &gt;100 µs past its slot</text>
+    <g transform="translate(1352,556)" opacity="0.9">
+      <line x1="0" y1="30" x2="94" y2="30" stroke="#5c4512" stroke-width="1"/>
+      <g stroke="#ffb020" stroke-width="1.4">
+        <line x1="2" y1="30" x2="2" y2="20"/><line x1="17" y1="30" x2="17" y2="14"/>
+        <line x1="32" y1="30" x2="32" y2="22"/><line x1="47" y1="30" x2="47" y2="12"/>
+        <line x1="62" y1="30" x2="62" y2="19"/><line x1="77" y1="30" x2="77" y2="15"/>
+        <line x1="92" y1="30" x2="92" y2="23"/>
+      </g>
+      <line x1="2" y1="4" x2="92" y2="4" stroke="#8a6414" stroke-width="1" stroke-dasharray="3 3"/>
+      <text x="0" y="0" font-size="8" fill="#a8823c" class="mono">scan</text>
+    </g>
+  </g>
+
+  <g>
+    <rect x="1014" y="618" width="442" height="64" rx="8" fill="#141006" stroke="#4a3710"/>
+    <text class="card-title" x="1026" y="636" fill="#ffcf7a">own HAL component: linc_plc.*</text>
+    <text class="card-sub" x="1026" y="651">pins created from the project, before hal_ready()</text>
+    <g class="pin mono">
+      <rect x="1026" y="658" width="62" height="16" rx="3" fill="#241a06" stroke="#6b4d12"/><text x="1057" y="669.5" text-anchor="middle" fill="#d9ad55">&lt;binding&gt;</text>
+      <rect x="1094" y="658" width="42" height="16" rx="3" fill="#241a06" stroke="#6b4d12"/><text x="1115" y="669.5" text-anchor="middle" fill="#d9ad55">alive</text>
+      <rect x="1142" y="658" width="40" height="16" rx="3" fill="#241a06" stroke="#6b4d12"/><text x="1162" y="669.5" text-anchor="middle" fill="#d9ad55">fault</text>
+      <rect x="1188" y="658" width="68" height="16" rx="3" fill="#241a06" stroke="#6b4d12"/><text x="1222" y="669.5" text-anchor="middle" fill="#d9ad55">scan-count</text>
+      <rect x="1262" y="658" width="80" height="16" rx="3" fill="#241a06" stroke="#6b4d12"/><text x="1302" y="669.5" text-anchor="middle" fill="#d9ad55">scan-time-us</text>
+      <rect x="1348" y="658" width="60" height="16" rx="3" fill="#241a06" stroke="#6b4d12"/><text x="1378" y="669.5" text-anchor="middle" fill="#d9ad55">overruns</text>
+    </g>
+  </g>
+
+  <g>
+    <rect x="1014" y="690" width="442" height="60" rx="8" fill="#12100a" stroke="#3d2f10"/>
+    <text class="card-title" x="1026" y="708">Unix socket server</text>
+    <text class="card-mono mono" x="1026" y="724" fill="#b08a45">$XDG_RUNTIME_DIR/linc/plc-&lt;uid&gt;.sock</text>
+    <text class="card-sub" x="1026" y="740">mode 0600 · 4-byte big-endian length + JSON · one client</text>
+  </g>
+
+  <g>
+    <rect x="1014" y="758" width="442" height="36" rx="8" fill="#1b0e0e" stroke="#6b2626"/>
+    <path d="M1028,776 l6,-11 l6,11 z" fill="none" stroke="#ff6b6b" stroke-width="1.2" stroke-linejoin="round"/>
+    <text x="1046" y="772" font-size="10.2" font-weight="600" fill="#ff9d9d">watchdog input</text>
+    <text x="1046" y="786" font-size="9.2" class="mono" fill="#c97070">alive must show edges  AND  linc_plc.fault must be false</text>
+  </g>
+
+  <g>
+    <text class="card-sub" x="1026" y="812" font-size="8.6" letter-spacing="0.6">STATE</text>
+    <g class="chip mono">
+      <rect x="1070" y="801" width="58" height="17" rx="4" fill="#151a20" stroke="#2d3742"/><text x="1099" y="813" text-anchor="middle" fill="#93a0ad">Idle</text>
+      <text x="1134" y="813" fill="#6c7884">→</text>
+      <rect x="1146" y="801" width="70" height="17" rx="4" fill="#151a20" stroke="#2d3742"/><text x="1181" y="813" text-anchor="middle" fill="#93a0ad">Loaded</text>
+      <text x="1222" y="813" fill="#6c7884">→</text>
+      <rect x="1234" y="801" width="72" height="17" rx="4" fill="#1c1708" stroke="#8a6414"/><text x="1270" y="813" text-anchor="middle" fill="#ffb020">Running</text>
+      <text x="1312" y="813" fill="#6c7884">→</text>
+      <rect x="1324" y="801" width="58" height="17" rx="4" fill="#1b0e0e" stroke="#6b2626"/><text x="1353" y="813" text-anchor="middle" fill="#ff8f8f">Fault</text>
+    </g>
+    <text class="card-sub" x="1026" y="836" font-size="9">retained vars: LPRT blob · program + layout hash · CRC-32</text>
+  </g>
+</g>
+
+<!-- inter-process links -->
+<g>
+  <!-- spawn: linc row4 -> plc switch card -->
+  <path d="M926,648 L956,648 L956,412 L1000,412" fill="none" stroke="#ffb020" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#aAmber)"/>
+  <text transform="translate(986,540) rotate(-90)" text-anchor="middle" font-size="8.4" fill="#c79a45" letter-spacing="1.2">SPAWN · DETACHED</text>
+  <!-- socket: linc row5 -> plc socket card -->
+  <path d="M926,712 L998,712" fill="none" stroke="#ffb020" stroke-width="1.5" marker-start="url(#aAmber)" marker-end="url(#aAmber)"/>
+  <rect x="944" y="696" width="48" height="14" rx="4" fill="#171207" stroke="#6b4d12"/>
+  <text x="968" y="706" text-anchor="middle" font-size="8" class="mono" fill="#d9ad55">JSON</text>
+</g>
+
+<!-- ============ aux ============ -->
+<g>
+  <rect x="1486" y="336" width="214" height="524" rx="14" fill="url(#gAux)" stroke="#29323b"/>
+  <rect x="1486.5" y="352" width="3" height="492" rx="1.5" fill="#6b7683"/>
+  <text class="proc-name mono" x="1504" y="362" fill="#b7c2cc" font-size="14">aux</text>
+  <text class="proc-tag mono" x="1684" y="361" text-anchor="end">OPTIONAL</text>
+  <text class="proc-sub" x="1504" y="378">peers and libraries</text>
+  <line x1="1504" y1="388" x2="1684" y2="388" stroke="#262e36"/>
+
+  <g>
+    <rect x="1500" y="398" width="186" height="88" rx="9" fill="#0c1114" stroke="#24424a"/>
+    <text class="card-title" x="1512" y="416" fill="#a8eef8">linc-sim3d</text>
+    <text class="card-sub" x="1512" y="433">optional 3D machine model</text>
+    <text class="card-sub" x="1512" y="449">--hal publishes its own</text>
+    <text class="card-sub" x="1512" y="465">linc-sim3d.* pins</text>
+    <text class="card-mono mono" x="1512" y="480" fill="#6a98a2">collision · probe · step</text>
+  </g>
+  <g>
+    <rect x="1500" y="494" width="186" height="88" rx="9" fill="#0c1114" stroke="#2b333c"/>
+    <text class="card-title" x="1512" y="512" fill="#b7c2cc">linc-mcp</text>
+    <text class="card-sub" x="1512" y="529">MCP on stdio, diagnostics</text>
+    <text class="card-sub" x="1512" y="545">over a Unix socket</text>
+    <text class="card-sub" x="1512" y="561">never links HAL, NML</text>
+    <text class="card-mono mono" x="1512" y="576" fill="#7d8894">or the UI</text>
+  </g>
+  <g>
+    <rect x="1500" y="590" width="186" height="88" rx="9" fill="#0c1114" stroke="#26364a"/>
+    <text class="card-title" x="1512" y="608" fill="#9ecbf7">linuxcnc-nml</text>
+    <text class="card-sub" x="1512" y="625">the Rust NML client crate</text>
+    <text class="card-sub" x="1512" y="641">libnml + liblinuxcnc</text>
+    <text class="card-sub" x="1512" y="657">through a C++ shim</text>
+    <text class="card-mono mono" x="1512" y="672" fill="#6d8aa8">links at build time</text>
+  </g>
+  <g>
+    <text class="body" x="1504" y="700">Every process creates</text>
+    <text class="body" x="1504" y="716">its own component and</text>
+    <text class="body" x="1504" y="732">writes only its own</text>
+    <text class="body" x="1504" y="748">pins. No process writes</text>
+    <text class="body" x="1504" y="764">another's HAL surface.</text>
+  </g>
+  <g>
+    <rect x="1500" y="800" width="186" height="40" rx="9" fill="#0f1317" stroke="#2b333c"/>
+    <circle cx="1516" cy="820" r="4" fill="#6b7683"/>
+    <text x="1528" y="824" font-size="9.4" fill="#98a4b0">all optional at runtime</text>
+  </g>
+</g>
+
+<!-- container -> HAL connectors -->
+<g fill="none" stroke-width="1.5">
+  <path d="M176,860 L176,896" stroke="#c084fc" marker-end="url(#aPurple)"/>
+  <path d="M620,860 L620,896" stroke="#3ddc84" marker-end="url(#aGreen)"/>
+  <path d="M1180,860 L1180,896" stroke="#ffb020" marker-end="url(#aAmber)"/>
+  <path d="M1593,860 L1593,896" stroke="#67e8f9" stroke-dasharray="4 4" marker-end="url(#aCyan)"/>
+</g>
+<text class="arrow-label" x="184" y="884" fill="#a879d6">cnc_panel.*</text>
+<text class="arrow-label" x="628" y="884" fill="#4fb87b">linc.* · HAL I/O</text>
+<text class="arrow-label" x="1172" y="884" text-anchor="end" fill="#c79a45">linc_plc.*</text>
+<text class="arrow-label" x="1601" y="884" fill="#6cc9d8">sim3d</text>
+
+<!-- ===================== BAND 03: HAL ===================== -->
+<g>
+  <rect x="60" y="884" width="24" height="17" rx="5" fill="#122027" stroke="#2c4a55"/>
+  <text class="band-num" x="72" y="896" text-anchor="middle" fill="#a8eef8">03</text>
+  <text class="band-title" x="94" y="896" fill="#a8eef8">HAL BACKPLANE</text>
+  <line x1="248" y1="890.5" x2="1700" y2="890.5" stroke="#233038"/>
+  <text class="band-note" x="1690" y="894" text-anchor="end">shared memory · typed pins · one writer per signal</text>
+</g>
+<g>
+  <rect x="60" y="902" width="1640" height="78" rx="14" fill="url(#gBus)" stroke="#2c5a68" stroke-width="1.2"/>
+  <g transform="translate(82,918)" stroke="#67e8f9" stroke-width="1.5" opacity="0.85">
+    <line x1="0" y1="6" x2="22" y2="6"/><line x1="0" y1="15" x2="22" y2="15"/><line x1="0" y1="24" x2="22" y2="24"/>
+    <circle cx="4" cy="6" r="2"/><circle cx="11" cy="15" r="2"/><circle cx="18" cy="24" r="2"/>
+  </g>
+  <text x="118" y="930" font-size="14" font-weight="600" fill="#b8f4fd">HAL — shared-memory backplane</text>
+  <text x="118" y="948" font-size="9.8" fill="#7fa8b2">hal_data · pins · signals · servo-thread and base-thread</text>
+  <text x="118" y="964" font-size="9.2" class="mono" fill="#5f8892">read-only readers still need a component</text>
+
+  <g class="pin mono">
+    <rect x="430" y="912" width="66" height="20" rx="4" fill="#0d2026" stroke="#2e5c68"/><text x="463" y="925.5" text-anchor="middle" fill="#9ad8e3">linc.*</text>
+    <rect x="504" y="912" width="104" height="20" rx="4" fill="#0d2026" stroke="#2e5c68"/><text x="556" y="925.5" text-anchor="middle" fill="#9ad8e3">cnc_panel.*</text>
+    <rect x="616" y="912" width="96" height="20" rx="4" fill="#1c1708" stroke="#8a6414"/><text x="664" y="925.5" text-anchor="middle" fill="#ffc861">linc_plc.*</text>
+    <rect x="720" y="912" width="108" height="20" rx="4" fill="#0d2026" stroke="#2e5c68"/><text x="774" y="925.5" text-anchor="middle" fill="#9ad8e3">linc-sim3d.*</text>
+    <rect x="836" y="912" width="76" height="20" rx="4" fill="#0d2026" stroke="#2e5c68"/><text x="874" y="925.5" text-anchor="middle" fill="#9ad8e3">halui.*</text>
+    <rect x="920" y="912" width="100" height="20" rx="4" fill="#0d2026" stroke="#2e5c68"/><text x="970" y="925.5" text-anchor="middle" fill="#9ad8e3">iocontrol.*</text>
+
+    <rect x="430" y="940" width="122" height="20" rx="4" fill="#0d2026" stroke="#2e5c68"/><text x="491" y="953.5" text-anchor="middle" fill="#9ad8e3">joint.* · axis.*</text>
+    <rect x="560" y="940" width="138" height="20" rx="4" fill="#0d2026" stroke="#2e5c68"/><text x="629" y="953.5" text-anchor="middle" fill="#9ad8e3">motion.probe-input</text>
+    <rect x="706" y="940" width="130" height="20" rx="4" fill="#0d2026" stroke="#2e5c68"/><text x="771" y="953.5" text-anchor="middle" fill="#9ad8e3">spindle.* · tool.*</text>
+  </g>
+  <text x="1068" y="932" font-size="10.2" fill="#6f98a2">The only state the four processes share.</text>
+  <text x="1068" y="948" font-size="10.2" fill="#6f98a2">A pin that carries no signal reads as unlinked.</text>
+</g>
+
+<!-- NML link (deliberately bypasses HAL) -->
+<g>
+  <path d="M400,860 L400,1000 L800,1000 L800,1014" fill="none" stroke="#0a0d10" stroke-width="7"/>
+  <path d="M400,860 L400,1000 L800,1000 L800,1014" fill="none" stroke="#4da3ff" stroke-width="1.8" marker-end="url(#aBlue)"/>
+  <text x="418" y="995" font-size="9.6" fill="#79baff">NML — emcStatus · emcCommand · emcError · not HAL</text>
+</g>
+
+<!-- HAL -> LinuxCNC -->
+<g fill="none" stroke-width="1.5">
+  <path d="M250,980 L250,1014" stroke="#67e8f9" marker-end="url(#aCyan)"/>
+  <path d="M1050,980 L1050,1014" stroke="#67e8f9" marker-end="url(#aCyan)"/>
+</g>
+
+
+<!-- ===================== BAND 04 ===================== -->
+<g>
+  <rect x="60" y="1000" width="24" height="17" rx="5" fill="#121a23" stroke="#2c3d4d"/>
+  <text class="band-num" x="72" y="1012" text-anchor="middle" fill="#9ecbf7">04</text>
+  <text class="band-title" x="94" y="1012" fill="#9ecbf7">LINUXCNC</text>
+  <line x1="248" y1="1006.5" x2="1124" y2="1006.5" stroke="#233038"/>
+  <text class="band-note" x="1114" y="1010" text-anchor="end">the only motion authority</text>
+</g>
+<g>
+  <rect x="60" y="1018" width="1064" height="132" rx="14" fill="url(#gCNC)" stroke="#2c3a49" stroke-width="1.2"/>
+  <text class="proc-name mono" x="78" y="1042" fill="#9ecbf7" font-size="15">LinuxCNC</text>
+  <text class="proc-tag mono" x="1108" y="1041" text-anchor="end">REALTIME SESSION</text>
+  <text class="proc-sub" x="78" y="1057">task · interpreter · motion · I/O — every one of them is also a HAL peer</text>
+
+  <g>
+    <rect x="74" y="1066" width="199" height="74" rx="9" fill="#0a0e12" stroke="#27333f"/>
+    <text class="card-title" x="86" y="1084" fill="#cfe3f5">task + interpreter</text>
+    <text class="card-sub" x="86" y="1101">emcTask · G-code · MDI</text>
+    <text class="card-sub" x="86" y="1117">parameters · tool table</text>
+    <text class="card-mono mono" x="86" y="1132" fill="#6f8296">NML server side</text>
+  </g>
+  <g>
+    <rect x="283" y="1066" width="199" height="74" rx="9" fill="#0a0e12" stroke="#27333f"/>
+    <text class="card-title" x="295" y="1084" fill="#cfe3f5">motion controller</text>
+    <text class="card-sub" x="295" y="1101">motmod · joints and axes</text>
+    <text class="card-sub" x="295" y="1117">homing · probe input</text>
+    <text class="card-mono mono" x="295" y="1132" fill="#6f8296">servo-thread</text>
+  </g>
+  <g>
+    <rect x="492" y="1066" width="199" height="74" rx="9" fill="#0a0e12" stroke="#27333f"/>
+    <text class="card-title" x="504" y="1084" fill="#cfe3f5">iocontrol · halui</text>
+    <text class="card-sub" x="504" y="1101">tool changer · spindle</text>
+    <text class="card-sub" x="504" y="1117">coolant · overrides</text>
+    <text class="card-mono mono" x="504" y="1132" fill="#6f8296">HAL sinks and sources</text>
+  </g>
+  <g>
+    <rect x="701" y="1066" width="199" height="74" rx="9" fill="#0a0e12" stroke="#2b4460"/>
+    <text class="card-title" x="713" y="1084" fill="#9ecbf7">NML buffers</text>
+    <text class="card-sub" x="713" y="1101">emcStatus · emcCommand</text>
+    <text class="card-sub" x="713" y="1117">emcError</text>
+    <text class="card-mono mono" x="713" y="1132" fill="#6d8aa8">the HMI's transport</text>
+  </g>
+  <g>
+    <rect x="910" y="1066" width="199" height="74" rx="9" fill="#0c1c22" stroke="#2e5c68"/>
+    <text class="card-title" x="922" y="1084" fill="#a8eef8">HAL pins &amp; signals</text>
+    <text class="card-sub" x="922" y="1101">hal_data in shared memory</text>
+    <text class="card-sub" x="922" y="1117">servo-thread · base-thread</text>
+    <text class="card-mono mono" x="922" y="1132" fill="#6a98a2">the PLC's only surface</text>
+  </g>
+</g>
+
+<!-- failure domains -->
+<g>
+  <rect x="1140" y="1018" width="560" height="132" rx="14" fill="#101419" stroke="#262f38"/>
+  <text x="1158" y="1042" font-size="13" font-weight="600" fill="#dfe7ef">failure domains</text>
+  <text x="1682" y="1041" text-anchor="end" font-size="9" class="mono" fill="#6b7683">who survives what</text>
+  <g font-size="10.2">
+    <circle cx="1163" cy="1061" r="3.5" fill="#3ddc84"/>
+    <text x="1174" y="1065" font-weight="600" fill="#cfe0d6">HMI dies</text>
+    <text x="1262" y="1065" fill="#8b99a5">panel keeps control · the PLC keeps scanning</text>
+    <circle cx="1163" cy="1083" r="3.5" fill="#c084fc"/>
+    <text x="1174" y="1087" font-weight="600" fill="#dcc9ef">panel dies</text>
+    <text x="1262" y="1087" fill="#8b99a5">cnc_panel.* stops updating · the HMI shows no panel</text>
+    <circle cx="1163" cy="1105" r="3.5" fill="#ffb020"/>
+    <text x="1174" y="1109" font-weight="600" fill="#f2d8a8">PLC dies</text>
+    <text x="1262" y="1109" fill="#8b99a5">fault pin · outputs drop only if a watchdog sees it</text>
+    <circle cx="1163" cy="1127" r="3.5" fill="#6b7683"/>
+    <text x="1174" y="1131" font-weight="600" fill="#c3ccd5">CNC stops</text>
+    <text x="1262" y="1131" fill="#8b99a5">both clients lose the machine · HAL pins go stale</text>
+  </g>
+</g>
+
+<!-- ===================== BAND 05: MACHINE ===================== -->
+<g>
+  <rect x="60" y="1170" width="24" height="17" rx="5" fill="#1a1114" stroke="#4d2a30"/>
+  <text class="band-num" x="72" y="1182" text-anchor="middle" fill="#ff9d9d">05</text>
+  <text class="band-title" x="94" y="1182" fill="#d3a9ae">MACHINE &amp; SAFETY</text>
+  <line x1="330" y1="1176.5" x2="1700" y2="1176.5" stroke="#302327"/>
+  <text class="band-note" x="1690" y="1180" text-anchor="end" fill="#a5787e">no software in the safety path</text>
+</g>
+
+<g fill="none" stroke-width="1.5">
+  <path d="M190,1150 L190,1186" stroke="#67e8f9" marker-end="url(#aCyan)"/>
+  <path d="M600,1150 L600,1186" stroke="#67e8f9" marker-end="url(#aCyan)"/>
+  <path d="M1010,1150 L1010,1186" stroke="#67e8f9" marker-end="url(#aCyan)"/>
+</g>
+
+<g>
+  <rect x="60" y="1190" width="398" height="92" rx="12" fill="url(#gTile)" stroke="#26414a"/>
+  <rect x="60" y="1204" width="3" height="26" rx="1.5" fill="#67e8f9"/>
+  <text class="tile-title" x="78" y="1219">Field I/O</text>
+  <text class="tile-line" x="78" y="1241">rio.* · Mesa cards · digital and analog</text>
+  <text class="tile-line" x="78" y="1259">the machine's own HAL signals</text>
+  <text class="tile-mono mono" x="78" y="1277">one signal, one writer</text>
+</g>
+<g>
+  <rect x="474" y="1190" width="398" height="92" rx="12" fill="url(#gTile)" stroke="#26414a"/>
+  <rect x="474" y="1204" width="3" height="26" rx="1.5" fill="#67e8f9"/>
+  <text class="tile-title" x="492" y="1219">Actuators</text>
+  <text class="tile-line" x="492" y="1241">spindle VFD · coolant · lube · chip conveyor</text>
+  <text class="tile-line" x="492" y="1259">tool changer · work lamp</text>
+  <text class="tile-mono mono" x="492" y="1277">driven through iocontrol and rio</text>
+</g>
+<g>
+  <rect x="888" y="1190" width="398" height="92" rx="12" fill="url(#gTile)" stroke="#26414a"/>
+  <rect x="888" y="1204" width="3" height="26" rx="1.5" fill="#67e8f9"/>
+  <text class="tile-title" x="906" y="1219">Sensors</text>
+  <text class="tile-line" x="906" y="1241">probe · home and limit switches</text>
+  <text class="tile-line" x="906" y="1259">spindle orientation · door</text>
+  <text class="tile-mono mono" x="906" y="1277">motion.probe-input · joint.N.home-state</text>
+</g>
+<g>
+  <rect x="1302" y="1190" width="398" height="92" rx="12" fill="#171013" stroke="#7a3138" stroke-width="1.3"/>
+  <rect x="1302" y="1204" width="3" height="26" rx="1.5" fill="#ff6b6b"/>
+  <g transform="translate(1664,1202)" opacity="0.9">
+    <rect x="0" y="6" width="16" height="12" rx="2" fill="none" stroke="#ff6b6b" stroke-width="1.3"/>
+    <path d="M4,6 V3 a4,4 0 0 1 8,0 V6" fill="none" stroke="#ff6b6b" stroke-width="1.3"/>
+  </g>
+  <text class="tile-title" x="1320" y="1219" fill="#ffb3b3">Hardwired safety circuit</text>
+  <text class="tile-line" x="1320" y="1241" fill="#b98d92">E-stop relay · guard interlock · STO</text>
+  <text class="tile-line" x="1320" y="1259" fill="#b98d92">limit switches · charge pump</text>
+  <text class="tile-mono mono" x="1320" y="1277" fill="#a06b72">never routed through linc-plc</text>
+</g>
+
+<!-- ===================== BAND 06: SEAMS ===================== -->
+<g>
+  <rect x="60" y="1302" width="24" height="17" rx="5" fill="#151b21" stroke="#2b343d"/>
+  <text class="band-num" x="72" y="1314" text-anchor="middle">06</text>
+  <text class="band-title" x="94" y="1314">INTEGRATION SEAMS</text>
+  <line x1="330" y1="1308.5" x2="1700" y2="1308.5" stroke="#232b33"/>
+  <text class="band-note" x="1690" y="1312" text-anchor="end">where the PLC actually meets LiNC</text>
+</g>
+
+<g>
+  <rect x="60" y="1322" width="404" height="112" rx="12" fill="#101519" stroke="#2a333c"/>
+  <circle cx="88" cy="1348" r="13" fill="none" stroke="#8a6414"/>
+  <text x="88" y="1352" text-anchor="middle" font-size="11" font-weight="700" class="mono" fill="#ffb020">1</text>
+  <text class="seam-title" x="112" y="1352">spawn</text>
+  <text class="seam-body" x="78" y="1376">linc-app/src/plc.rs starts linc-plc only after the backend</text>
+  <text class="seam-body" x="78" y="1392">connects. It never waits for the child and never kills it on</text>
+  <text class="seam-body" x="78" y="1408">exit; a socket that already answers is reused, not duplicated.</text>
+  <text class="card-mono mono" x="78" y="1425" fill="#6b7a88">LINC_PLC_BIN · LINC_PLC_PID_FILE · plc.pid</text>
+</g>
+<g>
+  <rect x="472" y="1322" width="404" height="112" rx="12" fill="#101519" stroke="#2a333c"/>
+  <circle cx="500" cy="1348" r="13" fill="none" stroke="#8a6414"/>
+  <text x="500" y="1352" text-anchor="middle" font-size="11" font-weight="700" class="mono" fill="#ffb020">2</text>
+  <text class="seam-title" x="524" y="1352">control</text>
+  <text class="seam-body" x="490" y="1376">4-byte big-endian length + JSON over a Unix socket:</text>
+  <text class="seam-body" x="490" y="1392">$XDG_RUNTIME_DIR/linc/plc-&lt;uid&gt;.sock, mode 0600.</text>
+  <text class="seam-body" x="490" y="1408">One request, one response, 2 s read and write timeout.</text>
+  <text class="card-mono mono" x="490" y="1425" fill="#6b7a88">hello · load · start · stop · force · snapshot · trends</text>
+</g>
+<g>
+  <rect x="884" y="1322" width="404" height="112" rx="12" fill="#101519" stroke="#2a333c"/>
+  <circle cx="912" cy="1348" r="13" fill="none" stroke="#2e5c68"/>
+  <text x="912" y="1352" text-anchor="middle" font-size="11" font-weight="700" class="mono" fill="#67e8f9">3</text>
+  <text class="seam-title" x="936" y="1352">I/O</text>
+  <text class="seam-body" x="902" y="1376">Own linc_plc.* component. Pins are created from the</text>
+  <text class="seam-body" x="902" y="1392">project before hal_ready() and frozen for the process</text>
+  <text class="seam-body" x="902" y="1408">lifetime; a changed I/O binding answers io_map_locked.</text>
+  <text class="card-mono mono" x="902" y="1425" fill="#6b7a88">&lt;binding&gt; · alive · fault · scan-count · overruns</text>
+</g>
+<g>
+  <rect x="1296" y="1322" width="404" height="112" rx="12" fill="#131014" stroke="#3d2429"/>
+  <circle cx="1324" cy="1348" r="13" fill="none" stroke="#6b2626"/>
+  <text x="1324" y="1352" text-anchor="middle" font-size="11" font-weight="700" class="mono" fill="#ff8080">4</text>
+  <text class="seam-title" x="1348" y="1352" fill="#ffb3b3">safety boundary</text>
+  <text class="seam-body" x="1314" y="1376">Outputs are driven false on Load, Stop, fault and exit.</text>
+  <text class="seam-body" x="1314" y="1392">alive toggles only while Running, so a watchdog needs</text>
+  <text class="seam-body" x="1314" y="1408">alive edges AND fault low — neither one alone.</text>
+  <text class="card-mono mono" x="1314" y="1425" fill="#8a5c60">a panic in release latches the last pin values</text>
+</g>
+
+<!-- footer -->
+<line x1="60" y1="1452" x2="1700" y2="1452" stroke="#1d242b"/>
+<text class="foot mono" x="60" y="1470">docs/architecture.md · docs/plc.md · crates/linc-{app,plc,plc-core,hal,linuxcnc,ui,panel}</text>
+<text class="foot" x="1700" y="1470" text-anchor="end">LiNC · GPL-2.0-or-later</text>
+</svg>
