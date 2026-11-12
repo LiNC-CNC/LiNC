@@ -141,6 +141,10 @@ impl FbdGrid {
     }
 
     pub fn set_cell(&mut self, row: usize, col: usize, cell: FbdCell) {
+        // Grow the columns first: the rows were padded to the *old* `columns`, so a
+        // grid that started at zero columns silently dropped every cell it was
+        // given (`line.get_mut(col)` found nothing).
+        self.columns = self.columns.max(col + 1);
         while self.cells.len() <= row {
             self.cells.push(vec![FbdCell::Empty; self.columns]);
         }

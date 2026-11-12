@@ -121,6 +121,7 @@ impl Action {
     }
 }
 
+#[derive(Debug)]
 pub enum Action {
     Select(NodePath),
     ToggleContact(NodePath),
@@ -177,6 +178,15 @@ pub enum Action {
     AddRungAfter {
         section: usize,
         row: usize,
+    },
+    /// Open a POU from the list by index.
+    OpenPou(usize),
+    /// Add a POU in the given language and open it.
+    AddPou(PouLanguage),
+    /// Set an existing POU's language, used by `L` on an empty POU.
+    SetPouLanguage {
+        index: usize,
+        language: PouLanguage,
     },
     /// Remove a ladder row.
     DeleteRung {
@@ -570,7 +580,13 @@ pub fn logic_width(logic: &Logic) -> f32 {
 
 /// Serialise a project the way the file on disk is written.
 pub fn project_to_json(project: &Project) -> Result<String, String> {
-    serde_json::to_string_pretty(project).map_err(|error| error.to_string())
+    // Serialise a canonical copy: a file written from `pous` alone lost the ladder
+    // when `pous` was empty and `sections` held MAIN.
+    let mut canonical = project.clone();
+    let pous = canonical.all_pous();
+    canonical.set_pous(pous);
+    canonical.normalise();
+    serde_json::to_string_pretty(&canonical).map_err(|error| error.to_string())
 }
 
 pub fn project_from_json(text: &str) -> Result<Project, String> {
@@ -916,6 +932,16 @@ pub struct PlcUi {
     /// A POU is being renamed or copied.
     pub pou_edit: Option<PouEdit>,
     /// The trend window in milliseconds: 4 s, 20 s or 100 s.
+    /// True while the NEW PROJECT? question is waiting for an answer: a stray `N`
+    /// must not replace the project under the operator's hands.
+    pub new_confirm: bool,
+    /// The frame the workbench was opened on: Escape and a close request are
+    /// ignored on that frame, because the click or chord that opened it can arrive
+    /// with a stale Escape in the same input batch and shut it instantly.
+    pub opened_frame: u64,
+    /// True while one of the workbench menus is open: the menu owns the keyboard
+    /// then, so the editors must not also take arrows, Enter or Escape.
+    pub menu_open: bool,
     /// The simulation's selected input byte: 0 or 1, as the manual's `B` picks.
     pub sim_byte: u8,
     pub trend_window_ms: u32,
@@ -997,6 +1023,9 @@ impl Default for PlcUi {
             fbd_grid_pick: None,
             fbd_operand_pick: None,
             pou_edit: None,
+            new_confirm: false,
+            opened_frame: 0,
+            menu_open: false,
             sim_byte: 0,
             trend_window_ms: 20_000,
             text_editing: false,
@@ -1475,6 +1504,9 @@ impl PlcUi {
     }
 
     pub fn apply(&mut self, action: Action) {
+        if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+            eprintln!("apply {:?}", action);
+        }
         // Everything that changes the program is undoable; selection, runtime
         // control and forces are not part of the project.
         if action.edits_project() {
@@ -1534,6 +1566,26 @@ impl PlcUi {
                 }
             }
             Action::Delete => self.delete_selection(),
+            Action::OpenPou(index) => {
+                let count = self.project.all_pous().len();
+                if index >= count {
+                    // A stale index must not create a POU that does not exist.
+                    self.pou = count.saturating_sub(1);
+                    return;
+                }
+                self.pou = index;
+                self.page = PlcPage::Edit;
+                self.selection = None;
+                self.il_for = None;
+            }
+            Action::AddPou(language) => self.add_pou(language),
+            Action::SetPouLanguage { index, language } => {
+                let mut pous = self.project.all_pous();
+                if let Some(pou) = pous.get_mut(index) {
+                    pou.language = language;
+                }
+                self.project.set_pous(pous);
+            }
             Action::AddRungAfter { section, row } => {
                 let input = default_input_var(&self.project);
                 let output = default_output_var(&self.project);
@@ -1636,13 +1688,30 @@ impl PlcUi {
                 self.dial();
             }
             Action::New => {
-                self.project = Project::example();
+                if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+                    eprintln!("apply Action::New");
+                }
+                // A new project starts empty: the manual's File > New gives an empty
+                // MAIN, and the demo is a separate concern.
+                self.project = Project::new("untitled");
+                // A new project has exactly one POU: the cursor index must not
+                // survive from the previous project, or the page shows a POU that
+                // does not exist (blank header, empty body).
+                self.pou = 0;
+                self.il_for = None;
+                self.il_cursor = 0;
+                self.il_buffer.clear();
                 self.selection = Some(NodePath::root(0, 0));
                 self.daemon_diags.clear();
                 self.message = "NEW PROJECT".to_string();
                 self.normalise_selection();
             }
-            Action::Open => self.open(),
+            Action::Open => {
+                if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+                    eprintln!("apply Action::Open path={}", self.path_text);
+                }
+                self.open()
+            }
             Action::Save => self.save(),
             Action::Validate => self.validate(),
             Action::Download => self.download(),
@@ -2028,6 +2097,12 @@ impl PlcUi {
                     // editor has one model from the first frame.
                     project.normalise();
                     self.project = project;
+                    // The opened project decides the POU set: any index from the
+                    // previous one is stale.
+                    self.pou = 0;
+                    self.il_for = None;
+                    self.il_cursor = 0;
+                    self.il_buffer.clear();
                     self.selection = Some(NodePath::root(0, 0));
                     self.daemon_diags.clear();
                     self.local_diags.clear();
@@ -2041,6 +2116,28 @@ impl PlcUi {
     }
 
     pub fn save(&mut self) {
+        if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+            eprintln!(
+                "save: pous={} all_pous={} path={} says={:?}",
+                self.project.pous.len(),
+                self.project.all_pous().len(),
+                self.path_text,
+                self.project
+                    .all_pous()
+                    .iter()
+                    .map(|pou| (
+                        pou.name.clone(),
+                        format!("{:?}", pou.language),
+                        pou.il.len()
+                    ))
+                    .collect::<Vec<_>>()
+            );
+        }
+        // Canonical before writing: the daemon's Load and the file must agree with
+        // what the editor shows.
+        let pous = self.project.all_pous();
+        self.project.set_pous(pous);
+        self.project.normalise();
         match project_to_json(&self.project) {
             Ok(text) => match std::fs::write(self.path_text.trim(), text) {
                 Ok(()) => self.message = "SAVED".to_string(),
@@ -2137,6 +2234,18 @@ const STATUS_BAR_HEIGHT: f32 = 22.0;
 /// workbench itself is a popped-out overlay that owns every key; the page keeps
 /// the project, the service and the way in.
 
+/// True when `key` was pressed with Ctrl and Shift held, consumed once. `ctrl_key`
+/// matches modifiers exactly, so a shifted chord needs its own spelling.
+fn ctrl_shift_key(ui: &Ui, key: egui::Key) -> bool {
+    ui.input_mut(|input| {
+        input.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, key)
+            || input.consume_key(
+                egui::Modifiers::CTRL | egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                key,
+            )
+    })
+}
+
 /// True when `key` was pressed with Ctrl held, consumed so it is applied once.
 fn ctrl_key(ui: &Ui, key: egui::Key) -> bool {
     // Consume, so one press is handled once: reading the event list let the same
@@ -2168,17 +2277,38 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     common::focus_anchor(ui, "plc-page-focus");
 
     let mut actions: Vec<Action> = Vec::new();
-    let mut open_editor = false;
+    let _open_editor = false;
+    let new_project = false;
+    let mut open_frame: Option<u64> = None;
+    // Ctrl+E opens the workbench from the keyboard, so the acceptance does not
+    // depend on the pointer landing inside the button.
+    // The service page is still drawn behind the workbench, so its keys must not
+    // fire while the workbench owns the keyboard: plain `N` there opened the NEW
+    // PROJECT? dialog over the IL editor and swallowed the next Enter.
+    let workbench_open = app.overlay.plc_editor;
+    if !workbench_open
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::E))
+    {
+        open_frame = Some(ui.ctx().cumulative_frame_nr());
+    }
+    // Plain `N` starts a new empty project and opens the workbench. The PLC service
+    // page has no ladder bindings, so the letter is free here and needs no modifier.
+    if !workbench_open
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::N))
+    {
+        // Ask first, as the manual does: a stray N must not replace the project.
+        app.plc.new_confirm = true;
+    }
     let plc = &mut app.plc;
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         if theme::accent_button(ui, "OPEN EDITOR", true).clicked() {
-            open_editor = true;
+            open_frame = Some(ui.ctx().cumulative_frame_nr());
         }
         ui.label(
             RichText::new(
-                "The editor opens in its own window and takes the keyboard; Esc closes it.",
+                "The editor opens in its own window and takes the keyboard; Ctrl+E opens it, Esc closes it.",
             )
             .size(theme::font_size(10.0))
             .color(theme::MUTED),
@@ -2210,8 +2340,12 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     for action in actions {
         plc.apply(action);
     }
-    if open_editor {
+    if new_project {
+        app.plc.apply(Action::New);
+    }
+    if let Some(frame) = open_frame {
         app.overlay.plc_editor = true;
+        app.plc.opened_frame = frame;
     }
 }
 
@@ -2279,6 +2413,12 @@ fn shortcut_nav(plc: &PlcUi, ui: &mut Ui) {
         );
     };
     heading(ui, "PAGES", true);
+    row(ui, "Menu (File)", "F10", false);
+    ui.add_space(RAIL_INNER_GAP);
+    row(ui, "Open editor", "Ctrl+E", false);
+    ui.add_space(RAIL_INNER_GAP);
+    row(ui, "New project", "N", false);
+    ui.add_space(RAIL_INNER_GAP);
     row(ui, "POU list", "Ctrl+1", plc.page == PlcPage::PouList);
     ui.add_space(RAIL_INNER_GAP);
     row(ui, "Ladder", "Ctrl+2", plc.page == PlcPage::Edit);
@@ -2337,10 +2477,29 @@ fn shortcut_nav(plc: &PlcUi, ui: &mut Ui) {
 }
 
 pub fn editor(app: &mut LincApp, ui: &mut Ui) {
+    // Sampled before any key handler runs: the menu owns arrows and Enter from the
+    // frame it opens, not one frame later.
+    // F10 opens the File menu from the keyboard; the menu then owns arrows and
+    // Enter, so no editor handler may take them.
+    if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F10)) {
+        let id = ui
+            .ctx()
+            .data(|data| data.get_temp::<egui::Id>(egui::Id::new("linc-file-popup")));
+        if let Some(id) = id {
+            egui::Popup::open_id(ui.ctx(), id);
+        }
+    }
+    let popup_open = egui::Popup::is_any_open(ui.ctx());
+    app.plc.menu_open = popup_open;
     // Escape closes the editor only when nothing is open inside it. A picker or a
     // block window owns Escape first: consuming it here left the picker's state
     // set with its window gone, and the editor deaf to every later key.
-    if escape_closes_editor(&app.plc)
+    // The workbench draws on the frame after the one that opened it, so the guard
+    // covers the opening frame and the first drawn frame.
+    let opened_this_frame = ui.ctx().cumulative_frame_nr() <= app.plc.opened_frame + 1;
+    if !app.plc.menu_open
+        && !opened_this_frame
+        && escape_closes_editor(&app.plc)
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         && !ui.ctx().text_edit_focused()
     {
@@ -2366,7 +2525,9 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     }
     if app.plc.text_editing {
         let still_focused = text_field_focused(ui.ctx());
-        let page_lost_owner = app.plc.page != PlcPage::Edit;
+        // Pages that own text fields: the ladder's property panel and the symbol
+        // editor. Anything else means the keyboard owner really did change page.
+        let page_lost_owner = !matches!(app.plc.page, PlcPage::Edit | PlcPage::Symbols);
         if page_lost_owner || !still_focused {
             app.plc.text_editing = false;
         }
@@ -2392,16 +2553,46 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     }
     // Locked: the grid owns the arrows, and an unlocked anchor let egui walk the
     // focus away on a plain Left/Right, so the cursor never moved.
-    common::focus_anchor_locked(ui, "plc-editor-focus", true);
+    if !app.plc.menu_open {
+        common::focus_anchor_locked(ui, "plc-editor-focus", true);
+    }
+    if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+        eprintln!("plc cp: after-focus");
+    }
+
     // The menu bar does not take clicks in this build, so the pages and the
     // two actions the workflow needs every minute have keys as well.
-    let (to_pous, to_edit, to_symbols, to_sim, add_rung, save, add_row, delete_row) = (
+    // The NEW PROJECT? question owns the keyboard while it is up.
+    if app.plc.new_confirm {
+        let (yes, no) = ui.input_mut(|input| {
+            (
+                // Only `Y` confirms: Enter is the editor's own key and must never
+                // answer this question, or opening a POU would wipe the project.
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Y),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::N)
+                    || input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+            )
+        });
+        if yes {
+            app.plc.new_confirm = false;
+            app.plc.apply(Action::New);
+            app.overlay.plc_editor = true;
+            app.plc.opened_frame = ui.ctx().cumulative_frame_nr();
+        } else if no {
+            app.plc.new_confirm = false;
+        }
+        return;
+    }
+    let (to_pous, to_edit, to_symbols, to_sim, add_rung, save, new_project, add_row, delete_row) = (
         ctrl_key(ui, egui::Key::Num1),
         ctrl_key(ui, egui::Key::Num2),
         ctrl_key(ui, egui::Key::Num3),
         ctrl_key(ui, egui::Key::Num4),
         ctrl_key(ui, egui::Key::N),
         ctrl_key(ui, egui::Key::S),
+        // Ctrl+Shift+N is the keyboard path to File > New: the menu popup is not
+        // reachable by keyboard in this build, and a new project must be.
+        ctrl_shift_key(ui, egui::Key::N),
         // The manual's SS+ENTER substitute, plus Ctrl+J for terminals that
         // cannot send Ctrl+Enter.
         ctrl_key(ui, egui::Key::Enter) || ctrl_key(ui, egui::Key::J),
@@ -2494,6 +2685,9 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
             app.plc.apply(action);
         }
     }
+    if new_project {
+        app.plc.apply(Action::New);
+    }
     if add_rung {
         let (section, row) = app
             .plc
@@ -2523,16 +2717,32 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         app.plc.apply(Action::Save);
     }
     let mut actions: Vec<Action> = Vec::new();
+    if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+        eprintln!("plc cp: after-chords");
+    }
     // Pickers first: they own the keyboard while they are open, and a text field
     // drawn later in the frame would consume Enter before the picker saw it.
     crate::screens::plc_grid::pickers(&mut app.plc, ui.ctx(), &mut actions);
-    crate::screens::plc_grid::editor_keys(app, ui, &mut actions);
-    il_keys(&mut app.plc, ui, &mut actions);
-    fbd_keys(&mut app.plc, ui, &mut actions);
+    if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+        eprintln!("plc cp: after-pickers");
+    }
+
+    if !app.plc.menu_open {
+        crate::screens::plc_grid::editor_keys(app, ui, &mut actions);
+        il_keys(&mut app.plc, ui, &mut actions);
+        fbd_keys(&mut app.plc, ui, &mut actions);
+    }
+    if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+        eprintln!("plc cp: after-keys");
+    }
+
     {
         let plc = &mut app.plc;
 
         menu_bar(plc, ui, &mut actions);
+        if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+            eprintln!("plc cp: after-menu");
+        }
         ui.add_space(2.0);
 
         let height = (ui.available_height() - STATUS_BAR_HEIGHT - 4.0).max(160.0);
@@ -2575,7 +2785,11 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     }
     if app.plc.close_requested {
         app.plc.close_requested = false;
-        app.overlay.plc_editor = false;
+        // A close requested on the opening frame is the stale one that shut the
+        // workbench before it could paint.
+        if !opened_this_frame {
+            app.overlay.plc_editor = false;
+        }
     }
 }
 
@@ -2584,7 +2798,7 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
 fn menu_bar(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        ui.menu_button("File", |ui| {
+        let file_menu = ui.menu_button("File", |ui| {
             if ui.button("New").clicked() {
                 actions.push(Action::New);
             }
@@ -2609,6 +2823,14 @@ fn menu_bar(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
                 plc.close_requested = true;
             }
         });
+        // Remembered so F10 can open the menu without a pointer: egui's menu owns
+        // arrows and Enter once its popup is open.
+        // The popup id is built by a second `Popup::menu` wrapper. Compute it
+        // first, then store it: doing both inside one `data_mut` deadlocked the
+        // frame, and the button id is not the popup id.
+        let file_popup = egui::Popup::menu(&file_menu.response).get_id();
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(egui::Id::new("linc-file-popup"), file_popup));
         ui.menu_button("POU", |ui| {
             if ui.button("POU list").clicked() {
                 plc.page = PlcPage::PouList;
@@ -2806,7 +3028,91 @@ fn page_body(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
 
 /// ZX-PLC's POU list: name, language, size, comment. Select with a click, open
 /// with a second click or Enter.
-fn pou_list_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, _actions: &mut Vec<Action>) {
+/// POU list keys, the manual's management plus LiNC's own letters: arrows select,
+/// Enter opens, `N`/`I`/`F` add an LD/IL/FBD POU, `L` cycles the language of an
+/// empty POU, `R` renames, `U` duplicates and `D` deletes (never MAIN).
+fn pou_list_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
+    // The caller normally matches the page, but a stale or direct call must never
+    // edit POUs while the editor owns the keyboard: letters typed into an IL body
+    // were reaching this handler and cycling languages, duplicating and deleting.
+    if plc.page != PlcPage::PouList || plc.text_editing {
+        return;
+    }
+    let pous = plc.project.all_pous();
+    if pous.is_empty() {
+        return;
+    }
+    let mut selected = plc.pou.min(pous.len() - 1);
+    let mut redraw = false;
+    ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            selected = selected.saturating_sub(1);
+            redraw = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            selected = (selected + 1).min(pous.len() - 1);
+            redraw = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+            actions.push(Action::OpenPou(selected));
+            redraw = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::N) {
+            actions.push(Action::AddPou(PouLanguage::Ld));
+            redraw = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::I) {
+            actions.push(Action::AddPou(PouLanguage::Il));
+            redraw = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::F) {
+            actions.push(Action::AddPou(PouLanguage::Fbd));
+            redraw = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::L) {
+            let pou = &pous[selected];
+            let empty = match pou.language {
+                PouLanguage::Ld => pou.sections.iter().all(|section| section.rungs.is_empty()),
+                PouLanguage::Il => pou.il.iter().all(|line| line.trim().is_empty()),
+                PouLanguage::Fbd => pou.fbd.is_empty(),
+            };
+            if empty {
+                let next = match pou.language {
+                    PouLanguage::Ld => PouLanguage::Il,
+                    PouLanguage::Il => PouLanguage::Fbd,
+                    PouLanguage::Fbd => PouLanguage::Ld,
+                };
+                actions.push(Action::SetPouLanguage {
+                    index: selected,
+                    language: next,
+                });
+                redraw = true;
+            }
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::R) {
+            actions.push(Action::RenamePou {
+                index: selected,
+                name: pous[selected].name.clone(),
+            });
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::U) {
+            actions.push(Action::DuplicatePou {
+                index: selected,
+                name: format!("{}_2", pous[selected].name),
+            });
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::D) && selected > 0 {
+            actions.push(Action::DeletePou { index: selected });
+            redraw = true;
+        }
+    });
+    if redraw {
+        plc.pou = selected;
+    }
+}
+
+fn pou_list_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
+    pou_list_keys(plc, ui, actions);
     let pous = plc.project.all_pous();
     egui::Grid::new("plc-pou-list")
         .num_columns(4)
@@ -2938,7 +3244,6 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
     });
 }
 
-
 /// The operand a line refers to and its live bit value, if the snapshot has one.
 /// A `CAL TON0(...)` line names the instance, so the block's `Q` is the bit.
 fn il_operand_value(plc: &PlcUi, line: &str) -> (String, Option<bool>) {
@@ -2967,7 +3272,11 @@ fn il_display_value(plc: &PlcUi, operand: &str) -> Option<String> {
         return None;
     }
     if let Some(value) = plc.bit_value(operand) {
-        return Some(if value { "TRUE".to_string() } else { "FALSE".to_string() });
+        return Some(if value {
+            "TRUE".to_string()
+        } else {
+            "FALSE".to_string()
+        });
     }
     if let Some(value) = plc.word_value(operand) {
         return Some(value.to_string());
@@ -3145,11 +3454,31 @@ fn il_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
                         lines.insert(0, String::new());
                         plc.il_cursor = 0;
                         plc.il_buffer.clear();
-                    } else if let Some(message) = plc.il_check(&plc.il_buffer) {
+                    } else if let Some(message) = {
+                        let check = plc.il_check(&plc.il_buffer);
+                        if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+                            eprintln!(
+                                "il enter buf={:?} check={:?} cursor={} lines={}",
+                                plc.il_buffer,
+                                check,
+                                plc.il_cursor,
+                                lines.len()
+                            );
+                        }
+                        check
+                    } {
                         plc.il_message = Some(message);
                         break;
                     } else {
                         plc.il_store_buffer(&mut lines, true);
+                        if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+                            eprintln!(
+                                "il stored project_il={:?}",
+                                plc.current_pou()
+                                    .map(|pou| pou.il.clone())
+                                    .unwrap_or_default()
+                            );
+                        }
                         // Commit is one line: the cursor moves on and the buffer is
                         // either the next stored line or empty. Leaving the typed
                         // text in the buffer glued the next line onto it
@@ -3234,7 +3563,8 @@ fn fbd_box_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
     let mut next_block: Option<String> = None;
     let mut next_preset: Option<String> = None;
     egui::Window::new(format!("{} · row {} col {}", block.kind, row + 1, col + 1))
-        .order(egui::Order::Foreground)
+        // Above the workbench overlay (Foreground), which is itself above the page.
+        .order(egui::Order::Tooltip)
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -3579,7 +3909,10 @@ fn fbd_place_block(
     actions: &mut Vec<Action>,
     message: &mut Option<String>,
 ) {
-    let Some((row, col)) = plc.fbd_cursor else {
+    // The picker's coordinate is authoritative: it is the cell the operator chose.
+    // Falling back to the cursor kept the block silent when the two differed (the
+    // cursor could be `None` while the picker was open).
+    let Some((row, col)) = plc.fbd_grid_pick.or(plc.fbd_cursor) else {
         return;
     };
     let mut grid = fbd_grid_of(plc);
@@ -3678,7 +4011,76 @@ fn fbd_close_up(grid: &mut FbdGrid, row: usize, ins: usize) {
 }
 
 /// The element list for a grid cell: signals, gates, blocks.
+
+/// What a key means while the FBD element picker is open.
+enum FbdPick {
+    Wire,
+    Input,
+    Output,
+    Block(&'static str),
+    Close,
+}
+
+/// The picker's letter map, mirroring the manual's FBD table.
+fn fbd_pick_for_char(character: char) -> Option<FbdPick> {
+    Some(match character.to_ascii_uppercase() {
+        'W' | '-' => FbdPick::Wire,
+        'I' => FbdPick::Input,
+        'Q' => FbdPick::Output,
+        'A' => FbdPick::Block("AND"),
+        'O' => FbdPick::Block("OR"),
+        'X' => FbdPick::Block("XOR"),
+        'N' | '!' => FbdPick::Block("NOT"),
+        'T' => FbdPick::Block("TON"),
+        'F' => FbdPick::Block("TOF"),
+        'U' => FbdPick::Block("TP"),
+        'K' => FbdPick::Block("CTU"),
+        'D' => FbdPick::Block("CTD"),
+        _ => return None,
+    })
+}
+
+/// Read the picker's choice from the frame's events. Letters arrive as
+/// `Event::Text` (a typed key), so `consume_key` alone never matched them; `-` and
+/// Escape stay on the key path because they produce no text.
+fn fbd_pick_key(ctx: &egui::Context) -> Option<FbdPick> {
+    let mut picked = None;
+    for event in ctx.input(|input| input.events.clone()) {
+        match event {
+            egui::Event::Text(text) => {
+                for character in text.chars() {
+                    if let Some(choice) = fbd_pick_for_char(character) {
+                        picked = Some(choice);
+                        break;
+                    }
+                }
+            }
+            egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } if modifiers.is_none() => match key {
+                egui::Key::Minus => picked = Some(FbdPick::Wire),
+                egui::Key::Escape => picked = Some(FbdPick::Close),
+                _ => {}
+            },
+            _ => {}
+        }
+        if picked.is_some() {
+            break;
+        }
+    }
+    picked
+}
+
 fn fbd_grid_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+        eprintln!(
+            "fbd menu: pick={:?} operand={:?} filter={:?}",
+            plc.fbd_grid_pick, plc.fbd_operand_pick, plc.operand_filter
+        );
+    }
     let Some((row, col)) = plc.fbd_grid_pick else {
         return;
     };
@@ -3688,8 +4090,43 @@ fn fbd_grid_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>
     let mut operand_pick: Option<bool> = None;
     let mut block: Option<String> = None;
     let mut box_edit = false;
+    // The picker owns the letters while it is open: the grid cursor moves with the
+    // arrows and a letter chooses the element, so placing never needs a click.
+    let keyed = fbd_pick_key(ctx);
+    if cfg!(debug_assertions) {
+        eprintln!(
+            "fbd pick key -> {:?}",
+            keyed.as_ref().map(|pick| match pick {
+                FbdPick::Wire => "wire",
+                FbdPick::Input => "input",
+                FbdPick::Output => "output",
+                FbdPick::Block(kind) => kind,
+                FbdPick::Close => "close",
+            })
+        );
+    }
+    if keyed.is_some() {
+        // The picker consumed the letters: leaving them in the frame's events let
+        // the operand window that opens in the same frame append them to its filter
+        // (`i` became part of `ipump`).
+        ctx.input_mut(|input| {
+            input
+                .events
+                .retain(|event| !matches!(event, egui::Event::Text(_)))
+        });
+    }
+    if let Some(choice) = keyed {
+        match choice {
+            FbdPick::Wire => set_cell = Some(FbdCell::Wire),
+            FbdPick::Input => operand_pick = Some(false),
+            FbdPick::Output => operand_pick = Some(true),
+            FbdPick::Block(kind) => block = Some(kind.to_string()),
+            FbdPick::Close => close = true,
+        }
+    }
     egui::Window::new(format!("FBD  row {} col {}", row + 1, col + 1))
-        .order(egui::Order::Foreground)
+        // Above the workbench overlay (Foreground), which is itself above the page.
+        .order(egui::Order::Tooltip)
         .collapsible(false)
         .resizable(true)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -3753,6 +4190,9 @@ fn fbd_grid_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>
         close = true;
     }
     if let Some(output) = operand_pick {
+        // A fresh picker starts with an empty filter: stale text from an earlier
+        // placement made the next typed name match nothing (`pumpstopqrun`).
+        plc.operand_filter.clear();
         plc.fbd_operand_pick = Some((row, col, output));
         close = true;
     }
@@ -3767,6 +4207,16 @@ fn fbd_grid_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>
     if let Some(message) = message {
         plc.il_message = Some(message);
     }
+    if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+        eprintln!(
+            "fbd menu tail: close={} operand={:?} grid_pick={:?} actions={} msg={:?}",
+            close,
+            plc.fbd_operand_pick,
+            plc.fbd_grid_pick,
+            actions.len(),
+            plc.il_message
+        );
+    }
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
         plc.fbd_grid_pick = None;
     }
@@ -3779,11 +4229,58 @@ fn fbd_operand_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Acti
     };
     let mut close = false;
     let mut chosen: Option<String> = None;
+    // Keyboard, as the ladder's operand picker has: typed text filters, Enter takes
+    // the first match, Escape closes. The list was click-only, so `Enter → I → pump`
+    // placed nothing.
+    {
+        let mut typed = String::new();
+        let mut backspace = false;
+        let mut enter = false;
+        let mut escape = false;
+        for event in ctx.input(|input| input.events.clone()) {
+            match event {
+                egui::Event::Text(text) => typed.push_str(&text),
+                egui::Event::Key {
+                    key, pressed: true, ..
+                } => match key {
+                    egui::Key::Backspace => backspace = true,
+                    egui::Key::Enter => enter = true,
+                    egui::Key::Escape => escape = true,
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        plc.operand_filter.push_str(&typed);
+        if backspace {
+            plc.operand_filter.pop();
+        }
+        if escape {
+            plc.fbd_operand_pick = None;
+            plc.operand_filter.clear();
+            return;
+        }
+        if enter {
+            let needle = plc.operand_filter.trim().to_ascii_lowercase();
+            let first = plc
+                .project
+                .io
+                .iter()
+                .find(|point| {
+                    needle.is_empty() || point.name.to_ascii_lowercase().contains(&needle)
+                })
+                .map(|point| point.name.clone());
+            if let Some(name) = first {
+                chosen = Some(name);
+            }
+        }
+    }
     egui::Window::new(if output {
         "FBD OUTPUT CELL"
     } else {
         "FBD INPUT CELL"
     })
+    .order(egui::Order::Tooltip)
     .collapsible(false)
     .resizable(true)
     .default_width(320.0)
@@ -3792,7 +4289,10 @@ fn fbd_operand_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Acti
         egui::ScrollArea::vertical()
             .max_height(320.0)
             .show(ui, |ui| {
-                for point in plc.project.io.clone() {
+                let needle = plc.operand_filter.trim().to_ascii_lowercase();
+                for point in plc.project.io.clone().into_iter().filter(|point| {
+                    needle.is_empty() || point.name.to_ascii_lowercase().contains(&needle)
+                }) {
                     if ui
                         .button(format!("{}   {}", point.name, point.comment))
                         .clicked()
@@ -3848,11 +4348,27 @@ fn fbd_operand_menu(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Acti
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
         plc.fbd_operand_pick = None;
         plc.fbd_negate = false;
+        plc.operand_filter.clear();
     }
 }
 
 /// Keys the grid owns: arrows move between cells, Enter opens the element list.
 fn fbd_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
+    if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+        eprintln!(
+            "fbd keys: page={:?} editing={} field={} lang={:?} pick={:?}",
+            plc.page,
+            plc.text_editing,
+            text_field_focused(ui.ctx()),
+            plc.current_pou().map(|pou| pou.language),
+            plc.fbd_grid_pick
+        );
+    }
+    // An open picker owns the keyboard: without this the grid handled the same
+    // Enter that chose an element and re-opened the picker, so nothing was placed.
+    if plc.fbd_grid_pick.is_some() || plc.fbd_operand_pick.is_some() {
+        return;
+    }
     if plc.page != PlcPage::Edit || plc.text_editing || text_field_focused(ui.ctx()) {
         return;
     }
@@ -4065,14 +4581,50 @@ fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Act
                     ui.label("");
                     ui.label("");
                     ui.horizontal(|ui| {
+                        // Keyboard-only add: `N` claims the field (focus by stable
+                        // id), typed text goes to the buffer, `I` commits an input
+                        // and `O` an output, Escape cancels.
+                        let field_id = egui::Id::new("linc-new-symbol");
+                        if ui.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::NONE, egui::Key::N)
+                        }) {
+                            plc.text_editing = true;
+                            ui.memory_mut(|memory| memory.request_focus(field_id));
+                        }
                         let mut name = plc.symbol_new.clone();
                         let response = ui.add(
                             egui::TextEdit::singleline(&mut name)
+                                .id(field_id)
                                 .desired_width(140.0)
                                 .hint_text("new symbol name"),
                         );
+                        if plc.text_editing && !response.has_focus() {
+                            response.request_focus();
+                        }
                         if response.changed() {
                             plc.symbol_new = name.clone();
+                        }
+                        if plc.text_editing {
+                            let (commit_in, commit_out, cancel) = ui.input_mut(|input| {
+                                (
+                                    input.consume_key(egui::Modifiers::NONE, egui::Key::I),
+                                    input.consume_key(egui::Modifiers::NONE, egui::Key::O),
+                                    input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+                                )
+                            });
+                            let trimmed = plc.symbol_new.trim().to_string();
+                            if commit_in && !trimmed.is_empty() {
+                                actions.push(Action::AddInput(trimmed));
+                                plc.symbol_new.clear();
+                                plc.text_editing = false;
+                            } else if commit_out && !trimmed.is_empty() {
+                                actions.push(Action::AddSymbol(trimmed));
+                                plc.symbol_new.clear();
+                                plc.text_editing = false;
+                            } else if cancel {
+                                plc.symbol_new.clear();
+                                plc.text_editing = false;
+                            }
                         }
                         if theme::action_button(ui, "add out", true).clicked()
                             && !name.trim().is_empty()
@@ -4433,7 +4985,11 @@ fn sim_bit_panel(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
                         ui.painter().text(
                             egui::pos2(rect.center().x, rect.bottom() - 2.0),
                             Align2::CENTER_BOTTOM,
-                            if forced { format!("F {}", point.name) } else { point.name.clone() },
+                            if forced {
+                                format!("F {}", point.name)
+                            } else {
+                                point.name.clone()
+                            },
                             FontId::monospace(6.5),
                             colour,
                         );
@@ -6669,7 +7225,10 @@ mod il_editor_tests {
         let lines = plc.il_lines();
         assert_eq!(lines[0], "LD pump", "first line kept as typed");
         assert_eq!(lines[1], "ST run", "second line is its own line, not glued");
-        assert!(plc.il_buffer.is_empty(), "the buffer is empty after a commit");
+        assert!(
+            plc.il_buffer.is_empty(),
+            "the buffer is empty after a commit"
+        );
     }
 
     /// Backspace edits the line being typed, however many times it is pressed.
@@ -6689,5 +7248,581 @@ mod il_editor_tests {
         );
         frame(&mut plc, vec![egui::Event::Text("pump".into())]);
         assert_eq!(plc.il_buffer, "LD pump");
+    }
+}
+
+#[cfg(test)]
+mod menu_ownership_tests {
+    use super::*;
+
+    fn il_plc() -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.project.normalise();
+        let mut pous = plc.project.all_pous();
+        pous[0].language = PouLanguage::Il;
+        pous[0].il = vec!["LD pump".to_string()];
+        plc.project.set_pous(pous);
+        plc.page = PlcPage::Edit;
+        plc.il_cursor = 1;
+        plc.il_buffer.clear();
+        plc.menu_open = true;
+        plc
+    }
+
+    /// While a menu is open the menu owns arrows and Enter: the IL line editor must
+    /// not consume them, or File > New can never be confirmed from the keyboard.
+    #[test]
+    fn an_open_menu_keeps_enter_and_arrows_from_the_editor() {
+        let mut plc = il_plc();
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::Text("ST".into()),
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Area::new(egui::Id::new("menu-ownership"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    if !plc.menu_open {
+                        il_keys(&mut plc, ui, &mut Vec::new());
+                    }
+                });
+        });
+        output.textures_delta.clear();
+        assert!(
+            plc.il_buffer.is_empty(),
+            "the editor took text while a menu was open"
+        );
+        assert_eq!(plc.il_lines()[0], "LD pump", "the stored line is untouched");
+    }
+
+    /// With no menu open the same keys do reach the editor, so the guard is the
+    /// menu and not a permanent mute.
+    #[test]
+    fn without_a_menu_the_editor_still_owns_the_keys() {
+        let mut plc = il_plc();
+        plc.menu_open = false;
+        // An empty POU, so the synced buffer starts empty and the assertion is
+        // about the typed text alone.
+        let mut pous = plc.project.all_pous();
+        pous[0].il = Vec::new();
+        plc.project.set_pous(pous);
+        plc.il_cursor = 0;
+        plc.il_buffer.clear();
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events: vec![egui::Event::Text("ST".into())],
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Area::new(egui::Id::new("no-menu"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    il_keys(&mut plc, ui, &mut Vec::new());
+                });
+        });
+        output.textures_delta.clear();
+        assert_eq!(plc.il_buffer, "ST");
+    }
+}
+
+#[cfg(test)]
+mod launcher_tests {
+    use super::*;
+
+    /// Ctrl+E opens the workbench from the keyboard, so acceptance does not hinge on
+    /// the pointer landing inside the OPEN EDITOR button.
+    #[test]
+    fn ctrl_e_is_the_keyboard_launcher() {
+        let ctx = egui::Context::default();
+        let mut opened = false;
+        let input = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::E,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL,
+            }],
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Area::new(egui::Id::new("launcher"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    if ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::E))
+                    {
+                        opened = true;
+                    }
+                });
+        });
+        output.textures_delta.clear();
+        assert!(opened, "Ctrl+E must set the open flag");
+    }
+}
+
+#[cfg(test)]
+mod open_frame_tests {
+    use super::*;
+
+    /// The frame that opens the workbench must not also close it: the click or chord
+    /// can arrive with a stale Escape in the same input batch.
+    #[test]
+    fn an_escape_on_the_opening_frame_does_not_close_the_workbench() {
+        let mut plc = PlcUi::default();
+        plc.opened_frame = 7;
+        // Same frame as the open: the guard must refuse to close.
+        let same_frame_guard = |frame: u64, opened: u64| frame <= opened;
+        assert!(
+            same_frame_guard(7, plc.opened_frame),
+            "opening frame is protected"
+        );
+        // A later frame may close it, so the workbench is not stuck open.
+        assert!(
+            !same_frame_guard(8, plc.opened_frame),
+            "the next frame may close"
+        );
+    }
+}
+
+#[cfg(test)]
+mod pou_keys_tests {
+    use super::*;
+
+    /// A new project is empty: `File > New` must not bring the example ladder.
+    #[test]
+    fn a_new_project_is_empty() {
+        let mut plc = PlcUi::default();
+        plc.apply(Action::New);
+        let pous = plc.project.all_pous();
+        assert_eq!(pous.len(), 1, "one MAIN");
+        assert!(
+            pous[0]
+                .sections
+                .iter()
+                .all(|section| section.rungs.is_empty()),
+            "no rungs come with a new project"
+        );
+    }
+
+    /// The language of an empty POU cycles, so an empty MAIN can become IL from the
+    /// keyboard; a POU with a program keeps its language.
+    #[test]
+    fn the_language_cycles_only_for_an_empty_pou() {
+        let mut plc = PlcUi::default();
+        plc.apply(Action::New);
+        plc.apply(Action::SetPouLanguage {
+            index: 0,
+            language: PouLanguage::Il,
+        });
+        assert_eq!(plc.project.all_pous()[0].language, PouLanguage::Il);
+        let mut with_program = PlcUi::default();
+        with_program.project = Project::example();
+        with_program.project.normalise();
+        with_program.apply(Action::SetPouLanguage {
+            index: 0,
+            language: PouLanguage::Fbd,
+        });
+        assert_eq!(
+            with_program.project.all_pous()[0].language,
+            PouLanguage::Fbd,
+            "the action itself sets the language; the list guards it for non-empty POUs"
+        );
+    }
+
+    /// Adding a POU opens it, which is what the list keys rely on.
+    #[test]
+    fn adding_a_pou_opens_it() {
+        let mut plc = PlcUi::default();
+        plc.apply(Action::New);
+        plc.apply(Action::AddPou(PouLanguage::Fbd));
+        let pous = plc.project.all_pous();
+        assert_eq!(pous.len(), 2);
+        assert_eq!(plc.pou, 1, "the new POU is current");
+        assert_eq!(pous[1].language, PouLanguage::Fbd);
+    }
+}
+
+#[cfg(test)]
+mod symbol_focus_tests {
+    use super::*;
+
+    /// A claimed field must keep the keyboard on the Symbols page: the editor used to
+    /// clear `text_editing` on every page that was not Edit.
+    #[test]
+    fn the_symbol_field_keeps_the_keyboard_on_the_symbols_page() {
+        let mut plc = PlcUi::default();
+        plc.page = PlcPage::Symbols;
+        plc.text_editing = true;
+        // The rule the editor now applies.
+        let page_lost_owner = !matches!(plc.page, PlcPage::Edit | PlcPage::Symbols);
+        assert!(!page_lost_owner, "Symbols owns text fields");
+        assert!(plc.text_editing, "the claim survives");
+        plc.page = PlcPage::PouList;
+        let page_lost_owner = !matches!(plc.page, PlcPage::Edit | PlcPage::Symbols);
+        assert!(page_lost_owner, "leaving for another page releases it");
+    }
+}
+
+#[cfg(test)]
+mod save_pous_tests {
+    use super::*;
+
+    /// A new project plus an added POU must serialise both: MAIN and the new IL POU.
+    /// If this ever fails, the empty save is a real defect rather than a stray New.
+    #[test]
+    fn a_new_project_with_an_added_pou_saves_both() {
+        let mut plc = PlcUi::default();
+        plc.apply(Action::New);
+        plc.apply(Action::AddPou(PouLanguage::Il));
+        let all = plc.project.all_pous();
+        plc.project.set_pous(all);
+        let text = project_to_json(&plc.project).expect("serialize");
+        let parsed: Project = serde_json::from_str(&text).expect("parse back");
+        let names: Vec<String> = parsed.all_pous().into_iter().map(|pou| pou.name).collect();
+        assert_eq!(names.len(), 2, "both POUs are written: {names:?}");
+        assert!(names.iter().any(|name| name == "MAIN"), "{names:?}");
+    }
+}
+
+#[cfg(test)]
+mod pou_guard_tests {
+    use super::*;
+
+    fn il_project() -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.project.normalise();
+        let mut pous = plc.project.all_pous();
+        pous[0].language = PouLanguage::Il;
+        plc.project.set_pous(pous);
+        plc.apply(Action::AddPou(PouLanguage::Il));
+        plc.pou = 1;
+        plc.il_cursor = 0;
+        plc.il_buffer.clear();
+        plc
+    }
+
+    /// On the Edit page the POU list must not touch the POU set: typing an IL body
+    /// used to cycle languages, duplicate and delete POUs.
+    #[test]
+    fn pou_list_keys_are_inert_outside_the_list_page() {
+        let mut plc = il_project();
+        plc.page = PlcPage::Edit;
+        let before = plc.project.all_pous().len();
+        let ctx = egui::Context::default();
+        let mut actions = Vec::new();
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::Text("LD".into()),
+                egui::Event::Key {
+                    key: egui::Key::U,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Area::new(egui::Id::new("pou-guard"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    pou_list_keys(&mut plc, ui, &mut actions);
+                });
+        });
+        output.textures_delta.clear();
+        assert!(actions.is_empty(), "no POU action from the Edit page");
+        assert_eq!(
+            plc.project.all_pous().len(),
+            before,
+            "no POU added or removed"
+        );
+    }
+}
+
+#[cfg(test)]
+mod canonical_save_tests {
+    use super::*;
+
+    /// `pous` empty with a section present must still serialise MAIN.
+    #[test]
+    fn an_empty_pou_list_with_one_section_serialises_main() {
+        let mut project = Project::new("t");
+        project.sections.push(linc_plc_core::model::Section {
+            name: "main".to_string(),
+            rungs: vec![Rung::new(
+                Logic::contact("start", false),
+                Coil::new("run", CoilKind::Normal),
+            )],
+        });
+        project.pous.clear();
+        let text = project_to_json(&project).expect("serialize");
+        let parsed: Project = serde_json::from_str(&text).expect("parse");
+        let names: Vec<String> = parsed.all_pous().into_iter().map(|pou| pou.name).collect();
+        assert!(names.iter().any(|name| name == "MAIN"), "{names:?}");
+        assert!(
+            !parsed.all_pous()[0].sections.is_empty(),
+            "the ladder section survives the canonicalising write"
+        );
+    }
+
+    /// A new project plus an added IL POU serialises both, with the IL body.
+    #[test]
+    fn a_new_project_with_an_il_pou_serialises_both_and_its_body() {
+        let mut plc = PlcUi::default();
+        plc.apply(Action::New);
+        plc.apply(Action::AddPou(PouLanguage::Il));
+        let mut pous = plc.project.all_pous();
+        pous[1].il = vec!["LD pump".to_string(), "ST run".to_string()];
+        plc.project.set_pous(pous);
+        let text = project_to_json(&plc.project).expect("serialize");
+        let parsed: Project = serde_json::from_str(&text).expect("parse");
+        let pous = parsed.all_pous();
+        assert_eq!(pous.len(), 2, "both POUs written");
+        assert_eq!(
+            pous[1].il,
+            vec!["LD pump".to_string(), "ST run".to_string()]
+        );
+    }
+}
+
+#[cfg(test)]
+mod pou_index_tests {
+    use super::*;
+
+    /// A stale POU index must never leave the editor pointing past the POU list:
+    /// that produced a blank header and an empty body after File > New.
+    #[test]
+    fn a_stale_pou_index_cannot_open_a_pou_that_does_not_exist() {
+        let mut plc = PlcUi::default();
+        plc.apply(Action::New);
+        assert_eq!(plc.pou, 0, "a new project selects MAIN");
+        plc.apply(Action::OpenPou(1));
+        assert_eq!(plc.pou, 0, "an out-of-range index is ignored");
+        assert!(plc.current_pou().is_some(), "the header always has a POU");
+
+        plc.apply(Action::AddPou(PouLanguage::Il));
+        assert_eq!(plc.pou, 1, "a real POU opens");
+        plc.apply(Action::New);
+        assert_eq!(plc.pou, 0, "New resets the index again");
+        assert!(plc.current_pou().is_some());
+    }
+}
+
+#[cfg(test)]
+mod fbd_place_keyboard_tests {
+    use super::*;
+
+    fn fbd_plc() -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.project.normalise();
+        let mut pous = plc.project.all_pous();
+        pous[0].language = PouLanguage::Fbd;
+        pous[0].fbd_grid = None;
+        plc.project.set_pous(pous);
+        plc.page = PlcPage::Edit;
+        plc.pou = 0;
+        plc.fbd_grid_pick = Some((0, 0));
+        plc.operand_filter.clear();
+        plc
+    }
+
+    fn frame(plc: &mut PlcUi, events: Vec<egui::Event>) -> Vec<Action> {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        let mut actions = Vec::new();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Area::new(egui::Id::new("fbd-place"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    fbd_keys(plc, ui, &mut actions);
+                    fbd_grid_menu(plc, ctx, &mut actions);
+                    fbd_operand_menu(plc, ctx, &mut actions);
+                });
+        });
+        output.textures_delta.clear();
+        actions
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn one_input() -> PlcUi {
+        let mut plc = fbd_plc();
+        plc.project.io = vec![linc_plc_core::IoPoint {
+            name: "pump".into(),
+            direction: linc_plc_core::IoDirection::In,
+            kind: linc_plc_core::IoKind::Bit,
+            comment: String::new(),
+        }];
+        plc
+    }
+
+    #[test]
+    fn enter_i_pump_enter_places_an_input() {
+        let mut plc = one_input();
+        let _ = frame(&mut plc, vec![egui::Event::Text("i".into())]);
+        assert!(plc.fbd_operand_pick.is_some(), "I opens the operand list");
+        let _ = frame(&mut plc, vec![egui::Event::Text("pump".into())]);
+        let actions = frame(&mut plc, vec![key(egui::Key::Enter)]);
+        assert!(plc.fbd_operand_pick.is_none(), "Enter closes the list");
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::SetFbdGrid(_))),
+            "Enter writes the cell"
+        );
+    }
+
+    #[test]
+    fn a_places_an_and_block() {
+        let mut plc = fbd_plc();
+        let actions = frame(&mut plc, vec![egui::Event::Text("a".into())]);
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::SetFbdGrid(_))),
+            "A places the block"
+        );
+    }
+
+    #[test]
+    fn a_block_lands_on_the_picker_cell_not_the_cursor() {
+        let mut plc = fbd_plc();
+        // Cursor deliberately elsewhere: the picker coordinate must win.
+        plc.fbd_cursor = Some((3, 1));
+        plc.fbd_grid_pick = Some((0, 2));
+        let actions = frame(&mut plc, vec![egui::Event::Text("a".into())]);
+        let grid = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::SetFbdGrid(grid) => Some(grid.clone()),
+                _ => None,
+            })
+            .expect("a grid is written");
+        let block = grid.blocks.first().expect("the AND block is placed");
+        assert_eq!(
+            (block.row, block.col),
+            (0, 2),
+            "the picker cell, not the cursor"
+        );
+    }
+
+    #[test]
+    fn q_places_an_output() {
+        let mut plc = one_input();
+        let _ = frame(&mut plc, vec![egui::Event::Text("q".into())]);
+        assert!(plc.fbd_operand_pick.is_some(), "Q opens the output list");
+        let _ = frame(&mut plc, vec![egui::Event::Text("pump".into())]);
+        let actions = frame(&mut plc, vec![key(egui::Key::Enter)]);
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::SetFbdGrid(_))),
+            "Enter writes the output cell"
+        );
+    }
+}
+
+#[cfg(test)]
+mod fbd_filter_tests {
+    use super::*;
+
+    fn fbd_plc() -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.project.normalise();
+        let mut pous = plc.project.all_pous();
+        pous[0].language = PouLanguage::Fbd;
+        plc.project.set_pous(pous);
+        plc.page = PlcPage::Edit;
+        plc.pou = 0;
+        plc.fbd_grid_pick = Some((0, 0));
+        plc.project.io = vec![linc_plc_core::IoPoint {
+            name: "pump".into(),
+            direction: linc_plc_core::IoDirection::In,
+            kind: linc_plc_core::IoKind::Bit,
+            comment: String::new(),
+        }];
+        plc
+    }
+
+    fn frame(plc: &mut PlcUi, events: Vec<egui::Event>) -> Vec<Action> {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        let mut actions = Vec::new();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Area::new(egui::Id::new("fbd-filter"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    fbd_keys(plc, ui, &mut actions);
+                    fbd_grid_menu(plc, ctx, &mut actions);
+                    fbd_operand_menu(plc, ctx, &mut actions);
+                });
+        });
+        output.textures_delta.clear();
+        actions
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Every new operand pick starts with an empty filter, even after a previous
+    /// placement left text behind.
+    #[test]
+    fn the_operand_filter_starts_empty_for_each_pick() {
+        let mut plc = fbd_plc();
+        plc.operand_filter = "stale".into();
+        let _ = frame(&mut plc, vec![egui::Event::Text("i".into())]);
+        assert!(plc.fbd_operand_pick.is_some(), "I opens the list");
+        assert!(
+            plc.operand_filter.is_empty(),
+            "the stale filter was cleared: {:?}",
+            plc.operand_filter
+        );
+    }
+
+    /// A commit clears the filter, so the next pick cannot inherit the name.
+    #[test]
+    fn the_operand_filter_clears_after_a_commit() {
+        let mut plc = fbd_plc();
+        let _ = frame(&mut plc, vec![egui::Event::Text("i".into())]);
+        let _ = frame(&mut plc, vec![egui::Event::Text("pump".into())]);
+        let actions = frame(&mut plc, vec![key(egui::Key::Enter)]);
+        assert!(
+            actions.iter().any(|action| matches!(action, Action::SetFbdGrid(_))),
+            "the cell is written"
+        );
+        assert!(plc.fbd_operand_pick.is_none(), "the list closed");
+        assert!(plc.operand_filter.is_empty(), "the filter is clean again");
     }
 }

@@ -246,30 +246,59 @@ impl LincApp {
     /// from inside the editor still sits on top of it. `overlay_open()` includes
     /// it, so the shell's own keys never reach the page behind.
     pub(super) fn draw_plc_editor(&mut self, ctx: &egui::Context) {
+        if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+            eprintln!(
+                "plc draw entry: overlay={} close_requested={}",
+                self.overlay.plc_editor, self.plc.close_requested
+            );
+        }
         if !self.overlay.plc_editor {
             return;
         }
         let screen = ctx.input(|input| input.viewport_rect());
-        // Middle, not Foreground: the overlay's own menus and dialogs are
-        // `Order::Foreground`, and a Foreground overlay paints over its own
-        // dropdowns and pickers, which reads as "the button does nothing".
-        egui::Area::new(egui::Id::unique("linc-plc-editor"))
-            .order(egui::Order::Middle)
+        let overlay = egui::Area::new(egui::Id::unique("linc-plc-editor"))
+            // Above the central page: at Middle the workbench was painted underneath
+            // it, so the overlay existed but the screen kept showing the PLC service
+            // page. Its own windows sit higher still (Tooltip), so they stay on top.
+            .order(egui::Order::Foreground)
             .fixed_pos(screen.min)
             .show(ctx, |ui| {
-                // No full-screen click target here: it made egui treat the
-                // click that opened a dropdown as a click outside it, so every
-                // menu opened and shut in one frame. The overlay is opaque and
-                // covers the page, so nothing underneath is reachable anyway.
-                ui.painter().rect_filled(screen, 0.0, theme::PANEL);
-                egui::Frame::new()
-                    .fill(theme::PANEL)
-                    .inner_margin(egui::Margin::same(10))
-                    .show(ui, |ui| {
-                        ui.set_min_size(screen.size() - egui::vec2(20.0, 20.0));
-                        crate::screens::plc::editor(self, ui);
-                    });
+                // The child `Ui` owns the whole rect. Allocating an exact size here
+                // consumed the Area's cursor, so the Frame below had no space left and
+                // the workbench had zero height.
+                ui.allocate_ui_with_layout(
+                    screen.size(),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.painter().rect_filled(screen, 0.0, theme::PANEL);
+                        egui::Frame::new()
+                            .fill(theme::PANEL)
+                            .inner_margin(egui::Margin::same(10))
+                            .show(ui, |ui| {
+                                // The page scrolls inside the viewport: letting the
+                                // content grow past it (1001 > 822) clipped the
+                                // overlay's own popups, so menus opened but painted
+                                // outside the visible area.
+                                ui.set_min_size(screen.size() - egui::vec2(20.0, 20.0));
+                                ui.set_max_size(screen.size() - egui::vec2(20.0, 20.0));
+                                egui::ScrollArea::vertical()
+                                    .id_salt("plc-editor-scroll")
+                                    .auto_shrink([false, false])
+                                    .show(ui, |ui| {
+                                        crate::screens::plc::editor(self, ui);
+                                    });
+                            });
+                    },
+                );
             });
+        if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
+            eprintln!(
+                "plc overlay rect={:?} size={:?}",
+                overlay.response.rect,
+                overlay.response.rect.size()
+            );
+        }
+
     }
 
     pub(super) fn draw_modal(&mut self, ctx: &egui::Context) {

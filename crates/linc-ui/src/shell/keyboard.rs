@@ -19,6 +19,20 @@ pub(super) const LINE_PAGE: isize = 10;
 /// page's delete (`[keys].cut` defaults to the same chord).
 pub(super) const CUT_SHORTCUT: Binding = Binding::new(egui::Key::X, egui::Modifiers::CTRL);
 
+/// True when the PLC page's open chord is pressed: Ctrl+E, in either spelling egui
+/// reports for Ctrl on Linux, and only on the PLC page with the workbench closed.
+pub(super) fn plc_open_chord(
+    page: Page,
+    overlay_open: bool,
+    input: &mut egui::InputState,
+) -> bool {
+    if page != Page::Plc || overlay_open {
+        return false;
+    }
+    input.consume_key(egui::Modifiers::CTRL, egui::Key::E)
+        || input.consume_key(egui::Modifiers::CTRL | egui::Modifiers::COMMAND, egui::Key::E)
+}
+
 impl LincApp {
     pub fn handle_keyboard(&mut self, ui: &mut egui::Ui) {
         // The safety notice is the only thing on screen until it is answered.
@@ -42,6 +56,17 @@ impl LincApp {
         // handled on paths that run before this guard.
         if self.overlay.plc_editor {
             return;
+        }
+        // Ctrl+E opens the PLC workbench from the keyboard, so the acceptance does
+        // not depend on the pointer landing inside the OPEN EDITOR button. Handled
+        // here because the page handlers are downstream of this point.
+        if self.nav.page == Page::Plc && !self.overlay.plc_editor {
+            let open = ui.input_mut(|input| plc_open_chord(self.nav.page, false, input));
+            if open {
+                self.overlay.plc_editor = true;
+                self.plc.opened_frame = ui.ctx().cumulative_frame_nr();
+                return;
+            }
         }
         self.hand_cut_to_page(ui);
         // A modal messages dialog owns the keyboard: Enter/Escape close it and
@@ -913,5 +938,48 @@ impl LincApp {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod plc_open_tests {
+    use super::*;
+
+    fn chord(page: Page, overlay: bool, modifiers: egui::Modifiers) -> bool {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::E,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }],
+            ..Default::default()
+        };
+        let mut opened = false;
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Area::new(egui::Id::new("plc-open"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    opened = ui.input_mut(|input| plc_open_chord(page, overlay, input));
+                });
+        });
+        output.textures_delta.clear();
+        opened
+    }
+
+    /// Ctrl+E opens the workbench from the PLC page, in both modifier spellings,
+    /// and is not a shortcut anywhere else.
+    #[test]
+    fn ctrl_e_opens_the_plc_workbench() {
+        assert!(chord(Page::Plc, false, egui::Modifiers::CTRL));
+        assert!(chord(
+            Page::Plc,
+            false,
+            egui::Modifiers::CTRL | egui::Modifiers::COMMAND
+        ));
+        assert!(!chord(Page::Plc, true, egui::Modifiers::CTRL), "already open");
+        assert!(!chord(Page::Machine, false, egui::Modifiers::CTRL));
     }
 }

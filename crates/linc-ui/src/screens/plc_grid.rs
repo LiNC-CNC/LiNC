@@ -582,7 +582,8 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
     let mut patch_instance: Option<String> = None;
     let mut patch_preset: Option<String> = None;
     egui::Window::new(format!("{block} BOX"))
-        .order(egui::Order::Foreground)
+        // Above the workbench overlay (Foreground), which is itself above the page.
+        .order(egui::Order::Tooltip)
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
@@ -653,7 +654,8 @@ fn xref_window(plc: &mut PlcUi, ctx: &egui::Context) {
     };
     let mut close = false;
     egui::Window::new(format!("CROSS REFERENCES  {name}"))
-        .order(egui::Order::Foreground)
+        // Above the workbench overlay (Foreground), which is itself above the page.
+        .order(egui::Order::Tooltip)
         .collapsible(false)
         .resizable(true)
         .default_width(420.0)
@@ -883,7 +885,8 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
     let mut visible = true;
     let shown = egui::Window::new("ELEMENT")
         .open(&mut visible)
-        .order(egui::Order::Foreground)
+        // Above the workbench overlay (Foreground), which is itself above the page.
+        .order(egui::Order::Tooltip)
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
@@ -1114,7 +1117,8 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
     let mut visible = true;
     let shown = egui::Window::new("OPERAND")
         .open(&mut visible)
-        .order(egui::Order::Foreground)
+        // Above the workbench overlay (Foreground), which is itself above the page.
+        .order(egui::Order::Tooltip)
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
@@ -1232,7 +1236,8 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     let mut visible = true;
     let shown = egui::Window::new("COIL OPERAND")
         .open(&mut visible)
-        .order(egui::Order::Foreground)
+        // Above the workbench overlay (Foreground), which is itself above the page.
+        .order(egui::Order::Tooltip)
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
@@ -1400,7 +1405,8 @@ fn expr_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     } else {
         "COMPARE CONTACT  G"
     })
-    .order(egui::Order::Foreground)
+    // Above the workbench overlay (Foreground), which is itself above the page.
+        .order(egui::Order::Tooltip)
     .collapsible(false)
     .resizable(false)
     .anchor(Align2::CENTER_CENTER, [0.0, 0.0])

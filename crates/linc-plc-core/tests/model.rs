@@ -219,3 +219,28 @@ fn a_linked_continuation_row_may_have_a_blank_coil() {
         "the ladder compiles"
     );
 }
+
+/// A grid that starts with no columns must still accept a cell: `set_cell` grew
+/// rows but not columns, and every input/output was dropped on the floor.
+#[test]
+fn set_cell_grows_columns_from_zero() {
+    use linc_plc_core::model::{FbdCell, FbdGrid};
+    let mut grid = FbdGrid {
+        columns: 0,
+        rows: 0,
+        cells: Vec::new(),
+        blocks: Vec::new(),
+    };
+    grid.set_cell(0, 1, FbdCell::In {
+        operand: "pump".to_string(),
+    });
+    assert_eq!(grid.columns, 2, "the column count grew to fit col 1");
+    assert_eq!(grid.rows, 1);
+    assert_eq!(
+        grid.cells[0][1],
+        FbdCell::In {
+            operand: "pump".to_string()
+        },
+        "the cell is stored, not dropped"
+    );
+}
