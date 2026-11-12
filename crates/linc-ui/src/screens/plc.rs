@@ -48,6 +48,15 @@ const FORCE_TTL_MS: u32 = 0;
 
 /// The watch list holds at most this many operands (manual §11).
 pub const WATCH_ROWS: usize = 16;
+
+/// The three trend windows the manual offers, in the order Z cycles them.
+pub fn next_trend_window(window_ms: u32) -> u32 {
+    match window_ms {
+        4_000 => 20_000,
+        20_000 => 100_000,
+        _ => 4_000,
+    }
+}
 /// What the operator can do when the profile leaves the PLC off. The page stays
 /// usable offline, so this is a hint, not an error.
 pub const DISABLED_HINT: &str = "set [plc] enabled = true or run start-sim.sh --plc";
@@ -2774,8 +2783,27 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
             entries.push(row("Loads and starts", "on open", false));
             entries.push(row("Stops", "on leave", false));
         }
-        // Symbols, watch and trend are editor pages: the ladder's mode switch
-        // belongs to the screen that owns the program list, not here.
+        PlcPage::Watch => {
+            entries.push(Heading("WATCH"));
+            entries.push(row("Select", "↑ ↓", false));
+            entries.push(row("Edit / add operand", "Enter", false));
+            entries.push(row("Force: TRUE→FALSE→release", "F", false));
+            entries.push(row("Remove row", "Bksp", false));
+            entries.push(Heading("TREND"));
+            entries.push(row("Window 4 / 20 / 100 s", "Z", false));
+            entries.push(Heading("SAVE"));
+            entries.push(row("Save project", "Ctrl+S", false));
+            entries.push(row("Save as", "Ctrl+Shift+S", false));
+        }
+        PlcPage::Trend => {
+            entries.push(Heading("TREND"));
+            entries.push(row("Window 4 / 20 / 100 s", "Z", false));
+            entries.push(Heading("SAVE"));
+            entries.push(row("Save project", "Ctrl+S", false));
+            entries.push(row("Save as", "Ctrl+Shift+S", false));
+        }
+        // Symbols is an editor page: the ladder's mode switch belongs to the
+        // screen that owns the program list, not here.
         _ => {
             entries.push(Heading("SAVE"));
             entries.push(row("Save project", "Ctrl+S", false));
@@ -9021,6 +9049,34 @@ mod watch_page_tests {
         });
         assert_eq!(plc.project.watch.len(), 16, "the seventeenth is refused");
         assert!(plc.message.contains("16"), "{:?}", plc.message);
+    }
+
+    /// Z cycles 4 s, 20 s and 100 s, the three windows the manual offers.
+    #[test]
+    fn z_cycles_the_three_windows() {
+        assert_eq!(next_trend_window(4_000), 20_000);
+        assert_eq!(next_trend_window(20_000), 100_000);
+        assert_eq!(next_trend_window(100_000), 4_000);
+    }
+
+    /// Both pages that show the trend name the key they answer.
+    #[test]
+    fn the_rail_names_the_window_key() {
+        for page in [PlcPage::Watch, PlcPage::Trend] {
+            let mut plc = PlcUi::default();
+            plc.page = page;
+            let rows: Vec<(&str, &str)> = rail_entries(&plc)
+                .into_iter()
+                .filter_map(|entry| match entry {
+                    RailEntry::Row { text, key, .. } => Some((text, key)),
+                    RailEntry::Heading(_) => None,
+                })
+                .collect();
+            assert!(
+                rows.contains(&("Window 4 / 20 / 100 s", "Z")),
+                "{page:?} does not name Z: {rows:?}"
+            );
+        }
     }
 
     /// The watch list is part of the project: it survives a save and reload.

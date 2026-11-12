@@ -15,17 +15,17 @@ use crate::theme;
 
 /// Keys the ladder editor owns. Consumed before any widget sees them.
 pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
-    if app.plc.page == PlcPage::Trend {
+    if matches!(app.plc.page, PlcPage::Trend | PlcPage::Watch) {
         // Z cycles the window, as the manual's trend page does; the daemon
-        // restarts the history when the window changes.
-        let zoom = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Z));
-        if zoom {
-            app.plc.trend_window_ms = match app.plc.trend_window_ms {
-                4_000 => 20_000,
-                20_000 => 100_000,
-                _ => 4_000,
-            };
-            app.plc.trend_remote.samples.clear();
+        // restarts the history when the window changes. While a watch row is
+        // being typed into, Z is a letter for the field, not a window.
+        let typing = app.plc.watch_edit.is_some() || app.plc.watch_value_edit.is_some();
+        if !typing {
+            let zoom = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Z));
+            if zoom {
+                app.plc.trend_window_ms = crate::screens::plc::next_trend_window(app.plc.trend_window_ms);
+                app.plc.trend_remote.samples.clear();
+            }
         }
         return;
     }
