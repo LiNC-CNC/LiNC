@@ -45,6 +45,9 @@ const POLL_OFFLINE: Duration = Duration::from_millis(900);
 /// A simulation force holds until it is released or the data is reset, as the ZX
 /// simulation's toggles do. It must never expire while the operator navigates.
 const FORCE_TTL_MS: u32 = 0;
+
+/// The watch list holds at most this many operands (manual §11).
+pub const WATCH_ROWS: usize = 16;
 /// What the operator can do when the profile leaves the PLC off. The page stays
 /// usable offline, so this is a hint, not an error.
 pub const DISABLED_HINT: &str = "set [plc] enabled = true or run start-sim.sh --plc";
@@ -154,6 +157,12 @@ pub enum Action {
     Force(String, bool),
     /// Pin an operand to the watch list, or unpin it.
     ToggleWatch(String),
+    /// Write one watch row from the page's inline editor: `index == len`
+    /// appends, an empty name removes the row.
+    SetWatchRow {
+        index: usize,
+        name: String,
+    },
     /// Release one operand's force.
     Unforce(String),
     /// Set the comment of a declared symbol.
@@ -1057,6 +1066,13 @@ pub struct PlcUi {
     pub trend_remote: TrendData,
     /// The word bank and block members from the last snapshot.
     pub words: Vec<WordValue>,
+    /// Watch list cursor: rows 0..len-1 are entries, `len` is the add row.
+    pub watch_cursor: usize,
+    /// The operand being typed into the watch row `watch_edit_row`; `len` adds.
+    pub watch_edit_row: usize,
+    pub watch_edit: Option<String>,
+    /// Why the typed watch operand cannot be used, in the row's own words.
+    pub watch_error: Option<String>,
     /// Buffer for the IL editor; synced when the selected POU changes.
     /// IL line editor: the line under the cursor and the text typed into it.
     pub il_cursor: usize,
@@ -1157,6 +1173,10 @@ impl Default for PlcUi {
             trend: TrendBuffer::default(),
             trend_remote: TrendData::default(),
             words: Vec::new(),
+            watch_cursor: 0,
+            watch_edit_row: 0,
+            watch_edit: None,
+            watch_error: None,
             il_cursor: 0,
             il_buffer: String::new(),
             il_message: None,
@@ -2229,9 +2249,42 @@ impl PlcUi {
                     .position(|operand| operand.eq_ignore_ascii_case(&name))
                 {
                     self.project.watch.remove(index);
-                } else if self.project.watch.len() < 16 {
+                } else if self.project.watch.len() < WATCH_ROWS {
                     self.project.watch.push(name);
+                } else {
+                    self.message = format!("WATCH LIST HOLDS {WATCH_ROWS} OPERANDS");
                 }
+            }
+            Action::SetWatchRow { index, name } => {
+                let name = name.trim().to_string();
+                let len = self.project.watch.len();
+                if index < len {
+                    if name.is_empty() {
+                        self.project.watch.remove(index);
+                        self.watch_cursor = index.min(self.project.watch.len());
+                    } else if self.project.watch.iter().enumerate().any(|(row, operand)| {
+                        row != index && operand.eq_ignore_ascii_case(&name)
+                    }) {
+                        self.message = format!("{name} IS ALREADY ON THE WATCH LIST");
+                    } else {
+                        self.project.watch[index] = name;
+                    }
+                } else if !name.is_empty() {
+                    if len >= WATCH_ROWS {
+                        self.message = format!("WATCH LIST HOLDS {WATCH_ROWS} OPERANDS");
+                    } else if self
+                        .project
+                        .watch
+                        .iter()
+                        .any(|operand| operand.eq_ignore_ascii_case(&name))
+                    {
+                        self.message = format!("{name} IS ALREADY ON THE WATCH LIST");
+                    } else {
+                        self.project.watch.push(name);
+                        self.watch_cursor = self.project.watch.len() - 1;
+                    }
+                }
+                self.watch_cursor = self.watch_cursor.min(self.project.watch.len());
             }
             Action::SetCell {
                 section,
@@ -2615,6 +2668,7 @@ pub fn escape_closes_editor(plc: &PlcUi) -> bool {
         && plc.compute_edit.is_none()
         && plc.xref.is_none()
         && !plc.symbol_new_dialog
+        && plc.watch_edit.is_none()
 }
 
 /// The PLC workbench's navigation strip, built with the main GUI's row metrics:
@@ -2877,7 +2931,8 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         let still_focused = text_field_focused(ui.ctx());
         // Pages that own text fields: the ladder's property panel and the symbol
         // editor. Anything else means the keyboard owner really did change page.
-        let page_lost_owner = !matches!(app.plc.page, PlcPage::Edit | PlcPage::Symbols);
+        let page_lost_owner =
+            !matches!(app.plc.page, PlcPage::Edit | PlcPage::Symbols | PlcPage::Watch);
         if page_lost_owner || !still_focused {
             app.plc.text_editing = false;
         }
@@ -5199,74 +5254,302 @@ fn sim_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>
     sim_view(plc, ui, actions);
 }
 
+/// Why this text cannot be watched, in the words of the list. The compiler is
+/// the judge of what a cell may name; this turns its refusals into a sentence.
+fn watch_operand_error(plc: &PlcUi, text: &str) -> Option<String> {
+    let name = text.trim();
+    if name.is_empty() {
+        return Some("needs an operand".to_string());
+    }
+    if plc
+        .project
+        .io
+        .iter()
+        .any(|point| point.name.eq_ignore_ascii_case(name))
+        || plc
+            .project
+            .vars
+            .iter()
+            .any(|var| var.name.eq_ignore_ascii_case(name))
+        || linc_plc_core::il::word_operand(name).is_some()
+    {
+        return None;
+    }
+    if let Some((instance, member)) = name.split_once('.') {
+        let member = member.to_ascii_uppercase();
+        if matches!(member.as_str(), "ET" | "CV" | "PT" | "PV") {
+            let declared = plc.project.all_pous().iter().any(|pou| {
+                pou.sections.iter().any(|section| {
+                    section.rungs.iter().any(|rung| {
+                        rung.cells.iter().any(|cell| {
+                            matches!(cell, linc_plc_core::grid::Cell::Block { instance: block, .. }
+                                if block.eq_ignore_ascii_case(instance))
+                        })
+                    })
+                })
+            });
+            if declared {
+                return None;
+            }
+            return Some(format!("{instance} is not a block in this ladder"));
+        }
+    }
+    Some(format!(
+        "{name} is not a symbol, MW0 to MW15 or a block value"
+    ))
+}
+
+/// Draw one watch row in the tool table's clothes: a selected band with an
+/// accent bar, stripes, the operand on the left and its state on the right.
+fn watch_row(
+    ui: &mut Ui,
+    left: &str,
+    right: &str,
+    selected: bool,
+    striped: bool,
+    editing: bool,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
+        Sense::click(),
+    );
+    let painter = ui.painter();
+    if striped {
+        painter.rect_filled(rect, egui::CornerRadius::ZERO, theme::SURFACE);
+    }
+    if selected {
+        painter.rect_filled(rect, egui::CornerRadius::ZERO, theme::PANEL_RAISED);
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                rect.min,
+                egui::vec2(theme::SELECTION_BAR, rect.height()),
+            ),
+            egui::CornerRadius::ZERO,
+            theme::ACCENT,
+        );
+    }
+    let font = egui::FontId::monospace(theme::font_size(10.0));
+    let left_color = if editing { theme::ACCENT } else { theme::FG };
+    painter.text(
+        egui::pos2(rect.left() + theme::SELECTION_BAR + 8.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        left,
+        font.clone(),
+        left_color,
+    );
+    painter.text(
+        egui::pos2(rect.right() - 10.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        right,
+        font,
+        theme::MUTED,
+    );
+    response
+}
+
+fn watch_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
+    if plc.page != PlcPage::Watch || plc.keys_blocked {
+        return;
+    }
+    // The page owns its typed field: a TextEdit here would lose the ring to the
+    // grid anchor every frame, so the buffer is read from the frame's events.
+    if let Some(mut buffer) = plc.watch_edit.clone() {
+        for event in ui.input(|input| input.events.clone()) {
+            match event {
+                egui::Event::Text(text) => buffer.push_str(&text),
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    ..
+                } => match key {
+                    egui::Key::Backspace => {
+                        buffer.pop();
+                    }
+                    egui::Key::Escape => {
+                        plc.watch_edit = None;
+                        plc.watch_error = None;
+                        plc.text_editing = false;
+                    }
+                    egui::Key::Enter => {
+                        let row = plc.watch_edit_row;
+                        let name = buffer.trim().to_string();
+                        if name.is_empty() {
+                            if row < plc.project.watch.len() {
+                                actions.push(Action::SetWatchRow {
+                                    index: row,
+                                    name: String::new(),
+                                });
+                            }
+                            plc.watch_edit = None;
+                            plc.watch_error = None;
+                            plc.text_editing = false;
+                        } else if let Some(error) = watch_operand_error(plc, &name) {
+                            // Keep the field open: the typed text is the thing
+                            // being corrected, and closing it would discard it.
+                            plc.watch_error = Some(error);
+                        } else {
+                            actions.push(Action::SetWatchRow {
+                                index: row,
+                                name,
+                            });
+                            plc.watch_edit = None;
+                            plc.watch_error = None;
+                            plc.text_editing = false;
+                        }
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        if plc.watch_edit.is_some() {
+            plc.watch_edit = Some(buffer);
+        }
+        return;
+    }
+    let len = plc.project.watch.len();
+    plc.watch_cursor = plc.watch_cursor.min(len);
+    let (up, down, page_up, page_down, enter, backspace, delete) = ui.input_mut(|input| {
+        (
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
+        )
+    });
+    if up {
+        plc.watch_cursor = plc.watch_cursor.saturating_sub(1);
+    }
+    if down {
+        plc.watch_cursor = (plc.watch_cursor + 1).min(len);
+    }
+    if page_up {
+        plc.watch_cursor = plc.watch_cursor.saturating_sub(8);
+    }
+    if page_down {
+        plc.watch_cursor = (plc.watch_cursor + 8).min(len);
+    }
+    if enter {
+        plc.watch_edit_row = plc.watch_cursor;
+        plc.watch_edit = Some(
+            plc.project
+                .watch
+                .get(plc.watch_cursor)
+                .cloned()
+                .unwrap_or_default(),
+        );
+        plc.watch_error = None;
+        plc.text_editing = true;
+    }
+    // Backspace deletes, as in every other table; the panel has no Delete key,
+    // but a full keyboard's Delete does the same.
+    if backspace || delete {
+        if plc.watch_cursor < len {
+            actions.push(Action::SetWatchRow {
+                index: plc.watch_cursor,
+                name: String::new(),
+            });
+        }
+    }
+}
+
 fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
+    watch_keys(plc, ui, actions);
     common::card_title(ui, "WATCH");
     ui.label(
-        RichText::new("Ctrl+W on a cell pins its operand. The trend page follows this list.")
-            .size(theme::font_size(9.0))
-            .color(theme::MUTED),
+        RichText::new(
+            "↑ ↓ MOVE · ENTER EDITS · BACKSPACE REMOVES · 16 OPERANDS · CTRL+W PINS A CELL",
+        )
+        .monospace()
+        .size(theme::font_size(9.0))
+        .color(theme::MUTED),
     );
     ui.add_space(4.0);
-    if plc.project.watch.is_empty() {
+    if plc.project.watch.is_empty() && plc.watch_edit.is_none() {
         ui.label(
-            RichText::new("Nothing pinned yet.")
+            RichText::new("Nothing pinned yet. Enter on ADD OPERAND starts the list.")
                 .size(theme::font_size(10.0))
                 .color(theme::MUTED),
         );
     }
-    let mut unpin: Option<String> = None;
+    let mut selected_rect: Option<egui::Rect> = None;
     egui::ScrollArea::vertical()
-        .max_height((height - 120.0).max(80.0))
+        .id_salt("plc-watch-rows")
+        .max_height((height - 150.0).max(80.0))
+        .auto_shrink([false, false])
         .show(ui, |ui| {
-            for name in plc.project.watch.clone() {
-                let text = if let Some(value) = plc.words.iter().find(|word| word.name == name) {
-                    format!("{}  =  {}", name, value.value)
-                } else if let Some(value) = plc.vars.iter().find(|var| var.name == name) {
-                    format!(
-                        "{}  =  {}",
-                        name,
-                        if value.value { "TRUE" } else { "FALSE" }
-                    )
+            let names = plc.project.watch.clone();
+            for (index, name) in names.iter().enumerate() {
+                let editing = plc.watch_edit.is_some() && plc.watch_edit_row == index;
+                let text = if editing {
+                    format!("{}_", plc.watch_edit.clone().unwrap_or_default())
                 } else {
-                    format!("{name}  =  -")
+                    name.clone()
                 };
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(text)
-                            .monospace()
-                            .size(theme::font_size(10.0))
-                            .color(theme::FG),
-                    );
-                    // BOOL rows can be forced, word rows cannot (manual §11).
-                    let forced = plc.forced.iter().any(|item| item == &name);
-                    let word = plc.words.iter().any(|word| word.name == name);
-                    if !word {
-                        let (label, value) = match (
-                            forced,
-                            plc.vars
-                                .iter()
-                                .find(|var| var.name == name)
-                                .map(|var| var.value),
-                        ) {
-                            (false, _) => ("force T", Some(true)),
-                            (true, Some(true)) => ("force F", Some(false)),
-                            (true, _) => ("release", None),
-                        };
-                        if theme::action_button(ui, label, true).clicked() {
-                            match value {
-                                Some(value) => actions.push(Action::Force(name.clone(), value)),
-                                None => actions.push(Action::Unforce(name.clone())),
-                            }
-                        }
+                let state = if editing {
+                    "ENTER SAVES · ESC CANCELS".to_string()
+                } else if let Some(value) = plc.words.iter().find(|word| word.name == *name) {
+                    let forced = plc.forced.iter().any(|item| item == name);
+                    if forced {
+                        format!("{}  FORCED", value.value)
+                    } else {
+                        value.value.to_string()
                     }
-                    if theme::action_button(ui, "unpin", true).clicked() {
-                        unpin = Some(name.clone());
+                } else if let Some(value) = plc.vars.iter().find(|var| var.name == *name) {
+                    let forced = plc.forced.iter().any(|item| item == name);
+                    match (value.value, forced) {
+                        (true, true) => "FORCED TRUE".to_string(),
+                        (false, true) => "FORCED FALSE".to_string(),
+                        (true, false) => "TRUE".to_string(),
+                        (false, false) => "FALSE".to_string(),
                     }
-                });
+                } else {
+                    "-".to_string()
+                };
+                let selected = plc.watch_cursor == index;
+                let response = watch_row(ui, &text, &state, selected, index % 2 == 1, editing);
+                if selected {
+                    selected_rect = Some(response.rect);
+                }
+                if response.clicked() {
+                    plc.watch_cursor = index;
+                }
+            }
+            // The add row is the list's last position, and the only way in when
+            // the list is empty.
+            let len = names.len();
+            let editing = plc.watch_edit.is_some() && plc.watch_edit_row == len;
+            let text = if editing {
+                format!("{}_", plc.watch_edit.clone().unwrap_or_default())
+            } else {
+                "ADD OPERAND".to_string()
+            };
+            let state = if editing {
+                "ENTER ADDS · ESC CANCELS".to_string()
+            } else {
+                "ENTER".to_string()
+            };
+            let selected = plc.watch_cursor == len;
+            let response = watch_row(ui, &text, &state, selected, len % 2 == 1, editing);
+            if selected || editing {
+                selected_rect = Some(response.rect);
+            }
+            if response.clicked() {
+                plc.watch_cursor = len;
             }
         });
-    if let Some(name) = unpin {
-        actions.push(Action::ToggleWatch(name));
+    if let Some(rect) = selected_rect {
+        ui.scroll_to_rect(rect, None);
+    }
+    if let Some(error) = &plc.watch_error {
+        ui.label(
+            RichText::new(error.clone())
+                .size(theme::font_size(10.0))
+                .color(theme::ERROR),
+        );
     }
     ui.add_space(6.0);
     variables_card(plc, ui, height, actions)
@@ -8306,6 +8589,195 @@ mod symbol_add_tests {
         assert!(plc.project.io.is_empty(), "a variable is not an I/O point");
         plc.apply(Action::AddVar("seal".into()));
         assert_eq!(plc.project.vars.len(), 1, "the name is taken");
+    }
+}
+
+#[cfg(test)]
+mod watch_page_tests {
+    use super::*;
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn frame(plc: &mut PlcUi, events: Vec<egui::Event>) -> Vec<Action> {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        let mut actions = Vec::new();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Area::new(egui::Id::new("watch-page"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    watch_page(plc, ui, 600.0, &mut actions);
+                });
+        });
+        output.textures_delta.clear();
+        actions
+    }
+
+    fn watched(names: &[&str]) -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.project = linc_plc_core::model::Project::new("t");
+        plc.project.io = names
+            .iter()
+            .map(|name| linc_plc_core::IoPoint {
+                name: (*name).to_string(),
+                direction: linc_plc_core::IoDirection::Out,
+                kind: linc_plc_core::IoKind::Bit,
+                comment: String::new(),
+            })
+            .collect();
+        plc.project.watch = names.iter().map(|name| (*name).to_string()).collect();
+        plc.page = PlcPage::Watch;
+        plc
+    }
+
+    /// Arrows walk the operand rows and then the add row, which is how a list
+    /// gets its first entry with no mouse.
+    #[test]
+    fn the_arrows_walk_the_rows_and_the_add_row() {
+        let mut plc = watched(&["start", "run"]);
+        frame(&mut plc, vec![key(egui::Key::ArrowDown)]);
+        assert_eq!(plc.watch_cursor, 1);
+        frame(&mut plc, vec![key(egui::Key::ArrowDown)]);
+        assert_eq!(plc.watch_cursor, 2, "the add row is the last position");
+        frame(&mut plc, vec![key(egui::Key::ArrowDown)]);
+        assert_eq!(plc.watch_cursor, 2, "the cursor stops on the add row");
+        frame(&mut plc, vec![key(egui::Key::ArrowUp)]);
+        assert_eq!(plc.watch_cursor, 1);
+    }
+
+    /// Enter opens the row's operand for editing, typing replaces it, and Enter
+    /// writes the new operand in its place.
+    #[test]
+    fn enter_edits_a_row_in_place() {
+        let mut plc = watched(&["start", "run"]);
+        frame(&mut plc, vec![key(egui::Key::Enter)]);
+        assert_eq!(plc.watch_edit.as_deref(), Some("start"));
+        for _ in 0.."start".len() {
+            frame(&mut plc, vec![key(egui::Key::Backspace)]);
+        }
+        let _ = frame(&mut plc, vec![egui::Event::Text("run".into())]);
+        let actions = frame(&mut plc, vec![key(egui::Key::Enter)]);
+        assert!(plc.watch_edit.is_none(), "Enter closes the field");
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::SetWatchRow { index: 0, name } if name == "run")),
+            "the row is rewritten: {actions:?}"
+        );
+    }
+
+    /// Enter on the add row types a new operand; an empty add entry adds nothing.
+    #[test]
+    fn enter_on_the_add_row_appends() {
+        let mut plc = watched(&["start"]);
+        plc.project.io.push(linc_plc_core::IoPoint {
+            name: "pump".into(),
+            direction: linc_plc_core::IoDirection::Out,
+            kind: linc_plc_core::IoKind::Bit,
+            comment: String::new(),
+        });
+        frame(&mut plc, vec![key(egui::Key::ArrowDown)]);
+        assert_eq!(plc.watch_cursor, 1);
+        frame(&mut plc, vec![key(egui::Key::Enter)]);
+        assert_eq!(plc.watch_edit.as_deref(), Some(""));
+        let _ = frame(&mut plc, vec![egui::Event::Text("pump".into())]);
+        let actions = frame(&mut plc, vec![key(egui::Key::Enter)]);
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::SetWatchRow { index: 1, name } if name == "pump")),
+            "the add row appends: {actions:?}"
+        );
+    }
+
+    /// An empty name removes the row, and so does Backspace on the row itself.
+    #[test]
+    fn an_empty_name_or_backspace_removes_the_row() {
+        let mut plc = watched(&["start", "run"]);
+        frame(&mut plc, vec![key(egui::Key::Enter)]);
+        for _ in 0.."start".len() {
+            frame(&mut plc, vec![key(egui::Key::Backspace)]);
+        }
+        let actions = frame(&mut plc, vec![key(egui::Key::Enter)]);
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::SetWatchRow { index: 0, name } if name.is_empty())),
+            "an empty name is a removal: {actions:?}"
+        );
+
+        let mut plc = watched(&["start", "run"]);
+        let actions = frame(&mut plc, vec![key(egui::Key::Backspace)]);
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::SetWatchRow { index: 0, name } if name.is_empty())),
+            "Backspace removes the selected row: {actions:?}"
+        );
+    }
+
+    /// A name the ladder does not know keeps the field open and says why.
+    #[test]
+    fn an_unknown_operand_keeps_the_field_open() {
+        let mut plc = watched(&[]);
+        frame(&mut plc, vec![key(egui::Key::Enter)]);
+        let _ = frame(&mut plc, vec![egui::Event::Text("ghost".into())]);
+        let actions = frame(&mut plc, vec![key(egui::Key::Enter)]);
+        assert!(actions.is_empty(), "nothing is added: {actions:?}");
+        assert!(
+            plc.watch_edit.is_some(),
+            "the typed text stays for correction"
+        );
+        let error = plc.watch_error.clone().unwrap_or_default();
+        assert!(error.contains("not a symbol"), "{error:?}");
+    }
+
+    /// The list stops at sixteen operands and says so.
+    #[test]
+    fn the_list_holds_sixteen_operands() {
+        let mut plc = watched(&[]);
+        plc.project.io = (0..17)
+            .map(|index| linc_plc_core::IoPoint {
+                name: format!("o{index}"),
+                direction: linc_plc_core::IoDirection::Out,
+                kind: linc_plc_core::IoKind::Bit,
+                comment: String::new(),
+            })
+            .collect();
+        for index in 0..16 {
+            plc.apply(Action::SetWatchRow {
+                index,
+                name: format!("o{index}"),
+            });
+        }
+        assert_eq!(plc.project.watch.len(), 16);
+        plc.apply(Action::SetWatchRow {
+            index: 16,
+            name: "o16".into(),
+        });
+        assert_eq!(plc.project.watch.len(), 16, "the seventeenth is refused");
+        assert!(plc.message.contains("16"), "{:?}", plc.message);
+    }
+
+    /// The watch list is part of the project: it survives a save and reload.
+    #[test]
+    fn the_watch_list_is_saved_with_the_project() {
+        let mut plc = watched(&["start", "run", "MW2", "TON0.ET"]);
+        plc.project.watch = vec!["start".into(), "run".into(), "MW2".into()];
+        let json = project_to_json(&plc.project).expect("the project serialises");
+        let back = project_from_json(&json).expect("the project reads back");
+        assert_eq!(back.watch, vec!["start", "run", "MW2"]);
     }
 }
 
