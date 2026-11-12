@@ -23,7 +23,8 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         if !typing {
             let zoom = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Z));
             if zoom {
-                app.plc.trend_window_ms = crate::screens::plc::next_trend_window(app.plc.trend_window_ms);
+                app.plc.trend_window_ms =
+                    crate::screens::plc::next_trend_window(app.plc.trend_window_ms);
                 app.plc.trend_remote.samples.clear();
             }
         }

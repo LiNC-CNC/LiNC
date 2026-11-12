@@ -2294,9 +2294,13 @@ impl PlcUi {
                     if name.is_empty() {
                         self.project.watch.remove(index);
                         self.watch_cursor = index.min(self.project.watch.len());
-                    } else if self.project.watch.iter().enumerate().any(|(row, operand)| {
-                        row != index && operand.eq_ignore_ascii_case(&name)
-                    }) {
+                    } else if self
+                        .project
+                        .watch
+                        .iter()
+                        .enumerate()
+                        .any(|(row, operand)| row != index && operand.eq_ignore_ascii_case(&name))
+                    {
                         self.message = format!("{name} IS ALREADY ON THE WATCH LIST");
                     } else {
                         self.project.watch[index] = name;
@@ -2987,8 +2991,10 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         let still_focused = text_field_focused(ui.ctx());
         // Pages that own text fields: the ladder's property panel and the symbol
         // editor. Anything else means the keyboard owner really did change page.
-        let page_lost_owner =
-            !matches!(app.plc.page, PlcPage::Edit | PlcPage::Symbols | PlcPage::Watch);
+        let page_lost_owner = !matches!(
+            app.plc.page,
+            PlcPage::Edit | PlcPage::Symbols | PlcPage::Watch
+        );
         if page_lost_owner || !still_focused {
             app.plc.text_editing = false;
         }
@@ -5376,10 +5382,7 @@ fn watch_row(
     if selected {
         painter.rect_filled(rect, egui::CornerRadius::ZERO, theme::PANEL_RAISED);
         painter.rect_filled(
-            egui::Rect::from_min_size(
-                rect.min,
-                egui::vec2(theme::SELECTION_BAR, rect.height()),
-            ),
+            egui::Rect::from_min_size(rect.min, egui::vec2(theme::SELECTION_BAR, rect.height())),
             egui::CornerRadius::ZERO,
             theme::ACCENT,
         );
@@ -5421,9 +5424,7 @@ fn watch_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
                     }
                 }
                 egui::Event::Key {
-                    key,
-                    pressed: true,
-                    ..
+                    key, pressed: true, ..
                 } => match key {
                     egui::Key::Backspace => {
                         buffer.pop();
@@ -5443,9 +5444,8 @@ fn watch_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
                                     plc.text_editing = false;
                                 }
                                 Err(_) => {
-                                    plc.watch_error = Some(
-                                        "needs a whole number: -32768 to 32767".to_string(),
-                                    );
+                                    plc.watch_error =
+                                        Some("needs a whole number: -32768 to 32767".to_string());
                                 }
                             }
                         }
@@ -5467,9 +5467,7 @@ fn watch_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
             match event {
                 egui::Event::Text(text) => buffer.push_str(&text),
                 egui::Event::Key {
-                    key,
-                    pressed: true,
-                    ..
+                    key, pressed: true, ..
                 } => match key {
                     egui::Key::Backspace => {
                         buffer.pop();
@@ -5497,10 +5495,7 @@ fn watch_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
                             // being corrected, and closing it would discard it.
                             plc.watch_error = Some(error);
                         } else {
-                            actions.push(Action::SetWatchRow {
-                                index: row,
-                                name,
-                            });
+                            actions.push(Action::SetWatchRow { index: row, name });
                             plc.watch_edit = None;
                             plc.watch_error = None;
                             plc.text_editing = false;
@@ -5518,19 +5513,18 @@ fn watch_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
     }
     let len = plc.project.watch.len();
     plc.watch_cursor = plc.watch_cursor.min(len);
-    let (up, down, page_up, page_down, enter, force, backspace, delete) =
-        ui.input_mut(|input| {
-            (
-                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::F),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
-            )
-        });
+    let (up, down, page_up, page_down, enter, force, backspace, delete) = ui.input_mut(|input| {
+        (
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::F),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
+        )
+    });
     if up {
         plc.watch_cursor = plc.watch_cursor.saturating_sub(1);
     }
@@ -5594,13 +5588,11 @@ fn watch_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
     }
     // Backspace deletes, as in every other table; the panel has no Delete key,
     // but a full keyboard's Delete does the same.
-    if backspace || delete {
-        if plc.watch_cursor < len {
-            actions.push(Action::SetWatchRow {
-                index: plc.watch_cursor,
-                name: String::new(),
-            });
-        }
+    if (backspace || delete) && plc.watch_cursor < len {
+        actions.push(Action::SetWatchRow {
+            index: plc.watch_cursor,
+            name: String::new(),
+        });
     }
 }
 
@@ -5632,8 +5624,7 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
             let names = plc.project.watch.clone();
             for (index, name) in names.iter().enumerate() {
                 let editing = plc.watch_edit.is_some() && plc.watch_edit_row == index;
-                let value_editing =
-                    plc.watch_value_edit.is_some() && plc.watch_cursor == index;
+                let value_editing = plc.watch_value_edit.is_some() && plc.watch_cursor == index;
                 let text = if editing {
                     format!("{}_", plc.watch_edit.clone().unwrap_or_default())
                 } else {
@@ -5888,12 +5879,11 @@ fn trend_page(plc: &PlcUi, ui: &mut Ui, height: f32) {
             }
             // ET and CV follow the boolean lanes, scaled by their block's
             // preset, so a half-done timer is halfway up its lane.
-            for (name, lane) in trend
-                .word_channels
-                .iter()
-                .zip(trend.word_lanes.iter())
-            {
-                let values = lane.iter().map(|value| i32::from(*value)).collect::<Vec<_>>();
+            for (name, lane) in trend.word_channels.iter().zip(trend.word_lanes.iter()) {
+                let values = lane
+                    .iter()
+                    .map(|value| i32::from(*value))
+                    .collect::<Vec<_>>();
                 draw_analog_lane(ui, name, &values, block_preset_for(plc, name));
             }
         });
@@ -5925,7 +5915,12 @@ fn draw_remote_trend(plc: &PlcUi, ui: &mut Ui) {
         // A word lane draws in its own scaled clothes; only a bit lane uses the
         // lane allocated here.
         if data.words.get(index).copied().unwrap_or(false) {
-            draw_analog_lane(ui, &plc.operand_label(name), &column, block_preset_for(plc, name));
+            draw_analog_lane(
+                ui,
+                &plc.operand_label(name),
+                &column,
+                block_preset_for(plc, name),
+            );
             continue;
         }
         let (rect, _) = ui.allocate_exact_size(vec2(width, lane_height), Sense::hover());
@@ -8981,9 +8976,9 @@ mod watch_page_tests {
         let actions = frame(&mut plc, vec![key(egui::Key::Enter)]);
         assert!(plc.watch_edit.is_none(), "Enter closes the field");
         assert!(
-            actions
-                .iter()
-                .any(|action| matches!(action, Action::SetWatchRow { index: 0, name } if name == "run")),
+            actions.iter().any(
+                |action| matches!(action, Action::SetWatchRow { index: 0, name } if name == "run")
+            ),
             "the row is rewritten: {actions:?}"
         );
     }
@@ -9005,9 +9000,9 @@ mod watch_page_tests {
         let _ = frame(&mut plc, vec![egui::Event::Text("pump".into())]);
         let actions = frame(&mut plc, vec![key(egui::Key::Enter)]);
         assert!(
-            actions
-                .iter()
-                .any(|action| matches!(action, Action::SetWatchRow { index: 1, name } if name == "pump")),
+            actions.iter().any(
+                |action| matches!(action, Action::SetWatchRow { index: 1, name } if name == "pump")
+            ),
             "the add row appends: {actions:?}"
         );
     }
@@ -9022,18 +9017,18 @@ mod watch_page_tests {
         }
         let actions = frame(&mut plc, vec![key(egui::Key::Enter)]);
         assert!(
-            actions
-                .iter()
-                .any(|action| matches!(action, Action::SetWatchRow { index: 0, name } if name.is_empty())),
+            actions.iter().any(
+                |action| matches!(action, Action::SetWatchRow { index: 0, name } if name.is_empty())
+            ),
             "an empty name is a removal: {actions:?}"
         );
 
         let mut plc = watched(&["start", "run"]);
         let actions = frame(&mut plc, vec![key(egui::Key::Backspace)]);
         assert!(
-            actions
-                .iter()
-                .any(|action| matches!(action, Action::SetWatchRow { index: 0, name } if name.is_empty())),
+            actions.iter().any(
+                |action| matches!(action, Action::SetWatchRow { index: 0, name } if name.is_empty())
+            ),
             "Backspace removes the selected row: {actions:?}"
         );
     }
@@ -9116,7 +9111,11 @@ mod watch_page_tests {
             )),
             "the prompt opens before anything is sent: {actions:?}"
         );
-        assert_eq!(plc.watch_value_edit.as_deref(), Some("5"), "seeded with the value");
+        assert_eq!(
+            plc.watch_value_edit.as_deref(),
+            Some("5"),
+            "seeded with the value"
+        );
 
         frame(&mut plc, vec![key(egui::Key::Backspace)]);
         let _ = frame(&mut plc, vec![egui::Event::Text("123".into())]);
@@ -9172,7 +9171,10 @@ mod watch_page_tests {
         assert!(
             !actions.iter().any(|action| matches!(
                 action,
-                Action::Force(..) | Action::ForceWord { .. } | Action::Unforce(..) | Action::UnforceWord(..)
+                Action::Force(..)
+                    | Action::ForceWord { .. }
+                    | Action::Unforce(..)
+                    | Action::UnforceWord(..)
             )),
             "a block value is not forced: {actions:?}"
         );

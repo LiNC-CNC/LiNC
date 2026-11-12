@@ -439,11 +439,7 @@ impl Daemon {
                 } else {
                     Some(Instant::now() + Duration::from_millis(u64::from(ttl_ms)))
                 };
-                match self
-                    .word_forces
-                    .iter_mut()
-                    .find(|force| force.name == name)
-                {
+                match self.word_forces.iter_mut().find(|force| force.name == name) {
                     Some(existing) => {
                         existing.value = value;
                         existing.expires = expires;

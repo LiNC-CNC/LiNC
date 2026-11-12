@@ -203,9 +203,9 @@ fn handle_request(request: Request, shared: &Shared) -> Result<Outcome, Error> {
             Outcome::Reply(dispatch(shared, |reply| Command::Unforce { name, reply }))
         }
 
-        Request::UnforceWord { name } => {
-            Outcome::Reply(dispatch(shared, |reply| Command::UnforceWord { name, reply }))
-        }
+        Request::UnforceWord { name } => Outcome::Reply(dispatch(shared, |reply| {
+            Command::UnforceWord { name, reply }
+        })),
 
         Request::ClearForces => {
             Outcome::Reply(dispatch(shared, |reply| Command::ClearForces { reply }))
