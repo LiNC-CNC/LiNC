@@ -256,7 +256,7 @@ impl LincApp {
             return;
         }
         let screen = ctx.input(|input| input.viewport_rect());
-        let overlay = egui::Area::new(egui::Id::unique("linc-plc-editor"))
+        let _overlay = egui::Area::new(egui::Id::unique("linc-plc-editor"))
             // Above the central page: at Middle the workbench was painted underneath
             // it, so the overlay existed but the screen kept showing the PLC service
             // page. Its own windows sit higher still (Tooltip), so they stay on top.
@@ -291,13 +291,6 @@ impl LincApp {
                     },
                 );
             });
-        if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
-            eprintln!(
-                "plc overlay rect={:?} size={:?}",
-                overlay.response.rect,
-                overlay.response.rect.size()
-            );
-        }
 
     }
 

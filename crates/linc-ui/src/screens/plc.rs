@@ -42,7 +42,9 @@ const POLL_CONNECTED: Duration = Duration::from_millis(120);
 const POLL_OFFLINE: Duration = Duration::from_millis(900);
 /// Force lifetime requested from the daemon. The page never holds a force for
 /// ever: a lost HMI must not leave a pin pinned.
-const FORCE_TTL_MS: u32 = 10_000;
+/// A simulation force holds until it is released or the data is reset, as the ZX
+/// simulation's toggles do. It must never expire while the operator navigates.
+const FORCE_TTL_MS: u32 = 0;
 /// What the operator can do when the profile leaves the PLC off. The page stays
 /// usable offline, so this is a hint, not an error.
 pub const DISABLED_HINT: &str = "set [plc] enabled = true or run start-sim.sh --plc";
@@ -3653,6 +3655,36 @@ fn is_hidden(grid: &FbdGrid, row: usize, col: usize) -> bool {
 }
 
 /// Draw the grid: cells, blocks spanning their rows, and the cursor.
+
+/// Live output of an FBD block. A named function block publishes its `Q`; a generic
+/// gate is evaluated from the input cells on its rows. A block whose inputs are not
+/// readable answers `None` rather than guessing.
+fn fbd_block_active(plc: &PlcUi, grid: &FbdGrid, block: &linc_plc_core::model::FbdBlock) -> Option<bool> {
+    if !block.instance.is_empty() {
+        return plc.bit_value(&format!("{}.Q", block.instance));
+    }
+    let row_value = |row: usize| -> Option<bool> {
+        match grid.cell(row, block.col.saturating_sub(1)) {
+            FbdCell::In { operand } | FbdCell::Out { operand } => {
+                plc.bit_value(operand.trim_start_matches('!'))
+            }
+            _ => None,
+        }
+    };
+    let rows = block.ins.max(1);
+    let values: Vec<bool> = (0..rows).filter_map(row_value).collect();
+    if values.len() != rows {
+        return None;
+    }
+    Some(match block.kind.as_str() {
+        "AND" => values.iter().all(|value| *value),
+        "OR" => values.iter().any(|value| *value),
+        "XOR" => values.iter().filter(|value| **value).count() % 2 == 1,
+        "NOT" => !values[0],
+        _ => return None,
+    })
+}
+
 fn fbd_grid_view(
     plc: &mut PlcUi,
     grid: &FbdGrid,
@@ -3739,9 +3771,7 @@ fn fbd_grid_view(
                 );
                 // A block is coloured by its own output, which the snapshot now
                 // publishes as `TON0.Q` etc.
-                let q = plc
-                    .bit_value(&format!("{}.Q", block.instance))
-                    .unwrap_or(false);
+                let q = fbd_block_active(plc, &grid, block).unwrap_or(false);
                 let block_colour = if q { theme::C4 } else { theme::ACCENT };
                 painter.text(
                     block_rect.center(),
@@ -4656,13 +4686,22 @@ fn sim_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>
     // always on screen: with the whole page in one scroll area the ladder pushed
     // them past the fold, and the wheel did not reach them.
     let monitor = (height * 0.45).clamp(140.0, 260.0);
+    // The monitor shows the current POU in its own language. Rendering the ladder
+    // unconditionally made an IL or FBD POU read "No sections" while the program was
+    // running and the header said otherwise.
+    let language = plc
+        .current_pou()
+        .map(|pou| pou.language)
+        .unwrap_or(PouLanguage::Ld);
     let sections = plc.current_pou_sections();
     egui::ScrollArea::vertical()
         .id_salt("plc-sim-monitor")
         .max_height(monitor)
         .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ladder_body(plc, &sections, ui, monitor, actions);
+        .show(ui, |ui| match language {
+            PouLanguage::Ld => ladder_body(plc, &sections, ui, monitor, actions),
+            PouLanguage::Il => il_editor(plc, ui, monitor),
+            PouLanguage::Fbd => fbd_editor(plc, ui, monitor, actions),
         });
     ui.add_space(4.0);
     sim_view(plc, ui, actions);
@@ -6521,8 +6560,8 @@ mod tests {
         );
         assert!(
             seen.iter()
-                .any(|request| request == "force seal=true ttl 10000"),
-            "the force carries the page's TTL: {seen:?}"
+                .any(|request| request == "force seal=true ttl 0"),
+            "a simulation force is persistent until released: {seen:?}"
         );
     }
 
@@ -7824,5 +7863,87 @@ mod fbd_filter_tests {
         );
         assert!(plc.fbd_operand_pick.is_none(), "the list closed");
         assert!(plc.operand_filter.is_empty(), "the filter is clean again");
+    }
+}
+
+#[cfg(test)]
+mod fbd_active_tests {
+    use super::*;
+    use linc_plc_core::model::{FbdBlock, FbdCell, FbdGrid};
+
+    fn plc_with(values: &[(&str, bool)]) -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.vars = values
+            .iter()
+            .map(|(name, value)| linc_plc_core::VarValue {
+                name: (*name).to_string(),
+                value: *value,
+                kind: linc_plc_core::SymbolKind::Input,
+                forced: false,
+            })
+            .collect();
+        plc
+    }
+
+    /// A generic AND has no `Q` in the snapshot: it is evaluated from its input
+    /// cells, which is what makes the block and its output light up in Sim.
+    #[test]
+    fn a_generic_and_reads_true_from_both_inputs() {
+        let plc = plc_with(&[("pump", true), ("stop", true), ("run", true)]);
+        let mut grid = FbdGrid {
+            columns: 3,
+            rows: 2,
+            cells: vec![vec![FbdCell::Empty; 3]; 2],
+            blocks: Vec::new(),
+        };
+        grid.cells[0][0] = FbdCell::In { operand: "pump".into() };
+        grid.cells[1][0] = FbdCell::In { operand: "stop".into() };
+        grid.cells[0][2] = FbdCell::Out { operand: "run".into() };
+        let block = FbdBlock {
+            row: 0,
+            col: 1,
+            ins: 2,
+            kind: "AND".into(),
+            instance: String::new(),
+            preset: String::new(),
+        };
+        assert_eq!(fbd_block_active(&plc, &grid, &block), Some(true));
+
+        let mut off = plc_with(&[("pump", true), ("stop", false), ("run", false)]);
+        off.vars[1].value = false;
+        assert_eq!(fbd_block_active(&off, &grid, &block), Some(false));
+    }
+
+    /// A block whose input cells carry no readable operand stays neutral.
+    #[test]
+    fn an_unreadable_block_is_not_guessed() {
+        let plc = plc_with(&[]);
+        let grid = FbdGrid {
+            columns: 3,
+            rows: 2,
+            cells: vec![vec![FbdCell::Empty; 3]; 2],
+            blocks: Vec::new(),
+        };
+        let block = FbdBlock {
+            row: 0,
+            col: 1,
+            ins: 2,
+            kind: "AND".into(),
+            instance: String::new(),
+            preset: String::new(),
+        };
+        assert_eq!(fbd_block_active(&plc, &grid, &block), None);
+    }
+}
+
+#[cfg(test)]
+mod force_persist_tests {
+    use super::*;
+
+    /// A simulation force is persistent: zero TTL means "until released or reset",
+    /// so navigating between POUs cannot drop it mid-session.
+    #[test]
+    fn a_simulation_force_does_not_expire_on_its_own() {
+        assert_eq!(FORCE_TTL_MS, 0, "the UI asks for a persistent force");
     }
 }
