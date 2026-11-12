@@ -194,7 +194,10 @@ pub enum Op {
     Jump(u16),
     /// Pop the result bit and jump to `target` when it equals `when`:
     /// `JMPC` is `when: true`, `JMPCN` is `when: false`.
-    JumpIf { target: u16, when: bool },
+    JumpIf {
+        target: u16,
+        when: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

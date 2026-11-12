@@ -402,7 +402,7 @@ impl Vm {
                 Op::JumpIf { target, when } => {
                     // Conditional jumps consume the result bit: the next line
                     // starts a new expression, as on the ZX.
-                    let value = pop(&mut stack, &mut depth);
+                    let value = pop(&stack, &mut depth);
                     if value == when {
                         pc = target as usize;
                     }

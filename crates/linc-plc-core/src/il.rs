@@ -100,10 +100,7 @@ pub fn parse_line(line: &str) -> IlLine {
     if !SUPPORTED.contains(&mnemonic.as_str()) && !UNSUPPORTED.contains(&mnemonic.as_str()) {
         return IlLine::Bad(format!("unknown instruction '{mnemonic}'"));
     }
-    let no_operand = matches!(
-        mnemonic.as_str(),
-        "NOT" | "RET" | "RETC" | "RETCN"
-    );
+    let no_operand = matches!(mnemonic.as_str(), "NOT" | "RET" | "RETC" | "RETCN");
     if !no_operand && operand.is_empty() {
         return IlLine::Bad(format!("'{mnemonic}' needs an operand"));
     }
