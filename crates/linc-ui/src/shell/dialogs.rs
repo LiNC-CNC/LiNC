@@ -576,7 +576,10 @@ impl LincApp {
                     // the ring on the frame it opens: Enter accepts what was
                     // typed and CANCEL is one arrow away. An empty field accepts
                     // nothing, so Enter cannot jump the view by itself.
-                    if first_frame {
+                    // Keep the ring while the dialog is up: a single request on
+                    // the opening frame lost it to whatever drew after, and the
+                    // name could not be typed.
+                    if !field.has_focus() {
                         field.request_focus();
                     }
                     if field.changed() {
@@ -747,11 +750,14 @@ impl LincApp {
                     // ring on the frame it opens: Enter writes the typed name
                     // rather than taking a button. A dialog with no field focuses
                     // its safe button instead.
-                    if first_frame {
+                    // Keep the ring while the dialog is up: the dialog owns the
+                    // keyboard, and a single request on the opening frame was
+                    // surrendered to the page behind it.
+                    if !field.has_focus() {
                         field.request_focus();
                     }
                     if field.changed() {
-                        save_as_name = Some(text);
+                        save_as_name = Some(text.clone());
                     }
                     ui.add_space(6.0);
                     if let Some(error) = &dialog.error {

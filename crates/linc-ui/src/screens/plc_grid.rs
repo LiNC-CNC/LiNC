@@ -85,7 +85,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
     cursor.1 = cursor.1.min(rows[cursor.0].saturating_sub(1));
     cursor.2 = cursor.2.min(POSITIONS);
 
-    let (left, right, up, down, enter, delete) = ui.input_mut(|input| {
+    let (left, right, up, down, enter, delete, page_up, page_down) = ui.input_mut(|input| {
         (
             input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft)
                 || input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowLeft),
@@ -97,6 +97,8 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                 || input.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowDown),
             input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
             input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown),
         )
     });
     let (undo, redo) = ui.input_mut(|input| {
@@ -114,10 +116,21 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         };
     }
     let (copy, paste, xref, watch) = ui.input_mut(|input| {
+        // egui-winit turns Ctrl+X into a Cut event for the clipboard, so the key
+        // itself never arrives; the cut is the cross-reference chord here.
+        let cut = input
+            .events
+            .iter()
+            .any(|event| matches!(event, egui::Event::Cut));
+        if cut {
+            input
+                .events
+                .retain(|event| !matches!(event, egui::Event::Cut));
+        }
         (
             input.consume_key(egui::Modifiers::CTRL, egui::Key::C),
             input.consume_key(egui::Modifiers::CTRL, egui::Key::V),
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::X),
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::X) || cut,
             input.consume_key(egui::Modifiers::CTRL, egui::Key::W),
         )
     });
@@ -172,6 +185,46 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         app.plc.cell_cursor = Some((cursor.0, cursor.1 + 1, 0));
         return;
     }
+    // Preview toggles: the digits hold an input bit for the drawing, so a rung
+    // can be followed without touching the machine or the daemon.
+    if app.plc.page == PlcPage::Edit && !app.plc.text_editing {
+        let (bit, byte) = ui.input_mut(|input| {
+            let digit = [
+                egui::Key::Num0,
+                egui::Key::Num1,
+                egui::Key::Num2,
+                egui::Key::Num3,
+                egui::Key::Num4,
+                egui::Key::Num5,
+                egui::Key::Num6,
+                egui::Key::Num7,
+            ]
+            .iter()
+            .position(|key| input.consume_key(egui::Modifiers::NONE, *key));
+            (
+                digit,
+                input.consume_key(egui::Modifiers::NONE, egui::Key::B),
+            )
+        });
+        if byte {
+            app.plc.preview_byte = if app.plc.preview_byte == 0 { 1 } else { 0 };
+        }
+        if let Some(bit) = bit {
+            if let Some(name) =
+                crate::screens::plc::sim_input_name(&app.plc, app.plc.preview_byte, bit as u8)
+            {
+                let held = app
+                    .plc
+                    .preview
+                    .iter()
+                    .find(|(held, _)| *held == name)
+                    .map(|(_, value)| *value)
+                    .unwrap_or(false);
+                app.plc.preview.retain(|(held, _)| *held != name);
+                app.plc.preview.push((name, !held));
+            }
+        }
+    }
     let insert = ui.input_mut(|input| letter(input, egui::Key::I));
     // `/` on an empty row starts a network comment row, as the manual does.
     let slash = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Slash));
@@ -199,7 +252,15 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         .cloned();
     // Movement comes first: the coil branch below returns, and while it did so
     // before the arrow handling the cursor could never leave the coil at all.
-    if left || right || up || down {
+    if left || right || up || down || page_up || page_down {
+        // A page key moves by a screenful, as in every other list. The scroll
+        // to the cursor happens after the draw, once the cell's rect is known.
+        if page_up {
+            cursor.1 = cursor.1.saturating_sub(5);
+        }
+        if page_down {
+            cursor.1 = (cursor.1 + 5).min(rows[cursor.0].saturating_sub(1));
+        }
         if right {
             cursor.2 = (cursor.2 + 1).min(POSITIONS);
         }
@@ -223,6 +284,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             }
         }
         app.plc.cell_cursor = Some(cursor);
+        app.plc.scroll_to_cursor = true;
         return;
     }
     if cursor.2 >= POSITIONS {
@@ -1010,9 +1072,10 @@ fn xref_window(plc: &mut PlcUi, ctx: &egui::Context) {
         // Above the workbench overlay (Foreground), which is itself above the page.
         .order(egui::Order::Tooltip)
         .collapsible(false)
-        .resizable(true)
-        .default_width(420.0)
+        .resizable(false)
+        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
+            ui.set_min_width(380.0);
             let mut hits = 0usize;
             for pou in plc.project.all_pous() {
                 for section in &pou.sections {
@@ -1049,11 +1112,26 @@ fn xref_window(plc: &mut PlcUi, ctx: &egui::Context) {
                 ui.label("no references");
             }
             ui.add_space(4.0);
-            if theme::action_button(ui, "Close", true).clicked() {
+            ui.label(
+                RichText::new("ENTER OR ESC CLOSES")
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            if theme::action_button(ui, "Close", true).clicked()
+                || modal_keys(ctx).enter
+                || modal_keys(ctx).escape
+            {
                 close = true;
             }
         });
     if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        // The window took this Enter or Escape; leaving it in the frame let the
+        // ladder act on the same key and open the element list behind the
+        // closed cross references.
+        ctx.input_mut(|input| {
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+        });
         plc.xref = None;
     }
 }
@@ -1144,6 +1222,7 @@ fn clear_pickers(plc: &mut PlcUi) {
     plc.block_fields = None;
     plc.compare_edit = None;
     plc.compute_edit = None;
+    plc.xref = None;
 }
 
 /// A picker row is taller than a rail row so the glyphs keep a clear band of
@@ -1601,22 +1680,38 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 .map(|var| (var.name.clone(), "VAR".to_string())),
         )
         .collect::<Vec<_>>();
-    if plc.operand_filter.is_empty() && names.len() > 6 {
-        plc.operand_filter.clear();
-    }
     let mut close = false;
     let keys = modal_keys(ctx);
+    // The filter takes this frame's keys before the rows are worked out, so a
+    // name typed and confirmed in one batch is in the list the Enter reads.
+    let typed = !keys.typed.is_empty();
     for character in &keys.typed {
         plc.operand_filter.push(*character);
     }
     if keys.backspace {
         plc.operand_filter.pop();
     }
+    if typed || keys.backspace {
+        plc.operand_cursor = 0;
+    }
+    let needle = plc.operand_filter.trim().to_ascii_lowercase();
+    let matches = names
+        .iter()
+        .filter(|(name, _)| needle.is_empty() || name.to_ascii_lowercase().contains(&needle))
+        .collect::<Vec<_>>();
+    plc.operand_cursor = plc.operand_cursor.min(matches.len().saturating_sub(1));
+    if keys.up {
+        plc.operand_cursor = plc.operand_cursor.saturating_sub(1);
+    }
+    if keys.down {
+        plc.operand_cursor = (plc.operand_cursor + 1).min(matches.len().saturating_sub(1));
+    }
     if keys.escape {
         plc.operand_pick = None;
         plc.operand_filter.clear();
         return false;
     }
+    let mut chosen: Option<String> = None;
     let mut visible = true;
     let shown = egui::Window::new("OPERAND")
         .open(&mut visible)
@@ -1626,72 +1721,87 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_min_width(320.0);
+            ui.set_max_width(320.0);
             if names.is_empty() {
-                ui.label("No symbols declared yet. Add an input, output or variable.");
+                ui.label(
+                    RichText::new("no symbols yet: add an input, output or variable")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                return;
             }
-            // Type to narrow, Enter takes a single match: with a dozen symbols
-            // the list is long and clicking it is a coordinate game.
-            // The filter is text the picker collected itself, so it shows what
-            // was actually typed on the frame it arrived.
+            // The filter is the picker's own buffer, so it shows the keys that
+            // actually arrived rather than the frame's later state.
             ui.label(
                 RichText::new(if plc.operand_filter.is_empty() {
-                    "type to narrow, Enter picks the first match".to_string()
+                    "type to narrow".to_string()
                 } else {
-                    plc.operand_filter.clone()
+                    format!("{}▌", plc.operand_filter)
                 })
                 .monospace()
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-            );
-            let needle = plc.operand_filter.trim().to_ascii_lowercase();
-            let matches = names
-                .iter()
-                .filter(|(name, _)| {
-                    needle.is_empty() || name.to_ascii_lowercase().contains(&needle)
-                })
-                .collect::<Vec<_>>();
-            if keys.enter {
-                if let Some((name, _)) = matches.first() {
-                    let chosen = with_operand(&cell, name);
-                    actions.push(Action::SetCell {
-                        section,
-                        rung,
-                        position,
-                        cell: chosen,
-                    });
-                    close = true;
-                }
-            }
-            for (name, kind) in matches {
-                let comment = plc.symbol_comment(name).unwrap_or("");
-                let label = if comment.is_empty() {
-                    format!("{name}   {kind}")
+                .size(theme::font_size(10.0))
+                .color(if plc.operand_filter.is_empty() {
+                    theme::MUTED
                 } else {
-                    format!("{name}   {kind}   — {comment}")
-                };
-                if ui.button(label).clicked() {
-                    let chosen = with_operand(&cell, name);
-                    actions.push(Action::SetCell {
-                        section,
-                        rung,
-                        position,
-                        cell: chosen,
-                    });
-                    close = true;
+                    theme::FG
+                }),
+            );
+            ui.add_space(4.0);
+            // Every symbol is a row of the same table as the tool list: the band
+            // marks the cursor and the right column says what the symbol is.
+            let first = plc
+                .operand_cursor
+                .saturating_sub(2)
+                .min(matches.len().saturating_sub(OPERAND_ROWS));
+            for (offset, (name, kind)) in matches.iter().enumerate().skip(first).take(OPERAND_ROWS)
+            {
+                let selected = offset == plc.operand_cursor;
+                let response = window_row(ui, name, kind, selected, true, offset % 2 == 1);
+                let comment = plc.symbol_comment(name).unwrap_or("");
+                if !comment.is_empty() {
+                    ui.label(
+                        RichText::new(comment)
+                            .size(theme::font_size(9.0))
+                            .color(theme::MUTED),
+                    );
+                }
+                if response.clicked() {
+                    chosen = Some((*name).clone());
                 }
             }
-            ui.add_space(4.0);
-            if theme::action_button(ui, "Cancel", true).clicked() {
-                close = true;
+            if keys.enter {
+                if let Some((name, _)) = matches.get(plc.operand_cursor) {
+                    chosen = Some((*name).clone());
+                }
             }
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("↑ ↓ SELECT · ENTER PICKS · ESC CANCELS")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
         });
-    let drawn = shown.is_some() && visible;
+    if let Some(name) = chosen {
+        actions.push(Action::SetCell {
+            section,
+            rung,
+            position,
+            cell: with_operand(&cell, &name),
+        });
+        close = true;
+    }
     if close || !visible {
         plc.operand_pick = None;
         plc.operand_filter.clear();
     }
-    drawn
+    shown.is_some()
 }
+
+/// Rows the operand list shows before it pages.
+const OPERAND_ROWS: usize = 8;
 
 /// The cell with its operand replaced, keeping its kind and negation.
 pub fn with_operand(cell: &Cell, name: &str) -> Cell {
@@ -1714,28 +1824,57 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
         return false;
     };
     // Every symbol, not only the outputs: a coil may drive a variable, and a
-    // list that filtered them out could be empty, which left Enter with nothing
-    // to commit and the window open for good.
+    // list that filtered them out could be empty.
     let names = plc
         .project
         .io
         .iter()
-        .map(|point| point.name.clone())
-        .chain(plc.project.vars.iter().map(|var| var.name.clone()))
+        .map(|point| {
+            let kind = match point.direction {
+                linc_plc_core::model::IoDirection::In => "IN",
+                linc_plc_core::model::IoDirection::Out => "OUT",
+            };
+            (point.name.clone(), kind.to_string())
+        })
+        .chain(
+            plc.project
+                .vars
+                .iter()
+                .map(|var| (var.name.clone(), "VAR".to_string())),
+        )
         .collect::<Vec<_>>();
     let mut close = false;
     let keys = modal_keys(ctx);
+    // Filter first, then read the rows, so a name typed and confirmed in one
+    // batch is the one Enter takes.
+    let typed = !keys.typed.is_empty();
     for character in &keys.typed {
         plc.operand_filter.push(*character);
     }
     if keys.backspace {
         plc.operand_filter.pop();
     }
+    if typed || keys.backspace {
+        plc.operand_cursor = 0;
+    }
+    let needle = plc.operand_filter.trim().to_ascii_lowercase();
+    let matches = names
+        .iter()
+        .filter(|(name, _)| needle.is_empty() || name.to_ascii_lowercase().contains(&needle))
+        .collect::<Vec<_>>();
+    plc.operand_cursor = plc.operand_cursor.min(matches.len().saturating_sub(1));
+    if keys.up {
+        plc.operand_cursor = plc.operand_cursor.saturating_sub(1);
+    }
+    if keys.down {
+        plc.operand_cursor = (plc.operand_cursor + 1).min(matches.len().saturating_sub(1));
+    }
     if keys.escape {
         plc.coil_pick = None;
         plc.operand_filter.clear();
         return false;
     }
+    let mut chosen: Option<String> = None;
     let mut visible = true;
     let shown = egui::Window::new("COIL OPERAND")
         .open(&mut visible)
@@ -1745,55 +1884,61 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_min_width(320.0);
+            ui.set_max_width(320.0);
             ui.label(
                 RichText::new(if plc.operand_filter.is_empty() {
-                    "type to narrow, Enter picks the first match".to_string()
+                    "type to narrow".to_string()
                 } else {
-                    plc.operand_filter.clone()
+                    format!("{}▌", plc.operand_filter)
                 })
                 .monospace()
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
+                .size(theme::font_size(10.0))
+                .color(if plc.operand_filter.is_empty() {
+                    theme::MUTED
+                } else {
+                    theme::FG
+                }),
             );
-            let needle = plc.operand_filter.trim().to_ascii_lowercase();
-            let matches = names
-                .iter()
-                .filter(|name| needle.is_empty() || name.to_ascii_lowercase().contains(&needle))
-                .collect::<Vec<_>>();
-            // The picker is modal, so Enter always takes the first match; the
-            // focus test made it depend on a frame the field had already lost.
+            ui.add_space(4.0);
+            let first = plc
+                .operand_cursor
+                .saturating_sub(2)
+                .min(matches.len().saturating_sub(OPERAND_ROWS));
+            for (offset, (name, kind)) in matches.iter().enumerate().skip(first).take(OPERAND_ROWS)
+            {
+                let selected = offset == plc.operand_cursor;
+                if window_row(ui, name, kind, selected, true, offset % 2 == 1).clicked() {
+                    chosen = Some((*name).clone());
+                }
+            }
             if keys.enter {
-                if let Some(name) = matches.first() {
-                    actions.push(Action::SetCoilVar {
-                        section,
-                        rung,
-                        var: (*name).clone(),
-                    });
-                }
-                // Enter with nothing to commit still closes the window: a modal
-                // that cannot be left with the keyboard is a dead end.
-                close = true;
-            }
-            for name in matches {
-                if ui.button(name).clicked() {
-                    actions.push(Action::SetCoilVar {
-                        section,
-                        rung,
-                        var: name.clone(),
-                    });
-                    close = true;
+                if let Some((name, _)) = matches.get(plc.operand_cursor) {
+                    chosen = Some((*name).clone());
                 }
             }
-            if theme::action_button(ui, "Cancel", true).clicked() {
-                close = true;
-            }
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("↑ ↓ SELECT · ENTER PICKS · ESC CANCELS")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
         });
-    let drawn = shown.is_some() && visible;
+    if let Some(name) = chosen {
+        actions.push(Action::SetCoilVar {
+            section,
+            rung,
+            var: name,
+        });
+        close = true;
+    }
     if close || !visible {
         plc.coil_pick = None;
         plc.operand_filter.clear();
     }
-    drawn
+    shown.is_some()
 }
 
 /// What Enter on a ladder cell opens. The cell decides: a box and a compare have
@@ -2702,6 +2847,7 @@ pub fn grid_rung(
     rung_index: usize,
     rung: &Rung,
     actions: &mut Vec<Action>,
+    cursor_rect: &mut Option<egui::Rect>,
 ) {
     let _ = actions;
     // A rung drawn before the grid existed has no cells; its flat series is
@@ -2721,7 +2867,7 @@ pub fn grid_rung(
         for position in 0..POSITIONS {
             let cell = cells.get(position).cloned().unwrap_or(Cell::Wire);
             let label = grid_cell_label(plc, &cell);
-            cell_box(
+            let rect = cell_box(
                 plc,
                 ui,
                 section,
@@ -2730,12 +2876,15 @@ pub fn grid_rung(
                 &label,
                 matches!(cell, Cell::Wire),
                 cell_symbol(&cell),
-                if commented { 18.0 } else { 10.0 },
+                if commented { 18.0 } else { 16.0 },
                 cell_active(plc, &cell),
             );
+            if plc.cell_cursor == Some((section, rung_index, position)) {
+                *cursor_rect = Some(rect);
+            }
         }
         let coil = plc.operand_label(&rung.coil.var);
-        cell_box(
+        let coil_rect = cell_box(
             plc,
             ui,
             section,
@@ -2744,7 +2893,7 @@ pub fn grid_rung(
             &coil,
             rung.coil.var.is_empty(),
             CellSymbol::Coil(rung.coil.kind),
-            if commented { 18.0 } else { 10.0 },
+            if commented { 18.0 } else { 16.0 },
             // A compute rung writes through its cell, so its coil slot is unused
             // and must not light up from a variable of the same name.
             if cells
@@ -2756,6 +2905,9 @@ pub fn grid_rung(
                 plc.bit_value(&rung.coil.var)
             },
         );
+        if plc.cell_cursor == Some((section, rung_index, POSITIONS)) {
+            *cursor_rect = Some(coil_rect);
+        }
     });
     if commented {
         // Inside the strip: the rung stays exactly CELL_HEIGHT tall, so the link's
@@ -2979,7 +3131,7 @@ fn cell_box(
     symbol: CellSymbol,
     name_y: f32,
     live: Option<bool>,
-) {
+) -> egui::Rect {
     let size = Vec2::new(CELL_WIDTH, CELL_HEIGHT);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let selected = plc.cell_cursor == Some((section, rung, position));
@@ -3039,6 +3191,7 @@ fn cell_box(
             size -= 0.5;
         }
     }
+    rect
 }
 
 /// What a cell shows: the operand in the chosen name/address mode, with the
@@ -3274,9 +3427,10 @@ mod rung_pitch_tests {
         let (advance, spacing) = pass_with(|ui| {
             crate::screens::plc::zero_rung_spacing(ui);
             let before = ui.cursor().top();
-            grid_rung(&plc, ui, 0, 0, &rung, &mut actions);
+            let mut cursor_rect = None;
+            grid_rung(&plc, ui, 0, 0, &rung, &mut actions, &mut cursor_rect);
             let step = ui.cursor().top() - before;
-            grid_rung(&plc, ui, 0, 1, &rung, &mut actions);
+            grid_rung(&plc, ui, 0, 1, &rung, &mut actions, &mut cursor_rect);
             let two = ui.cursor().top() - before;
             (step, two - step)
         });

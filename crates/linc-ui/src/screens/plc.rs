@@ -922,8 +922,10 @@ pub struct PlcUi {
     pub picker_cursor: usize,
     /// The operand list is open for the cell a kind was just chosen for.
     pub operand_pick: Option<(usize, usize, usize, Cell)>,
-    /// Filter typed into the operand list; Enter takes the only match.
+    /// Filter typed into the operand list; Enter takes the row under its cursor.
     pub operand_filter: String,
+    /// The operand list's cursor, an index into the filtered rows.
+    pub operand_cursor: usize,
     /// The coil operand is being picked for this row.
     pub coil_pick: Option<(usize, usize)>,
     /// A compare cell's condition and operands are being edited in one window.
@@ -932,6 +934,8 @@ pub struct PlcUi {
     pub compute_edit: Option<ComputeEdit>,
     /// Set when the selection moved by a key, so the list scrolls to it once.
     pub scroll_to_pou: bool,
+    /// Set when the cell cursor moved, so the ladder scrolls it into view once.
+    pub scroll_to_cursor: bool,
     /// Enter or a double click on a row asks for the editor window.
     pub open_editor: bool,
     /// SAVE asks the shell for the save dialog; the file name is chosen there.
@@ -982,6 +986,13 @@ pub struct PlcUi {
     pub menu_open: bool,
     /// The simulation's selected input byte: 0 or 1, as the manual's `B` picks.
     pub sim_byte: u8,
+    /// TEST RUN started the ladder on entry and must stop it on the way out.
+    sim_running: bool,
+    /// Input bits held only for drawing the ladder: the machine and the daemon
+    /// never see them. This is the editor's preview, not TEST RUN.
+    pub preview: Vec<(String, bool)>,
+    /// Which bank of eight input bits the digits toggle.
+    pub preview_byte: u8,
     pub trend_window_ms: u32,
     /// A property text field is being typed into, so the ladder keys stand down.
     /// Cleared by Escape, by a click on the canvas, or by leaving the field.
@@ -1047,10 +1058,12 @@ impl Default for PlcUi {
             picker_cursor: 0,
             operand_pick: None,
             operand_filter: String::new(),
+            operand_cursor: 0,
             coil_pick: None,
             compare_edit: None,
             compute_edit: None,
             scroll_to_pou: false,
+            scroll_to_cursor: false,
             open_editor: false,
             save_requested: false,
             keys_blocked: false,
@@ -1075,6 +1088,9 @@ impl Default for PlcUi {
             opened_frame: 0,
             menu_open: false,
             sim_byte: 0,
+            sim_running: false,
+            preview: Vec::new(),
+            preview_byte: 0,
             trend_window_ms: 20_000,
             autostart: false,
             autostarted: false,
@@ -1498,6 +1514,9 @@ impl PlcUi {
 
     /// The live value of a bit operand, if the snapshot carries it.
     pub fn bit_value(&self, name: &str) -> Option<bool> {
+        if let Some((_, value)) = self.preview.iter().find(|(held, _)| held == name) {
+            return Some(*value);
+        }
         self.vars
             .iter()
             .find(|var| var.name == name)
@@ -2311,7 +2330,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         });
     }
     app.plc.poll();
-    common::focus_anchor(ui, "plc-page-focus");
+    // A dialog owns the keyboard, including focus: the page's anchor took it
+    // back every frame, so the save prompt's name field could not be typed in.
+    if app.overlay.modal.is_none() {
+        common::focus_anchor(ui, "plc-page-focus");
+    }
 
     let mut actions: Vec<Action> = Vec::new();
     let _open_editor = false;
@@ -2326,9 +2349,9 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // The mode switch needs keys: the buttons sit on the service pane below the
     // list, and the panel keyboard has no Tab to reach them with.
     if !workbench_open {
-        if ctrl_shift_key(ui, egui::Key::Enter) {
+        if app.overlay.modal.is_none() && ctrl_shift_key(ui, egui::Key::Enter) {
             actions.push(Action::Stop);
-        } else if ctrl_key(ui, egui::Key::Enter) {
+        } else if app.overlay.modal.is_none() && ctrl_key(ui, egui::Key::Enter) {
             actions.push(Action::Start);
         }
     }
@@ -2348,6 +2371,13 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     let dialog_open = app.overlay.modal.is_some() || workbench_open || app.plc.pou_edit.is_some();
     let plc = &mut app.plc;
     plc.keys_blocked = dialog_open;
+    // The list is this screen's page, but only while it is the page in front:
+    // the editor overlay draws the symbols, simulation, watch and trend pages,
+    // and a list drawn behind it used to reset the page to the list every frame,
+    // which made every page chord look dead.
+    if !workbench_open {
+        plc.page = PlcPage::PouList;
+    }
 
     let width = ui.available_width();
     // The program list sits over the service pane: the list is what the operator
@@ -2409,6 +2439,7 @@ pub fn escape_closes_editor(plc: &PlcUi) -> bool {
         && plc.block_edit.is_none()
         && plc.compare_edit.is_none()
         && plc.compute_edit.is_none()
+        && plc.xref.is_none()
 }
 
 /// The PLC workbench's navigation strip, built with the main GUI's row metrics:
@@ -2436,14 +2467,11 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
     let row = |text: &'static str, key: &'static str, active: bool| Row { text, key, active };
     let mut entries = vec![
         Heading("PAGES"),
-        // The menu and the program list live on the PLC screen behind the
-        // editor, so Ctrl+1 leaves for that screen rather than opening a page.
-        row("Program list", "Ctrl+1", plc.page == PlcPage::PouList),
-        row("Ladder", "Ctrl+2", plc.page == PlcPage::Edit),
-        row("Symbols", "Ctrl+3", plc.page == PlcPage::Symbols),
-        row("Simulation", "Ctrl+4", plc.page == PlcPage::Sim),
-        row("Watch", "Ctrl+W", plc.page == PlcPage::Watch),
-        row("Trend", "Ctrl+T", plc.page == PlcPage::Trend),
+        row("Ladder", "Ctrl+L", plc.page == PlcPage::Edit),
+        row("Symbols", "Ctrl+1", plc.page == PlcPage::Symbols),
+        row("Test run", "Ctrl+2", plc.page == PlcPage::Sim),
+        row("Watch", "Ctrl+3", plc.page == PlcPage::Watch),
+        row("Trend", "Ctrl+4", plc.page == PlcPage::Trend),
     ];
     match plc.page {
         // The list has its own keys; the editor's element letters do not work
@@ -2476,19 +2504,30 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
             entries.push(Heading("RUNG"));
             entries.push(row("New row", "Ctrl+N", false));
             entries.push(row("Insert row", "Ctrl+Enter", false));
-            entries.push(row("Delete row", "Ctrl+Del", false));
-            entries.push(Heading("SIMULATION"));
+            entries.push(row("Delete row", "Ctrl+Bksp", false));
+            entries.push(Heading("PREVIEW"));
             entries.push(row("Toggle input bit", "0-7", false));
             entries.push(row("Select input byte", "B", false));
-            entries.push(row("Step one scan", "S", false));
-            entries.push(row("Reset data", "E", false));
+            entries.push(row("Drawing only", "no HAL", false));
             entries.push(Heading("TOOLS"));
-            entries.push(row("Watch page", "Ctrl+W", false));
-            entries.push(row("Trend page", "Ctrl+T", false));
             entries.push(row("Cross references", "Ctrl+X", false));
             entries.push(row("Undo / redo", "Ctrl+Z Y", false));
             entries.push(Heading("SAVE"));
             entries.push(row("Save project", "Ctrl+S", false));
+            entries.push(row("Close editor", "Esc", false));
+        }
+        // TEST RUN runs itself: entering loads and starts, leaving stops. There
+        // is nothing to save here either; the ladder's own mode switch belongs
+        // to the screen that owns the list.
+        PlcPage::Sim => {
+            entries.push(Heading("TEST RUN"));
+            entries.push(row("Loads and starts", "on open", false));
+            entries.push(row("Stops", "on leave", false));
+            entries.push(Heading("SIGNALS"));
+            entries.push(row("Toggle input bit", "0-7", false));
+            entries.push(row("Select input byte", "B", false));
+            entries.push(row("Step one scan", "S", false));
+            entries.push(row("Reset data", "E", false));
         }
         // Every other page keeps the mode switch and the save in reach.
         _ => {
@@ -2638,6 +2677,9 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         && !ui.ctx().text_edit_focused()
     {
         app.overlay.plc_editor = false;
+        // The preview is an editor aid: it must not outlive the window and leave
+        // the screen showing held inputs.
+        app.plc.preview.clear();
         return;
     }
 
@@ -2654,7 +2696,9 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     // navigation never eats the arrow keys, and surrendering it here left the
     // cell cursor unable to move vertically at all.
     let anchor_id = ui.scope_id().with("plc-editor-focus");
-    if !app.plc.text_editing {
+    // A shell dialog owns the focus: surrendering anything that is not the grid
+    // anchor took the ring away from the save prompt's name field every frame.
+    if !app.plc.text_editing && app.overlay.modal.is_none() {
         ui.ctx().memory_mut(|memory| {
             if let Some(id) = memory.focused() {
                 if id != anchor_id {
@@ -2697,7 +2741,7 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     // also has to hold the focus: the lock filter is only consulted for the
     // focused widget, so without this egui spent the arrows on focus navigation
     // and the cell cursor never moved at all.
-    if !app.plc.menu_open {
+    if !app.plc.menu_open && app.overlay.modal.is_none() {
         let anchor = common::focus_anchor_locked(ui, "plc-editor-focus", true);
         if !app.plc.text_editing && !anchor.has_focus() {
             anchor.request_focus();
@@ -2706,36 +2750,33 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
 
     // The menu bar does not take clicks in this build, so the pages and the
     // two actions the workflow needs every minute have keys as well.
-    let (to_pous, to_edit, to_symbols, to_sim, add_rung, save, new_project, add_row, delete_row) = (
-        ctrl_key(ui, egui::Key::Num1),
-        ctrl_key(ui, egui::Key::Num2),
-        ctrl_key(ui, egui::Key::Num3),
-        ctrl_key(ui, egui::Key::Num4),
-        ctrl_key(ui, egui::Key::N),
-        ctrl_key(ui, egui::Key::S),
-        // Ctrl+Shift+N is the keyboard path to File > New: the menu popup is not
-        // reachable by keyboard in this build, and a new project must be.
-        ctrl_shift_key(ui, egui::Key::N),
-        // The manual's SS+ENTER substitute, plus Ctrl+J for terminals that
-        // cannot send Ctrl+Enter.
-        ctrl_key(ui, egui::Key::Enter) || ctrl_key(ui, egui::Key::J),
-        ctrl_key(ui, egui::Key::Delete),
-    );
-    if to_pous {
-        // The program list is not drawn here; the key returns to the PLC screen
-        // where it lives, rather than switching this window to a page it owns.
-        app.overlay.plc_editor = false;
-        app.plc.page = PlcPage::PouList;
-    }
-    if to_edit {
+    // A shell dialog owns every key; the page keys wait until it closes.
+    let dialog_open = app.overlay.modal.is_some();
+    let (to_symbols, to_sim, to_watch, to_trend, add_rung, save, new_project, add_row, delete_row) =
+        if dialog_open {
+            (
+                false, false, false, false, false, false, false, false, false,
+            )
+        } else {
+            (
+                ctrl_key(ui, egui::Key::Num1),
+                ctrl_key(ui, egui::Key::Num2),
+                ctrl_key(ui, egui::Key::Num3),
+                ctrl_key(ui, egui::Key::Num4),
+                ctrl_key(ui, egui::Key::N),
+                ctrl_key(ui, egui::Key::S),
+                // Ctrl+Shift+N is the keyboard path to File > New: the menu popup is not
+                // reachable by keyboard in this build, and a new project must be.
+                ctrl_shift_key(ui, egui::Key::N),
+                // The manual's SS+ENTER substitute, plus Ctrl+J for terminals that
+                // cannot send Ctrl+Enter.
+                ctrl_key(ui, egui::Key::Enter) || ctrl_key(ui, egui::Key::J),
+                // The panel keyboard has no Delete key: Bksp is the delete it has.
+                ctrl_key(ui, egui::Key::Backspace),
+            )
+        };
+    if !dialog_open && ctrl_key(ui, egui::Key::L) {
         app.plc.page = PlcPage::Edit;
-        app.plc.text_editing = false;
-        // Opening the page starts from a clean keyboard: a picker left open by
-        // an earlier visit would otherwise swallow the first keys of the batch.
-        app.plc.picker = None;
-        app.plc.operand_pick = None;
-        app.plc.coil_pick = None;
-        app.plc.operand_filter.clear();
     }
     if to_symbols {
         app.plc.page = PlcPage::Symbols;
@@ -2743,14 +2784,21 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     if to_sim {
         app.plc.page = PlcPage::Sim;
     }
+    if to_watch {
+        app.plc.page = PlcPage::Watch;
+    }
+    if to_trend {
+        app.plc.page = PlcPage::Trend;
+    }
     // The simulation page owns its keys as the manual describes them, and the
     // input and run keys keep working on the watch and trend pages so a program can
     // be tried while its signals are compared in time.
-    let sim_keys = matches!(app.plc.page, PlcPage::Sim | PlcPage::Watch | PlcPage::Trend);
+    let sim_keys =
+        !dialog_open && matches!(app.plc.page, PlcPage::Sim | PlcPage::Watch | PlcPage::Trend);
     if sim_keys {
         let mut bit: Option<u8> = None;
         let mut byte = false;
-        let (step, reset, watch, trend, run) = ui.input_mut(|input| {
+        let (step, reset, watch, trend) = ui.input_mut(|input| {
             let digit = [
                 egui::Key::Num0,
                 egui::Key::Num1,
@@ -2772,7 +2820,6 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
                 input.consume_key(egui::Modifiers::NONE, egui::Key::E),
                 input.consume_key(egui::Modifiers::NONE, egui::Key::W),
                 input.consume_key(egui::Modifiers::NONE, egui::Key::G),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::R),
             )
         });
         if byte {
@@ -2802,33 +2849,30 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         if trend {
             app.plc.page = PlcPage::Trend;
         }
-        if run {
-            let action = if matches!(app.plc.state, RunState::Running) {
-                Action::Stop
-            } else {
-                Action::Start
-            };
-            app.plc.apply(action);
-        }
     }
     if new_project {
         app.plc.apply(Action::New);
     }
-    if add_rung {
+    let ladder_page = app.plc.page == PlcPage::Edit;
+    if add_rung && ladder_page {
         let (section, row) = app
             .plc
             .cell_cursor
             .map(|cursor| (cursor.0, cursor.1))
             .unwrap_or((0, 0));
         app.plc.apply(Action::AddRungAfter { section, row });
+        // The new row is where the next key belongs: without moving the cursor,
+        // repeated presses inserted at the same place and the ladder looked as
+        // if nothing had happened.
+        app.plc.cell_cursor = Some((section, row + 1, 0));
     }
-    if delete_row {
+    if delete_row && ladder_page {
         if let Some((section, rung)) = app.plc.cell_cursor.map(|cursor| (cursor.0, cursor.1)) {
             app.plc.apply(Action::DeleteRung { section, rung });
             app.plc.cell_cursor = Some((section, rung.saturating_sub(1), 0));
         }
     }
-    if add_row {
+    if add_row && ladder_page {
         // Explicit row, not the tree selection: `AddRung` reads the selection,
         // which is not the cell cursor and inserted the row in the wrong place.
         let (section, row) = app
@@ -2842,10 +2886,32 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     if save {
         app.request_plc_save();
     }
+    // TEST RUN is the ladder against the machine: opening the page loads and
+    // starts it, leaving stops it. Nothing on the page can leave it running.
+    if app.plc.page == PlcPage::Sim && !app.plc.sim_running {
+        app.plc.sim_running = true;
+        // Load what is on screen and run it. No save: testing an edit must not
+        // rewrite the project file behind the operator's back.
+        app.plc.validate();
+        let project = app.plc.project.clone();
+        app.plc.send(Tag::Load, Request::Load { project });
+        app.plc.send(Tag::Start, Request::Start);
+        app.plc.message = "TEST RUN".to_string();
+    } else if app.plc.page != PlcPage::Sim && app.plc.sim_running {
+        app.plc.sim_running = false;
+        app.plc.apply(Action::Stop);
+    }
     let mut actions: Vec<Action> = Vec::new();
+    // A shell dialog (the save prompt, for one) owns the keyboard completely:
+    // the grid behind it must not take the Enter that confirms the dialog.
+    let shell_modal = app.overlay.modal.is_some();
     // Pickers first: they own the keyboard while they are open, and a text field
     // drawn later in the frame would consume Enter before the picker saw it.
-    let modal_owned = crate::screens::plc_grid::pickers(&mut app.plc, ui.ctx(), &mut actions);
+    let modal_owned = if shell_modal {
+        true
+    } else {
+        crate::screens::plc_grid::pickers(&mut app.plc, ui.ctx(), &mut actions)
+    };
 
     // A window on top owns the letters: without this a preset's `m` or `s` also
     // ran the grid's commands, and Backspace deleted the cell under the box.
@@ -2907,6 +2973,7 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         // workbench before it could paint.
         if !opened_this_frame {
             app.overlay.plc_editor = false;
+            app.plc.preview.clear();
         }
     }
 }
@@ -2937,8 +3004,8 @@ fn page_body(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
 /// and the list is the only place a POU is created: the editor window edits the
 /// one it was opened on.
 fn pou_list_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
-    // Only the drawn list owns these keys. `pou_list_page` sets the page before
-    // it reads them, so a stale `Edit` left behind by the closed editor cannot
+    // Only the drawn list owns these keys. The screen sets the page before it
+    // draws the list, so a stale `Edit` left behind by the closed editor cannot
     // make the list deaf, and a direct call from anywhere else stays inert.
     if plc.page != PlcPage::PouList || plc.text_editing || plc.keys_blocked {
         return;
@@ -3016,9 +3083,6 @@ const POU_PAGE: isize = 8;
 /// a header row, one selected band with an accent bar, stripes, Page keys and a
 /// footer that names the keys. The selection is the open POU.
 fn pou_list_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
-    // Drawing the list is what makes it the live page: the workbench forces Edit
-    // when it opens, so this assignment never fights the editor.
-    plc.page = PlcPage::PouList;
     pou_list_keys(plc, ui, actions);
     let pous = plc.project.all_pous();
     let selected = plc.pou.min(pous.len().saturating_sub(1));
@@ -3190,6 +3254,15 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
             );
         }
     });
+    if !plc.preview.is_empty() {
+        ui.label(
+            RichText::new(
+                "PREVIEW · input bits held for the drawing only, not sent to the machine",
+            )
+            .size(theme::font_size(9.0))
+            .color(theme::WARNING),
+        );
+    }
     if language == PouLanguage::Fbd {
         fbd_box_editor(plc, ui.ctx(), actions);
     }
@@ -3212,7 +3285,13 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
                         .max_width(left_width)
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ladder_body(plc, &sections, ui, body_height, actions);
+                            // Keep the cell cursor on screen: the page is taller
+                            // than the window on a long program, and a cursor
+                            // that walked off the fold could not be seen while
+                            // keys moved it.
+                            let follow = plc.scroll_to_cursor;
+                            plc.scroll_to_cursor = false;
+                            ladder_body(plc, &sections, ui, body_height, actions, follow);
                         });
                 }
                 PouLanguage::Il => il_editor(plc, ui, body_height),
@@ -4665,7 +4744,9 @@ fn sim_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>
     // The monitor gets its own bounded scroll area so the I/O controls below are
     // always on screen: with the whole page in one scroll area the ladder pushed
     // them past the fold, and the wheel did not reach them.
-    let monitor = (height * 0.45).clamp(140.0, 260.0);
+    // The ladder takes everything the signal panel does not: a fixed share of
+    // the window left most of it empty and cut long programs short.
+    let monitor = (height - 132.0).max(180.0);
     // The monitor shows the current POU in its own language. Rendering the ladder
     // unconditionally made an IL or FBD POU read "No sections" while the program was
     // running and the header said otherwise.
@@ -4679,7 +4760,9 @@ fn sim_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>
         .max_height(monitor)
         .auto_shrink([false, false])
         .show(ui, |ui| match language {
-            PouLanguage::Ld => ladder_body(plc, &sections, ui, monitor, actions),
+            PouLanguage::Ld => {
+                ladder_body(plc, &sections, ui, monitor, actions, false);
+            }
             PouLanguage::Il => il_editor(plc, ui, monitor),
             PouLanguage::Fbd => fbd_editor(plc, ui, monitor, actions),
         });
@@ -4931,7 +5014,7 @@ fn draw_remote_trend(plc: &PlcUi, ui: &mut Ui) {
 /// The configured input at `bit` of the selected byte, if that slot is bound. The
 /// panel shows unbound slots disabled rather than inventing names, as the manual's
 /// 16 fixed inputs do.
-fn sim_input_name(plc: &PlcUi, byte: u8, bit: u8) -> Option<String> {
+pub(crate) fn sim_input_name(plc: &PlcUi, byte: u8, bit: u8) -> Option<String> {
     let index = usize::from(byte) * 8 + usize::from(bit);
     plc.project
         .io
@@ -4946,94 +5029,87 @@ fn sim_input_name(plc: &PlcUi, byte: u8, bit: u8) -> Option<String> {
 /// has the brighter paper, and a click toggles a bound input.
 fn sim_bit_panel(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
     for (title, direction) in [("IN", IoDirection::In), ("OUT", IoDirection::Out)] {
+        let points = plc
+            .project
+            .io
+            .iter()
+            .filter(|point| point.direction == direction)
+            .collect::<Vec<_>>();
+        // An empty slot says nothing and took a row of space: only bound points
+        // are drawn, numbered by their position among their own direction.
+        if points.is_empty() {
+            continue;
+        }
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(title)
-                    .monospace()
-                    .size(theme::font_size(8.0))
-                    .color(theme::MUTED),
+            ui.spacing_mut().item_spacing.x = 2.0;
+            ui.allocate_ui_with_layout(
+                egui::vec2(24.0, 36.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.label(
+                        RichText::new(title)
+                            .monospace()
+                            .size(theme::font_size(8.0))
+                            .color(theme::MUTED),
+                    );
+                },
             );
-            for bit in 0..16u8 {
-                let index = usize::from(bit);
-                let point = plc
-                    .project
-                    .io
-                    .iter()
-                    .filter(|point| point.direction == direction)
-                    .nth(index);
-                let selected_byte =
-                    direction == IoDirection::In && (usize::from(bit) / 8) as u8 == plc.sim_byte;
+            for (index, point) in points.iter().enumerate() {
                 let (rect, response) =
-                    ui.allocate_exact_size(egui::vec2(30.0, 22.0), egui::Sense::click());
-                let paper = if selected_byte {
-                    theme::PANEL_RAISED
+                    ui.allocate_exact_size(egui::vec2(38.0, 36.0), egui::Sense::click());
+                ui.painter().rect_filled(rect, 2.0, theme::PANEL);
+                let value = plc
+                    .vars
+                    .iter()
+                    .find(|var| var.name == point.name)
+                    .map(|var| var.value)
+                    .unwrap_or(false);
+                let forced = plc.is_forced(&point.name);
+                let colour = if value {
+                    if direction == IoDirection::In {
+                        theme::C4
+                    } else {
+                        theme::C5
+                    }
                 } else {
-                    theme::PANEL
+                    theme::MUTED
                 };
-                ui.painter().rect_filled(rect, 2.0, paper);
-                match point {
-                    Some(point) => {
-                        let value = plc
-                            .vars
-                            .iter()
-                            .find(|var| var.name == point.name)
-                            .map(|var| var.value)
-                            .unwrap_or(false);
-                        let forced = plc.is_forced(&point.name);
-                        let colour = if value {
-                            if direction == IoDirection::In {
-                                theme::C4
-                            } else {
-                                theme::C5
-                            }
-                        } else {
-                            theme::MUTED
-                        };
-                        ui.painter().text(
-                            egui::pos2(rect.center().x, rect.top() + 7.0),
-                            Align2::CENTER_CENTER,
-                            format!("{bit}"),
-                            FontId::monospace(7.0),
-                            theme::MUTED,
-                        );
-                        ui.painter().circle_filled(
-                            egui::pos2(rect.center().x, rect.center().y + 3.0),
-                            3.0,
-                            colour,
-                        );
-                        ui.painter().text(
-                            egui::pos2(rect.center().x, rect.bottom() - 2.0),
-                            Align2::CENTER_BOTTOM,
-                            if forced {
-                                format!("F {}", point.name)
-                            } else {
-                                point.name.clone()
-                            },
-                            FontId::monospace(6.5),
-                            colour,
-                        );
-                        if direction == IoDirection::In && response.clicked() {
-                            actions.push(Action::Force(point.name.clone(), !value));
-                        }
-                    }
-                    None => {
-                        ui.painter().text(
-                            rect.center(),
-                            Align2::CENTER_CENTER,
-                            format!("{bit}"),
-                            FontId::monospace(7.0),
-                            theme::C3,
-                        );
-                    }
+                // Bit number above, lamp in the middle, name below it: the label
+                // used to be painted across the lamp.
+                ui.painter().text(
+                    egui::pos2(rect.center().x, rect.top() + 7.0),
+                    Align2::CENTER_CENTER,
+                    format!("{index}"),
+                    FontId::monospace(7.0),
+                    theme::MUTED,
+                );
+                ui.painter().circle_filled(
+                    egui::pos2(rect.center().x, rect.top() + 17.0),
+                    3.5,
+                    colour,
+                );
+                ui.painter().text(
+                    egui::pos2(rect.center().x, rect.bottom() - 2.0),
+                    Align2::CENTER_BOTTOM,
+                    if forced {
+                        format!("F {}", point.name)
+                    } else {
+                        point.name.clone()
+                    },
+                    FontId::monospace(6.5),
+                    colour,
+                );
+                if direction == IoDirection::In && response.clicked() {
+                    actions.push(Action::Force(point.name.clone(), !value));
                 }
             }
         });
+        ui.add_space(2.0);
     }
-    ui.add_space(3.0);
 }
 
 fn sim_view(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
-    common::card_title(ui, "SIMULATION");
+    common::card_title(ui, "TEST RUN");
     // The 16-bit panel is the control surface: the named button row below it said
     // the same thing twice and is gone.
     sim_bit_panel(plc, ui, actions);
@@ -5269,15 +5345,17 @@ fn ladder_body(
     ui: &mut Ui,
     height: f32,
     actions: &mut Vec<Action>,
-) {
+    follow_cursor: bool,
+) -> Option<egui::Rect> {
     if sections.is_empty() {
         ui.label(
             RichText::new("No sections. Add rung / Add section starts one.")
                 .size(theme::font_size(10.0))
                 .color(theme::MUTED),
         );
-        return;
+        return None;
     }
+    let mut cursor_rect = None;
     egui::ScrollArea::both()
         .id_salt("plc-ladder")
         .max_height((height - 6.0).max(80.0))
@@ -5310,10 +5388,20 @@ fn ladder_body(
                         rung_index,
                         rung,
                         actions,
+                        &mut cursor_rect,
                     );
                 }
             }
+            // The scroll belongs to this area, not to the pane around it: the
+            // cursor rect lives in this content, and scrolling the outer clip
+            // with it moved nothing.
+            if follow_cursor {
+                if let Some(rect) = cursor_rect {
+                    ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                }
+            }
         });
+    cursor_rect
 }
 
 /// A card with an exact rect, sized by the caller so the page's columns end on
@@ -6874,6 +6962,42 @@ mod picker_key_tests {
         );
     }
 
+    /// The list is a table with a cursor: the arrows walk it and Enter takes the
+    /// row, which is the keyboard path the buttons never had.
+    #[test]
+    fn the_arrows_walk_the_operand_list() {
+        let mut plc = plc_with_symbols();
+        plc.picker = Some((0, 0, 1));
+        let _ = frame(&mut plc, text("c"));
+        assert!(plc.operand_pick.is_some(), "contact list open");
+        let key = |key: egui::Key| {
+            vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        let _ = frame(&mut plc, key(egui::Key::ArrowDown));
+        assert_eq!(plc.operand_cursor, 1, "the second row is under the cursor");
+        let actions = frame(&mut plc, key(egui::Key::Enter));
+        let cell = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::SetCell { cell, .. } => Some(cell.clone()),
+                _ => None,
+            })
+            .expect("the highlighted row was taken");
+        assert_eq!(
+            cell,
+            Cell::Contact {
+                var: "estop".into(),
+                negated: false
+            }
+        );
+    }
+
     /// Typing narrows the operand list and Enter commits the typed name on the
     /// frame it arrives, with the kind the letter chose.
     #[test]
@@ -7494,6 +7618,20 @@ mod rail_tests {
         let edit = rows(&plc);
         assert!(edit.contains(&("Compare / compute", "G M")), "{edit:?}");
         assert!(edit.contains(&("Insert row", "Ctrl+Enter")), "{edit:?}");
+        assert!(edit.contains(&("Delete row", "Ctrl+Bksp")), "{edit:?}");
+        assert!(edit.contains(&("Close editor", "Esc")), "{edit:?}");
+        assert!(edit.contains(&("Ladder", "Ctrl+L")), "{edit:?}");
+        assert!(edit.contains(&("Test run", "Ctrl+2")), "{edit:?}");
+        assert!(
+            !edit.iter().any(|(text, _)| *text == "Program list"),
+            "the list is not a page of this window: {edit:?}"
+        );
+        assert!(
+            !edit
+                .iter()
+                .any(|(text, _)| *text == "Watch page" || *text == "Trend page"),
+            "watch and trend are in PAGES once: {edit:?}"
+        );
         assert!(
             !edit.iter().any(|(text, _)| *text == "Duplicate"),
             "the list's keys do not work in the editor: {edit:?}"
