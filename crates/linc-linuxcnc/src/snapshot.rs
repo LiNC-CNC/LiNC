@@ -536,6 +536,19 @@ impl SnapshotBuilder {
                 axis.name.clone(),
                 joint.map(|joint| joint.homing).unwrap_or(false),
             );
+            snapshot.machine.limits.insert(
+                axis.name.clone(),
+                LimitState {
+                    min_hard: joint.map(|joint| joint.min_hard_limit).unwrap_or(false),
+                    max_hard: joint.map(|joint| joint.max_hard_limit).unwrap_or(false),
+                    min_soft: joint.map(|joint| joint.min_soft_limit).unwrap_or(false),
+                    max_soft: joint.map(|joint| joint.max_soft_limit).unwrap_or(false),
+                },
+            );
+            snapshot.machine.overridden.insert(
+                axis.name.clone(),
+                joint.map(|joint| joint.override_limits).unwrap_or(false),
+            );
             snapshot.machine.following_error.insert(
                 axis.name.clone(),
                 joint.map(|joint| joint.ferror_current).unwrap_or(0.0),
@@ -550,7 +563,6 @@ impl SnapshotBuilder {
                 pose_component(&status.positions.actual, pose_index),
             );
         }
-        snapshot.machine.limits = limit_labels(status, axes);
 
         let g5x = status.offsets.g5x_offset;
         let g92 = status.offsets.g92_offset;
@@ -655,7 +667,7 @@ impl SnapshotBuilder {
             adaptive_feed: status.motion.adaptive_feed_enabled,
         };
 
-        snapshot.limits_overridden = panel.override_limits;
+        snapshot.limits_overridden = snapshot.any_limit_overridden();
         snapshot.panel = panel.to_snapshot(&self.profile, status.io.tool_in_spindle.max(0) as u16);
         snapshot.pendant = snapshot.panel.pendant.clone();
 
@@ -1384,28 +1396,6 @@ fn pose_component(pose: &linuxcnc_nml::Pose, index: usize) -> f64 {
         8 => pose.w,
         _ => 0.0,
     }
-}
-
-fn limit_labels(status: &Status, axes: &[linc_core::ini::AxisIni]) -> Vec<String> {
-    let mut labels = Vec::new();
-    for (index, mask) in status.limits.iter().enumerate() {
-        let Some(axis) = axes.get(index) else {
-            continue;
-        };
-        if mask & 1 != 0 {
-            labels.push(format!("{}-", axis.name));
-        }
-        if mask & 2 != 0 {
-            labels.push(format!("{}+", axis.name));
-        }
-        if mask & 4 != 0 {
-            labels.push(format!("{} MIN", axis.name));
-        }
-        if mask & 8 != 0 {
-            labels.push(format!("{} MAX", axis.name));
-        }
-    }
-    labels
 }
 
 fn feed_word(status: &Status, linear_units: &str) -> f64 {

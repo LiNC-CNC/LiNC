@@ -223,6 +223,15 @@ impl LincApp {
                         if command == "Load program" {
                             load_failed = true;
                         }
+                        // The recovery dialog is async: the backend's refusal
+                        // arrives here, not from `send`. Put it on the dialog,
+                        // where the operator is looking, and end the attempt so
+                        // the next frame does not re-issue the same step.
+                        if matches!(command.as_str(), "Recover limit" | "Arm limits override") {
+                            if let Some(Modal::LimitRecovery(dialog)) = &mut self.overlay.modal {
+                                dialog.fail(error.to_string().to_ascii_uppercase());
+                            }
+                        }
                         self.toast(error.to_string(), theme::ERROR);
                         self.log_ui(
                             AlarmSeverity::Error,

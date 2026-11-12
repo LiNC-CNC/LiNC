@@ -323,6 +323,53 @@ impl Default for TaskState {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LimitSide {
+    Min,
+    Max,
+}
+
+impl LimitSide {
+    /// Signed multiplier that moves away from the tripped switch.
+    pub fn away(self) -> f64 {
+        match self {
+            Self::Max => -1.0,
+            Self::Min => 1.0,
+        }
+    }
+}
+
+/// One joint's limit inputs.
+///
+/// The four bits are kept together because the status bar already shows soft
+/// limits beside hard ones, and dropping the soft pair to make room for the
+/// recovery side would be a regression. Recovery reads only `hard_side()`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LimitState {
+    pub min_hard: bool,
+    pub max_hard: bool,
+    pub min_soft: bool,
+    pub max_soft: bool,
+}
+
+impl LimitState {
+    /// The tripped hard side, if any. A joint cannot physically sit on both;
+    /// `Min` wins if a controller reports both in the same poll.
+    pub fn hard_side(self) -> Option<LimitSide> {
+        if self.min_hard {
+            Some(LimitSide::Min)
+        } else if self.max_hard {
+            Some(LimitSide::Max)
+        } else {
+            None
+        }
+    }
+
+    pub fn any(self) -> bool {
+        self.min_hard || self.max_hard || self.min_soft || self.max_soft
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MachineState {
     pub on: bool,
@@ -330,7 +377,11 @@ pub struct MachineState {
     pub homed: AxisMap<bool>,
     pub homing: AxisMap<bool>,
     pub homing_sequence: Vec<u32>,
-    pub limits: Vec<String>,
+    /// Limit inputs per axis, from the controller's joint status.
+    pub limits: AxisMap<LimitState>,
+    /// The controller's limits override is armed per joint. LinuxCNC clears it
+    /// when the jog it allowed finishes.
+    pub overridden: AxisMap<bool>,
     pub fault: bool,
     pub force_homing: bool,
     pub following_error: AxisMap<f64>,
@@ -359,7 +410,8 @@ impl Default for MachineState {
             homed: AxisMap::new(),
             homing: AxisMap::new(),
             homing_sequence: Vec::new(),
-            limits: Vec::new(),
+            limits: AxisMap::new(),
+            overridden: AxisMap::new(),
             fault: false,
             force_homing: false,
             following_error: AxisMap::new(),
@@ -379,6 +431,28 @@ impl Default for MachineState {
             nml_status_connected: true,
             hal_thread_ok: true,
         }
+    }
+}
+
+impl MachineState {
+    /// The columns and order the status bar has always shown.
+    pub fn limit_labels(&self) -> Vec<String> {
+        let mut labels = Vec::new();
+        for (axis, limit) in self.limits.iter() {
+            if limit.min_hard {
+                labels.push(format!("{axis}-"));
+            }
+            if limit.max_hard {
+                labels.push(format!("{axis}+"));
+            }
+            if limit.min_soft {
+                labels.push(format!("{axis} MIN"));
+            }
+            if limit.max_soft {
+                labels.push(format!("{axis} MAX"));
+            }
+        }
+        labels
     }
 }
 
@@ -1408,6 +1482,12 @@ pub struct MachineSnapshot {
     pub variant: MachineVariant,
     pub machine_name: String,
     pub simulated: bool,
+    /// Cabinet machine-on switch, `linc.machine-on`. `None` when the pin is
+    /// absent (simulation, or a build without the HAL reader), which is
+    /// treated as allowed: recovery is disabled, not blocked, by evidence it
+    /// cannot see.
+    #[serde(default)]
+    pub cabinet_on: Option<bool>,
     pub task: TaskState,
     /// The move being executed, for the two questions the display asks of it:
     /// whether the following error means anything, and whether to step back.
@@ -1452,6 +1532,28 @@ pub struct MachineSnapshot {
 }
 
 impl MachineSnapshot {
+    /// The tripped hard side of `axis`, if any.
+    pub fn limit_tripped(&self, axis: &str) -> Option<LimitSide> {
+        self.machine
+            .limits
+            .get(axis)
+            .and_then(|limit| limit.hard_side())
+    }
+
+    /// Every axis sitting on a hard limit, in axis order.
+    pub fn tripped_axes(&self) -> Vec<(String, LimitSide)> {
+        self.machine
+            .limits
+            .iter()
+            .filter_map(|(axis, limit)| limit.hard_side().map(|side| (axis.to_string(), side)))
+            .collect()
+    }
+
+    /// Any joint's limits override is armed.
+    pub fn any_limit_overridden(&self) -> bool {
+        self.machine.overridden.iter().any(|(_, on)| *on)
+    }
+
     pub fn empty(variant: MachineVariant) -> Self {
         Self {
             limits_overridden: false,
@@ -1459,6 +1561,7 @@ impl MachineSnapshot {
             variant,
             machine_name: String::new(),
             simulated: false,
+            cabinet_on: None,
             task: TaskState::default(),
             motion_kind: MotionKind::None,
             machine: MachineState::default(),
@@ -1697,6 +1800,58 @@ mod motion_kind_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tripped_axes_reads_only_hard_limits_in_axis_order() {
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.machine.limits.insert(
+            "X",
+            LimitState {
+                max_hard: true,
+                ..Default::default()
+            },
+        );
+        snapshot.machine.limits.insert(
+            "Y",
+            LimitState {
+                min_soft: true,
+                ..Default::default()
+            },
+        );
+        snapshot.machine.limits.insert(
+            "Z",
+            LimitState {
+                min_hard: true,
+                max_soft: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(snapshot.limit_tripped("X"), Some(LimitSide::Max));
+        assert_eq!(
+            snapshot.limit_tripped("Y"),
+            None,
+            "soft limits are not trips"
+        );
+        assert_eq!(
+            snapshot.tripped_axes(),
+            vec![
+                ("X".to_string(), LimitSide::Max),
+                ("Z".to_string(), LimitSide::Min)
+            ]
+        );
+        let labels = snapshot.machine.limit_labels();
+        assert_eq!(labels, vec!["X+", "Y MIN", "Z-", "Z MAX"]);
+    }
+
+    #[test]
+    fn both_hard_bits_on_one_joint_report_the_minimum_side() {
+        let limit = LimitState {
+            min_hard: true,
+            max_hard: true,
+            ..Default::default()
+        };
+        assert_eq!(limit.hard_side(), Some(LimitSide::Min));
+    }
 
     #[test]
     fn protect_fails_closed_when_unknown() {

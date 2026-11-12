@@ -420,6 +420,12 @@ impl LincApp {
             );
             ui.add_space(4.0);
         }
+        if let Some(text) = linc_core::recovery::banner_text(&self.snapshot) {
+            if theme::banner_action(ui, theme::ERROR, &text, "RECOVER (Ctrl+I)") {
+                self.open_limit_recovery();
+            }
+            ui.add_space(4.0);
+        }
         if self.snapshot.limits_overridden {
             theme::banner(
                 ui,

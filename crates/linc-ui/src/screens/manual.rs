@@ -177,7 +177,7 @@ pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
     }
     let axes = app.axes();
     let mut zero: Option<Vec<String>> = None;
-    let mut toggle_limits = false;
+    let mut open_recovery = false;
     ui.input_mut(|input| {
         for (key, axis) in [
             (egui::Key::X, "X"),
@@ -193,11 +193,11 @@ pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
             zero = Some(axes.clone());
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::O) {
-            toggle_limits = true;
+            open_recovery = true;
         }
     });
-    if toggle_limits {
-        app.send(linc_core::command::MachineCommand::ToggleLimitsOverride);
+    if open_recovery {
+        app.open_limit_recovery();
     }
     if let Some(axes) = zero {
         common::zero_axes(app, axes);

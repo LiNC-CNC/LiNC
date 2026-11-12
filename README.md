@@ -237,7 +237,9 @@ around, and each one exists to keep the software and the machine in agreement.
 
 - **No software machine controls.** No jog, no cycle start, no override slider,
   no software E-stop. The panel owns them. The exceptions are explicit commands
-  the operator asks for by name: an MDI block, a tool change, a probe cycle.
+  the operator asks for by name: an MDI block, a tool change, a probe cycle, and
+  the limit-switch recovery dialog, which arms the override and issues at most
+  four 5 mm increments away from a tripped hard limit.
 - **Program protect is a lock.** While the panel's protect switch is on, LiNC
   cannot save G-code, write offsets or the tool table, import files or apply
   probe results. Unsaved edits are kept, read-only, instead of being thrown

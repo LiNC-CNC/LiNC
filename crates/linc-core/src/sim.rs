@@ -38,6 +38,9 @@ pub struct SimBackend {
     /// The last tool in the spindle, so a simulator restart does not pretend
     /// the spindle was emptied when the power was cut.
     tool_state: ToolState,
+    /// Simulator-only hard limits and how many recovery steps each axis still
+    /// needs before its switch clears. Empty until a test or a demo trips one.
+    recovery_steps: std::collections::BTreeMap<String, u8>,
 }
 
 impl SimBackend {
@@ -78,6 +81,11 @@ impl SimBackend {
             );
             snapshot.machine.homed.insert(axis.name.clone(), true);
             snapshot.machine.homing.insert(axis.name.clone(), false);
+            snapshot
+                .machine
+                .limits
+                .insert(axis.name.clone(), LimitState::default());
+            snapshot.machine.overridden.insert(axis.name.clone(), false);
             snapshot
                 .machine
                 .following_error
@@ -317,6 +325,7 @@ impl SimBackend {
             panel_seen: Instant::now(),
             machine_off: false,
             tool_state,
+            recovery_steps: std::collections::BTreeMap::new(),
         };
         backend.trail_limit = backend.profile.config.toolpath.trail_max_points;
         backend.initialize_program();
@@ -640,6 +649,40 @@ impl SimBackend {
         let tip = self.current_tool_tip();
         self.snapshot.live_trail = Arc::new(vec![TrailPoint::new(tip, false)]);
         self.snapshot.tool_tip = Some(tip);
+    }
+
+    /// Put `axis` on a hard limit that clears after `steps` recovery moves.
+    ///
+    /// Test and demo hook only: it models the trip a real machine reaches by
+    /// jogging into the switch, including motion being disabled and the
+    /// spindle stopping, without a jog simulation the simulator does not have.
+    pub fn trip_hard_limit(&mut self, axis: &str, side: LimitSide, steps: u8) {
+        let entry = self
+            .snapshot
+            .machine
+            .limits
+            .get(axis)
+            .copied()
+            .unwrap_or_default();
+        let updated = match side {
+            LimitSide::Min => LimitState {
+                min_hard: true,
+                ..entry
+            },
+            LimitSide::Max => LimitState {
+                max_hard: true,
+                ..entry
+            },
+        };
+        self.snapshot.machine.limits.insert(axis, updated);
+        self.snapshot.machine.overridden.insert(axis, false);
+        self.recovery_steps.insert(axis.to_string(), steps.max(1));
+        for spindle in &mut self.snapshot.spindles {
+            spindle.on = false;
+        }
+        self.snapshot.machine.on = false;
+        self.snapshot.task.power = MachinePower::Off;
+        self.snapshot.limits_overridden = false;
     }
 
     fn sync_panel(&mut self) {
@@ -1039,8 +1082,46 @@ impl MachineBackend for SimBackend {
     fn send(&mut self, command: MachineCommand) -> Result<(), MachineError> {
         self.sync_panel();
         match command {
-            MachineCommand::ToggleLimitsOverride => {
-                self.snapshot.limits_overridden = !self.snapshot.limits_overridden;
+            MachineCommand::ArmLimitsOverride { axis } => {
+                crate::recovery::check_gates(&self.snapshot, &axis)?;
+                // Arm-only, like the controller: every limit tripped right now
+                // is masked. Sending it again cannot disarm.
+                let tripped: Vec<String> = self
+                    .snapshot
+                    .tripped_axes()
+                    .into_iter()
+                    .map(|(axis, _)| axis)
+                    .collect();
+                for axis in tripped {
+                    self.snapshot.machine.overridden.insert(axis, true);
+                }
+                self.snapshot.limits_overridden = self.snapshot.any_limit_overridden();
+                Ok(())
+            }
+            MachineCommand::RecoverLimit { axis } => {
+                crate::recovery::check_gates(&self.snapshot, &axis)?;
+                // One bounded step: the simulated machine is enabled for it,
+                // the override is armed for the move, and LinuxCNC clears the
+                // mask when the move ends, so the snapshot does too.
+                self.snapshot.task.power = MachinePower::On;
+                self.snapshot.machine.on = true;
+                self.snapshot.machine.overridden.insert(axis.clone(), false);
+                self.snapshot.limits_overridden = self.snapshot.any_limit_overridden();
+                let remaining = self
+                    .recovery_steps
+                    .get(&axis)
+                    .copied()
+                    .unwrap_or(crate::recovery::MAX_STEPS)
+                    .saturating_sub(1);
+                if remaining == 0 {
+                    self.recovery_steps.remove(&axis);
+                    if let Some(limit) = self.snapshot.machine.limits.get_mut(&axis) {
+                        limit.min_hard = false;
+                        limit.max_hard = false;
+                    }
+                } else {
+                    self.recovery_steps.insert(axis, remaining);
+                }
                 Ok(())
             }
             MachineCommand::IssueMdi { block, origin } => {
@@ -2005,6 +2086,73 @@ enabled = true
             .send(MachineCommand::ActivateWorkOffset { index: 10 })
             .unwrap_err();
         assert!(matches!(error, MachineError::Invalid(message) if message.contains("G54")));
+    }
+
+    #[test]
+    fn recovery_clears_a_tripped_limit_after_the_configured_steps() {
+        use crate::command::MachineCommand;
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Jog);
+        backend.trip_hard_limit("X", LimitSide::Max, 2);
+        assert_eq!(
+            backend.snapshot().limit_tripped("X"),
+            Some(LimitSide::Max),
+            "the trip is visible before recovery"
+        );
+
+        backend
+            .send(MachineCommand::RecoverLimit { axis: "X".into() })
+            .expect("first step is issued");
+        assert_eq!(
+            backend.snapshot().limit_tripped("X"),
+            Some(LimitSide::Max),
+            "one step is not enough for a two-step switch"
+        );
+
+        backend
+            .send(MachineCommand::RecoverLimit { axis: "X".into() })
+            .expect("second step is issued");
+        let snapshot = backend.snapshot();
+        assert_eq!(snapshot.limit_tripped("X"), None, "the switch cleared");
+        assert!(snapshot.machine.on, "motion is enabled after the clear");
+    }
+
+    #[test]
+    fn recovery_refuses_an_axis_that_is_not_tripped() {
+        use crate::command::MachineCommand;
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Jog);
+        for spindle in &mut backend.snapshot.spindles {
+            spindle.on = false;
+        }
+        let error = backend
+            .send(MachineCommand::RecoverLimit { axis: "X".into() })
+            .unwrap_err();
+        assert!(
+            matches!(error, MachineError::LimitNotTripped { ref axis } if axis == "X"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn arming_the_override_twice_leaves_it_armed() {
+        use crate::command::MachineCommand;
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Jog);
+        backend.trip_hard_limit("Y", LimitSide::Min, 4);
+
+        backend
+            .send(MachineCommand::ArmLimitsOverride { axis: "Y".into() })
+            .expect("arm");
+        assert_eq!(backend.snapshot().machine.overridden.get("Y"), Some(&true));
+        backend
+            .send(MachineCommand::ArmLimitsOverride { axis: "Y".into() })
+            .expect("arm again");
+        assert_eq!(
+            backend.snapshot().machine.overridden.get("Y"),
+            Some(&true),
+            "the command cannot disarm"
+        );
     }
 
     #[test]

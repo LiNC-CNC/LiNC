@@ -22,3 +22,4 @@ Problem, Symptoms, What Didn't Work, Solution, Why This Works, Prevention.
 ## Entries
 
 - [Saving a program must reopen it, or AUTO runs the pre-edit text](integration-issues/linuxcnc-save-must-reopen-program.md)
+- [Recovery from a hard limit needs the override armed before motion is enabled](integration-issues/limit-switch-recovery-needs-override-first.md)

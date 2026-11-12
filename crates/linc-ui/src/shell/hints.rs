@@ -361,6 +361,7 @@ impl LincApp {
                 }
                 hints.push(("X/Y/Z".into(), "ZERO AXIS"));
                 hints.push(("A".into(), "ZERO ALL"));
+                hints.push(("O".into(), "LIMIT RECOVERY"));
             }
             Page::Offsets => {
                 hints.push(("Arrows".into(), "SELECT"));

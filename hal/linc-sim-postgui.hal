@@ -9,6 +9,11 @@ net linc-status linc.status-display => cnc_panel.sseg_status
 net tool-changed linc.tool-change-confirm
 net linc-hmi-heartbeat linc.hmi-alive
 
+# Cabinet machine-on switch, the same net the real machine's post-GUI file uses.
+# Without it `linc.machine-on` exists but is unconnected, reads FALSE, and makes
+# the recovery gate refuse with CABINET IS OFF.
+net sig_rio_machine-on-switch_bit => linc.machine-on
+
 # A latched probe trip switches the machine off: halui refuses a jog unless the
 # task state is ON, and the panel jogs straight into halui. The level is ORed
 # with the POWER OFF key onto the single halui.machine.off pin. It is held until

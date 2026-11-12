@@ -2,7 +2,7 @@
 
 use super::*;
 use linc_core::model::{
-    Alarm, AlarmSeverity, AlarmSource, LoobricStatus, NetworkStatus, PanelModeValidity,
+    Alarm, AlarmSeverity, AlarmSource, LimitSide, LoobricStatus, NetworkStatus, PanelModeValidity,
     ToolChangerKind,
 };
 
@@ -7163,4 +7163,66 @@ fn history_limit_drops_the_oldest_block() {
     mdi.commit(2, "G3 X4".into());
     assert_eq!(mdi.len(), 2);
     assert_eq!(mdi.blocks[1].0, "G3 X4");
+}
+
+#[test]
+fn recovery_opens_only_with_a_tripped_axis() {
+    let (_dir, mut app) = make_app(PanelMode::Jog);
+    app.snapshot.machine.limits.insert(
+        "X",
+        linc_core::model::LimitState {
+            max_hard: true,
+            ..Default::default()
+        },
+    );
+    app.open_limit_recovery();
+    match &app.overlay.modal {
+        Some(Modal::LimitRecovery(dialog)) => {
+            assert_eq!(dialog.axis, "X");
+            assert_eq!(dialog.side, LimitSide::Max);
+            assert_eq!(dialog.phase, RecoveryPhase::Confirming);
+        }
+        other => panic!("expected the recovery dialog, got {other:?}"),
+    }
+    assert_eq!(
+        app.overlay.modal.as_ref().map(Modal::kind),
+        Some("limit-recovery")
+    );
+
+    // Dismissed and untripped: the key reports instead of opening an empty
+    // dialog with two buttons that can only refuse.
+    app.overlay.modal = None;
+    app.snapshot.machine.limits = linc_core::model::AxisMap::new();
+    app.open_limit_recovery();
+    assert!(app.overlay.modal.is_none());
+    assert!(app
+        .overlay
+        .toasts
+        .iter()
+        .any(|toast| toast.text == "NO LIMIT SWITCH TRIPPED"));
+}
+
+#[test]
+fn recovery_names_the_gate_that_blocks_it() {
+    let (_dir, mut app) = make_app(PanelMode::Jog);
+    app.snapshot.machine.limits.insert(
+        "X",
+        linc_core::model::LimitState {
+            max_hard: true,
+            ..Default::default()
+        },
+    );
+    // The simulator starts with its spindles running, which is a refusal.
+    let reason = app
+        .limit_recovery_block("X")
+        .expect("a running spindle blocks recovery");
+    assert!(reason.contains("SPINDLE"), "{reason}");
+
+    for spindle in &mut app.snapshot.spindles {
+        spindle.on = false;
+    }
+    assert_eq!(app.limit_recovery_block("X"), None);
+    // A different axis is not the tripped one.
+    let reason = app.limit_recovery_block("Y").expect("Y is not on a limit");
+    assert!(reason.contains("Y IS NOT ON A LIMIT"), "{reason}");
 }

@@ -379,12 +379,13 @@ impl LincApp {
                 nav_page = Some(Page::Tools);
             }
             // The jog screens carry no button for the limit override, so the
-            // chord is the only way to free a joint parked on a switch.
+            // chord is the way in from anywhere. It opens the recovery dialog,
+            // which owns the arm and the bounded moves.
             if input.consume_key(
-                self.prefs.keymap.limits_override.modifiers,
-                self.prefs.keymap.limits_override.key,
+                self.prefs.keymap.limit_recovery.modifiers,
+                self.prefs.keymap.limit_recovery.key,
             ) {
-                self.send(linc_core::command::MachineCommand::ToggleLimitsOverride);
+                self.open_limit_recovery();
             }
             if input.consume_key(
                 self.prefs.keymap.offsets.modifiers,

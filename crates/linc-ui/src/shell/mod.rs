@@ -38,6 +38,7 @@ mod keyboard;
 mod nav;
 mod prefs;
 mod program;
+mod recovery;
 mod status;
 mod sync;
 mod view;
@@ -67,6 +68,8 @@ use nav::*;
 use prefs::*;
 #[allow(unused_imports)]
 use program::*;
+#[allow(unused_imports)]
+use recovery::*;
 #[allow(unused_imports)]
 use status::*;
 #[allow(unused_imports)]
@@ -309,6 +312,7 @@ impl LincApp {
                 messages_dialog: false,
                 messages_scroll: 0.0,
                 confirm_token: None,
+                limit_prompt_seen: None,
             },
             safety_gate,
             jog: JogUi {

@@ -471,11 +471,9 @@ impl LincApp {
             fields.push(field);
         }
         // A held limit switch is never quiet: it blocks motion and says why.
-        if !self.snapshot.machine.limits.is_empty() {
-            fields.push((
-                format!("LIMIT {}", self.snapshot.machine.limits.join(" ")),
-                theme::ERROR,
-            ));
+        let limits = self.snapshot.machine.limit_labels();
+        if !limits.is_empty() {
+            fields.push((format!("LIMIT {}", limits.join(" ")), theme::ERROR));
         }
         if let Some(field) = tool_change_field(&self.snapshot.tool_change) {
             fields.push(field);

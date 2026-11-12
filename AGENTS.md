@@ -93,7 +93,7 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
 - `halui.estop.activate` belongs to the machine HAL (`cnc_panel.estop -> rio.sim-estop` in simulation). Do not link it in `hal/linc.hal`.
 - `or2` is loaded once in `hal/linc.hal`; a second `loadrt or2` fails with "already exists". Add instances there.
 - The panel service owns `/dev/ttyUSB0`. The HMI, `NmlBackend` and `HalReader` must never open it; only `linc-panel` owns serial code. `linc-linuxcnc` has no `serialport` dependency.
-- No on-screen mode, cycle, jog, spindle, coolant, override or software E-stop. The explicit exceptions are MDI, `RUN PROBE`, `CHANGE TOOL`, `RUN FROM LINE`, and the keyboard `Esc` program reset while a program is active (the panel's K4).
+- No on-screen mode, cycle, jog, spindle, coolant, override or software E-stop. The explicit exceptions are MDI, `RUN PROBE`, `CHANGE TOOL`, `RUN FROM LINE`, the keyboard `Esc` program reset while a program is active (the panel's K4), and the limit-switch recovery dialog, which arms the controller override and issues at most four 5 mm increments away from a tripped hard limit (see SPEC.md §6.10.1).
 - Program protect fails closed on unknown/stale and is rechecked on every write. Never discard a dirty buffer when protect turns on.
 - The tool table file always carries `P`, even for a manual changer: LinuxCNC keeps one tool per
   `P` value, and a table without `P` words loads only its last row. The UI hides the column for

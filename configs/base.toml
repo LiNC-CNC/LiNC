@@ -213,8 +213,9 @@ tool_number = "Ctrl+T"
 # with no [ui] pages entry, so the keys are the way in.
 diagnostics = "Ctrl+D"
 help = "Ctrl+H"
-# Frees a joint parked on a limit switch. No button on the jog screens.
-limits_override = "Ctrl+Shift+O"
+# Opens the limit-switch recovery dialog from any page. No button on the
+# jog screens; O opens the same dialog there.
+limit_recovery = "Ctrl+I"
 # Full-screen messages dialog.
 messages = "M"
 back = "Escape"

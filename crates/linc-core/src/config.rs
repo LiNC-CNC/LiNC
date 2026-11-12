@@ -455,8 +455,10 @@ pub struct KeysConfig {
     /// Page-local to the Tools page: type a tool number and load it, for an
     /// operator who knows the number and does not want to cursor to the row.
     pub tool_number: String,
-    /// Toggles the limit-switch override; it has no button on the jog screens.
-    pub limits_override: String,
+    /// Opens the limit-switch recovery dialog from any page. The old name was
+    /// `limits_override`, which described a toggle that never existed.
+    #[serde(alias = "limits_override")]
+    pub limit_recovery: String,
     pub diagnostics: String,
     /// Open the offline G-code reference from any page.
     pub help: String,
@@ -517,7 +519,7 @@ impl KeysConfig {
             tools: "F7".into(),
             offsets: "F8".into(),
             tool_number: "Ctrl+T".into(),
-            limits_override: "Ctrl+Shift+O".into(),
+            limit_recovery: "Ctrl+I".into(),
             diagnostics: "Ctrl+D".into(),
             help: "Ctrl+H".into(),
             messages: "M".into(),

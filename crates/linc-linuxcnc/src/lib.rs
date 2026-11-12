@@ -266,6 +266,13 @@ impl NmlBackend {
         let mut snapshot =
             self.builder
                 .build(&status, &panel, spindles, &self.parameters, executing_line);
+        // The cabinet switch is a level the HMI must judge before a recovery
+        // move: `halui.machine.on` samples edges, but this pin is the state.
+        snapshot.cabinet_on = self
+            .hal
+            .as_ref()
+            .and_then(|hal| hal.read("linc.machine-on"))
+            .and_then(|value| value.as_bool());
         if let Some(stored) = self.last_snapshot.as_mut() {
             carry_hal_selections(&mut snapshot, stored);
         }
@@ -803,6 +810,86 @@ impl NmlBackend {
         Ok(())
     }
 
+    /// Arm the limits override for `axis` and make sure motion is enabled, the
+    /// order recovery depends on: a joint still sitting on the switch re-faults
+    /// on the next servo cycle unless the mask is armed first.
+    fn arm_limits_override(&mut self, axis: &str) -> Result<(), MachineError> {
+        let snapshot = self.refresh();
+        linc_core::recovery::check_gates(&snapshot, axis)?;
+        self.nml_send(&NmlCommand::OverrideLimits)?;
+        self.wait_complete(Duration::from_secs(1))?;
+        self.enable_motion()
+    }
+
+    /// `EMC_TASK_SET_STATE(ON)` is the only path from the HMI to motion's
+    /// enable, and the task reports ON before motion has accepted it. Poll the
+    /// controller's own `motion.enabled` rather than guessing.
+    fn enable_motion(&mut self) -> Result<(), MachineError> {
+        let status = self.poll_status()?;
+        if status.task.state == NmlTaskState::On && status.motion.enabled {
+            return Ok(());
+        }
+        self.nml_send(&NmlCommand::SetState(NmlTaskState::On))?;
+        self.wait_complete(Duration::from_secs(1))?;
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            if self.poll_status()?.motion.enabled {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(MachineError::Backend(
+                    "the controller did not enable motion".into(),
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// One bounded step off the tripped hard limit.
+    ///
+    /// The caller names an axis and nothing else. The side, the sign, the feed
+    /// and the index space are derived here from the controller's own status,
+    /// so a caller cannot drive the machine into the switch or name a distance.
+    fn recover_limit(&mut self, axis: &str) -> Result<(), MachineError> {
+        let snapshot = self.refresh();
+        let side = linc_core::recovery::check_gates(&snapshot, axis)?;
+        let joint_index = self
+            .profile
+            .machine_ini
+            .axes
+            .iter()
+            .position(|candidate| candidate.name.eq_ignore_ascii_case(axis))
+            .ok_or_else(|| MachineError::LimitNotTripped {
+                axis: axis.to_ascii_uppercase(),
+            })?;
+
+        self.arm_limits_override(axis)?;
+
+        // A homed machine sits in TELEOP and takes an axis jog; an unhomed one
+        // is still in FREE and takes a joint jog. The two index spaces differ,
+        // which is why the mode is read from the controller after enabling.
+        let status = self.poll_status()?;
+        let joint_mode = matches!(
+            linuxcnc_nml::TrajMode::from_i32(status.motion.mode),
+            linuxcnc_nml::TrajMode::Free
+        );
+        let index = if joint_mode {
+            joint_index as i32
+        } else {
+            axis_pose_index(axis)
+                .ok_or_else(|| MachineError::Invalid(format!("{axis} has no axis index")))?
+                as i32
+        };
+        let plan = linc_core::recovery::plan(side, &self.profile.machine_ini.linear_units);
+        self.nml_send(&NmlCommand::JogIncrement {
+            joint_mode,
+            index,
+            velocity: plan.feed,
+            increment: plan.increment,
+        })?;
+        Ok(())
+    }
+
     fn validate_write(&mut self) -> Result<MachineSnapshot, MachineError> {
         let snapshot = self.refresh();
         if !snapshot.panel.connected || snapshot.panel.communication_error {
@@ -1172,17 +1259,8 @@ impl NmlBackend {
                 self.validate_issue(MdiOrigin::ToolChange)?;
                 self.issue_blocks(&[format!("M61 Q{tool}")])
             }
-            MachineCommand::ToggleLimitsOverride => {
-                if self.refresh().probe_trip_active() {
-                    return Err(MachineError::ProbeTripped);
-                }
-                self.nml_send(&NmlCommand::OverrideLimits)?;
-                self.wait_complete(Duration::from_secs(1))?;
-                if self.poll_status()?.task.state != NmlTaskState::On {
-                    self.nml_send(&NmlCommand::SetState(NmlTaskState::On))?;
-                }
-                Ok(())
-            }
+            MachineCommand::ArmLimitsOverride { axis } => self.arm_limits_override(&axis),
+            MachineCommand::RecoverLimit { axis } => self.recover_limit(&axis),
             MachineCommand::LoadProgram {
                 path,
                 expected_revision,

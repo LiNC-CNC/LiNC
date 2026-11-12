@@ -1342,7 +1342,11 @@ Rules:
   preferences as `mdi_history`, bounded by `mdi.history_limit`; issuing,
   deleting or moving a line updates the stored copy. `Ctrl+S` writes a program
   file.
-- No on-screen jog, override, spindle, coolant or E-stop controls.
+- No on-screen jog, override, spindle, coolant or E-stop controls. The one
+  exception is the limit-switch recovery dialog (§6.10.1): it arms the
+  controller's limit override and issues at most four bounded increments away
+  from a tripped hard limit. It cannot express a direction, a distance, a speed
+  or a continuous jog.
 
 ### 6.10 Homing
 
@@ -1418,6 +1422,46 @@ to the live graph or the coordinate readout applies to both.
   `NO_FORCE_HOMING = 0` means programs/MDI are blocked until homed.
 - The page shows machine position, limits, homed count and sequence completion.
   It provides no on-screen home, unhome, jog or override buttons.
+
+#### 6.10.1 Limit-switch recovery
+
+An unhomed machine has no soft limits, so a jog can put a joint on a hard limit.
+LinuxCNC then disables motion and reports `ESTOP_RESET`; `HOME` is dropped while
+motion is disabled, and the cabinet switch cannot re-enable the machine because
+`halui.machine.on` is edge-triggered on a maintained latch. The HMI is the only
+path back.
+
+A trip raises a banner (`LIMIT SWITCH — X- — MOTION DISABLED.`) with a
+`RECOVER (Ctrl+I)` action. Plain `O` on MANUAL/HOMING opens the same dialog, as
+does `[keys] limit_recovery` (default `Ctrl+I`, old name `limits_override`
+still parses). With no tripped axis, `O` toasts `NO LIMIT SWITCH TRIPPED` and
+opens nothing; with more than one, the dialog opens on the first and
+RECOVER/ASSIST stay disabled with the reason named.
+
+The dialog offers:
+
+- `RECOVER` — arms `EMC_JOINT_OVERRIDE_LIMITS`, enables motion, and issues one
+  bounded `EMC_JOG_INCR` away from the tripped side. One command is one step;
+  the dialog re-arms and re-enables per step, up to four steps (20 mm), and
+  stops when the switch clears. A step is 5 mm at 5 mm/s in machine units,
+  converted from the INI's `[TRAJ] LINEAR_UNITS`.
+- `ASSIST` — arms the override and enables motion only; the operator holds the
+  jog key. The dialog re-arms after each jog (LinuxCNC clears the mask when the
+  move ends) while it stays open, with a 60 s timeout.
+- `STOP` — aborts motion and ends the attempt. `CANCEL` takes the keyboard on
+  the first frame, so a reflex `Enter` never recovers.
+
+Both actions are refused unless the cabinet switch is not off, the E-stop is
+released, the panel is live and in JOG/INC/MPG, no program is running or
+paused, the spindle is stopped, no probe trip is latched, no joint is homing, no
+tool change is pending, and exactly the named axis sits on a hard limit. The
+backend re-checks the same list on every command, derives the side, the sign
+and the joint/axis index space from the controller's own status, and refuses a
+caller that names any other axis.
+
+Recovery never issues a home command: it only clears the switch so the panel's
+HOME mode can run. A switch still tripped after four steps is reported and the
+machine is left disabled.
 
 ### 6.11 Manual modes: JOG / INC / MPG
 
@@ -1806,7 +1850,11 @@ HAL pins is still open.
   switch, is rechecked by the backend on every write, and fails closed when
   unknown or stale.
 - Manual modes are read-only: no HMI jog, increment, handwheel, mode or
-  override command exists. The WHB pendant is accepted for jog only.
+  override command exists. The WHB pendant is accepted for jog only. The one
+  exception is limit-switch recovery (§6.10.1): it arms the override and issues
+  at most four 5 mm increments away from the tripped hard limit, deriving the
+  side, sign and jog mode from the controller's status. It never issues a
+  continuous jog, a direction, a distance, or a home command.
 - A probe trip reported by LinuxCNC latches a persistent banner and blocks
   motion/MDI/probe/tool/offset commands until the operator's reset clears it.
   The banner has no timeout. The clear action is the controller's
