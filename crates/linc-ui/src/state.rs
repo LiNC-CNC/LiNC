@@ -340,6 +340,9 @@ pub struct SaveProgramDialog {
     pub name: String,
     pub directory: PathBuf,
     pub error: Option<String>,
+    /// True when the dialog writes a PLC project instead of a G-code program:
+    /// the root is the PLC folder and the extension is `.json`.
+    pub plc: bool,
 }
 
 pub trait UiBackend {
@@ -544,6 +547,13 @@ pub struct FilesUi {
     pub nc_current: PathBuf,
     pub nc_entries: Vec<FileEntry>,
     pub nc_selected: usize,
+    /// The right pane browses the PLC programs folder instead of NC_FILES.
+    /// Enter opens a project in the PLC screen.
+    pub plc_mode: bool,
+    pub plc_current: PathBuf,
+    pub plc_entries: Vec<FileEntry>,
+    pub plc_selected: usize,
+    pub plc_parent_selected: bool,
     /// The right pane shows the recent programs instead of the directory.
     /// Toggled with the square key, like CODE/SPLIT on the Program page.
     pub recent_shown: bool,
@@ -582,6 +592,11 @@ impl FilesUi {
             nc_current: nc_root,
             nc_entries: Vec::new(),
             nc_selected: 0,
+            plc_mode: false,
+            plc_current: PathBuf::new(),
+            plc_entries: Vec::new(),
+            plc_selected: 0,
+            plc_parent_selected: false,
             recent_shown: false,
             recent_selected: 0,
             status: String::new(),

@@ -31,6 +31,15 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             }
         });
     }
+    // The PLC mode browses its own folder. The root comes from the profile, so
+    // the first frame in the mode fills the list before any key can walk it.
+    if app.files.plc_mode
+        && app.files.plc_entries.is_empty()
+        && app.files.plc_current.as_os_str().is_empty()
+    {
+        app.files.plc_current = app.profile.plc_programs_root();
+        app.files.plc_entries = read_plc_entries(&app.files.plc_current);
+    }
     handle_keys(app, ui);
     let available = ui.available_size();
     // Leave one line for the copy/error status.
@@ -104,10 +113,13 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
         return;
     }
     let usb = app.files.usb_focused;
-    // The right pane has two views; the left one never does.
-    let recent = !usb && app.files.recent_shown;
+    // The right pane has three views; the left one never does.
+    let plc = !usb && app.files.plc_mode;
+    let recent = !usb && !plc && app.files.recent_shown;
     let entries: Vec<FileEntry> = if usb {
         app.files.usb_entries.clone()
+    } else if plc {
+        app.files.plc_entries.clone()
     } else if recent {
         recent_entries(app)
     } else {
@@ -115,6 +127,8 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     };
     let current = if usb {
         app.files.usb_current.clone()
+    } else if plc {
+        Some(app.files.plc_current.clone())
     } else if recent {
         None
     } else {
@@ -122,6 +136,8 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     };
     let root = if usb {
         app.files.usb_root.clone()
+    } else if plc {
+        Some(app.files.plc_current.clone())
     } else if recent {
         None
     } else {
@@ -129,6 +145,8 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     };
     let mut selected = if usb {
         app.files.usb_selected
+    } else if plc {
+        app.files.plc_selected
     } else if recent {
         app.files.recent_selected
     } else {
@@ -143,6 +161,8 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     let mut on_parent = parent_available
         && if usb {
             app.files.usb_parent_selected
+        } else if plc {
+            app.files.plc_parent_selected
         } else {
             app.files.nc_parent_selected
         };
@@ -157,6 +177,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     let mut delete: Option<PathBuf> = None;
     let mut scroll_selection = false;
     let mut toggle_recent = false;
+    let mut toggle_plc = false;
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::C) {
             copy_side = true;
@@ -172,6 +193,11 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::E) {
             eject_media = true;
+        }
+        // `P`: the right pane switches to the PLC programs folder. The two
+        // right-pane views are exclusive, so the recent list steps aside.
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::P) {
+            toggle_plc = true;
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
             if on_parent {
@@ -257,14 +283,32 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     if usb {
         app.files.usb_selected = selected;
         app.files.usb_parent_selected = on_parent;
+    } else if plc {
+        app.files.plc_selected = selected;
+        app.files.plc_parent_selected = on_parent;
     } else if recent {
         app.files.recent_selected = selected;
     } else {
         app.files.nc_selected = selected;
         app.files.nc_parent_selected = on_parent;
     }
+    if toggle_plc {
+        app.files.plc_mode = !app.files.plc_mode;
+        app.files.recent_shown = false;
+        app.files.usb_focused = false;
+        if app.files.plc_mode {
+            // Always land on the configured root, not on wherever the last
+            // visit ended: the folder is the screen's subject.
+            app.files.plc_current = app.profile.plc_programs_root();
+            app.files.plc_entries = read_plc_entries(&app.files.plc_current);
+            app.files.plc_selected = 0;
+            app.files.plc_parent_selected = false;
+        }
+        app.files.scroll_to_selection = true;
+    }
     if toggle_recent {
         app.files.recent_shown = !app.files.recent_shown;
+        app.files.plc_mode = false;
         // The square key is about the right pane, so it also takes the focus
         // there: otherwise the toggle changes a list the arrows do not reach.
         app.files.usb_focused = false;
@@ -279,6 +323,16 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
             app.files.usb_entries = crate::state::read_dir_entries(&dir);
             app.files.usb_selected = 0;
             app.files.usb_parent_selected = false;
+        } else if plc {
+            // The PLC pane may walk subfolders, but only under its root: `..`
+            // at the root is the parent row, not an escape.
+            let root = app.profile.plc_programs_root();
+            if dir.starts_with(&root) {
+                app.files.plc_current = dir.clone();
+                app.files.plc_entries = read_plc_entries(&dir);
+                app.files.plc_selected = 0;
+                app.files.plc_parent_selected = false;
+            }
         } else {
             app.files.nc_current = dir.clone();
             app.files.nc_entries = crate::state::read_dir_entries(&dir);
@@ -287,20 +341,24 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
         }
     }
     if let Some(path) = load {
-        load_selected(app, &path);
+        if plc {
+            load_plc_project(app, &path);
+        } else {
+            load_selected(app, &path);
+        }
     }
     if copy_enter && copy_to_nc_allowed(app) {
         copy_usb_to_nc(app);
     }
     // Copy and rename act on the focused pane's directory row. The recent list
     // is not that row, so both stand down while it is in front.
-    if copy_side && !on_parent && !recent {
+    if copy_side && !on_parent && !recent && !plc {
         copy_selected(app);
     }
-    if duplicate && !on_parent && !recent {
+    if duplicate && !on_parent && !recent && !plc {
         duplicate_selected(app);
     }
-    if rename && !on_parent && !recent {
+    if rename && !on_parent && !recent && !plc {
         begin_rename(app);
     }
     if new_file {
@@ -733,18 +791,29 @@ fn nc_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
         ui.set_min_height(height);
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(if recent { "RECENT" } else { "NC_FILES" })
-                    .size(theme::font_size(16.0))
-                    .strong()
-                    .color(if app.files.usb_focused {
-                        theme::FG
-                    } else {
-                        theme::ACCENT
-                    }),
+                RichText::new(if app.files.plc_mode {
+                    "PLC PROGRAMS"
+                } else if recent {
+                    "RECENT"
+                } else {
+                    "NC_FILES"
+                })
+                .size(theme::font_size(16.0))
+                .strong()
+                .color(if app.files.usb_focused {
+                    theme::FG
+                } else {
+                    theme::ACCENT
+                }),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let detail = if recent {
-                    format!("{} / NEWEST FIRST", app.prefs.preferences.recent_files.len())
+                    format!(
+                        "{} / NEWEST FIRST",
+                        app.prefs.preferences.recent_files.len()
+                    )
+                } else if app.files.plc_mode {
+                    format!("{} / ENTER OPENS", app.files.plc_current.display())
                 } else {
                     app.files.nc_current.display().to_string()
                 };
@@ -756,7 +825,17 @@ fn nc_pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 );
             });
         });
-        file_list(app, ui, if recent { Pane::Recent } else { Pane::Nc });
+        file_list(
+            app,
+            ui,
+            if recent {
+                Pane::Recent
+            } else if app.files.plc_mode {
+                Pane::Plc
+            } else {
+                Pane::Nc
+            },
+        );
     });
 }
 
@@ -768,10 +847,29 @@ enum Pane {
     /// first, so the operator does not walk the directory to get back to the
     /// job they were on. `preferences.recent_files` already holds that order.
     Recent,
+    /// The PLC programs folder: only `.json` projects, Enter opens one in the
+    /// PLC screen.
+    Plc,
+}
+
+/// Entries the PLC pane shows: directories to walk, and project files only.
+fn read_plc_entries(dir: &Path) -> Vec<FileEntry> {
+    crate::state::read_dir_entries(dir)
+        .into_iter()
+        .filter(|entry| {
+            entry.is_dir
+                || entry
+                    .path
+                    .extension()
+                    .map(|extension| extension.eq_ignore_ascii_case("json"))
+                    .unwrap_or(false)
+        })
+        .collect()
 }
 
 fn recent_entries(app: &LincApp) -> Vec<FileEntry> {
-    app.prefs.preferences
+    app.prefs
+        .preferences
         .recent_files
         .iter()
         .map(|entry| {
@@ -797,21 +895,25 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
         Pane::Usb => app.files.usb_entries.clone(),
         Pane::Nc => app.files.nc_entries.clone(),
         Pane::Recent => recent_entries(app),
+        Pane::Plc => app.files.plc_entries.clone(),
     };
     let current = match pane {
         Pane::Usb => app.files.usb_current.clone(),
         Pane::Nc => Some(app.files.nc_current.clone()),
         Pane::Recent => None,
+        Pane::Plc => Some(app.files.plc_current.clone()),
     };
     let root = match pane {
         Pane::Usb => app.files.usb_root.clone(),
         Pane::Nc => Some(app.files.nc_root.clone()),
         Pane::Recent => None,
+        Pane::Plc => Some(app.files.plc_current.clone()),
     };
     let mut selected = match pane {
         Pane::Usb => app.files.usb_selected,
         Pane::Nc => app.files.nc_selected,
         Pane::Recent => app.files.recent_selected,
+        Pane::Plc => app.files.plc_selected,
     };
     selected = selected.min(entries.len().saturating_sub(1));
     let parent = parent_row(
@@ -1158,11 +1260,50 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
         Pane::Usb => app.files.usb_selected = selected,
         Pane::Nc => app.files.nc_selected = selected,
         Pane::Recent => app.files.recent_selected = selected,
+        Pane::Plc => app.files.plc_selected = selected,
     }
     if let Some(path) = load_file {
-        if matches!(pane, Pane::Nc | Pane::Recent) {
-            load_selected(app, &path);
+        match pane {
+            Pane::Nc | Pane::Recent => load_selected(app, &path),
+            Pane::Plc => load_plc_project(app, &path),
+            Pane::Usb => {}
         }
+    }
+}
+
+/// Enter on a PLC project: parse it, adopt it, and show its program list. A file
+/// that is not a project stays a file: the toast names it and nothing changes.
+fn load_plc_project(app: &mut LincApp, path: &Path) {
+    let loaded = std::fs::read_to_string(path)
+        .map_err(|error| error.to_string())
+        .and_then(|text| crate::screens::plc::project_from_json(&text));
+    match loaded {
+        Ok(project) => {
+            app.plc.project = project;
+            app.plc.pou = 0;
+            app.plc.page = crate::screens::plc::PlcPage::PouList;
+            app.plc.path_text = path.display().to_string();
+            app.plc.message = "OPENED".to_string();
+            app.nav.page = crate::state::Page::Plc;
+            app.toast(
+                format!(
+                    "opened {}",
+                    path.file_name()
+                        .unwrap_or(path.as_os_str())
+                        .to_string_lossy()
+                ),
+                theme::SUCCESS,
+            );
+        }
+        Err(error) => app.toast(
+            format!(
+                "{}: {error}",
+                path.file_name()
+                    .unwrap_or(path.as_os_str())
+                    .to_string_lossy()
+            ),
+            theme::ERROR,
+        ),
     }
 }
 

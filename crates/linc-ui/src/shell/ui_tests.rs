@@ -1862,6 +1862,7 @@ fn a_dialog_with_a_field_focuses_the_field_not_its_safe_button() {
         name: String::new(),
         directory: harness.app.save_as_directory(),
         error: None,
+        plc: false,
     }));
     harness.frame(&[]);
     assert!(

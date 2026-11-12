@@ -742,6 +742,11 @@ pub struct PlcConfig {
     pub scan_us: u64,
     #[serde(default)]
     pub allow_force: bool,
+    /// Directory the PLC file screen browses. A relative path resolves against
+    /// the profile directory, like the project. Empty means `plc/` beside the
+    /// machine INI, which is where a machine keeps its own files.
+    #[serde(default)]
+    pub programs: String,
     /// Retained-value store; empty means retention is off. A relative path
     /// resolves against the profile directory, like the project.
     #[serde(default)]
@@ -769,6 +774,7 @@ impl Default for PlcConfig {
             retain_file: String::new(),
             retain_flush_s: default_plc_retain_flush_s(),
             allow_force: false,
+            programs: String::new(),
         }
     }
 }
@@ -834,6 +840,20 @@ impl Profile {
 
     pub fn nc_files_root(&self) -> &Path {
         &self.machine_ini.program_prefix
+    }
+
+    /// Where the PLC file screen browses. `[plc] programs` wins when it is set;
+    /// otherwise the programs live in `plc/` beside the machine INI, so a machine
+    /// carries its ladder with its own configuration.
+    pub fn plc_programs_root(&self) -> PathBuf {
+        let configured = self.config.plc.programs.trim();
+        if !configured.is_empty() {
+            return PathBuf::from(configured);
+        }
+        self.machine_ini_path
+            .parent()
+            .map(|dir| dir.join("plc"))
+            .unwrap_or_else(|| PathBuf::from("plc"))
     }
 
     pub fn max_axes(&self) -> usize {
@@ -932,6 +952,11 @@ impl Profile {
             )));
         }
         let machine_ini = MachineIni::parse_file(&ini_path)?;
+        if !config.plc.programs.trim().is_empty() {
+            config.plc.programs = resolve_path(&base_dir, &config.plc.programs)
+                .to_string_lossy()
+                .into_owned();
+        }
         resolve_loobric_paths(&mut config.loobric, &base_dir);
         validate(&config, &machine_ini, &base_dir)?;
         let variant = if config.machine.gui == "lathe" {
@@ -2133,6 +2158,32 @@ enabled = true
         assert!(profile
             .summary()
             .contains(&("PLC".into(), "disabled".into())));
+    }
+
+    /// The PLC file screen has a home even when the profile says nothing: the
+    /// machine carries its ladder beside its own INI. A configured folder wins
+    /// and resolves against the profile, like the project path.
+    #[test]
+    fn plc_programs_default_to_a_folder_beside_the_machine_ini() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let profile = Profile::load(&plc_profile(dir.path(), ""), None).unwrap();
+        assert_eq!(
+            profile.plc_programs_root(),
+            profile.machine_ini_path.parent().unwrap().join("plc")
+        );
+
+        let profile = Profile::load(
+            &plc_profile(dir.path(), "[plc]\nprograms = \"ladder\""),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            profile.plc_programs_root(),
+            dir.path().join("ladder"),
+            "a relative folder resolves against the profile"
+        );
     }
 
     #[test]

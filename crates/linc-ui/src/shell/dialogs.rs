@@ -72,6 +72,29 @@ impl LincApp {
     /// The extension an unnamed program gets: the first configured G-code
     /// extension, so the file the operator just saved is one the Files page
     /// will load.
+    /// `SAVE` on the PLC screen: ask where in the PLC folder the project goes.
+    /// The dialog is the same one the program pane uses, with the PLC folder as
+    /// its root and `.json` as its extension.
+    pub fn request_plc_save(&mut self) {
+        if self.plc.project.all_pous().is_empty() {
+            self.toast("nothing to save: the project has no POUs", theme::ERROR);
+            return;
+        }
+        let directory = self.profile.plc_programs_root();
+        let name = std::path::Path::new(self.plc.path_text.trim())
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        self.overlay.modal = Some(crate::state::Modal::SaveProgramAs(
+            crate::state::SaveProgramDialog {
+                name,
+                directory,
+                error: None,
+                plc: true,
+            },
+        ));
+    }
+
     pub(super) fn save_as_extension(&self) -> String {
         self.profile
             .config
@@ -102,13 +125,47 @@ impl LincApp {
             self.edit_save_as(|dialog| dialog.error = Some("invalid file name".into()));
             return;
         }
-        let extension = self.save_as_extension();
+        let plc = dialog.plc;
+        let extension = if plc {
+            ".json".to_string()
+        } else {
+            self.save_as_extension()
+        };
         let name = if std::path::Path::new(name).extension().is_some() {
             name.to_string()
         } else {
             format!("{name}{extension}")
         };
         let path = dialog.directory.join(&name);
+        if plc {
+            // A PLC project is written here, not through the machine backend:
+            // the daemon only ever receives the compiled project.
+            let root = self.profile.plc_programs_root();
+            if !path.starts_with(&root) {
+                self.edit_save_as(|dialog| {
+                    dialog.error = Some(format!("that folder is outside {}", root.display()))
+                });
+                return;
+            }
+            let text = match crate::screens::plc::project_to_json(&self.plc.project) {
+                Ok(text) => text,
+                Err(error) => {
+                    self.edit_save_as(|dialog| dialog.error = Some(error));
+                    return;
+                }
+            };
+            if let Err(error) =
+                std::fs::create_dir_all(&root).and_then(|()| std::fs::write(&path, text))
+            {
+                self.edit_save_as(|dialog| dialog.error = Some(error.to_string()));
+                return;
+            }
+            self.plc.path_text = path.display().to_string();
+            self.plc.message = "SAVED".to_string();
+            self.overlay.modal = None;
+            self.toast(format!("saved {name}"), theme::SUCCESS);
+            return;
+        }
         if path.exists() {
             self.edit_save_as(|dialog| {
                 dialog.error = Some(format!("{name} already exists; choose another name"))
@@ -658,14 +715,19 @@ impl LincApp {
                     }
                 }
                 Modal::SaveProgramAs(dialog) => {
+                    let plc = dialog.plc;
                     ui.label(
-                        RichText::new("SAVE PROGRAM AS")
+                        RichText::new(if plc { "SAVE PLC PROGRAM" } else { "SAVE PROGRAM AS" })
                             .size(theme::font_size(18.0))
                             .strong()
                             .color(theme::FG),
                     );
                     ui.add_space(6.0);
-                    ui.label("This buffer has no file yet. Name it under NC_FILES:");
+                    ui.label(if plc {
+                        "Name the project under the PLC folder:"
+                    } else {
+                        "This buffer has no file yet. Name it under NC_FILES:"
+                    });
                     ui.add_space(4.0);
                     ui.label(
                         RichText::new(dialog.directory.display().to_string())
@@ -679,7 +741,7 @@ impl LincApp {
                         egui::TextEdit::singleline(&mut text)
                             .id(egui::Id::unique("linc-save-as-name"))
                             .desired_width(280.0)
-                            .hint_text("part.ngc"),
+                            .hint_text(if plc { "cell.json" } else { "part.ngc" }),
                     );
                     // The dialog exists to name the file, so the field takes the
                     // ring on the frame it opens: Enter writes the typed name
@@ -710,7 +772,11 @@ impl LincApp {
                             close = true;
                         }
                     });
-                    if field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                    // Enter writes whatever the field holds, whether or not the
+                    // field has already surrendered focus this frame: a singleline
+                    // TextEdit keeps focus on Enter in egui 0.37, so waiting for
+                    // `lost_focus` left the dialog open and the key did nothing.
+                    if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
                         save_as_confirm = true;
                     }
                 }

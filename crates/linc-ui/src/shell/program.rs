@@ -192,6 +192,7 @@ impl LincApp {
                 name: String::new(),
                 directory,
                 error: None,
+                plc: false,
             }));
             return;
         };

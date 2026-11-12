@@ -881,6 +881,7 @@ which overrides this table for one run; see `docs/plc.md`.
 |---|---|---|
 | `enabled` | `false` | Start the daemon at HMI start-up. |
 | `project` | `""` | Ladder project JSON, resolved relative to the profile directory. Required when `enabled = true`. |
+| `programs` | `""` | Folder the PLC mode of the FILE screen browses and where the save dialog writes. Empty means `plc/` beside the machine INI; a relative path resolves against the profile directory. |
 | `socket` | `""` | Daemon socket. Empty uses `linc_plc_client::default_socket_path()` (`$XDG_RUNTIME_DIR/linc/plc-<uid>.sock`); a relative path resolves against the profile directory. |
 | `scan_us` | `2000` | Scan period in microseconds, 100..=1000000. |
 | `allow_force` | `false` | Let the PLC page force I/O; the daemon refuses forces without it. |
