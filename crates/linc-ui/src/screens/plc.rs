@@ -910,6 +910,16 @@ pub struct PlcUi {
     pub coil_pick: Option<(usize, usize)>,
     /// A compare or compute expression is being built step by step.
     pub expr_edit: Option<ExprEdit>,
+    /// Set when the selection moved by a key, so the list scrolls to it once.
+    pub scroll_to_pou: bool,
+    /// Enter or a double click on a row asks for the editor window.
+    pub open_editor: bool,
+    /// The box the dialog is editing, and the two typed fields it holds.
+    pub block_fields: Option<(usize, usize, usize)>,
+    pub block_instance_text: String,
+    pub block_preset_text: String,
+    /// 0 edits the instance, 1 the preset.
+    pub block_field: usize,
     /// Project snapshots for undo, oldest first, and the redo arm of the pair.
     pub undo_stack: Vec<Vec<Pou>>,
     pub redo_stack: Vec<Vec<Pou>>,
@@ -1015,6 +1025,12 @@ impl Default for PlcUi {
             operand_filter: String::new(),
             coil_pick: None,
             expr_edit: None,
+            scroll_to_pou: false,
+            open_editor: false,
+            block_fields: None,
+            block_instance_text: String::new(),
+            block_preset_text: String::new(),
+            block_field: 0,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             cell_clipboard: None,
@@ -2208,30 +2224,6 @@ pub enum PlcPage {
     Service,
 }
 
-impl PlcPage {
-    fn label(self) -> &'static str {
-        match self {
-            Self::PouList => "POU LIST",
-            Self::Edit => "EDIT",
-            Self::Symbols => "SYMBOLS",
-            Self::Sim => "SIMULATION",
-            Self::Watch => "WATCH",
-            Self::Trend => "TREND",
-            Self::Messages => "MESSAGES",
-            Self::Service => "SERVICE",
-        }
-    }
-
-    const ALL: [PlcPage; 6] = [
-        Self::PouList,
-        Self::Edit,
-        Self::Symbols,
-        Self::Sim,
-        Self::Watch,
-        Self::Trend,
-    ];
-}
-
 /// The page's status bar height, below the content.
 const STATUS_BAR_HEIGHT: f32 = 22.0;
 
@@ -2306,44 +2298,31 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     }
     let plc = &mut app.plc;
 
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        if theme::accent_button(ui, "OPEN EDITOR", true).clicked() {
-            open_frame = Some(ui.ctx().cumulative_frame_nr());
-        }
-        ui.label(
-            RichText::new(
-                "The editor opens in its own window and takes the keyboard; Ctrl+E opens it, Esc closes it.",
-            )
-            .size(theme::font_size(10.0))
-            .color(theme::MUTED),
-        );
-    });
-    ui.add_space(4.0);
-
     let width = ui.available_width();
-    let left_width = (width * 0.36).clamp(260.0, 380.0);
-    let tree_width = (width - left_width - 8.0).max(320.0);
-    ui.horizontal_top(|ui| {
-        ui.allocate_ui_with_layout(
-            vec2(left_width, 220.0),
-            egui::Layout::top_down(Align::Min),
-            |ui| {
-                card(ui, vec2(left_width, 220.0), |ui, _| {
-                    status_card(plc, ui, &mut actions)
-                });
-            },
-        );
-        ui.add_space(6.0);
-        ui.allocate_ui_with_layout(
-            vec2(tree_width, 220.0),
-            egui::Layout::top_down(Align::Min),
-            |ui| pou_list_page(plc, ui, 220.0, &mut actions),
-        );
+    // The program list sits over the service pane: the list is what the operator
+    // opens a body from, and the service pane is the machine it talks to. Side by
+    // side, the service fields were squeezed to half the screen and truncated.
+    let list_height = (ui.available_height() * 0.45).clamp(180.0, 300.0);
+    ui.allocate_ui_with_layout(
+        vec2(width, list_height),
+        egui::Layout::top_down(Align::Min),
+        |ui| pou_list_page(plc, ui, list_height, &mut actions),
+    );
+    ui.add_space(6.0);
+    let pane_height = (ui.available_height() - 4.0).max(190.0);
+    card(ui, vec2(width, pane_height), |ui, _| {
+        status_card(plc, ui, &mut actions)
     });
 
     for action in actions {
         plc.apply(action);
+    }
+    // Enter on a row opens the body in the editor window. The action above has
+    // already selected the POU and moved the page to Edit.
+    let open_from_list = plc.open_editor;
+    plc.open_editor = false;
+    if open_from_list {
+        open_frame = Some(ui.ctx().cumulative_frame_nr());
     }
     if new_project {
         app.plc.apply(Action::New);
@@ -2351,6 +2330,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     if let Some(frame) = open_frame {
         app.overlay.plc_editor = true;
         app.plc.opened_frame = frame;
+        // The editor window edits a program; the program list stays on this screen.
+        app.plc.page = PlcPage::Edit;
+        app.plc.picker = None;
+        app.plc.operand_pick = None;
+        app.plc.coil_pick = None;
     }
 }
 
@@ -2391,48 +2375,177 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
     let edit = plc.page == PlcPage::Edit;
     let mut entries = vec![
         Heading("PAGES"),
-        Row { text: "Menu (File)", key: "F10", active: false },
-        Row { text: "Open editor", key: "Ctrl+E", active: false },
-        Row { text: "New project", key: "N", active: false },
-        Row { text: "POU list", key: "Ctrl+1", active: plc.page == PlcPage::PouList },
-        Row { text: "Ladder", key: "Ctrl+2", active: edit },
-        Row { text: "Symbols", key: "Ctrl+3", active: plc.page == PlcPage::Symbols },
-        Row { text: "Simulation", key: "Ctrl+4", active: plc.page == PlcPage::Sim },
-        Row { text: "Watch", key: "Ctrl+W", active: plc.page == PlcPage::Watch },
-        Row { text: "Trend", key: "Ctrl+T", active: plc.page == PlcPage::Trend },
+        // The rail lists what this window can do. The menu and the program list
+        // live on the PLC screen behind it, so Ctrl+1 leaves for that screen
+        // rather than pretending it opens a page here.
+        Row {
+            text: "Program list",
+            key: "Ctrl+1",
+            active: false,
+        },
+        Row {
+            text: "New project",
+            key: "N",
+            active: false,
+        },
+        Row {
+            text: "POU list",
+            key: "Ctrl+1",
+            active: plc.page == PlcPage::PouList,
+        },
+        Row {
+            text: "Ladder",
+            key: "Ctrl+2",
+            active: edit,
+        },
+        Row {
+            text: "Symbols",
+            key: "Ctrl+3",
+            active: plc.page == PlcPage::Symbols,
+        },
+        Row {
+            text: "Simulation",
+            key: "Ctrl+4",
+            active: plc.page == PlcPage::Sim,
+        },
+        Row {
+            text: "Watch",
+            key: "Ctrl+W",
+            active: plc.page == PlcPage::Watch,
+        },
+        Row {
+            text: "Trend",
+            key: "Ctrl+T",
+            active: plc.page == PlcPage::Trend,
+        },
         Heading("RUN"),
-        Row { text: "Run / stop", key: "R", active: false },
+        Row {
+            text: "Run / stop",
+            key: "R",
+            active: false,
+        },
         Heading("RUNG"),
-        Row { text: "New row", key: "Ctrl+N", active: false },
-        Row { text: "New row at cursor", key: "Ctrl+J", active: false },
-        Row { text: "Delete row", key: "Ctrl+Del", active: false },
+        Row {
+            text: "New row",
+            key: "Ctrl+N",
+            active: false,
+        },
+        Row {
+            text: "New row at cursor",
+            key: "Ctrl+J",
+            active: false,
+        },
+        Row {
+            text: "Delete row",
+            key: "Ctrl+Del",
+            active: false,
+        },
         Heading("SAVE"),
-        Row { text: "Save project", key: "Ctrl+S", active: false },
+        Row {
+            text: "Save project",
+            key: "Ctrl+S",
+            active: false,
+        },
         Heading("ELEMENTS"),
-        Row { text: "Contact", key: "C", active: false },
-        Row { text: "Negated contact", key: "X", active: false },
-        Row { text: "Rising / falling edge", key: "P N", active: false },
-        Row { text: "Wire / link", key: "W V", active: false },
-        Row { text: "Timer / counter", key: "T F U K D", active: false },
-        Row { text: "Compare / compute", key: "G M", active: false },
-        Row { text: "Insert before", key: "I", active: false },
-        Row { text: "Delete cell", key: "Bksp", active: false },
+        Row {
+            text: "Contact",
+            key: "C",
+            active: false,
+        },
+        Row {
+            text: "Negated contact",
+            key: "X",
+            active: false,
+        },
+        Row {
+            text: "Rising / falling edge",
+            key: "P N",
+            active: false,
+        },
+        Row {
+            text: "Wire / link",
+            key: "W V",
+            active: false,
+        },
+        Row {
+            text: "Timer / counter",
+            key: "T F U K D",
+            active: false,
+        },
+        Row {
+            text: "Compare / compute",
+            key: "G M",
+            active: false,
+        },
+        Row {
+            text: "Insert before",
+            key: "I",
+            active: false,
+        },
+        Row {
+            text: "Delete cell",
+            key: "Bksp",
+            active: false,
+        },
         Heading("COIL"),
-        Row { text: "Normal / set / reset", key: "C S R", active: false },
+        Row {
+            text: "Normal / set / reset",
+            key: "C S R",
+            active: false,
+        },
         Heading("SIMULATION"),
-        Row { text: "Toggle input bit", key: "0-7", active: false },
-        Row { text: "Select input byte", key: "B", active: false },
-        Row { text: "Step one scan", key: "S", active: false },
-        Row { text: "Reset data", key: "E", active: false },
+        Row {
+            text: "Toggle input bit",
+            key: "0-7",
+            active: false,
+        },
+        Row {
+            text: "Select input byte",
+            key: "B",
+            active: false,
+        },
+        Row {
+            text: "Step one scan",
+            key: "S",
+            active: false,
+        },
+        Row {
+            text: "Reset data",
+            key: "E",
+            active: false,
+        },
         Heading("TOOLS"),
-        Row { text: "Watch page", key: "W", active: false },
-        Row { text: "Trend page", key: "G", active: false },
-        Row { text: "Cross references", key: "Ctrl+X", active: false },
-        Row { text: "Undo / redo", key: "Ctrl+Z Y", active: false },
+        Row {
+            text: "Watch page",
+            key: "W",
+            active: false,
+        },
+        Row {
+            text: "Trend page",
+            key: "G",
+            active: false,
+        },
+        Row {
+            text: "Cross references",
+            key: "Ctrl+X",
+            active: false,
+        },
+        Row {
+            text: "Undo / redo",
+            key: "Ctrl+Z Y",
+            active: false,
+        },
     ];
     if edit {
         entries.retain(|entry| !matches!(entry, RailEntry::Row { text: "Ladder", .. }));
-        entries.insert(5, RailEntry::Row { text: "Ladder", key: "Ctrl+2", active: true });
+        entries.insert(
+            5,
+            RailEntry::Row {
+                text: "Ladder",
+                key: "Ctrl+2",
+                active: true,
+            },
+        );
     }
     entries
 }
@@ -2554,28 +2667,20 @@ fn shortcut_nav(plc: &PlcUi, ui: &mut Ui) {
 }
 
 pub fn editor(app: &mut LincApp, ui: &mut Ui) {
-    // Sampled before any key handler runs: the menu owns arrows and Enter from the
-    // frame it opens, not one frame later.
-    // F10 opens the File menu from the keyboard; the menu then owns arrows and
-    // Enter, so no editor handler may take them.
-    if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F10)) {
-        let id = ui
-            .ctx()
-            .data(|data| data.get_temp::<egui::Id>(egui::Id::new("linc-file-popup")));
-        if let Some(id) = id {
-            egui::Popup::open_id(ui.ctx(), id);
-        }
+    // The workbench is a program editor, not a shell: the menu and the program
+    // list belong to the PLC screen behind it, and a page left over from the
+    // screen must not turn this window into a second copy of them.
+    if app.plc.page == PlcPage::PouList {
+        app.plc.page = PlcPage::Edit;
     }
-    let popup_open = egui::Popup::is_any_open(ui.ctx());
-    app.plc.menu_open = popup_open;
+    app.plc.menu_open = false;
     // Escape closes the editor only when nothing is open inside it. A picker or a
     // block window owns Escape first: consuming it here left the picker's state
     // set with its window gone, and the editor deaf to every later key.
     // The workbench draws on the frame after the one that opened it, so the guard
     // covers the opening frame and the first drawn frame.
     let opened_this_frame = ui.ctx().cumulative_frame_nr() <= app.plc.opened_frame + 1;
-    if !app.plc.menu_open
-        && !opened_this_frame
+    if !opened_this_frame
         && escape_closes_editor(&app.plc)
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         && !ui.ctx().text_edit_focused()
@@ -2676,6 +2781,9 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         ctrl_key(ui, egui::Key::Delete),
     );
     if to_pous {
+        // The program list is not drawn here; the key returns to the PLC screen
+        // where it lives, rather than switching this window to a page it owns.
+        app.overlay.plc_editor = false;
         app.plc.page = PlcPage::PouList;
     }
     if to_edit {
@@ -2816,11 +2924,9 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     {
         let plc = &mut app.plc;
 
-        menu_bar(plc, ui, &mut actions);
         if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
-            eprintln!("plc cp: after-menu");
+            eprintln!("plc cp: after-keys");
         }
-        ui.add_space(2.0);
 
         let height = (ui.available_height() - STATUS_BAR_HEIGHT - 4.0).max(160.0);
         // A fixed column for the shortcuts and the rest for the page: without
@@ -2878,219 +2984,6 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
 
 /// ZX-PLC's menu bar: FILE, POU, EDIT, VIEW, RUN, HELP, with the current POU and
 /// its language at the right, as the ZX screen shows `DEMO_LD (L10)`.
-fn menu_bar(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        let file_menu = ui.menu_button("File", |ui| {
-            if ui.button("New").clicked() {
-                actions.push(Action::New);
-            }
-            if ui.button("Open").clicked() {
-                actions.push(Action::Open);
-            }
-            if ui.button("Save").clicked() {
-                actions.push(Action::Save);
-            }
-            ui.separator();
-            if ui.button("Validate").clicked() {
-                actions.push(Action::Validate);
-            }
-            if ui.button("Download").clicked() {
-                actions.push(Action::Download);
-            }
-            ui.separator();
-            if ui.button("Service").clicked() {
-                plc.page = PlcPage::Service;
-            }
-            if ui.button("Close editor").clicked() {
-                plc.close_requested = true;
-            }
-        });
-        // Remembered so F10 can open the menu without a pointer: egui's menu owns
-        // arrows and Enter once its popup is open.
-        // The popup id is built by a second `Popup::menu` wrapper. Compute it
-        // first, then store it: doing both inside one `data_mut` deadlocked the
-        // frame, and the button id is not the popup id.
-        let file_popup = egui::Popup::menu(&file_menu.response).get_id();
-        ui.ctx()
-            .data_mut(|data| data.insert_temp(egui::Id::new("linc-file-popup"), file_popup));
-        ui.menu_button("POU", |ui| {
-            if ui.button("POU list").clicked() {
-                plc.page = PlcPage::PouList;
-            }
-            ui.separator();
-            for language in [PouLanguage::Il, PouLanguage::Ld, PouLanguage::Fbd] {
-                if ui.button(format!("New {} POU", language.label())).clicked() {
-                    plc.add_pou(language);
-                }
-            }
-            ui.separator();
-            if ui.button("Rename / comment…").clicked() {
-                plc.pou_edit = Some(PouEdit {
-                    index: plc.pou,
-                    duplicate: false,
-                    name: plc
-                        .current_pou()
-                        .map(|pou| pou.name)
-                        .unwrap_or_else(|| "MAIN".to_string()),
-                });
-            }
-            if ui.button("Duplicate…").clicked() {
-                let name = plc
-                    .current_pou()
-                    .map(|pou| format!("{}_2", pou.name))
-                    .unwrap_or_else(|| "COPY".to_string());
-                plc.pou_edit = Some(PouEdit {
-                    index: plc.pou,
-                    duplicate: true,
-                    name,
-                });
-            }
-            let is_main = plc
-                .current_pou()
-                .map(|pou| pou.name.eq_ignore_ascii_case("MAIN"))
-                .unwrap_or(true);
-            ui.add_enabled_ui(!is_main, |ui| {
-                if ui.button("Delete").clicked() {
-                    actions.push(Action::DeletePou { index: plc.pou });
-                }
-            });
-            ui.separator();
-            for language in [PouLanguage::Il, PouLanguage::Ld, PouLanguage::Fbd] {
-                if ui
-                    .button(format!("Language: {}", language.label()))
-                    .clicked()
-                {
-                    plc.set_language(language);
-                }
-            }
-        });
-        ui.menu_button("Edit", |ui| {
-            if ui.button("Undo").clicked() {
-                plc.undo();
-            }
-            if ui.button("Redo").clicked() {
-                plc.redo();
-            }
-            ui.separator();
-            if ui.button("Copy").clicked() {
-                plic_copy(plc);
-            }
-            if ui.button("Cut").clicked() {
-                plic_cut(plc, actions);
-            }
-            ui.separator();
-            if ui.button("Add comment row").clicked() {
-                if let Some((section, rung, _)) = plc.cell_cursor {
-                    actions.push(Action::AddCommentRow { section, rung });
-                }
-            }
-            if ui.button("Symbols").clicked() {
-                plc.page = PlcPage::Symbols;
-            }
-            ui.separator();
-            let selected = plc.selection.is_some();
-            if ui
-                .add_enabled(selected, egui::Button::new("Delete"))
-                .clicked()
-            {
-                actions.push(Action::Delete);
-            }
-            if ui
-                .add_enabled(selected, egui::Button::new("Negate"))
-                .clicked()
-            {
-                if let Some(node) = plc.selection.clone() {
-                    actions.push(Action::ToggleContact(node));
-                }
-            }
-            if ui
-                .add_enabled(selected, egui::Button::new("Series"))
-                .clicked()
-            {
-                actions.push(Action::WrapSeries);
-            }
-            if ui
-                .add_enabled(selected, egui::Button::new("Parallel"))
-                .clicked()
-            {
-                actions.push(Action::WrapParallel);
-            }
-            ui.separator();
-            if ui.button("Add rung").clicked() {
-                actions.push(Action::AddRung);
-            }
-            if ui.button("Add section").clicked() {
-                actions.push(Action::AddSection);
-            }
-        });
-        ui.menu_button("View", |ui| {
-            for page in PlcPage::ALL {
-                let active = plc.page == page;
-                if ui.selectable_label(active, page.label()).clicked() {
-                    plc.page = page;
-                }
-            }
-            ui.separator();
-            if ui
-                .selectable_label(!plc.view_addresses, "Symbols")
-                .clicked()
-            {
-                plc.view_addresses = false;
-            }
-            if ui
-                .selectable_label(plc.view_addresses, "Addresses")
-                .clicked()
-            {
-                plc.view_addresses = true;
-            }
-            ui.separator();
-            if ui.button("Messages").clicked() {
-                plc.page = PlcPage::Messages;
-            }
-            if ui.button("Service").clicked() {
-                plc.page = PlcPage::Service;
-            }
-        });
-        ui.menu_button("Run", |ui| {
-            let running = matches!(plc.state, RunState::Running);
-            if ui
-                .add_enabled(plc.online && !running, egui::Button::new("Run"))
-                .clicked()
-            {
-                actions.push(Action::Start);
-            }
-            if ui
-                .add_enabled(plc.online && running, egui::Button::new("Stop"))
-                .clicked()
-            {
-                actions.push(Action::Stop);
-            }
-            ui.separator();
-            if ui.button("Clear forces").clicked() {
-                actions.push(Action::ClearForces);
-            }
-        });
-        ui.menu_button("Help", |ui| {
-            ui.label(format!("POU {} of {}", plc.pou + 1, plc.pou_count()));
-            ui.label(DISABLED_HINT);
-        });
-        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            let (state_label, state_color) = run_state_label(plc.state);
-            common::nav_badge(ui, state_label, state_color);
-            ui.add_space(8.0);
-            if let Some(pou) = plc.current_pou() {
-                ui.label(
-                    RichText::new(format!("{}  {}", pou.name, pou.language.label()))
-                        .monospace()
-                        .size(theme::font_size(10.0))
-                        .color(theme::FG),
-                );
-            }
-        });
-    });
-}
-
 fn page_body(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
     match plc.page {
         PlcPage::PouList => pou_list_page(plc, ui, height, actions),
@@ -3109,15 +3002,15 @@ fn page_body(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
     }
 }
 
-/// ZX-PLC's POU list: name, language, size, comment. Select with a click, open
-/// with a second click or Enter.
-/// POU list keys, the manual's management plus LiNC's own letters: arrows select,
-/// Enter opens, `N`/`I`/`F` add an LD/IL/FBD POU, `L` cycles the language of an
-/// empty POU, `R` renames, `U` duplicates and `D` deletes (never MAIN).
+/// The program list keys read like the tool table's: arrows move the selection,
+/// Page keys move a screenful, Enter opens, Backspace deletes. `N` adds a ladder
+/// POU, `R` renames and `U` duplicates the selected one. MAIN is never deleted,
+/// and the list is the only place a POU is created: the editor window edits the
+/// one it was opened on.
 fn pou_list_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
-    // The caller normally matches the page, but a stale or direct call must never
-    // edit POUs while the editor owns the keyboard: letters typed into an IL body
-    // were reaching this handler and cycling languages, duplicating and deleting.
+    // Only the drawn list owns these keys. `pou_list_page` sets the page before
+    // it reads them, so a stale `Edit` left behind by the closed editor cannot
+    // make the list deaf, and a direct call from anywhere else stays inert.
     if plc.page != PlcPage::PouList || plc.text_editing {
         return;
     }
@@ -3136,41 +3029,23 @@ fn pou_list_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
             selected = (selected + 1).min(pous.len() - 1);
             redraw = true;
         }
+        // Page keys move by a screenful, as in every other list.
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+            selected = selected.saturating_sub(POU_PAGE as usize);
+            redraw = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+            selected = (selected + POU_PAGE as usize).min(pous.len() - 1);
+            redraw = true;
+        }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
             actions.push(Action::OpenPou(selected));
+            plc.open_editor = true;
             redraw = true;
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::N) {
             actions.push(Action::AddPou(PouLanguage::Ld));
             redraw = true;
-        }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::I) {
-            actions.push(Action::AddPou(PouLanguage::Il));
-            redraw = true;
-        }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::F) {
-            actions.push(Action::AddPou(PouLanguage::Fbd));
-            redraw = true;
-        }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::L) {
-            let pou = &pous[selected];
-            let empty = match pou.language {
-                PouLanguage::Ld => pou.sections.iter().all(|section| section.rungs.is_empty()),
-                PouLanguage::Il => pou.il.iter().all(|line| line.trim().is_empty()),
-                PouLanguage::Fbd => pou.fbd.is_empty(),
-            };
-            if empty {
-                let next = match pou.language {
-                    PouLanguage::Ld => PouLanguage::Il,
-                    PouLanguage::Il => PouLanguage::Fbd,
-                    PouLanguage::Fbd => PouLanguage::Ld,
-                };
-                actions.push(Action::SetPouLanguage {
-                    index: selected,
-                    language: next,
-                });
-                redraw = true;
-            }
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::R) {
             actions.push(Action::RenamePou {
@@ -3184,6 +3059,12 @@ fn pou_list_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
                 name: format!("{}_2", pous[selected].name),
             });
         }
+        // Backspace deletes, as in the tool table. MAIN stays: the project needs
+        // one POU to open into, and index 0 is the one every caller assumes.
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace) && selected > 0 {
+            actions.push(Action::DeletePou { index: selected });
+            redraw = true;
+        }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::D) && selected > 0 {
             actions.push(Action::DeletePou { index: selected });
             redraw = true;
@@ -3191,73 +3072,173 @@ fn pou_list_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
     });
     if redraw {
         plc.pou = selected;
+        plc.scroll_to_pou = true;
     }
 }
 
+/// Rows moved by one Page key, as in the tool table.
+const POU_PAGE: isize = 8;
+
+/// The program list, styled and driven like the tool table: a card, a heading,
+/// a header row, one selected band with an accent bar, stripes, Page keys and a
+/// footer that names the keys. The selection is the open POU.
 fn pou_list_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
+    // Drawing the list is what makes it the live page: the workbench forces Edit
+    // when it opens, so this assignment never fights the editor.
+    plc.page = PlcPage::PouList;
     pou_list_keys(plc, ui, actions);
     let pous = plc.project.all_pous();
-    egui::Grid::new("plc-pou-list")
-        .num_columns(4)
-        .spacing(vec2(18.0, 2.0))
-        .show(ui, |ui| {
-            for header in ["POU NAME", "LANGUAGE", "SIZE", "COMMENT"] {
+    let selected = plc.pou.min(pous.len().saturating_sub(1));
+    let mut open: Option<usize> = None;
+    theme::card(ui, |ui| {
+        ui.horizontal(|ui| {
+            theme::section_header(ui, "PROGRAM LIST");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
-                    RichText::new(header)
+                    RichText::new(format!("{} POU", pous.len()))
                         .monospace()
-                        .strong()
-                        .size(theme::font_size(10.0))
-                        .color(theme::C1),
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
                 );
-            }
-            ui.end_row();
-            for (index, pou) in pous.iter().enumerate() {
-                let size = match pou.language {
-                    PouLanguage::Ld => pou.sections.iter().map(|s| s.rungs.len()).sum::<usize>(),
-                    PouLanguage::Il => pou.il.len(),
-                    PouLanguage::Fbd => pou.fbd.len(),
-                };
-                let selected = index == plc.pou;
-                let response = ui.selectable_label(
-                    selected,
-                    RichText::new(&pou.name)
-                        .monospace()
-                        .size(theme::font_size(10.0)),
-                );
-                if response.clicked() {
-                    if selected {
-                        plc.page = PlcPage::Edit;
-                    } else {
+            });
+        });
+        ui.label(
+            RichText::new("LADDER ONLY · ENTER OPENS · BACKSPACE DELETES")
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
+        ui.add_space(4.0);
+        if pous.is_empty() {
+            ui.label(
+                RichText::new("no POUs in this project")
+                    .size(theme::font_size(10.0))
+                    .color(theme::MUTED),
+            );
+            return;
+        }
+        let name_width = 150.0;
+        let language_width = 76.0;
+        let size_width = 44.0;
+        let gap = 16.0;
+        let comment_width =
+            (ui.available_width() - name_width - language_width - size_width - gap * 3.0).max(80.0);
+        let columns = [
+            ("POU NAME", name_width),
+            ("LANGUAGE", language_width),
+            ("SIZE", size_width),
+            ("COMMENT", comment_width),
+        ];
+        // Header: one line of uppercase headings and a rule under it, the same
+        // weight as the tool table's header.
+        let (header_rect, _) =
+            ui.allocate_exact_size(vec2(ui.available_width(), 18.0), egui::Sense::hover());
+        let painter = ui.painter().clone();
+        let mut x = header_rect.left();
+        for (heading, width) in columns {
+            painter.text(
+                egui::pos2(x, header_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                heading,
+                egui::FontId::monospace(theme::font_size(9.0)),
+                theme::MUTED,
+            );
+            x += width + gap;
+        }
+        painter.hline(
+            header_rect.x_range(),
+            header_rect.bottom(),
+            egui::Stroke::new(1.0, theme::BORDER),
+        );
+        let row_height = 22.0;
+        let list_height = (height - 96.0).max(72.0);
+        egui::ScrollArea::vertical()
+            .id_salt("plc-pou-scroll")
+            .max_height(list_height)
+            .auto_shrink([false, false])
+            .show_rows(ui, row_height, pous.len(), |ui, range| {
+                for index in range {
+                    let pou = &pous[index];
+                    let (rect, response) = ui.allocate_exact_size(
+                        vec2(ui.available_width(), row_height - 2.0),
+                        egui::Sense::click(),
+                    );
+                    let painter = ui.painter();
+                    if index % 2 == 1 {
+                        painter.rect_filled(rect, egui::CornerRadius::ZERO, theme::SURFACE);
+                    }
+                    if index == selected {
+                        painter.rect_filled(rect, egui::CornerRadius::ZERO, theme::PANEL_RAISED);
+                        painter.rect_filled(
+                            egui::Rect::from_min_size(
+                                rect.min,
+                                egui::vec2(theme::SELECTION_BAR, rect.height()),
+                            ),
+                            egui::CornerRadius::ZERO,
+                            theme::ACCENT,
+                        );
+                        if plc.scroll_to_pou {
+                            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                            plc.scroll_to_pou = false;
+                        }
+                    }
+                    let size = match pou.language {
+                        PouLanguage::Ld => {
+                            pou.sections.iter().map(|s| s.rungs.len()).sum::<usize>()
+                        }
+                        PouLanguage::Il => pou.il.len(),
+                        PouLanguage::Fbd => pou.fbd.len(),
+                    };
+                    let text = |x: f32, value: &str, colour: egui::Color32, monospace: bool| {
+                        painter.text(
+                            egui::pos2(x, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            value,
+                            if monospace {
+                                egui::FontId::monospace(theme::font_size(10.0))
+                            } else {
+                                egui::FontId::proportional(theme::font_size(10.0))
+                            },
+                            colour,
+                        );
+                    };
+                    let mut x = rect.left() + theme::SELECTION_BAR + 4.0;
+                    text(x, &pou.name, theme::FG, true);
+                    x = rect.left() + name_width + gap;
+                    text(x, pou.language.label(), theme::C3, true);
+                    x = rect.left() + name_width + language_width + gap * 2.0;
+                    text(x, &size.to_string(), theme::MUTED, true);
+                    x = rect.left() + name_width + language_width + size_width + gap * 3.0;
+                    painter.with_clip_rect(egui::Rect::from_min_max(
+                        egui::pos2(x, rect.top()),
+                        egui::pos2(rect.right(), rect.bottom()),
+                    ));
+                    text(x, &pou.comment, theme::MUTED, false);
+                    if response.clicked() {
                         plc.pou = index;
+                        plc.scroll_to_pou = true;
+                    }
+                    if response.double_clicked() {
+                        open = Some(index);
                     }
                 }
-                ui.label(
-                    RichText::new(pou.language.label())
-                        .monospace()
-                        .size(theme::font_size(10.0))
-                        .color(theme::C3),
-                );
-                ui.label(
-                    RichText::new(size.to_string())
-                        .monospace()
-                        .size(theme::font_size(10.0))
-                        .color(theme::MUTED),
-                );
-                ui.label(
-                    RichText::new(&pou.comment)
-                        .size(theme::font_size(10.0))
-                        .color(theme::MUTED),
-                );
-                ui.end_row();
-            }
-        });
-    ui.add_space(6.0);
-    ui.label(
-        RichText::new(format!("{} POU · Free {} B", pous.len(), height as usize))
+            });
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(
+                "↑ ↓ SELECT · PGUP PGDN PAGE · ENTER OPEN · N NEW · R RENAME · U DUPLICATE",
+            )
             .monospace()
             .size(theme::font_size(9.0))
             .color(theme::MUTED),
-    );
+        );
+    });
+    if let Some(index) = open {
+        // A double click opens the same body the Enter key does.
+        plc.pou = index;
+        actions.push(Action::OpenPou(index));
+        plc.open_editor = true;
+    }
 }
 
 /// The EDIT page: the selected POU in its own language, with the property
@@ -4682,7 +4663,7 @@ fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Act
                         // Keyboard-only add: `N` claims the field (focus by stable
                         // id), typed text goes to the buffer, `I` commits an input
                         // and `O` an output, Escape cancels.
-                        let field_id = egui::Id::new("linc-new-symbol");
+                        let field_id = egui::Id::unique("linc-new-symbol");
                         if ui.input_mut(|input| {
                             input.consume_key(egui::Modifiers::NONE, egui::Key::N)
                         }) {
@@ -5192,70 +5173,6 @@ fn pou_edit_dialog(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Actio
 }
 
 /// Copy the marked block (or the cell under the cursor) without a keyboard.
-fn plic_copy(plc: &mut PlcUi) {
-    let Some((section, rung, position)) = plc.cell_cursor else {
-        return;
-    };
-    let sections = plc.current_pou_sections();
-    let cells = match plc.cell_mark {
-        Some((mark_section, mark_rung, mark_position)) if mark_section == section => {
-            let (low_rung, high_rung) = if mark_rung <= rung {
-                (mark_rung, rung)
-            } else {
-                (rung, mark_rung)
-            };
-            let (low, high) = if mark_position <= position {
-                (mark_position, position)
-            } else {
-                (position, mark_position)
-            };
-            (low_rung..=high_rung)
-                .filter_map(|index| sections.get(section).and_then(|s| s.rungs.get(index)))
-                .map(|row| {
-                    (low..=high)
-                        .map(|slot| row.cells.get(slot).cloned().unwrap_or(Cell::Wire))
-                        .collect::<Vec<Cell>>()
-                })
-                .collect::<Vec<_>>()
-        }
-        _ => Vec::new(),
-    };
-    if cells.is_empty() {
-        plc.cell_clipboard = sections
-            .get(section)
-            .and_then(|section| section.rungs.get(rung))
-            .and_then(|row| row.cells.get(position))
-            .cloned();
-        plc.cell_block.clear();
-    } else {
-        plc.cell_block = cells;
-        plc.cell_clipboard = None;
-    }
-}
-
-/// Copy the block and empty it, which is Cut in the manual's Edit menu.
-fn plic_cut(plc: &mut PlcUi, actions: &mut Vec<Action>) {
-    plic_copy(plc);
-    let Some((section, rung, position)) = plc.cell_cursor else {
-        return;
-    };
-    let rows = plc.cell_block.len();
-    let columns = plc.cell_block.first().map(Vec::len).unwrap_or(1);
-    for row in 0..rows.max(1) {
-        for column in 0..columns {
-            if position + column < POSITIONS {
-                actions.push(Action::SetCell {
-                    section,
-                    rung: rung + row,
-                    position: position + column,
-                    cell: Cell::Wire,
-                });
-            }
-        }
-    }
-    plc.cell_block.clear();
-}
-
 fn status_bar(plc: &PlcUi, ui: &mut Ui) {
     // The cell under the cursor wins, because that is what ZX shows; with no
     // cursor the selected rung's coil and its comment stand in.
@@ -5484,44 +5401,43 @@ fn status_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
     let running = matches!(plc.state, RunState::Running);
     let any_force = !plc.forced.is_empty();
     common::card_title(ui, "PLC SERVICE");
+    // Facts get their own line. Sharing one row with a right-to-left block is
+    // what made the badge, the banner and the counters paint over each other.
     ui.horizontal(|ui| {
         ui.add_space(2.0);
         theme::status_dot(ui, dot_color, dot_text, &status_text);
         ui.add_space(10.0);
         common::nav_badge(ui, state_label, state_color);
-        ui.add_space(10.0);
-        ui.label(
-            RichText::new(status_text)
-                .monospace()
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-        );
-        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            ui.label(
-                RichText::new(format!(
-                    "{} · SCAN {} · {} us · OVERRUN {} · {}",
-                    project_name,
-                    plc.scan_count,
-                    plc.scan_time_us,
-                    plc.overruns,
-                    if plc.alive {
-                        "HEARTBEAT HEALTHY"
-                    } else {
-                        "HEARTBEAT IDLE"
-                    }
-                ))
-                .monospace()
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-            );
-        });
     });
-    ui.horizontal(|ui| {
-        field(ui, "SOCKET", "linc-plc-socket", &mut plc.socket_text);
-        ui.add_space(6.0);
-        field(ui, "FILE", "linc-plc-file", &mut plc.path_text);
-    });
-    ui.horizontal(|ui| {
+    ui.label(
+        RichText::new(status_text)
+            .monospace()
+            .size(theme::font_size(9.0))
+            .color(theme::MUTED),
+    );
+    ui.add_space(2.0);
+    ui.label(
+        RichText::new(format!(
+            "{}  ·  SCAN {}  ·  {} us  ·  OVERRUN {}  ·  {}",
+            project_name,
+            plc.scan_count,
+            plc.scan_time_us,
+            plc.overruns,
+            if plc.alive {
+                "HEARTBEAT HEALTHY"
+            } else {
+                "HEARTBEAT IDLE"
+            }
+        ))
+        .monospace()
+        .size(theme::font_size(9.0))
+        .color(theme::MUTED),
+    );
+    ui.add_space(4.0);
+    field(ui, "SOCKET", "linc-plc-socket", &mut plc.socket_text);
+    field(ui, "FILE", "linc-plc-file", &mut plc.path_text);
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         if theme::action_button(ui, "CONNECT", true).clicked() {
             actions.push(Action::Connect);
@@ -5561,19 +5477,29 @@ fn status_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
 }
 
 fn field(ui: &mut Ui, label: &str, id: &str, text: &mut String) {
-    ui.label(
-        RichText::new(label)
-            .size(theme::font_size(9.0))
-            .color(theme::MUTED),
-    );
-    let width = (ui.available_width() * 0.46).max(120.0);
-    let response = ui.add_sized(
-        [width, theme::MIN_TARGET],
-        egui::TextEdit::singleline(text)
-            .id(egui::Id::unique(id))
-            .font(egui::FontId::monospace(theme::font_size(10.0))),
-    );
-    theme::focus_ring(ui, &response);
+    ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            vec2(52.0, theme::MIN_TARGET),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    RichText::new(label)
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+            },
+        );
+        // A field takes the rest of its own row. Two fields on one row halved the
+        // width and both paths came out with an ellipsis.
+        let width = ui.available_width().max(120.0);
+        let response = ui.add_sized(
+            [width, theme::MIN_TARGET],
+            egui::TextEdit::singleline(text)
+                .id(egui::Id::unique(id))
+                .font(egui::FontId::monospace(theme::font_size(10.0))),
+        );
+        theme::focus_ring(ui, &response);
+    });
 }
 
 #[allow(dead_code)]

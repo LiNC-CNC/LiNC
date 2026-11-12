@@ -163,7 +163,25 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
 - The DRO readout is one line: axis name at the coordinate's own size, the value, and a dimmed `M …`
   dropped whole when it would touch the value. Card heights are `theme::DRO_CARD_*`; the freed row goes
   to the toolpath, not to page slack.
+- **IEC 61131-3 wins over ZX.** ZX-PLC is the reference for look, feel and
+  authoring flow, not for capability. No limit that exists only because a ZX
+  Spectrum had 48K survives in LiNC: the four-per-type FB instance bank, the
+  16-row watch, an 8-character name cap, and any other fixed table sized for
+  that machine are inherited constraints, not standard behaviour. When the ZX
+  implementation and IEC 61131-3 disagree — instance declaration, name lengths,
+  data types, block semantics, POU kinds — the standard is authoritative and the
+  ZX screenshot is only evidence of what the operator used to see.
 - Use `theme` constants and the `SPEC.md §7` palette, not literals.
+- **The PLC UI is self-documenting.** A person who knows PLCs but has never seen
+  this screen must be able to read what each control means from the screen
+  itself. Every field carries the name the manual uses (`instance`, `preset`,
+  `PT`, `PV`), every value shows the form it accepts (`T#1s`, `10`), and every
+  window states how to leave it (`Tab moves between the fields · Enter applies ·
+  Esc cancels`). Prefer a typed field with its allowed shape over a row of
+  preset buttons; prefer the operand's own name over an icon alone. Do not
+  explain the PLC model itself — assume ladder, timers, edges and force are
+  known — and do not add prose paragraphs or help screens to compensate for a
+  control whose label is vague: rename the control.
 - The program editor soft-wraps long lines at the editor width. The gutter paints
   one number at each logical line's first galley row, and the selection band covers
   all of that line's wrapped rows. Map character offsets to rows (row_for_char /

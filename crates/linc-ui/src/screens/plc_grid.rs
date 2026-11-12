@@ -9,7 +9,7 @@ use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_core::grid::{Cell, POSITIONS};
 use linc_plc_core::{Coil, CoilKind, PouLanguage, Rung};
 
-use crate::screens::plc::{Action, ExprEdit, PlcPage, PlcUi, RAIL_GROUP_GAP};
+use crate::screens::plc::{Action, ExprEdit, PlcPage, PlcUi, RAIL_GROUP_GAP, RAIL_INNER_GAP};
 use crate::shell::LincApp;
 use crate::theme;
 
@@ -525,41 +525,6 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
 
 /// The element picker and, after it, the operand list.
 
-/// A picker row reads like a navigation row: the symbol on the left, its keyboard
-/// chord on the right, no button chrome. The chord is the hint, so the element
-/// name never carries a bracketed key and the two never disagree.
-/// A picker row is taller than a rail row so the glyphs keep a clear band of
-/// padding: the contact bars reach 8 px either side of the conductor, so the
-/// 18 px glyph box would touch its neighbours at the rail's own height.
-const PICKER_ROW_HEIGHT: f32 = theme::NAV_ROW_HEIGHT_SECONDARY + 8.0;
-
-fn picker_row(ui: &mut Ui, symbol: &str, chord: &str) -> egui::Response {
-    let width = 280.0_f32.max(ui.available_width());
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(width, theme::NAV_ROW_HEIGHT_SECONDARY),
-        egui::Sense::click(),
-    );
-    let painter = ui.painter();
-    if response.hovered() {
-        painter.rect_filled(rect, 4.0, theme::C1.gamma_multiply(0.10));
-    }
-    painter.text(
-        egui::pos2(rect.left() + 12.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        symbol,
-        egui::FontId::proportional(theme::font_size(11.0)),
-        theme::FG,
-    );
-    painter.text(
-        egui::pos2(rect.right() - 12.0, rect.center().y),
-        egui::Align2::RIGHT_CENTER,
-        chord,
-        egui::FontId::monospace(theme::font_size(8.5)),
-        theme::MUTED,
-    );
-    response
-}
-
 pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
     // Escape closes any picker here, before the editor's own Escape, so leaving
     // a list never also leaves the editor.
@@ -594,10 +559,13 @@ pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     xref_window(plc, ctx);
 }
 
-/// Timer and counter boxes: which of the four instances, and the preset. ZX
-/// asks for both when the box is placed; here the same window edits a placed box.
+/// Timer and counter boxes: the instance and the preset, as the manual describes
+/// them — two typed fields, not a wall of preset buttons. ZX asks for the instance
+/// and then the preset when a box is placed; the same window edits a placed box,
+/// and `T` on one opens straight into the preset field.
 fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
     let Some((section, rung, position)) = plc.block_edit else {
+        plc.block_fields = None;
         return;
     };
     let cell = plc
@@ -613,11 +581,24 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
     }) = cell
     else {
         plc.block_edit = None;
+        plc.block_fields = None;
         return;
     };
+    // The fields follow the box, never the other way round: a frame that re-synced
+    // every draw would fight the operator's typing.
+    if plc.block_fields != Some((section, rung, position)) {
+        plc.block_fields = Some((section, rung, position));
+        plc.block_instance_text = instance.clone();
+        plc.block_preset_text = preset.clone();
+        plc.block_field = 0;
+    }
     let mut close = false;
-    let mut patch_instance: Option<String> = None;
-    let mut patch_preset: Option<String> = None;
+    let mut apply = false;
+    let hint = if block.starts_with("CT") {
+        "PV, e.g. 10"
+    } else {
+        "PT, e.g. T#1s"
+    };
     egui::Window::new(format!("{block} BOX"))
         // Above the workbench overlay (Foreground), which is itself above the page.
         .order(egui::Order::Tooltip)
@@ -625,61 +606,129 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
-            ui.label(
-                RichText::new(format!("{instance}   {preset}"))
-                    .monospace()
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-            ui.add_space(4.0);
-            ui.label(
-                RichText::new("instance")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-            ui.horizontal(|ui| {
-                for number in 0..4 {
-                    let name = format!("{block}{number}");
-                    if theme::action_button(ui, &name, true).clicked() {
-                        patch_instance = Some(name);
+            ui.spacing_mut().item_spacing.y = RAIL_INNER_GAP;
+            ui.set_min_width(340.0);
+            let field = |ui: &mut Ui, label: &str, text: &mut String, hint: &str, active: bool| {
+                ui.horizontal(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(64.0, theme::NAV_ROW_HEIGHT_SECONDARY),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                RichText::new(label)
+                                    .size(theme::font_size(9.0))
+                                    .color(if active { theme::FG } else { theme::MUTED }),
+                            );
+                        },
+                    );
+                    let response = ui.add(
+                        egui::TextEdit::singleline(text)
+                            .desired_width(150.0)
+                            .hint_text(hint)
+                            .font(egui::FontId::monospace(theme::font_size(10.0))),
+                    );
+                    if active && !response.has_focus() {
+                        response.request_focus();
                     }
-                }
-            });
-            ui.add_space(4.0);
+                });
+            };
+            field(
+                ui,
+                "instance",
+                &mut plc.block_instance_text,
+                "TON0",
+                plc.block_field == 0,
+            );
+            field(
+                ui,
+                "preset  ",
+                &mut plc.block_preset_text,
+                hint,
+                plc.block_field == 1,
+            );
+            ui.add_space(2.0);
             ui.label(
-                RichText::new("preset")
-                    .size(theme::font_size(9.0))
+                RichText::new("Tab moves between the fields · Enter applies · Esc cancels")
+                    .size(theme::font_size(8.5))
                     .color(theme::MUTED),
             );
-            ui.horizontal_wrapped(|ui| {
-                let presets: &[&str] = if block.starts_with("CT") {
-                    &["1", "5", "10", "50", "100", "1000"]
-                } else {
-                    &["T#100ms", "T#500ms", "T#1s", "T#2s", "T#5s", "T#10s"]
-                };
-                for value in presets {
-                    if ui.button(*value).clicked() {
-                        patch_preset = Some((*value).to_string());
-                    }
-                }
-            });
-            ui.add_space(4.0);
-            if theme::action_button(ui, "Cancel", true).clicked() {
-                close = true;
-            }
         });
-    if patch_instance.is_some() || patch_preset.is_some() {
-        actions.push(Action::SetBlockField {
-            section,
-            rung,
-            position,
-            instance: patch_instance,
-            preset: patch_preset,
-        });
+    // Tab and the arrows move between the two fields; Enter applies them both.
+    if ctx
+        .input(|input| input.key_pressed(egui::Key::Tab) || input.key_pressed(egui::Key::ArrowDown))
+    {
+        plc.block_field = (plc.block_field + 1) % 2;
+    }
+    if ctx.input(|input| {
+        input.key_pressed(egui::Key::ArrowUp) || input.key_pressed(egui::Key::ArrowRight)
+    }) && plc.block_field == 0
+    {
+        // Cycling the instance with the arrows is quicker than retyping TON0.
+        let next = plc
+            .block_instance_text
+            .trim()
+            .strip_prefix(&block)
+            .and_then(|digits| digits.parse::<usize>().ok())
+            .map(|number| (number + 1) % 4)
+            .unwrap_or(0);
+        plc.block_instance_text = format!("{block}{next}");
+    }
+    if ctx.input(|input| input.key_pressed(egui::Key::Enter)) {
+        apply = true;
+    }
+    if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
         close = true;
     }
-    if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+    if apply {
+        let instance = plc.block_instance_text.trim().to_string();
+        let preset = plc.block_preset_text.trim().to_string();
+        if instance.is_empty() && preset.is_empty() {
+            close = true;
+        } else {
+            actions.push(Action::SetBlockField {
+                section,
+                rung,
+                position,
+                instance: (!instance.is_empty()
+                    && instance != instance_at(plc, section, rung, position))
+                .then_some(instance),
+                preset: (!preset.is_empty() && preset != preset_at(plc, section, rung, position))
+                    .then_some(preset),
+            });
+            close = true;
+        }
+    }
+    if close {
         plc.block_edit = None;
+        plc.block_fields = None;
+    }
+}
+
+/// The box's current instance, read back from the project.
+fn instance_at(plc: &PlcUi, section: usize, rung: usize, position: usize) -> String {
+    match plc
+        .current_pou_sections()
+        .get(section)
+        .and_then(|section| section.rungs.get(rung))
+        .and_then(|rung| rung.cells.get(position))
+        .cloned()
+    {
+        Some(Cell::Block { instance, .. }) => instance,
+        _ => String::new(),
+    }
+}
+
+/// The box's current preset, read back from the project.
+fn preset_at(plc: &PlcUi, section: usize, rung: usize, position: usize) -> String {
+    match plc
+        .current_pou_sections()
+        .get(section)
+        .and_then(|section| section.rungs.get(rung))
+        .and_then(|rung| rung.cells.get(position))
+        .cloned()
+    {
+        Some(Cell::Block { preset, .. }) => preset,
+        _ => String::new(),
     }
 }
 
@@ -822,6 +871,11 @@ fn clear_pickers(plc: &mut PlcUi) {
     plc.coil_pick = None;
     plc.operand_filter.clear();
 }
+
+/// A picker row is taller than a rail row so the glyphs keep a clear band of
+/// padding: the contact bars reach 8 px either side of the conductor, so the
+/// 18 px glyph box would touch its neighbours at the rail's own height.
+const PICKER_ROW_HEIGHT: f32 = theme::NAV_ROW_HEIGHT_SECONDARY + 8.0;
 
 /// What one picker frame did: whether it took the keys, and whether it drew.
 struct PickerFrame {
