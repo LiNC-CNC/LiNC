@@ -5409,17 +5409,19 @@ fn watch_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
     }
     let len = plc.project.watch.len();
     plc.watch_cursor = plc.watch_cursor.min(len);
-    let (up, down, page_up, page_down, enter, backspace, delete) = ui.input_mut(|input| {
-        (
-            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
-        )
-    });
+    let (up, down, page_up, page_down, enter, force, backspace, delete) =
+        ui.input_mut(|input| {
+            (
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::F),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
+            )
+        });
     if up {
         plc.watch_cursor = plc.watch_cursor.saturating_sub(1);
     }
@@ -5444,6 +5446,31 @@ fn watch_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
         plc.watch_error = None;
         plc.text_editing = true;
     }
+    // F walks one BOOL through the manual's three states: forced TRUE, forced
+    // FALSE, released. A word or block value has no bit to force; the words a
+    // marker word takes are written later, from the same row.
+    if force {
+        if let Some(name) = plc.project.watch.get(plc.watch_cursor).cloned() {
+            let word = plc.words.iter().any(|word| word.name == name)
+                || linc_plc_core::il::word_operand(&name).is_some()
+                || name.contains('.');
+            if word {
+                plc.message = format!("{name} IS A WORD: F TAKES A WHOLE NUMBER");
+            } else {
+                let forced = plc.forced.iter().any(|item| item == &name);
+                let value = plc
+                    .vars
+                    .iter()
+                    .find(|var| var.name == name)
+                    .map(|var| var.value);
+                match (forced, value) {
+                    (false, _) => actions.push(Action::Force(name, true)),
+                    (true, Some(true)) => actions.push(Action::Force(name, false)),
+                    (true, _) => actions.push(Action::Unforce(name)),
+                }
+            }
+        }
+    }
     // Backspace deletes, as in every other table; the panel has no Delete key,
     // but a full keyboard's Delete does the same.
     if backspace || delete {
@@ -5461,7 +5488,7 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
     common::card_title(ui, "WATCH");
     ui.label(
         RichText::new(
-            "↑ ↓ MOVE · ENTER EDITS · BACKSPACE REMOVES · 16 OPERANDS · CTRL+W PINS A CELL",
+            "↑ ↓ MOVE · ENTER EDITS · F FORCES TRUE → FALSE → RELEASE · BACKSPACE REMOVES · 16 OPERANDS",
         )
         .monospace()
         .size(theme::font_size(9.0))
@@ -8741,6 +8768,71 @@ mod watch_page_tests {
         );
         let error = plc.watch_error.clone().unwrap_or_default();
         assert!(error.contains("not a symbol"), "{error:?}");
+    }
+
+    fn bit(plc: &mut PlcUi, name: &str, value: bool) {
+        plc.vars = vec![VarValue {
+            name: name.to_string(),
+            value,
+            kind: linc_plc_core::SymbolKind::Input,
+            forced: false,
+        }];
+    }
+
+    /// F walks a BOOL through forced TRUE, forced FALSE and released. The
+    /// second state is the one a two-state toggle cannot express.
+    #[test]
+    fn f_cycles_a_bool_force_through_three_states() {
+        let mut plc = watched(&["start"]);
+        bit(&mut plc, "start", false);
+
+        let actions = frame(&mut plc, vec![key(egui::Key::F)]);
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::Force(name, true) if name == "start")),
+            "released → forced TRUE: {actions:?}"
+        );
+
+        plc.forced = vec!["start".into()];
+        plc.vars[0].value = true;
+        let actions = frame(&mut plc, vec![key(egui::Key::F)]);
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::Force(name, false) if name == "start")),
+            "forced TRUE → forced FALSE: {actions:?}"
+        );
+
+        plc.vars[0].value = false;
+        let actions = frame(&mut plc, vec![key(egui::Key::F)]);
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::Unforce(name) if name == "start")),
+            "forced FALSE → released: {actions:?}"
+        );
+    }
+
+    /// F on a word row does not force a bit: a word takes a typed number from
+    /// its own prompt.
+    #[test]
+    fn f_on_a_word_row_does_not_force_it() {
+        let mut plc = watched(&[]);
+        plc.project.watch = vec!["MW2".into()];
+        plc.words = vec![linc_plc_core::WordValue {
+            name: "MW2".into(),
+            value: 5,
+        }];
+        let actions = frame(&mut plc, vec![key(egui::Key::F)]);
+        assert!(
+            !actions.iter().any(|action| matches!(
+                action,
+                Action::Force(..) | Action::Unforce(..)
+            )),
+            "a word is not forced as a bit: {actions:?}"
+        );
+        assert!(plc.message.contains("WORD"), "{:?}", plc.message);
     }
 
     /// The list stops at sixteen operands and says so.
