@@ -528,6 +528,11 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
 /// A picker row reads like a navigation row: the symbol on the left, its keyboard
 /// chord on the right, no button chrome. The chord is the hint, so the element
 /// name never carries a bracketed key and the two never disagree.
+/// A picker row is taller than a rail row so the glyphs keep a clear band of
+/// padding: the contact bars reach 8 px either side of the conductor, so the
+/// 18 px glyph box would touch its neighbours at the rail's own height.
+const PICKER_ROW_HEIGHT: f32 = theme::NAV_ROW_HEIGHT_SECONDARY + 8.0;
+
 fn picker_row(ui: &mut Ui, symbol: &str, chord: &str) -> egui::Response {
     let width = 280.0_f32.max(ui.available_width());
     let (rect, response) = ui.allocate_exact_size(
@@ -1076,7 +1081,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 }
                 let selected = index == plc.picker_cursor;
                 let (rect, response) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
+                    egui::vec2(ui.available_width(), PICKER_ROW_HEIGHT),
                     egui::Sense::click(),
                 );
                 if selected {
@@ -1822,7 +1827,12 @@ fn arc_points(
         .collect()
 }
 
-pub(crate) fn draw_cell_symbol(painter: &egui::Painter, rect: egui::Rect, symbol: CellSymbol, color: Color32) {
+pub(crate) fn draw_cell_symbol(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    symbol: CellSymbol,
+    color: Color32,
+) {
     let line = Stroke::new(1.6, color);
     let thin = Stroke::new(1.2, color);
     let y = rect.top() + CONDUCTOR_Y;
