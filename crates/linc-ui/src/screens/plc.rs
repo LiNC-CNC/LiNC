@@ -820,21 +820,18 @@ pub struct TrendBuffer {
 
 impl TrendBuffer {
     pub const DEPTH: usize = 512;
-    pub const CHANNELS: usize = 8;
 
     pub const WORD_CHANNELS: usize = 4;
 
     pub fn sample(&mut self, vars: &[VarValue], words: &[WordValue], watch: &[String]) {
+        // Every traced symbol gets a lane: the page scrolls when they do not
+        // fit, rather than hiding the rest behind an eight-lane cap.
         let names = if watch.is_empty() {
-            vars.iter()
-                .take(Self::CHANNELS)
-                .map(|var| var.name.clone())
-                .collect::<Vec<_>>()
+            vars.iter().map(|var| var.name.clone()).collect::<Vec<_>>()
         } else {
             watch
                 .iter()
                 .filter(|name| words.iter().all(|word| &word.name != *name))
-                .take(Self::CHANNELS)
                 .cloned()
                 .collect::<Vec<_>>()
         };
@@ -1868,6 +1865,17 @@ impl PlcUi {
                 }
                 // A new project starts empty: the manual's File > New gives an empty
                 // MAIN, and the demo is a separate concern.
+                // A new project is a fresh ladder: stop the running one first,
+                // or the daemon refuses the next Load with "stop the ladder
+                // before loading a project", which read as the new program's
+                // fault. Leave the run pages so nothing tries to start it.
+                if matches!(self.state, RunState::Running) {
+                    self.send(Tag::Stop, Request::Stop);
+                }
+                self.sim_running = false;
+                self.page = PlcPage::Edit;
+                self.last_error = None;
+                self.local_diags.clear();
                 self.project = Project::new("untitled");
                 // A new project has exactly one POU: the cursor index must not
                 // survive from the previous project, or the page shows a POU that
@@ -1885,7 +1893,14 @@ impl PlcUi {
                 if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
                     eprintln!("apply Action::Open path={}", self.path_text);
                 }
-                self.open()
+                // Loading while the ladder runs is refused by the daemon, so
+                // stop it first and come back to the ladder page.
+                if matches!(self.state, RunState::Running) {
+                    self.send(Tag::Stop, Request::Stop);
+                }
+                self.sim_running = false;
+                self.page = PlcPage::Edit;
+                self.open();
             }
             Action::Save => self.save(),
             Action::Validate => self.validate(),
@@ -2919,6 +2934,9 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
             false, false, false, false, false, false, false, false, false, false,
         )
     } else {
+        // Ctrl+Shift+N must be read before Ctrl+N: the plain chord consumes a
+        // key whose modifiers it matches logically, Shift included.
+        let new_project = ctrl_shift_key(ui, egui::Key::N);
         (
             ctrl_key(ui, egui::Key::Num1),
             ctrl_key(ui, egui::Key::Num2),
@@ -2928,9 +2946,9 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
             ctrl_key(ui, egui::Key::N),
             ctrl_key(ui, egui::Key::S),
             ctrl_shift_key(ui, egui::Key::S),
-            // Ctrl+Shift+N is the keyboard path to File > New: the menu popup is not
-            // reachable by keyboard in this build, and a new project must be.
-            ctrl_shift_key(ui, egui::Key::N),
+            // The keyboard path to File > New: the menu popup is not reachable
+            // by keyboard in this build, and a new project must be.
+            new_project,
             // The panel keyboard has no Delete key: Bksp is the delete it has.
             ctrl_key(ui, egui::Key::Backspace),
         )
@@ -2983,24 +3001,45 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     // the moment it was opened.
     let run_page = matches!(app.plc.page, PlcPage::Sim | PlcPage::Watch | PlcPage::Trend);
     if run_page && !app.plc.sim_running {
-        app.plc.sim_running = true;
-        // Load what is on screen and run it. No save: testing an edit must not
-        // rewrite the project file behind the operator's back.
-        app.plc.validate();
-        // A refused project leaves the daemon with no I/O at best: say why
-        // instead of sending a Load that cannot succeed.
-        if let Some(error) = app
+        let has_rungs = app
             .plc
-            .local_diags
+            .project
+            .all_pous()
             .iter()
-            .find(|diag| diag.severity == linc_plc_core::validate::Severity::Error)
-        {
-            app.plc.last_error = Some(format!("NOT RUNNING: {} ({})", error.message, error.path));
+            .flat_map(|pou| pou.sections.iter())
+            .any(|section| !section.rungs.is_empty());
+        if !has_rungs {
+            // A new, empty program is not a fault: there is simply nothing to
+            // run until a rung exists.
+            app.plc.message = "EMPTY PROGRAM — ADD A RUNG TO RUN IT".to_string();
+            app.plc.sim_running = false;
+            app.plc.last_error = None;
         } else {
-            let project = app.plc.project.clone();
-            app.plc.send(Tag::Load, Request::Load { project });
-            app.plc.send(Tag::Start, Request::Start);
-            app.plc.message = "TEST RUN".to_string();
+            app.plc.sim_running = true;
+            // Load what is on screen and run it. No save: testing an edit must not
+            // rewrite the project file behind the operator's back.
+            // The daemon refuses a Load while it scans, so stop first: the jobs go
+            // in order and the Start below runs the new program.
+            if matches!(app.plc.state, RunState::Running) {
+                app.plc.send(Tag::Stop, Request::Stop);
+            }
+            app.plc.validate();
+            // A refused project leaves the daemon with no I/O at best: say why
+            // instead of sending a Load that cannot succeed.
+            if let Some(error) = app
+                .plc
+                .local_diags
+                .iter()
+                .find(|diag| diag.severity == linc_plc_core::validate::Severity::Error)
+            {
+                app.plc.last_error =
+                    Some(format!("NOT RUNNING: {} ({})", error.message, error.path));
+            } else {
+                let project = app.plc.project.clone();
+                app.plc.send(Tag::Load, Request::Load { project });
+                app.plc.send(Tag::Start, Request::Start);
+                app.plc.message = "TEST RUN".to_string();
+            }
         }
     } else if !run_page && app.plc.sim_running {
         app.plc.sim_running = false;
@@ -3107,7 +3146,7 @@ fn page_body(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
         PlcPage::Symbols => symbols_page(plc, ui, height, actions),
         PlcPage::Sim => sim_page(plc, ui, height, actions),
         PlcPage::Watch => watch_page(plc, ui, height, actions),
-        PlcPage::Trend => trend_page(plc, ui),
+        PlcPage::Trend => trend_page(plc, ui, height),
         PlcPage::Messages => {
             let _ = height;
             diagnostics_card(plc, ui, 400.0)
@@ -5233,9 +5272,13 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
     variables_card(plc, ui, height, actions)
 }
 
-fn trend_page(plc: &PlcUi, ui: &mut Ui) {
+fn trend_page(plc: &PlcUi, ui: &mut Ui, height: f32) {
     if !plc.trend_remote.samples.is_empty() {
-        draw_remote_trend(plc, ui);
+        egui::ScrollArea::vertical()
+            .id_salt("plc-trend-remote")
+            .max_height((height - 50.0).max(120.0))
+            .auto_shrink([false, false])
+            .show(ui, |ui| draw_remote_trend(plc, ui));
         return;
     }
     let trend = &plc.trend;
@@ -5260,54 +5303,60 @@ fn trend_page(plc: &PlcUi, ui: &mut Ui) {
         .color(theme::MUTED),
     );
     ui.add_space(4.0);
-    let width = ui.available_width();
-    let lane_height = 26.0;
-    for (name, lane) in trend.channels.iter().zip(trend.lanes.iter()) {
-        let (rect, _) = ui.allocate_exact_size(vec2(width, lane_height), Sense::hover());
-        let painter = ui.painter();
-        painter.rect_filled(rect, 2.0, theme::SURFACE);
-        painter.rect_stroke(
-            rect,
-            2.0,
-            Stroke::new(1.0, theme::BORDER),
-            egui::StrokeKind::Inside,
-        );
-        painter.text(
-            pos2(rect.left() + 4.0, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            name,
-            egui::FontId::monospace(theme::font_size(9.0)),
-            theme::MUTED,
-        );
-        let plot_left = rect.left() + 92.0;
-        let plot_right = rect.right() - 4.0;
-        let height = rect.height() - 6.0;
-        let step = (plot_right - plot_left) / TrendBuffer::DEPTH as f32;
-        let offset = TrendBuffer::DEPTH.saturating_sub(lane.len()) as f32 * step;
-        let mut points = Vec::with_capacity(lane.len());
-        for (index, value) in lane.iter().enumerate() {
-            let x = plot_left + offset + index as f32 * step;
-            let y = if *value {
-                rect.top() + 3.0
-            } else {
-                rect.top() + 3.0 + height
-            };
-            points.push(pos2(x, y));
-        }
-        if points.len() > 1 {
-            painter.add(egui::Shape::line(
-                points,
-                Stroke::new(
-                    1.2,
-                    if lane.last().copied().unwrap_or(false) {
-                        theme::SUCCESS
+    egui::ScrollArea::vertical()
+        .id_salt("plc-trend-lanes")
+        .max_height((height - 110.0).max(120.0))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let width = ui.available_width();
+            let lane_height = 26.0;
+            for (name, lane) in trend.channels.iter().zip(trend.lanes.iter()) {
+                let (rect, _) = ui.allocate_exact_size(vec2(width, lane_height), Sense::hover());
+                let painter = ui.painter();
+                painter.rect_filled(rect, 2.0, theme::SURFACE);
+                painter.rect_stroke(
+                    rect,
+                    2.0,
+                    Stroke::new(1.0, theme::BORDER),
+                    egui::StrokeKind::Inside,
+                );
+                painter.text(
+                    pos2(rect.left() + 4.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    name,
+                    egui::FontId::monospace(theme::font_size(9.0)),
+                    theme::MUTED,
+                );
+                let plot_left = rect.left() + 92.0;
+                let plot_right = rect.right() - 4.0;
+                let height = rect.height() - 6.0;
+                let step = (plot_right - plot_left) / TrendBuffer::DEPTH as f32;
+                let offset = TrendBuffer::DEPTH.saturating_sub(lane.len()) as f32 * step;
+                let mut points = Vec::with_capacity(lane.len());
+                for (index, value) in lane.iter().enumerate() {
+                    let x = plot_left + offset + index as f32 * step;
+                    let y = if *value {
+                        rect.top() + 3.0
                     } else {
-                        theme::C1
-                    },
-                ),
-            ));
-        }
-    }
+                        rect.top() + 3.0 + height
+                    };
+                    points.push(pos2(x, y));
+                }
+                if points.len() > 1 {
+                    painter.add(egui::Shape::line(
+                        points,
+                        Stroke::new(
+                            1.2,
+                            if lane.last().copied().unwrap_or(false) {
+                                theme::SUCCESS
+                            } else {
+                                theme::C1
+                            },
+                        ),
+                    ));
+                }
+            }
+        });
 }
 
 /// The daemon's per-scan window: one lane per watch entry, words auto-scaled.
@@ -8198,6 +8247,24 @@ mod trend_tests {
     /// With nothing pinned, the trend traces both directions. Taking the
     /// snapshot order showed whichever pins came first — all inputs, in the
     /// demo — and the outputs never appeared.
+    /// The trace has a lane per symbol, not eight: the page scrolls instead of
+    /// dropping the rest.
+    #[test]
+    fn every_symbol_gets_a_lane() {
+        let vars: Vec<VarValue> = (0..12)
+            .map(|index| VarValue {
+                name: format!("in{index}"),
+                value: index % 2 == 0,
+                kind: linc_plc_core::SymbolKind::Input,
+                forced: false,
+            })
+            .collect();
+        let mut trend = TrendBuffer::default();
+        trend.sample(&vars, &[], &[]);
+        assert_eq!(trend.channels.len(), 12);
+        assert_eq!(trend.lanes.len(), 12);
+    }
+
     #[test]
     fn the_default_trend_traces_inputs_and_outputs() {
         let mut project = Project::new("t");
