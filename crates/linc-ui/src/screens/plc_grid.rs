@@ -127,13 +127,61 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                 .events
                 .retain(|event| !matches!(event, egui::Event::Cut));
         }
+        // egui-winit reports Ctrl as CTRL|COMMAND on Linux, so both spellings
+        // must be consumed.
+        let chord = |input: &mut egui::InputState, key: egui::Key| {
+            input.consume_key(egui::Modifiers::CTRL, key)
+                || input.consume_key(egui::Modifiers::CTRL | egui::Modifiers::COMMAND, key)
+        };
         (
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::C),
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::V),
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::X) || cut,
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::W),
+            chord(input, egui::Key::C),
+            chord(input, egui::Key::V),
+            chord(input, egui::Key::X) || cut,
+            chord(input, egui::Key::W),
         )
     });
+    // Cross references and the watch pin belong to the cell under the cursor,
+    // coil slot included: the coil branch returns before the element handling,
+    // so they must be read here.
+    if xref {
+        app.plc.xref_scroll = 0;
+        let operand = sections
+            .get(cursor.0)
+            .and_then(|section| section.rungs.get(cursor.1))
+            .map(|rung| {
+                if cursor.2 >= POSITIONS {
+                    rung.coil.var.clone()
+                } else {
+                    rung.cells
+                        .get(cursor.2)
+                        .and_then(|cell| cell.operand())
+                        .unwrap_or("")
+                        .to_string()
+                }
+            })
+            .filter(|operand| !operand.is_empty());
+        app.plc.xref = operand;
+    }
+    if watch {
+        let operand = sections
+            .get(cursor.0)
+            .and_then(|section| section.rungs.get(cursor.1))
+            .map(|rung| {
+                if cursor.2 >= POSITIONS {
+                    rung.coil.var.clone()
+                } else {
+                    rung.cells
+                        .get(cursor.2)
+                        .and_then(|cell| cell.operand())
+                        .unwrap_or("")
+                        .to_string()
+                }
+            })
+            .filter(|operand| !operand.is_empty());
+        if let Some(operand) = operand {
+            actions.push(Action::ToggleWatch(operand));
+        }
+    }
     // ZX element letters. They live on the page now that the editor overlay owns
     // the keyboard, and a text field's focus stops the handler above.
     let letter = |input: &mut egui::InputState, key: egui::Key| {
@@ -271,6 +319,28 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         return;
     }
     if cursor.2 >= POSITIONS {
+        // Space cycles the coil's kind: Normal, Set, Reset, Negated. The coil
+        // letters and their rail group are gone; one cell key does the job.
+        let space =
+            ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space));
+        if space {
+            if let Some(rung) = sections
+                .get(cursor.0)
+                .and_then(|section| section.rungs.get(cursor.1))
+            {
+                let next = match rung.coil.kind {
+                    CoilKind::Normal => CoilKind::Set,
+                    CoilKind::Set => CoilKind::Reset,
+                    CoilKind::Reset => CoilKind::Negated,
+                    CoilKind::Negated => CoilKind::Normal,
+                };
+                actions.push(Action::SetCoil {
+                    section: cursor.0,
+                    rung: cursor.1,
+                    coil: Coil::new(rung.coil.var.clone(), next),
+                });
+            }
+        }
         // Enter on the coil edits its operand. This branch returns before the
         // general Enter handling, so the coil's Enter lives here.
         if enter {
@@ -563,22 +633,46 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             });
         }
     }
+    // Cross references and the watch pin belong to the cell under the cursor,
+    // coil slot included: the coil branch returns before the element handling,
+    // so they must be read here.
     if xref {
-        app.plc.xref = sections
+        app.plc.xref_scroll = 0;
+        let operand = sections
             .get(cursor.0)
             .and_then(|section| section.rungs.get(cursor.1))
-            .and_then(|rung| rung.cells.get(cursor.2))
-            .and_then(|cell| cell.operand())
-            .map(|operand| operand.to_string());
+            .map(|rung| {
+                if cursor.2 >= POSITIONS {
+                    rung.coil.var.clone()
+                } else {
+                    rung.cells
+                        .get(cursor.2)
+                        .and_then(|cell| cell.operand())
+                        .unwrap_or("")
+                        .to_string()
+                }
+            })
+            .filter(|operand| !operand.is_empty());
+        app.plc.xref = operand;
     }
     if watch {
-        if let Some(operand) = sections
+        let operand = sections
             .get(cursor.0)
             .and_then(|section| section.rungs.get(cursor.1))
-            .and_then(|rung| rung.cells.get(cursor.2))
-            .and_then(|cell| cell.operand())
-        {
-            actions.push(Action::ToggleWatch(operand.to_string()));
+            .map(|rung| {
+                if cursor.2 >= POSITIONS {
+                    rung.coil.var.clone()
+                } else {
+                    rung.cells
+                        .get(cursor.2)
+                        .and_then(|cell| cell.operand())
+                        .unwrap_or("")
+                        .to_string()
+                }
+            })
+            .filter(|operand| !operand.is_empty());
+        if let Some(operand) = operand {
+            actions.push(Action::ToggleWatch(operand));
         }
     }
     if enter {
@@ -1081,6 +1175,71 @@ fn xref_window(plc: &mut PlcUi, ctx: &egui::Context) {
     let Some(name) = plc.xref.clone() else {
         return;
     };
+    let mut lines: Vec<String> = Vec::new();
+    for pou in plc.project.all_pous() {
+        for section in &pou.sections {
+            for (rung_index, rung) in section.rungs.iter().enumerate() {
+                for (position, cell) in rung.cells.iter().enumerate() {
+                    if cell
+                        .operand()
+                        .map(|operand| operand.eq_ignore_ascii_case(&name))
+                        .unwrap_or(false)
+                    {
+                        lines.push(format!(
+                            "{}  {}  rung {}  position {}",
+                            pou.name,
+                            section.name,
+                            rung_index + 1,
+                            position
+                        ));
+                    }
+                }
+                if rung.coil.var.eq_ignore_ascii_case(&name) {
+                    lines.push(format!(
+                        "{}  {}  rung {}  coil",
+                        pou.name,
+                        section.name,
+                        rung_index + 1
+                    ));
+                }
+            }
+        }
+    }
+    if lines.is_empty() {
+        lines.push("no references".to_string());
+    }
+    // The window owns the arrows: the list scrolls, the grid behind stays put.
+    const ROWS: usize = 10;
+    let keys = modal_keys(ctx);
+    let mut delta = 0isize;
+    if keys.up {
+        delta -= 1;
+    }
+    if keys.down {
+        delta += 1;
+    }
+    // These are the window's keys now: consuming them keeps the grid's cell
+    // cursor where it was while the list scrolls.
+    let page = ctx.input_mut(|input| {
+        let mut page = 0isize;
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            page -= 1;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            page += 1;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+            page -= ROWS as isize;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+            page += ROWS as isize;
+        }
+        page
+    });
+    let delta = if page != 0 { page } else { delta };
+    let max_offset = lines.len().saturating_sub(ROWS);
+    plc.xref_scroll = (plc.xref_scroll as isize + delta).clamp(0, max_offset as isize) as usize;
+    let offset = plc.xref_scroll;
     let mut close = false;
     egui::Window::new(format!("CROSS REFERENCES  {name}"))
         // Above the workbench overlay (Foreground), which is itself above the page.
@@ -1090,63 +1249,41 @@ fn xref_window(plc: &mut PlcUi, ctx: &egui::Context) {
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
             ui.set_min_width(380.0);
-            let mut hits = 0usize;
-            for pou in plc.project.all_pous() {
-                for section in &pou.sections {
-                    for (rung_index, rung) in section.rungs.iter().enumerate() {
-                        for (position, cell) in rung.cells.iter().enumerate() {
-                            if cell
-                                .operand()
-                                .map(|operand| operand.eq_ignore_ascii_case(&name))
-                                .unwrap_or(false)
-                            {
-                                hits += 1;
-                                ui.label(format!(
-                                    "{}  {}  rung {}  position {}",
-                                    pou.name,
-                                    section.name,
-                                    rung_index + 1,
-                                    position
-                                ));
-                            }
-                        }
-                        if rung.coil.var.eq_ignore_ascii_case(&name) {
-                            hits += 1;
-                            ui.label(format!(
-                                "{}  {}  rung {}  coil",
-                                pou.name,
-                                section.name,
-                                rung_index + 1
-                            ));
-                        }
-                    }
-                }
-            }
-            if hits == 0 {
-                ui.label("no references");
+            for line in lines.iter().skip(offset).take(ROWS) {
+                ui.label(
+                    RichText::new(line)
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::FG),
+                );
             }
             ui.add_space(4.0);
             ui.label(
-                RichText::new("ENTER OR ESC CLOSES")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
+                RichText::new(format!(
+                    "↑ ↓ SCROLL · ENTER OR ESC CLOSES · {} REFERENCE(S)",
+                    lines.len()
+                ))
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
             );
-            if theme::action_button(ui, "Close", true).clicked()
-                || modal_keys(ctx).enter
-                || modal_keys(ctx).escape
-            {
+            if theme::action_button(ui, "Close", true).clicked() || keys.enter || keys.escape {
                 close = true;
             }
         });
-    if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+    if close {
         // The window took this Enter or Escape; leaving it in the frame let the
         // ladder act on the same key and open the element list behind the
         // closed cross references.
         ctx.input_mut(|input| {
             input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
             input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp);
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown);
+            input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp);
+            input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown);
         });
         plc.xref = None;
+        plc.xref_scroll = 0;
     }
 }
 
@@ -3878,7 +4015,10 @@ mod compare_window_tests {
             .into_iter()
             .map(|(name, _)| name)
             .collect();
-        assert!(!names.contains(&"pump".to_string()), "input offered: {names:?}");
+        assert!(
+            !names.contains(&"pump".to_string()),
+            "input offered: {names:?}"
+        );
         assert!(names.contains(&"run".to_string()));
         assert!(names.contains(&"seal".to_string()));
     }

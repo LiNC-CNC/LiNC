@@ -82,6 +82,12 @@
       "kind": "bit",
       "retain": false,
       "comment": ""
+    },
+    {
+      "name": "aux1",
+      "kind": "bit",
+      "retain": false,
+      "comment": ""
     }
   ],
   "watch": [],
@@ -127,7 +133,7 @@
               "negated": false
             },
             {
-              "cell": "wire"
+              "cell": "link"
             },
             {
               "cell": "contact",
@@ -218,49 +224,6 @@
               "block": "TOF",
               "instance": "TOF0",
               "preset": "T#5s"
-            },
-            {
-              "cell": "wire"
-            },
-            {
-              "cell": "wire"
-            },
-            {
-              "cell": "wire"
-            },
-            {
-              "cell": "wire"
-            },
-            {
-              "cell": "wire"
-            },
-            {
-              "cell": "wire"
-            },
-            {
-              "cell": "wire"
-            }
-          ]
-        },
-        {
-          "comment": "",
-          "logic": {
-            "op": "contact",
-            "var": "start",
-            "negated": false
-          },
-          "coil": {
-            "var": "run",
-            "kind": "normal"
-          },
-          "cells": [
-            {
-              "cell": "contact",
-              "var": "start",
-              "negated": false
-            },
-            {
-              "cell": "wire"
             },
             {
               "cell": "wire"
@@ -705,7 +668,7 @@
                   "negated": false
                 },
                 {
-                  "cell": "wire"
+                  "cell": "link"
                 },
                 {
                   "cell": "contact",
@@ -796,49 +759,6 @@
                   "block": "TOF",
                   "instance": "TOF0",
                   "preset": "T#5s"
-                },
-                {
-                  "cell": "wire"
-                },
-                {
-                  "cell": "wire"
-                },
-                {
-                  "cell": "wire"
-                },
-                {
-                  "cell": "wire"
-                },
-                {
-                  "cell": "wire"
-                },
-                {
-                  "cell": "wire"
-                },
-                {
-                  "cell": "wire"
-                }
-              ]
-            },
-            {
-              "comment": "",
-              "logic": {
-                "op": "contact",
-                "var": "start",
-                "negated": false
-              },
-              "coil": {
-                "var": "run",
-                "kind": "normal"
-              },
-              "cells": [
-                {
-                  "cell": "contact",
-                  "var": "start",
-                  "negated": false
-                },
-                {
-                  "cell": "wire"
                 },
                 {
                   "cell": "wire"

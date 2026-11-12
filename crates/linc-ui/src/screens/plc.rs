@@ -663,8 +663,6 @@ enum Tag {
     Load,
     Start,
     Stop,
-    Step,
-    ResetData,
     Snapshot,
     Force,
     ClearForces,
@@ -773,6 +771,38 @@ pub struct ComputeEdit {
     pub focus: u8,
     /// Why the last Enter refused a value.
     pub error: Option<String>,
+}
+
+/// The lanes the trend traces when nothing is pinned: inputs and outputs
+/// interleaved, so a screen of the first few symbols always shows both
+/// directions.
+fn trend_names(project: &Project) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut inputs = project
+        .io
+        .iter()
+        .filter(|point| point.direction == IoDirection::In)
+        .map(|point| point.name.clone());
+    let mut outputs = project
+        .io
+        .iter()
+        .filter(|point| point.direction == IoDirection::Out)
+        .map(|point| point.name.clone());
+    loop {
+        let mut added = false;
+        if let Some(name) = inputs.next() {
+            names.push(name);
+            added = true;
+        }
+        if let Some(name) = outputs.next() {
+            names.push(name);
+            added = true;
+        }
+        if !added {
+            break;
+        }
+    }
+    names
 }
 
 /// A ring of boolean samples for the trend page: one lane per symbol, oldest
@@ -971,6 +1001,8 @@ pub struct PlcUi {
     pub cell_mark: Option<(usize, usize, usize)>,
     /// The operand whose cross references are shown.
     pub xref: Option<String>,
+    /// First cross-reference row the window shows.
+    pub xref_scroll: usize,
     /// A timer or counter box is being edited at this cell.
     pub block_edit: Option<(usize, usize, usize)>,
     /// The block at this grid cell is having its instance and preset edited.
@@ -1008,6 +1040,8 @@ pub struct PlcUi {
     pub view_addresses: bool,
     /// The name typed into the symbols table's new row.
     pub symbol_new: String,
+    /// The NEW SYMBOL popup, with the name typed in `symbol_new`.
+    pub symbol_new_dialog: bool,
     /// Symbols table cursor, its column, and the row being renamed.
     pub symbol_cursor: usize,
     pub symbol_column: usize,
@@ -1095,6 +1129,7 @@ impl Default for PlcUi {
             cell_block: Vec::new(),
             cell_mark: None,
             xref: None,
+            xref_scroll: 0,
             block_edit: None,
             fbd_block_edit: None,
             fbd_negate: false,
@@ -1113,6 +1148,7 @@ impl Default for PlcUi {
             text_editing: false,
             view_addresses: false,
             symbol_new: String::new(),
+            symbol_new_dialog: false,
             symbol_cursor: 0,
             symbol_column: 0,
             symbol_edit_row: 0,
@@ -1521,9 +1557,15 @@ impl PlcUi {
         self.fault = snapshot.fault;
         self.vars = snapshot.vars;
         self.words = snapshot.words;
-        // One sample per received snapshot, so the traces follow the scan.
-        self.trend
-            .sample(&self.vars, &self.words, &self.project.watch);
+        // One sample per received snapshot, so the traces follow the scan. With
+        // nothing pinned, both directions are traced: taking the snapshot order
+        // traced whichever pins came first, which left the outputs out.
+        let watch = if self.project.watch.is_empty() {
+            trend_names(&self.project)
+        } else {
+            self.project.watch.clone()
+        };
+        self.trend.sample(&self.vars, &self.words, &watch);
         self.forced = snapshot.forced;
     }
 
@@ -1690,7 +1732,38 @@ impl PlcUi {
             }
             Action::AddRungAfter { section, row } => {
                 let input = default_input_var(&self.project);
-                let output = default_output_var(&self.project);
+                // A new row writes somewhere new: reusing the first output made
+                // the second row a duplicate write, which the validator refuses
+                // and the daemon will not load at startup.
+                let used: Vec<String> = self
+                    .project
+                    .all_pous()
+                    .iter()
+                    .flat_map(|pou| pou.sections.iter())
+                    .flat_map(|section| section.rungs.iter())
+                    .map(|rung| rung.coil.var.clone())
+                    .collect();
+                let output = self
+                    .project
+                    .io
+                    .iter()
+                    .filter(|point| point.direction == IoDirection::Out)
+                    .map(|point| point.name.clone())
+                    .chain(self.project.vars.iter().map(|var| var.name.clone()))
+                    .find(|name| !used.contains(name))
+                    .unwrap_or_else(|| {
+                        let mut index = 1;
+                        loop {
+                            let name = format!("aux{index}");
+                            if !self.project.vars.iter().any(|var| var.name == name) {
+                                self.project
+                                    .vars
+                                    .push(linc_plc_core::model::VarDecl::new(name.clone()));
+                                break name;
+                            }
+                            index += 1;
+                        }
+                    });
                 let mut pous = self.project.all_pous();
                 let mut made = None;
                 if let Some(pou) = pous.get_mut(self.pou) {
@@ -2526,6 +2599,7 @@ pub fn escape_closes_editor(plc: &PlcUi) -> bool {
         && plc.compare_edit.is_none()
         && plc.compute_edit.is_none()
         && plc.xref.is_none()
+        && !plc.symbol_new_dialog
 }
 
 /// The PLC workbench's navigation strip, built with the main GUI's row metrics:
@@ -2585,14 +2659,11 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
             entries.push(row("Compare / compute", "G M", false));
             entries.push(row("Insert before", "I", false));
             entries.push(row("Delete cell", "Bksp", false));
-            entries.push(Heading("COIL"));
-            entries.push(row("Normal / set / reset", "C S R", false));
             entries.push(Heading("RUNG"));
             entries.push(row("New row", "Ctrl+N", false));
-            entries.push(row("Insert row", "Ctrl+Enter", false));
             entries.push(row("Delete row", "Ctrl+Bksp", false));
             entries.push(Heading("PREVIEW"));
-            entries.push(row("Hold a contact", "Space", false));
+            entries.push(row("Hold contact · cycle coil", "Space", false));
             entries.push(row("Drawing only", "no HAL", false));
             entries.push(Heading("TOOLS"));
             entries.push(row("Cross references", "Ctrl+X", false));
@@ -2609,17 +2680,13 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
             entries.push(Heading("TEST RUN"));
             entries.push(row("Loads and starts", "on open", false));
             entries.push(row("Stops", "on leave", false));
-            entries.push(Heading("LADDER"));
-            entries.push(row("Step one scan", "S", false));
-            entries.push(row("Reset data", "E", false));
         }
-        // Every other page keeps the mode switch and the save in reach.
+        // Symbols, watch and trend are editor pages: the ladder's mode switch
+        // belongs to the screen that owns the program list, not here.
         _ => {
-            entries.push(Heading("RUN"));
-            entries.push(row("Start", "Ctrl+Enter", false));
-            entries.push(row("Stop", "Ctrl+Shift+Enter", false));
             entries.push(Heading("SAVE"));
             entries.push(row("Save project", "Ctrl+S", false));
+            entries.push(row("Save as", "Ctrl+Shift+S", false));
         }
     }
     entries
@@ -2846,11 +2913,10 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         save,
         save_as,
         new_project,
-        add_row,
         delete_row,
     ) = if dialog_open {
         (
-            false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false,
         )
     } else {
         (
@@ -2865,9 +2931,6 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
             // Ctrl+Shift+N is the keyboard path to File > New: the menu popup is not
             // reachable by keyboard in this build, and a new project must be.
             ctrl_shift_key(ui, egui::Key::N),
-            // The manual's SS+ENTER substitute, plus Ctrl+J for terminals that
-            // cannot send Ctrl+Enter.
-            ctrl_key(ui, egui::Key::Enter) || ctrl_key(ui, egui::Key::J),
             // The panel keyboard has no Delete key: Bksp is the delete it has.
             ctrl_key(ui, egui::Key::Backspace),
         )
@@ -2886,33 +2949,6 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     }
     if to_trend {
         app.plc.page = PlcPage::Trend;
-    }
-    // The simulation page owns its keys as the manual describes them, and the
-    // input and run keys keep working on the watch and trend pages so a program can
-    // be tried while its signals are compared in time.
-    let sim_keys =
-        !dialog_open && matches!(app.plc.page, PlcPage::Sim | PlcPage::Watch | PlcPage::Trend);
-    if sim_keys {
-        let (step, reset, watch, trend) = ui.input_mut(|input| {
-            (
-                input.consume_key(egui::Modifiers::NONE, egui::Key::S),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::E),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::W),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::G),
-            )
-        });
-        if step {
-            app.plc.send(Tag::Step, Request::Step);
-        }
-        if reset {
-            app.plc.send(Tag::ResetData, Request::ResetData);
-        }
-        if watch {
-            app.plc.page = PlcPage::Watch;
-        }
-        if trend {
-            app.plc.page = PlcPage::Trend;
-        }
     }
     if new_project {
         app.plc.apply(Action::New);
@@ -2936,35 +2972,37 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
             app.plc.cell_cursor = Some((section, rung.saturating_sub(1), 0));
         }
     }
-    if add_row && ladder_page {
-        // Explicit row, not the tree selection: `AddRung` reads the selection,
-        // which is not the cell cursor and inserted the row in the wrong place.
-        let (section, row) = app
-            .plc
-            .cell_cursor
-            .map(|cursor| (cursor.0, cursor.1))
-            .unwrap_or((0, 0));
-        app.plc.apply(Action::AddRungAfter { section, row });
-        app.plc.cell_cursor = Some((section, row + 1, 0));
-    }
     if save {
         app.request_plc_save();
     }
     if save_as {
         app.request_plc_save_as();
     }
-    // TEST RUN is the ladder against the machine: opening the page loads and
-    // starts it, leaving stops it. Nothing on the page can leave it running.
-    if app.plc.page == PlcPage::Sim && !app.plc.sim_running {
+    // TEST RUN, WATCH and TREND all need a running ladder: the watch list and
+    // the trend lanes are dead when the scan stops, which made Trend pointless
+    // the moment it was opened.
+    let run_page = matches!(app.plc.page, PlcPage::Sim | PlcPage::Watch | PlcPage::Trend);
+    if run_page && !app.plc.sim_running {
         app.plc.sim_running = true;
         // Load what is on screen and run it. No save: testing an edit must not
         // rewrite the project file behind the operator's back.
         app.plc.validate();
-        let project = app.plc.project.clone();
-        app.plc.send(Tag::Load, Request::Load { project });
-        app.plc.send(Tag::Start, Request::Start);
-        app.plc.message = "TEST RUN".to_string();
-    } else if app.plc.page != PlcPage::Sim && app.plc.sim_running {
+        // A refused project leaves the daemon with no I/O at best: say why
+        // instead of sending a Load that cannot succeed.
+        if let Some(error) = app
+            .plc
+            .local_diags
+            .iter()
+            .find(|diag| diag.severity == linc_plc_core::validate::Severity::Error)
+        {
+            app.plc.last_error = Some(format!("NOT RUNNING: {} ({})", error.message, error.path));
+        } else {
+            let project = app.plc.project.clone();
+            app.plc.send(Tag::Load, Request::Load { project });
+            app.plc.send(Tag::Start, Request::Start);
+            app.plc.message = "TEST RUN".to_string();
+        }
+    } else if !run_page && app.plc.sim_running {
         app.plc.sim_running = false;
         app.plc.apply(Action::Stop);
     }
@@ -2997,7 +3035,7 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         // strip.
         ui.horizontal_top(|ui| {
             // Two columns need room for the longest label beside its chord
-            // ("Normal / set / reset" with "C S R"), so the pane widens with them.
+            // ("Negated contact" with "X"), so the pane widens with them.
             let nav_width = if rail_total_height(plc) > height {
                 408.0
             } else {
@@ -3014,6 +3052,21 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
                 egui::vec2(page_width, height),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
+                    let banner = if let Some(error) = &plc.last_error {
+                        Some((format!("ERROR  {error}"), theme::ERROR))
+                    } else if !plc.message.is_empty() {
+                        Some((plc.message.clone(), theme::SUCCESS))
+                    } else {
+                        None
+                    };
+                    if let Some((text, colour)) = banner {
+                        ui.label(
+                            RichText::new(text)
+                                .monospace()
+                                .size(theme::font_size(9.0))
+                                .color(colour),
+                        );
+                    }
                     egui::ScrollArea::vertical()
                         .id_salt("plc-page")
                         .max_width(page_width)
@@ -4630,7 +4683,7 @@ fn fbd_notice(ui: &mut Ui) {
 fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
     common::card_title(ui, "SYMBOLS");
     ui.label(
-        RichText::new("N NEW · CTRL+I INPUT · CTRL+O OUTPUT · CTRL+V VAR · ENTER EDITS")
+        RichText::new("N NEW SYMBOL · ENTER EDITS · ← → COLUMN · BACKSPACE REMOVES")
             .monospace()
             .size(theme::font_size(9.0))
             .color(theme::MUTED),
@@ -4672,7 +4725,8 @@ fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Act
     let mut remove: Option<String> = None;
     let mut rename: Option<(String, String)> = None;
     let mut comment_set: Option<(String, String)> = None;
-    let typing = plc.symbol_edit.is_some() || plc.symbol_comment_edit.is_some();
+    let typing =
+        plc.symbol_edit.is_some() || plc.symbol_comment_edit.is_some() || plc.symbol_new_dialog;
     // Both editable columns use the page's own buffer, like the box preset: no
     // egui TextEdit can lose the ring to the grid anchor.
     if let Some(mut buffer) = plc.symbol_edit.clone() {
@@ -4971,67 +5025,98 @@ fn symbols_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Act
         }
     }
 
-    ui.add_space(6.0);
-    // The add field is live only when no table cell is being typed in: otherwise
-    // it took the ring (and the letters) from the name or comment being edited.
-    let new_field_active =
-        plc.text_editing && plc.symbol_edit.is_none() && plc.symbol_comment_edit.is_none();
-    ui.horizontal(|ui| {
-        // Keyboard-only add: `N` claims the field, typed text goes to the buffer,
-        // `I` commits an input and `O` an output, Escape cancels.
-        let field_id = egui::Id::unique("linc-new-symbol");
-        // `N` opens the new-symbol field only when no table cell is being typed
-        // in: otherwise the letter in a name or comment started an add, and a
-        // later `i` in the same word committed it as a symbol.
-        if !typing && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::N)) {
-            plc.text_editing = true;
-            ui.memory_mut(|memory| memory.request_focus(field_id));
-        }
-        // The kind chord is read before the field draws: a plain letter would be
-        // part of the name, and Ctrl+V would be eaten by the field's paste.
-        let (commit_in, commit_out, commit_var, cancel) = if new_field_active {
-            (
-                ctrl_key(ui, egui::Key::I),
-                ctrl_key(ui, egui::Key::O),
-                ctrl_key(ui, egui::Key::V),
-                ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)),
-            )
-        } else {
-            (false, false, false, false)
-        };
-        let mut name = plc.symbol_new.clone();
-        let response = ui.add(
-            egui::TextEdit::singleline(&mut name)
-                .id(field_id)
-                .desired_width(140.0)
-                .hint_text("new symbol name"),
-        );
-        if new_field_active && !response.has_focus() {
-            response.request_focus();
-        }
-        if response.changed() {
-            plc.symbol_new = name.clone();
-        }
-        if new_field_active {
-            let trimmed = plc.symbol_new.trim().to_string();
-            if commit_in && !trimmed.is_empty() {
-                actions.push(Action::AddInput(trimmed));
-                plc.symbol_new.clear();
-                plc.text_editing = false;
-            } else if commit_out && !trimmed.is_empty() {
-                actions.push(Action::AddSymbol(trimmed));
-                plc.symbol_new.clear();
-                plc.text_editing = false;
-            } else if commit_var && !trimmed.is_empty() {
-                actions.push(Action::AddVar(trimmed));
-                plc.symbol_new.clear();
-                plc.text_editing = false;
-            } else if cancel {
-                plc.symbol_new.clear();
-                plc.text_editing = false;
+    // A new symbol is a popup, not an inline field: the table's own keys and
+    // the page anchor left a text field unreachable, so the name is a buffer the
+    // page reads itself.
+    if !typing && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::N)) {
+        plc.symbol_new.clear();
+        plc.symbol_new_dialog = true;
+        // The `n` that opened the popup also arrives as text; it is not part of
+        // the name.
+        ui.input_mut(|input| {
+            input
+                .events
+                .retain(|event| !matches!(event, egui::Event::Text(_)));
+        });
+    }
+    if plc.symbol_new_dialog {
+        let mut add: Option<Action> = None;
+        for event in ui.input(|input| input.events.clone()) {
+            match event {
+                egui::Event::Text(text) => plc.symbol_new.push_str(&text),
+                egui::Event::Key {
+                    key, pressed: true, ..
+                } => match key {
+                    egui::Key::Backspace => {
+                        plc.symbol_new.pop();
+                    }
+                    egui::Key::Escape => plc.symbol_new_dialog = false,
+                    _ => {}
+                },
+                _ => {}
             }
         }
-    });
+        // Ctrl chords commit as a kind: a plain letter is part of the name.
+        if ctrl_key(ui, egui::Key::I) {
+            add = Some(Action::AddInput(plc.symbol_new.trim().to_string()));
+            plc.message =
+                "NEW I/O PIN: RESTART THE PLC SERVICE (OR THE SIM) TO BIND IT".to_string();
+        } else if ctrl_key(ui, egui::Key::O) {
+            add = Some(Action::AddSymbol(plc.symbol_new.trim().to_string()));
+            plc.message =
+                "NEW I/O PIN: RESTART THE PLC SERVICE (OR THE SIM) TO BIND IT".to_string();
+        } else if ctrl_key(ui, egui::Key::B) {
+            add = Some(Action::AddVar(plc.symbol_new.trim().to_string()));
+        }
+        egui::Window::new("NEW SYMBOL")
+            .order(egui::Order::Tooltip)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ui.ctx(), |ui| {
+                ui.set_min_width(320.0);
+                ui.label(
+                    RichText::new("NAME")
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), theme::MIN_TARGET),
+                    egui::Sense::hover(),
+                );
+                ui.painter()
+                    .rect_filled(rect, egui::CornerRadius::same(3), theme::SURFACE);
+                ui.painter().rect_stroke(
+                    rect,
+                    egui::CornerRadius::same(3),
+                    egui::Stroke::new(1.0, theme::ACCENT),
+                    egui::StrokeKind::Inside,
+                );
+                ui.painter().text(
+                    egui::pos2(rect.left() + 8.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    format!("{}▌", plc.symbol_new),
+                    egui::FontId::monospace(theme::font_size(11.0)),
+                    theme::FG,
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new("CTRL+I INPUT · CTRL+O OUTPUT · CTRL+B BIT (VAR) · ESC CANCEL")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+            });
+        if let Some(action) = add {
+            if plc.symbol_new.trim().is_empty() {
+                // Nothing to add: keep the popup so the name is not lost.
+            } else {
+                actions.push(action);
+                plc.symbol_new.clear();
+                plc.symbol_new_dialog = false;
+            }
+        }
+    }
 
     if let Some(name) = remove {
         actions.push(Action::RemoveSymbol(name));
@@ -5527,6 +5612,22 @@ fn status_bar(plc: &PlcUi, ui: &mut Ui) {
             Some((rung.coil.var.clone(), rung.comment.clone()))
         });
     let (state_label, state_color) = run_state_label(plc.state);
+    // Feedback lives where the operator is looking: the editor's status bar.
+    if let Some(error) = &plc.last_error {
+        ui.label(
+            RichText::new(format!("ERROR  {error}"))
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::ERROR),
+        );
+    } else if !plc.message.is_empty() {
+        ui.label(
+            RichText::new(plc.message.clone())
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::SUCCESS),
+        );
+    }
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         match &selected {
@@ -7898,7 +7999,14 @@ mod rail_tests {
         plc.page = PlcPage::Edit;
         let edit = rows(&plc);
         assert!(edit.contains(&("Compare / compute", "G M")), "{edit:?}");
-        assert!(edit.contains(&("Insert row", "Ctrl+Enter")), "{edit:?}");
+        assert!(
+            !edit.iter().any(|(text, _)| *text == "Insert row"),
+            "Ctrl+N is the one row insert: {edit:?}"
+        );
+        assert!(
+            !edit.iter().any(|(text, _)| *text == "Normal / set / reset"),
+            "the coil group is gone: {edit:?}"
+        );
         assert!(edit.contains(&("Delete row", "Ctrl+Bksp")), "{edit:?}");
         assert!(edit.contains(&("Close editor", "Esc")), "{edit:?}");
         assert!(edit.contains(&("Ladder", "Ctrl+1")), "{edit:?}");
@@ -8031,6 +8139,83 @@ mod pou_list_n_tests {
             actions.is_empty(),
             "MAIN cannot be deleted, got {actions:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod new_row_tests {
+    use super::*;
+
+    /// Rows added after one another must not write the same coil: the second
+    /// write made the project invalid, and a saved file then stopped the daemon
+    /// at startup with no I/O and no message.
+    #[test]
+    fn new_rows_get_distinct_coils() {
+        let mut plc = PlcUi::default();
+        plc.project = linc_plc_core::model::Project::new("t");
+        plc.project
+            .io
+            .push(linc_plc_core::IoPoint::new("run", IoDirection::Out));
+        plc.project.sections = vec![linc_plc_core::model::Section {
+            name: "main".into(),
+            rungs: vec![linc_plc_core::model::Rung {
+                comment: String::new(),
+                logic: linc_plc_core::model::Logic::Const { value: true },
+                coil: linc_plc_core::model::Coil::new(
+                    "run",
+                    linc_plc_core::model::CoilKind::Normal,
+                ),
+                cells: vec![Cell::Contact {
+                    var: "start".into(),
+                    negated: false,
+                }],
+            }],
+        }];
+        plc.project.set_pous(plc.project.all_pous());
+        plc.apply(Action::AddRungAfter { section: 0, row: 0 });
+        plc.apply(Action::AddRungAfter { section: 0, row: 1 });
+        let pous = plc.project.all_pous();
+        let coils: Vec<String> = pous[0].sections[0]
+            .rungs
+            .iter()
+            .map(|rung| rung.coil.var.clone())
+            .collect();
+        let mut unique = coils.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(
+            unique.len(),
+            coils.len(),
+            "duplicate coil target: {coils:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod trend_tests {
+    use super::*;
+
+    /// With nothing pinned, the trend traces both directions. Taking the
+    /// snapshot order showed whichever pins came first — all inputs, in the
+    /// demo — and the outputs never appeared.
+    #[test]
+    fn the_default_trend_traces_inputs_and_outputs() {
+        let mut project = Project::new("t");
+        for (name, direction) in [
+            ("start", IoDirection::In),
+            ("stop", IoDirection::In),
+            ("run", IoDirection::Out),
+            ("pump", IoDirection::In),
+            ("fan", IoDirection::Out),
+        ] {
+            project
+                .io
+                .push(linc_plc_core::IoPoint::new(name, direction));
+        }
+        let names = trend_names(&project);
+        assert!(names.contains(&"run".to_string()), "{names:?}");
+        assert!(names.contains(&"fan".to_string()), "{names:?}");
+        assert!(names.contains(&"start".to_string()), "{names:?}");
     }
 }
 
