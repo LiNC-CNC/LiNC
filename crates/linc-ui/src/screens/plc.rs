@@ -2376,109 +2376,181 @@ pub fn escape_closes_editor(plc: &PlcUi) -> bool {
 pub const RAIL_INNER_GAP: f32 = theme::NAV_ROW_GAP;
 pub const RAIL_GROUP_GAP: f32 = 8.0;
 
-fn shortcut_nav(plc: &PlcUi, ui: &mut Ui) {
+enum RailEntry {
+    Heading(&'static str),
+    Row {
+        text: &'static str,
+        key: &'static str,
+        active: bool,
+    },
+}
+
+/// The rail's rows as data, so they can be laid out in one column or two.
+fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
+    use RailEntry::{Heading, Row};
+    let edit = plc.page == PlcPage::Edit;
+    let mut entries = vec![
+        Heading("PAGES"),
+        Row { text: "Menu (File)", key: "F10", active: false },
+        Row { text: "Open editor", key: "Ctrl+E", active: false },
+        Row { text: "New project", key: "N", active: false },
+        Row { text: "POU list", key: "Ctrl+1", active: plc.page == PlcPage::PouList },
+        Row { text: "Ladder", key: "Ctrl+2", active: edit },
+        Row { text: "Symbols", key: "Ctrl+3", active: plc.page == PlcPage::Symbols },
+        Row { text: "Simulation", key: "Ctrl+4", active: plc.page == PlcPage::Sim },
+        Row { text: "Watch", key: "Ctrl+W", active: plc.page == PlcPage::Watch },
+        Row { text: "Trend", key: "Ctrl+T", active: plc.page == PlcPage::Trend },
+        Heading("RUN"),
+        Row { text: "Run / stop", key: "R", active: false },
+        Heading("RUNG"),
+        Row { text: "New row", key: "Ctrl+N", active: false },
+        Row { text: "New row at cursor", key: "Ctrl+J", active: false },
+        Row { text: "Delete row", key: "Ctrl+Del", active: false },
+        Heading("SAVE"),
+        Row { text: "Save project", key: "Ctrl+S", active: false },
+        Heading("ELEMENTS"),
+        Row { text: "Contact", key: "C", active: false },
+        Row { text: "Negated contact", key: "X", active: false },
+        Row { text: "Rising / falling edge", key: "P N", active: false },
+        Row { text: "Wire / link", key: "W V", active: false },
+        Row { text: "Timer / counter", key: "T F U K D", active: false },
+        Row { text: "Compare / compute", key: "G M", active: false },
+        Row { text: "Insert before", key: "I", active: false },
+        Row { text: "Delete cell", key: "Bksp", active: false },
+        Heading("COIL"),
+        Row { text: "Normal / set / reset", key: "C S R", active: false },
+        Heading("SIMULATION"),
+        Row { text: "Toggle input bit", key: "0-7", active: false },
+        Row { text: "Select input byte", key: "B", active: false },
+        Row { text: "Step one scan", key: "S", active: false },
+        Row { text: "Reset data", key: "E", active: false },
+        Heading("TOOLS"),
+        Row { text: "Watch page", key: "W", active: false },
+        Row { text: "Trend page", key: "G", active: false },
+        Row { text: "Cross references", key: "Ctrl+X", active: false },
+        Row { text: "Undo / redo", key: "Ctrl+Z Y", active: false },
+    ];
+    if edit {
+        entries.retain(|entry| !matches!(entry, RailEntry::Row { text: "Ladder", .. }));
+        entries.insert(5, RailEntry::Row { text: "Ladder", key: "Ctrl+2", active: true });
+    }
+    entries
+}
+
+/// The height one entry asks for, including its gap.
+fn rail_entry_height(entry: &RailEntry) -> f32 {
+    match entry {
+        RailEntry::Heading(_) => RAIL_GROUP_GAP + theme::NAV_ROW_HEIGHT_SECONDARY,
+        RailEntry::Row { .. } => RAIL_INNER_GAP + theme::NAV_ROW_HEIGHT_SECONDARY,
+    }
+}
+
+/// Paint entries from the top, with a group heading opening each new group.
+fn draw_rail_entries(ui: &mut Ui, entries: &[RailEntry]) {
     ui.spacing_mut().item_spacing.y = 0.0;
-    let row = |ui: &mut Ui, text: &str, key: &str, active: bool| {
-        let (rect, _) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
-            egui::Sense::hover(),
-        );
-        if active {
-            ui.painter().rect_filled(rect, 2.0, theme::PANEL_RAISED);
+    let mut first = true;
+    for entry in entries {
+        match entry {
+            RailEntry::Heading(text) => {
+                if !first {
+                    ui.add_space(RAIL_GROUP_GAP);
+                }
+                first = false;
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
+                    egui::Sense::hover(),
+                );
+                ui.painter().text(
+                    egui::pos2(rect.left() + 6.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    *text,
+                    FontId::proportional(theme::font_size(8.0)),
+                    theme::C3,
+                );
+            }
+            RailEntry::Row { text, key, active } => {
+                first = false;
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
+                    egui::Sense::hover(),
+                );
+                if *active {
+                    ui.painter().rect_filled(rect, 2.0, theme::PANEL_RAISED);
+                }
+                ui.painter().text(
+                    egui::pos2(rect.left() + 6.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    *text,
+                    FontId::proportional(theme::font_size(9.5)),
+                    if *active { theme::FG } else { theme::MUTED },
+                );
+                ui.painter().text(
+                    egui::pos2(rect.right() - 6.0, rect.center().y),
+                    Align2::RIGHT_CENTER,
+                    *key,
+                    FontId::monospace(theme::font_size(8.5)),
+                    theme::ACCENT,
+                );
+                ui.add_space(RAIL_INNER_GAP);
+            }
         }
-        ui.painter().text(
-            egui::pos2(rect.left() + 6.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            text,
-            FontId::proportional(theme::font_size(9.5)),
-            if active { theme::FG } else { theme::MUTED },
-        );
-        ui.painter().text(
-            egui::pos2(rect.right() - 6.0, rect.center().y),
-            Align2::RIGHT_CENTER,
-            key,
-            FontId::monospace(theme::font_size(8.5)),
-            theme::ACCENT,
-        );
-    };
-    let heading = |ui: &mut Ui, text: &str, first: bool| {
-        if !first {
-            ui.add_space(RAIL_GROUP_GAP);
+    }
+}
+
+/// Split at a group heading nearest the halfway mark, so each column starts on a
+/// heading instead of cutting a group in two.
+fn rail_split(entries: &[RailEntry], total: f32) -> usize {
+    let mut best = entries.len() / 2;
+    let mut best_distance = f32::MAX;
+    let mut running = 0.0;
+    for (index, entry) in entries.iter().enumerate() {
+        if matches!(entry, RailEntry::Heading(_)) && index > 0 {
+            let distance = (running - total / 2.0).abs();
+            if distance < best_distance {
+                best_distance = distance;
+                best = index;
+            }
         }
-        let (rect, _) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
-            egui::Sense::hover(),
-        );
-        ui.painter().text(
-            egui::pos2(rect.left() + 6.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            text,
-            FontId::proportional(theme::font_size(8.0)),
-            theme::C3,
-        );
+        running += rail_entry_height(entry);
+    }
+    best
+}
+
+/// Height the whole rail asks for in one column; the editor widens the pane when
+/// the viewport is shorter than this, so the second column has room for its label
+/// and chord.
+pub fn rail_total_height(plc: &PlcUi) -> f32 {
+    rail_entries(plc).iter().map(rail_entry_height).sum()
+}
+
+fn shortcut_nav(plc: &PlcUi, ui: &mut Ui) {
+    let entries = rail_entries(plc);
+    let needed: f32 = entries.iter().map(rail_entry_height).sum();
+    // A rail that cannot fit its rows in one column continues beside itself: the
+    // groups stay in reading order, split on a heading so neither column starts
+    // halfway through one.
+    let columns = if needed > ui.available_height() && ui.available_width() >= 320.0 {
+        2
+    } else {
+        1
     };
-    heading(ui, "PAGES", true);
-    row(ui, "Menu (File)", "F10", false);
-    ui.add_space(RAIL_INNER_GAP);
-    row(ui, "Open editor", "Ctrl+E", false);
-    ui.add_space(RAIL_INNER_GAP);
-    row(ui, "New project", "N", false);
-    ui.add_space(RAIL_INNER_GAP);
-    row(ui, "POU list", "Ctrl+1", plc.page == PlcPage::PouList);
-    ui.add_space(RAIL_INNER_GAP);
-    row(ui, "Ladder", "Ctrl+2", plc.page == PlcPage::Edit);
-    ui.add_space(RAIL_INNER_GAP);
-    row(ui, "Symbols", "Ctrl+3", plc.page == PlcPage::Symbols);
-    ui.add_space(RAIL_INNER_GAP);
-    row(ui, "Simulation", "Ctrl+4", plc.page == PlcPage::Sim);
-    heading(ui, "RUN", false);
-    row(ui, "Run / stop", "R", false);
-    heading(ui, "RUNG", false);
-    row(ui, "New row", "Ctrl+N", false);
-    ui.add_space(RAIL_INNER_GAP);
-    row(ui, "New row at cursor", "Ctrl+J", false);
-    ui.add_space(RAIL_INNER_GAP);
-    row(ui, "Delete row", "Ctrl+Del", false);
-    heading(ui, "SAVE", false);
-    row(ui, "Save project", "Ctrl+S", false);
-    heading(ui, "ELEMENTS", false);
-    for (text, key) in [
-        ("Contact", "C"),
-        ("Negated contact", "X"),
-        ("Rising / falling edge", "P N"),
-        ("Wire / link", "W V"),
-        ("Timer / counter", "T F U K D"),
-        ("Compare / compute", "G M"),
-        ("Insert before", "I"),
-        ("Delete cell", "Bksp"),
-    ] {
-        row(ui, text, key, false);
-        ui.add_space(RAIL_INNER_GAP);
+    if columns == 1 {
+        draw_rail_entries(ui, &entries);
+        return;
     }
-    heading(ui, "COIL", false);
-    row(ui, "Normal / set / reset", "C S R", false);
-    heading(ui, "SIMULATION", false);
-    for (text, key) in [
-        ("Toggle input bit", "0-7"),
-        ("Select input byte", "B"),
-        ("Run / stop", "R"),
-        ("Step one scan", "S"),
-        ("Reset data", "E"),
-        ("Watch page", "W"),
-        ("Trend page", "G"),
-    ] {
-        row(ui, text, key, false);
-        ui.add_space(RAIL_INNER_GAP);
-    }
-    heading(ui, "TOOLS", false);
-    for (text, key) in [
-        ("Watch", "Ctrl+W"),
-        ("Cross references", "Ctrl+X"),
-        ("Undo / redo", "Ctrl+Z Y"),
-    ] {
-        row(ui, text, key, false);
-        ui.add_space(RAIL_INNER_GAP);
-    }
+    let split = rail_split(&entries, needed);
+    let column_width = (ui.available_width() - 6.0) / 2.0;
+    let height = ui.available_height();
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        for chunk in [&entries[..split], &entries[split..]] {
+            ui.allocate_ui_with_layout(
+                egui::vec2(column_width, height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| draw_rail_entries(ui, chunk),
+            );
+        }
+    });
 }
 
 pub fn editor(app: &mut LincApp, ui: &mut Ui) {
@@ -2755,7 +2827,13 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         // allocating both sizes the page took the whole width and drew over the
         // strip.
         ui.horizontal_top(|ui| {
-            let nav_width = 196.0;
+            // Two columns need room for the longest label beside its chord
+            // ("Normal / set / reset" with "C S R"), so the pane widens with them.
+            let nav_width = if rail_total_height(plc) > height {
+                408.0
+            } else {
+                196.0
+            };
             ui.allocate_ui_with_layout(
                 egui::vec2(nav_width, height),
                 egui::Layout::top_down(egui::Align::Min),
