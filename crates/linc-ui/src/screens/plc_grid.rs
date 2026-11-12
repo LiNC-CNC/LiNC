@@ -9,7 +9,7 @@ use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_core::grid::{Cell, POSITIONS};
 use linc_plc_core::{Coil, CoilKind, PouLanguage, Rung};
 
-use crate::screens::plc::{Action, ExprEdit, PlcPage, PlcUi, RAIL_GROUP_GAP, RAIL_INNER_GAP};
+use crate::screens::plc::{Action, ExprEdit, PlcPage, PlcUi, RAIL_GROUP_GAP};
 use crate::shell::LincApp;
 use crate::theme;
 
@@ -559,10 +559,10 @@ pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     xref_window(plc, ctx);
 }
 
-/// Timer and counter boxes: the instance and the preset, as the manual describes
-/// them — two typed fields, not a wall of preset buttons. ZX asks for the instance
-/// and then the preset when a box is placed; the same window edits a placed box,
-/// and `T` on one opens straight into the preset field.
+/// Timer and counter boxes: pick the instance from the ones the block type has,
+/// type the preset, and the window says what a preset may look like. The panel
+/// keyboard has no Tab, so nothing here needs it: the arrows walk the instance
+/// list, typed characters go into the preset, Enter applies, Esc leaves.
 fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
     let Some((section, rung, position)) = plc.block_edit else {
         plc.block_fields = None;
@@ -584,21 +584,18 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
         plc.block_fields = None;
         return;
     };
-    // The fields follow the box, never the other way round: a frame that re-synced
-    // every draw would fight the operator's typing.
+    // The buffer follows the box, never the other way round: a frame that
+    // re-synced every draw would fight the operator's typing.
     if plc.block_fields != Some((section, rung, position)) {
         plc.block_fields = Some((section, rung, position));
-        plc.block_instance_text = instance.clone();
         plc.block_preset_text = preset.clone();
-        plc.block_field = 0;
+        plc.block_preset_error = None;
+        plc.block_instance_cursor = instance_number(&block, &instance).unwrap_or(0);
     }
+    let used = used_instances(plc, &block);
+    let counters = block.starts_with("CT");
     let mut close = false;
     let mut apply = false;
-    let hint = if block.starts_with("CT") {
-        "PV, e.g. 10"
-    } else {
-        "PT, e.g. T#1s"
-    };
     egui::Window::new(format!("{block} BOX"))
         // Above the workbench overlay (Foreground), which is itself above the page.
         .order(egui::Order::Tooltip)
@@ -606,101 +603,236 @@ fn block_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
-            ui.spacing_mut().item_spacing.y = RAIL_INNER_GAP;
+            ui.spacing_mut().item_spacing.y = 0.0;
             ui.set_min_width(340.0);
-            let field = |ui: &mut Ui, label: &str, text: &mut String, hint: &str, active: bool| {
-                ui.horizontal(|ui| {
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(64.0, theme::NAV_ROW_HEIGHT_SECONDARY),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.label(
-                                RichText::new(label)
-                                    .size(theme::font_size(9.0))
-                                    .color(if active { theme::FG } else { theme::MUTED }),
-                            );
-                        },
-                    );
-                    let response = ui.add(
-                        egui::TextEdit::singleline(text)
-                            .desired_width(150.0)
-                            .hint_text(hint)
-                            .font(egui::FontId::monospace(theme::font_size(10.0))),
-                    );
-                    if active && !response.has_focus() {
-                        response.request_focus();
-                    }
-                });
-            };
-            field(
-                ui,
-                "instance",
-                &mut plc.block_instance_text,
-                "TON0",
-                plc.block_field == 0,
-            );
-            field(
-                ui,
-                "preset  ",
-                &mut plc.block_preset_text,
-                hint,
-                plc.block_field == 1,
-            );
-            ui.add_space(2.0);
             ui.label(
-                RichText::new("Tab moves between the fields · Enter applies · Esc cancels")
-                    .size(theme::font_size(8.5))
+                RichText::new("INSTANCE")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            // One row per instance, in the tool table's dressing: the band marks
+            // the choice, the right-hand word says whether something else
+            // already holds it.
+            for number in 0..4 {
+                let name = format!("{block}{number}");
+                let row_selected = plc.block_instance_cursor == number;
+                let taken = used.contains(&name);
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), theme::NAV_ROW_HEIGHT_SECONDARY),
+                    egui::Sense::hover(),
+                );
+                let painter = ui.painter();
+                if row_selected {
+                    painter.rect_filled(rect, egui::CornerRadius::ZERO, theme::PANEL_RAISED);
+                    painter.rect_filled(
+                        egui::Rect::from_min_size(
+                            rect.min,
+                            egui::vec2(theme::SELECTION_BAR, rect.height()),
+                        ),
+                        egui::CornerRadius::ZERO,
+                        theme::ACCENT,
+                    );
+                } else if number % 2 == 1 {
+                    painter.rect_filled(rect, egui::CornerRadius::ZERO, theme::SURFACE);
+                }
+                painter.text(
+                    egui::pos2(rect.left() + theme::SELECTION_BAR + 6.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    &name,
+                    egui::FontId::monospace(theme::font_size(10.0)),
+                    if taken { theme::C3 } else { theme::FG },
+                );
+                painter.text(
+                    egui::pos2(rect.right() - 6.0, rect.center().y),
+                    egui::Align2::RIGHT_CENTER,
+                    if taken { "IN USE" } else { "FREE" },
+                    egui::FontId::monospace(theme::font_size(9.0)),
+                    if taken { theme::C3 } else { theme::MUTED },
+                );
+            }
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(if counters {
+                    "PRESET (PV)"
+                } else {
+                    "PRESET (PT)"
+                })
+                .monospace()
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+            );
+            // The typed value is the window's own buffer: no text widget holds
+            // the keyboard, so the arrows never have to be given back to the
+            // instance list first.
+            let (rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), theme::MIN_TARGET),
+                egui::Sense::hover(),
+            );
+            let painter = ui.painter();
+            painter.rect_filled(rect, egui::CornerRadius::same(3), theme::SURFACE);
+            painter.rect_stroke(
+                rect,
+                egui::CornerRadius::same(3),
+                egui::Stroke::new(1.0, theme::BORDER),
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                egui::pos2(rect.left() + 8.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                format!("{}▌", plc.block_preset_text),
+                egui::FontId::monospace(theme::font_size(11.0)),
+                theme::FG,
+            );
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(if counters {
+                    "a whole number, e.g. 25"
+                } else {
+                    "T#<n>ms, T#<n>s or T#<n>m — e.g. T#250ms, T#2s, T#1m"
+                })
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+            );
+            if let Some(error) = &plc.block_preset_error {
+                ui.label(
+                    RichText::new(error)
+                        .size(theme::font_size(9.0))
+                        .color(theme::ERROR),
+                );
+            }
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("↑ ↓ INSTANCE · TYPE THE PRESET")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            ui.label(
+                RichText::new("BACKSPACE · ENTER APPLY · ESC CANCEL")
+                    .monospace()
+                    .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
         });
-    // Tab and the arrows move between the two fields; Enter applies them both.
-    if ctx
-        .input(|input| input.key_pressed(egui::Key::Tab) || input.key_pressed(egui::Key::ArrowDown))
-    {
-        plc.block_field = (plc.block_field + 1) % 2;
+    let keys = modal_keys(ctx);
+    if keys.up {
+        plc.block_instance_cursor = plc.block_instance_cursor.saturating_sub(1);
     }
-    if ctx.input(|input| {
-        input.key_pressed(egui::Key::ArrowUp) || input.key_pressed(egui::Key::ArrowRight)
-    }) && plc.block_field == 0
-    {
-        // Cycling the instance with the arrows is quicker than retyping TON0.
-        let next = plc
-            .block_instance_text
-            .trim()
-            .strip_prefix(&block)
-            .and_then(|digits| digits.parse::<usize>().ok())
-            .map(|number| (number + 1) % 4)
-            .unwrap_or(0);
-        plc.block_instance_text = format!("{block}{next}");
+    if keys.down {
+        plc.block_instance_cursor = (plc.block_instance_cursor + 1).min(3);
     }
-    if ctx.input(|input| input.key_pressed(egui::Key::Enter)) {
+    if keys.backspace {
+        plc.block_preset_text.pop();
+    }
+    for character in keys.typed {
+        // A preset is digits, `#`, letters for the unit and a dot; anything else
+        // is refused here so the buffer cannot fill with keys that never parse.
+        if character.is_ascii_alphanumeric() || matches!(character, '#' | '.' | ':') {
+            plc.block_preset_text.push(character);
+        }
+    }
+    if keys.enter {
         apply = true;
+        // Enter belongs to this window: leaving it in the frame let the grid
+        // behind reopen the box in the same keystroke, so Apply looked like
+        // Cancel followed by a reopen.
+        ctx.input_mut(|input| {
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+        });
     }
-    if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+    if keys.escape {
         close = true;
     }
     if apply {
-        let instance = plc.block_instance_text.trim().to_string();
+        let instance = format!("{block}{}", plc.block_instance_cursor);
         let preset = plc.block_preset_text.trim().to_string();
-        if instance.is_empty() && preset.is_empty() {
-            close = true;
-        } else {
-            actions.push(Action::SetBlockField {
-                section,
-                rung,
-                position,
-                instance: (!instance.is_empty()
-                    && instance != instance_at(plc, section, rung, position))
-                .then_some(instance),
-                preset: (!preset.is_empty() && preset != preset_at(plc, section, rung, position))
+        match preset_is_valid(counters, &preset) {
+            Ok(()) => {
+                actions.push(Action::SetBlockField {
+                    section,
+                    rung,
+                    position,
+                    instance: (instance != instance_at(plc, section, rung, position))
+                        .then_some(instance),
+                    preset: (!preset.is_empty()
+                        && preset != preset_at(plc, section, rung, position))
                     .then_some(preset),
-            });
-            close = true;
+                });
+                close = true;
+            }
+            // The window stays and says why: closing on a bad preset would write
+            // nothing and look like it worked.
+            Err(error) => plc.block_preset_error = Some(error),
         }
     }
     if close {
         plc.block_edit = None;
         plc.block_fields = None;
+    }
+}
+
+/// The instance index in `TON2`, when the name has the block's own prefix.
+fn instance_number(block: &str, instance: &str) -> Option<usize> {
+    instance
+        .trim()
+        .strip_prefix(block)
+        .and_then(|digits| digits.parse::<usize>().ok())
+        .filter(|number| *number < 4)
+}
+
+/// Instances of this block type that another box in the project already holds.
+fn used_instances(plc: &PlcUi, block: &str) -> Vec<String> {
+    let mut used = Vec::new();
+    for pou in plc.project.all_pous() {
+        for section in &pou.sections {
+            for rung in &section.rungs {
+                for cell in &rung.cells {
+                    if let Cell::Block {
+                        block: kind,
+                        instance,
+                        ..
+                    } = cell
+                    {
+                        if kind == block && !used.contains(instance) {
+                            used.push(instance.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    used
+}
+
+/// What a preset may hold. The rules are the ones the window states, so a value
+/// the operator can type and the dialog accepts are the same set.
+fn preset_is_valid(counters: bool, preset: &str) -> Result<(), String> {
+    if preset.is_empty() {
+        return Err("a preset is required, e.g. T#1s".to_string());
+    }
+    if counters {
+        return preset
+            .parse::<i32>()
+            .map(|value| {
+                let _ = value;
+            })
+            .map_err(|_| format!("{preset} is not a whole number, e.g. 25"));
+    }
+    let rest = preset
+        .strip_prefix("T#")
+        .ok_or_else(|| format!("{preset} must start with T#, e.g. T#250ms"))?;
+    let number_len = rest
+        .find(|character: char| !character.is_ascii_digit() && character != '.')
+        .unwrap_or(rest.len());
+    let (number, unit) = rest.split_at(number_len);
+    if number.is_empty() || number.parse::<f32>().is_err() {
+        return Err(format!("{preset} has no number, e.g. T#250ms"));
+    }
+    match unit {
+        "ms" | "s" | "m" => Ok(()),
+        "" => Err(format!("{preset} needs a unit: ms, s or m")),
+        other => Err(format!("{other} is not a unit: use ms, s or m")),
     }
 }
 
@@ -870,6 +1002,11 @@ fn clear_pickers(plc: &mut PlcUi) {
     plc.operand_pick = None;
     plc.coil_pick = None;
     plc.operand_filter.clear();
+    // The block window is a picker too. Leaving it out of the sweep kept its
+    // state alive, so Escape skipped its draw for one frame and the window came
+    // straight back on the next.
+    plc.block_edit = None;
+    plc.block_fields = None;
 }
 
 /// A picker row is taller than a rail row so the glyphs keep a clear band of
@@ -2342,5 +2479,62 @@ mod rung_pitch_tests {
     fn the_ladder_zeroes_the_vertical_spacing() {
         let spacing = pass_with(|ui| crate::screens::plc::zero_rung_spacing(ui));
         assert_eq!(spacing, 0.0);
+    }
+}
+
+#[cfg(test)]
+mod block_window_tests {
+    use super::*;
+
+    /// The hint under the field is the rule: what it says is accepted, what it
+    /// does not say is refused with a reason.
+    #[test]
+    fn timer_presets_need_a_number_and_a_unit() {
+        assert!(preset_is_valid(false, "T#250ms").is_ok());
+        assert!(preset_is_valid(false, "T#2s").is_ok());
+        assert!(preset_is_valid(false, "T#1.5s").is_ok());
+        assert!(preset_is_valid(false, "T#1m").is_ok());
+        assert_eq!(
+            preset_is_valid(false, "T#2").unwrap_err(),
+            "T#2 needs a unit: ms, s or m"
+        );
+        assert_eq!(
+            preset_is_valid(false, "2s").unwrap_err(),
+            "2s must start with T#, e.g. T#250ms"
+        );
+        assert_eq!(
+            preset_is_valid(false, "T#2h").unwrap_err(),
+            "h is not a unit: use ms, s or m"
+        );
+    }
+
+    #[test]
+    fn counter_presets_are_whole_numbers() {
+        assert!(preset_is_valid(true, "25").is_ok());
+        assert_eq!(
+            preset_is_valid(true, "2.5").unwrap_err(),
+            "2.5 is not a whole number, e.g. 25"
+        );
+    }
+
+    /// The window's instance list is the block type's four slots, named the way
+    /// the ladder names them.
+    #[test]
+    fn the_instance_list_is_four_slots_of_the_same_block() {
+        assert_eq!(instance_number("TON", "TON2"), Some(2));
+        assert_eq!(instance_number("TON", "TOF2"), None);
+        assert_eq!(instance_number("TON", "TON9"), None);
+    }
+
+    /// Escape used to skip the window's draw for one frame and leave its state
+    /// alive, so the window came straight back. The sweep clears it.
+    #[test]
+    fn escape_drops_the_block_window_with_the_pickers() {
+        let mut plc = PlcUi::default();
+        plc.block_edit = Some((0, 0, 1));
+        plc.block_fields = Some((0, 0, 1));
+        clear_pickers(&mut plc);
+        assert!(plc.block_edit.is_none());
+        assert!(plc.block_fields.is_none());
     }
 }

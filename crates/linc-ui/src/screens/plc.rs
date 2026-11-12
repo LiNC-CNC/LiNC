@@ -914,12 +914,17 @@ pub struct PlcUi {
     pub scroll_to_pou: bool,
     /// Enter or a double click on a row asks for the editor window.
     pub open_editor: bool,
+    /// SAVE asks the shell for the save dialog; the file name is chosen there.
+    pub save_requested: bool,
+    /// A dialog owns the keys; the list behind it must not take them.
+    pub keys_blocked: bool,
     /// The box the dialog is editing, and the two typed fields it holds.
     pub block_fields: Option<(usize, usize, usize)>,
-    pub block_instance_text: String,
+    /// Which of the block type's four instances the window has selected.
+    pub block_instance_cursor: usize,
+    /// The preset being typed, and why the last Enter refused it.
     pub block_preset_text: String,
-    /// 0 edits the instance, 1 the preset.
-    pub block_field: usize,
+    pub block_preset_error: Option<String>,
     /// Project snapshots for undo, oldest first, and the redo arm of the pair.
     pub undo_stack: Vec<Vec<Pou>>,
     pub redo_stack: Vec<Vec<Pou>>,
@@ -1027,10 +1032,12 @@ impl Default for PlcUi {
             expr_edit: None,
             scroll_to_pou: false,
             open_editor: false,
+            save_requested: false,
+            keys_blocked: false,
             block_fields: None,
-            block_instance_text: String::new(),
+            block_instance_cursor: 0,
             block_preset_text: String::new(),
-            block_field: 0,
+            block_preset_error: None,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             cell_clipboard: None,
@@ -2283,6 +2290,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // fire while the workbench owns the keyboard: plain `N` there opened the NEW
     // PROJECT? dialog over the IL editor and swallowed the next Enter.
     let workbench_open = app.overlay.plc_editor;
+    // The rail advertises Ctrl+S on this screen, so the screen answers it: the
+    // program list's Save asks for the same dialog the editor does.
+    if !workbench_open && ctrl_key(ui, egui::Key::S) {
+        app.plc.save_requested = true;
+    }
     if !workbench_open
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::E))
     {
@@ -2296,7 +2308,12 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         // Ask first, as the manual does: a stray N must not replace the project.
         app.plc.new_confirm = true;
     }
+    // Anything on top of the list — a dialog or the editor window — owns Enter,
+    // the arrows and the letters. Without this the list ate the Enter that should
+    // have confirmed the save dialog, and every arrow aimed at the ladder.
+    let dialog_open = app.overlay.modal.is_some() || workbench_open;
     let plc = &mut app.plc;
+    plc.keys_blocked = dialog_open;
 
     let width = ui.available_width();
     // The program list sits over the service pane: the list is what the operator
@@ -2323,6 +2340,10 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     plc.open_editor = false;
     if open_from_list {
         open_frame = Some(ui.ctx().cumulative_frame_nr());
+    }
+    if app.plc.save_requested {
+        app.plc.save_requested = false;
+        app.request_plc_save();
     }
     if new_project {
         app.plc.apply(Action::New);
@@ -2698,10 +2719,16 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     // No field may hold focus unless the operator claimed one by clicking it.
     // A TextEdit that keeps focus on this page consumes Enter and chords such as
     // Ctrl+Enter before the grid's handlers see them.
+    // The grid's own anchor is the exception: it holds the focus so egui's focus
+    // navigation never eats the arrow keys, and surrendering it here left the
+    // cell cursor unable to move vertically at all.
+    let anchor_id = ui.scope_id().with("plc-editor-focus");
     if !app.plc.text_editing {
         ui.ctx().memory_mut(|memory| {
             if let Some(id) = memory.focused() {
-                memory.surrender_focus(id);
+                if id != anchor_id {
+                    memory.surrender_focus(id);
+                }
             }
         });
     }
@@ -2734,9 +2761,15 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         }
     }
     // Locked: the grid owns the arrows, and an unlocked anchor let egui walk the
-    // focus away on a plain Left/Right, so the cursor never moved.
+    // focus away on a plain Left/Right, so the cursor never moved. The anchor
+    // also has to hold the focus: the lock filter is only consulted for the
+    // focused widget, so without this egui spent the arrows on focus navigation
+    // and the cell cursor never moved at all.
     if !app.plc.menu_open {
-        common::focus_anchor_locked(ui, "plc-editor-focus", true);
+        let anchor = common::focus_anchor_locked(ui, "plc-editor-focus", true);
+        if !app.plc.text_editing && !anchor.has_focus() {
+            anchor.request_focus();
+        }
     }
     if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
         eprintln!("plc cp: after-focus");
@@ -2899,7 +2932,7 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
         app.plc.cell_cursor = Some((section, row + 1, 0));
     }
     if save {
-        app.plc.apply(Action::Save);
+        app.request_plc_save();
     }
     let mut actions: Vec<Action> = Vec::new();
     if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
@@ -3011,7 +3044,7 @@ fn pou_list_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
     // Only the drawn list owns these keys. `pou_list_page` sets the page before
     // it reads them, so a stale `Edit` left behind by the closed editor cannot
     // make the list deaf, and a direct call from anywhere else stays inert.
-    if plc.page != PlcPage::PouList || plc.text_editing {
+    if plc.page != PlcPage::PouList || plc.text_editing || plc.keys_blocked {
         return;
     }
     let pous = plc.project.all_pous();
@@ -5449,7 +5482,7 @@ fn status_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
             actions.push(Action::Open);
         }
         if theme::action_button(ui, "SAVE", true).clicked() {
-            actions.push(Action::Save);
+            plc.save_requested = true;
         }
         if theme::action_button(ui, "VALIDATE", true).clicked() {
             actions.push(Action::Validate);
