@@ -185,7 +185,7 @@ pub enum Action {
     /// Hold a marker word at a value, typed in the watch row.
     ForceWord {
         name: String,
-        value: i16,
+        value: i32,
     },
     /// Release a marker word's force.
     UnforceWord(String),
@@ -857,7 +857,7 @@ pub struct TrendBuffer {
     pub lanes: Vec<Vec<bool>>,
     /// Block members (`ET`/`CV`) as analog lanes, up to four.
     pub word_channels: Vec<String>,
-    pub word_lanes: Vec<Vec<i16>>,
+    pub word_lanes: Vec<Vec<i32>>,
     pub samples: usize,
 }
 
@@ -1642,7 +1642,7 @@ impl PlcUi {
     }
 
     /// The live value of a word operand (`MW3`, `TON0.ET`, `CTU1.CV`).
-    pub fn word_value(&self, name: &str) -> Option<i16> {
+    pub fn word_value(&self, name: &str) -> Option<i32> {
         self.words
             .iter()
             .find(|word| word.name == name)
@@ -5521,7 +5521,7 @@ fn watch_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
                     }
                     egui::Key::Enter => {
                         if let Some(name) = plc.project.watch.get(plc.watch_cursor).cloned() {
-                            match buffer.trim().parse::<i16>() {
+                            match buffer.trim().parse::<i32>() {
                                 Ok(value) => {
                                     actions.push(Action::ForceWord { name, value });
                                     plc.watch_value_edit = None;
@@ -5529,8 +5529,10 @@ fn watch_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
                                     plc.text_editing = false;
                                 }
                                 Err(_) => {
-                                    plc.watch_error =
-                                        Some("needs a whole number: -32768 to 32767".to_string());
+                                    plc.watch_error = Some(
+                                        "needs a whole number: -2147483648 to 2147483647"
+                                            .to_string(),
+                                    );
                                 }
                             }
                         }
@@ -5799,7 +5801,7 @@ fn watch_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Actio
 /// The preset of the block a member belongs to, in the block's own unit:
 /// milliseconds for a timer's ET, counts for a counter's CV. This is the scale a
 /// scaled trace is drawn against.
-fn block_preset_for(plc: &PlcUi, name: &str) -> Option<i16> {
+fn block_preset_for(plc: &PlcUi, name: &str) -> Option<i32> {
     let (instance, member) = name.split_once('.')?;
     if !matches!(member.to_ascii_uppercase().as_str(), "ET" | "CV") {
         return None;
@@ -5826,9 +5828,9 @@ fn block_preset_for(plc: &PlcUi, name: &str) -> Option<i16> {
 /// The vertical range of an analog lane: a block member is normalized by its
 /// preset, so a half-elapsed timer sits halfway up; a marker word has no preset
 /// and uses its own range in the window.
-fn analog_bounds(preset: Option<i16>, values: &[i32]) -> (i32, i32) {
+fn analog_bounds(preset: Option<i32>, values: &[i32]) -> (i32, i32) {
     if let Some(preset) = preset.filter(|preset| *preset > 0) {
-        return (0, i32::from(preset));
+        return (0, preset);
     }
     let low = values.iter().copied().min().unwrap_or(0);
     let high = values.iter().copied().max().unwrap_or(0);
@@ -5842,7 +5844,7 @@ fn analog_y(value: i32, low: i32, high: i32, top: f32, bottom: f32) -> f32 {
 }
 
 /// One scaled trace: label and range on the left, the line in the window.
-fn draw_analog_lane(ui: &mut Ui, name: &str, values: &[i32], preset: Option<i16>) {
+fn draw_analog_lane(ui: &mut Ui, name: &str, values: &[i32], preset: Option<i32>) {
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(vec2(width, 26.0), Sense::hover());
     let painter = ui.painter();
@@ -5968,11 +5970,7 @@ fn trend_page(plc: &PlcUi, ui: &mut Ui, height: f32) {
             // ET and CV follow the boolean lanes, scaled by their block's
             // preset, so a half-done timer is halfway up its lane.
             for (name, lane) in trend.word_channels.iter().zip(trend.word_lanes.iter()) {
-                let values = lane
-                    .iter()
-                    .map(|value| i32::from(*value))
-                    .collect::<Vec<_>>();
-                draw_analog_lane(ui, name, &values, block_preset_for(plc, name));
+                draw_analog_lane(ui, name, lane, block_preset_for(plc, name));
             }
         });
 }

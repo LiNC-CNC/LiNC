@@ -115,8 +115,9 @@ sections of rungs. A rung is a `Logic` tree plus a coil:
 ```
 
 Supported in this slice: NO/NC contacts, normal/set/reset coils,
-series/parallel branches, multiple sections, constants, validation, local
-offline editing, download, start/stop, live monitoring and forcing.
+series/parallel branches, multiple sections, constants, a 32-bit word bank with
+`word` and `float` I/O points, validation, local offline editing, download,
+start/stop, live monitoring and forcing.
 
 Not yet: SFC, `.clp`, Modbus, true hot
 swap, and a servo-thread realtime component. Timers, counters, compare/compute
@@ -174,17 +175,49 @@ images swap, and outputs are read from the new `prev`. So:
 - a forced output is not overwritten by a coil;
 - duplicate coil targets in one section are a compile error (no last-one-wins).
 
+Word I/O follows the same rule. `scan_with_io` writes the word and float input
+regions into the bank before the ops pass, so a rung reads this scan's field
+value, and the daemon reads the output regions after it.
+
+## Word bank and word I/O
+
+The integer bank is 32 bits wide. `MW0..MW15` are the internal marker words;
+after them come the project's word inputs, word outputs, float inputs and float
+outputs, in that order. That order is the ABI: adding a point renumbers the
+slots after it. A point declared `"kind": "word"` becomes an `s32` HAL pin, and
+one declared `"kind": "float"` becomes a `float` pin. The project carries at
+most 256 bank slots; a larger bank is refused with `too_large`.
+
+Consequences worth stating:
+
+- Timers are no longer capped at 32.7 s: `T#5m` is 300,000 ms and `TON0.PT`
+  reports it. A preset the bank cannot hold is refused, never clamped.
+- `MW` arithmetic wraps at 32 bits (`i32::MAX + 1` is `i32::MIN`); `/` and `%`
+  by zero still yield 0.
+- A float pin is an integer view of its slot. At the boundary, `f64 as i32`
+  truncates toward zero and saturates, so `2.7` reads as `2` and an out-of-range
+  pin clamps. The output boundary converts back, so writing `2` drives `2.0`.
+  This is ClassicLadder's `%IF`/`%QF` behaviour.
+- A point may only be used as its declared kind: a word point named as a
+  contact, or a bit point named in a compare, fails validation with `io_kind`
+  instead of addressing the other image.
+
 ## Retained values
 
-Variables declared `retain` and the whole `MW` bank can survive a daemon
-restart. Set `[plc] retain_file` to a path (empty means off, logged at info) and
-`retain_flush_s` for how often the store is published (default 5; Stop and exit
-always publish).
+Variables declared `retain` and the marker words `MW0..MW15` can survive a daemon
+restart. The word and float I/O regions are never stored: HAL owns those values,
+and a restored `QW` would be a command nobody issued. Set `[plc] retain_file` to
+a path (empty means off, logged at info) and `retain_flush_s` for how often the
+store is published (default 5; Stop and exit always publish).
 
-The store is a small blob: magic `LPRT`, format version, the **program hash** and
-a **layout hash** over the retained slots, the values, and a CRC-32. A restore
-needs both hashes to match, so editing the program or reordering its symbols
-refuses an old store instead of lining values up with the wrong slots. A refusal
+The store is a small blob: magic `LPRT`, format version **2**, the **program
+hash** and a **layout hash** over the retained slots, the marker-word count, the
+whole bank size, the values, and a CRC-32. A restore needs both hashes to match,
+so editing the program, reordering its symbols or adding a word point refuses an
+old store instead of lining values up with the wrong slots. Format 2 widened a
+word value to four bytes; a format-1 store is refused with `UnsupportedFormat`
+rather than misread, and a format-2 store is refused the same way by an older
+build. A refusal
 is logged with its reason — bad magic, unsupported format, truncated, CRC
 mismatch, layout mismatch, another program, or a blob over 64 KiB, which turns
 retention off rather than writing something unreadable. A restore writes values
@@ -224,14 +257,19 @@ shows scan, cycle and lateness.
 4-byte big-endian length + JSON, adjacent tagging:
 
 ```
-{"request":"hello","data":{"protocol":1}}
+{"request":"hello","data":{"protocol":8}}
 {"request":"load","data":{"project":{...}}}
 {"request":"start"}
 {"response":"state","data":{ ... StateSnapshot ... }}
 {"response":"error","data":{"code":"...","message":"..."}}
 ```
 
-Dashboard pins: `linc_plc.<binding>` for each I/O point,
+Protocol 8 widens the word bank and the `WordValue` wire type to 32 bits. The
+version is checked on `Hello`, so a 7 client attached to an 8 daemon (or the
+reverse) is told the numbers differ instead of decoding a truncated word.
+
+Dashboard pins: `linc_plc.<binding>` for each I/O point — `HAL_BIT` for a bit
+point, `HAL_S32` for a word point, `HAL_FLOAT` for a float point — plus
 `linc_plc.alive`, `linc_plc.scan-count`, `linc_plc.scan-time-us`,
 `linc_plc.fault`, `linc_plc.overruns`. See `hal/linc-plc.hal` for example
 nets; it is documentation only and is not loaded by any machine profile.
