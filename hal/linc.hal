@@ -79,6 +79,9 @@ addf not.lube servo-thread
 addf not.opt servo-thread
 addf not.paused servo-thread
 addf not.spindle_on servo-thread
+# The tool-change inhibit: without this line the instance never runs, its output
+# stays FALSE, and the spindle gates are shut for every session.
+addf not.tool_changing servo-thread
 addf or2.jog_a servo-thread
 addf or2.jog_b servo-thread
 addf or2.manual_req servo-thread

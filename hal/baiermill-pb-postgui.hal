@@ -145,6 +145,9 @@ addf and2.home-y servo-thread
 addf and2.home-z servo-thread
 addf and2.worklamp servo-thread
 addf not.ls-b servo-thread
+# The tool-change inhibit: without this line the instance never runs, its output
+# stays FALSE, and every spindle gate is shut.
+addf not.tool-changing servo-thread
 addf and2.spindle-orient-gate servo-thread
 addf mult2.jog-speed servo-thread
 addf mult2.spindle-speed servo-thread
