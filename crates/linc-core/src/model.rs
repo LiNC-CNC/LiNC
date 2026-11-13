@@ -962,6 +962,12 @@ pub struct ToolChangeState {
     /// The operator confirmed; the request is still up, so the machine is
     /// catching up. The prompt stays until the HAL request drops.
     pub confirmed: bool,
+    /// The tool the backend is putting back in the spindle (`M61`) because the
+    /// last session left it there and LinuxCNC booted with an empty one. The
+    /// status line shows it so T0 is not read as "empty spindle" while the
+    /// restore waits for power, homing or PROTECT. `None` once it lands, is
+    /// written off, or there was nothing to restore.
+    pub restore_pending: Option<u16>,
 }
 
 impl Default for ToolChangeState {
@@ -975,6 +981,7 @@ impl Default for ToolChangeState {
             token: None,
             confirm_available: false,
             confirmed: false,
+            restore_pending: None,
         }
     }
 }

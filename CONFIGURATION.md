@@ -522,9 +522,19 @@ after an explicit unload). On startup the backend restores a remembered
 nonzero tool with `M61 Qn`, which sets the current tool without moving the
 changer, and then `G43 Hn`, once the machine is ON, homed, idle and
 unprotected and the tool is in the tool table. A controller that already
-reports a tool wins over the stored one. The file is written atomically on
-each observed change; deleting it makes the next session trust the controller,
-with no other effect.
+reports a tool wins over the stored one. While the restore waits, the status
+line reads `RESTORING Tn`; a block the controller accepts and then does not
+publish is retried three times, then written off with one warning, and a tool
+missing from the table is written off at once. `M61` sets the tool, not the
+pocket, so a turret/ATC machine reads the restored tool with an unknown pocket
+until the next change. The file is written atomically on each observed change;
+deleting it makes the next session trust the controller, with no other effect.
+
+The panel's spindle keys are held off while `iocontrol.0.tool-change` is high:
+`hal/linc.hal`, `hal/linc-lathe.hal` and the BaierMill session's
+`hal/panel-spindle.hal` route them through an `and2` with that signal, and the
+mill post-GUI cuts the spindle enable/forward/reverse drive bits with it too.
+A machine that wires its own spindle keys must apply the same gate.
 
 `--config`/machine profile changes require a restart. Preferences may be
 written while running.

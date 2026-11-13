@@ -933,8 +933,14 @@ Primary quick tool-change surface; no MDI entry required.
   remembered tool with `M61 Qn` (which sets the current tool without moving the
   changer) and then `G43 Hn`, once the machine is ON, homed, idle and
   unprotected and the tool is in the table. A controller that already reports a
-  tool wins. This keeps the `CURRENT` row, delete/renumber protection and the
-  probe-tool gate aligned with the physical spindle after a power cycle.
+  tool wins. While the restore waits, the status line reads `RESTORING Tn`, so
+  an empty `CURRENT` is not read as an empty spindle. A block the controller
+  accepts and then does not publish is retried three times and then written off
+  with one warning; a remembered tool that is not in the table is written off at
+  once. `M61` sets the tool and not the pocket, so a turret/ATC profile reads the
+  restored tool with an unknown pocket until the next change. This keeps the
+  `CURRENT` row, delete/renumber protection and the probe-tool gate aligned with
+  the physical spindle after a power cycle.
 - An axis DRO row sits above the table, at the same place and in the same
   cards as the Offsets page: the work coordinate large, the machine coordinate
   dimmed underneath, optional axes from the INI and the lathe's X in the

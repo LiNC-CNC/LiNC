@@ -125,9 +125,17 @@ struct ToolRestore {
     /// The `M61` block has been sent; wait for the controller to publish it
     /// before trying again.
     issued: bool,
+    /// Blocks the controller accepted and then did not publish. A restore that
+    /// is waiting for power, homing, PROTECT or an idle interpreter is not an
+    /// attempt: it is the machine not being ready yet.
+    attempts: u8,
     next_attempt: Instant,
-    warned_missing: bool,
 }
+
+/// How many accepted-then-unpublished `M61` blocks a remembered tool gets before
+/// the state file is written off as stale. Without a cap the backend re-issues
+/// the block every 5 s for the life of the session and logs each one.
+const RESTORE_ATTEMPTS: u8 = 3;
 
 impl NmlBackend {
     pub fn connect(profile: Profile) -> Result<Self, BackendError> {
@@ -170,8 +178,8 @@ impl NmlBackend {
             .map(|tool| ToolRestore {
                 tool,
                 issued: false,
+                attempts: 0,
                 next_attempt: Instant::now(),
-                warned_missing: false,
             });
         let bridge = BridgeInfo {
             kind: "nml".into(),
@@ -311,7 +319,7 @@ impl NmlBackend {
         snapshot.hal.tool_change_confirm_seq = self.confirm_seq;
         snapshot.machine.hal_thread_ok = self.hal.is_some();
         snapshot.bridge = Some(self.bridge_info());
-        self.service_tool_state(&snapshot);
+        self.service_tool_state(&mut snapshot);
         self.last_snapshot = Some(snapshot.clone());
         snapshot
     }
@@ -327,9 +335,13 @@ impl NmlBackend {
     /// on, homed, idle and unprotected, so the restore never fights a real
     /// tool change or a safety gate. `M61` does not move the changer; the
     /// following `G43` applies the remembered tool's length.
-    fn service_tool_state(&mut self, snapshot: &MachineSnapshot) {
+    fn service_tool_state(&mut self, snapshot: &mut MachineSnapshot) {
         let current = snapshot.tool_change.current_tool;
         if let Some(mut restore) = self.tool_restore {
+            // Published while the restore waits for the machine: the tool change
+            // message alone is not rendered, and T0 would read as "empty
+            // spindle" for as long as booting, homing or PROTECT takes.
+            snapshot.tool_change.restore_pending = Some(restore.tool);
             if current != 0 {
                 // The controller has a tool: an operator change, or the
                 // restore landed. Trust it over a remembered number.
@@ -342,9 +354,18 @@ impl NmlBackend {
                 return;
             }
             if restore.issued {
-                // The block was accepted but never reached the status pin.
-                // Ask again rather than leaving the spindle remembered as T0.
+                // The block was accepted but never reached the status pin. Ask
+                // again, but not forever: the controller may be refusing it.
                 restore.issued = false;
+                restore.attempts += 1;
+                if restore.attempts >= RESTORE_ATTEMPTS {
+                    log::warn!(
+                        "T{} was not restored after {RESTORE_ATTEMPTS} attempts; the controller still reports no tool",
+                        restore.tool
+                    );
+                    self.tool_restore = None;
+                    return;
+                }
             }
             if snapshot.tool_table.error.is_some() {
                 restore.next_attempt = now + Duration::from_secs(1);
@@ -357,15 +378,14 @@ impl NmlBackend {
                 .iter()
                 .any(|row| row.tool == restore.tool)
             {
-                if !restore.warned_missing {
-                    log::warn!(
-                        "remembered tool T{} is not in the tool table; not restoring it",
-                        restore.tool
-                    );
-                    restore.warned_missing = true;
-                }
-                restore.next_attempt = now + Duration::from_secs(5);
-                self.tool_restore = Some(restore);
+                // The table is loaded and the row is not in it, so `M61` would
+                // be refused every cycle. Stop, once, instead of leaving the
+                // status line pending for the session.
+                log::warn!(
+                    "remembered tool T{} is not in the tool table; not restoring it",
+                    restore.tool
+                );
+                self.tool_restore = None;
                 return;
             }
             if snapshot.issue_allowed().is_err()

@@ -247,6 +247,11 @@ pub(super) fn moving_axis(axes: &AxisMap<PositionSet>) -> Option<(&str, f64)> {
 /// The field for a manual tool change that is waiting on the operator.
 pub(super) fn tool_change_field(tool_change: &ToolChangeState) -> Option<(String, Color32)> {
     if tool_change.status != ToolChangeStatus::ManualPrompt {
+        // A restore after a reboot is a request the machine has not accepted
+        // yet, not a prompt: say so instead of showing the empty spindle.
+        if let Some(tool) = tool_change.restore_pending {
+            return Some((format!("RESTORING T{tool}"), theme::WARNING));
+        }
         return None;
     }
     let target = tool_change.target_tool.unwrap_or(tool_change.current_tool);
@@ -576,5 +581,26 @@ mod tests {
         tool_change.target_tool = None;
         tool_change.current_tool = 3;
         assert_eq!(tool_change_field(&tool_change).unwrap().0, "TC T3 PENDING");
+    }
+
+    #[test]
+    pub(super) fn a_restore_after_a_reboot_is_named_until_it_lands() {
+        let mut tool_change = ToolChangeState {
+            restore_pending: Some(12),
+            ..Default::default()
+        };
+        assert_eq!(
+            tool_change_field(&tool_change).unwrap().0,
+            "RESTORING T12",
+            "T0 must not read as an empty spindle while the restore waits"
+        );
+        // A real prompt needs the operator now, so it takes the field.
+        tool_change.status = ToolChangeStatus::ManualPrompt;
+        tool_change.target_tool = Some(4);
+        assert_eq!(tool_change_field(&tool_change).unwrap().0, "TC T4 PENDING");
+        // Landed or written off: nothing to say.
+        tool_change.status = ToolChangeStatus::Idle;
+        tool_change.restore_pending = None;
+        assert!(tool_change_field(&tool_change).is_none());
     }
 }
