@@ -1552,6 +1552,63 @@ fn the_increment_row_and_its_numbers_belong_to_the_step_modes() {
     assert_eq!(harness.app.jog.index, 0, "and takes no digits");
 }
 
+/// The manual page carries the servo card from MAIN under the coordinates:
+/// same column, same frame width, meters you can read while jogging.
+#[test]
+fn the_manual_page_stacks_the_servo_load_under_the_work_coordinates() {
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Manual);
+    harness.frame(&[]);
+    let output = harness.frame_full(Vec::new());
+    let texts = painted_text(&output);
+    let cards = painted_cards(&output);
+    let anchor = |label: &str| {
+        let (_, text) = texts
+            .iter()
+            .find(|(text, _)| text == label)
+            .unwrap_or_else(|| panic!("{label} is painted"));
+        cards
+            .iter()
+            .copied()
+            .find(|card| card.contains(text.center()))
+            .unwrap_or_else(|| panic!("{label} sits in a card"))
+    };
+    let coordinates = anchor("WORK COORDINATES");
+    let servo = anchor("SERVO LOAD");
+    assert!(
+        (coordinates.left() - servo.left()).abs() <= 1.0
+            && (coordinates.right() - servo.right()).abs() <= 1.0,
+        "the two cards share the column's edges: {coordinates:?} vs {servo:?}"
+    );
+    assert!(
+        servo.top() >= coordinates.bottom(),
+        "the servo card sits below the coordinates, not over them: {coordinates:?} vs {servo:?}"
+    );
+    // One meter per configured row, so the card is drawn with its contents.
+    let meters = texts
+        .iter()
+        .filter(|(text, rect)| text.ends_with('%') && servo.contains(rect.center()))
+        .count();
+    assert_eq!(meters, 3, "X, Y and Z each have a meter: {texts:?}");
+
+    // INC carries the step row in that column instead, so the card is hidden
+    // there; MPG has no step row, so it shows the card like JOG.
+    for (mode, expected) in [(PanelMode::Inc, false), (PanelMode::Mpg, true)] {
+        let mut harness = ProbeHarness::new(mode, false, true);
+        harness.app.set_page(Page::Manual);
+        harness.frame(&[]);
+        let texts: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect();
+        assert_eq!(
+            texts.iter().any(|text| text == "SERVO LOAD"),
+            expected,
+            "{mode:?} servo card presence: {texts:?}"
+        );
+    }
+}
+
 /// The style, not the page: REMAINING is what stops the trail being drawn,
 /// and the eaten line reaches the view as it is.
 #[test]

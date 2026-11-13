@@ -603,6 +603,20 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
 /// One meter row: the label, the bar and the percentage on a single line.
 pub const SERVO_METER_HEIGHT: f32 = 16.0;
 
+/// Height of a SERVO LOAD card holding `rows` meters: the title, the frame's
+/// two margins and the slack the meters are centred in.
+///
+/// MAIN draws this card beside the feed block and the manual page stacks it
+/// under the coordinates, so both pages take the height from here. `0` means
+/// no rows, which is the caller's cue not to draw the card at all.
+pub fn servo_load_card_height(rows: usize) -> f32 {
+    if rows == 0 {
+        0.0
+    } else {
+        44.0 + rows as f32 * SERVO_METER_HEIGHT
+    }
+}
+
 /// Where the block of meters starts inside the card's free space.
 ///
 /// The SERVO LOAD card is as tall as the feed block beside it, so a three-axis

@@ -1519,6 +1519,14 @@ jog in JOG mode.
   distance-to-go, with units and sign. Work coordinates use a large monospace
   face; machine/DTG values may be smaller but must remain legible at the target
   display.
+- **SERVO LOAD** sits under the work coordinates in `JOG` and `MPG`: the same
+  card MAIN shows under the toolpath, aligned to the coordinates card's left and
+  right edges. It lists one load bar per `[ui] servo_load` entry (X, Y, Z and S
+  on the mill) and is absent on a profile with no list. `INC` does not show it:
+  that column carries the increment row there, one secondary card under the DRO
+  rather than a stack. Its height comes from the row count, the same expression
+  MAIN uses, so the meters are never clipped; a window too short for the
+  coordinates and servo stack scrolls that column as a whole.
 - Optional axes follow the INI. Lathe X is shown in the configured
   radius/diameter convention, with the convention labeled.
 - The active axis is highlighted from the panel's selected-axis state. Unknown
