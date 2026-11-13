@@ -35,16 +35,45 @@ net lathe-jog-xn cnc_panel.jog_xn => halui.axis.x.minus
 net lathe-jog-zp cnc_panel.jog_zp => halui.axis.z.plus
 net lathe-jog-zn cnc_panel.jog_zn => halui.axis.z.minus
 
-# Spindle (spindle 0).
-net lathe-spindle-cw cnc_panel.spd_cw => halui.spindle.0.forward
-net lathe-spindle-ccw cnc_panel.spd_ccw => halui.spindle.0.reverse
-net lathe-spindle-stop cnc_panel.spd_sp => halui.spindle.0.stop
+# Spindle (spindle 0) and the second spindle (spindle 1). Every start grows
+# through a change gate: `tool-change-request` is the signal core_sim_2.hal
+# carries `iocontrol.0.tool-change` on, and it is high from the request until
+# the change is acknowledged. The gate sits on the request, so a key pressed
+# during a change does nothing then and nothing afterwards.
+loadrt not names=not.tool_changing
+loadrt and2 names=and2.spindle0_cw_change,and2.spindle0_ccw_change,and2.spindle0_sp_change,and2.spindle1_cw_change,and2.spindle1_ccw_change,and2.spindle1_sp_change
+addf not.tool_changing servo-thread
+addf and2.spindle0_cw_change servo-thread
+addf and2.spindle0_ccw_change servo-thread
+addf and2.spindle0_sp_change servo-thread
+addf and2.spindle1_cw_change servo-thread
+addf and2.spindle1_ccw_change servo-thread
+addf and2.spindle1_sp_change servo-thread
+
+net tool-change-request => not.tool_changing.in
+net not-tool-changing <= not.tool_changing.out
+
+net lathe-spindle-cw-request cnc_panel.spd_cw => and2.spindle0_cw_change.in0
+net not-tool-changing => and2.spindle0_cw_change.in1
+net lathe-spindle-cw and2.spindle0_cw_change.out => halui.spindle.0.forward
+net lathe-spindle-ccw-request cnc_panel.spd_ccw => and2.spindle0_ccw_change.in0
+net not-tool-changing => and2.spindle0_ccw_change.in1
+net lathe-spindle-ccw and2.spindle0_ccw_change.out => halui.spindle.0.reverse
+net lathe-spindle-stop-request cnc_panel.spd_sp => and2.spindle0_sp_change.in0
+net not-tool-changing => and2.spindle0_sp_change.in1
+net lathe-spindle-stop and2.spindle0_sp_change.out => halui.spindle.0.stop
 
 # Second spindle: the INI declares SPINDLES = 2, so the SPD.2.* keys drive
 # spindle 1. They have no lamp of their own; the cap lights while pressed.
-net lathe-sp2-cw cnc_panel.spd2_cw => halui.spindle.1.forward
-net lathe-sp2-ccw cnc_panel.spd2_ccw => halui.spindle.1.reverse
-net lathe-sp2-stop cnc_panel.spd2_sp => halui.spindle.1.stop
+net lathe-sp2-cw-request cnc_panel.spd2_cw => and2.spindle1_cw_change.in0
+net not-tool-changing => and2.spindle1_cw_change.in1
+net lathe-sp2-cw and2.spindle1_cw_change.out => halui.spindle.1.forward
+net lathe-sp2-ccw-request cnc_panel.spd2_ccw => and2.spindle1_ccw_change.in0
+net not-tool-changing => and2.spindle1_ccw_change.in1
+net lathe-sp2-ccw and2.spindle1_ccw_change.out => halui.spindle.1.reverse
+net lathe-sp2-stop-request cnc_panel.spd2_sp => and2.spindle1_sp_change.in0
+net not-tool-changing => and2.spindle1_sp_change.in1
+net lathe-sp2-stop and2.spindle1_sp_change.out => halui.spindle.1.stop
 
 # FEED BRAKE holds the feed, the way the panel's brake key does.
 # halui.program.pause already carries CYCLE STOP in this file, and a HAL pin

@@ -16,14 +16,14 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 # ---------------------------------------------------------------------------
 # Logic and conversion components
 # ---------------------------------------------------------------------------
-loadrt and2 names=and2.cycle_gate,and2.cycle_resume,and2.cycle_run,and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint
+loadrt and2 names=and2.cycle_gate,and2.cycle_resume,and2.cycle_run,and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint,and2.spindle_cw_change,and2.spindle_ccw_change,and2.spindle_sp_change
 # `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
 # with "or2: already exists". Instances only used by the simulation
 # (or2.estop_reset, or2.machine_off, or2.probe_sim3d) are created here and wired
 # in the simulation-only HAL files (linc-sim.hal, linc-sim3d.hal,
 # linc-sim-postgui.hal).
 loadrt or2 names=or2.estop_reset,or2.jog_a,or2.jog_b,or2.machine_off,or2.manual_req,or2.pause,or2.probe_sim3d
-loadrt not names=not.bdt,not.coolant,not.is_joint,not.lube,not.opt,not.paused,not.spindle_on
+loadrt not names=not.bdt,not.coolant,not.is_joint,not.lube,not.opt,not.paused,not.spindle_on,not.tool_changing
 loadrt toggle names=toggle.coolant,toggle.lube,toggle.opt,toggle.bdt,toggle.sbk,toggle.worklamp
 loadrt scale names=scale.feed,scale.rapid,scale.spindle
 loadrt conv_float_s32 names=conv.feed,conv.rapid,conv.spindle
@@ -67,6 +67,11 @@ addf and2.zp_inc servo-thread
 addf and2.zp_joint servo-thread
 addf and2.zp_step_axis servo-thread
 addf and2.zp_step_joint servo-thread
+# Last in the thread: the change gates consume the request pins, and a gate
+# that runs before its input in the same cycle would pass a stale value.
+addf and2.spindle_cw_change servo-thread
+addf and2.spindle_ccw_change servo-thread
+addf and2.spindle_sp_change servo-thread
 addf not.bdt servo-thread
 addf not.coolant servo-thread
 addf not.is_joint servo-thread
@@ -174,9 +179,27 @@ net opt-status halui.program.optional-stop.is-on => cnc_panel.led_opt
 # ---------------------------------------------------------------------------
 # Spindle
 # ---------------------------------------------------------------------------
-net spindle-cw cnc_panel.spd_cw => halui.spindle.0.forward
-net spindle-ccw cnc_panel.spd_ccw => halui.spindle.0.reverse
-net spindle-stop cnc_panel.spd_sp => halui.spindle.0.stop
+# Spindle motion is inhibited during a tool change. `iocontrol.0.tool-change`
+# is high from the request until the change is acknowledged, and the panel's
+# spindle keys must not turn the spindle while the tool is being released,
+# clamped or swapped. The gate sits on the request, not on the drive, so no
+# request is latched and then released when the change ends: a key pressed
+# during the change does nothing at all afterwards.
+#
+# `tool-change` is the signal rio_sim.hal already carries the pin on, so this
+# adds a reader instead of a second net for the same pin.
+net tool-change => not.tool_changing.in
+net not-tool-changing <= not.tool_changing.out
+
+net spindle-cw-request cnc_panel.spd_cw => and2.spindle_cw_change.in0
+net not-tool-changing => and2.spindle_cw_change.in1
+net spindle-cw-gated and2.spindle_cw_change.out => halui.spindle.0.forward
+net spindle-ccw-request cnc_panel.spd_ccw => and2.spindle_ccw_change.in0
+net not-tool-changing => and2.spindle_ccw_change.in1
+net spindle-ccw-gated and2.spindle_ccw_change.out => halui.spindle.0.reverse
+net spindle-stop-request cnc_panel.spd_sp => and2.spindle_sp_change.in0
+net not-tool-changing => and2.spindle_sp_change.in1
+net spindle-stop-gated and2.spindle_sp_change.out => halui.spindle.0.stop
 
 # spindle.0.orient is a status output from motmod, not a request input.
 # Wire the panel orient button to the machine-specific orient command (for

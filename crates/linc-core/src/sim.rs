@@ -1129,6 +1129,15 @@ impl MachineBackend for SimBackend {
                 if block.trim().is_empty() {
                     return Err(MachineError::Invalid("empty MDI block".into()));
                 }
+                // A spindle start during a tool change is refused here as well
+                // as cut in HAL: a request that silently does nothing is worse
+                // than a refused command, and nothing is left latched for the
+                // moment the change ends.
+                if crate::command::starts_spindle(&block)
+                    && self.snapshot.machine.tool_change_active
+                {
+                    return Err(MachineError::ToolChangePending);
+                }
                 if matches!(origin, MdiOrigin::Probe) && !self.snapshot.probe.enabled {
                     return Err(MachineError::Invalid("touch probing is disabled".into()));
                 }

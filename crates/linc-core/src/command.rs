@@ -419,9 +419,61 @@ pub enum BackendEvent {
     SnapshotLost,
 }
 
+/// Does this MDI block ask the spindle to turn?
+///
+/// `M3`, `M4` and `M19` start it: forward, reverse and orient. `M5` stops it and
+/// `S` only sets the commanded speed, so neither counts as a start and both stay
+/// allowed during a tool change — the operator may be recovering from a spindle
+/// someone left running. Parenthesised and `;` comments are skipped, and the
+/// integer part of the word is what counts, so `M3.1` (start, then wait for
+/// at-speed) starts it too.
+pub fn starts_spindle(block: &str) -> bool {
+    let mut code = String::with_capacity(block.len());
+    let mut depth = 0usize;
+    for character in block.chars() {
+        match character {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => code.push(character),
+            _ => {}
+        }
+    }
+    let code = code.split(';').next().unwrap_or(&code);
+    code.split_whitespace()
+        .filter_map(|word| {
+            let digits = word.strip_prefix('M').or_else(|| word.strip_prefix('m'))?;
+            digits
+                .split('.')
+                .next()
+                .unwrap_or(digits)
+                .parse::<u32>()
+                .ok()
+        })
+        .any(|number| matches!(number, 3 | 4 | 19))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_spindle_start_is_recognised_and_a_stop_is_not() {
+        for block in ["M3", "M4 S1000", "G0 X0 M3", "M19 R0", "M3.1", "m4"] {
+            assert!(starts_spindle(block), "{block} starts the spindle");
+        }
+        for block in [
+            "M5",
+            "G97 S300 M5",
+            "M30",
+            "G0 X0",
+            "S1000",
+            "(M3) G0 X0",
+            "G0 X0 ; M3",
+            "(nested (M4) comment) M5",
+        ] {
+            assert!(!starts_spindle(block), "{block} does not start it");
+        }
+    }
 
     #[test]
     fn only_declared_hal_outputs_are_representable() {

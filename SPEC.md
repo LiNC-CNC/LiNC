@@ -1015,6 +1015,15 @@ Primary quick tool-change surface; no MDI entry required.
   `linc.tool-change-confirm` HAL output and **holds it** until `iocontrol.0.tool-change`
   drops — a pulse shorter than the EMCIO cycle can be missed. It is not an
   arbitrary HAL write.
+- The spindle is inhibited for the whole change. `iocontrol.0.tool-change` is
+  high from the request until the acknowledgement, so the panel spindle keys
+  reach halui through an `and2` with that signal (`hal/linc.hal`,
+  `hal/linc-lathe.hal`, and `hal/panel-spindle.hal` in the BaierMill session)
+  and the mill post-GUI cuts the enable/forward/reverse drive bits with the same
+  signal. The keys therefore do nothing during a change, and nothing is latched
+  for after it. `spindle.0.inhibit` is deliberately not used: it also blocks the
+  `M19` orientation a changer program runs. An MDI block that starts the spindle
+  (`M3`, `M4`, `M19`) is refused with `TOOL CHANGE` while the change is up.
 - The acknowledgement token is derived from a counter that increments on the
   rising edge of the request, so it is stable for one change episode and a late
   press cannot confirm the next one.

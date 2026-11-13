@@ -46,7 +46,8 @@ not.spindle-on,\
 not.tool-99,\
 not.homing,\
 not.worklamp,\
-not.ls-b
+not.ls-b,\
+not.tool-changing
 
 loadrt toggle names=toggle.coolant,\
 toggle.bdt,\
@@ -73,7 +74,10 @@ and2.home-x,\
 and2.home-y,\
 and2.home-z,\
 and2.worklamp,\
-and2.spindle-orient-gate
+and2.spindle-orient-gate,\
+and2.spindle-enable-change,\
+and2.spindle-forward-change,\
+and2.spindle-rev-change
 
 loadrt or2 names=or2.pause-trigger,\
 or2.ready-or,\
@@ -120,6 +124,10 @@ addf and2.spindle-enable-gate servo-thread
 addf and2.spindle-forward-on servo-thread
 addf and2.spindle-forward-gate servo-thread
 addf and2.spindle-rev-gate servo-thread
+# The change stage runs after the tool-99 stage it wraps.
+addf and2.spindle-enable-change servo-thread
+addf and2.spindle-forward-change servo-thread
+addf and2.spindle-rev-change servo-thread
 addf or2.pause-trigger servo-thread
 addf or2.ready-or servo-thread
 addf or2.k4-led servo-thread
@@ -441,22 +449,40 @@ net tool-is-99 <= comp.tool-check.equal
 net tool-is-99 => not.tool-99.in
 net tool-not-99 <= not.tool-99.out
 
+# `iocontrol.0.tool-change` is high from the request until the change is
+# acknowledged. The spindle must not turn while the tool is being released,
+# clamped or swapped, so every request is cut at the drive. `tool-change` is the
+# signal the machine's pendant section above already carries the pin on; this
+# adds readers rather than a second net for the same pin.
+#
+# The gate is deliberately not `spindle.0.inhibit`: that pin carries the clamp
+# sensor (not.ls-b) and also blocks `M19` orientation, which a changer program
+# uses during the change itself.
+net tool-change => not.tool-changing.in
+net not-tool-changing <= not.tool-changing.out
+
 # Gate spindle enable signal
 net sig_spindle_0_on => and2.spindle-enable-gate.in0
 net tool-not-99 => and2.spindle-enable-gate.in1
-net gated-spindle-enable <= and2.spindle-enable-gate.out
-net gated-spindle-enable => rio.spindle.enable
+net gated-spindle-enable <= and2.spindle-enable-gate.out => and2.spindle-enable-change.in0
+net not-tool-changing => and2.spindle-enable-change.in1
+net gated-spindle-enable-final <= and2.spindle-enable-change.out
+net gated-spindle-enable-final => rio.spindle.enable
 
 # Gate spindle forward signal
 net sig_spindle_0_forward => and2.spindle-forward-on.in0
 net sig_spindle_0_on => and2.spindle-forward-on.in1
 net sig_spindle_forward_on <= and2.spindle-forward-on.out => and2.spindle-forward-gate.in0
 net tool-not-99 => and2.spindle-forward-gate.in1
-net gated-spindle-forward <= and2.spindle-forward-gate.out
-net gated-spindle-forward => rio.spindle-forward.bit
+net gated-spindle-forward <= and2.spindle-forward-gate.out => and2.spindle-forward-change.in0
+net not-tool-changing => and2.spindle-forward-change.in1
+net gated-spindle-forward-final <= and2.spindle-forward-change.out
+net gated-spindle-forward-final => rio.spindle-forward.bit
 
 # Gate spindle reverse signal
 net sig_spindle_0_reverse => and2.spindle-rev-gate.in0
 net tool-not-99 => and2.spindle-rev-gate.in1
-net gated-spindle-rev <= and2.spindle-rev-gate.out
-net gated-spindle-rev => rio.spindle-reverse.bit
+net gated-spindle-rev <= and2.spindle-rev-gate.out => and2.spindle-rev-change.in0
+net not-tool-changing => and2.spindle-rev-change.in1
+net gated-spindle-rev-final <= and2.spindle-rev-change.out
+net gated-spindle-rev-final => rio.spindle-reverse.bit

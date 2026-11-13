@@ -24,7 +24,7 @@ use linuxcnc_nml::{
 
 use linc_core::backend::MachineBackend;
 use linc_core::command::{
-    HalValue, LincOutput, MachineCommand, MachineError, MdiOrigin, ProbeTarget,
+    starts_spindle, HalValue, LincOutput, MachineCommand, MachineError, MdiOrigin, ProbeTarget,
 };
 use linc_core::config::Profile;
 use linc_core::diag::BridgeInfo;
@@ -1195,6 +1195,18 @@ impl NmlBackend {
                     .collect();
                 if blocks.is_empty() {
                     return Err(MachineError::Invalid("empty MDI block".into()));
+                }
+                // A spindle start during a tool change is refused here as well
+                // as cut in HAL: a request that silently does nothing is worse
+                // than a refused command, and nothing is left latched for the
+                // moment the change ends. `validate_issue` refreshed the
+                // controller, so the flag it stored is the current one.
+                let tool_change_active = self
+                    .last_snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.machine.tool_change_active);
+                if starts_spindle(&block) && tool_change_active {
+                    return Err(MachineError::ToolChangePending);
                 }
                 let axes = self.profile.machine_ini.axis_names();
                 for line in &blocks {
