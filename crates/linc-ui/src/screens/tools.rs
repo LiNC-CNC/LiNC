@@ -81,7 +81,22 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     if app.tools.selected_column >= columns.len() {
         app.tools.selected_column = columns.len().saturating_sub(1);
     }
-    handle_keys(app, ui, &columns);
+    // The rows the search shows. `selected_row` stays an index into the whole
+    // table, so `T`, `Z`, the cell editor and the dialogs keep addressing the
+    // tool they name; only what the table draws is filtered.
+    let visible =
+        linc_core::tooltable::filter_indices(&app.snapshot.tool_table.rows, &app.tools.query);
+    // A filter can hide the row the cursor was on, usually because a tool
+    // change snapped the selection to the tool in the spindle. Move to the
+    // first row the search shows rather than leaving the cursor invisible.
+    if let Some(first) = visible.first().copied() {
+        if !visible.contains(&app.tools.selected_row) {
+            app.tools.selected_row = first;
+            app.tools.scroll_to_selected = true;
+        }
+    }
+    let search_focus = ui.memory(|memory| memory.has_focus(search_id()));
+    handle_keys(app, ui, &columns, &visible, search_focus);
     // The typed-number dialog lives over the table, not instead of it: the
     // table keeps drawing behind the window.
     draw_number_dialog(app, ui);
@@ -97,7 +112,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // No change/changer panes: the table is the page. Loading the selected tool
     // is the `T` shortcut below, and the manual-change prompt is drawn by the
     // shell when the controller asks for it.
-    table_card(app, ui);
+    table_card(app, ui, &visible);
     // The table holds keyboard focus, and claims the keys it needs.
     //
     // With no focused widget egui treats the arrow keys as focus navigation and
@@ -115,8 +130,17 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     );
     // Never while a dialog or the tool-change prompt is up: this widget claims
     // focus every frame, and it was stealing it back from the dialog's buttons.
+    // The search field counts as owned input too, so it is asked about after
+    // the table drew it rather than from the frame's opening state: `/` moves
+    // the focus into the field this frame.
     let overlay_open = app.overlay_open();
-    if !app.tools.editing && app.tools.kind_popup.is_none() && !overlay_open && !focus.has_focus() {
+    let search_holds_focus = ui.memory(|memory| memory.has_focus(search_id()));
+    if !app.tools.editing
+        && app.tools.kind_popup.is_none()
+        && !overlay_open
+        && !search_holds_focus
+        && !focus.has_focus()
+    {
         focus.request_focus();
     }
     ui.memory_mut(|memory| {
@@ -130,6 +154,33 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             },
         );
     });
+    // What the shell reads on the next frame, before this page draws: whether
+    // the search field owns Escape. Taken after the focus decisions above, so
+    // the frame that moves the focus (Enter, or `/`) is not reported a frame
+    // late and does not swallow the first Escape.
+    app.tools.search_focused = ui.memory(|memory| memory.has_focus(search_id()));
+}
+
+/// The table search's widget id, shared by the page and its keys.
+fn search_id() -> egui::Id {
+    egui::Id::unique("linc-tools-search")
+}
+
+/// Move `delta` rows through the list a search shows, clamped to its ends.
+///
+/// The cursor normally sits on a visible row; if a filter hid it between
+/// frames, the step starts from the insertion point so the key still lands on
+/// the nearest row in the direction it moved.
+fn visible_step(visible: &[usize], selected: usize, delta: isize) -> usize {
+    if visible.is_empty() {
+        return selected;
+    }
+    let position = match visible.iter().position(|index| *index == selected) {
+        Some(position) => position as isize,
+        None => visible.partition_point(|index| *index < selected) as isize,
+    };
+    let last = visible.len() as isize - 1;
+    visible[(position + delta).clamp(0, last) as usize]
 }
 
 /// Optional Loobric status, shown in the tool table's own header so it costs
@@ -399,7 +450,19 @@ fn write_refusal(app: &LincApp) -> String {
 }
 
 /// Table keys, consumed before the table draws so no widget takes them first.
-fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
+fn handle_keys(
+    app: &mut LincApp,
+    ui: &mut Ui,
+    columns: &[ColumnSpec],
+    visible: &[usize],
+    typing: bool,
+) {
+    // The search field owns the keyboard while it has focus: every key is text
+    // or a caret move, so the table must not move, edit or load underneath it.
+    // Enter and Escape are taken by the field itself.
+    if typing {
+        return;
+    }
     // The tool-number dialog owns the keyboard while it is open: its Enter,
     // Escape and Backspace are taken here, before the table and before the
     // field itself draws. It returns early, so no table key moves underneath.
@@ -442,7 +505,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
         }
         return;
     }
-    let rows = app.snapshot.tool_table.rows.len();
+    let rows = visible.len();
     let mut move_row = 0isize;
     let mut move_column = 0isize;
     let mut edit = false;
@@ -453,6 +516,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
     let mut duplicate = false;
     let mut sync_loobric = false;
     let mut delete_tool = false;
+    let mut focus_search = false;
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
             move_row -= 1;
@@ -511,16 +575,22 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui, columns: &[ColumnSpec]) {
         {
             sync_loobric = true;
         }
+        // Bare `/`: move the keyboard into the search field. Page-local, like
+        // `T` and `Z`, and free on this page (the shell only claims it on the
+        // Help page).
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Slash) {
+            focus_search = true;
+        }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace) {
             delete_tool = true;
         }
     });
     if move_row != 0 && rows > 0 {
-        let target = app.tools.selected_row as isize + move_row;
-        app.tools.selected_row = target.clamp(0, rows as isize - 1) as usize;
-        // The table scrolls to follow the keyboard cursor; a click on a visible
-        // row needs no scroll.
+        app.tools.selected_row = visible_step(visible, app.tools.selected_row, move_row);
         app.tools.scroll_to_selected = true;
+    }
+    if focus_search {
+        app.tools.focus_search = true;
     }
     if move_column != 0 {
         let target = app.tools.selected_column as isize + move_column;
@@ -1221,7 +1291,7 @@ fn draw_position_dialog(app: &mut LincApp, ui: &mut Ui) {
     app.tools.position = Some(entry);
 }
 
-fn table_card(app: &mut LincApp, ui: &mut Ui) {
+fn table_card(app: &mut LincApp, ui: &mut Ui, visible: &[usize]) {
     let pocket = app.profile.changer.uses_pockets();
     let lathe = app.profile.variant == MachineVariant::Lathe;
     // The hint row names the configured chord, not a hardcoded one.
@@ -1254,6 +1324,55 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                         .truncate(),
                     );
                 }
+            });
+        });
+        // The search is the table's title bar, as on the G-code help page:
+        // one text line, not the 44 px touch-target row the theme reserves.
+        // It sits above the error lines so a load failure stays next to the
+        // table it is about.
+        let one_line = ui.text_style_height(&egui::TextStyle::Body);
+        ui.scope(|ui| {
+            ui.spacing_mut().interact_size.y = one_line + 2.0;
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("SEARCH")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut app.tools.query)
+                        .id(search_id())
+                        .hint_text("T12, 12, face mill, drill …  ( / )")
+                        .desired_width(300.0)
+                        .margin(egui::Margin::symmetric(6, 2)),
+                );
+                if app.tools.focus_search {
+                    response.request_focus();
+                    app.tools.focus_search = false;
+                }
+                // Enter hands the keyboard back to the table and must not also
+                // load or edit the selected row in the same frame.
+                if response.has_focus()
+                    && ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                    })
+                {
+                    ui.memory_mut(|memory| {
+                        memory.request_focus(egui::Id::unique("tools-table-focus"));
+                    });
+                }
+                let shown = visible.len();
+                let total = rows.len();
+                ui.label(
+                    RichText::new(if app.tools.query.trim().is_empty() {
+                        format!("{total} TOOLS")
+                    } else {
+                        format!("{shown} OF {total} TOOLS")
+                    })
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+                );
             });
         });
         if let Some(error) = &app.snapshot.tool_table.error {
@@ -1290,6 +1409,15 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
         if rows.is_empty() {
             ui.label(
                 RichText::new("no tools in the table")
+                    .size(theme::font_size(10.0))
+                    .color(theme::MUTED),
+            );
+        } else if visible.is_empty() {
+            // A search with no hits says so instead of looking like a table
+            // that has not arrived from the backend.
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("NO TOOLS MATCH THIS SEARCH")
                     .size(theme::font_size(10.0))
                     .color(theme::MUTED),
             );
@@ -1333,8 +1461,12 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
             if app.tools.scroll_to_selected {
                 app.tools.scroll_to_selected = false;
                 // `scroll_to_row` lives on the builder: the table computes its
-                // scroll offsets before the body runs.
-                builder = builder.scroll_to_row(selected_row, Some(egui::Align::Center));
+                // scroll offsets before the body runs. The cursor is a table
+                // index; the table draws filtered rows, so the row to scroll to
+                // is the cursor's position in the filtered list.
+                if let Some(position) = visible.iter().position(|index| *index == selected_row) {
+                    builder = builder.scroll_to_row(position, Some(egui::Align::Center));
+                }
             }
             let clicked = std::cell::Cell::new(None::<(usize, usize)>);
             let clicked_kind = std::cell::Cell::new(None::<(usize, egui::Rect)>);
@@ -1373,8 +1505,11 @@ fn table_card(app: &mut LincApp, ui: &mut Ui) {
                     }
                 })
                 .body(|body| {
-                    body.rows(row_height, rows.len(), |mut row| {
-                        let index = row.index();
+                    body.rows(row_height, visible.len(), |mut row| {
+                        // The row the table draws versus the row it addresses:
+                        // a filtered table has fewer rows, but every edit and
+                        // every stored rect is keyed by the table index.
+                        let index = visible[row.index()];
                         let entry = rows[index].clone();
                         // `TableRow::response` may only be called after a cell
                         // exists, so the row's geometry is taken from the cells.

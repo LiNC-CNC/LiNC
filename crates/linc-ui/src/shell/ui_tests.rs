@@ -4026,6 +4026,110 @@ fn a_tool_change_moves_the_table_selection_to_the_active_row() {
     assert_eq!(harness.app.tools.selected_row, 0);
 }
 
+/// The TOOLS search filters what the table draws, and the row `T` loads stays
+/// the tool the cursor names: a filter must not renumber the rows the page
+/// edits and loads by index.
+#[test]
+fn the_tools_search_filters_the_table_without_moving_the_loaded_tool() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Tools);
+    harness.frame(&[]);
+    harness.sent.borrow_mut().clear();
+
+    // `/` takes the keyboard into the field; the panel's text event is what
+    // types into it, so the digits arrive as a `Text` event, not as keys.
+    harness.frame(&[egui::Key::Slash]);
+    harness.type_text("12");
+    harness.frame(&[]);
+    assert_eq!(harness.app.tools.query, "12");
+
+    let texts: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        texts.iter().any(|text| text == "1 OF 2 TOOLS"),
+        "the count follows the filter: {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|text| text == "face mill"),
+        "T12 is still drawn: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|text| text == "end mill"),
+        "T1 is filtered out: {texts:?}"
+    );
+    assert!(
+        harness.app.tools.selected_row == 1,
+        "the hidden cursor moved to the row the search shows"
+    );
+    assert!(harness.sent.borrow().is_empty(), "typing issues no command");
+
+    // `T` is text while the field owns the keyboard: the page must not read it
+    // as "load" and issue a tool change underneath the operator's search.
+    harness.type_text("t");
+    harness.frame(&[]);
+    assert_eq!(harness.app.tools.query, "12t", "the letter is typed");
+    assert!(
+        harness.sent.borrow().is_empty(),
+        "a letter in the field is not a command"
+    );
+
+    // Enter hands the keyboard back to the table, and Escape then clears the
+    // search: with no filter the whole table comes back.
+    harness.frame(&[egui::Key::Enter]);
+    harness.frame(&[egui::Key::Escape]);
+    assert!(
+        harness.app.tools.query.is_empty(),
+        "Escape clears the search"
+    );
+    let texts: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        texts.iter().any(|text| text == "2 TOOLS") && texts.iter().any(|text| text == "end mill"),
+        "every row comes back: {texts:?}"
+    );
+
+    // Filter again and load: `T` reaches the page once Enter released the
+    // field, and the row it loads is the tool the filtered table shows.
+    harness.app.tools.query = "12".into();
+    harness.frame(&[]);
+    assert_eq!(harness.app.tools.selected_row, 1, "the cursor is on T12");
+    harness.frame(&[egui::Key::Enter]);
+    harness.frame(&[egui::Key::T]);
+    let sent = harness.sent.borrow();
+    assert!(
+        matches!(sent.as_slice(), [MachineCommand::LoadTool { tool: 12 }]),
+        "T loads T12, not a row number in the shorter list: {sent:?}"
+    );
+    drop(sent);
+}
+
+/// A search with no hits says so instead of looking like an empty table.
+#[test]
+fn a_tools_search_with_no_hits_says_so() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Tools);
+    harness.app.tools.query = "drill".into();
+    harness.frame(&[]);
+    let texts: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == "NO TOOLS MATCH THIS SEARCH"),
+        "the miss is stated: {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|text| text == "0 OF 2 TOOLS"),
+        "and the count says zero: {texts:?}"
+    );
+}
+
 /// Editing the mill's OFFSET cell must write the Z the table loader reads back.
 /// The row carries the length in two places — `length` and `values["Z"]` — and
 /// the file is written from the values map, so a cell that updated only `length`

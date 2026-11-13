@@ -483,7 +483,9 @@ impl LincApp {
             // An edit or a page popup owns Escape: it cancels the edit (or
             // closes the selector) rather than leaving the page.
             let editing_in_place = (self.nav.page == Page::Tools
-                && (self.tools.editing || self.tools.kind_popup.is_some()))
+                && (self.tools.editing
+                    || self.tools.kind_popup.is_some()
+                    || self.tools.search_focused))
                 || (self.nav.page == Page::Offsets
                     && (self.offsets.editing || self.offsets.dro_edit.is_some()))
                 || (self.nav.page == Page::Files && self.files.rename.is_some())

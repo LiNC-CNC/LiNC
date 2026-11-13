@@ -1537,6 +1537,16 @@ pub struct ToolsUi {
     /// `LincApp::overlay_open`, so the table, the cell editor and the shell's
     /// global keys stand down behind it.
     pub position: Option<ToolPositionEntry>,
+    /// The table search, matched against the tool number, pocket, description
+    /// and kind. Empty shows every row. The search filters what the table
+    /// draws; `selected_row` stays an index into the full table, so every
+    /// edit path keeps addressing the tool it names.
+    pub query: String,
+    /// Focus the search field on the next frame. Set by the page's `/` key.
+    pub focus_search: bool,
+    /// The search field holds the keyboard this frame. The shell leaves Escape
+    /// to the page while it does, the way it does for an in-place cell edit.
+    pub search_focused: bool,
 }
 
 /// The TOOLS page's tool-number dialog: one line of digits, prefilled with the
@@ -1613,6 +1623,9 @@ impl Default for ToolsUi {
             number: None,
             pending_select_tool: None,
             position: None,
+            query: String::new(),
+            focus_search: false,
+            search_focused: false,
         }
     }
 }

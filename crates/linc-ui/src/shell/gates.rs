@@ -271,6 +271,15 @@ impl LincApp {
             self.set_page(self.nav.help_return_page);
             return;
         }
+        // The tool table's search is a field too: Esc clears it while it holds
+        // text, and only an empty line falls through to the page and then to the
+        // program reset. The caret goes back to the field, because egui drops
+        // the focus on Escape and clearing is not a dismissal.
+        if self.nav.page == Page::Tools && !self.tools.query.is_empty() {
+            self.tools.query.clear();
+            self.tools.focus_search = true;
+            return;
+        }
         // The HAL browser's filter and the log search are fields, not pages:
         // Esc clears one while it holds text, and only an empty line falls
         // through to leaving the page. Clearing keeps the caret, so the next

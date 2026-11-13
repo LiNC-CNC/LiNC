@@ -972,6 +972,17 @@ Primary quick tool-change surface; no MDI entry required.
 - `T` loads the selected row's tool: `Tn M6` followed by `G43 Hn` in one
   backend command, so the length compensation is in effect as soon as the
   change completes. The shortcut does not fire while a cell is being edited.
+- The table searches like the G-code help index: a `SEARCH` line in the card
+  header, focused with `/` (`[keys] help_search`, page-local). It filters as the
+  operator types, on the tool number (`12` or `T12`), the pocket, the
+  description and the type. `Enter` hands the keyboard back to the table and
+  `Esc` clears the query and puts the caret back in the line. Filtering changes
+  what is drawn, not what the cursor names: `T`, `Z`, the cell editor and the
+  dialogs still act on the tool under the cursor, and a cursor left on a
+  filtered-out row (a tool change can do that) moves to the first row the search
+  shows. The line reads `N TOOLS`, or `N OF M TOOLS` while a query is up, and a
+  query with no hits says `NO TOOLS MATCH THIS SEARCH` instead of looking like a
+  table the backend never sent.
 - `Ctrl+T` (`[keys] tool_number`, page-local like `T`) opens a small dialog
   that types a tool number directly, for an operator who knows the number and
   does not want to cursor to the row. It opens on one line of digits prefilled

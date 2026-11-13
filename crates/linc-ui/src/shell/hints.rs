@@ -438,6 +438,7 @@ impl LincApp {
                 }
             }
             Page::Tools => {
+                hints.push((k.help_search.label(), "SEARCH"));
                 hints.push(("Arrows".into(), "SELECT"));
                 hints.push(("Enter".into(), "EDIT"));
                 hints.push(("T".into(), "LOAD + G43"));
