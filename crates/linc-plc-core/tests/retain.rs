@@ -1,7 +1,10 @@
 //! Retain stores: the seven pack/store cases and the gates around them.
 
 use linc_plc_core::retain::{self, Refusal, Retained};
-use linc_plc_core::{compile, Coil, CoilKind, IoDirection, IoPoint, Logic, Project, Rung, Section, VarDecl};
+use linc_plc_core::{
+    compile, Coil, CoilKind, IoDirection, IoKind, IoPoint, Logic, Project, Rung, Section, VarDecl,
+    Vm,
+};
 
 fn project(retain: bool) -> Project {
     let mut project = Project::new("retain-test");
@@ -114,7 +117,10 @@ fn the_vm_packs_restored_values_and_never_a_force() {
         packed.bits.iter().any(|(_, value)| *value),
         "the forced retained bit is packed as a value"
     );
-    assert!(packed.words.iter().any(|(slot, value)| *slot == 3 && *value == 11));
+    assert!(packed
+        .words
+        .iter()
+        .any(|(slot, value)| *slot == 3 && *value == 11));
 
     let mut other = linc_plc_core::Vm::new(&compiled);
     other.retain_unpack(&packed);
@@ -136,5 +142,78 @@ fn a_variable_that_is_not_retained_stays_out_of_the_store() {
     let vm = linc_plc_core::Vm::new(&compiled);
     let packed = vm.retain_pack();
     assert!(packed.bits.is_empty(), "nothing was declared retained");
-    assert!(!packed.words.is_empty(), "the word bank is always kept");
+    assert_eq!(packed.words.len(), 16, "the marker words are always kept");
+}
+
+/// The format gate. A 32-bit build writes FORMAT 2; an old reader's rule is
+/// `version != 1`, so it answers `UnsupportedFormat(2)` and never lines
+/// four-byte values up with two-byte slots. This reader has the mirror rule,
+/// asserted here, and the version is written before the CRC so a stale blob is
+/// refused for its format rather than its checksum.
+#[test]
+fn a_format_1_store_is_refused_by_the_32_bit_reader() {
+    let mut bytes = retain::pack("hash", 1, &sample());
+    assert_eq!(
+        u16::from_le_bytes([bytes[4], bytes[5]]),
+        2,
+        "this build writes format 2, which a format-1 reader refuses as UnsupportedFormat(2)"
+    );
+    bytes[4] = 1;
+    bytes[5] = 0;
+    assert_eq!(
+        retain::unpack(&bytes, "hash", 1).unwrap_err(),
+        Refusal::UnsupportedFormat(1)
+    );
+}
+
+fn word_io_project() -> Project {
+    let mut project = Project::new("retain-io");
+    let point = |name: &str, direction: IoDirection, kind: IoKind| IoPoint {
+        name: name.to_string(),
+        direction,
+        kind,
+        comment: String::new(),
+    };
+    project.io = vec![
+        point("iw0", IoDirection::In, IoKind::Word),
+        point("qw0", IoDirection::Out, IoKind::Word),
+        point("if0", IoDirection::In, IoKind::Float),
+        point("qf0", IoDirection::Out, IoKind::Float),
+    ];
+    let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Il);
+    pou.il = vec!["LD 1".to_string()];
+    project.pous = vec![pou];
+    project
+}
+
+/// Retention keeps `MW0..MW15` only. Packing the I/O regions would restore a
+/// stale field value the next scan overwrites and, worse, a `QW` value nobody
+/// commanded.
+#[test]
+fn a_project_with_word_io_retains_only_the_marker_words() {
+    let compiled = compile(&word_io_project()).expect("compile");
+    assert_eq!(compiled.program.words.total(), 20, "16 + 4 I/O slots");
+    let mut vm = Vm::new(&compiled);
+    for slot in 16..20 {
+        vm.set_word(slot, 999);
+    }
+    vm.set_word(3, 7);
+
+    let packed = vm.retain_pack();
+    assert_eq!(packed.words.len(), 16, "exactly the marker words");
+    assert!(packed.words.iter().all(|(slot, _)| *slot < 16));
+    assert!(packed
+        .words
+        .iter()
+        .any(|(slot, value)| *slot == 3 && *value == 7));
+
+    // A store that named an output slot cannot command it: the restore keeps
+    // to the marker-word region.
+    let crafted = Retained {
+        bits: Vec::new(),
+        words: vec![(17, 123)],
+    };
+    let mut other = Vm::new(&compiled);
+    other.retain_unpack(&crafted);
+    assert_eq!(other.word(17), 0, "a QW slot is not restorable");
 }

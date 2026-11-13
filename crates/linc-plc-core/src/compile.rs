@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::il::{lower_line, parse_line, IlLine, IlOperand};
-use crate::model::{CoilKind, IoDirection, Logic, PouLanguage, Project};
+use crate::model::{CoilKind, IoDirection, IoKind, Logic, PouLanguage, Project};
 use crate::validate::{validate, Diagnostic, Severity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,18 +16,126 @@ pub enum SymbolKind {
     Var,
 }
 
+/// Which image a symbol's `index` addresses.
+///
+/// A `Bit` symbol indexes the scan image (`Vm.prev` / `Vm.next`); a `Word`
+/// symbol indexes `Vm.words`. Word I/O cannot share the bit namespace, so the
+/// bank is explicit rather than inferred from the symbol kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Bank {
+    Bit,
+    Word,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
     pub name: String,
     pub index: u16,
     pub kind: SymbolKind,
     pub retain: bool,
+    pub bank: Bank,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
     pub name: String,
     pub index: u16,
+}
+
+/// The word bank's regions, in the fixed order the ABI assigns:
+///
+/// ```text
+/// [  0 .. mw )        MW0..MW15        internal, retained
+/// [ mw .. mw+iw )     word inputs      s32 HAL pins, written each scan
+/// [ .. +qw )          word outputs     s32 HAL pins, read each scan
+/// [ .. +fi )          float inputs     float HAL pins, converted to i32
+/// [ .. +fo )          float outputs    converted from i32 to float
+/// ```
+///
+/// The order is part of the ABI: inserting a word point renumbers every slot
+/// after it, exactly as the bit image does, and the retain layout hash notices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WordLayout {
+    /// `WORD_COUNT`: the retained marker words.
+    pub mw: u16,
+    pub iw: u16,
+    pub qw: u16,
+    pub fi: u16,
+    pub fo: u16,
+}
+
+impl WordLayout {
+    pub fn new(iw: u16, qw: u16, fi: u16, fo: u16) -> Self {
+        Self {
+            mw: WORD_COUNT,
+            iw,
+            qw,
+            fi,
+            fo,
+        }
+    }
+
+    pub fn total(&self) -> u16 {
+        self.mw + self.iw + self.qw + self.fi + self.fo
+    }
+
+    pub fn iw_base(&self) -> u16 {
+        self.mw
+    }
+
+    pub fn qw_base(&self) -> u16 {
+        self.mw + self.iw
+    }
+
+    pub fn fi_base(&self) -> u16 {
+        self.mw + self.iw + self.qw
+    }
+
+    pub fn fo_base(&self) -> u16 {
+        self.mw + self.iw + self.qw + self.fi
+    }
+}
+
+/// The compiled symbol table split by bank. Bit slots and word-bank slots are
+/// separate namespaces, so every lookup says which one it wants; a word point
+/// can never be read as a bit slot by accident.
+#[derive(Debug, Default)]
+struct Lookup {
+    bit: HashMap<String, u16>,
+    /// IL operands are typed by hand; accept any spelling of a declared name.
+    bit_ci: HashMap<String, u16>,
+    word: HashMap<String, u16>,
+}
+
+impl Lookup {
+    fn insert(&mut self, name: &str, bank: Bank, index: u16) {
+        match bank {
+            Bank::Bit => {
+                self.bit.insert(name.to_string(), index);
+                self.bit_ci.insert(name.to_ascii_lowercase(), index);
+            }
+            Bank::Word => {
+                self.word.insert(name.to_string(), index);
+            }
+        }
+    }
+
+    /// The bit-slot index of a declared bit symbol.
+    fn bit(&self, name: &str) -> Option<u16> {
+        self.bit
+            .get(name)
+            .or_else(|| self.bit_ci.get(&name.to_ascii_lowercase()))
+            .copied()
+    }
+
+    /// The word-bank slot of a declared word symbol.
+    fn word(&self, name: &str) -> Option<u16> {
+        self.word
+            .get(name)
+            .or_else(|| self.word.get(&name.to_ascii_lowercase()))
+            .copied()
+    }
 }
 
 /// Standard function blocks, four instances each, as ZX-PLC numbers them.
@@ -139,7 +247,7 @@ pub enum Op {
     /// Push word slot `MWn` on the word stack.
     LoadWord(u16),
     /// Push a literal on the word stack.
-    LoadConst(i16),
+    LoadConst(i32),
     /// Pop a word and write it to `MWn`.
     StoreWord(u16),
     Add,
@@ -158,7 +266,7 @@ pub enum Op {
     Fb {
         kind: FbKind,
         instance: u16,
-        preset: i16,
+        preset: i32,
     },
     /// Push the block's `ET` (timers) or `CV` (counters) on the word stack.
     FbWord(u16),
@@ -203,10 +311,12 @@ pub enum Op {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
     pub ops: Vec<Op>,
-    /// Value slots in the scan image: inputs, then outputs, then variables.
+    /// Bit slots in the scan image: inputs, then outputs, then variables.
     pub var_count: u16,
-    /// Word slots in the integer bank.
+    /// Word slots in the integer bank: `words.total()`.
     pub word_count: u16,
+    /// The bank's regions. The ABI fixes the slot order, not just the count.
+    pub words: WordLayout,
     /// Function-block instances: `FB_PER_TYPE` per kind, index `kind*4 + n`.
     pub fb_count: u16,
     /// Previous-value slots for edge contacts.
@@ -219,8 +329,16 @@ pub struct Program {
 pub struct Compiled {
     pub program: Program,
     pub symbols: Vec<Symbol>,
+    /// Bit bindings, in scan-image order.
     pub inputs: Vec<Binding>,
     pub outputs: Vec<Binding>,
+    /// Word- and float-point bindings, in word-bank order. `index` is the slot
+    /// the value lives in, so the daemon can read and write one contiguous
+    /// slice per region.
+    pub word_inputs: Vec<Binding>,
+    pub word_outputs: Vec<Binding>,
+    pub float_inputs: Vec<Binding>,
+    pub float_outputs: Vec<Binding>,
     pub hash: String,
     pub warnings: Vec<Diagnostic>,
 }
@@ -236,14 +354,20 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
 
     let capacity = project.io.len() + project.vars.len();
     let mut symbols = Vec::with_capacity(capacity);
-    let mut lookup: HashMap<String, u16> = HashMap::with_capacity(capacity);
+    let mut lookup = Lookup::default();
     let mut inputs = Vec::new();
     let mut outputs = Vec::new();
+    let mut word_inputs = Vec::new();
+    let mut word_outputs = Vec::new();
+    let mut float_inputs = Vec::new();
+    let mut float_outputs = Vec::new();
 
+    // Bit points first, so every bit symbol's index is its position in the
+    // image and `var_count` stays the size of `prev`/`next`.
     for point in project
         .io
         .iter()
-        .filter(|point| point.direction == IoDirection::In)
+        .filter(|point| point.direction == IoDirection::In && point.kind == IoKind::Bit)
     {
         let index = intern(
             &mut symbols,
@@ -251,6 +375,8 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
             &point.name,
             SymbolKind::Input,
             false,
+            Bank::Bit,
+            None,
         );
         inputs.push(Binding {
             name: point.name.clone(),
@@ -260,7 +386,7 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
     for point in project
         .io
         .iter()
-        .filter(|point| point.direction == IoDirection::Out)
+        .filter(|point| point.direction == IoDirection::Out && point.kind == IoKind::Bit)
     {
         let index = intern(
             &mut symbols,
@@ -268,6 +394,8 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
             &point.name,
             SymbolKind::Output,
             false,
+            Bank::Bit,
+            None,
         );
         outputs.push(Binding {
             name: point.name.clone(),
@@ -281,17 +409,107 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
             &var.name,
             SymbolKind::Var,
             var.retain,
+            Bank::Bit,
+            None,
         );
+    }
+
+    // Word points second: their index is a slot of `words`, assigned by
+    // `WordLayout` in the ABI order (word in, word out, float in, float out).
+    let words = WordLayout::new(
+        count_points(project, IoDirection::In, IoKind::Word),
+        count_points(project, IoDirection::Out, IoKind::Word),
+        count_points(project, IoDirection::In, IoKind::Float),
+        count_points(project, IoDirection::Out, IoKind::Float),
+    );
+    for (offset, point) in project
+        .io
+        .iter()
+        .filter(|point| point.direction == IoDirection::In && point.kind == IoKind::Word)
+        .enumerate()
+    {
+        let slot = words.iw_base() + offset as u16;
+        intern(
+            &mut symbols,
+            &mut lookup,
+            &point.name,
+            SymbolKind::Input,
+            false,
+            Bank::Word,
+            Some(slot),
+        );
+        word_inputs.push(Binding {
+            name: point.name.clone(),
+            index: slot,
+        });
+    }
+    for (offset, point) in project
+        .io
+        .iter()
+        .filter(|point| point.direction == IoDirection::Out && point.kind == IoKind::Word)
+        .enumerate()
+    {
+        let slot = words.qw_base() + offset as u16;
+        intern(
+            &mut symbols,
+            &mut lookup,
+            &point.name,
+            SymbolKind::Output,
+            false,
+            Bank::Word,
+            Some(slot),
+        );
+        word_outputs.push(Binding {
+            name: point.name.clone(),
+            index: slot,
+        });
+    }
+    for (offset, point) in project
+        .io
+        .iter()
+        .filter(|point| point.direction == IoDirection::In && point.kind == IoKind::Float)
+        .enumerate()
+    {
+        let slot = words.fi_base() + offset as u16;
+        intern(
+            &mut symbols,
+            &mut lookup,
+            &point.name,
+            SymbolKind::Input,
+            false,
+            Bank::Word,
+            Some(slot),
+        );
+        float_inputs.push(Binding {
+            name: point.name.clone(),
+            index: slot,
+        });
+    }
+    for (offset, point) in project
+        .io
+        .iter()
+        .filter(|point| point.direction == IoDirection::Out && point.kind == IoKind::Float)
+        .enumerate()
+    {
+        let slot = words.fo_base() + offset as u16;
+        intern(
+            &mut symbols,
+            &mut lookup,
+            &point.name,
+            SymbolKind::Output,
+            false,
+            Bank::Word,
+            Some(slot),
+        );
+        float_outputs.push(Binding {
+            name: point.name.clone(),
+            index: slot,
+        });
     }
 
     let mut ops = Vec::new();
     let mut edges = 0u16;
     let pous = project.all_pous();
-    // IL operands are typed by hand; accept any spelling of a declared name.
-    let lookup_ci: HashMap<String, u16> = lookup
-        .iter()
-        .map(|(name, index)| (name.to_ascii_lowercase(), *index))
-        .collect();
     // A POU that another POU calls is a routine: it runs where it is called,
     // not on its own. With no calls every POU is a program, which is how the
     // compiler behaved before `CAL` existed.
@@ -316,23 +534,28 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         .iter()
         .find(|pou| pou.name.eq_ignore_ascii_case("MAIN"));
     match main {
-        Some(main) => lower_pou(main, &by_name, &lookup, &lookup_ci, &mut ops, &mut edges, 0),
+        Some(main) => lower_pou(main, &by_name, &lookup, &mut ops, &mut edges, 0),
         None => {
             for pou in &pous {
                 if called.contains(&pou.name.to_ascii_uppercase()) {
                     continue;
                 }
-                lower_pou(pou, &by_name, &lookup, &lookup_ci, &mut ops, &mut edges, 0);
+                lower_pou(pou, &by_name, &lookup, &mut ops, &mut edges, 0);
             }
         }
     }
 
+    let bit_count = symbols
+        .iter()
+        .filter(|symbol| symbol.bank == Bank::Bit)
+        .count() as u16;
     let program = Program {
-        word_count: WORD_COUNT,
+        word_count: words.total(),
+        words,
         fb_count: FB_PER_TYPE * 9,
         edge_count: edges,
         ops,
-        var_count: symbols.len() as u16,
+        var_count: bit_count,
         input_count: inputs.len() as u16,
         output_count: outputs.len() as u16,
     };
@@ -346,9 +569,22 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         symbols,
         inputs,
         outputs,
+        word_inputs,
+        word_outputs,
+        float_inputs,
+        float_outputs,
         hash: project_hash(project),
         warnings,
     })
+}
+
+/// Number of I/O points of one direction and declared kind.
+fn count_points(project: &Project, direction: IoDirection, kind: IoKind) -> u16 {
+    project
+        .io
+        .iter()
+        .filter(|point| point.direction == direction && point.kind == kind)
+        .count() as u16
 }
 
 /// Stable FNV-1a 64-bit digest of the serialised project, as 16 lowercase hex digits.
@@ -371,19 +607,24 @@ pub fn project_hash(project: &Project) -> String {
 
 fn intern(
     symbols: &mut Vec<Symbol>,
-    lookup: &mut HashMap<String, u16>,
+    lookup: &mut Lookup,
     name: &str,
     kind: SymbolKind,
     retain: bool,
+    bank: Bank,
+    index: Option<u16>,
 ) -> u16 {
-    let index = symbols.len() as u16;
+    // A bit symbol's index is its position in the image; a word symbol's is the
+    // bank slot the layout assigned it.
+    let index = index.unwrap_or(symbols.len() as u16);
     symbols.push(Symbol {
         name: name.to_string(),
         index,
         kind,
         retain,
+        bank,
     });
-    lookup.insert(name.to_string(), index);
+    lookup.insert(name, bank, index);
     index
 }
 
@@ -402,8 +643,7 @@ fn patch_jump(ops: &mut [Op], at: usize, target: u16) {
 fn lower_pou(
     pou: &crate::model::Pou,
     pous: &HashMap<String, &crate::model::Pou>,
-    lookup: &HashMap<String, u16>,
-    lookup_ci: &HashMap<String, u16>,
+    lookup: &Lookup,
     ops: &mut Vec<Op>,
     edges: &mut u16,
     depth: u8,
@@ -491,7 +731,7 @@ fn lower_pou(
                                 target: 0,
                                 when: mnemonic == "CALCN",
                             });
-                            lower_pou(callee, pous, lookup, lookup_ci, ops, edges, depth + 1);
+                            lower_pou(callee, pous, lookup, ops, edges, depth + 1);
                             let after = ops.len() as u16;
                             if let Op::JumpIf { target, .. } = &mut ops[skip] {
                                 *target = after;
@@ -525,11 +765,11 @@ fn lower_pou(
                             }
                         } else if let Some(callee) = pous.get(&operand.trim().to_ascii_uppercase())
                         {
-                            lower_pou(callee, pous, lookup, lookup_ci, ops, edges, depth + 1);
+                            lower_pou(callee, pous, lookup, ops, edges, depth + 1);
                         }
                     }
                     _ => {
-                        lower_line(&mnemonic, il_operand(&operand, lookup, lookup_ci), ops);
+                        lower_line(&mnemonic, il_operand(&operand, lookup), ops);
                     }
                 }
             }
@@ -555,11 +795,11 @@ fn lower_pou(
 }
 
 /// Push a bit operand: `TRUE`, a declared symbol, or false when unknown.
-fn push_bit_operand(operand: &str, lookup: &HashMap<String, u16>, ops: &mut Vec<Op>) {
+fn push_bit_operand(operand: &str, lookup: &Lookup, ops: &mut Vec<Op>) {
     if operand.eq_ignore_ascii_case("TRUE") {
         ops.push(Op::PushConst(true));
-    } else if let Some(index) = lookup.get(operand.trim()) {
-        ops.push(Op::Push(*index));
+    } else if let Some(index) = lookup.bit(operand.trim()) {
+        ops.push(Op::Push(index));
     } else {
         ops.push(Op::PushConst(false));
     }
@@ -570,7 +810,7 @@ fn push_bit_operand(operand: &str, lookup: &HashMap<String, u16>, ops: &mut Vec<
 fn lower_fbd_line(
     lines: &[crate::model::FbdLine],
     index: usize,
-    lookup: &HashMap<String, u16>,
+    lookup: &Lookup,
     ops: &mut Vec<Op>,
 ) {
     let Some(line) = lines.get(index) else {
@@ -584,15 +824,15 @@ fn lower_fbd_line(
     if negated {
         ops.push(Op::Not);
     }
-    if let Some(target) = lookup.get(name) {
-        ops.push(Op::Store(*target));
+    if let Some(target) = lookup.bit(name) {
+        ops.push(Op::Store(target));
     }
 }
 
 /// Lower a drawn grid. Blocks are evaluated in reading order (row, then
 /// column), which is the order the editor enforces: a block may only take its
 /// input from something to its left or above.
-fn lower_fbd_grid(grid: &crate::model::FbdGrid, lookup: &HashMap<String, u16>, ops: &mut Vec<Op>) {
+fn lower_fbd_grid(grid: &crate::model::FbdGrid, lookup: &Lookup, ops: &mut Vec<Op>) {
     let mut order = grid
         .blocks
         .iter()
@@ -610,8 +850,8 @@ fn lower_fbd_grid(grid: &crate::model::FbdGrid, lookup: &HashMap<String, u16>, o
             let name = name.trim();
             // A word target is written by the compute block itself.
             if crate::il::word_operand(name).is_none() {
-                if let Some(slot) = lookup.get(name) {
-                    ops.push(Op::Store(*slot));
+                if let Some(slot) = lookup.bit(name) {
+                    ops.push(Op::Store(slot));
                 }
             }
         }
@@ -630,7 +870,7 @@ fn split_negation(operand: &str) -> (bool, &str) {
 fn lower_fbd_grid_block(
     grid: &crate::model::FbdGrid,
     index: usize,
-    lookup: &HashMap<String, u16>,
+    lookup: &Lookup,
     ops: &mut Vec<Op>,
 ) {
     let Some(block) = grid.blocks.get(index) else {
@@ -709,8 +949,8 @@ fn lower_fbd_grid_block(
                 });
             } else if let Some(compare) = compare_op(&name) {
                 let (Some(left), Some(right)) = (
-                    word_operand_value(inputs.first().map(String::as_str).unwrap_or("0")),
-                    word_operand_value(inputs.get(1).map(String::as_str).unwrap_or("0")),
+                    resolve_word(inputs.first().map(String::as_str).unwrap_or("0"), lookup),
+                    resolve_word(inputs.get(1).map(String::as_str).unwrap_or("0"), lookup),
                 ) else {
                     ops.push(Op::PushConst(false));
                     return;
@@ -726,8 +966,8 @@ fn lower_fbd_grid_block(
                     _ => String::new(),
                 };
                 let (Some(left), Some(right), Some(target)) = (
-                    word_operand_value(inputs.first().map(String::as_str).unwrap_or("0")),
-                    word_operand_value(inputs.get(1).map(String::as_str).unwrap_or("0")),
+                    resolve_word(inputs.first().map(String::as_str).unwrap_or("0"), lookup),
+                    resolve_word(inputs.get(1).map(String::as_str).unwrap_or("0"), lookup),
                     crate::il::word_operand(&target),
                 ) else {
                     ops.push(Op::PushConst(false));
@@ -773,7 +1013,7 @@ fn lower_fbd_grid_bit(
     input: &str,
     grid: &crate::model::FbdGrid,
     index: usize,
-    lookup: &HashMap<String, u16>,
+    lookup: &Lookup,
     ops: &mut Vec<Op>,
     depth: u8,
 ) {
@@ -797,8 +1037,8 @@ fn lower_fbd_grid_bit(
         ops.push(Op::PushConst(false));
     } else if text.eq_ignore_ascii_case("TRUE") {
         ops.push(Op::PushConst(true));
-    } else if let Some(slot) = lookup.get(text) {
-        ops.push(Op::PushNext(*slot));
+    } else if let Some(slot) = lookup.bit(text) {
+        ops.push(Op::PushNext(slot));
     } else {
         ops.push(Op::PushConst(false));
     }
@@ -811,7 +1051,7 @@ fn lower_fbd_grid_bit(
 fn lower_fbd_block(
     lines: &[crate::model::FbdLine],
     index: usize,
-    lookup: &HashMap<String, u16>,
+    lookup: &Lookup,
     ops: &mut Vec<Op>,
     depth: u8,
 ) {
@@ -889,8 +1129,14 @@ fn lower_fbd_block(
                 });
             } else if let Some(compare) = compare_op(&block) {
                 let (Some(left), Some(right)) = (
-                    word_operand_value(line.inputs.first().map(String::as_str).unwrap_or("0")),
-                    word_operand_value(line.inputs.get(1).map(String::as_str).unwrap_or("0")),
+                    resolve_word(
+                        line.inputs.first().map(String::as_str).unwrap_or("0"),
+                        lookup,
+                    ),
+                    resolve_word(
+                        line.inputs.get(1).map(String::as_str).unwrap_or("0"),
+                        lookup,
+                    ),
                 ) else {
                     ops.push(Op::PushConst(false));
                     return;
@@ -911,7 +1157,7 @@ fn lower_fbd_bit(
     input: &str,
     lines: &[crate::model::FbdLine],
     index: usize,
-    lookup: &HashMap<String, u16>,
+    lookup: &Lookup,
     ops: &mut Vec<Op>,
     depth: u8,
 ) {
@@ -935,8 +1181,8 @@ fn lower_fbd_bit(
     }
     if text.eq_ignore_ascii_case("TRUE") {
         ops.push(Op::PushConst(true));
-    } else if let Some(slot) = lookup.get(text) {
-        ops.push(Op::PushNext(*slot));
+    } else if let Some(slot) = lookup.bit(text) {
+        ops.push(Op::PushNext(slot));
     } else {
         ops.push(Op::PushConst(false));
     }
@@ -950,7 +1196,7 @@ fn lower_fbd_bit(
 /// element is a true rung.
 fn lower_cells(
     cells: &[crate::grid::Cell],
-    lookup: &HashMap<String, u16>,
+    lookup: &Lookup,
     ops: &mut Vec<Op>,
     edges: &mut u16,
 ) -> bool {
@@ -959,7 +1205,7 @@ fn lower_cells(
         match cell {
             crate::grid::Cell::Wire | crate::grid::Cell::Link => continue,
             crate::grid::Cell::Contact { var, negated } => {
-                let index = lookup.get(var.as_str()).copied().unwrap_or(0);
+                let index = lookup.bit(var.as_str()).unwrap_or(0);
                 ops.push(Op::Push(index));
                 if *negated {
                     ops.push(Op::Not);
@@ -989,7 +1235,7 @@ fn lower_cells(
             }
             crate::grid::Cell::Compare { op, left, right } => {
                 let (Some(left), Some(right)) =
-                    (word_operand_value(left), word_operand_value(right))
+                    (resolve_word(left, lookup), resolve_word(right, lookup))
                 else {
                     continue;
                 };
@@ -1015,7 +1261,7 @@ fn lower_cells(
                 right,
             } => {
                 let (Some(left), Some(right)) =
-                    (word_operand_value(left), word_operand_value(right))
+                    (resolve_word(left, lookup), resolve_word(right, lookup))
                 else {
                     continue;
                 };
@@ -1038,7 +1284,7 @@ fn lower_cells(
             }
             // Validation refuses these until their semantics exist.
             crate::grid::Cell::Edge { var, rising } => {
-                let index = lookup.get(var.as_str()).copied().unwrap_or(0);
+                let index = lookup.bit(var.as_str()).unwrap_or(0);
                 ops.push(Op::Edge {
                     slot: *edges,
                     var: index,
@@ -1062,7 +1308,7 @@ fn lower_cells(
 fn lower_grid_rung(
     run: &[Vec<crate::grid::Cell>],
     index: usize,
-    lookup: &HashMap<String, u16>,
+    lookup: &Lookup,
     ops: &mut Vec<Op>,
     edges: &mut u16,
 ) -> (usize, bool) {
@@ -1110,7 +1356,9 @@ fn lower_grid_rung(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WordOperand {
     Word(u16),
-    Const(i16),
+    Const(i32),
+    /// A declared word-typed symbol, by bank slot: a word or float I/O point.
+    Slot(u16),
     /// The block's `ET` / `CV`.
     Block(u16),
     /// The block's `PT` / `PV`.
@@ -1147,12 +1395,18 @@ pub fn word_operand_value(text: &str) -> Option<WordOperand> {
     if text.starts_with("T#") || text.starts_with("t#") {
         return Some(WordOperand::Const(parse_preset(text, true)?));
     }
-    text.parse::<i16>().ok().map(WordOperand::Const)
+    text.parse::<i32>().ok().map(WordOperand::Const)
+}
+
+/// Resolve a word operand in a context that has the symbol table: `MWn`, a
+/// time, a literal, a block member, or a declared word symbol.
+fn resolve_word(text: &str, lookup: &Lookup) -> Option<WordOperand> {
+    word_operand_value(text).or_else(|| lookup.word(text.trim()).map(WordOperand::Slot))
 }
 
 fn emit_word(ops: &mut Vec<Op>, value: WordOperand) {
     match value {
-        WordOperand::Word(index) => ops.push(Op::LoadWord(index)),
+        WordOperand::Word(index) | WordOperand::Slot(index) => ops.push(Op::LoadWord(index)),
         WordOperand::Const(value) => ops.push(Op::LoadConst(value)),
         WordOperand::Block(index) => ops.push(Op::FbWord(index)),
         WordOperand::BlockPreset(index) => ops.push(Op::FbPreset(index)),
@@ -1172,7 +1426,7 @@ pub fn compare_op(name: &str) -> Option<Op> {
 }
 
 /// `TON` + `TON2` + `T#4s` -> kind, instance index, preset in ms or counts.
-pub fn parse_block(block: &str, instance: &str, preset: &str) -> Option<(FbKind, u16, i16)> {
+pub fn parse_block(block: &str, instance: &str, preset: &str) -> Option<(FbKind, u16, i32)> {
     let instance = instance.trim();
     let kind = FbKind::parse(block).or_else(|| {
         let letters: String = instance
@@ -1196,7 +1450,13 @@ pub fn parse_block(block: &str, instance: &str, preset: &str) -> Option<(FbKind,
 
 /// Presets: `T#4s`, `T#1s500ms`, `T#2m`, or a count. Milliseconds are capped at
 /// what the 16-bit `ET` can hold, which is just under 33 seconds.
-pub fn parse_preset(text: &str, timer: bool) -> Option<i16> {
+/// Presets: `T#4s`, `T#1s500ms`, `T#2m`, or a count.
+///
+/// A timer preset is milliseconds and is **not** clamped: the word bank is 32
+/// bits, so `T#5m` is 300,000 ms. An unrepresentable preset is refused (`None`)
+/// rather than silently cut down, because a five-minute dwell that runs for
+/// 32.7 seconds is a wrong value, not a limitation.
+pub fn parse_preset(text: &str, timer: bool) -> Option<i32> {
     let text = text.trim();
     if timer {
         if text.is_empty() {
@@ -1225,47 +1485,35 @@ pub fn parse_preset(text: &str, timer: bool) -> Option<i16> {
                 let tail = tail.strip_prefix('m')?;
                 (60_000, tail)
             };
-            total += value * unit;
+            total = total.checked_add(value.checked_mul(unit)?)?;
             rest = tail;
         }
-        Some(total.clamp(0, i32::from(i16::MAX)) as i16)
+        Some(total.max(0))
     } else {
         if text.is_empty() {
             return Some(10);
         }
-        text.parse::<i16>().ok()
+        text.parse::<i32>().ok()
     }
 }
 
-/// Resolve an IL operand: `MWn`, a decimal literal, or a declared symbol.
-fn il_operand(
-    operand: &str,
-    lookup: &HashMap<String, u16>,
-    lookup_ci: &HashMap<String, u16>,
-) -> IlOperand {
+/// Resolve an IL operand: `MWn`, a decimal literal, or a declared symbol of
+/// either bank. A word symbol resolves to its bank slot, never to a bit slot.
+fn il_operand(operand: &str, lookup: &Lookup) -> IlOperand {
     let text = operand.trim();
-    let bare = text.strip_prefix('%').unwrap_or(text);
-    let word = bare
-        .strip_prefix("MW")
-        .or_else(|| bare.strip_prefix("mw"))
-        .and_then(|index| index.parse::<u16>().ok());
-    if let Some(index) = word {
-        if index < WORD_COUNT {
-            return IlOperand::Word(index);
-        }
+    if let Some(index) = crate::il::word_operand(text) {
+        return IlOperand::Word(index);
     }
-    if let Ok(value) = text.parse::<i16>() {
+    if let Ok(value) = text.parse::<i32>() {
         return IlOperand::Literal(value);
     }
-    let index = lookup
-        .get(text)
-        .or_else(|| lookup_ci.get(&text.to_ascii_lowercase()))
-        .copied()
-        .unwrap_or(0);
-    IlOperand::Bit(index)
+    if let Some(slot) = lookup.word(text) {
+        return IlOperand::Word(slot);
+    }
+    IlOperand::Bit(lookup.bit(text).unwrap_or(0))
 }
 
-fn store_coil(ops: &mut Vec<Op>, lookup: &HashMap<String, u16>, coil: &crate::model::Coil) {
+fn store_coil(ops: &mut Vec<Op>, lookup: &Lookup, coil: &crate::model::Coil) {
     // `CTU0.R` and `CTD0.LD` are coils on a counter, not on a bit.
     if let Some((rest, load)) = coil
         .var
@@ -1282,7 +1530,7 @@ fn store_coil(ops: &mut Vec<Op>, lookup: &HashMap<String, u16>, coil: &crate::mo
             return;
         }
     }
-    let index = lookup.get(coil.var.as_str()).copied().unwrap_or(0);
+    let index = lookup.bit(coil.var.as_str()).unwrap_or(0);
     let kind = coil.kind;
     if kind == CoilKind::Negated {
         ops.push(Op::Not);
@@ -1294,11 +1542,11 @@ fn store_coil(ops: &mut Vec<Op>, lookup: &HashMap<String, u16>, coil: &crate::mo
     });
 }
 
-fn lower_logic(logic: &Logic, lookup: &HashMap<String, u16>, edges: &mut u16, ops: &mut Vec<Op>) {
+fn lower_logic(logic: &Logic, lookup: &Lookup, edges: &mut u16, ops: &mut Vec<Op>) {
     match logic {
         Logic::Const { value } => ops.push(Op::PushConst(*value)),
         Logic::Contact { var, negated } => {
-            ops.push(Op::Push(lookup.get(var.as_str()).copied().unwrap_or(0)));
+            ops.push(Op::Push(lookup.bit(var.as_str()).unwrap_or(0)));
             if *negated {
                 ops.push(Op::Not);
             }
@@ -1308,7 +1556,7 @@ fn lower_logic(logic: &Logic, lookup: &HashMap<String, u16>, edges: &mut u16, op
             *edges = edges.saturating_add(1);
             ops.push(Op::Edge {
                 slot,
-                var: lookup.get(var.as_str()).copied().unwrap_or(0),
+                var: lookup.bit(var.as_str()).unwrap_or(0),
                 rising: *rising,
             });
         }
@@ -1317,7 +1565,8 @@ fn lower_logic(logic: &Logic, lookup: &HashMap<String, u16>, edges: &mut u16, op
             left,
             right,
         } => {
-            let (Some(left), Some(right)) = (word_operand_value(left), word_operand_value(right))
+            let (Some(left), Some(right)) =
+                (resolve_word(left, lookup), resolve_word(right, lookup))
             else {
                 ops.push(Op::PushConst(false));
                 return;

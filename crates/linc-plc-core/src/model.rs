@@ -281,10 +281,19 @@ pub enum IoDirection {
     Out,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// What a bound point carries.
+///
+/// `Word` is a 32-bit `s32` HAL pin; `Float` is a `float` pin the VM sees as the
+/// integer view of it, which is ClassicLadder's `%IF`/`%QF` behaviour. The kind
+/// decides the pin type the daemon creates and which bank region the value lives
+/// in, so a point cannot be read as a kind it was not declared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IoKind {
+    #[default]
     Bit,
+    Word,
+    Float,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

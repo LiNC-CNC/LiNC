@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::il::{parse_line, word_operand, IlLine};
-use crate::model::{IoDirection, Logic, PouLanguage, Project, Section};
+use crate::model::{IoDirection, IoKind, Logic, PouLanguage, Project, Section};
 use crate::SCHEMA_VERSION;
 
 /// IL mnemonics that push or combine a bit.
@@ -26,6 +26,10 @@ const MAX_SYMBOLS: usize = 4096;
 const MAX_RUNGS: usize = 4096;
 /// Maximum project-name length, in characters.
 const MAX_NAME: usize = 64;
+/// Maximum word-bank slots: 16 marker words plus every word and float point.
+/// The bank is a fixed table in the scan image, so a project past this is
+/// refused rather than truncated.
+const MAX_WORDS: u16 = 256;
 
 const RESERVED: [&str; 5] = ["alive", "scan-count", "scan-time-us", "fault", "overruns"];
 
@@ -140,6 +144,36 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         );
     }
 
+    // A point's declared kind decides what it may be used as. `Word` and
+    // `Float` both live in the word bank (a float pin is its integer view), so
+    // the word side accepts either and the bit side accepts only `Bit`.
+    let mut io_kinds: HashMap<&str, IoKind> = HashMap::with_capacity(project.io.len());
+    for point in &project.io {
+        io_kinds.insert(point.name.as_str(), point.kind);
+    }
+    let word_symbols: HashSet<String> = project
+        .io
+        .iter()
+        .filter(|point| point.kind != IoKind::Bit)
+        .map(|point| point.name.to_ascii_lowercase())
+        .collect();
+    let layout = crate::compile::WordLayout::new(
+        count_points(project, IoDirection::In, IoKind::Word),
+        count_points(project, IoDirection::Out, IoKind::Word),
+        count_points(project, IoDirection::In, IoKind::Float),
+        count_points(project, IoDirection::Out, IoKind::Float),
+    );
+    if layout.total() > MAX_WORDS {
+        diagnostics.push(Diagnostic::error(
+            "too_large",
+            format!(
+                "the word bank needs {} slots (16 marker words plus the word and float points); the maximum is {MAX_WORDS}",
+                layout.total()
+            ),
+            "io",
+        ));
+    }
+
     let pous = project.all_pous();
     let pou_names: HashSet<String> = pous
         .iter()
@@ -177,8 +211,48 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     match parse_line(line) {
                         IlLine::Instruction { mnemonic, operand } => {
                             let operand_is_word = word_operand(&operand).is_some()
-                                || operand.trim().parse::<i16>().is_ok()
-                                || operand.starts_with("T#");
+                                || operand.trim().parse::<i32>().is_ok()
+                                || operand.starts_with("T#")
+                                || word_symbols.contains(&operand.trim().to_ascii_lowercase());
+                            if !operand.trim().is_empty() {
+                                // Only a mnemonic that fixes the operand's side
+                                // is checked here: `LD`/`LDN`/`ST`/`STN`/`=` take
+                                // either side, and the type flow above already
+                                // reports an accumulator mismatch.
+                                if matches!(
+                                    mnemonic.as_str(),
+                                    "AND" | "ANDN" | "OR" | "ORN" | "XOR" | "XORN" | "S" | "R"
+                                ) {
+                                    check_io_kind(
+                                        &operand,
+                                        true,
+                                        &io_kinds,
+                                        path.clone(),
+                                        &mut diagnostics,
+                                    );
+                                } else if matches!(
+                                    mnemonic.as_str(),
+                                    "ADD"
+                                        | "SUB"
+                                        | "MUL"
+                                        | "DIV"
+                                        | "MOD"
+                                        | "GT"
+                                        | "GE"
+                                        | "EQ"
+                                        | "NE"
+                                        | "LE"
+                                        | "LT"
+                                ) {
+                                    check_io_kind(
+                                        &operand,
+                                        false,
+                                        &io_kinds,
+                                        path.clone(),
+                                        &mut diagnostics,
+                                    );
+                                }
+                            }
                             if matches!(mnemonic.as_str(), "ST" | "STN" | "=") {
                                 if let Some(current) = accumulator {
                                     if current != operand_is_word {
@@ -347,7 +421,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                 // Arithmetic leaves a word, a compare a bit.
                                 accumulator = Some(IL_WORD_OPS.contains(&mnemonic.as_str()));
                             } else if word_operand(&operand).is_none()
-                                && operand.trim().parse::<i16>().is_err()
+                                && operand.trim().parse::<i32>().is_err()
                                 && !known.contains(&operand.to_ascii_lowercase())
                             {
                                 diagnostics.push(Diagnostic::error(
@@ -369,7 +443,14 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             }
             PouLanguage::Fbd => {
                 if let Some(grid) = pou.fbd_grid.as_ref().filter(|grid| !grid.blocks.is_empty()) {
-                    check_fbd_grid(grid, index, &known, &mut diagnostics);
+                    check_fbd_grid(
+                        grid,
+                        index,
+                        &known,
+                        &word_symbols,
+                        &io_kinds,
+                        &mut diagnostics,
+                    );
                     if pou.name.trim().is_empty() {
                         diagnostics.push(Diagnostic::error(
                             "pou_name",
@@ -421,6 +502,16 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                             || known.contains(&input.to_ascii_lowercase())
                             || reference(input).map(|target| target >= 1).unwrap_or(false)
                     });
+                    let word_block = crate::compile::compare_op(&block).is_some();
+                    for input in &line.inputs {
+                        check_io_kind(
+                            input.trim().trim_start_matches('!'),
+                            !word_block,
+                            &io_kinds,
+                            format!("{path}.inputs"),
+                            &mut diagnostics,
+                        );
+                    }
                     if matches!(block.as_str(), "AND" | "OR" | "XOR" | "NOT") {
                         if !bit_ok {
                             diagnostics.push(Diagnostic::error(
@@ -464,7 +555,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                             || !line
                                 .inputs
                                 .iter()
-                                .all(|input| crate::compile::word_operand_value(input).is_some())
+                                .all(|input| word_operand_known(input, &word_symbols))
                         {
                             diagnostics.push(Diagnostic::error(
                                 "fbd_input",
@@ -678,7 +769,14 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         ));
                     }
                     for operand in [left, right] {
-                        if crate::compile::word_operand_value(operand).is_none() {
+                        check_io_kind(
+                            operand,
+                            false,
+                            &io_kinds,
+                            format!("{rung_path}.cells[{cell_index}]"),
+                            &mut diagnostics,
+                        );
+                        if !word_operand_known(operand, &word_symbols) {
                             diagnostics.push(Diagnostic::error(
                                 "cell_compare_operand",
                                 format!(
@@ -707,7 +805,14 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         ));
                     }
                     for operand in [left, right] {
-                        if crate::compile::word_operand_value(operand).is_none() {
+                        check_io_kind(
+                            operand,
+                            false,
+                            &io_kinds,
+                            format!("{rung_path}.cells[{cell_index}]"),
+                            &mut diagnostics,
+                        );
+                        if !word_operand_known(operand, &word_symbols) {
                             diagnostics.push(Diagnostic::error(
                                 "cell_compute_operand",
                                 format!(
@@ -718,6 +823,13 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         }
                     }
                 } else if let Some(operand) = cell.operand() {
+                    check_io_kind(
+                        operand,
+                        true,
+                        &io_kinds,
+                        format!("{rung_path}.cells[{cell_index}]"),
+                        &mut diagnostics,
+                    );
                     let known = symbols
                         .keys()
                         .any(|name| name.eq_ignore_ascii_case(operand));
@@ -737,13 +849,28 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     &logic_path,
                 ));
             } else {
-                check_logic(&rung.logic, &logic_path, &symbols, &mut diagnostics);
+                check_logic(
+                    &rung.logic,
+                    &logic_path,
+                    &symbols,
+                    &io_kinds,
+                    &mut diagnostics,
+                );
             }
 
             if rung.is_comment_row() {
                 continue;
             }
             let coil_path = format!("{rung_path}.coil.var");
+            if !rung.coil.var.trim().is_empty() {
+                check_io_kind(
+                    &rung.coil.var,
+                    true,
+                    &io_kinds,
+                    coil_path.clone(),
+                    &mut diagnostics,
+                );
+            }
             // A counter's reset/load is a coil on the instance, not on a bit.
             let counter_coil = rung
                 .coil
@@ -841,6 +968,64 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     diagnostics
 }
 
+/// `io_kind`: a declared point used on the wrong side of the model. A bit point
+/// has no word slot and a word point has no bit slot, so accepting the name
+/// would silently address the wrong image; validation refuses it instead.
+fn check_io_kind(
+    name: &str,
+    want_bit: bool,
+    io_kinds: &HashMap<&str, IoKind>,
+    path: String,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let name = name.trim();
+    let Some(kind) = io_kinds.get(name) else {
+        return;
+    };
+    if want_bit {
+        if *kind != IoKind::Bit {
+            diagnostics.push(Diagnostic::error(
+                "io_kind",
+                format!(
+                    "`{name}` is a {} point and cannot be read as a bit contact or coil",
+                    kind_label(*kind)
+                ),
+                path,
+            ));
+        }
+    } else if *kind == IoKind::Bit {
+        diagnostics.push(Diagnostic::error(
+            "io_kind",
+            format!("`{name}` is a bit point and cannot be used as a word value"),
+            path,
+        ));
+    }
+}
+
+fn kind_label(kind: IoKind) -> &'static str {
+    match kind {
+        IoKind::Bit => "bit",
+        IoKind::Word => "word",
+        IoKind::Float => "float",
+    }
+}
+
+/// Is this text a word value? `MWn`, a time, a literal and a block member keep
+/// their old path; a declared word or float point resolves through the bank.
+fn word_operand_known(text: &str, word_symbols: &HashSet<String>) -> bool {
+    crate::compile::word_operand_value(text).is_some()
+        || word_symbols.contains(&text.trim().to_ascii_lowercase())
+}
+
+/// Number of I/O points of one direction and declared kind.
+fn count_points(project: &Project, direction: IoDirection, kind: IoKind) -> u16 {
+    project
+        .io
+        .iter()
+        .filter(|point| point.direction == direction && point.kind == kind)
+        .count() as u16
+}
+
 fn register<'a>(
     symbols: &mut HashMap<&'a str, SymbolClass>,
     name: &'a str,
@@ -865,6 +1050,8 @@ fn check_fbd_grid(
     grid: &crate::model::FbdGrid,
     pou_index: usize,
     known: &HashSet<String>,
+    word_symbols: &HashSet<String>,
+    io_kinds: &HashMap<&str, IoKind>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (block_index, block) in grid.blocks.iter().enumerate() {
@@ -917,6 +1104,16 @@ fn check_fbd_grid(
             ));
             continue;
         }
+        let inputs_path = format!("{path}.row");
+        for input in inputs.iter().take(if needs_two_bits { 2 } else { 1 }) {
+            check_io_kind(
+                input.trim().trim_start_matches('!'),
+                needs_bit || needs_two_bits,
+                io_kinds,
+                inputs_path.clone(),
+                diagnostics,
+            );
+        }
         if needs_bit && (inputs.is_empty() || !bit_ok(&inputs[0])) {
             diagnostics.push(Diagnostic::error(
                 "fbd_open",
@@ -932,9 +1129,10 @@ fn check_fbd_grid(
             ));
         }
         if needs_words
-            && !inputs.iter().take(2).all(|input| {
-                crate::compile::word_operand_value(input.trim().trim_start_matches('!')).is_some()
-            })
+            && !inputs
+                .iter()
+                .take(2)
+                .all(|input| word_operand_known(input.trim().trim_start_matches('!'), word_symbols))
         {
             diagnostics.push(Diagnostic::error(
                 "fbd_input",
@@ -943,9 +1141,10 @@ fn check_fbd_grid(
             ));
         }
         if compute
-            && !inputs.iter().take(2).all(|input| {
-                crate::compile::word_operand_value(input.trim().trim_start_matches('!')).is_some()
-            })
+            && !inputs
+                .iter()
+                .take(2)
+                .all(|input| word_operand_known(input.trim().trim_start_matches('!'), word_symbols))
         {
             diagnostics.push(Diagnostic::error(
                 "fbd_input",
@@ -1049,11 +1248,13 @@ fn check_logic(
     logic: &Logic,
     path: &str,
     symbols: &HashMap<&str, SymbolClass>,
+    io_kinds: &HashMap<&str, IoKind>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match logic {
         Logic::Const { .. } => {}
         Logic::Contact { var, .. } | Logic::Edge { var, .. } => {
+            check_io_kind(var, true, io_kinds, format!("{path}.var"), diagnostics);
             if !symbols.contains_key(var.as_str()) {
                 diagnostics.push(Diagnostic::error(
                     "unknown_symbol",
@@ -1088,6 +1289,13 @@ fn check_logic(
                 ));
             }
             for operand in [left, right] {
+                check_io_kind(
+                    operand,
+                    false,
+                    io_kinds,
+                    format!("{path}.left"),
+                    diagnostics,
+                );
                 if crate::compile::word_operand_value(operand).is_none() {
                     diagnostics.push(Diagnostic::error(
                         "compare_operand",
@@ -1098,10 +1306,10 @@ fn check_logic(
             }
         }
         Logic::Series { items } => {
-            check_items(items, path, true, symbols, diagnostics);
+            check_items(items, path, true, symbols, io_kinds, diagnostics);
         }
         Logic::Parallel { items } => {
-            check_items(items, path, false, symbols, diagnostics);
+            check_items(items, path, false, symbols, io_kinds, diagnostics);
         }
     }
 }
@@ -1111,6 +1319,7 @@ fn check_items(
     path: &str,
     series: bool,
     symbols: &HashMap<&str, SymbolClass>,
+    io_kinds: &HashMap<&str, IoKind>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if items.is_empty() {
@@ -1133,6 +1342,7 @@ fn check_items(
             item,
             &format!("{path}.items[{index}]"),
             symbols,
+            io_kinds,
             diagnostics,
         );
     }

@@ -5,12 +5,18 @@
 //! therefore stay one scan behind. Forces are applied to both images before the
 //! ops pass (a forced input or variable is what logic reads) and again to `next`
 //! after it, so a forced coil wins over Store, Set and Reset.
+//!
+//! Word I/O follows the bit rule: `scan_with_io` writes the word and float
+//! inputs into their bank regions before the ops pass, so a rung reads the field
+//! value on the same scan, and reads the output regions after it.
 
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-use crate::compile::{Binding, Compiled, FbKind, MathOp, Op, Program, SymbolKind, WordOperand};
+use crate::compile::{
+    Bank, Binding, Compiled, FbKind, MathOp, Op, Program, SymbolKind, WordOperand,
+};
 
 /// Operand-stack depth. Validation caps logic nesting at 64, so this is slack.
 const STACK_DEPTH: usize = 128;
@@ -28,11 +34,12 @@ pub struct ScanStats {
     pub scan_count: u64,
 }
 
-/// One word of the bank in a snapshot: `MW3`, or a block member `TON0.ET`.
+/// One word of the bank in a snapshot: `MW3`, a word point, or a block member
+/// `TON0.ET`. The value is 32 bits; the wire type widened at protocol 8.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WordValue {
     pub name: String,
-    pub value: i16,
+    pub value: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,15 +50,29 @@ pub struct VarValue {
     pub forced: bool,
 }
 
+/// One scan's field I/O, borrowed so the scan path still allocates nothing.
+///
+/// `bits` are the bit inputs in compiled order; `words` and `floats` are the
+/// word/float input regions in bank order. The daemon converts HAL `f64` pins to
+/// `i32` at the boundary, which is ClassicLadder's `%IF` behaviour.
+pub struct IoFrame<'a> {
+    pub bits: &'a [bool],
+    pub words: &'a [i32],
+    pub floats: &'a [i32],
+}
+
 #[derive(Debug, Clone)]
 pub struct Vm {
     program: Program,
     names: Vec<(String, SymbolKind)>,
+    /// Declared word symbols by bank slot, so the snapshot can name `IW`/`QW`
+    /// slots the way the project does instead of calling them `MW16`.
+    word_names: Vec<(String, u16)>,
     inputs: Vec<Binding>,
     outputs: Vec<Binding>,
     prev: Vec<bool>,
     next: Vec<bool>,
-    words: Vec<i16>,
+    words: Vec<i32>,
     dt_ms: u16,
     blocks: Vec<FbState>,
     /// Previous value of each edge contact, one slot per contact occurrence.
@@ -68,11 +89,13 @@ pub struct Vm {
 
 impl Vm {
     pub fn new(compiled: &Compiled) -> Self {
-        let slots = compiled.symbols.len();
+        // Word symbols index the bank, not the bit image: only bit symbols make
+        // the image, and `var_count` counts exactly those.
+        let slots = compiled.program.var_count as usize;
         let retained = compiled
             .symbols
             .iter()
-            .filter(|symbol| symbol.retain)
+            .filter(|symbol| symbol.retain && symbol.bank == Bank::Bit)
             .map(|symbol| (symbol.index, symbol.name.clone()))
             .collect::<Vec<_>>();
         let layout = crate::retain::layout_hash(
@@ -80,14 +103,21 @@ impl Vm {
                 .iter()
                 .map(|(index, name)| (*index, name.as_str()))
                 .collect::<Vec<_>>(),
-            compiled.program.word_count,
+            compiled.program.words,
         );
         Self {
             program: compiled.program.clone(),
             names: compiled
                 .symbols
                 .iter()
+                .filter(|symbol| symbol.bank == Bank::Bit)
                 .map(|symbol| (symbol.name.clone(), symbol.kind))
+                .collect(),
+            word_names: compiled
+                .symbols
+                .iter()
+                .filter(|symbol| symbol.bank == Bank::Word)
+                .map(|symbol| (symbol.name.clone(), symbol.index))
                 .collect(),
             inputs: compiled.inputs.clone(),
             outputs: compiled.outputs.clone(),
@@ -103,6 +133,35 @@ impl Vm {
             forces: vec![None; slots],
             scan_count: 0,
             last_scan_us: 0,
+        }
+    }
+
+    /// Write one frame's field values into the images. A bit input goes into
+    /// both images, so logic reads the live value for the whole scan; word and
+    /// float inputs go into their bank regions before the ops pass. The `take`
+    /// bounds stop a longer frame from spilling into the output regions.
+    fn write_inputs(&mut self, io: &IoFrame<'_>) {
+        for slot in 0..self.inputs.len() {
+            if let Some(value) = io.bits.get(slot) {
+                let index = self.inputs[slot].index as usize;
+                if let Some(cell) = self.next.get_mut(index) {
+                    *cell = *value;
+                }
+                if let Some(cell) = self.prev.get_mut(index) {
+                    *cell = *value;
+                }
+            }
+        }
+        let layout = self.program.words;
+        for (offset, value) in io.words.iter().take(layout.iw as usize).enumerate() {
+            if let Some(cell) = self.words.get_mut(layout.iw_base() as usize + offset) {
+                *cell = *value;
+            }
+        }
+        for (offset, value) in io.floats.iter().take(layout.fi as usize).enumerate() {
+            if let Some(cell) = self.words.get_mut(layout.fi_base() as usize + offset) {
+                *cell = *value;
+            }
         }
     }
 
@@ -123,22 +182,26 @@ impl Vm {
         self.scan_with_dt(inputs, DEFAULT_DT_MS)
     }
 
+    /// The bit-only scan the tests and the older callers use: no word or float
+    /// field values are written, so the bank keeps whatever a test put in it.
     pub fn scan_with_dt(&mut self, inputs: &[bool], dt_ms: u16) -> ScanStats {
+        self.scan_with_io(
+            IoFrame {
+                bits: inputs,
+                words: &[],
+                floats: &[],
+            },
+            dt_ms,
+        )
+    }
+
+    /// One scan with the field I/O the daemon read this cycle. Still allocates
+    /// nothing, takes no locks and performs no I/O.
+    pub fn scan_with_io(&mut self, io: IoFrame<'_>, dt_ms: u16) -> ScanStats {
         let started = Instant::now();
         self.dt_ms = dt_ms.max(1);
         self.next.copy_from_slice(&self.prev);
-
-        for slot in 0..self.inputs.len() {
-            if let Some(value) = inputs.get(slot) {
-                let index = self.inputs[slot].index as usize;
-                if let Some(cell) = self.next.get_mut(index) {
-                    *cell = *value;
-                }
-                if let Some(cell) = self.prev.get_mut(index) {
-                    *cell = *value;
-                }
-            }
-        }
+        self.write_inputs(&io);
 
         // Both images, as documented: a function-block line reads `next`, so a
         // force that only reached `prev` would be invisible to it.
@@ -147,7 +210,7 @@ impl Vm {
 
         let mut stack = [false; STACK_DEPTH];
         let mut depth = 0usize;
-        let mut word_stack = [0i16; STACK_DEPTH];
+        let mut word_stack = [0i32; STACK_DEPTH];
         let mut word_depth = 0usize;
         let mut pc = 0usize;
         let mut executed = 0usize;
@@ -238,9 +301,9 @@ impl Vm {
                         *cell = value;
                     }
                 }
-                Op::Add => bin_word(&mut word_stack, &mut word_depth, i16::wrapping_add),
-                Op::Sub => bin_word(&mut word_stack, &mut word_depth, i16::wrapping_sub),
-                Op::Mul => bin_word(&mut word_stack, &mut word_depth, i16::wrapping_mul),
+                Op::Add => bin_word(&mut word_stack, &mut word_depth, i32::wrapping_add),
+                Op::Sub => bin_word(&mut word_stack, &mut word_depth, i32::wrapping_sub),
+                Op::Mul => bin_word(&mut word_stack, &mut word_depth, i32::wrapping_mul),
                 Op::Div => bin_word(&mut word_stack, &mut word_depth, |left, right| {
                     if right == 0 {
                         0
@@ -432,7 +495,9 @@ impl Vm {
         }
     }
 
-    /// The retained slots and the whole word bank, ready to store.
+    /// The retained slots and `MW0..MW15`, ready to store. The I/O regions are
+    /// not packed: HAL owns them, and a restored `QW` would be a value nobody
+    /// commanded.
     pub fn retain_pack(&self) -> crate::retain::Retained {
         crate::retain::Retained {
             bits: self
@@ -449,13 +514,16 @@ impl Vm {
                 .words
                 .iter()
                 .enumerate()
+                .take(self.program.words.mw as usize)
                 .map(|(index, value)| (index as u16, *value))
                 .collect(),
         }
     }
 
-    /// Restore values. This writes the two scan images and the word bank; it
-    /// never touches forces, so a restore cannot silently force the plant.
+    /// Restore values. This writes the two scan images and the marker words; it
+    /// never touches forces, so a restore cannot silently force the plant, and
+    /// it refuses a slot outside `MW0..MW15`, so a crafted store cannot command
+    /// an output.
     pub fn retain_unpack(&mut self, retained: &crate::retain::Retained) {
         for (slot, value) in &retained.bits {
             if let Some(cell) = self.prev.get_mut(*slot as usize) {
@@ -466,10 +534,34 @@ impl Vm {
             }
         }
         for (slot, value) in &retained.words {
+            if (*slot as usize) >= self.program.words.mw as usize {
+                continue;
+            }
             if let Some(cell) = self.words.get_mut(*slot as usize) {
                 *cell = *value;
             }
         }
+    }
+
+    /// The word output region, in compiled order, as produced by the last scan.
+    pub fn word_outputs(&self) -> &[i32] {
+        let layout = self.program.words;
+        let base = layout.qw_base() as usize;
+        let end = base
+            .saturating_add(layout.qw as usize)
+            .min(self.words.len());
+        self.words.get(base..end).unwrap_or(&[])
+    }
+
+    /// The float output region, in compiled order, as the integer view of the
+    /// float pins. The daemon converts each value to `f64` at the HAL boundary.
+    pub fn float_outputs(&self) -> &[i32] {
+        let layout = self.program.words;
+        let base = layout.fo_base() as usize;
+        let end = base
+            .saturating_add(layout.fo as usize)
+            .min(self.words.len());
+        self.words.get(base..end).unwrap_or(&[])
     }
 
     /// Hash of the retained layout, for the store's gate.
@@ -482,9 +574,9 @@ impl Vm {
         &self.output_image
     }
 
-    fn word_value(&self, value: WordOperand) -> i16 {
+    fn word_value(&self, value: WordOperand) -> i32 {
         match value {
-            WordOperand::Word(index) => self.word(index),
+            WordOperand::Word(index) | WordOperand::Slot(index) => self.word(index),
             WordOperand::Const(value) => value,
             WordOperand::Block(instance) => self.block_value(instance),
             WordOperand::BlockPreset(instance) => self
@@ -496,10 +588,19 @@ impl Vm {
     }
 
     /// `ET`/`CV` of a block instance.
-    pub fn block_value(&self, instance: u16) -> i16 {
+    pub fn block_value(&self, instance: u16) -> i32 {
         self.blocks
             .get(instance as usize)
             .map(|state| state.value)
+            .unwrap_or(0)
+    }
+
+    /// `PT`/`PV` of a block instance as last executed. The preset is 32 bits, so
+    /// a five-minute `T#5m` reports 300,000 rather than a clamped 32,767.
+    pub fn block_preset(&self, instance: u16) -> i32 {
+        self.blocks
+            .get(instance as usize)
+            .map(|state| state.preset)
             .unwrap_or(0)
     }
 
@@ -512,30 +613,51 @@ impl Vm {
     }
 
     /// Read a word slot of the bank.
-    pub fn word(&self, index: u16) -> i16 {
+    pub fn word(&self, index: u16) -> i32 {
         self.words.get(index as usize).copied().unwrap_or(0)
     }
 
+    /// The bank slot of a declared word point, by name. Word points do not
+    /// follow the `MWn` spelling, so a watch entry or a trend needs this lookup
+    /// rather than the operand parser.
+    pub fn word_slot(&self, name: &str) -> Option<u16> {
+        self.word_names
+            .iter()
+            .find(|(symbol, _)| symbol == name)
+            .map(|(_, slot)| *slot)
+    }
+
     /// Write a word slot, for the protocol's force/set and for tests.
-    pub fn set_word(&mut self, index: u16, value: i16) {
+    pub fn set_word(&mut self, index: u16, value: i32) {
         if let Some(cell) = self.words.get_mut(index as usize) {
             *cell = value;
         }
     }
 
-    /// The whole word bank, for the snapshot.
-    pub fn words(&self) -> &[i16] {
+    /// The whole word bank, for the snapshot and for tests.
+    pub fn words(&self) -> &[i32] {
         &self.words
     }
 
-    /// Words and block members with their names, in a stable order.
+    /// Words and block members with their names, in a stable order. The marker
+    /// words are `MW0..MW15`; every other slot carries the name its project gave
+    /// it, so a watch entry for a word point resolves like any other operand.
     pub fn word_snapshot(&self) -> Vec<WordValue> {
+        let mw = self.program.words.mw as usize;
         let mut values = self
             .words
             .iter()
             .enumerate()
             .map(|(index, value)| WordValue {
-                name: format!("MW{index}"),
+                name: if index < mw {
+                    format!("MW{index}")
+                } else {
+                    self.word_names
+                        .iter()
+                        .find(|(_, slot)| *slot as usize == index)
+                        .map(|(name, _)| name.clone())
+                        .unwrap_or_else(|| format!("W{index}"))
+                },
                 value: *value,
             })
             .collect::<Vec<_>>();
@@ -661,9 +783,9 @@ struct FbState {
     q: bool,
     running: bool,
     /// `ET` of a timer, `CV` of a counter.
-    value: i16,
+    value: i32,
     /// `PT` of a timer, `PV` of a counter, as last executed.
-    preset: i16,
+    preset: i32,
 }
 
 /// Advance one block and return its `Q`. `dt` is the scan delta in
@@ -673,7 +795,7 @@ fn run_block(
     instance: usize,
     kind: FbKind,
     input: bool,
-    preset: i16,
+    preset: i32,
     dt: u16,
 ) -> bool {
     let Some(state) = blocks.get_mut(instance) else {
@@ -681,7 +803,7 @@ fn run_block(
     };
     let preset = preset.max(0);
     state.preset = preset;
-    let dt = i16::try_from(dt).unwrap_or(i16::MAX);
+    let dt = i32::from(dt);
     match kind {
         FbKind::Ton => {
             if input {
@@ -759,14 +881,14 @@ fn run_latch(
     state.q
 }
 
-fn push_word(stack: &mut [i16; STACK_DEPTH], depth: &mut usize, value: i16) {
+fn push_word(stack: &mut [i32; STACK_DEPTH], depth: &mut usize, value: i32) {
     if *depth < STACK_DEPTH {
         stack[*depth] = value;
         *depth += 1;
     }
 }
 
-fn pop_word(stack: &[i16; STACK_DEPTH], depth: &mut usize) -> i16 {
+fn pop_word(stack: &[i32; STACK_DEPTH], depth: &mut usize) -> i32 {
     if *depth == 0 {
         return 0;
     }
@@ -774,7 +896,7 @@ fn pop_word(stack: &[i16; STACK_DEPTH], depth: &mut usize) -> i16 {
     stack[*depth]
 }
 
-fn bin_word(stack: &mut [i16; STACK_DEPTH], depth: &mut usize, op: fn(i16, i16) -> i16) {
+fn bin_word(stack: &mut [i32; STACK_DEPTH], depth: &mut usize, op: fn(i32, i32) -> i32) {
     let right = pop_word(stack, depth);
     let left = pop_word(stack, depth);
     push_word(stack, depth, op(left, right));
@@ -783,9 +905,9 @@ fn bin_word(stack: &mut [i16; STACK_DEPTH], depth: &mut usize, op: fn(i16, i16) 
 fn cmp_word(
     bits: &mut [bool; STACK_DEPTH],
     bit_depth: &mut usize,
-    words: &mut [i16; STACK_DEPTH],
+    words: &mut [i32; STACK_DEPTH],
     word_depth: &mut usize,
-    op: fn(i16, i16) -> bool,
+    op: fn(i32, i32) -> bool,
 ) {
     let right = pop_word(words, word_depth);
     let left = pop_word(words, word_depth);

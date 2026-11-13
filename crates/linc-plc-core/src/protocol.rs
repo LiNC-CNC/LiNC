@@ -44,7 +44,7 @@ pub enum Request {
     /// be forced: they follow their block.
     ForceWord {
         name: String,
-        value: i16,
+        value: i32,
         ttl_ms: u32,
     },
     /// Release one operand's force, leaving the others.

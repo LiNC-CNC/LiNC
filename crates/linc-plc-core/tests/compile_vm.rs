@@ -1,6 +1,6 @@
 use linc_plc_core::{
-    compile, project_hash, Coil, CoilKind, IoDirection, IoPoint, Logic, Op, Project, Rung, Section,
-    SymbolKind, VarDecl, Vm,
+    compile, project_hash, Coil, CoilKind, IoDirection, IoKind, IoPoint, Logic, Op, Project, Rung,
+    Section, SymbolKind, VarDecl, Vm,
 };
 use linc_plc_core::validate::validate;
 
@@ -1707,4 +1707,206 @@ fn an_endless_jump_loop_stops_at_the_budget() {
     let mut vm = Vm::new(&compile(&project).expect("the loop compiles"));
     let stats = vm.scan(&[]);
     assert_eq!(stats.scan_count, 1, "the scan returned");
+}
+
+// --- item 1: the 32-bit word bank and word/float HAL I/O ---------------------
+
+fn point(name: &str, direction: IoDirection, kind: IoKind) -> IoPoint {
+    IoPoint {
+        name: name.to_string(),
+        direction,
+        kind,
+        comment: String::new(),
+    }
+}
+
+fn il_project(io: Vec<IoPoint>, il: Vec<&str>) -> Project {
+    let mut project = project_with(io, Vec::new(), Vec::new());
+    let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Il);
+    pou.il = il.into_iter().map(str::to_string).collect();
+    project.pous = vec![pou];
+    project
+}
+
+/// `T#5m` runs for five minutes. The 16-bit bank used to clamp the preset to
+/// 32,767 ms with no diagnostic, so a dwell silently ran for 32.7 s; this is the
+/// bug item 1 exists to fix and the assertion is at the exact boundary.
+#[test]
+fn a_five_minute_timer_is_not_clamped_to_thirty_two_seconds() {
+    let project = simple_project(
+        Logic::series(vec![
+            Logic::contact("a", false),
+            Logic::Block {
+                block: "TON".to_string(),
+                instance: "TON0".to_string(),
+                preset: "T#5m".to_string(),
+            },
+        ]),
+        Coil::new("y", CoilKind::Normal),
+    );
+    let compiled = compile(&project).expect("compile");
+    let mut vm = Vm::new(&compiled);
+    // TON is block kind 0, so TON0 is instance 0.
+    let ton = 0;
+    for _ in 0..299 {
+        vm.scan_with_dt(&[true], 1000);
+    }
+    assert_eq!(vm.block_value(ton), 299_000, "299 s elapsed");
+    assert!(!vm.block_q(ton), "not due at 299 s");
+    vm.scan_with_dt(&[true], 1000);
+    assert_eq!(vm.block_value(ton), 300_000, "300 s elapsed");
+    assert!(vm.block_q(ton), "due at 300 s");
+    assert_eq!(vm.outputs(), &[true], "the coil follows Q");
+    assert_eq!(vm.block_preset(ton), 300_000, "TON0.PT reports 300,000");
+}
+
+#[test]
+fn a_forty_second_preset_is_not_clamped() {
+    use linc_plc_core::compile::parse_preset;
+    assert_eq!(parse_preset("T#40s", true), Some(40_000));
+    assert_eq!(parse_preset("T#5m", true), Some(300_000));
+    assert_eq!(parse_preset("T#1s500ms", true), Some(1_500));
+    // A preset the bank cannot hold is refused, not cut down to fit.
+    assert_eq!(parse_preset("T#99000m", true), None);
+}
+
+#[test]
+fn a_word_holds_values_beyond_the_16_bit_range() {
+    let project = il_project(
+        Vec::new(),
+        vec!["LD 100000", "ST MW0", "LD MW0", "ADD 1", "ST MW1"],
+    );
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan(&[]);
+    assert_eq!(vm.word(0), 100_000);
+    assert_eq!(vm.word(1), 100_001, "no wrap at 100,001");
+}
+
+#[test]
+fn an_overflowing_word_wraps_at_32_bits() {
+    let project = il_project(Vec::new(), vec!["LD 2147483647", "ADD 1", "ST MW0"]);
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan(&[]);
+    assert_eq!(vm.word(0), i32::MIN, "i32::MAX + 1 wraps");
+}
+
+/// A word input is live for a rung on the same scan and a word output reflects
+/// the rung's write after it. The slots are part of the ABI: `MW0..MW15`, then
+/// word inputs, then word outputs.
+#[test]
+fn a_word_input_is_live_and_a_word_output_follows_the_scan() {
+    let project = il_project(
+        vec![
+            point("iw0", IoDirection::In, IoKind::Word),
+            point("qw0", IoDirection::Out, IoKind::Word),
+        ],
+        vec!["LD iw0", "ADD 1", "ST qw0"],
+    );
+    let compiled = compile(&project).expect("compile");
+    assert_eq!(compiled.word_inputs[0].index, 16, "first word slot after MW");
+    assert_eq!(compiled.word_outputs[0].index, 17);
+    assert_eq!(compiled.program.words.total(), 18);
+    assert_eq!(compiled.program.var_count, 0, "no bit image for word points");
+
+    let mut vm = Vm::new(&compiled);
+    let frame = |words: &'static [i32]| linc_plc_core::vm::IoFrame {
+        bits: &[],
+        words,
+        floats: &[],
+    };
+    vm.scan_with_io(frame(&[41]), 20);
+    assert_eq!(vm.word(17), 42, "the rung read the live field value");
+    assert_eq!(vm.word_outputs(), &[42]);
+
+    // A second scan with a new field value: the rung reads this scan's input,
+    // not the previous scan's.
+    vm.scan_with_io(frame(&[9]), 20);
+    assert_eq!(vm.word_outputs(), &[10]);
+
+    // The snapshot names the slots the way the project does, so a watch entry
+    // for a word point resolves like any other operand.
+    let named = vm
+        .word_snapshot()
+        .into_iter()
+        .filter(|word| word.name == "iw0" || word.name == "qw0")
+        .map(|word| (word.name, word.value))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        named,
+        vec![("iw0".to_string(), 9), ("qw0".to_string(), 10)],
+        "word points are named, not called MW16"
+    );
+}
+
+/// A float pin is an integer view of its slot: the daemon truncates 2.7 to 2
+/// before the scan and writes 2 back as 2.0 after it (`hal.rs`), so the VM only
+/// carries the integer through the bank.
+#[test]
+fn a_float_pin_carries_its_integer_view_through_the_bank() {
+    let project = il_project(
+        vec![
+            point("if0", IoDirection::In, IoKind::Float),
+            point("qf0", IoDirection::Out, IoKind::Float),
+        ],
+        vec!["LD if0", "ST qf0"],
+    );
+    let compiled = compile(&project).expect("compile");
+    assert_eq!(compiled.float_inputs[0].index, 16);
+    assert_eq!(compiled.float_outputs[0].index, 17);
+    let mut vm = Vm::new(&compiled);
+    vm.scan_with_io(
+        linc_plc_core::vm::IoFrame {
+            bits: &[],
+            words: &[],
+            floats: &[2],
+        },
+        20,
+    );
+    assert_eq!(vm.float_outputs(), &[2]);
+}
+
+#[test]
+fn a_word_point_used_as_a_contact_is_refused() {
+    let mut project = simple_project(
+        Logic::contact("iw0", false),
+        Coil::new("y", CoilKind::Normal),
+    );
+    project
+        .io
+        .push(point("iw0", IoDirection::In, IoKind::Word));
+    let codes = codes(&validate(&project));
+    assert!(codes.contains(&"io_kind".to_string()), "{codes:?}");
+}
+
+#[test]
+fn a_bit_point_used_as_a_word_value_is_refused() {
+    let project = simple_project(
+        Logic::Compare {
+            operator: "GT".to_string(),
+            left: "a".to_string(),
+            right: "5".to_string(),
+        },
+        Coil::new("y", CoilKind::Normal),
+    );
+    let codes = codes(&validate(&project));
+    assert!(codes.contains(&"io_kind".to_string()), "{codes:?}");
+}
+
+#[test]
+fn a_word_bank_over_256_slots_is_refused() {
+    let mut project = Project::new("wide");
+    project.io = (0..241)
+        .map(|index| point(&format!("w{index}"), IoDirection::In, IoKind::Word))
+        .collect();
+    let mut pou = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Il);
+    pou.il = vec!["LD 1".to_string()];
+    project.pous = vec![pou];
+    // 16 marker words + 241 points = 257 slots.
+    assert!(codes(&validate(&project)).contains(&"too_large".to_string()));
+
+    project.io.truncate(240);
+    assert!(
+        !codes(&validate(&project)).contains(&"too_large".to_string()),
+        "16 + 240 = 256 is the last accepted bank"
+    );
 }

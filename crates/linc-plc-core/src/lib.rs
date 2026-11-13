@@ -12,16 +12,18 @@
 
 pub mod compile;
 pub mod grid;
-pub mod plcopen;
-pub mod retain;
-pub mod timing;
 pub mod il;
 pub mod model;
+pub mod plcopen;
 pub mod protocol;
+pub mod retain;
+pub mod timing;
 pub mod validate;
 pub mod vm;
 
-pub use compile::{compile, project_hash, Binding, Compiled, Op, Program, Symbol, SymbolKind};
+pub use compile::{
+    compile, project_hash, Bank, Binding, Compiled, Op, Program, Symbol, SymbolKind, WordLayout,
+};
 pub use grid::{Cell, POSITIONS};
 pub use model::{
     Coil, CoilKind, IoDirection, IoKind, IoPoint, Logic, Pou, PouLanguage, Project, Rung, Section,
@@ -37,7 +39,9 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// Wire protocol version spoken by the daemon and the client.
 /// Bumped when a snapshot gains a field the other side must understand. 2 adds
 /// the word bank, 3 the per-scan trend, 4 the single-operand unforce, 5 the trend window, 6 scan timing.
-pub const PROTOCOL_VERSION: u32 = 7;
+/// 8 widens the word bank and the `WordValue` wire type to 32 bits; a 7 client
+/// would decode `MW0 = 100000` as a truncated value, so the mismatch is refused.
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Largest accepted frame payload, in bytes.
 pub const MAX_FRAME: usize = 4 * 1024 * 1024;

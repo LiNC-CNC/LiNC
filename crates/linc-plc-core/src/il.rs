@@ -112,11 +112,14 @@ pub fn parse_line(line: &str) -> IlLine {
 
 /// Append the ops for one instruction. `index` is the resolved symbol slot.
 /// What an IL operand resolved to: a bit slot, a word slot, or a literal.
+///
+/// `Word` is a slot in the word bank, so `MWn` and a declared word point share
+/// one path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IlOperand {
     Bit(u16),
     Word(u16),
-    Literal(i16),
+    Literal(i32),
 }
 
 /// Lower one instruction. `false` means this compiler has no such operation for

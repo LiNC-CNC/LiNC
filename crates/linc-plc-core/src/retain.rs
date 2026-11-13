@@ -11,16 +11,25 @@
 /// `LPRT`: LiNC PLC Retain.
 pub const MAGIC: [u8; 4] = *b"LPRT";
 /// Bumped when the byte layout changes. A reader refuses what it does not know.
-pub const FORMAT: u16 = 1;
+///
+/// 2 widened a word value from two bytes to four and restricted the store to
+/// `MW0..MW15`, so a format-1 reader must refuse format 2 (and this reader must
+/// refuse format 1) rather than line four-byte values up with two-byte slots.
+pub const FORMAT: u16 = 2;
 /// A store larger than this is refused before it is parsed; 64 KiB holds every
 /// slot this VM has with room to spare.
 pub const MAX_BLOB: usize = 64 * 1024;
 
-/// The values to keep: retained bit slots by index, and the whole word bank.
+/// The values to keep: retained bit slots by index, and the marker words
+/// `MW0..MW15` by bank slot.
+///
+/// The word/float I/O regions are deliberately absent. HAL owns those values: a
+/// restore would inject a stale field value that the next scan overwrites, and
+/// worse, a `QW` slot would be restored to a value nobody commanded.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Retained {
     pub bits: Vec<(u16, bool)>,
-    pub words: Vec<(u16, i16)>,
+    pub words: Vec<(u16, i32)>,
 }
 
 impl Retained {
@@ -85,12 +94,18 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// The layout hash: the retained slots by name and index, plus the word count.
-/// Reordering a project keeps the program hash only if the shape is identical,
-/// and this catches the case where the shape moved under the same text.
-pub fn layout_hash(retained_names: &[(u16, &str)], words: u16) -> u64 {
+/// The layout hash: the retained slots by name and index, the marker-word count
+/// and the whole bank size. Reordering a project keeps the program hash only if
+/// the shape is identical, and this catches the case where the shape moved under
+/// the same text.
+///
+/// Both counts enter the hash on purpose. `mw` is how many word slots the store
+/// holds; `total` is the whole bank, so adding a word or float point invalidates
+/// a store that would otherwise still line up slot for slot.
+pub fn layout_hash(retained_names: &[(u16, &str)], words: crate::compile::WordLayout) -> u64 {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(&words.to_le_bytes());
+    bytes.extend_from_slice(&words.mw.to_le_bytes());
+    bytes.extend_from_slice(&words.total().to_le_bytes());
     for (index, name) in retained_names {
         bytes.extend_from_slice(&index.to_le_bytes());
         bytes.extend_from_slice(name.as_bytes());
@@ -174,10 +189,9 @@ pub fn unpack(bytes: &[u8], program_hash: &str, layout: u64) -> Result<Retained,
     let mut words = Vec::with_capacity(word_count as usize);
     for _ in 0..word_count {
         let slot = read_u16(body, &mut cursor)?;
-        let low = *body.get(cursor).ok_or(Refusal::Truncated)?;
-        let high = *body.get(cursor + 1).ok_or(Refusal::Truncated)?;
-        cursor += 2;
-        words.push((slot, i16::from_le_bytes([low, high])));
+        let bytes = body.get(cursor..cursor + 4).ok_or(Refusal::Truncated)?;
+        cursor += 4;
+        words.push((slot, i32::from_le_bytes(bytes.try_into().unwrap_or([0; 4]))));
     }
     Ok(Retained { bits, words })
 }
