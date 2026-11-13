@@ -49,7 +49,7 @@ struct Force {
 /// bank slot, so they cannot be forced.
 struct WordForce {
     name: String,
-    value: i16,
+    value: i32,
     expires: Option<Instant>,
 }
 
@@ -488,7 +488,12 @@ impl Daemon {
         let Some(vm) = self.vm.as_mut() else {
             return Err("no program is loaded".to_string());
         };
-        let inputs = hal.read_inputs().map_err(|error| error.to_string())?;
+        let bits = hal.read_inputs().map_err(|error| error.to_string())?;
+        // The word and float inputs are read in bank order; the VM writes them
+        // into their regions before the ops pass, so a rung sees this scan's
+        // field value. A float pin arrives as its integer view (`f64 as i32`).
+        let words = hal.read_word_inputs().map_err(|error| error.to_string())?;
+        let floats = hal.read_float_inputs().map_err(|error| error.to_string())?;
         // Timers add the real scan delta, not a fixed tick. The cap keeps a
         // stalled thread from jumping a timer past its preset in one scan.
         let dt_ms = self
@@ -503,7 +508,14 @@ impl Daemon {
                 vm.set_word(index, force.value);
             }
         }
-        vm.scan_with_dt(&inputs, dt_ms.max(1));
+        vm.scan_with_io(
+            linc_plc_core::vm::IoFrame {
+                bits: &bits,
+                words: &words,
+                floats: &floats,
+            },
+            dt_ms.max(1),
+        );
         for force in &self.word_forces {
             if let Some(index) = linc_plc_core::il::word_operand(&force.name) {
                 vm.set_word(index, force.value);
@@ -565,6 +577,10 @@ impl Daemon {
             }
         }
         hal.write_outputs(vm.outputs())
+            .map_err(|error| error.to_string())?;
+        hal.write_word_outputs(vm.word_outputs())
+            .map_err(|error| error.to_string())?;
+        hal.write_float_outputs(vm.float_outputs())
             .map_err(|error| error.to_string())
     }
 
@@ -613,6 +629,11 @@ impl Daemon {
     /// a sample never mixes two programs.
     fn set_watch(&mut self, watch: Vec<String>, shared: &Shared) {
         self.watch = watch;
+        // A Load installs the VM before pointing the trend at its watch list;
+        // without one there is nothing to sample yet.
+        let Some(vm) = self.vm.as_ref() else {
+            return;
+        };
         if let Ok(mut trend) = shared.trend.lock() {
             trend.names = self.watch.clone();
             trend.window_ms = self.trend_window;
@@ -620,7 +641,7 @@ impl Daemon {
             trend.words = self
                 .watch
                 .iter()
-                .map(|name| !super::is_bit_operand(name))
+                .map(|name| !super::is_bit_operand(name, vm))
                 .collect();
             trend.samples.clear();
         }

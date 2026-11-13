@@ -21,8 +21,16 @@
 #
 # Pins linc-plc creates, in this order, before it calls hal_ready():
 #
-#   linc_plc.<binding>     HAL_BIT  in   for every ladder "In" binding
-#   linc_plc.<binding>     HAL_BIT  out  for every ladder "Out" binding
+#   linc_plc.<binding>     HAL_BIT  in   for every ladder "In" bit binding
+#   linc_plc.<binding>     HAL_BIT  out  for every ladder "Out" bit binding
+#   linc_plc.<binding>     HAL_S32  in   for every "In" point of kind "word"
+#   linc_plc.<binding>     HAL_S32  out  for every "Out" point of kind "word"
+#   linc_plc.<binding>     HAL_FLOAT in  for every "In" point of kind "float"
+#   linc_plc.<binding>     HAL_FLOAT out for every "Out" point of kind "float"
+#
+# A word point is 32 bits. A float pin is read as its integer view (truncated
+# toward zero, saturating) and written back as a float, which is ClassicLadder's
+# %IF / %QF behaviour.
 #   linc_plc.alive         HAL_BIT  out  toggles every scan while the ladder runs,
 #                                       held false in Idle, Loaded and Fault
 #   linc_plc.scan-count    HAL_S32  out  wrapping scan counter

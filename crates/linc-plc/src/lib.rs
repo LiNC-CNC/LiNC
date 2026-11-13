@@ -108,6 +108,13 @@ pub enum Error {
     SocketPath(String),
     #[error("HAL pin {0} has no data slot")]
     Unlinked(String),
+    /// A binding was compiled as one HAL type and asked for another. Unreachable
+    /// while the compiler and the pin map agree, and a wiring fault if it fires.
+    #[error("HAL pin {name} is not a {expected} pin")]
+    PinType {
+        name: String,
+        expected: &'static str,
+    },
     #[error("output layout mismatch: {expected} HAL pin(s), {got} ladder value(s)")]
     Layout { expected: usize, got: usize },
 }
@@ -144,7 +151,7 @@ pub(crate) enum Command {
     },
     ForceWord {
         name: String,
-        value: i16,
+        value: i32,
         ttl_ms: u32,
         reply: mpsc::Sender<linc_plc_core::protocol::Response>,
     },
@@ -161,15 +168,22 @@ pub(crate) enum Command {
     },
 }
 
-/// Is this watch name a plain bit symbol rather than a word or block member?
-pub(crate) fn is_bit_operand(name: &str) -> bool {
-    linc_plc_core::il::word_operand(name).is_none() && !name.contains('.')
+/// Is this watch name a plain bit symbol rather than a word point, marker word
+/// or block member? The VM answers for the declared word points, whose names do
+/// not follow the `MWn` spelling.
+pub(crate) fn is_bit_operand(name: &str, vm: &Vm) -> bool {
+    linc_plc_core::il::word_operand(name).is_none()
+        && !name.contains('.')
+        && vm.word_slot(name).is_none()
 }
 
-/// One watch value: a bit as 0/1, or a word or block member.
+/// One watch value: a bit as 0/1, a word or block member, or a word point.
 pub(crate) fn trend_value(name: &str, vm: &Vm) -> Option<i32> {
     if let Some(index) = linc_plc_core::il::word_operand(name) {
-        return Some(i32::from(vm.word(index)));
+        return Some(vm.word(index));
+    }
+    if let Some(slot) = vm.word_slot(name) {
+        return Some(vm.word(slot));
     }
     if let Some(rest) = name
         .strip_suffix(".ET")
@@ -178,7 +192,7 @@ pub(crate) fn trend_value(name: &str, vm: &Vm) -> Option<i32> {
         .or_else(|| name.strip_suffix(".cv"))
     {
         if let Some((_, instance, _)) = linc_plc_core::compile::parse_block(rest, rest, "") {
-            return Some(i32::from(vm.block_value(instance)));
+            return Some(vm.block_value(instance));
         }
     }
     vm.get(name).map(i32::from)
@@ -186,32 +200,47 @@ pub(crate) fn trend_value(name: &str, vm: &Vm) -> Option<i32> {
 
 /// The compiled input and output binding names the pins were created for.
 /// Frozen at startup for the process lifetime.
+///
+/// Every region is part of the map: a load that adds or renames a word or float
+/// point would need new pins of a different HAL type, so it is refused with
+/// `io_map_locked` exactly like a changed bit binding.
 #[derive(Clone, Default)]
 pub(crate) struct IoMap {
     pub(crate) inputs: Vec<String>,
     pub(crate) outputs: Vec<String>,
+    pub(crate) word_inputs: Vec<String>,
+    pub(crate) word_outputs: Vec<String>,
+    pub(crate) float_inputs: Vec<String>,
+    pub(crate) float_outputs: Vec<String>,
 }
 
 impl IoMap {
     fn from_compiled(compiled: &Compiled) -> Self {
+        let names = |bindings: &[linc_plc_core::Binding]| {
+            bindings
+                .iter()
+                .map(|binding| binding.name.clone())
+                .collect::<Vec<String>>()
+        };
         Self {
-            inputs: compiled
-                .inputs
-                .iter()
-                .map(|binding| binding.name.clone())
-                .collect(),
-            outputs: compiled
-                .outputs
-                .iter()
-                .map(|binding| binding.name.clone())
-                .collect(),
+            inputs: names(&compiled.inputs),
+            outputs: names(&compiled.outputs),
+            word_inputs: names(&compiled.word_inputs),
+            word_outputs: names(&compiled.word_outputs),
+            float_inputs: names(&compiled.float_inputs),
+            float_outputs: names(&compiled.float_outputs),
         }
     }
 
     /// True when the candidate program drives exactly the bound map, in order.
     fn accepts(&self, compiled: &Compiled) -> bool {
         let candidate = Self::from_compiled(compiled);
-        candidate.inputs == self.inputs && candidate.outputs == self.outputs
+        candidate.inputs == self.inputs
+            && candidate.outputs == self.outputs
+            && candidate.word_inputs == self.word_inputs
+            && candidate.word_outputs == self.word_outputs
+            && candidate.float_inputs == self.float_inputs
+            && candidate.float_outputs == self.float_outputs
     }
 }
 
