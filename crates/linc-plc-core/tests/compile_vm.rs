@@ -1,6 +1,6 @@
 use linc_plc_core::{
-    compile, project_hash, Coil, CoilKind, IoDirection, IoKind, IoPoint, Logic, Op, Project, Rung,
-    Section, SymbolKind, VarDecl, Vm,
+    compile, project_hash, Coil, CoilKind, IoDirection, IoKind, IoPoint, Logic, Op, PresetSource,
+    Project, Rung, Section, SymbolKind, VarDecl, Vm,
 };
 use linc_plc_core::validate::validate;
 
@@ -1909,4 +1909,223 @@ fn a_word_bank_over_256_slots_is_refused() {
         !codes(&validate(&project)).contains(&"too_large".to_string()),
         "16 + 240 = 256 is the last accepted bank"
     );
+}
+
+// --- item 3: presets from a word, and preset writes -------------------------
+
+/// A compute (MOVE) coil on a rung of its own. Its coil slot is unused.
+fn compute_rung(target: &str, op: &str, left: &str, right: &str) -> Rung {
+    Rung {
+        cells: vec![linc_plc_core::grid::Cell::Compute {
+            op: op.to_string(),
+            target: target.to_string(),
+            left: left.to_string(),
+            right: right.to_string(),
+        }],
+        comment: String::new(),
+        logic: Logic::Const { value: true },
+        coil: Coil::new("", CoilKind::Normal),
+    }
+}
+
+/// `PT:=MW3` makes the preset a live word: the timer follows the bank, and a
+/// changed recipe word lands on the next scan instead of a baked literal.
+#[test]
+fn a_timer_preset_can_come_from_a_word() {
+    let project = il_project(
+        vec![IoPoint::new("start", IoDirection::In)],
+        vec!["CAL TON0(IN:=start, PT:=MW3)"],
+    );
+    let compiled = compile(&project).expect("compile");
+    assert_eq!(
+        compiled.program.ops[1],
+        Op::Fb {
+            kind: linc_plc_core::compile::FbKind::Ton,
+            instance: 0,
+            preset: PresetSource::Word(3),
+        },
+        "PT:=MW3 is a live source, not a baked default"
+    );
+
+    let mut vm = Vm::new(&compiled);
+    vm.set_word(3, 5_000);
+    for _ in 0..4 {
+        vm.scan_with_dt(&[true], 1000);
+    }
+    assert_eq!(vm.block_value(0), 4_000, "4 s elapsed");
+    assert!(!vm.block_q(0), "not due at 4 s");
+    vm.scan_with_dt(&[true], 1000);
+    assert_eq!(vm.block_value(0), 5_000);
+    assert!(vm.block_q(0), "due at the word's 5 s");
+
+    // Off resets the elapsed time; a 3 s recipe then fires at 3 s.
+    vm.scan_with_dt(&[false], 1000);
+    assert_eq!(vm.block_value(0), 0, "input off resets ET");
+    vm.set_word(3, 3_000);
+    for _ in 0..2 {
+        vm.scan_with_dt(&[true], 1000);
+    }
+    assert_eq!(vm.block_preset(0), 3_000, "the preset follows the word");
+    assert!(!vm.block_q(0), "2 s is not 3 s");
+    vm.scan_with_dt(&[true], 1000);
+    assert!(vm.block_q(0), "due at the new 3 s");
+    assert_eq!(vm.block_value(0), 3_000);
+}
+
+/// `TON0.PT := 10_000` from a compute coil. The compare rung reads the preset
+/// back through `FbPreset`, so this is the ladder's own read path.
+#[test]
+fn a_compute_coil_writes_a_block_preset() {
+    let write = compute_rung("TON0.PT", "MOVE", "10000", "0");
+    let read = Rung::new(
+        Logic::Compare {
+            operator: "EQ".to_string(),
+            left: "TON0.PT".to_string(),
+            right: "10000".to_string(),
+        },
+        Coil::new("y", CoilKind::Normal),
+    );
+    let project = project_with(
+        vec![IoPoint::new("y", IoDirection::Out)],
+        Vec::new(),
+        vec![section("main", vec![write, read])],
+    );
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan(&[]);
+    assert_eq!(vm.block_preset(0), 10_000);
+    assert_eq!(vm.outputs(), &[true], "TON0.PT reads 10,000");
+}
+
+/// The widened target is a `WordOperand`, so a compute coil can also drive a
+/// declared word point and therefore a word output pin.
+#[test]
+fn a_compute_coil_can_write_a_word_point() {
+    let project = project_with(
+        vec![point("qw0", IoDirection::Out, IoKind::Word)],
+        Vec::new(),
+        vec![section("main", vec![compute_rung("qw0", "MOVE", "MW0", "0")])],
+    );
+    let compiled = compile(&project).expect("compile");
+    let mut vm = Vm::new(&compiled);
+    vm.set_word(0, 42);
+    vm.scan(&[]);
+    assert_eq!(vm.word(16), 42, "qw0 is the first word slot after MW");
+    assert_eq!(vm.word_outputs(), &[42]);
+}
+
+/// A literal preset still bakes in, and a call with no `PT` keeps the block's
+/// default.
+#[test]
+fn a_literal_preset_still_works_and_reports_its_value() {
+    let project = il_project(
+        vec![IoPoint::new("start", IoDirection::In)],
+        vec!["CAL TON0(IN:=start, PT:=T#4s)"],
+    );
+    let compiled = compile(&project).expect("compile");
+    assert_eq!(
+        compiled.program.ops[1],
+        Op::Fb {
+            kind: linc_plc_core::compile::FbKind::Ton,
+            instance: 0,
+            preset: PresetSource::Const(4_000),
+        }
+    );
+    let mut vm = Vm::new(&compiled);
+    for _ in 0..3 {
+        vm.scan_with_dt(&[true], 1000);
+    }
+    assert!(!vm.block_q(0), "not due at 3 s");
+    vm.scan_with_dt(&[true], 1000);
+    assert!(vm.block_q(0), "due at 4 s");
+    assert_eq!(vm.block_preset(0), 4_000);
+
+    let default = il_project(
+        vec![IoPoint::new("start", IoDirection::In)],
+        vec!["CAL TON0(IN:=start)"],
+    );
+    let compiled = compile(&default).expect("compile");
+    assert_eq!(
+        compiled.program.ops[1],
+        Op::Fb {
+            kind: linc_plc_core::compile::FbKind::Ton,
+            instance: 0,
+            preset: PresetSource::Const(1_000),
+        },
+        "no PT keeps the block's one-second default"
+    );
+}
+
+/// Anything that is not a preset or a declared word is refused by name. A block
+/// member is a readable value but not a preset source, and `MW99` is outside
+/// the bank.
+#[test]
+fn a_bad_preset_is_still_refused_by_name() {
+    for preset in ["BOGUS", "MW99", "TON1.ET"] {
+        let line = format!("CAL TON0(IN:=start, PT:={preset})");
+        let project = il_project(
+            vec![IoPoint::new("start", IoDirection::In)],
+            vec![line.as_str()],
+        );
+        let diagnostics = validate(&project);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|item| item.code == "cal_arg" && item.message.contains(preset)),
+            "{preset}: {diagnostics:?}"
+        );
+    }
+}
+
+/// A literal is a value, not a place: a compute coil whose target is a number
+/// is refused with its own code, and the operator check does not fire.
+#[test]
+fn a_compute_coil_refuses_a_literal_target() {
+    let project = project_with(
+        Vec::new(),
+        Vec::new(),
+        vec![section("main", vec![compute_rung("5", "MOVE", "MW0", "0")])],
+    );
+    let codes = codes(&validate(&project));
+    assert!(codes.contains(&"compute_target".to_string()), "{codes:?}");
+    assert!(
+        !codes.contains(&"cell_compute".to_string()),
+        "the operator is valid: {codes:?}"
+    );
+}
+
+/// `Op::Fb` stores its own source into the block's preset every execution — the
+/// same as before item 3 — so a preset written by a compute coil holds only
+/// until that block runs again. A preset that must stay authoritative is the
+/// one sourced from a word (`PT:=MW3`), not a one-off write.
+#[test]
+fn a_block_reasserts_its_own_preset_after_a_write() {
+    let timer = Rung::new(
+        Logic::series(vec![
+            Logic::contact("start", false),
+            Logic::Block {
+                block: "TON".to_string(),
+                instance: "TON0".to_string(),
+                preset: "T#4s".to_string(),
+            },
+        ]),
+        Coil::new("y", CoilKind::Normal),
+    );
+    // The write comes first, so the timer's own op runs after it in this scan.
+    let write = compute_rung("TON0.PT", "MOVE", "10000", "0");
+    let project = project_with(
+        vec![
+            IoPoint::new("start", IoDirection::In),
+            IoPoint::new("y", IoDirection::Out),
+        ],
+        Vec::new(),
+        vec![section("main", vec![write, timer])],
+    );
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan_with_dt(&[true], 1000);
+    assert_eq!(
+        vm.block_preset(0),
+        4_000,
+        "the timer re-asserted its literal after the write"
+    );
+    assert_eq!(vm.block_value(0), 1_000, "and it counts toward its own 4 s");
 }

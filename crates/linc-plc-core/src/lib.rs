@@ -22,7 +22,8 @@ pub mod validate;
 pub mod vm;
 
 pub use compile::{
-    compile, project_hash, Bank, Binding, Compiled, Op, Program, Symbol, SymbolKind, WordLayout,
+    compile, project_hash, Bank, Binding, Compiled, Op, PresetSource, Program, Symbol, SymbolKind,
+    WordLayout,
 };
 pub use grid::{Cell, POSITIONS};
 pub use model::{

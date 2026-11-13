@@ -202,6 +202,25 @@ Consequences worth stating:
   contact, or a bit point named in a compare, fails validation with `io_kind`
   instead of addressing the other image.
 
+### Presets from a word
+
+A function block's preset can be a live word rather than a literal:
+`CAL TON0(IN:=start, PT:=MW3)` (or `PT:=` a declared word point) reads the bank
+on every scan, so `MW3 = 5000` is a five-second timer and changing `MW3` changes
+the preset from the next scan. Anything that is neither a preset nor a declared
+word — `BOGUS`, `MW99`, a block member — is refused with `cal_arg` naming the
+operand.
+
+A compute (MOVE/ADD/…) coil can write a block member: `TON0.PT := MW3`,
+`CTU0.PV := MW7`, `TON0.ET := 0`, or a declared word point. A target that is
+neither a bank slot nor a block member is refused with `compute_target`.
+
+Ordering matters, and it follows from the block owning one preset field: the
+block's own instruction stores its source into that field on every execution, so
+a preset written by a compute coil holds only until the block runs again. When
+the preset must stay under the ladder's control, source it from a word instead
+of writing it once.
+
 ## Retained values
 
 Variables declared `retain` and the marker words `MW0..MW15` can survive a daemon

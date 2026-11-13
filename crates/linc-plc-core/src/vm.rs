@@ -15,7 +15,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::compile::{
-    Bank, Binding, Compiled, FbKind, MathOp, Op, Program, SymbolKind, WordOperand,
+    Bank, Binding, Compiled, FbKind, MathOp, Op, PresetSource, Program, SymbolKind, WordOperand,
 };
 
 /// Operand-stack depth. Validation caps logic nesting at 64, so this is slack.
@@ -366,6 +366,12 @@ impl Vm {
                     preset,
                 } => {
                     let input = pop(&stack, &mut depth);
+                    // A word source is read every scan, so a recipe word drives
+                    // the block; a literal is the value it was compiled with.
+                    let preset = match preset {
+                        PresetSource::Const(value) => value,
+                        PresetSource::Word(slot) => self.word(slot),
+                    };
                     let q = run_block(
                         &mut self.blocks,
                         instance as usize,
@@ -450,7 +456,7 @@ impl Vm {
                             }
                             MathOp::Move => left,
                         };
-                        self.set_word(target, result);
+                        self.write_word(target, result);
                     }
                 }
                 Op::FbQ(instance) => {
@@ -631,6 +637,31 @@ impl Vm {
     pub fn set_word(&mut self, index: u16, value: i32) {
         if let Some(cell) = self.words.get_mut(index as usize) {
             *cell = value;
+        }
+    }
+
+    /// Write a compute coil's result: a bank slot, a block's `PT`/`PV`, or a
+    /// block's `ET`/`CV`.
+    ///
+    /// The preset field is the one `Op::Fb` re-asserts from its own source on
+    /// the next execution, so a written preset holds until that block runs
+    /// again. A preset *sourced from a word* is the way to make the ladder's
+    /// value authoritative.
+    fn write_word(&mut self, target: WordOperand, value: i32) {
+        match target {
+            WordOperand::Word(index) | WordOperand::Slot(index) => self.set_word(index, value),
+            WordOperand::Block(instance) => {
+                if let Some(state) = self.blocks.get_mut(instance as usize) {
+                    state.value = value;
+                }
+            }
+            WordOperand::BlockPreset(instance) => {
+                if let Some(state) = self.blocks.get_mut(instance as usize) {
+                    state.preset = value;
+                }
+            }
+            // Validation refuses a literal target; keep the scan alive.
+            WordOperand::Const(_) => {}
         }
     }
 

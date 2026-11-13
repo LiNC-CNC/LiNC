@@ -229,6 +229,19 @@ pub const FB_PER_TYPE: u16 = 4;
 /// means an existing ZX program's `MW` numbers mean the same thing here.
 pub const WORD_COUNT: u16 = 16;
 
+/// Where a function block's preset comes from.
+///
+/// `Word` holds a bank slot, so the preset is read on every scan and a recipe
+/// word drives the timer or counter. `Const` is the literal a drawn block box or
+/// `PT:=T#4s` bakes into the program. The block's state still holds one preset;
+/// only where it came from changes, so `FbPreset` and `WordOperand::BlockPreset`
+/// read the field they always did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresetSource {
+    Const(i32),
+    Word(u16),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     PushConst(bool),
@@ -266,7 +279,7 @@ pub enum Op {
     Fb {
         kind: FbKind,
         instance: u16,
-        preset: i32,
+        preset: PresetSource,
     },
     /// Push the block's `ET` (timers) or `CV` (counters) on the word stack.
     FbWord(u16),
@@ -291,10 +304,11 @@ pub enum Op {
         rising: bool,
     },
     /// A compute coil: pop the power bit and, when it is true, write the result
-    /// to `MWtarget`. It ends the rung; there is no coil output.
+    /// to `target`, which is a bank slot or a block member. It ends the rung;
+    /// there is no coil output.
     Compute {
         op: MathOp,
-        target: u16,
+        target: WordOperand,
         left: WordOperand,
         right: WordOperand,
     },
@@ -742,20 +756,22 @@ fn lower_pou(
                         // `CAL TON0(IN:=x, PT:=T#1s)` runs a block; a bare name
                         // is a POU call.
                         if let Some((name, args)) = crate::il::parse_call(&operand) {
-                            if let Some((kind, instance, mut preset)) =
-                                parse_block(&name, &name, "")
-                            {
+                            if let Some((kind, instance, default)) = parse_block(&name, &name, "") {
                                 let input = args
                                     .iter()
                                     .find(|(key, _)| matches!(key.as_str(), "IN" | "CU" | "CD"))
                                     .map(|(_, value)| value.as_str())
                                     .unwrap_or("FALSE");
-                                if let Some((_, value)) = args
+                                // `PT:=MW3` is a live source; a literal bakes in.
+                                // Validation refused anything else, so a failed
+                                // resolve keeps the block's default preset.
+                                let preset = args
                                     .iter()
                                     .find(|(key, _)| matches!(key.as_str(), "PT" | "PV"))
-                                {
-                                    preset = parse_preset(value, kind.is_timer()).unwrap_or(preset);
-                                }
+                                    .and_then(|(_, value)| {
+                                        resolve_preset(value, kind.is_timer(), lookup)
+                                    })
+                                    .unwrap_or(PresetSource::Const(default));
                                 push_bit_operand(input, lookup, ops);
                                 ops.push(Op::Fb {
                                     kind,
@@ -945,7 +961,7 @@ fn lower_fbd_grid_block(
                 ops.push(Op::Fb {
                     kind,
                     instance,
-                    preset,
+                    preset: PresetSource::Const(preset),
                 });
             } else if let Some(compare) = compare_op(&name) {
                 let (Some(left), Some(right)) = (
@@ -968,7 +984,7 @@ fn lower_fbd_grid_block(
                 let (Some(left), Some(right), Some(target)) = (
                     resolve_word(inputs.first().map(String::as_str).unwrap_or("0"), lookup),
                     resolve_word(inputs.get(1).map(String::as_str).unwrap_or("0"), lookup),
-                    crate::il::word_operand(&target),
+                    resolve_word(&target, lookup).filter(|target| target.is_writable()),
                 ) else {
                     ops.push(Op::PushConst(false));
                     return;
@@ -1125,7 +1141,7 @@ fn lower_fbd_block(
                 ops.push(Op::Fb {
                     kind,
                     instance,
-                    preset,
+                    preset: PresetSource::Const(preset),
                 });
             } else if let Some(compare) = compare_op(&block) {
                 let (Some(left), Some(right)) = (
@@ -1226,7 +1242,7 @@ fn lower_cells(
                     ops.push(Op::Fb {
                         kind,
                         instance,
-                        preset,
+                        preset: PresetSource::Const(preset),
                     });
                 } else {
                     // Validation refused this cell; keep the rung alive.
@@ -1265,9 +1281,10 @@ fn lower_cells(
                 else {
                     continue;
                 };
-                let (Some(math), Some(target)) =
-                    (MathOp::parse(op), crate::il::word_operand(target))
-                else {
+                let (Some(math), Some(target)) = (
+                    MathOp::parse(op),
+                    resolve_word(target, lookup).filter(|target| target.is_writable()),
+                ) else {
                     continue;
                 };
                 if !has_power {
@@ -1365,6 +1382,17 @@ pub enum WordOperand {
     BlockPreset(u16),
 }
 
+impl WordOperand {
+    /// Is this somewhere a compute coil may write? A literal is a value, not a
+    /// place; a bank slot and a block member (`PT`/`PV`, `ET`/`CV`) are fields.
+    pub fn is_writable(self) -> bool {
+        matches!(
+            self,
+            Self::Word(_) | Self::Slot(_) | Self::Block(_) | Self::BlockPreset(_)
+        )
+    }
+}
+
 /// Resolve `MW3`, `T#4s`, `-12`, `TON0.ET` or `CTU1.CV`.
 pub fn word_operand_value(text: &str) -> Option<WordOperand> {
     let text = text.trim();
@@ -1402,6 +1430,25 @@ pub fn word_operand_value(text: &str) -> Option<WordOperand> {
 /// time, a literal, a block member, or a declared word symbol.
 fn resolve_word(text: &str, lookup: &Lookup) -> Option<WordOperand> {
     word_operand_value(text).or_else(|| lookup.word(text.trim()).map(WordOperand::Slot))
+}
+
+/// Resolve a preset in a context that has the symbol table: a declared word
+/// point becomes a live source, everything else goes through `preset_source`.
+fn resolve_preset(text: &str, timer: bool, lookup: &Lookup) -> Option<PresetSource> {
+    lookup
+        .word(text)
+        .map(PresetSource::Word)
+        .or_else(|| preset_source(text, timer))
+}
+
+/// A preset that needs no symbol table: `MWn`, a time (`T#4s`), or a count.
+/// Validation and the compiler share this, so a preset one accepts is one the
+/// other can resolve.
+pub fn preset_source(text: &str, timer: bool) -> Option<PresetSource> {
+    match crate::il::word_operand(text) {
+        Some(slot) => Some(PresetSource::Word(slot)),
+        None => parse_preset(text, timer).map(PresetSource::Const),
+    }
 }
 
 fn emit_word(ops: &mut Vec<Op>, value: WordOperand) {
@@ -1586,7 +1633,7 @@ fn lower_logic(logic: &Logic, lookup: &Lookup, edges: &mut u16, ops: &mut Vec<Op
             Some((kind, instance, preset)) => ops.push(Op::Fb {
                 kind,
                 instance,
-                preset,
+                preset: PresetSource::Const(preset),
             }),
             None => ops.push(Op::PushConst(false)),
         },
@@ -1609,7 +1656,7 @@ fn lower_logic(logic: &Logic, lookup: &Lookup, edges: &mut u16, ops: &mut Vec<Op
                             Some((kind, instance, preset)) => ops.push(Op::Fb {
                                 kind,
                                 instance,
-                                preset,
+                                preset: PresetSource::Const(preset),
                             }),
                             None => ops.push(Op::PushConst(false)),
                         }

@@ -368,13 +368,22 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                                 let timer = block
                                                     .map(|(kind, _, _)| kind.is_timer())
                                                     .unwrap_or(true);
-                                                if crate::compile::parse_preset(&value, timer)
-                                                    .is_none()
-                                                {
+                                                // A literal preset, `MWn`, or a
+                                                // declared word point; a block
+                                                // member is a readable value but
+                                                // not a preset source.
+                                                let ok = crate::compile::preset_source(
+                                                    &value, timer,
+                                                )
+                                                .is_some()
+                                                    || word_symbols.contains(
+                                                        &value.trim().to_ascii_lowercase(),
+                                                    );
+                                                if !ok {
                                                     diagnostics.push(Diagnostic::error(
                                                         "cal_arg",
                                                         format!(
-                                                            "'{value}' is not a valid preset"
+                                                            "'{value}' is not a valid preset or a declared word"
                                                         ),
                                                         path.clone(),
                                                     ));
@@ -793,13 +802,20 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     right,
                 } = cell
                 {
-                    if crate::compile::MathOp::parse(op).is_none()
-                        || crate::il::word_operand(target).is_none()
-                    {
+                    if crate::compile::MathOp::parse(op).is_none() {
                         diagnostics.push(Diagnostic::error(
                             "cell_compute",
                             format!(
-                                "'{target}':='{op}' is not a compute coil; use MW0-15 and ADD, SUB, MUL, DIV or MOVE"
+                                "'{op}' is not a compute operator; use ADD, SUB, MUL, DIV or MOVE"
+                            ),
+                            format!("{rung_path}.cells[{cell_index}]"),
+                        ));
+                    }
+                    if !compute_target_known(target, &word_symbols) {
+                        diagnostics.push(Diagnostic::error(
+                            "compute_target",
+                            format!(
+                                "'{target}' is not a place to write; use MW0-15, a word point or a block member such as TON0.PT"
                             ),
                             format!("{rung_path}.cells[{cell_index}]"),
                         ));
@@ -1017,6 +1033,14 @@ fn word_operand_known(text: &str, word_symbols: &HashSet<String>) -> bool {
         || word_symbols.contains(&text.trim().to_ascii_lowercase())
 }
 
+/// Is this a place a compute coil may write? A bank slot (`MWn` or a declared
+/// word point) or a block member; never a literal. A block member on the left
+/// of a compute is a write, which is what `compute_target` guards.
+fn compute_target_known(text: &str, word_symbols: &HashSet<String>) -> bool {
+    crate::compile::word_operand_value(text).is_some_and(|operand| operand.is_writable())
+        || word_symbols.contains(&text.trim().to_ascii_lowercase())
+}
+
 /// Number of I/O points of one direction and declared kind.
 fn count_points(project: &Project, direction: IoDirection, kind: IoKind) -> u16 {
     project
@@ -1155,14 +1179,28 @@ fn check_fbd_grid(
         match grid.cell(block.row, block.col + 1) {
             crate::model::FbdCell::Out { operand } => {
                 let target = operand.trim().trim_start_matches('!');
-                let declared = known.contains(&target.to_ascii_lowercase());
-                let word = crate::il::word_operand(target).is_some();
-                if !declared && !word {
-                    diagnostics.push(Diagnostic::error(
-                        "fbd_output",
-                        format!("'{operand}' is not a declared output or variable"),
-                        format!("{path}.row"),
-                    ));
+                if compute {
+                    // A compute block writes a word; a literal or a bit output
+                    // is not a place to put the result.
+                    if !compute_target_known(target, word_symbols) {
+                        diagnostics.push(Diagnostic::error(
+                            "compute_target",
+                            format!(
+                                "'{operand}' is not a place to write; use MW0-15, a word point or a block member such as TON0.PT"
+                            ),
+                            format!("{path}.row"),
+                        ));
+                    }
+                } else {
+                    let declared = known.contains(&target.to_ascii_lowercase());
+                    let word = crate::il::word_operand(target).is_some();
+                    if !declared && !word {
+                        diagnostics.push(Diagnostic::error(
+                            "fbd_output",
+                            format!("'{operand}' is not a declared output or variable"),
+                            format!("{path}.row"),
+                        ));
+                    }
                 }
             }
             _ => diagnostics.push(Diagnostic::error(
