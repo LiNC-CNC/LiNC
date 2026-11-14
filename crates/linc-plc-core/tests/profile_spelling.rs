@@ -84,21 +84,17 @@ fn a_projects_dialect_is_written_only_when_it_is_not_iec() {
         "an unknown profile must not be guessed"
     );
 
-    // Until its semantics exist, a classicladder project is refused loudly
-    // rather than validated as iec.
-    let diagnostics = linc_plc_core::validate(&classic);
-    assert!(
-        diagnostics.iter().any(|item| item.code == "profile"
-            && item.path == "profile"
-            && item.message.contains("not implemented yet")),
-        "{diagnostics:?}"
-    );
-    assert!(
-        !linc_plc_core::validate(&iec)
-            .iter()
-            .any(|item| item.code == "profile"),
-        "an iec project says nothing about profiles"
-    );
+    // The dialect is a fact of the document, not a diagnostic: both validate
+    // cleanly, and the profile is what gives them different meaning.
+    for project in [&iec, &classic] {
+        assert!(
+            !linc_plc_core::validate(project)
+                .iter()
+                .any(|item| item.code == "profile"),
+            "`{}` says nothing about profiles",
+            project.profile.label()
+        );
+    }
 }
 
 /// M4's acceptance: the validator names no instruction and no operand format.

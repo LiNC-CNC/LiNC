@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::compile::{
     Bank, Binding, Compiled, FbKind, MathOp, Op, PresetSource, Program, SymbolKind, WordOperand,
 };
+use crate::profile::counter::{CounterDone, CounterRule};
 
 /// Operand-stack depth. Validation caps logic nesting at 64, so this is slack.
 const STACK_DEPTH: usize = 128;
@@ -401,6 +402,23 @@ impl Vm {
                     );
                     push(&mut stack, &mut depth, q);
                 }
+                Op::Counter {
+                    instance,
+                    preset,
+                    rule,
+                } => {
+                    let input = pop(&stack, &mut depth);
+                    let preset = match preset {
+                        PresetSource::Const(value) => value,
+                        PresetSource::Word(slot) => self.word(slot),
+                    };
+                    let q = run_counter(&mut self.blocks, instance as usize, input, preset, rule);
+                    push(&mut stack, &mut depth, q);
+                }
+                Op::Count { instance, up, top } => {
+                    let power = pop(&stack, &mut depth);
+                    count_member(&mut self.blocks, instance as usize, up, power, top);
+                }
                 Op::Latch { kind, instance } => {
                     let reset = pop(&stack, &mut depth);
                     let set = pop(&stack, &mut depth);
@@ -415,11 +433,17 @@ impl Vm {
                         }
                     }
                 }
-                Op::FbLoad(instance) => {
+                Op::FbLoad { instance, preset } => {
                     let power = pop(&stack, &mut depth);
                     if power {
+                        let preset = match preset {
+                            PresetSource::Const(value) => value,
+                            PresetSource::Word(slot) => self.word(slot),
+                        }
+                        .max(0);
                         if let Some(state) = self.blocks.get_mut(instance as usize) {
-                            state.value = state.preset;
+                            state.value = preset;
+                            state.preset = preset;
                         }
                     }
                 }
@@ -849,6 +873,10 @@ struct FbState {
     input: bool,
     q: bool,
     running: bool,
+    /// Rising-edge memory for the member-coil counter's `CU` and `CD` coils.
+    /// Separate from `input`, which is the block's own count input.
+    up_input: bool,
+    down_input: bool,
     /// `ET` of a timer, `CV` of a counter.
     value: i32,
     /// `PT` of a timer, `PV` of a counter, as last executed.
@@ -909,18 +937,10 @@ fn run_block(
                 }
             }
         }
-        FbKind::Ctu => {
-            if input && !state.input {
-                state.value = state.value.saturating_add(1);
-            }
-            state.q = state.value >= preset;
-        }
-        FbKind::Ctd => {
-            if input && !state.input {
-                state.value = state.value.saturating_sub(1);
-            }
-            state.q = state.value <= 0;
-        }
+        // Counters run through `Op::Counter` and `Op::Count` with the mechanics
+        // the compiler baked, so reaching here would be a compiler bug: leave
+        // the state alone and report its `Q`.
+        FbKind::Ctu | FbKind::Ctd => {}
         FbKind::Rt => state.q = input && !state.input,
         FbKind::Rf => state.q = !input && state.input,
         // Latches run through `run_latch`.
@@ -928,6 +948,65 @@ fn run_block(
     }
     state.input = input;
     state.q
+}
+
+/// Run a counter. `rule` is data: where the steps come from and what `done`
+/// compares. The scan never asks which dialect produced it — Appendix D.
+fn run_counter(
+    blocks: &mut [FbState],
+    instance: usize,
+    input: bool,
+    preset: i32,
+    rule: CounterRule,
+) -> bool {
+    let Some(state) = blocks.get_mut(instance) else {
+        return false;
+    };
+    let preset = preset.max(0);
+    state.preset = preset;
+    if rule.steps_on_coils() {
+        // Member coils step the value; this execution only re-asserts the
+        // preset and decides `done`.
+    } else if input && !state.input {
+        state.value = state.value.saturating_add(1);
+    }
+    state.q = match rule.done {
+        CounterDone::AtLeastPreset => state.value >= preset,
+        CounterDone::AtMostZero => state.value <= 0,
+        CounterDone::EqualsPreset => state.value == preset,
+    };
+    state.input = input;
+    state.q
+}
+
+/// Step a member-coil counter: on the power bit's rising edge, add or subtract
+/// one. `top` is the inclusive upper end of the range; a step past either end
+/// wraps to the other, and `None` saturates instead.
+fn count_member(blocks: &mut [FbState], instance: usize, up: bool, power: bool, top: Option<i32>) {
+    let Some(state) = blocks.get_mut(instance) else {
+        return;
+    };
+    let previous = if up { state.up_input } else { state.down_input };
+    if power && !previous {
+        let mut value = if up {
+            state.value.saturating_add(1)
+        } else {
+            state.value.saturating_sub(1)
+        };
+        if let Some(top) = top {
+            if value > top {
+                value = 0;
+            } else if value < 0 {
+                value = top;
+            }
+        }
+        state.value = value;
+    }
+    if up {
+        state.up_input = power;
+    } else {
+        state.down_input = power;
+    }
 }
 
 /// Set-dominant `SR` and reset-dominant `RS`.

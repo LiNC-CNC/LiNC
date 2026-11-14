@@ -14,6 +14,7 @@
 //! their own types. That direction is what lets the rest of the strangler move
 //! without a cycle.
 
+pub mod counter;
 pub mod instr;
 pub mod layout;
 pub mod resolve;
@@ -21,9 +22,12 @@ pub mod spec;
 
 use std::collections::HashMap;
 
+use crate::model::Dialect;
+
+pub use counter::{BitMember, CounterRule};
 pub use layout::WordLayout;
 use resolve::{Operand, OperandError};
-use spec::Spec;
+use spec::{FbName, Spec};
 
 /// Instances per function-block kind. Part of the dialect: the instance index is
 /// `kind * FB_PER_TYPE + number`, and the editor offers exactly this many.
@@ -60,6 +64,18 @@ pub trait Profile {
 
     /// Most edge contacts the scan can carry.
     fn max_edge_contacts(&self) -> u16;
+
+    /// The bit member this dialect's blocks have, by `<instance>.<member>` text.
+    /// A member one dialect has and the other does not is simply absent here.
+    fn bit_member(&self, text: &str) -> Option<(u16, BitMember)>;
+
+    /// The counter mechanics this dialect bakes into a counter block's op.
+    fn counter_rule(&self, kind: FbName) -> CounterRule;
+
+    /// The top of a counter's value range when it wraps, `None` when it
+    /// saturates. A number, because the scan counts with it and never asks what
+    /// dialect produced it.
+    fn counter_top(&self) -> Option<i32>;
 }
 
 /// The dialect LiNC ships: the ZX-derived instruction set, its sixteen marker
@@ -95,6 +111,87 @@ impl Profile for Iec {
     fn max_edge_contacts(&self) -> u16 {
         layout::MAX_EDGE_CONTACTS
     }
+
+    fn bit_member(&self, text: &str) -> Option<(u16, BitMember)> {
+        counter::iec_member(text)
+    }
+
+    fn counter_rule(&self, kind: FbName) -> CounterRule {
+        counter::iec_rule(kind)
+    }
+
+    fn counter_top(&self) -> Option<i32> {
+        None
+    }
+}
+
+/// ClassicLadder's semantics: the same instructions and the same bank, a counter
+/// that is stepped by its member coils, wraps at 0..=9999 and reports `done` by
+/// equality, and no writable preset member.
+///
+/// The instruction table, the operand resolver and the bank geometry are shared
+/// with `iec` on purpose: the two dialects differ in their counters, not in their
+/// arithmetic or their grid.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ClassicLadder;
+
+impl Profile for ClassicLadder {
+    fn name(&self) -> &'static str {
+        "classicladder"
+    }
+
+    fn specs(&self) -> &'static [Spec] {
+        spec::SPECS
+    }
+
+    fn spec(&self, mnemonic: &str) -> Option<&'static Spec> {
+        spec::spec(mnemonic)
+    }
+
+    fn resolve(&self, text: &str, symbols: &SymbolLookup) -> Result<Operand, OperandError> {
+        let operand = resolve::resolve(text, symbols)?;
+        match operand {
+            // ClassicLadder's counter has no writable preset member: its preset
+            // is the element's own and the compiler bakes it. Accepting `.PV`
+            // would address a field nothing maintains.
+            Operand::BlockPreset(_) => Err(OperandError {
+                text: text.trim().to_string(),
+            }),
+            other => Ok(other),
+        }
+    }
+
+    fn layout(&self, iw: u16, qw: u16, fi: u16, fo: u16) -> WordLayout {
+        WordLayout::new(iw, qw, fi, fo)
+    }
+
+    fn max_words(&self) -> u16 {
+        layout::MAX_WORDS
+    }
+
+    fn max_edge_contacts(&self) -> u16 {
+        layout::MAX_EDGE_CONTACTS
+    }
+
+    fn bit_member(&self, text: &str) -> Option<(u16, BitMember)> {
+        counter::classicladder_member(text)
+    }
+
+    fn counter_rule(&self, kind: FbName) -> CounterRule {
+        counter::classicladder_rule(kind)
+    }
+
+    fn counter_top(&self) -> Option<i32> {
+        Some(9_999)
+    }
+}
+
+/// The profile a project's dialect names. Compile-time: the scan never asks.
+pub fn for_dialect(dialect: Dialect) -> &'static dyn Profile {
+    match dialect {
+        Dialect::Iec => &IEC,
+        Dialect::ClassicLadder => &CLASSIC_LADDER,
+    }
 }
 
 /// The profile the compiler, the validator and the editor read.
@@ -103,3 +200,4 @@ pub fn profile() -> &'static Iec {
 }
 
 static IEC: Iec = Iec;
+static CLASSIC_LADDER: ClassicLadder = ClassicLadder;

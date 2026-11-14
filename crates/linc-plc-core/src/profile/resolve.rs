@@ -296,18 +296,6 @@ pub fn parse_preset(text: &str, timer: bool) -> Option<i32> {
     }
 }
 
-/// The block instance a `<instance>.Q` bit operand names. A timer's done output
-/// is not a bank slot, so a ladder contact on a timer's done reads the block's
-/// `Q` through `Op::FbQ` instead of a symbol.
-pub fn q_instance(name: &str) -> Option<u16> {
-    let text = name.trim();
-    let rest = text
-        .strip_suffix(".Q")
-        .or_else(|| text.strip_suffix(".q"))?;
-    let (_, instance, _) = parse_block(rest, rest, "")?;
-    Some(instance)
-}
-
 /// An empty symbol table, for callers that only need the dialect's own
 /// spellings (`HashMap::new` allocates nothing until something is inserted).
 pub fn no_symbols() -> HashMap<String, u16> {

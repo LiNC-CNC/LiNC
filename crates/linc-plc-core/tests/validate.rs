@@ -339,8 +339,10 @@ fn a_counter_member_coil_only_belongs_to_a_counter() {
     let project = cell_project(Vec::new(), Coil::new("TON0.R", CoilKind::Normal));
     let diagnostics = validate(&project);
     assert!(
-        diagnostics.iter().any(|item| item.code == "coil_target"
-            && item.message.contains("only CTU and CTD have R and LD")),
+        diagnostics
+            .iter()
+            .any(|item| item.code == "coil_target"
+                && item.message.contains("only a counter has one")),
         "{diagnostics:?}"
     );
 }

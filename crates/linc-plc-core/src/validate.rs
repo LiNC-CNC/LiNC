@@ -32,6 +32,7 @@ enum SymbolClass {
 /// to each check. The validator owns them; nothing here decides a rule.
 #[derive(Clone, Copy)]
 struct Facts<'a> {
+    profile: &'a dyn crate::profile::Profile,
     known: &'a HashSet<String>,
     word_slots: &'a HashMap<String, u16>,
     io_kinds: &'a HashMap<&'a str, IoKind>,
@@ -45,6 +46,7 @@ impl Facts<'_> {
     fn ctx<'b>(&'b self, path: &'b str) -> Ctx<'b> {
         Ctx {
             path,
+            profile: self.profile,
             known: self.known,
             word_slots: self.word_slots,
             io_kinds: self.io_kinds,
@@ -84,18 +86,9 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         ));
     }
 
-    // The document says which semantics it means. `classicladder` is declared in
-    // the model and refused here until its counter rules and addresses exist:
-    // validating it as `iec` would quietly change what the program does.
-    if project.profile == crate::model::Dialect::ClassicLadder {
-        diagnostics.push(Diagnostic::error(
-            "profile",
-            "profile `classicladder` is not implemented yet; its counter rules (done = equality, \
-             wrap at 0..9999, empty and full outputs) and its `%B`/`%I`/`%Q`/`%W` addresses land \
-             with the second semantics, so a project is written in `iec` until then",
-            "profile",
-        ));
-    }
+    // The document's dialect, chosen once: validation is a compile-time pass and
+    // may ask the profile; the scan never does.
+    let profile = crate::profile::for_dialect(project.profile);
 
     let symbol_count = project.io.len() + project.vars.len();
     if symbol_count > MAX_SYMBOLS {
@@ -191,6 +184,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     }
                 }
                 let facts = Facts {
+                    profile,
                     known: &known,
                     word_slots: &word_slots,
                     io_kinds: &io_kinds,
@@ -227,6 +221,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             }
             PouLanguage::Fbd => {
                 let facts = Facts {
+                    profile,
                     known: &known,
                     word_slots: &word_slots,
                     io_kinds: &io_kinds,
@@ -445,6 +440,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         // names a rung label, which is checked against these rungs.
         let no_labels: HashSet<String> = HashSet::new();
         let facts = Facts {
+            profile,
             known: &known,
             word_slots: &word_slots,
             io_kinds: &io_kinds,

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::il::{lower_line, parse_line, IlLine, IlOperand};
 use crate::model::{CoilKind, IoDirection, IoKind, Logic, PouLanguage, Project};
+use crate::profile::counter::CounterRule;
 use crate::profile::spec::{CompareName, Family, FbName, IlForm, MathName};
 use crate::validate::{validate, Diagnostic, Severity};
 
@@ -47,8 +48,14 @@ pub struct Binding {
 /// The compiled symbol table split by bank. Bit slots and word-bank slots are
 /// separate namespaces, so every lookup says which one it wants; a word point
 /// can never be read as a bit slot by accident.
-#[derive(Debug, Default)]
 struct Lookup {
+    /// The dialect this program is compiled for. Compile-time only: the scan
+    /// executes the ops it produces, never a profile.
+    profile: &'static dyn crate::profile::Profile,
+    /// Each counter instance's preset text, from the block that declares it. A
+    /// member coil in another rung loads it, and on the first scan the block has
+    /// not run yet, so the text has to be found before lowering starts.
+    presets: HashMap<u16, (String, bool)>,
     bit: HashMap<String, u16>,
     /// IL operands are typed by hand; accept any spelling of a declared name.
     bit_ci: HashMap<String, u16>,
@@ -56,6 +63,16 @@ struct Lookup {
 }
 
 impl Lookup {
+    fn new(profile: &'static dyn crate::profile::Profile) -> Self {
+        Self {
+            profile,
+            presets: HashMap::new(),
+            bit: HashMap::new(),
+            bit_ci: HashMap::new(),
+            word: HashMap::new(),
+        }
+    }
+
     fn insert(&mut self, name: &str, bank: Bank, index: u16) {
         match bank {
             Bank::Bit => {
@@ -136,7 +153,7 @@ impl FbKind {
         self.name().code()
     }
 
-    fn name(self) -> FbName {
+    pub(crate) fn name(self) -> FbName {
         match self {
             Self::Ton => FbName::Ton,
             Self::Tof => FbName::Tof,
@@ -152,6 +169,11 @@ impl FbKind {
 
     pub fn is_timer(self) -> bool {
         matches!(self, Self::Ton | Self::Tof | Self::Tp)
+    }
+
+    /// Counters step a value; the rest are bit or time blocks.
+    pub fn is_counter(self) -> bool {
+        matches!(self, Self::Ctu | Self::Ctd)
     }
 
     /// Latches take two inputs; the rest take one.
@@ -265,6 +287,22 @@ pub enum Op {
         instance: u16,
         preset: PresetSource,
     },
+    /// Run a counter: pop its input, re-assert the preset, step the value the way
+    /// the profile baked (`rule`), push `Q`. A counter whose steps come from
+    /// member coils re-asserts the preset and computes `Q` here, and only
+    /// `Op::Count` moves the value.
+    Counter {
+        instance: u16,
+        preset: PresetSource,
+        rule: CounterRule,
+    },
+    /// Step a member-coil counter: pop the power bit and, on its rising edge, add
+    /// or subtract one inside `top`'s range. `None` saturates.
+    Count {
+        instance: u16,
+        up: bool,
+        top: Option<i32>,
+    },
     /// Push the block's `ET` (timers) or `CV` (counters) on the word stack.
     FbWord(u16),
     /// Push the block's `Q` on the bit stack.
@@ -276,8 +314,13 @@ pub enum Op {
     },
     /// Pop the power bit; when it is true, clear `CV` (`CTU0.R`).
     FbReset(u16),
-    /// Pop the power bit; when it is true, load `PV` into `CV` (`CTD0.LD`).
-    FbLoad(u16),
+    /// Pop the power bit; when it is true, load the counter's preset into `CV`
+    /// (`CTD0.LD`, ClassicLadder's `CTU0.L`). The preset is baked, so a load on
+    /// the first scan sees the value the block would assert.
+    FbLoad {
+        instance: u16,
+        preset: PresetSource,
+    },
     /// Push the block's preset (`PT` / `PV`) on the word stack.
     FbPreset(u16),
     /// Edge contact: push true on the scan the operand changed, then remember
@@ -355,7 +398,8 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
 
     let capacity = project.io.len() + project.vars.len();
     let mut symbols = Vec::with_capacity(capacity);
-    let mut lookup = Lookup::default();
+    let mut lookup = Lookup::new(crate::profile::for_dialect(project.profile));
+    collect_presets(project, &mut lookup);
     let mut inputs = Vec::new();
     let mut outputs = Vec::new();
     let mut word_inputs = Vec::new();
@@ -720,11 +764,7 @@ fn lower_pou(
                                     })
                                     .unwrap_or(PresetSource::Const(default));
                                 push_bit_operand(input, lookup, ops);
-                                ops.push(Op::Fb {
-                                    kind,
-                                    instance,
-                                    preset,
-                                });
+                                push_block(ops, lookup, kind, instance, preset);
                             }
                         } else if let Some(callee) = pous.get(&operand.trim().to_ascii_uppercase())
                         {
@@ -910,11 +950,7 @@ fn lower_fbd_grid_block(
                     ops,
                     0,
                 );
-                ops.push(Op::Fb {
-                    kind,
-                    instance,
-                    preset: PresetSource::Const(preset),
-                });
+                push_block(ops, lookup, kind, instance, PresetSource::Const(preset));
             } else if let Some(compare) = compare_op(&name) {
                 let (Some(left), Some(right)) = (
                     resolve_word(inputs.first().map(String::as_str).unwrap_or("0"), lookup),
@@ -1091,11 +1127,7 @@ fn lower_fbd_block(
                     ops,
                     depth,
                 );
-                ops.push(Op::Fb {
-                    kind,
-                    instance,
-                    preset: PresetSource::Const(preset),
-                });
+                push_block(ops, lookup, kind, instance, PresetSource::Const(preset));
             } else if let Some(compare) = compare_op(&block) {
                 let (Some(left), Some(right)) = (
                     resolve_word(
@@ -1174,8 +1206,8 @@ fn lower_cells(
         match cell {
             crate::grid::Cell::Wire | crate::grid::Cell::Link => continue,
             crate::grid::Cell::Contact { var, negated } => {
-                match q_instance(var) {
-                    Some(instance) => ops.push(Op::FbQ(instance)),
+                match lookup.profile.bit_member(var) {
+                    Some((instance, member)) => push_member(ops, lookup, instance, member),
                     None => ops.push(Op::Push(lookup.bit(var.as_str()).unwrap_or(0))),
                 }
                 if *negated {
@@ -1194,11 +1226,7 @@ fn lower_cells(
                     ops.push(Op::PushConst(true));
                 }
                 if let Some((kind, instance, preset)) = parse_block(block, instance, preset) {
-                    ops.push(Op::Fb {
-                        kind,
-                        instance,
-                        preset: PresetSource::Const(preset),
-                    });
+                    push_block(ops, lookup, kind, instance, PresetSource::Const(preset));
                 } else {
                     // Validation refused this cell; keep the rung alive.
                     ops.push(Op::PushConst(false));
@@ -1339,11 +1367,135 @@ fn lower_grid_rung(
 /// name stays here because every caller imports it from `compile`.
 pub use crate::profile::resolve::Operand as WordOperand;
 
-/// The block instance a `<instance>.Q` bit operand names. A timer's done output
-/// is not a bank slot, so a ladder contact on a timer's done reads the block's
-/// `Q` through `Op::FbQ` instead of a symbol.
-pub fn q_instance(name: &str) -> Option<u16> {
-    crate::profile::resolve::q_instance(name)
+impl Lookup {
+    /// The preset a counter's block declares, as the op must bake it.
+    fn preset_of(&self, instance: u16) -> PresetSource {
+        match self.presets.get(&instance) {
+            Some((text, timer)) => {
+                resolve_preset(text, *timer, self).unwrap_or(PresetSource::Const(0))
+            }
+            None => PresetSource::Const(0),
+        }
+    }
+}
+
+/// Every counter instance's preset text, from the block that declares it.
+///
+/// A `.L`/`.LD` coil lives in its own rung and must load the value the block
+/// would assert, including on the first scan, when the block has not run yet.
+fn collect_presets(project: &Project, lookup: &mut Lookup) {
+    fn walk(logic: &Logic, lookup: &mut Lookup) {
+        match logic {
+            Logic::Block {
+                block,
+                instance,
+                preset,
+            } => record(block, instance, preset, lookup),
+            Logic::Series { items } | Logic::Parallel { items } => {
+                for item in items {
+                    walk(item, lookup);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn record(block: &str, instance: &str, preset: &str, lookup: &mut Lookup) {
+        if let Some((kind, index, _)) = parse_block(block, instance, "") {
+            if kind.is_counter() {
+                lookup
+                    .presets
+                    .entry(index)
+                    .or_insert_with(|| (preset.to_string(), kind.is_timer()));
+            }
+        }
+    }
+    for pou in project.all_pous() {
+        // An IL call declares its block's preset too, and a `.LD` in another POU
+        // must load the same value.
+        for line in &pou.il {
+            let crate::il::IlLine::Instruction { mnemonic, operand } = crate::il::parse_line(line)
+            else {
+                continue;
+            };
+            if !crate::profile::instr::is_call_mnemonic(&mnemonic) {
+                continue;
+            }
+            let Some((name, args)) = crate::il::parse_call(&operand) else {
+                continue;
+            };
+            if let Some((_, value)) = args.iter().find(|(key, _)| key == "PT" || key == "PV") {
+                record(&name, &name, value, lookup);
+            }
+        }
+        for section in &pou.sections {
+            for rung in &section.rungs {
+                for cell in &rung.cells {
+                    if let crate::grid::Cell::Block {
+                        block,
+                        instance,
+                        preset,
+                    } = cell
+                    {
+                        record(block, instance, preset, lookup);
+                    }
+                }
+                walk(&rung.logic, lookup);
+            }
+        }
+    }
+}
+
+/// Push the op that runs one block. A counter carries the profile's baked rule;
+/// everything else is the shared block op.
+fn push_block(
+    ops: &mut Vec<Op>,
+    lookup: &Lookup,
+    kind: FbKind,
+    instance: u16,
+    preset: PresetSource,
+) {
+    if kind.is_counter() {
+        ops.push(Op::Counter {
+            instance,
+            preset,
+            rule: lookup.profile.counter_rule(kind.name()),
+        });
+    } else {
+        ops.push(Op::Fb {
+            kind,
+            instance,
+            preset,
+        });
+    }
+}
+
+/// Push one block member's value: `Q` from the block's state, and empty/full as
+/// the compares the compiler bakes from the profile's numbers.
+fn push_member(
+    ops: &mut Vec<Op>,
+    lookup: &Lookup,
+    instance: u16,
+    member: crate::profile::BitMember,
+) {
+    use crate::profile::BitMember;
+    match member {
+        BitMember::Done => ops.push(Op::FbQ(instance)),
+        BitMember::Empty => {
+            ops.push(Op::FbWord(instance));
+            ops.push(Op::LoadConst(0));
+            ops.push(Op::CmpEq);
+        }
+        BitMember::Full => {
+            ops.push(Op::FbWord(instance));
+            ops.push(Op::LoadConst(lookup.profile.counter_top().unwrap_or(0)));
+            ops.push(Op::CmpEq);
+        }
+        // A write member read as a value: validation refuses it, and a false bit
+        // is the stand-in that keeps the compiler total.
+        BitMember::Up | BitMember::Down | BitMember::Reset | BitMember::Load => {
+            ops.push(Op::PushConst(false))
+        }
+    }
 }
 
 /// Resolve a word operand through the profile: the dialect's own spellings, then
@@ -1509,18 +1661,28 @@ fn store_coil(ops: &mut Vec<Op>, lookup: &Lookup, coil: &crate::model::Coil) {
     ) {
         return;
     }
-    // `CTU0.R` and `CTD0.LD` are coils on a counter, not on a bit.
-    if let Some((rest, load)) = coil
-        .var
-        .strip_suffix(".R")
-        .map(|rest| (rest, false))
-        .or_else(|| coil.var.strip_suffix(".LD").map(|rest| (rest, true)))
-    {
-        if let Some((_, instance, _)) = parse_block(rest, rest, "") {
-            ops.push(if load {
-                Op::FbLoad(instance)
-            } else {
-                Op::FbReset(instance)
+    // A coil on a block member — `CTU0.R`, `CTD0.LD`, and ClassicLadder's
+    // `.CU`/`.CD`/`.L` — is a write to that block, not to a bit.
+    if let Some((instance, member)) = lookup.profile.bit_member(&coil.var) {
+        if member.is_writable() {
+            use crate::profile::BitMember;
+            ops.push(match member {
+                BitMember::Reset => Op::FbReset(instance),
+                BitMember::Load => Op::FbLoad {
+                    instance,
+                    preset: lookup.preset_of(instance),
+                },
+                BitMember::Up => Op::Count {
+                    instance,
+                    up: true,
+                    top: lookup.profile.counter_top(),
+                },
+                BitMember::Down => Op::Count {
+                    instance,
+                    up: false,
+                    top: lookup.profile.counter_top(),
+                },
+                _ => return,
             });
             return;
         }
@@ -1543,8 +1705,8 @@ fn lower_logic(logic: &Logic, lookup: &Lookup, edges: &mut u16, ops: &mut Vec<Op
     match logic {
         Logic::Const { value } => ops.push(Op::PushConst(*value)),
         Logic::Contact { var, negated } => {
-            match q_instance(var) {
-                Some(instance) => ops.push(Op::FbQ(instance)),
+            match lookup.profile.bit_member(var) {
+                Some((instance, member)) => push_member(ops, lookup, instance, member),
                 None => ops.push(Op::Push(lookup.bit(var.as_str()).unwrap_or(0))),
             }
             if *negated {
@@ -1588,11 +1750,9 @@ fn lower_logic(logic: &Logic, lookup: &Lookup, edges: &mut u16, ops: &mut Vec<Op
             instance,
             preset,
         } => match parse_block(block, instance, preset) {
-            Some((kind, instance, preset)) => ops.push(Op::Fb {
-                kind,
-                instance,
-                preset: PresetSource::Const(preset),
-            }),
+            Some((kind, instance, preset)) => {
+                push_block(ops, lookup, kind, instance, PresetSource::Const(preset))
+            }
             None => ops.push(Op::PushConst(false)),
         },
         Logic::Series { items } => {
@@ -1611,11 +1771,9 @@ fn lower_logic(logic: &Logic, lookup: &Lookup, edges: &mut u16, ops: &mut Vec<Op
                             ops.push(Op::PushConst(true));
                         }
                         match parse_block(block, instance, preset) {
-                            Some((kind, instance, preset)) => ops.push(Op::Fb {
-                                kind,
-                                instance,
-                                preset: PresetSource::Const(preset),
-                            }),
+                            Some((kind, instance, preset)) => {
+                                push_block(ops, lookup, kind, instance, PresetSource::Const(preset))
+                            }
                             None => ops.push(Op::PushConst(false)),
                         }
                     }

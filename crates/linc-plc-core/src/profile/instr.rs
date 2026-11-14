@@ -40,6 +40,9 @@ pub struct Ctx<'a> {
     pub labels: &'a HashSet<String>,
     /// The FBD grid, when the instruction is a block drawn in one.
     pub grid: Option<&'a FbdGrid>,
+    /// The dialect the project declares. Validation runs before the scan, so
+    /// asking the profile here is compile-time, not the scan loop.
+    pub profile: &'a dyn crate::profile::Profile,
 }
 
 /// One instruction, as the validator finds it in the model.
@@ -469,7 +472,7 @@ fn check_cell(cell: &Cell, ctx: &Ctx) -> Vec<Diagnostic> {
     } else if let Some(operand) = cell.operand() {
         io_kind(operand, true, ctx.path, ctx, &mut diagnostics);
         let known = ctx.known.contains(&operand.to_ascii_lowercase())
-            || crate::compile::q_instance(operand).is_some();
+            || ctx.profile.bit_member(operand).is_some();
         if !known {
             diagnostics.push(Diagnostic::error(
                 "cell_operand",
@@ -499,7 +502,7 @@ fn check_logic(logic: &Logic, ctx: &Ctx) -> Vec<Diagnostic> {
         Logic::Contact { var, .. } | Logic::Edge { var, .. } => {
             io_kind(var, true, &format!("{path}.var"), ctx, &mut diagnostics);
             if !ctx.known.contains(&var.to_ascii_lowercase())
-                && crate::compile::q_instance(var).is_none()
+                && ctx.profile.bit_member(var).is_none()
             {
                 diagnostics.push(Diagnostic::error(
                     "unknown_symbol",
@@ -673,22 +676,21 @@ fn check_coil(var: &str, ctx: &Ctx) -> Verdict {
     if !var.trim().is_empty() {
         io_kind(var, true, &path, ctx, &mut diagnostics);
     }
-    let counter_coil = var
-        .strip_suffix(".R")
-        .or_else(|| var.strip_suffix(".LD"))
-        .and_then(|rest| crate::compile::parse_block(rest, rest, ""));
-    if let Some((kind, _, _)) = counter_coil {
-        if !matches!(
-            kind,
-            crate::compile::FbKind::Ctu | crate::compile::FbKind::Ctd
-        ) {
-            diagnostics.push(Diagnostic::error(
-                "coil_target",
-                format!("`{var}` is not a counter; only CTU and CTD have R and LD"),
-                path,
-            ));
+    // A coil on a block member — `CTU0.R`, `CTD0.LD`, ClassicLadder's
+    // `.CU`/`.CD`/`.L` — is a write to that block. Only a counter has them; the
+    // profile says which spellings exist, and the compiler reads the same table.
+    if let Some((_, member)) = ctx.profile.bit_member(var) {
+        if member.is_writable() {
+            let kind = crate::compile::parse_block(var, var, "").map(|(kind, _, _)| kind);
+            if !kind.is_some_and(crate::compile::FbKind::is_counter) {
+                diagnostics.push(Diagnostic::error(
+                    "coil_target",
+                    format!("`{var}` is not a counter member; only a counter has one"),
+                    path,
+                ));
+            }
+            verdict.target_judged = true;
         }
-        verdict.target_judged = true;
     }
     verdict.diagnostics = diagnostics;
     verdict
