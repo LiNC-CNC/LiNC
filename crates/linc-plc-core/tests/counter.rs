@@ -334,7 +334,7 @@ fn presets_zero_one_and_the_top_behave_as_the_reference_says() {
 fn the_other_dialects_members_are_not_addressable() {
     let mut project = classic_project(5);
     // `LD` is iec's load spelling; this dialect's is `L`.
-    project.pous[0].sections[0].rungs[0].coil.var = "CTU0.LD".to_string();
+    project.pous[0].sections[0].rungs[0].coil_mut().var = "CTU0.LD".to_string();
     let diagnostics = linc_plc_core::validate(&project);
     assert!(
         diagnostics.iter().any(|item| item.code == "unknown_symbol"),
@@ -344,7 +344,7 @@ fn the_other_dialects_members_are_not_addressable() {
     // And an iec project cannot address the count coils at all.
     let mut iec = project.clone();
     iec.profile = Dialect::Iec;
-    iec.pous[0].sections[0].rungs[2].coil.var = "CTU0.CU".to_string();
+    iec.pous[0].sections[0].rungs[2].coil_mut().var = "CTU0.CU".to_string();
     let diagnostics = linc_plc_core::validate(&iec);
     assert!(
         diagnostics.iter().any(|item| item.code == "unknown_symbol"),

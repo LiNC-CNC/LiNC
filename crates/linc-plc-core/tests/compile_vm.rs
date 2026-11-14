@@ -1411,7 +1411,7 @@ fn compute_rows_run_and_chain_their_words() {
         }],
         comment: String::new(),
         logic: Logic::Const { value: true },
-        coil: Coil::new("", CoilKind::Normal),
+        coil: Some(Coil::new("", CoilKind::Normal)),
     };
     let project = project_with(
         vec![IoPoint::new("lamp", IoDirection::Out)],
@@ -1926,7 +1926,7 @@ fn compute_rung(target: &str, op: &str, left: &str, right: &str) -> Rung {
         }],
         comment: String::new(),
         logic: Logic::Const { value: true },
-        coil: Coil::new("", CoilKind::Normal),
+        coil: Some(Coil::new("", CoilKind::Normal)),
     }
 }
 
@@ -2196,7 +2196,7 @@ fn a_backward_jump_coil_is_bounded_by_the_op_budget() {
         }],
         comment: String::new(),
         logic: Logic::Const { value: true },
-        coil: Coil::new("LOOP", CoilKind::Jump),
+        coil: Some(Coil::new("LOOP", CoilKind::Jump)),
     };
     let project = project_with(
         Vec::new(),
@@ -2363,7 +2363,7 @@ fn a_recursive_call_coil_is_refused() {
 #[test]
 fn a_jump_coil_on_a_compute_row_is_refused() {
     let mut rung = compute_rung("MW0", "ADD", "MW0", "1");
-    rung.coil = Coil::new("NOWHERE", CoilKind::Jump);
+    rung.set_coil(Coil::new("NOWHERE", CoilKind::Jump));
     let project = project_with(Vec::new(), Vec::new(), vec![section("main", vec![rung])]);
     let diagnostics = validate(&project);
     assert!(
@@ -2384,7 +2384,7 @@ fn expr_rung(text: &str, coil: Coil) -> Rung {
         }],
         comment: String::new(),
         logic: Logic::Const { value: true },
-        coil,
+        coil: Some(coil),
     }
 }
 
@@ -2451,14 +2451,14 @@ fn mini_and_maxi_clamp() {
                 cells: Vec::new(),
                 comment: String::new(),
                 logic: Logic::Const { value: true },
-                coil: Coil::compute("MW1=MINI(MW0,5)"),
+                coil: Some(Coil::compute("MW1=MINI(MW0,5)")),
             },
             Rung {
                 label: String::new(),
                 cells: Vec::new(),
                 comment: String::new(),
                 logic: Logic::Const { value: true },
-                coil: Coil::compute("MW2=MAXI(MW0,0)"),
+                coil: Some(Coil::compute("MW2=MAXI(MW0,0)")),
             },
         ],
         &[],
@@ -2506,7 +2506,7 @@ fn a_compute_coil_writes_an_expression_and_follows_its_rung() {
                 }],
                 comment: String::new(),
                 logic: Logic::Const { value: true },
-                coil: Coil::compute("MW3=MW0*2+5"),
+                coil: Some(Coil::compute("MW3=MW0*2+5")),
             }],
         )],
     );
@@ -2562,7 +2562,7 @@ fn division_and_modulo_by_zero_yield_zero() {
                 cells: Vec::new(),
                 comment: String::new(),
                 logic: Logic::Const { value: true },
-                coil: Coil::compute(text),
+                coil: Some(Coil::compute(text)),
             }],
             &[],
         );
@@ -2635,7 +2635,7 @@ fn a_compute_coil_refuses_a_missing_or_misplaced_expression() {
                 cells: Vec::new(),
                 comment: String::new(),
                 logic: Logic::Const { value: true },
-                coil: Coil::compute("q3=1"),
+                coil: Some(Coil::compute("q3=1")),
             }],
         )],
     );
@@ -2662,7 +2662,7 @@ fn a_compare_first_rung_leaves_no_spare_bit() {
             }],
             comment: String::new(),
             logic: Logic::Const { value: true },
-            coil: Coil::new("y", CoilKind::Normal),
+            coil: Some(Coil::new("y", CoilKind::Normal)),
         }],
         &["y"],
     );
@@ -2709,7 +2709,7 @@ fn the_remaining_grammar_lowers() {
         cells: Vec::new(),
         comment: String::new(),
         logic: Logic::Const { value: true },
-        coil: Coil::compute(format!("{target}={text}")),
+        coil: Some(Coil::compute(format!("{target}={text}"))),
     };
     let project = expr_project(
         vec![
@@ -2764,7 +2764,7 @@ fn an_expression_with_too_many_operations_is_refused() {
             cells: Vec::new(),
             comment: String::new(),
             logic: Logic::Const { value: true },
-            coil: Coil::compute(format!("MW1={terms}")),
+            coil: Some(Coil::compute(format!("MW1={terms}"))),
         }],
         &[],
     );

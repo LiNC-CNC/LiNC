@@ -788,7 +788,7 @@ fn a_forced_word_holds_against_the_program_and_releases() {
             label: String::new(),
             comment: String::new(),
             logic: Logic::Const { value: true },
-            coil: Coil::new("out", CoilKind::Normal),
+            coil: Some(Coil::new("out", CoilKind::Normal)),
             cells: vec![linc_plc_core::Cell::Compute {
                 op: "MOVE".to_string(),
                 target: "MW2".to_string(),

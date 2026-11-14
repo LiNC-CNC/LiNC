@@ -523,11 +523,11 @@ pub fn add_rung(project: &mut Project, section: usize, after: Option<usize>) -> 
                 var: input,
                 negated: false,
             },
-            coil: Coil {
+            coil: Some(Coil {
                 var: output,
                 kind: CoilKind::Normal,
                 expr: None,
-            },
+            }),
         },
     );
     Some(NodePath::root(section, at))
@@ -1694,7 +1694,7 @@ impl PlcUi {
             _ => String::new(),
         };
         self.coil_text = rung_at(&self.project, &node)
-            .map(|rung| rung.coil.var.clone())
+            .map(|rung| rung.coil().var.clone())
             .unwrap_or_default();
         self.comment_text = rung_at(&self.project, &node)
             .map(|rung| rung.comment.clone())
@@ -1756,14 +1756,14 @@ impl PlcUi {
             Action::SetCoilVariable(text) => {
                 if let Some(node) = self.selection.clone() {
                     if let Some(rung) = rung_at_mut(&mut self.project, &node) {
-                        rung.coil.var = text.trim().to_string();
+                        rung.coil_mut().var = text.trim().to_string();
                     }
                 }
             }
             Action::SetCoilKind(kind) => {
                 if let Some(node) = self.selection.clone() {
                     if let Some(rung) = rung_at_mut(&mut self.project, &node) {
-                        rung.coil.kind = kind;
+                        rung.coil_mut().kind = kind;
                     }
                 }
             }
@@ -1825,7 +1825,7 @@ impl PlcUi {
                     .iter()
                     .flat_map(|pou| pou.sections.iter())
                     .flat_map(|section| section.rungs.iter())
-                    .map(|rung| rung.coil.var.clone())
+                    .map(|rung| rung.coil().var.clone())
                     .collect();
                 let output = self
                     .project
@@ -1863,7 +1863,7 @@ impl PlcUi {
                                     var: input,
                                     negated: false,
                                 },
-                                coil: Coil::new(output, CoilKind::Normal),
+                                coil: Some(Coil::new(output, CoilKind::Normal)),
                             },
                         );
                         made = Some(at);
@@ -1926,7 +1926,7 @@ impl PlcUi {
                                     var: input,
                                     negated: false,
                                 },
-                                coil: Coil::new(output, CoilKind::Normal),
+                                coil: Some(Coil::new(output, CoilKind::Normal)),
                             },
                         );
                         self.selection = Some(NodePath::root(section, at));
@@ -2111,7 +2111,7 @@ impl PlcUi {
                         .get_mut(section)
                         .and_then(|section| section.rungs.get_mut(rung))
                     {
-                        row.coil.var = var;
+                        row.coil_mut().var = var;
                     }
                 }
                 self.project.set_pous(pous);
@@ -2188,8 +2188,8 @@ impl PlcUi {
                     for pou in pous.iter_mut() {
                         for section in pou.sections.iter_mut() {
                             for rung in section.rungs.iter_mut() {
-                                if rung.coil.var == from {
-                                    rung.coil.var = to.clone();
+                                if rung.coil().var == from {
+                                    rung.coil_mut().var = to.clone();
                                 }
                                 for cell in rung.cells.iter_mut() {
                                     match cell {
@@ -2424,7 +2424,7 @@ impl PlcUi {
                         .get_mut(section)
                         .and_then(|section| section.rungs.get_mut(rung))
                     {
-                        row.coil = coil;
+                        row.set_coil(coil);
                     }
                 }
                 self.project.set_pous(pous);
@@ -6297,7 +6297,7 @@ fn status_bar(plc: &PlcUi, ui: &mut Ui) {
         .and_then(|(section, rung, position)| {
             let rung = rung_at(section, rung)?;
             let operand = if position >= POSITIONS {
-                Some(rung.coil.var.clone())
+                Some(rung.coil().var.clone())
             } else {
                 rung.cells
                     .get(position)
@@ -6312,7 +6312,7 @@ fn status_bar(plc: &PlcUi, ui: &mut Ui) {
         .or_else(|| {
             let node = plc.selection.as_ref()?;
             let rung = rung_at(node.section, node.rung)?;
-            Some((rung.coil.var.clone(), rung.comment.clone()))
+            Some((rung.coil().var.clone(), rung.comment.clone()))
         });
     let (state_label, state_color) = run_state_label(plc.state);
     // Feedback lives where the operator is looking: the editor's status bar.
@@ -6671,7 +6671,7 @@ fn draw_rung(
         wire,
     );
 
-    let live = plc.live_value(&rung.coil.var).unwrap_or(false);
+    let live = plc.live_value(&rung.coil().var).unwrap_or(false);
     let selected = plc.selection.as_ref() == Some(&root);
     let mut coil = row.new_child(
         egui::UiBuilder::new()
@@ -6681,10 +6681,10 @@ fn draw_rung(
     let response = coil.add_sized(
         BOX,
         ladder_box(
-            &format!("{}\n{}", rung.coil.var, coil_label(rung.coil.kind)),
+            &format!("{}\n{}", rung.coil().var, coil_label(rung.coil().kind)),
             live,
             selected,
-            plc.is_forced(&rung.coil.var),
+            plc.is_forced(&rung.coil().var),
         ),
     );
     if response.clicked() {
@@ -6892,7 +6892,7 @@ fn property_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
         plc.sync_buffers();
     }
     let logic = logic_at(&plc.project, &node).cloned();
-    let coil = rung_at(&plc.project, &node).map(|rung| rung.coil.clone());
+    let coil = rung_at(&plc.project, &node).map(|rung| rung.coil().clone());
     let kind = match &logic {
         Some(Logic::Contact { negated, .. }) => {
             if *negated {
@@ -7340,7 +7340,7 @@ mod tests {
         assert_eq!(added.path, Vec::<usize>::new());
         let rung = &project.sections[0].rungs[1];
         assert_eq!(contact_var(&rung.logic), Some("start"));
-        assert_eq!(rung.coil.var, "run");
+        assert_eq!(rung.coil().var, "run");
         // Appending is the same as after the last rung.
         let appended = add_rung(&mut project, 0, None).expect("a rung");
         assert_eq!(appended.rung, before + 1);
@@ -7914,7 +7914,7 @@ mod coil_pick_tests {
         });
         plc.coil_pick = None;
         let rungs = plc.current_pou_sections();
-        assert_eq!(rungs[0].rungs[0].coil.var, "fan");
+        assert_eq!(rungs[0].rungs[0].coil().var, "fan");
         assert!(plc.coil_pick.is_none(), "the picker closes on a pick");
     }
 }
@@ -9036,10 +9036,10 @@ mod new_row_tests {
                 label: String::new(),
                 comment: String::new(),
                 logic: linc_plc_core::model::Logic::Const { value: true },
-                coil: linc_plc_core::model::Coil::new(
+                coil: Some(linc_plc_core::model::Coil::new(
                     "run",
                     linc_plc_core::model::CoilKind::Normal,
-                ),
+                )),
                 cells: vec![Cell::Contact {
                     var: "start".into(),
                     negated: false,
@@ -9053,7 +9053,7 @@ mod new_row_tests {
         let coils: Vec<String> = pous[0].sections[0]
             .rungs
             .iter()
-            .map(|rung| rung.coil.var.clone())
+            .map(|rung| rung.coil().var.clone())
             .collect();
         let mut unique = coils.clone();
         unique.sort();
@@ -9119,7 +9119,7 @@ mod trend_tests {
                 label: String::new(),
                 comment: String::new(),
                 logic: Logic::Const { value: true },
-                coil: Coil::new("start", CoilKind::Normal),
+                coil: Some(Coil::new("start", CoilKind::Normal)),
                 cells: vec![Cell::Block {
                     block: "TON".into(),
                     instance: "TON0".into(),
@@ -9604,10 +9604,10 @@ mod symbol_rename_tests {
                 label: String::new(),
                 comment: String::new(),
                 logic: linc_plc_core::model::Logic::Const { value: true },
-                coil: linc_plc_core::model::Coil::new(
+                coil: Some(linc_plc_core::model::Coil::new(
                     "pump",
                     linc_plc_core::model::CoilKind::Normal,
-                ),
+                )),
                 cells: vec![Cell::Contact {
                     var: "pump".into(),
                     negated: false,
@@ -9621,7 +9621,7 @@ mod symbol_rename_tests {
         });
         let pou = &plc.project.all_pous()[0];
         let rung = &pou.sections[0].rungs[0];
-        assert_eq!(rung.coil.var, "vacuum");
+        assert_eq!(rung.coil().var, "vacuum");
         assert_eq!(
             rung.cells[0],
             Cell::Contact {

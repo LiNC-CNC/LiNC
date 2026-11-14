@@ -50,7 +50,7 @@ fn duplicate_symbol_between_io_and_vars_is_caught() {
 #[test]
 fn input_cannot_drive_a_coil() {
     let mut project = base_project();
-    project.sections[0].rungs[0].coil = Coil::new("start", CoilKind::Normal);
+    project.sections[0].rungs[0].set_coil(Coil::new("start", CoilKind::Normal));
     let diagnostics = validate(&project);
     assert_eq!(codes(&diagnostics), vec!["coil_target"]);
     assert_eq!(diagnostics[0].path, "sections[0].rungs[0].coil.var");
@@ -100,7 +100,7 @@ fn unknown_contact_symbol_reports_the_nested_path() {
 #[test]
 fn unknown_coil_symbol_is_caught() {
     let mut project = base_project();
-    project.sections[0].rungs[0].coil = Coil::new("ghost", CoilKind::Normal);
+    project.sections[0].rungs[0].set_coil(Coil::new("ghost", CoilKind::Normal));
     let diagnostics = validate(&project);
     assert_eq!(codes(&diagnostics), vec!["unknown_symbol"]);
 }
@@ -203,7 +203,10 @@ fn a_linked_continuation_row_may_have_a_blank_coil() {
         },
         Cell::Link,
     ];
-    let mut branch = Rung::new(Logic::contact("seal", false), Coil::new("", CoilKind::Normal));
+    let mut branch = Rung::new(
+        Logic::contact("seal", false),
+        Coil::new("", CoilKind::Normal),
+    );
     branch.cells = vec![Cell::Contact {
         var: "seal".into(),
         negated: false,
@@ -231,9 +234,13 @@ fn set_cell_grows_columns_from_zero() {
         cells: Vec::new(),
         blocks: Vec::new(),
     };
-    grid.set_cell(0, 1, FbdCell::In {
-        operand: "pump".to_string(),
-    });
+    grid.set_cell(
+        0,
+        1,
+        FbdCell::In {
+            operand: "pump".to_string(),
+        },
+    );
     assert_eq!(grid.columns, 2, "the column count grew to fit col 1");
     assert_eq!(grid.rows, 1);
     assert_eq!(
@@ -251,15 +258,18 @@ fn set_cell_grows_columns_from_zero() {
 fn rung_labels_and_jump_call_coils_round_trip() {
     let mut project = Project::example();
     project.sections[0].rungs[0].label = "LOOP".to_string();
-    project.sections[0].rungs[1].coil = Coil::new("LOOP", CoilKind::Jump);
-    project.sections[0].rungs[2].coil = Coil::new("MAIN", CoilKind::Call);
+    project.sections[0].rungs[1].set_coil(Coil::new("LOOP", CoilKind::Jump));
+    project.sections[0].rungs[2].set_coil(Coil::new("MAIN", CoilKind::Call));
 
     let json = serde_json::to_string(&project).expect("json");
     assert!(json.contains("\"label\":\"LOOP\""), "{json}");
     assert!(json.contains("\"kind\":\"jump\""), "{json}");
     assert!(json.contains("\"kind\":\"call\""), "{json}");
     let back: Project = serde_json::from_str(&json).expect("decode");
-    assert_eq!(back, project, "the schema stays 1 and the new fields round-trip");
+    assert_eq!(
+        back, project,
+        "the schema stays 1 and the new fields round-trip"
+    );
 
     // The version-1 file from before labels existed still decodes.
     let old = r#"{"schema":1,"name":"old","io":[],"vars":[],"sections":[{"name":"main","rungs":[{"logic":{"op":"const","value":true},"coil":{"var":"x","kind":"normal"}}]}]}"#;
@@ -291,7 +301,7 @@ fn expression_fields_are_additive() {
     project.sections[0].rungs[0].cells = vec![linc_plc_core::grid::Cell::Expr {
         text: "MW1<2*MW2".to_string(),
     }];
-    project.sections[0].rungs[1].coil = Coil::compute("MW3=MW0*2+5");
+    project.sections[0].rungs[1].set_coil(Coil::compute("MW3=MW0*2+5"));
 
     let json = serde_json::to_string(&project).expect("json");
     assert!(json.contains("MW1<2*MW2"), "{json}");
@@ -303,7 +313,6 @@ fn expression_fields_are_additive() {
     let coil: Coil = serde_json::from_str(r#"{"var":"","kind":"compute","expr":"MW3=1"}"#)
         .expect("compute coil");
     assert_eq!(coil.expr.as_deref(), Some("MW3=1"));
-    let plain: Coil =
-        serde_json::from_str(r#"{"var":"run","kind":"normal"}"#).expect("old coil");
+    let plain: Coil = serde_json::from_str(r#"{"var":"run","kind":"normal"}"#).expect("old coil");
     assert_eq!(plain.expr, None);
 }

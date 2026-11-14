@@ -1212,7 +1212,7 @@ impl Importer {
             label: labels[&raw.index].clone(),
             comment: raw.comment.clone(),
             logic: crate::model::Logic::Const { value: true },
-            coil,
+            coil: Some(coil),
             cells,
         }])
     }
@@ -1280,7 +1280,7 @@ impl Importer {
             label: labels[&raw.index].clone(),
             comment: raw.comment.clone(),
             logic: crate::model::Logic::Const { value: true },
-            coil,
+            coil: Some(coil),
             cells,
         };
         // The branch row is that link's continuation, so its coil is blank.
@@ -1291,7 +1291,7 @@ impl Importer {
             label: format!("{}-b", labels[&raw.index]),
             comment: String::new(),
             logic: crate::model::Logic::Const { value: true },
-            coil: Coil::new("", CoilKind::Normal),
+            coil: Some(Coil::new("", CoilKind::Normal)),
             cells: branch_cells,
         };
         Ok(vec![main_rung, branch_rung])
@@ -1676,7 +1676,7 @@ impl Importer {
             label: label.clone(),
             comment: raw.comment.clone(),
             logic: crate::model::Logic::Const { value: true },
-            coil: Coil::compute(format!("{value}={value}")),
+            coil: Some(Coil::compute(format!("{value}={value}"))),
             cells,
         });
 
@@ -1698,7 +1698,7 @@ impl Importer {
                 label: next_label(&mut extra),
                 comment: String::new(),
                 logic: crate::model::Logic::Const { value: true },
-                coil: Coil::new(format!("{instance}.LD"), CoilKind::Normal),
+                coil: Some(Coil::new(format!("{instance}.LD"), CoilKind::Normal)),
                 cells,
             });
         }
@@ -1719,13 +1719,13 @@ impl Importer {
                 comment: String::new(),
                 logic: crate::model::Logic::Const { value: true },
                 // A down counter with preset 0: loading PV is `CV := 0`.
-                coil: Coil::new(
+                coil: Some(Coil::new(
                     format!(
                         "{instance}.{}",
                         if kind == FbName::Ctu { "R" } else { "LD" }
                     ),
                     CoilKind::Normal,
-                ),
+                )),
                 cells,
             });
         }
@@ -1746,7 +1746,7 @@ impl Importer {
                 label: next_label(&mut extra),
                 comment: String::new(),
                 logic: crate::model::Logic::Const { value: true },
-                coil,
+                coil: Some(coil),
                 cells,
             });
         }

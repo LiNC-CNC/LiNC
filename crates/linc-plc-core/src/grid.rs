@@ -396,7 +396,7 @@ pub fn migrate_section(section: &mut crate::model::Section) {
         let mut rows = rows;
         let first = rows.remove(0);
         section.rungs[index].cells = padded(first);
-        let coil = section.rungs[index].coil.clone();
+        let coil = section.rungs[index].coil().clone();
         for (offset, row) in rows.into_iter().enumerate() {
             let mut branch = crate::model::Rung::new(
                 Logic::Const { value: true },

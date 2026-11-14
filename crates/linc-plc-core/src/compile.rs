@@ -339,6 +339,9 @@ pub enum Op {
         left: WordOperand,
         right: WordOperand,
     },
+    /// Pop one bit and discard it: a rung with no coil leaves its power bit
+    /// behind, and the stack has to stay balanced across rungs.
+    Drop,
     /// Pop a word and write it to `target`. This is the free-text assignment's
     /// store: the value is already on the word stack.
     StoreTarget(WordOperand),
@@ -512,8 +515,8 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         // callee is a routine here too and does not also run on its own.
         for section in &pou.sections {
             for rung in &section.rungs {
-                if rung.coil.kind == CoilKind::Call {
-                    called.insert(rung.coil.var.trim().to_ascii_uppercase());
+                if rung.coil().kind == CoilKind::Call {
+                    called.insert(rung.coil().var.trim().to_ascii_uppercase());
                 }
             }
         }
@@ -656,7 +659,13 @@ fn lower_pou(
                         let rung = &section.rungs[index];
                         record_label(&mut labels, &rung.label, ops.len());
                         lower_logic(&rung.logic, lookup, edges, ops);
-                        lower_coil(ops, lookup, pous, &rung.coil, &mut jumps, edges, depth);
+                        // A rung with no coil is a block whose result nothing
+                        // stores: the logic is the whole rung.
+                        if rung.has_coil() {
+                            lower_coil(ops, lookup, pous, rung.coil(), &mut jumps, edges, depth);
+                        } else {
+                            ops.push(Op::Drop);
+                        }
                         index += 1;
                         continue;
                     }
@@ -677,15 +686,13 @@ fn lower_pou(
                     while offset < run.len() {
                         let (used, compute) = lower_grid_rung(&run, offset, lookup, ops, edges);
                         if !compute {
-                            lower_coil(
-                                ops,
-                                lookup,
-                                pous,
-                                &section.rungs[index + offset].coil,
-                                &mut jumps,
-                                edges,
-                                depth,
-                            );
+                            let row = &section.rungs[index + offset];
+                            if row.has_coil() {
+                                lower_coil(ops, lookup, pous, row.coil(), &mut jumps, edges, depth);
+                            } else {
+                                // Nothing stores the row's power bit.
+                                ops.push(Op::Drop);
+                            }
                         }
                         offset += used;
                     }

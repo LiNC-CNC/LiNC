@@ -209,6 +209,9 @@ pub fn import(xml: &str) -> Result<Project, Vec<Diagnostic>> {
         .unwrap_or("imported")
         .to_string();
 
+    // One instance per block of a kind, across the whole file.
+    let mut instances: HashMap<crate::profile::spec::FbName, u16> = HashMap::new();
+
     let mut project = Project::new(name);
     project.schema = SCHEMA_VERSION;
 
@@ -233,7 +236,9 @@ pub fn import(xml: &str) -> Result<Project, Vec<Diagnostic>> {
     let mut seen_main = false;
     for (index, pou_element) in pous_element.children_named("pou").enumerate() {
         let path = format!("pous[{index}]");
-        if let Some((mut pou, io, vars)) = import_pou(pou_element, &path, &mut diagnostics) {
+        if let Some((mut pou, io, vars)) =
+            import_pou(pou_element, &path, &mut instances, &mut diagnostics)
+        {
             // The first program is the entry point, as the repository's
             // model expects MAIN to be.
             if !seen_main && pou_element.attribute("pouType").unwrap_or("program") == "program" {
@@ -266,6 +271,7 @@ type ImportedPou = (Pou, Vec<IoPoint>, Vec<VarDecl>);
 fn import_pou(
     element: &Element,
     path: &str,
+    instances: &mut HashMap<crate::profile::spec::FbName, u16>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<ImportedPou> {
     let name = element.attribute("name").unwrap_or("POU").to_string();
@@ -306,7 +312,7 @@ fn import_pou(
         return None;
     };
 
-    match import_ld(ld, path, &mut pou) {
+    match import_ld(ld, path, &mut pou, instances) {
         Ok(()) => Some((pou, io, vars)),
         Err(more) => {
             diagnostics.extend(more);
@@ -378,7 +384,12 @@ fn plain_text(element: &Element) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn import_ld(ld: &Element, path: &str, pou: &mut Pou) -> Result<(), Vec<Diagnostic>> {
+fn import_ld(
+    ld: &Element,
+    path: &str,
+    pou: &mut Pou,
+    instances: &mut HashMap<crate::profile::spec::FbName, u16>,
+) -> Result<(), Vec<Diagnostic>> {
     let mut diagnostics = Vec::new();
     let mut coils = Vec::new();
     let mut elements: HashMap<String, &Element> = HashMap::new();
@@ -459,6 +470,7 @@ fn import_ld(ld: &Element, path: &str, pou: &mut Pou) -> Result<(), Vec<Diagnost
             &left_rails,
             &right_rails,
             &mut visiting,
+            instances,
             &format!("{path}.body.LD.coil[{index}]"),
             &mut diagnostics,
         ) {
@@ -515,6 +527,7 @@ fn resolve_input(
     left_rails: &HashSet<String>,
     right_rails: &HashSet<String>,
     visiting: &mut HashSet<String>,
+    instances: &mut HashMap<crate::profile::spec::FbName, u16>,
     path: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Logic, ()> {
@@ -577,6 +590,7 @@ fn resolve_input(
                 left_rails,
                 right_rails,
                 visiting,
+                instances,
                 path,
                 diagnostics,
             ),
@@ -602,6 +616,7 @@ fn resolve_input(
             left_rails,
             right_rails,
             visiting,
+            instances,
             path,
             diagnostics,
         )?;
@@ -685,6 +700,7 @@ fn build_block(
     left_rails: &HashSet<String>,
     right_rails: &HashSet<String>,
     visiting: &mut HashSet<String>,
+    instances: &mut HashMap<crate::profile::spec::FbName, u16>,
     path: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Logic, ()> {
@@ -764,9 +780,28 @@ fn build_block(
         }
     }
     let _ = (elements, left_rails, right_rails, visiting);
+    // Each block of a kind gets its own instance. Binding every `<block>` to
+    // instance 0 made two timers share one `FbState`, so the second overwrote
+    // the first's preset and value every scan.
+    let (kind, _, _) = crate::compile::parse_block(&name, "", "")
+        .expect("the name was just checked against the table");
+    let slot = instances.entry(kind.name()).or_insert(0u16);
+    let number = *slot;
+    if number >= crate::profile::FB_PER_TYPE {
+        diagnostics.push(error(
+            "plcopen_block_instances",
+            format!(
+                "block '{name}' is instance {number} of its kind; the scan carries {}",
+                crate::profile::FB_PER_TYPE
+            ),
+            path,
+        ));
+        return Err(());
+    }
+    *slot += 1;
     Ok(Logic::Block {
         block: name,
-        instance: String::new(),
+        instance: crate::profile::resolve::block_instance(kind.name(), i32::from(number)),
         preset,
     })
 }

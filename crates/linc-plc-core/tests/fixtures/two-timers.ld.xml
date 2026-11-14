@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written for the importer tests: two timers in one program must not
+     share an instance (Appendix E, "plcopen.rs binds every <block> to 0"). -->
+<project xmlns="http://www.plcopen.org/xml/tc6_0200">
+  <fileHeader companyName="hand-written" productName="fixture" productVersion="1"
+              creationDateTime="2026-01-01T00:00:00"/>
+  <contentHeader name="two-timers"/>
+  <types>
+    <pous>
+      <pou name="Demo" pouType="program">
+        <interface>
+          <inputVars>
+            <variable name="Start"><type><BOOL/></type></variable>
+            <variable name="Stop"><type><BOOL/></type></variable>
+          </inputVars>
+          <outputVars>
+            <variable name="Lamp"><type><BOOL/></type></variable>
+            <variable name="Fan"><type><BOOL/></type></variable>
+          </outputVars>
+        </interface>
+        <body>
+          <LD>
+            <leftPowerRail localId="1"/>
+            <rightPowerRail localId="2"/>
+            <block localId="3" typeName="TON">
+              <connectionPointIn><connection refLocalId="1"/></connectionPointIn>
+              <inputVariables>
+                <variable formalParameter="PT"><expression>T#1s</expression></variable>
+              </inputVariables>
+              <connectionPointOut/>
+            </block>
+            <coil localId="4" negated="false" storage="none">
+              <connectionPointIn><connection refLocalId="3"/></connectionPointIn>
+              <variable>Lamp</variable>
+            </coil>
+            <block localId="5" typeName="TON">
+              <connectionPointIn><connection refLocalId="1"/></connectionPointIn>
+              <inputVariables>
+                <variable formalParameter="PT"><expression>T#2s</expression></variable>
+              </inputVariables>
+              <connectionPointOut/>
+            </block>
+            <coil localId="6" negated="false" storage="none">
+              <connectionPointIn><connection refLocalId="5"/></connectionPointIn>
+              <variable>Fan</variable>
+            </coil>
+          </LD>
+        </body>
+      </pou>
+    </pous>
+  </types>
+</project>

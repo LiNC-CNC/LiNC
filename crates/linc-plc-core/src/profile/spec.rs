@@ -17,7 +17,7 @@
 //! both sides, is the point.
 
 /// A standard function block, by behaviour rather than by spelling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FbName {
     Ton,
     Tof,

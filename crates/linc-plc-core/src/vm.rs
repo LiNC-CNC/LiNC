@@ -235,6 +235,9 @@ impl Vm {
                     let value = self.next.get(index as usize).copied().unwrap_or(false);
                     push(&mut stack, &mut depth, value);
                 }
+                Op::Drop => {
+                    let _ = pop(&stack, &mut depth);
+                }
                 Op::Not => {
                     let value = pop(&stack, &mut depth);
                     push(&mut stack, &mut depth, !value);

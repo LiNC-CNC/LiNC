@@ -151,7 +151,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             .and_then(|section| section.rungs.get(cursor.1))
             .map(|rung| {
                 if cursor.2 >= POSITIONS {
-                    rung.coil.var.clone()
+                    rung.coil().var.clone()
                 } else {
                     rung.cells
                         .get(cursor.2)
@@ -169,7 +169,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             .and_then(|section| section.rungs.get(cursor.1))
             .map(|rung| {
                 if cursor.2 >= POSITIONS {
-                    rung.coil.var.clone()
+                    rung.coil().var.clone()
                 } else {
                     rung.cells
                         .get(cursor.2)
@@ -267,7 +267,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             .get(cursor.0)
             .and_then(|section| section.rungs.get(cursor.1))
             .map(|rung| {
-                rung.coil.var.trim().is_empty()
+                rung.coil().var.trim().is_empty()
                     && rung.cells.iter().all(|cell| matches!(cell, Cell::Wire))
             })
             .unwrap_or(false);
@@ -332,7 +332,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                 .get(cursor.0)
                 .and_then(|section| section.rungs.get(cursor.1))
             {
-                let next = match rung.coil.kind {
+                let next = match rung.coil().kind {
                     CoilKind::Normal => CoilKind::Set,
                     CoilKind::Set => CoilKind::Reset,
                     CoilKind::Reset => CoilKind::Negated,
@@ -344,7 +344,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                 actions.push(Action::SetCoil {
                     section: cursor.0,
                     rung: cursor.1,
-                    coil: Coil::new(rung.coil.var.clone(), next),
+                    coil: Coil::new(rung.coil().var.clone(), next),
                 });
             }
         }
@@ -354,7 +354,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             let var = sections
                 .get(cursor.0)
                 .and_then(|section| section.rungs.get(cursor.1))
-                .map(|rung| rung.coil.var.clone())
+                .map(|rung| rung.coil().var.clone())
                 .unwrap_or_default();
             app.plc.operand_cursor = coil_position(&app.plc, cursor.0, cursor.1, &var);
             app.plc.operand_filter.clear();
@@ -377,7 +377,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             let var = sections
                 .get(cursor.0)
                 .and_then(|section| section.rungs.get(cursor.1))
-                .map(|rung| rung.coil.var.clone())
+                .map(|rung| rung.coil().var.clone())
                 .unwrap_or_default();
             actions.push(Action::SetCoil {
                 section: cursor.0,
@@ -652,7 +652,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             .and_then(|section| section.rungs.get(cursor.1))
             .map(|rung| {
                 if cursor.2 >= POSITIONS {
-                    rung.coil.var.clone()
+                    rung.coil().var.clone()
                 } else {
                     rung.cells
                         .get(cursor.2)
@@ -670,7 +670,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             .and_then(|section| section.rungs.get(cursor.1))
             .map(|rung| {
                 if cursor.2 >= POSITIONS {
-                    rung.coil.var.clone()
+                    rung.coil().var.clone()
                 } else {
                     rung.cells
                         .get(cursor.2)
@@ -707,7 +707,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                 let var = sections
                     .get(section)
                     .and_then(|section| section.rungs.get(rung))
-                    .map(|rung| rung.coil.var.clone())
+                    .map(|rung| rung.coil().var.clone())
                     .unwrap_or_default();
                 app.plc.operand_cursor = coil_position(&app.plc, section, rung, &var);
                 app.plc.operand_filter.clear();
@@ -1203,7 +1203,7 @@ fn xref_window(plc: &mut PlcUi, ctx: &egui::Context) {
                         ));
                     }
                 }
-                if rung.coil.var.eq_ignore_ascii_case(&name) {
+                if rung.coil().var.eq_ignore_ascii_case(&name) {
                     lines.push(format!(
                         "{}  {}  rung {}  coil",
                         pou.name,
@@ -1513,7 +1513,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 plc.current_pou_sections()
                     .get(node.section)
                     .and_then(|section| section.rungs.get(node.rung))
-                    .map(|rung| rung.coil.var.clone())
+                    .map(|rung| rung.coil().var.clone())
             })
             .filter(|var| !var.is_empty())
             .unwrap_or_else(|| first.clone());
@@ -1714,7 +1714,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     .current_pou_sections()
                     .get(section)
                     .and_then(|section| section.rungs.get(rung))
-                    .map(|rung| rung.coil.var.clone())
+                    .map(|rung| rung.coil().var.clone())
                     .filter(|var| !var.is_empty())
                     .unwrap_or_else(|| first.clone());
                 actions.push(Action::SetCoil {
@@ -1804,7 +1804,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
             .current_pou_sections()
             .get(section)
             .and_then(|section| section.rungs.get(rung))
-            .map(|rung| rung.coil.var.clone())
+            .map(|rung| rung.coil().var.clone())
             .filter(|var| !var.is_empty())
             .unwrap_or_else(|| first.clone());
         actions.push(Action::SetCoil {
@@ -2006,7 +2006,7 @@ fn coil_choices(plc: &PlcUi, section: usize, rung: usize) -> Vec<(String, String
         .current_pou_sections()
         .get(section)
         .and_then(|section| section.rungs.get(rung))
-        .map(|rung| rung.coil.kind);
+        .map(|rung| rung.coil().kind);
     match kind {
         Some(CoilKind::Jump) => plc
             .current_pou_sections()
@@ -2061,7 +2061,7 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
         .current_pou_sections()
         .get(section)
         .and_then(|section| section.rungs.get(rung))
-        .map(|rung| rung.coil.var.clone())
+        .map(|rung| rung.coil().var.clone())
         .unwrap_or_default();
     let mut names = coil_choices(plc, section, rung);
     if !current.is_empty() && !names.iter().any(|(name, _)| *name == current) {
@@ -3198,7 +3198,7 @@ pub fn grid_rung(
                 *cursor_rect = Some(rect);
             }
         }
-        let coil = plc.operand_label(&rung.coil.var);
+        let coil = plc.operand_label(&rung.coil().var);
         let coil_rect = cell_box(
             plc,
             ui,
@@ -3206,8 +3206,8 @@ pub fn grid_rung(
             rung_index,
             POSITIONS,
             &coil,
-            rung.coil.var.is_empty(),
-            CellSymbol::Coil(rung.coil.kind),
+            rung.coil().var.is_empty(),
+            CellSymbol::Coil(rung.coil().kind),
             if banded { 18.0 } else { 16.0 },
             // A compute rung writes through its cell, so its coil slot is unused
             // and must not light up from a variable of the same name.
@@ -3219,7 +3219,7 @@ pub fn grid_rung(
             {
                 None
             } else {
-                plc.bit_value(&rung.coil.var)
+                plc.bit_value(&rung.coil().var)
             },
         );
         if plc.cell_cursor == Some((section, rung_index, POSITIONS)) {
@@ -3768,7 +3768,10 @@ mod rung_pitch_tests {
             cells: vec![Cell::Wire],
             comment: String::new(),
             logic: linc_plc_core::model::Logic::Const { value: true },
-            coil: linc_plc_core::model::Coil::new("", linc_plc_core::model::CoilKind::Normal),
+            coil: Some(linc_plc_core::model::Coil::new(
+                "",
+                linc_plc_core::model::CoilKind::Normal,
+            )),
         };
         let mut actions = Vec::new();
         let (advance, spacing) = pass_with(|ui| {
@@ -3892,7 +3895,10 @@ mod block_window_tests {
                 label: String::new(),
                 comment: String::new(),
                 logic: linc_plc_core::model::Logic::Const { value: true },
-                coil: linc_plc_core::model::Coil::new("", linc_plc_core::model::CoilKind::Normal),
+                coil: Some(linc_plc_core::model::Coil::new(
+                    "",
+                    linc_plc_core::model::CoilKind::Normal,
+                )),
                 cells: vec![
                     Cell::Wire,
                     Cell::Block {
@@ -4141,7 +4147,7 @@ mod compare_window_tests {
             "a jump offers the section's labels"
         );
 
-        plc.project.pous[0].sections[0].rungs[1].coil = Coil::new("SUB", CoilKind::Call);
+        plc.project.pous[0].sections[0].rungs[1].set_coil(Coil::new("SUB", CoilKind::Call));
         assert_eq!(
             coil_choices(&plc, 0, 1),
             vec![("SUB".to_string(), "POU".to_string())],
@@ -4339,7 +4345,10 @@ mod compare_window_tests {
                 label: String::new(),
                 comment: String::new(),
                 logic: linc_plc_core::model::Logic::Const { value: true },
-                coil: linc_plc_core::model::Coil::new("", linc_plc_core::model::CoilKind::Normal),
+                coil: Some(linc_plc_core::model::Coil::new(
+                    "",
+                    linc_plc_core::model::CoilKind::Normal,
+                )),
                 cells: vec![
                     Cell::Block {
                         block: "TON".into(),

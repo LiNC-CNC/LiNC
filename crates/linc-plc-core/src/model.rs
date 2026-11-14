@@ -370,7 +370,15 @@ pub struct Rung {
     #[serde(default)]
     pub comment: String,
     pub logic: Logic,
-    pub coil: Coil,
+    /// The coil that ends this rung, if it has one.
+    ///
+    /// A rung may have none: a block that feeds no coil is a real rung in
+    /// IEC 61131-3 and in the PLCYard corpus, and `coil: Some(..)` on every rung
+    /// forced the importer to drop it (or invent a coil). Additive and
+    /// defaulted, so a version-1 file with `"coil": {..}` still decodes to
+    /// `Some`, and one without the key decodes to `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coil: Option<Coil>,
     /// The ladder grid this row was drawn on. Empty means the rung is still the
     /// version-2 tree in `logic`; a non-empty grid is lowered by the compiler.
     #[serde(default)]
@@ -553,14 +561,14 @@ impl Project {
                         ]),
                         Logic::contact("stop", true),
                     ]),
-                    coil: Coil::new("seal", CoilKind::Normal),
+                    coil: Some(Coil::new("seal", CoilKind::Normal)),
                 },
                 Rung {
                     label: String::new(),
                     cells: Vec::new(),
                     comment: "The seal drives the run output.".to_string(),
                     logic: Logic::contact("seal", false),
-                    coil: Coil::new("run", CoilKind::Normal),
+                    coil: Some(Coil::new("run", CoilKind::Normal)),
                 },
                 Rung {
                     label: String::new(),
@@ -577,7 +585,7 @@ impl Project {
                             rising: false,
                         },
                     ]),
-                    coil: Coil::new("alarm", CoilKind::Set),
+                    coil: Some(Coil::new("alarm", CoilKind::Set)),
                 },
             ],
         }];
@@ -616,7 +624,51 @@ impl Section {
     }
 }
 
+/// A blank coil, for the read path of a rung that has none: the editor, the
+/// compiler and the validator read `rung.coil()` and ask `rung.has_coil()`
+/// before they write.
+static BLANK_COIL: Coil = Coil {
+    var: String::new(),
+    kind: CoilKind::Normal,
+    expr: None,
+};
+
 impl Rung {
+    /// The rung's coil, or a blank one when it has none. A blank coil is the
+    /// no-coil answer for readers that only need a default; `has_coil` is the
+    /// question to ask before writing or reporting.
+    pub fn coil(&self) -> &Coil {
+        self.coil.as_ref().unwrap_or(&BLANK_COIL)
+    }
+
+    pub fn has_coil(&self) -> bool {
+        self.coil.is_some()
+    }
+
+    /// The coil for editing: a rung with none gets a blank one, because an edit
+    /// is about to name it.
+    pub fn coil_mut(&mut self) -> &mut Coil {
+        self.coil
+            .get_or_insert_with(|| Coil::new("", CoilKind::Normal))
+    }
+
+    /// Put a coil on the rung, replacing any it had.
+    pub fn set_coil(&mut self, coil: Coil) {
+        self.coil = Some(coil);
+    }
+
+    /// A rung with no coil: cells drive outputs of their own, or the rung is a
+    /// block whose result nothing stores.
+    pub fn without_coil(logic: Logic) -> Self {
+        Self {
+            label: String::new(),
+            comment: String::new(),
+            logic,
+            coil: None,
+            cells: Vec::new(),
+        }
+    }
+
     /// A row with nothing but a comment: no cells and no coil. It is drawn and
     /// compiled as a comment, not as a rung.
     /// A tree rung that has already been laid out as cells keeps its old tree
@@ -628,11 +680,18 @@ impl Rung {
 
     pub fn is_comment_row(&self) -> bool {
         // A jump, call or compute coil is an instruction even with no operand:
-        // an empty one is an error the validator must see, not a comment.
-        !matches!(
-            self.coil.kind,
-            CoilKind::Jump | CoilKind::Call | CoilKind::Compute
-        ) && self.coil.var.trim().is_empty()
+        // an empty one is an error the validator must see, not a comment. A rung
+        // with no coil at all is a comment only when it draws nothing either.
+        let blank = match &self.coil {
+            None => true,
+            Some(coil) => {
+                !matches!(
+                    coil.kind,
+                    CoilKind::Jump | CoilKind::Call | CoilKind::Compute
+                ) && coil.var.trim().is_empty()
+            }
+        };
+        blank
             && self
                 .cells
                 .iter()
@@ -644,7 +703,7 @@ impl Rung {
             label: String::new(),
             comment: String::new(),
             logic,
-            coil,
+            coil: Some(coil),
             cells: Vec::new(),
         }
     }

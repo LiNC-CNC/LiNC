@@ -296,8 +296,8 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 pou.sections
                     .iter()
                     .flat_map(|section| section.rungs.iter())
-                    .filter(|rung| rung.coil.kind == crate::model::CoilKind::Call)
-                    .map(|rung| rung.coil.var.trim().to_ascii_uppercase())
+                    .filter(|rung| rung.coil().kind == crate::model::CoilKind::Call)
+                    .map(|rung| rung.coil().var.trim().to_ascii_uppercase())
                     .filter(|name| !name.is_empty()),
             );
             (pou.name.to_ascii_uppercase(), targets)
@@ -489,6 +489,11 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             if rung.is_comment_row() {
                 continue;
             }
+            // A rung with no coil is a block whose result nothing stores: the
+            // cells are the whole rung, and there is no target to check.
+            if !rung.has_coil() {
+                continue;
+            }
             let coil_path = format!("{rung_path}.coil.var");
             let ctx = facts.ctx(&rung_path);
             // A compute cell ends the rung before the coil, so an instruction
@@ -499,12 +504,12 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 .any(|cell| matches!(cell, crate::grid::Cell::Compute { .. }));
             // `expr` is a compute coil's operand. On any other kind it would be
             // silently ignored, so it is refused instead.
-            if rung.coil.kind != crate::model::CoilKind::Compute {
-                if let Some(expr) = rung.coil.expr.as_deref() {
+            if rung.coil().kind != crate::model::CoilKind::Compute {
+                if let Some(expr) = rung.coil().expr.as_deref() {
                     diagnostics.extend(crate::profile::instr::check_instruction(
                         &Instr::CoilExpr {
-                            kind: rung.coil.kind,
-                            var: &rung.coil.var,
+                            kind: rung.coil().kind,
+                            var: &rung.coil().var,
                             expr,
                         },
                         &ctx,
@@ -513,10 +518,10 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             }
             // A compute coil writes through its expression: its slot is unused,
             // and its text is the whole operand.
-            if rung.coil.kind == crate::model::CoilKind::Compute {
+            if rung.coil().kind == crate::model::CoilKind::Compute {
                 diagnostics.extend(crate::profile::instr::check_instruction(
                     &Instr::ComputeCoil {
-                        expr: rung.coil.expr.as_deref(),
+                        expr: rung.coil().expr.as_deref(),
                         compute_cell,
                     },
                     &ctx,
@@ -526,13 +531,13 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             // A jump or call coil's operand is a label or a POU name, not a
             // writable bit, so it leaves the bit-coil rules alone.
             if matches!(
-                rung.coil.kind,
+                rung.coil().kind,
                 crate::model::CoilKind::Jump | crate::model::CoilKind::Call
             ) {
                 diagnostics.extend(crate::profile::instr::check_instruction(
                     &Instr::LabelCoil {
-                        kind: rung.coil.kind,
-                        var: &rung.coil.var,
+                        kind: rung.coil().kind,
+                        var: &rung.coil().var,
                         compute_cell,
                     },
                     &ctx,
@@ -541,7 +546,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             }
             let verdict = crate::profile::instr::coil(
                 &Instr::Coil {
-                    var: &rung.coil.var,
+                    var: &rung.coil().var,
                 },
                 &ctx,
             );
@@ -558,7 +563,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             // A blank coil is the linked continuation row: the row holds the
             // branch under the `Link` above it and the link's row carries the
             // coil. A blank coil anywhere else is still an error.
-            let linked_continuation = rung.coil.var.trim().is_empty()
+            let linked_continuation = rung.coil().var.trim().is_empty()
                 && rung_index > 0
                 && section.rungs[rung_index - 1]
                     .cells
@@ -567,30 +572,30 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             if linked_continuation {
                 continue;
             }
-            match symbols.get(rung.coil.var.as_str()) {
+            match symbols.get(rung.coil().var.as_str()) {
                 None => diagnostics.push(Diagnostic::error(
                     "unknown_symbol",
-                    format!("coil target `{}` is not declared", rung.coil.var),
+                    format!("coil target `{}` is not declared", rung.coil().var),
                     &coil_path,
                 )),
                 Some(SymbolClass::Input) => diagnostics.push(Diagnostic::error(
                     "coil_target",
                     format!(
                         "`{}` is an input and cannot be a coil target",
-                        rung.coil.var
+                        rung.coil().var
                     ),
                     &coil_path,
                 )),
                 Some(_) => {
                     // A Set and a Reset on one target are a latch, not a
                     // conflict: only two writes of the same kind are ambiguous.
-                    let class = match rung.coil.kind {
+                    let class = match rung.coil().kind {
                         crate::model::CoilKind::Set => "set",
                         crate::model::CoilKind::Reset => "reset",
                         _ => "write",
                     };
                     let seen = coils
-                        .entry(rung.coil.var.clone())
+                        .entry(rung.coil().var.clone())
                         .or_insert((false, false, false));
                     let conflict = match class {
                         "set" => seen.1 || seen.0,
@@ -602,7 +607,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                             "duplicate_coil",
                             format!(
                                 "`{}` has more than one {class} coil in this section",
-                                rung.coil.var
+                                rung.coil().var
                             ),
                             &coil_path,
                         ));

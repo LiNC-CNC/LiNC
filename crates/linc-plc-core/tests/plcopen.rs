@@ -34,7 +34,7 @@ fn a_contact_and_a_coil_import_and_run() {
     assert_eq!(pous[0].name, "MAIN", "the first program is the entry");
     assert_eq!(pous[0].language, PouLanguage::Ld);
     let rung = &pous[0].sections[0].rungs[0];
-    assert_eq!(rung.coil.var, "lamp", "names are lowercased on import");
+    assert_eq!(rung.coil().var, "lamp", "names are lowercased on import");
     assert_eq!(
         rung.logic,
         Logic::Contact {
@@ -100,7 +100,7 @@ fn a_set_coil_maps_and_a_second_coil_trips_duplicate_coil() {
     let project = imported(SET_COIL);
     let rungs = &project.all_pous()[0].sections[0].rungs;
     assert_eq!(rungs.len(), 2);
-    assert_eq!(rungs[0].coil.kind, CoilKind::Set);
+    assert_eq!(rungs[0].coil().kind, CoilKind::Set);
 
     let codes = validate(&project)
         .into_iter()
@@ -182,5 +182,128 @@ fn an_unknown_element_is_refused_by_name() {
             .iter()
             .any(|item| item.code == "plcopen_unsupported_element"),
         "{diagnostics:#?}"
+    );
+}
+
+/// One block rung, built by hand: the body the importer's backwards walk cannot
+/// reach yet, but the model and the compiler can now express and run it.
+#[test]
+fn a_block_with_no_coil_imports_into_a_runnable_rung() {
+    use linc_plc_core::grid::Cell;
+    use linc_plc_core::model::{Coil, Rung, Section};
+
+    let mut project = Project::new("block-only");
+    project.io = vec![
+        linc_plc_core::IoPoint::new("go", linc_plc_core::IoDirection::In),
+        linc_plc_core::IoPoint::new("done", linc_plc_core::IoDirection::Out),
+    ];
+    let mut count = Rung::without_coil(Logic::Const { value: true });
+    count.cells = vec![
+        Cell::Contact {
+            var: "go".to_string(),
+            negated: false,
+        },
+        Cell::Block {
+            block: "CTU".to_string(),
+            instance: "CTU0".to_string(),
+            preset: "2".to_string(),
+        },
+    ];
+    // A second rung reads the block's done, so the run is observable.
+    let mut lamp = Rung::new(
+        Logic::Contact {
+            var: "CTU0.Q".to_string(),
+            negated: false,
+        },
+        Coil::new("done", CoilKind::Normal),
+    );
+    lamp.cells = vec![Cell::Contact {
+        var: "CTU0.Q".to_string(),
+        negated: false,
+    }];
+    let mut pou = linc_plc_core::Pou::new("MAIN", PouLanguage::Ld);
+    pou.sections = vec![Section {
+        name: "main".into(),
+        rungs: vec![count, lamp],
+    }];
+    project.pous = vec![pou];
+
+    let errors = validate(&project)
+        .into_iter()
+        .filter(|item| item.severity == Severity::Error)
+        .collect::<Vec<_>>();
+    assert!(
+        errors.is_empty(),
+        "a rung with no coil is a real rung: {errors:#?}"
+    );
+
+    let compiled = compile(&project).expect("compile");
+    let mut vm = Vm::new(&compiled);
+    for _ in 0..2 {
+        vm.scan(&[false]);
+        vm.scan(&[true]);
+    }
+    assert_eq!(
+        vm.outputs().first().copied(),
+        Some(true),
+        "the block ran and its done reached the second rung"
+    );
+}
+
+/// Old files carry `"coil": {..}` and must still decode; a rung with no coil is
+/// written by omitting the key.
+#[test]
+fn the_coil_field_is_optional_and_backwards_compatible() {
+    let with_coil = r#"{
+        "schema": 1, "name": "old", "io": [], "vars": [], "watch": [],
+        "sections": [{
+            "name": "main", "rungs": [{
+                "logic": {"op": "const", "value": true},
+                "coil": {"var": "run", "kind": "normal"}
+            }]
+        }],
+        "pous": []
+    }"#;
+    let project: Project = serde_json::from_str(with_coil).expect("an old file decodes");
+    let rung = &project.sections[0].rungs[0];
+    assert_eq!(rung.coil().var, "run");
+    assert!(rung.has_coil());
+
+    let without_coil = r#"{
+        "schema": 1, "name": "new", "io": [], "vars": [], "watch": [],
+        "sections": [{
+            "name": "main", "rungs": [{
+                "logic": {"op": "const", "value": true}
+            }]
+        }],
+        "pous": []
+    }"#;
+    let project: Project = serde_json::from_str(without_coil).expect("a coil-less rung decodes");
+    assert!(!project.sections[0].rungs[0].has_coil());
+
+    let saved = serde_json::to_string(&project).expect("serialize");
+    assert!(
+        !saved.contains("\"coil\""),
+        "a rung with no coil writes no key: {saved}"
+    );
+}
+
+/// Appendix E: every `<block>` used to bind instance 0, so two timers shared one
+/// `FbState`. Each block of a kind gets its own instance now.
+#[test]
+fn two_timers_in_one_program_get_their_own_instances() {
+    let xml = include_str!("fixtures/two-timers.ld.xml");
+    let project = imported(xml);
+    let mut instances = Vec::new();
+    for rung in &project.all_pous()[0].sections[0].rungs {
+        if let Logic::Block { instance, .. } = &rung.logic {
+            instances.push(instance.clone());
+        }
+    }
+    instances.sort();
+    assert_eq!(
+        instances,
+        vec!["TON0".to_string(), "TON1".to_string()],
+        "two timers, two instances"
     );
 }

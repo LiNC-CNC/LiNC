@@ -53,14 +53,15 @@ fn seal_imports_clean_and_drives_run() {
     let pou = &project.all_pous()[0];
     let rungs = &pou.sections[0].rungs;
     assert_eq!(rungs.len(), 2, "the drawn row and its branch");
-    assert_eq!(rungs[0].coil.var, "run");
+    assert_eq!(rungs[0].coil().var, "run");
     assert_eq!(
         rungs[0].cells[1],
         Cell::Link,
         "the branch joins at column 1"
     );
     assert_eq!(
-        rungs[1].coil.var, "",
+        rungs[1].coil().var,
+        "",
         "the branch row has no coil of its own"
     );
     assert_eq!(
@@ -100,8 +101,8 @@ fn timer_keeps_its_preset_and_writes_it_from_an_expression() {
         .expect("a timer block");
     assert_eq!(preset, "T#4000ms", "four seconds from timers_iec.csv");
     // The operate element's `@260/0@` became the timer's preset member.
-    assert_eq!(rungs[1].coil.kind, CoilKind::Compute);
-    assert_eq!(rungs[1].coil.expr.as_deref(), Some("TON0.PT=4000"));
+    assert_eq!(rungs[1].coil().kind, CoilKind::Compute);
+    assert_eq!(rungs[1].coil().expr.as_deref(), Some("TON0.PT=4000"));
 
     let compiled = compile(&project).expect("the imported ladder compiles");
     let mut vm = Vm::new(&compiled);
@@ -120,9 +121,9 @@ fn a_counter_with_up_and_reset_wired_imports_as_a_ctu() {
     let rungs = &project.all_pous()[0].sections[0].rungs;
     assert_eq!(rungs.len(), 2, "the counting rung and the reset rung");
     assert_eq!(instance(rungs, "CTU").as_deref(), Some("CTU0"));
-    assert_eq!(rungs[1].coil.var, "CTU0.R");
+    assert_eq!(rungs[1].coil().var, "CTU0.R");
     assert_eq!(
-        rungs[0].coil.kind,
+        rungs[0].coil().kind,
         CoilKind::Compute,
         "a counter rung has no coil; the block's output is consumed"
     );
@@ -183,7 +184,7 @@ fn rung_order_is_the_next_rung_chain() {
     assert_eq!(labels, vec!["first", "second", "third"]);
     let coils = rungs
         .iter()
-        .map(|rung| rung.coil.var.clone())
+        .map(|rung| rung.coil().var.clone())
         .collect::<Vec<_>>();
     assert_eq!(
         coils,
