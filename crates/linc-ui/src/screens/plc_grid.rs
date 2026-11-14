@@ -3429,6 +3429,36 @@ fn edge_letter_at(cx: f32, y: f32, s: f32) -> egui::Pos2 {
     egui::pos2(cx, y + (EDGE_LETTER_Y - CONDUCTOR_Y) * s)
 }
 
+/// A coil's two arcs, each a half circle, meeting on the conductor at
+/// `cx +- COIL_R`. The leads end at exactly those two points, so a lead cannot
+/// cross an arc: the ends of a half circle lie on the conductor line by
+/// construction, and an arc of less than `PI` puts them above and below it.
+fn coil_arcs(cx: f32, y: f32, s: f32) -> (Vec<egui::Pos2>, Vec<egui::Pos2>) {
+    let centre = egui::pos2(cx, y);
+    let radius = COIL_R * s;
+    let half = std::f32::consts::PI;
+    let upper = arc_points(centre, radius, half, 2.0 * half, 16);
+    let lower = arc_points(centre, radius, 0.0, half, 16);
+    (upper, lower)
+}
+
+/// Where a coil's letter goes: the middle of the loop, between the arcs, as
+/// Table 62 draws `--(S)--`. Outside the coil it reads as a separate annotation
+/// the coil does not own.
+fn coil_letter_at(cx: f32, y: f32) -> egui::Pos2 {
+    egui::pos2(cx, y)
+}
+
+/// A negated coil's slash: inside the loop, spanning the arc gap, so the stroke
+/// belongs to the coil rather than floating past its right edge.
+fn coil_slash(cx: f32, y: f32, s: f32) -> [egui::Pos2; 2] {
+    let reach = COIL_R * s * 0.72;
+    [
+        egui::pos2(cx - reach, y + reach),
+        egui::pos2(cx + reach, y - reach),
+    ]
+}
+
 pub(crate) fn draw_cell_symbol(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -3478,15 +3508,14 @@ pub(crate) fn draw_cell_symbol(
             }
         }
         CellSymbol::Coil(kind) => {
-            // Two curved parentheses, as the reference draws a coil.
-            let radius = 9.0;
-            let centre = egui::pos2(cx, y);
+            // A coil is two arcs: a half circle above the conductor and one below,
+            // meeting where the leads do.
+            let radius = COIL_R * s;
             painter.line_segment([egui::pos2(left, y), egui::pos2(cx - radius, y)], thin);
             painter.line_segment([egui::pos2(cx + radius, y), egui::pos2(right, y)], thin);
-            let left_arc = arc_points(centre, radius, 1.9, 4.4, 12);
-            let right_arc = arc_points(centre, radius, -1.25, 1.25, 12);
-            painter.add(egui::Shape::line(left_arc, line));
-            painter.add(egui::Shape::line(right_arc, line));
+            let (upper, lower) = coil_arcs(cx, y, s);
+            painter.add(egui::Shape::line(upper, line));
+            painter.add(egui::Shape::line(lower, line));
             match kind {
                 CoilKind::Set
                 | CoilKind::Reset
@@ -3501,21 +3530,15 @@ pub(crate) fn draw_cell_symbol(
                         _ => "=",
                     };
                     painter.text(
-                        egui::pos2(cx - radius - 5.0, y - 9.0),
+                        coil_letter_at(cx, y),
                         Align2::CENTER_CENTER,
                         letter,
-                        FontId::monospace(8.5),
+                        FontId::monospace(8.5 * s),
                         color,
                     );
                 }
                 CoilKind::Negated => {
-                    painter.line_segment(
-                        [
-                            egui::pos2(cx + radius + 2.0, y - 7.0),
-                            egui::pos2(cx + radius + 8.0, y + 7.0),
-                        ],
-                        line,
-                    );
+                    painter.line_segment(coil_slash(cx, y, s), line);
                 }
                 CoilKind::Normal => {}
             }
@@ -3599,8 +3622,8 @@ mod geometry_tests {
         assert_eq!(SPAN, 2.0 * CELL_WIDTH);
     }
 
-    /// Rule 4: the slash ends on the bars. A longer one reads as a struck-through
-    /// contact rather than a negated one.
+    /// Rule 4: the slash ends on the bars. Longer leaves the wire visibly crossing
+    /// the circle of a coil and makes an NC contact look like a struck-through one.
     #[test]
     fn the_nc_slash_ends_on_the_bars() {
         let (cx, y) = (100.0, 200.0);
@@ -3643,6 +3666,61 @@ mod geometry_tests {
         let [start, end] = contact_slash(100.0, 200.0, 2.0);
         assert_eq!(end.x - start.x, 4.0 * SLASH);
         assert_eq!(edge_letter_at(100.0, 200.0, 2.0).x, 100.0);
+    }
+
+    /// Rule 1: the coil's leads end exactly on its arcs. Both arcs' ends lie on the
+    /// conductor, so the lead meets an arc end and the strokes cannot cross.
+    #[test]
+    fn the_coil_arcs_end_on_the_conductor() {
+        let (cx, y) = (100.0, 200.0);
+        let (upper, lower) = coil_arcs(cx, y, 1.0);
+        assert_eq!(upper.first().copied(), Some(egui::pos2(cx - COIL_R, y)));
+        assert_eq!(upper.last().copied(), Some(egui::pos2(cx + COIL_R, y)));
+        assert_eq!(lower.first().copied(), Some(egui::pos2(cx + COIL_R, y)));
+        assert_eq!(lower.last().copied(), Some(egui::pos2(cx - COIL_R, y)));
+        assert_eq!(COIL_R, COIL_LEAD_X, "the lead ends where the arc starts");
+    }
+
+    /// Two half circles, one on each side of the conductor: neither arc strays past
+    /// the conductor line except where it meets it.
+    #[test]
+    fn each_coil_arc_is_a_half_circle() {
+        let (cx, y) = (100.0, 200.0);
+        let (upper, lower) = coil_arcs(cx, y, 1.0);
+        for point in &upper {
+            assert!(point.y <= y + 0.01, "{point:?} is below the conductor");
+        }
+        for point in &lower {
+            assert!(point.y >= y - 0.01, "{point:?} is above the conductor");
+        }
+        // The topmost point is one radius above the conductor, and likewise below.
+        let top = upper.iter().fold(y, |low, point| low.min(point.y));
+        let bottom = lower.iter().fold(y, |high, point| high.max(point.y));
+        assert!((y - top - COIL_R).abs() < 0.01);
+        assert!((bottom - y - COIL_R).abs() < 0.01);
+    }
+
+    /// Rule 2: the letter is inside the loop, between the arcs, not outside-left.
+    #[test]
+    fn the_coil_letter_is_inside_the_loop() {
+        let (cx, y) = (100.0, 200.0);
+        let letter = coil_letter_at(cx, y);
+        assert_eq!(letter, egui::pos2(cx, y));
+        assert!(
+            (letter.x - cx).abs() < COIL_R && (letter.y - y).abs() < COIL_R,
+            "the letter is inside the coil's radius"
+        );
+    }
+
+    /// A negated coil's slash is inside the arc gap, not floating past the coil.
+    #[test]
+    fn the_negated_coil_slash_is_inside() {
+        let (cx, y) = (100.0, 200.0);
+        let [start, end] = coil_slash(cx, y, 1.0);
+        for point in [start, end] {
+            assert!((point.x - cx).abs() < COIL_R);
+            assert!((point.y - y).abs() < COIL_R);
+        }
     }
 
     /// The body grows a row at a time, and no block is padded with an empty row.
