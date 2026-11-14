@@ -177,10 +177,26 @@ fn run(xml: &str, trace: &Trace, stimulus: &Stimulus) -> Result<(), String> {
         ));
     }
 
+    // The stimulus says how the program is driven and for how long; the trace says
+    // what came out. Together they describe one run, so a disagreement is a corpus
+    // bug and must not be resolved by quietly preferring one of them.
+    if stimulus.scan_ms != trace.scan_ms {
+        return Err(format!(
+            "the stimulus runs at {} ms per scan, the trace was recorded at {}",
+            stimulus.scan_ms, trace.scan_ms
+        ));
+    }
+    if stimulus.scans != trace.scans {
+        return Err(format!(
+            "the stimulus covers {} scans, the trace covers {}",
+            stimulus.scans, trace.scans
+        ));
+    }
+
     let mut vm = Vm::new(&compiled);
-    for tick in 0..trace.scans {
+    for tick in 0..stimulus.scans {
         let scan = tick + 1;
-        if trace.fault.is_some() && scan >= trace.scans {
+        if trace.fault.is_some() && scan >= stimulus.scans {
             break;
         }
         let inputs = input_names
@@ -202,7 +218,7 @@ fn run(xml: &str, trace: &Trace, stimulus: &Stimulus) -> Result<(), String> {
                     })
             })
             .collect::<Vec<_>>();
-        vm.scan_with_dt(&inputs, trace.scan_ms);
+        vm.scan_with_dt(&inputs, stimulus.scan_ms);
         let expected = expected_at(trace, scan);
         let want_of = |name: &str| {
             trace
