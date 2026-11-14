@@ -8,7 +8,8 @@
 //! Function blocks and POU calls (`CAL`), jumps and labels are parsed and then
 //! refused with a named diagnostic rather than silently ignored.
 
-use crate::compile::Op;
+use crate::compile::{compare_op_for, Op};
+use crate::profile::spec::{IlForm, Spec, WordName};
 
 /// One parsed source line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,17 +25,6 @@ pub enum IlLine {
     /// A line the parser could not read at all.
     Bad(String),
 }
-
-/// Mnemonics this compiler can lower into the scan VM.
-pub const SUPPORTED: [&str; 33] = [
-    "LD", "LDN", "AND", "ANDN", "OR", "ORN", "XOR", "XORN", "NOT", "ST", "STN", "S", "R", "=",
-    "ADD", "SUB", "MUL", "DIV", "MOD", "GT", "GE", "EQ", "NE", "LE", "CAL", "RET", "JMP", "JMPC",
-    "JMPCN", "CALC", "CALCN", "RETC", "RETCN",
-];
-
-/// Mnemonics the compiler knows but cannot lower. Empty: every listed
-/// instruction has an operation and a test.
-pub const UNSUPPORTED: [&str; 0] = [];
 
 /// Parse a function-block call: `TON0(IN:=start, PT:=T#4s)`.
 pub fn parse_call(operand: &str) -> Option<(String, Vec<(String, String)>)> {
@@ -97,14 +87,15 @@ pub fn parse_line(line: &str) -> IlLine {
         return IlLine::Bad(format!("'{mnemonic}' is not supported by this compiler"));
     }
     let mnemonic = mnemonic.to_ascii_uppercase();
-    if !SUPPORTED.contains(&mnemonic.as_str()) && !UNSUPPORTED.contains(&mnemonic.as_str()) {
+    // The instruction table is the only place a mnemonic is spelled; this parser
+    // rejects a name by its absence from the profile, not by its own list.
+    let Some(spec) = crate::profile::spec::spec(&mnemonic) else {
         return IlLine::Bad(format!("unknown instruction '{mnemonic}'"));
-    }
-    let no_operand = matches!(mnemonic.as_str(), "NOT" | "RET" | "RETC" | "RETCN");
-    if !no_operand && operand.is_empty() {
+    };
+    if spec.takes_operand() && operand.is_empty() {
         return IlLine::Bad(format!("'{mnemonic}' needs an operand"));
     }
-    if no_operand && !operand.is_empty() {
+    if !spec.takes_operand() && !operand.is_empty() {
         return IlLine::Bad(format!("'{mnemonic}' takes no operand"));
     }
     IlLine::Instruction { mnemonic, operand }
@@ -122,78 +113,38 @@ pub enum IlOperand {
     Literal(i32),
 }
 
-/// Lower one instruction. `false` means this compiler has no such operation for
-/// that operand kind, and validation reports it at the source line.
-pub fn lower_line(mnemonic: &str, operand: IlOperand, ops: &mut Vec<Op>) -> bool {
+/// Lower one instruction from its table row. `false` means this compiler has no
+/// operation for that row and operand kind, and validation reports it at the
+/// source line.
+///
+/// The row decides what the instruction is, so a mnemonic is never matched here:
+/// the same `IlForm` is what `validate.rs` classifies for its type flow.
+pub fn lower_line(spec: &Spec, operand: IlOperand, ops: &mut Vec<Op>) -> bool {
     use IlOperand::{Bit, Literal, Word};
 
-    // Word instructions: the operand is a word or a literal.
-    match (mnemonic, operand) {
-        ("LD", Word(word)) => {
+    // The word forms first: the operand decides whether a word slot or a
+    // literal is pushed.
+    match (spec.il, operand) {
+        (IlForm::Push, Word(word)) => {
             ops.push(Op::LoadWord(word));
             return true;
         }
-        ("LD", Literal(value)) => {
+        (IlForm::Push, Literal(value)) => {
             ops.push(Op::LoadConst(value));
             return true;
         }
-        ("ST", Word(word)) => {
+        (IlForm::Store, Word(word)) => {
             ops.push(Op::StoreWord(word));
             return true;
         }
-        ("ADD", Word(_)) | ("ADD", Literal(_)) => {
+        (IlForm::Word(name), Word(_) | Literal(_)) => {
             push_operand(operand, ops);
-            ops.push(Op::Add);
+            ops.push(word_op(name));
             return true;
         }
-        ("SUB", Word(_)) | ("SUB", Literal(_)) => {
+        (IlForm::Compare(name), Word(_) | Literal(_)) => {
             push_operand(operand, ops);
-            ops.push(Op::Sub);
-            return true;
-        }
-        ("MUL", Word(_)) | ("MUL", Literal(_)) => {
-            push_operand(operand, ops);
-            ops.push(Op::Mul);
-            return true;
-        }
-        ("DIV", Word(_)) | ("DIV", Literal(_)) => {
-            push_operand(operand, ops);
-            ops.push(Op::Div);
-            return true;
-        }
-        ("MOD", Word(_)) | ("MOD", Literal(_)) => {
-            push_operand(operand, ops);
-            ops.push(Op::Mod);
-            return true;
-        }
-        ("GT", Word(_)) | ("GT", Literal(_)) => {
-            push_operand(operand, ops);
-            ops.push(Op::CmpGt);
-            return true;
-        }
-        ("GE", Word(_)) | ("GE", Literal(_)) => {
-            push_operand(operand, ops);
-            ops.push(Op::CmpGe);
-            return true;
-        }
-        ("EQ", Word(_)) | ("EQ", Literal(_)) => {
-            push_operand(operand, ops);
-            ops.push(Op::CmpEq);
-            return true;
-        }
-        ("NE", Word(_)) | ("NE", Literal(_)) => {
-            push_operand(operand, ops);
-            ops.push(Op::CmpNe);
-            return true;
-        }
-        ("LE", Word(_)) | ("LE", Literal(_)) => {
-            push_operand(operand, ops);
-            ops.push(Op::CmpLe);
-            return true;
-        }
-        ("LT", Word(_)) | ("LT", Literal(_)) => {
-            push_operand(operand, ops);
-            ops.push(Op::CmpLt);
+            ops.push(compare_op_for(name));
             return true;
         }
         _ => {}
@@ -202,50 +153,60 @@ pub fn lower_line(mnemonic: &str, operand: IlOperand, ops: &mut Vec<Op>) -> bool
     let Bit(index) = operand else {
         return false;
     };
-    match mnemonic {
-        "LD" => ops.push(Op::Push(index)),
-        "LDN" => {
+    match spec.il {
+        IlForm::Push => ops.push(Op::Push(index)),
+        IlForm::PushNot => {
             ops.push(Op::Push(index));
             ops.push(Op::Not);
         }
-        "AND" => {
+        IlForm::And => {
             ops.push(Op::Push(index));
             ops.push(Op::And);
         }
-        "ANDN" => {
+        IlForm::AndNot => {
             ops.push(Op::Push(index));
             ops.push(Op::Not);
             ops.push(Op::And);
         }
-        "OR" => {
+        IlForm::Or => {
             ops.push(Op::Push(index));
             ops.push(Op::Or);
         }
-        "ORN" => {
+        IlForm::OrNot => {
             ops.push(Op::Push(index));
             ops.push(Op::Not);
             ops.push(Op::Or);
         }
-        "XOR" => {
+        IlForm::Xor => {
             ops.push(Op::Push(index));
             ops.push(Op::Xor);
         }
-        "XORN" => {
+        IlForm::XorNot => {
             ops.push(Op::Push(index));
             ops.push(Op::Not);
             ops.push(Op::Xor);
         }
-        "NOT" => ops.push(Op::Not),
-        "ST" | "=" => ops.push(Op::Store(index)),
-        "STN" => {
+        IlForm::Not => ops.push(Op::Not),
+        IlForm::Store => ops.push(Op::Store(index)),
+        IlForm::StoreNot => {
             ops.push(Op::Not);
             ops.push(Op::Store(index));
         }
-        "S" => ops.push(Op::Set(index)),
-        "R" => ops.push(Op::Reset(index)),
+        IlForm::Set => ops.push(Op::Set(index)),
+        IlForm::Reset => ops.push(Op::Reset(index)),
         _ => return false,
     }
     true
+}
+
+fn word_op(name: WordName) -> Op {
+    match name {
+        WordName::Add => Op::Add,
+        WordName::Sub => Op::Sub,
+        WordName::Mul => Op::Mul,
+        WordName::Div => Op::Div,
+        WordName::Mod => Op::Mod,
+    }
 }
 
 fn push_operand(operand: IlOperand, ops: &mut Vec<Op>) {

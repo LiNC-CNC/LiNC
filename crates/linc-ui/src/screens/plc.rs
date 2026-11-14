@@ -3873,9 +3873,7 @@ fn il_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
                     }
                     if character == ' '
                         && !plc.il_buffer.ends_with(' ')
-                        && linc_plc_core::il::SUPPORTED
-                            .iter()
-                            .chain(linc_plc_core::il::UNSUPPORTED.iter())
+                        && linc_plc_core::profile::spec::il_mnemonics()
                             .any(|known| known.eq_ignore_ascii_case(plc.il_buffer.trim()))
                     {
                         // A known mnemonic uppercases and the cursor moves on,

@@ -17,6 +17,7 @@ pub mod grid;
 pub mod il;
 pub mod model;
 pub mod plcopen;
+pub mod profile;
 pub mod protocol;
 pub mod retain;
 pub mod timing;

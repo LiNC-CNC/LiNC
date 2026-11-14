@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::il::{lower_line, parse_line, IlLine, IlOperand};
 use crate::model::{CoilKind, IoDirection, IoKind, Logic, PouLanguage, Project};
+use crate::profile::spec::{CompareName, Family, FbName, IlForm, MathName};
 use crate::validate::{validate, Diagnostic, Severity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,18 +163,26 @@ pub enum FbKind {
 }
 
 impl FbKind {
+    /// Resolve a block name through the instruction table. The table is the only
+    /// place a mnemonic is spelled.
     pub fn parse(name: &str) -> Option<Self> {
-        match name.to_ascii_uppercase().as_str() {
-            "TON" => Some(Self::Ton),
-            "TOF" => Some(Self::Tof),
-            "TP" => Some(Self::Tp),
-            "CTU" => Some(Self::Ctu),
-            "CTD" => Some(Self::Ctd),
-            "RT" | "R_TRIG" => Some(Self::Rt),
-            "RF" | "F_TRIG" => Some(Self::Rf),
-            "SR" => Some(Self::Sr),
-            "RS" => Some(Self::Rs),
+        match crate::profile::spec::spec(name)?.family {
+            Family::Fb(name) => Some(Self::from_name(name)),
             _ => None,
+        }
+    }
+
+    fn from_name(name: FbName) -> Self {
+        match name {
+            FbName::Ton => Self::Ton,
+            FbName::Tof => Self::Tof,
+            FbName::Tp => Self::Tp,
+            FbName::Ctu => Self::Ctu,
+            FbName::Ctd => Self::Ctd,
+            FbName::Rt => Self::Rt,
+            FbName::Rf => Self::Rf,
+            FbName::Sr => Self::Sr,
+            FbName::Rs => Self::Rs,
         }
     }
 
@@ -212,14 +221,23 @@ pub enum MathOp {
 }
 
 impl MathOp {
+    /// Resolve a block arithmetic name through the instruction table. The
+    /// operator spellings a compute cell accepts (`+`, `:=`, …) are rows there
+    /// too, so this has no name list of its own.
     pub fn parse(name: &str) -> Option<Self> {
-        match name.trim().to_ascii_uppercase().as_str() {
-            "ADD" | "+" => Some(Self::Add),
-            "SUB" | "-" => Some(Self::Sub),
-            "MUL" | "*" => Some(Self::Mul),
-            "DIV" | "/" => Some(Self::Div),
-            "MOVE" | ":=" => Some(Self::Move),
+        match crate::profile::spec::spec(name)?.family {
+            Family::Math(name) => Some(Self::from_name(name)),
             _ => None,
+        }
+    }
+
+    fn from_name(name: MathName) -> Self {
+        match name {
+            MathName::Add => Self::Add,
+            MathName::Sub => Self::Sub,
+            MathName::Mul => Self::Mul,
+            MathName::Div => Self::Div,
+            MathName::Move => Self::Move,
         }
     }
 }
@@ -487,7 +505,10 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
     for pou in &pous {
         for line in &pou.il {
             if let IlLine::Instruction { mnemonic, operand } = parse_line(line) {
-                if mnemonic == "CAL" {
+                if matches!(
+                    crate::profile::spec::il_form(&mnemonic),
+                    Some(IlForm::Call(None))
+                ) {
                     called.insert(operand.trim().to_ascii_uppercase());
                 }
             }
@@ -732,38 +753,30 @@ fn lower_pou(
                     }
                     continue;
                 };
-                match mnemonic.as_str() {
-                    "RET" => {
+                // The instruction table says what a mnemonic means; this
+                // loop only arranges the control flow around that meaning.
+                let spec = crate::profile::spec::spec(&mnemonic);
+                match spec.map(|spec| spec.il) {
+                    Some(IlForm::Return(when)) => {
                         returns.push(ops.len());
-                        ops.push(Op::Jump(0));
-                    }
-                    "RETC" | "RETCN" => {
-                        returns.push(ops.len());
-                        ops.push(Op::JumpIf {
-                            target: 0,
-                            when: mnemonic == "RETC",
-                        });
-                    }
-                    "JMP" | "JMPC" | "JMPCN" => {
-                        label_jumps.push((ops.len(), operand.trim().to_ascii_uppercase()));
-                        if mnemonic == "JMP" {
-                            ops.push(Op::Jump(0));
-                        } else {
-                            ops.push(Op::JumpIf {
-                                target: 0,
-                                when: mnemonic == "JMPC",
-                            });
+                        match when {
+                            Some(when) => ops.push(Op::JumpIf { target: 0, when }),
+                            None => ops.push(Op::Jump(0)),
                         }
                     }
-                    "CALC" | "CALCN" => {
-                        // Execute the callee when CR says so; skip its inlined
-                        // block otherwise. `when` is the condition that skips.
+                    Some(IlForm::Jump(when)) => {
+                        label_jumps.push((ops.len(), operand.trim().to_ascii_uppercase()));
+                        match when {
+                            Some(when) => ops.push(Op::JumpIf { target: 0, when }),
+                            None => ops.push(Op::Jump(0)),
+                        }
+                    }
+                    Some(IlForm::Call(Some(when))) => {
+                        // Execute the callee when the accumulator says so; `when`
+                        // is the condition that skips its inlined block.
                         if let Some(callee) = pous.get(&operand.trim().to_ascii_uppercase()) {
                             let skip = ops.len();
-                            ops.push(Op::JumpIf {
-                                target: 0,
-                                when: mnemonic == "CALCN",
-                            });
+                            ops.push(Op::JumpIf { target: 0, when });
                             lower_pou(callee, pous, lookup, ops, edges, depth + 1);
                             let after = ops.len() as u16;
                             if let Op::JumpIf { target, .. } = &mut ops[skip] {
@@ -771,7 +784,7 @@ fn lower_pou(
                             }
                         }
                     }
-                    "CAL" => {
+                    Some(IlForm::Call(None)) => {
                         // `CAL TON0(IN:=x, PT:=T#1s)` runs a block; a bare name
                         // is a POU call.
                         if let Some((name, args)) = crate::il::parse_call(&operand) {
@@ -804,7 +817,9 @@ fn lower_pou(
                         }
                     }
                     _ => {
-                        lower_line(&mnemonic, il_operand(&operand, lookup), ops);
+                        if let Some(spec) = spec {
+                            lower_line(spec, il_operand(&operand, lookup), ops);
+                        }
                     }
                 }
             }
@@ -926,24 +941,27 @@ fn lower_fbd_grid_block(
         }
         inputs.push(operand);
     }
-    match name.as_str() {
-        "AND" | "OR" | "XOR" => {
+    // The gate names are instruction-table rows too (`AND`, `OR`, `XOR`, `NOT`),
+    // so the FBD path has no name list of its own.
+    let form = crate::profile::spec::il_form(&name);
+    match form {
+        Some(IlForm::And) | Some(IlForm::Or) | Some(IlForm::Xor) => {
             if inputs.is_empty() {
-                ops.push(Op::PushConst(name == "AND"));
+                ops.push(Op::PushConst(matches!(form, Some(IlForm::And))));
             } else {
                 for (position, input) in inputs.iter().enumerate() {
                     lower_fbd_grid_bit(input, grid, index, lookup, ops, 0);
                     if position > 0 {
-                        ops.push(match name.as_str() {
-                            "AND" => Op::And,
-                            "OR" => Op::Or,
+                        ops.push(match form {
+                            Some(IlForm::Or) => Op::Or,
+                            Some(IlForm::And) => Op::And,
                             _ => Op::Xor,
                         });
                     }
                 }
             }
         }
-        "NOT" => {
+        Some(IlForm::Not) => {
             lower_fbd_grid_bit(&inputs[0], grid, index, lookup, ops, 0);
             ops.push(Op::Not);
         }
@@ -1099,24 +1117,25 @@ fn lower_fbd_block(
         return;
     }
     let block = line.block.trim().to_ascii_uppercase();
-    match block.as_str() {
-        "AND" | "OR" | "XOR" => {
+    let form = crate::profile::spec::il_form(&block);
+    match form {
+        Some(IlForm::And) | Some(IlForm::Or) | Some(IlForm::Xor) => {
             if line.inputs.is_empty() {
-                ops.push(Op::PushConst(block == "AND"));
+                ops.push(Op::PushConst(matches!(form, Some(IlForm::And))));
             } else {
                 for (position, input) in line.inputs.iter().enumerate() {
                     lower_fbd_bit(input, lines, index, lookup, ops, depth);
                     if position > 0 {
-                        ops.push(match block.as_str() {
-                            "AND" => Op::And,
-                            "OR" => Op::Or,
+                        ops.push(match form {
+                            Some(IlForm::Or) => Op::Or,
+                            Some(IlForm::And) => Op::And,
                             _ => Op::Xor,
                         });
                     }
                 }
             }
         }
-        "NOT" => {
+        Some(IlForm::Not) => {
             lower_fbd_bit(
                 line.inputs.first().map(String::as_str).unwrap_or("FALSE"),
                 lines,
@@ -1503,15 +1522,24 @@ fn emit_word(ops: &mut Vec<Op>, value: WordOperand) {
     }
 }
 
+/// A compare block name, through the instruction table.
 pub fn compare_op(name: &str) -> Option<Op> {
-    match name.trim().to_ascii_uppercase().as_str() {
-        "GT" => Some(Op::CmpGt),
-        "GE" => Some(Op::CmpGe),
-        "EQ" => Some(Op::CmpEq),
-        "NE" => Some(Op::CmpNe),
-        "LE" => Some(Op::CmpLe),
-        "LT" => Some(Op::CmpLt),
+    match crate::profile::spec::spec(name)?.family {
+        Family::Compare(name) => Some(compare_op_for(name)),
         _ => None,
+    }
+}
+
+/// The VM operation for a compare, for callers that already resolved the name
+/// through the table.
+pub fn compare_op_for(name: CompareName) -> Op {
+    match name {
+        CompareName::Gt => Op::CmpGt,
+        CompareName::Ge => Op::CmpGe,
+        CompareName::Eq => Op::CmpEq,
+        CompareName::Ne => Op::CmpNe,
+        CompareName::Le => Op::CmpLe,
+        CompareName::Lt => Op::CmpLt,
     }
 }
 

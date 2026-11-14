@@ -7,16 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::il::{parse_line, word_operand, IlLine};
 use crate::model::{IoDirection, IoKind, Logic, PouLanguage, Project, Section};
+use crate::profile::spec::IlForm;
 use crate::SCHEMA_VERSION;
-
-/// IL mnemonics that push or combine a bit.
-const IL_BIT_OPS: [&str; 8] = ["LDN", "AND", "ANDN", "OR", "ORN", "XOR", "XORN", "NOT"];
-
-/// IL mnemonics that read a word accumulator.
-const IL_WORD_OPS: [&str; 5] = ["ADD", "SUB", "MUL", "DIV", "MOD"];
-
-/// IL compares: they read a word and leave a bit.
-const IL_COMPARES: [&str; 6] = ["GT", "GE", "EQ", "NE", "LE", "LT"];
 
 /// Maximum accepted logic nesting depth.
 const MAX_DEPTH: usize = 64;
@@ -226,10 +218,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                 // is checked here: `LD`/`LDN`/`ST`/`STN`/`=` take
                                 // either side, and the type flow above already
                                 // reports an accumulator mismatch.
-                                if matches!(
-                                    mnemonic.as_str(),
-                                    "AND" | "ANDN" | "OR" | "ORN" | "XOR" | "XORN" | "S" | "R"
-                                ) {
+                                if is_il_bit_operand(&mnemonic) {
                                     check_io_kind(
                                         &operand,
                                         true,
@@ -237,20 +226,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                         path.clone(),
                                         &mut diagnostics,
                                     );
-                                } else if matches!(
-                                    mnemonic.as_str(),
-                                    "ADD"
-                                        | "SUB"
-                                        | "MUL"
-                                        | "DIV"
-                                        | "MOD"
-                                        | "GT"
-                                        | "GE"
-                                        | "EQ"
-                                        | "NE"
-                                        | "LE"
-                                        | "LT"
-                                ) {
+                                } else if is_il_word_operand(&mnemonic) {
                                     check_io_kind(
                                         &operand,
                                         false,
@@ -260,7 +236,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                     );
                                 }
                             }
-                            if matches!(mnemonic.as_str(), "ST" | "STN" | "=") {
+                            if is_il_store(&mnemonic) {
                                 if let Some(current) = accumulator {
                                     if current != operand_is_word {
                                         diagnostics.push(Diagnostic::error(
@@ -275,9 +251,9 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                     }
                                 }
                             }
-                            if matches!(mnemonic.as_str(), "LD" | "LDN") {
+                            if is_il_load(&mnemonic) {
                                 accumulator = Some(operand_is_word);
-                            } else if IL_BIT_OPS.contains(&mnemonic.as_str()) {
+                            } else if is_il_bit_combinator(&mnemonic) {
                                 if let Some(true) = accumulator {
                                     diagnostics.push(Diagnostic::error(
                                         "il_type",
@@ -288,10 +264,10 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                     ));
                                 }
                             }
-                            if mnemonic == "RET" {
+                            if is_il_plain_return(&mnemonic) {
                                 continue;
                             }
-                            if matches!(mnemonic.as_str(), "JMP" | "JMPC" | "JMPCN") {
+                            if is_il_jump(&mnemonic) {
                                 if accumulator == Some(true) {
                                     diagnostics.push(Diagnostic::error(
                                         "il_type",
@@ -312,7 +288,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                 }
                                 continue;
                             }
-                            if matches!(mnemonic.as_str(), "RETC" | "RETCN") {
+                            if is_il_conditional_return(&mnemonic) {
                                 if accumulator == Some(true) {
                                     diagnostics.push(Diagnostic::error(
                                         "il_type",
@@ -324,7 +300,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                 }
                                 continue;
                             }
-                            if matches!(mnemonic.as_str(), "CALC" | "CALCN") {
+                            if is_il_conditional_call(&mnemonic) {
                                 if accumulator == Some(true) {
                                     diagnostics.push(Diagnostic::error(
                                         "il_type",
@@ -345,7 +321,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                 }
                                 continue;
                             }
-                            if mnemonic == "CAL" {
+                            if is_il_plain_call(&mnemonic) {
                                 if let Some((name, args)) = crate::il::parse_call(&operand) {
                                     let block = crate::compile::parse_block(&name, &name, "");
                                     if block.is_none() {
@@ -413,7 +389,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                         path,
                                     ));
                                 }
-                            } else if IL_COMPARES.contains(&mnemonic.as_str()) {
+                            } else if is_il_compare(&mnemonic) {
                                 if let Some(false) = accumulator {
                                     diagnostics.push(Diagnostic::error(
                                         "il_type",
@@ -424,7 +400,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                     ));
                                 }
                                 accumulator = Some(false);
-                            } else if IL_WORD_OPS.contains(&mnemonic.as_str()) {
+                            } else if is_il_word_op(&mnemonic) {
                                 if let Some(false) = accumulator {
                                     diagnostics.push(Diagnostic::error(
                                         "il_type",
@@ -435,7 +411,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                     ));
                                 }
                                 // Arithmetic leaves a word, a compare a bit.
-                                accumulator = Some(IL_WORD_OPS.contains(&mnemonic.as_str()));
+                                accumulator = Some(true);
                             } else if word_operand(&operand).is_none()
                                 && operand.trim().parse::<i32>().is_err()
                                 && !known.contains(&operand.to_ascii_lowercase())
@@ -528,7 +504,11 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                             &mut diagnostics,
                         );
                     }
-                    if matches!(block.as_str(), "AND" | "OR" | "XOR" | "NOT") {
+                    let form = il_form(&block);
+                    if matches!(
+                        form,
+                        Some(IlForm::And | IlForm::Or | IlForm::Xor | IlForm::Not)
+                    ) {
                         if !bit_ok {
                             diagnostics.push(Diagnostic::error(
                                 "fbd_input",
@@ -536,8 +516,9 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                 format!("{path}.inputs"),
                             ));
                         }
-                        let needed = if block == "NOT" { 1 } else { 2 };
-                        if block == "NOT" && line.inputs.len() != needed {
+                        let not = matches!(form, Some(IlForm::Not));
+                        let needed = if not { 1 } else { 2 };
+                        if not && line.inputs.len() != needed {
                             diagnostics.push(Diagnostic::error(
                                 "fbd_arity",
                                 "NOT takes one input",
@@ -607,7 +588,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 .iter()
                 .filter_map(|line| match parse_line(line) {
                     IlLine::Instruction { mnemonic, operand }
-                        if matches!(mnemonic.as_str(), "CAL" | "CALC" | "CALCN") =>
+                        if matches!(il_form(&mnemonic), Some(IlForm::Call(_))) =>
                     {
                         let target = operand.trim();
                         // `CAL TON0(IN:=..)` is a block, not a POU.
@@ -1228,6 +1209,74 @@ fn check_label_coil(
     }
 }
 
+// The IL type flow classifies a mnemonic from its instruction-table row, so a
+// name the validator understands is a name the parser and the compiler know.
+
+fn il_form(mnemonic: &str) -> Option<IlForm> {
+    crate::profile::spec::spec(mnemonic).map(|spec| spec.il)
+}
+
+fn is_il_load(mnemonic: &str) -> bool {
+    matches!(il_form(mnemonic), Some(IlForm::Push | IlForm::PushNot))
+}
+
+fn is_il_store(mnemonic: &str) -> bool {
+    matches!(il_form(mnemonic), Some(IlForm::Store | IlForm::StoreNot))
+}
+
+fn is_il_bit_combinator(mnemonic: &str) -> bool {
+    matches!(
+        il_form(mnemonic),
+        Some(
+            IlForm::And
+                | IlForm::AndNot
+                | IlForm::Or
+                | IlForm::OrNot
+                | IlForm::Xor
+                | IlForm::XorNot
+                | IlForm::Not
+        )
+    )
+}
+
+/// A mnemonic whose operand is a bit: the combinators and the coils.
+fn is_il_bit_operand(mnemonic: &str) -> bool {
+    is_il_bit_combinator(mnemonic) || matches!(il_form(mnemonic), Some(IlForm::Set | IlForm::Reset))
+}
+
+/// A mnemonic whose operand is a word: arithmetic and compares.
+fn is_il_word_operand(mnemonic: &str) -> bool {
+    is_il_word_op(mnemonic) || is_il_compare(mnemonic)
+}
+
+fn is_il_word_op(mnemonic: &str) -> bool {
+    matches!(il_form(mnemonic), Some(IlForm::Word(_)))
+}
+
+fn is_il_compare(mnemonic: &str) -> bool {
+    matches!(il_form(mnemonic), Some(IlForm::Compare(_)))
+}
+
+fn is_il_jump(mnemonic: &str) -> bool {
+    matches!(il_form(mnemonic), Some(IlForm::Jump(_)))
+}
+
+fn is_il_plain_return(mnemonic: &str) -> bool {
+    matches!(il_form(mnemonic), Some(IlForm::Return(None)))
+}
+
+fn is_il_conditional_return(mnemonic: &str) -> bool {
+    matches!(il_form(mnemonic), Some(IlForm::Return(Some(_))))
+}
+
+fn is_il_plain_call(mnemonic: &str) -> bool {
+    matches!(il_form(mnemonic), Some(IlForm::Call(None)))
+}
+
+fn is_il_conditional_call(mnemonic: &str) -> bool {
+    matches!(il_form(mnemonic), Some(IlForm::Call(Some(_))))
+}
+
 /// Is this a place a compute coil may write? A bank slot (`MWn` or a declared
 /// word point) or a block member; never a literal. A block member on the left
 /// of a compute is a write, which is what `compute_target` guards.
@@ -1302,7 +1351,10 @@ fn check_fbd_grid(
         let mut needs_two_bits = false;
         let mut needs_words = false;
         let mut compute = false;
-        if matches!(name.as_str(), "AND" | "OR" | "XOR" | "NOT") {
+        if matches!(
+            il_form(&name),
+            Some(IlForm::And | IlForm::Or | IlForm::Xor | IlForm::Not)
+        ) {
             needs_bit = true;
         } else if let Some((kind, _, _)) = crate::compile::parse_block(&name, &name, &block.preset)
         {
