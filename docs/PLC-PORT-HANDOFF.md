@@ -708,6 +708,24 @@ members. Do this as a widening of `WordLayout` into named typed regions, not as 
 second bank — the ABI order lesson from item 1 applies again: inserting a region
 renumbers every slot after it, and `retain::layout_hash` must notice.
 
+Arrays and indexing sit at the edge of this, so state the boundary here rather
+than leaving it to whoever gets there. §III.1 and §III.8 both point at this
+section for indexed fields, and it did not previously name them.
+
+- **Declared arrays with a checked index are in scope.** `Durations[Phase]`, where
+  `Durations` is a declared `DINT[6]` and `Phase` is a `DINT`, is a computed
+  offset inside a known extent: the validator knows the element type and its
+  bounds, and the compiler can emit a checked load. Two corpus programs need it
+  (`recipes-data-type-ld`, `traffic-lights-routines`).
+- **ClassicLadder's indirect addressing is not.** There an operand names a cell or
+  variable by a number computed at run time, with no declared type and no extent —
+  arbitrary aliasing into the memory image, which defeats static validation.
+  `clp.rs` already refuses it as `clp_indexed`, and that refusal is a decision, not
+  a gap.
+
+The test that separates them: can the validator name the element's type and
+bounds before the program runs? Then it is an array. If not, it is indirection.
+
 ## III.7 ZX attribution in code comments
 
 The documentation no longer names the ZX Spectrum program this dialect started
@@ -798,6 +816,70 @@ separately each leaves the corpus half-broken.
 - **Keep the reference engine honest.** A trace is only as good as the run that
   produced it; where it disagrees with IEC 61131-3, IEC wins and the trace gets
   corrected, not the semantics.
+
+## III.9 Symbol geometry, as a change list
+
+§III.4 states the geometry and the tests that guard it, but it never names a
+file, a symbol or a first step. The model work in §III.8 was concrete and got
+done; this was prose and did not. This section is the missing translation. Read
+§III.4 for the numbers and the reasoning; execute this.
+
+### The code as it stands
+
+All of it is `crates/linc-ui/src/screens/plc_grid.rs`, `draw_cell_symbol`:
+
+| what | now | §III.4 wants |
+| --- | --- | --- |
+| block body | `Rect::from_min_max(cx - 16, y - 9, cx + 16, y + 9)`, `rect_stroke(.., 0.0, ..)` — 32 x 18, square, **no name inside** | 38 wide, `height(rows)` = 23 / 32 / 41, `BLOCK_R = 4`, name and pins inside |
+| NC slash | `(cx - 9, y + 8)` to `(cx + 9, y - 8)`; bars at `cx +- 6.5` | `SLASH == BAR_HALF`: spans the bars, does not run past them |
+| edge letter | at `y - 11`, above the bars | between the bars, in the gap |
+| coil | two arcs, `1.9..4.4` and `-1.25..1.25` rad | `COIL_SPAN == PI`, leads ending on the arc |
+| values | not drawn for blocks | outside the body, `PAD_GAP = 6`, no stub off the power row |
+
+Already right and worth keeping: one continuous conductor per rung, leads
+running to the cell edges so neighbours show no joint, `CONDUCTOR_Y` named.
+
+### Steps, in order
+
+1. **Constants first.** Add the ones §III.4 names — `BAR_HALF`, `SLASH`,
+   `COIL_SPAN`, `BLOCK_W`, `BLOCK_R`, `PAD_GAP`, `VALUE_W`, `SPAN`,
+   `height(rows)` — each derived from `CELL_HEIGHT` or from a neighbour, no
+   `Geometry` struct.
+2. **Land the acceptance tests from §III.4, failing.** They are arithmetic and
+   cost microseconds. Doing this second means every later step is a measured
+   change, not a redraw someone eyeballs.
+3. **Contacts.** `SLASH = BAR_HALF`; move the `P`/`N` letter into the gap between
+   the bars.
+4. **Coils.** A half circle (`COIL_SPAN = PI`) with the leads terminating on the
+   arc ends; the `S`/`R`/`J`/`C` letter inside the coil; the negation slash at
+   the coil's edge.
+5. **Blocks.** `BLOCK_W = 38`, `height(rows)`, `BLOCK_R = 4`; the type name inside;
+   pins inside per the §III.4 table; the value outside with no horizontal line
+   through it; two positions occupied, neighbour must be `Cell::Wire`, refused as
+   `block_span`. This is the only step that touches `validate.rs`.
+6. **Replace `CellSymbol` with `Face`.** `Face::from_cell` becomes the single
+   mapping; `Row` carries `ins/out/value_in/value_out`; `Style` takes the `State`.
+   The tests in §III.4 for `Face::from_cell` and `Style` are the guard that this
+   deletion did not change what is drawn.
+7. **Golden image last**, for the rendered row only. It answers "did the picture
+   change", not "is the geometry right".
+
+### Done when
+
+- Every arithmetic test in §III.4 passes.
+- A `TON` renders as a named two-row body, 32 tall, `IN`/`PT` on the left, `Q`/`ET`
+  on the right, with the elapsed value outside the body and no line drawn across
+  it.
+- A `CTU` renders three rows, 41 tall, with a blank right side on its `R` row.
+- An NC contact's slash spans exactly its bars, and a `P` or `N` letter sits
+  between them.
+- `State::Unknown` is visibly not `Off`, so a value the snapshot cannot answer for
+  is not shown as false.
+- A block in the last position, or beside something other than a wire, is refused
+  with `block_span`.
+
+UI only, apart from the `block_span` rule. Doing this before III.6 is right: typed
+data grows the block body, and it is cheaper to grow a body that already has rows.
 
 # Part IV — Appendices
 
