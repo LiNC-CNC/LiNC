@@ -59,7 +59,7 @@ impl Element {
 /// The house rule for an imported identifier: lowercase, `_` for anything the
 /// model's name pattern rejects, `n_` when it would start with a digit, 32
 /// characters at most. `clp` uses it too, so the two importers sanitise alike.
-pub(crate) fn operand_name(raw: &str) -> String {
+pub fn operand_name(raw: &str) -> String {
     let mut name = String::with_capacity(raw.len());
     for character in raw.trim().chars() {
         if character.is_ascii_alphanumeric() || character == '_' || character == '-' {
@@ -216,19 +216,17 @@ pub fn import(xml: &str) -> Result<Project, Vec<Diagnostic>> {
     project.schema = SCHEMA_VERSION;
 
     let mut pous = Vec::new();
-    let Some(types) = project_element.child("types") else {
+    // Two shapes are in use, and both are TC6: 0200 puts the POUs inside
+    // `<types>`, 0201 allows them directly under `<project>`. Read either.
+    let pous_element = project_element
+        .child("types")
+        .and_then(|types| types.child("pous"))
+        .or_else(|| project_element.child("pous"));
+    let Some(pous_element) = pous_element else {
         diagnostics.push(error(
             "plcopen_unsupported_element",
-            "the file has no <types> section",
+            "the file has no <pous> section, under <types> or <project>",
             "project",
-        ));
-        return Err(diagnostics);
-    };
-    let Some(pous_element) = types.child("pous") else {
-        diagnostics.push(error(
-            "plcopen_unsupported_element",
-            "the file has no <pous> section",
-            "types",
         ));
         return Err(diagnostics);
     };
@@ -495,15 +493,38 @@ fn import_ld(
 /// `<variable>` may carry the name as text (the usual LD form) or as an
 /// `@name`; both are the same operand.
 fn operand_text(variable: &Element) -> Option<String> {
-    if let Some(name) = variable.attribute("name") {
-        return Some(operand_name(name));
+    let raw = match variable.attribute("name") {
+        Some(name) => name.to_string(),
+        None => variable.text.trim().to_string(),
+    };
+    if raw.is_empty() {
+        return None;
     }
-    let text = variable.text.trim();
-    if text.is_empty() {
-        None
-    } else {
-        Some(operand_name(text))
+    Some(operand_spelling(&raw))
+}
+
+/// A block member keeps its dot: `TON0.Q` names a member of an instance, not a
+/// symbol, and [`operand_name`] would flatten it into `ton0_q`. The instance part
+/// is uppercase because that is how the profile spells a block, and the member is
+/// left as written because member matching is case-insensitive.
+///
+/// Anything else goes through [`operand_name`], including a `%Q0.0` tag: the part
+/// after the dot there is a number, not a member.
+pub fn operand_spelling(raw: &str) -> String {
+    let raw = raw.trim();
+    if let Some((base, member)) = raw.split_once('.') {
+        let instance = !base.is_empty()
+            && base.chars().any(|character| character.is_ascii_digit())
+            && base.chars().all(|character| character.is_ascii_alphanumeric());
+        let named = !member.is_empty()
+            && member
+                .chars()
+                .all(|character| character.is_ascii_alphabetic());
+        if instance && named {
+            return format!("{}.{}", base.to_ascii_uppercase(), member);
+        }
     }
+    operand_name(raw)
 }
 
 fn coil_kind(coil: &Element) -> CoilKind {
