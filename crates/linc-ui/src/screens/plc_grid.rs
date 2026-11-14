@@ -3188,7 +3188,7 @@ pub fn grid_rung(
                 &label,
                 matches!(cell, Cell::Wire),
                 cell_symbol(&cell),
-                if banded { 18.0 } else { 16.0 },
+                LABEL_Y,
                 local
                     .as_ref()
                     .and_then(|(values, _)| values.get(position).copied().flatten())
@@ -3208,7 +3208,7 @@ pub fn grid_rung(
             &coil,
             rung.coil().var.is_empty(),
             CellSymbol::Coil(rung.coil().kind),
-            if banded { 18.0 } else { 16.0 },
+            LABEL_Y,
             // A compute rung writes through its cell, so its coil slot is unused
             // and must not light up from a variable of the same name.
             if let Some((_, coil)) = &local {
@@ -3246,7 +3246,7 @@ pub fn grid_rung(
         };
         let rect = strip.response.rect;
         ui.painter().text(
-            egui::pos2(rect.left() + 2.0, rect.top() + 8.0),
+            egui::pos2(rect.left() + 2.0, rect.top() + LABEL_Y),
             Align2::LEFT_CENTER,
             band,
             FontId::monospace(theme::font_size(8.0)),
@@ -3300,10 +3300,84 @@ pub fn cell_symbol(cell: &Cell) -> CellSymbol {
 /// runs along `CONDUCTOR_Y` from its left edge to its right edge.
 pub const CELL_WIDTH: f32 = 48.0;
 pub const CELL_HEIGHT: f32 = 50.0;
-pub const CONDUCTOR_Y: f32 = 39.0;
+/// The conductor is centred in the cell. A conductor below the centre puts the
+/// rung low and makes the row gap read as an empty band above every symbol.
+pub const CONDUCTOR_Y: f32 = CELL_HEIGHT / 2.0;
 pub const ROW_GAP: f32 = 0.0;
 /// Distance from one row's conductor to the next row's conductor.
 pub const ROW_STRIDE: f32 = CELL_HEIGHT + ROW_GAP;
+
+// --- contacts --------------------------------------------------------------
+/// Half the separation between a contact's bars: they stand at `cx +- BAR_HALF`.
+/// 16 apart is Table 61's proportion, and it leaves the gap wide enough for the
+/// `P`/`N` letter to sit inside it.
+pub const BAR_HALF: f32 = 8.0;
+/// Half a bar's height.
+pub const BAR_HALF_HEIGHT: f32 = 8.0;
+/// The NC slash spans bar to bar, at 45 degrees, and stops there. A slash past
+/// the bars reads as a stray stroke next to the contact instead of part of it.
+pub const SLASH: f32 = BAR_HALF;
+/// The letter on an edge contact sits on the conductor, between the bars: above
+/// the bars it reads as a separate annotation.
+pub const EDGE_LETTER_Y: f32 = CONDUCTOR_Y;
+/// Where a cell's operand name, rung label and comment sit. The conductor is
+/// centred, so this band shares the space above the bars with them.
+pub const LABEL_Y: f32 = 8.0;
+
+// --- coils -----------------------------------------------------------------
+pub const COIL_R: f32 = 8.0;
+/// A half circle, symmetric about the conductor, so its ends lie *on* the
+/// conductor line and the leads meet them exactly. An arc under 180 degrees puts
+/// its ends above and below the conductor, the lead meets the arc mid-stroke and
+/// the two visibly cross.
+pub const COIL_SPAN: f32 = std::f32::consts::PI;
+/// Where a coil's lead ends: on the arc, not at a contact's half-gap.
+pub const COIL_LEAD_X: f32 = COIL_R;
+
+// --- small boxes: compare, arithmetic, `:=` ---------------------------------
+pub const SMALL_W: f32 = 28.0;
+pub const SMALL_H: f32 = 18.0;
+pub const SMALL_R: f32 = 3.0;
+
+// --- block bodies ----------------------------------------------------------
+/// A block occupies two positions. Its pin values are drawn outside the body and
+/// there is no room for them in one cell, so the body sits centred on the
+/// boundary: 29 units of value column on each side.
+pub const SPAN: f32 = 2.0 * CELL_WIDTH;
+pub const BLOCK_W: f32 = 38.0;
+/// 4 of 38: under 3 the box reads as a rectangle, over 6 it reads as a button.
+pub const BLOCK_R: f32 = 4.0;
+/// Height of a one-row body, before the row pitch and the bottom margin.
+pub const BLOCK_H: f32 = 18.0;
+/// One extra row adds one pitch.
+pub const ROW_PITCH: f32 = 9.0;
+/// Bottom margin, so a three-row body is not flush with its last row.
+pub const BLOCK_PAD: f32 = 5.0;
+/// The gap between the body and a pin's value.
+pub const PAD_GAP: f32 = 6.0;
+/// Room for a value such as `2.4s` or `007`.
+pub const VALUE_W: f32 = 21.0;
+/// Breathing space between the value column and the next cell's symbol.
+pub const MARGIN: f32 = 2.0;
+/// One side of the body: pad, value, margin. Two of these plus the body is the
+/// span exactly.
+pub const SIDE: f32 = PAD_GAP + VALUE_W + MARGIN;
+/// Pin names and values, and the block's type name.
+pub const TITLE_PX: f32 = 6.5;
+/// Padding from the body's edge to its text.
+pub const INNER_PAD: f32 = 6.0;
+/// A symbol's lead to the strip edge, for a symbol that fits in one position.
+pub const LEAD: f32 = (CELL_WIDTH - BLOCK_W) / 2.0;
+/// The tallest body is the tightest fit: a three-row block keeps 4.5 units of
+/// clearance above and below, and a shorter one keeps more.
+pub const BLOCK_LEAD_V: f32 = (CELL_HEIGHT - (BLOCK_H + 2.0 * ROW_PITCH + BLOCK_PAD)) / 2.0;
+
+/// Body height for a block of `rows` rows: 23, 32, 41 for 1, 2, 3. The height
+/// follows the row count so no block is padded with an empty row and none is
+/// clipped.
+pub fn block_height(rows: usize) -> f32 {
+    BLOCK_H + ROW_PITCH * rows.saturating_sub(1) as f32 + BLOCK_PAD
+}
 
 fn arc_points(
     centre: egui::Pos2,
@@ -3433,6 +3507,76 @@ pub(crate) fn draw_cell_symbol(
                     color,
                 );
             }
+        }
+    }
+}
+
+/// §III.4's arithmetic: the geometry is a set of derived constants, and these are
+/// the assertions that keep them from drifting apart. They cost microseconds, so
+/// they are the primary guard; a golden image is the second layer.
+#[cfg(test)]
+mod geometry_tests {
+    use super::*;
+
+    /// Rule 6: the conductor is centred, so the row gap is symmetric.
+    #[test]
+    fn the_conductor_is_centred() {
+        assert_eq!(CONDUCTOR_Y, CELL_HEIGHT / 2.0);
+    }
+
+    /// Rule 4: the NC slash spans the bars and no further.
+    #[test]
+    fn the_nc_slash_spans_the_bars() {
+        assert_eq!(SLASH, BAR_HALF);
+    }
+
+    /// Rule 1: a half circle, so the lead meets the arc's end and does not cross it.
+    #[test]
+    fn the_coil_is_a_half_circle() {
+        assert_eq!(COIL_SPAN, std::f32::consts::PI);
+        assert_eq!(COIL_LEAD_X, COIL_R);
+    }
+
+    /// Rule 5: the body fits its cell and the leads have somewhere to go.
+    #[test]
+    fn the_body_fits_its_cell() {
+        assert!(BLOCK_W + 2.0 * LEAD <= CELL_WIDTH);
+        for rows in 1..=3 {
+            assert!(
+                block_height(rows) + 2.0 * BLOCK_LEAD_V <= CELL_HEIGHT,
+                "a {rows}-row body must fit the cell"
+            );
+        }
+    }
+
+    /// The corners are soft, not a button: 4 of 38.
+    #[test]
+    fn the_corners_are_soft_not_button_round() {
+        assert!(BLOCK_R >= 3.0);
+        assert!(BLOCK_R * 6.0 <= BLOCK_W);
+    }
+
+    /// The type text fits inside the body, so no block can be drawn nameless.
+    #[test]
+    fn the_type_text_fits_inside_the_body() {
+        assert!(TITLE_PX + INNER_PAD <= BLOCK_W / 2.0);
+    }
+
+    /// The two-position span is exactly consumed: no value clipped, no cell left.
+    #[test]
+    fn the_span_is_exactly_two_positions() {
+        assert_eq!(2.0 * (PAD_GAP + VALUE_W + MARGIN) + BLOCK_W, SPAN);
+        assert_eq!(SPAN, 2.0 * CELL_WIDTH);
+    }
+
+    /// The body grows a row at a time, and no block is padded with an empty row.
+    #[test]
+    fn a_body_grows_a_row_at_a_time() {
+        assert_eq!(block_height(1), 23.0);
+        assert_eq!(block_height(2), 32.0);
+        assert_eq!(block_height(3), 41.0);
+        for rows in 1..=3 {
+            assert_eq!(block_height(rows), 18.0 + 9.0 * (rows as f32 - 1.0) + 5.0);
         }
     }
 }
@@ -3714,13 +3858,15 @@ mod label_clearance_tests {
     #[test]
     fn the_label_clears_the_symbol_on_commented_and_plain_rows() {
         const LABEL_HALF: f32 = 4.5; // half a 9 px galley
-        const SYMBOL_HALF: f32 = 9.0; // tallest symbol above the conductor
-        for name_y in [18.0_f32, 10.0] {
+        const SYMBOL_HALF: f32 = 9.0; // tallest one-position symbol above the conductor
+        // The conductor is centred, so the band above it is `CONDUCTOR_Y` tall
+        // and the label shares it with the symbol's upper half.
+        for name_y in [LABEL_Y] {
             let label_bottom = name_y + LABEL_HALF;
             let symbol_top = CONDUCTOR_Y - SYMBOL_HALF;
             assert!(
-                symbol_top - label_bottom >= 7.0,
-                "label bottom {label_bottom} to symbol top {symbol_top} must be 7 px"
+                symbol_top - label_bottom >= 2.5,
+                "label bottom {label_bottom} to symbol top {symbol_top} must be 2.5 px"
             );
         }
         assert!(
