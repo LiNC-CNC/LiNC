@@ -128,3 +128,62 @@ fn the_table_is_the_whole_instruction_set() {
         }
     }
 }
+
+/// D9: a block's pin names are the table's data. The renderer positions them and
+/// is not allowed to know `TON` from `CTU`, so a block that ships without pins
+/// would draw as a bare rectangle; this makes that a test failure instead.
+#[test]
+fn every_function_block_declares_its_pins() {
+    for row in SPECS.iter() {
+        let fb = matches!(row.family, Family::Fb(_));
+        assert_eq!(
+            !row.pins.0.is_empty(),
+            fb,
+            "{} {}",
+            row.mnemonic,
+            if fb {
+                "is a function block and must declare its input pins"
+            } else {
+                "is not a function block and must not declare pins"
+            }
+        );
+        assert_eq!(
+            row.pins.0.is_empty(),
+            row.pins.1.is_empty(),
+            "{} declares pins on one side only",
+            row.mnemonic
+        );
+    }
+}
+
+/// The pin table against IEC 61131-3 Tables 34-37. Row 0 is the power row.
+///
+/// Two consequences worth pinning because they are easy to get wrong from memory:
+/// a bistable has one output (`Q1`), and an edge detector is one row, so `CLK` and
+/// `Q` share row 0.
+#[test]
+fn the_pin_table_matches_the_standard() {
+    for (mnemonic, ins, outs) in [
+        ("TON", &["IN", "PT"][..], &["Q", "ET"][..]),
+        ("TOF", &["IN", "PT"][..], &["Q", "ET"][..]),
+        ("TP", &["IN", "PT"][..], &["Q", "ET"][..]),
+        ("CTU", &["CU", "R", "PV"][..], &["Q", "", "CV"][..]),
+        ("CTD", &["CD", "LD", "PV"][..], &["Q", "", "CV"][..]),
+        ("SR", &["S1", "R"][..], &["Q1", ""][..]),
+        ("RS", &["S", "R1"][..], &["Q1", ""][..]),
+        ("R_TRIG", &["CLK"][..], &["Q"][..]),
+        ("F_TRIG", &["CLK"][..], &["Q"][..]),
+    ] {
+        let row = SPECS
+            .iter()
+            .find(|row| row.mnemonic == mnemonic)
+            .unwrap_or_else(|| panic!("{mnemonic} is not in the table"));
+        assert_eq!(row.pins.0, ins, "{mnemonic} input pins");
+        assert_eq!(row.pins.1, outs, "{mnemonic} output pins");
+        assert_eq!(
+            row.pins.0.len(),
+            row.pins.1.len(),
+            "{mnemonic} has a pin on one side and none on the other"
+        );
+    }
+}

@@ -183,6 +183,76 @@ fn cell_project(cells: Vec<Cell>, coil: Coil) -> Project {
     project
 }
 
+/// A block occupies two positions: its own cell, and the cell to its right, where
+/// its pins' values are drawn. Refused rather than clipped, so a block never
+/// overruns the row.
+#[test]
+fn a_block_in_the_last_position_is_refused() {
+    let mut cells = vec![Cell::Wire; linc_plc_core::grid::POSITIONS - 1];
+    cells.push(Cell::Block {
+        block: "TON".to_string(),
+        instance: "TON0".to_string(),
+        preset: "T#1s".to_string(),
+    });
+    let project = cell_project(cells, Coil::new("y", CoilKind::Normal));
+    let diagnostics = validate(&project);
+    let errors: Vec<&str> = diagnostics
+        .iter()
+        .filter(|item| item.code == "block_span")
+        .map(|item| item.message.as_str())
+        .collect();
+    assert_eq!(errors.len(), 1, "{diagnostics:?}");
+    assert!(errors[0].contains("two positions"), "{}", errors[0]);
+}
+
+/// The neighbour is the value column, so anything but a wire would have its
+/// symbol drawn under the values.
+#[test]
+fn a_block_beside_something_other_than_a_wire_is_refused() {
+    let project = cell_project(
+        vec![
+            Cell::Block {
+                block: "TON".to_string(),
+                instance: "TON0".to_string(),
+                preset: "T#1s".to_string(),
+            },
+            Cell::Contact {
+                var: "a".to_string(),
+                negated: false,
+            },
+        ],
+        Coil::new("y", CoilKind::Normal),
+    );
+    assert!(
+        codes(&project).iter().any(|code| code == "block_span"),
+        "{:?}",
+        validate(&project)
+    );
+}
+
+/// A row that ends on the block is a block at the last position, and a block with
+/// a wire after it is what the editor and both importers emit.
+#[test]
+fn a_block_with_a_wire_after_it_is_accepted() {
+    let project = cell_project(
+        vec![
+            Cell::Wire,
+            Cell::Block {
+                block: "TON".to_string(),
+                instance: "TON0".to_string(),
+                preset: "T#1s".to_string(),
+            },
+            Cell::Wire,
+        ],
+        Coil::new("y", CoilKind::Normal),
+    );
+    assert!(
+        !codes(&project).iter().any(|code| code == "block_span"),
+        "{:?}",
+        validate(&project)
+    );
+}
+
 #[test]
 fn a_cell_reports_every_kind_it_cannot_compile() {
     for (cell, wanted, text) in [

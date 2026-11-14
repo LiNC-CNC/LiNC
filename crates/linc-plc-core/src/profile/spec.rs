@@ -188,6 +188,12 @@ pub struct Spec {
     pub shape: Shape,
     /// The glyph inside a coil or small box, for the renderer.
     pub letter: &'static str,
+    /// A function block's pin names, top to bottom on the left and on the right.
+    /// Row 0 is the power row in every case. Empty for every other family: a
+    /// contact has one operand and no pins. The renderer reads this instead of
+    /// knowing any block's spelling, so a new block ships with its pins or not at
+    /// all.
+    pub pins: (&'static [&'static str], &'static [&'static str]),
     /// What the mnemonic does in IL, or [`IlForm::None`] for a block-only name.
     pub il: IlForm,
 }
@@ -220,6 +226,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Contact,
         letter: "",
+        pins: (&[], &[]),
         il: Push,
     },
     Spec {
@@ -230,6 +237,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: ContactNc,
         letter: "",
+        pins: (&[], &[]),
         il: PushNot,
     },
     Spec {
@@ -240,6 +248,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Contact,
         letter: "",
+        pins: (&[], &[]),
         il: And,
     },
     Spec {
@@ -250,6 +259,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: ContactNc,
         letter: "",
+        pins: (&[], &[]),
         il: AndNot,
     },
     Spec {
@@ -260,6 +270,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Contact,
         letter: "",
+        pins: (&[], &[]),
         il: Or,
     },
     Spec {
@@ -270,6 +281,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: ContactNc,
         letter: "",
+        pins: (&[], &[]),
         il: OrNot,
     },
     Spec {
@@ -280,6 +292,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Contact,
         letter: "",
+        pins: (&[], &[]),
         il: Xor,
     },
     Spec {
@@ -290,6 +303,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: ContactNc,
         letter: "",
+        pins: (&[], &[]),
         il: XorNot,
     },
     Spec {
@@ -300,6 +314,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "NOT",
+        pins: (&[], &[]),
         il: Not,
     },
     Spec {
@@ -310,6 +325,7 @@ pub const SPECS: &[Spec] = &[
         output: true,
         shape: Coil,
         letter: "",
+        pins: (&[], &[]),
         il: Store,
     },
     Spec {
@@ -320,6 +336,7 @@ pub const SPECS: &[Spec] = &[
         output: true,
         shape: Coil,
         letter: "/",
+        pins: (&[], &[]),
         il: StoreNot,
     },
     Spec {
@@ -330,6 +347,7 @@ pub const SPECS: &[Spec] = &[
         output: true,
         shape: Coil,
         letter: "",
+        pins: (&[], &[]),
         il: Store,
     },
     Spec {
@@ -340,6 +358,7 @@ pub const SPECS: &[Spec] = &[
         output: true,
         shape: Coil,
         letter: "S",
+        pins: (&[], &[]),
         il: Set,
     },
     Spec {
@@ -350,6 +369,7 @@ pub const SPECS: &[Spec] = &[
         output: true,
         shape: Coil,
         letter: "R",
+        pins: (&[], &[]),
         il: Reset,
     },
     // --- arithmetic: a block and an IL accumulator operation ----------------
@@ -361,6 +381,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "+",
+        pins: (&[], &[]),
         il: IlWord(WordName::Add),
     },
     Spec {
@@ -371,6 +392,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "-",
+        pins: (&[], &[]),
         il: IlWord(WordName::Sub),
     },
     Spec {
@@ -381,6 +403,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "*",
+        pins: (&[], &[]),
         il: IlWord(WordName::Mul),
     },
     Spec {
@@ -391,6 +414,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "/",
+        pins: (&[], &[]),
         il: IlWord(WordName::Div),
     },
     Spec {
@@ -401,6 +425,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "%",
+        pins: (&[], &[]),
         il: IlWord(WordName::Mod),
     },
     Spec {
@@ -411,6 +436,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     // The operator spellings a grid compute cell has always accepted.
@@ -422,6 +448,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "+",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -432,6 +459,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "-",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -442,6 +470,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "*",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -452,6 +481,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "/",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -462,6 +492,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     // --- compares: a block and an IL compare --------------------------------
@@ -473,6 +504,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: ">",
+        pins: (&[], &[]),
         il: IlCompare(CompareName::Gt),
     },
     Spec {
@@ -483,6 +515,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: ">=",
+        pins: (&[], &[]),
         il: IlCompare(CompareName::Ge),
     },
     Spec {
@@ -493,6 +526,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "=",
+        pins: (&[], &[]),
         il: IlCompare(CompareName::Eq),
     },
     Spec {
@@ -503,6 +537,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "<>",
+        pins: (&[], &[]),
         il: IlCompare(CompareName::Ne),
     },
     Spec {
@@ -513,6 +548,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "<=",
+        pins: (&[], &[]),
         il: IlCompare(CompareName::Le),
     },
     Spec {
@@ -523,6 +559,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "<",
+        pins: (&[], &[]),
         il: IlCompare(CompareName::Lt),
     },
     // --- control ------------------------------------------------------------
@@ -534,6 +571,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "",
+        pins: (&[], &[]),
         il: Jump(None),
     },
     Spec {
@@ -544,6 +582,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "",
+        pins: (&[], &[]),
         il: Jump(Some(true)),
     },
     Spec {
@@ -554,6 +593,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "",
+        pins: (&[], &[]),
         il: Jump(Some(false)),
     },
     Spec {
@@ -564,6 +604,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "",
+        pins: (&[], &[]),
         il: Call(None),
     },
     Spec {
@@ -574,6 +615,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "",
+        pins: (&[], &[]),
         il: Call(Some(false)),
     },
     Spec {
@@ -584,6 +626,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "",
+        pins: (&[], &[]),
         il: Call(Some(true)),
     },
     Spec {
@@ -594,6 +637,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "",
+        pins: (&[], &[]),
         il: Return(None),
     },
     Spec {
@@ -604,6 +648,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "",
+        pins: (&[], &[]),
         il: Return(Some(true)),
     },
     Spec {
@@ -614,6 +659,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "",
+        pins: (&[], &[]),
         il: Return(Some(false)),
     },
     // --- function blocks ----------------------------------------------------
@@ -625,6 +671,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "T",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -635,6 +682,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "T",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -645,6 +693,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "T",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -655,6 +704,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "C",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -665,6 +715,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "C",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -675,6 +726,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "S",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -685,6 +737,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "R",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -695,6 +748,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "P",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -705,6 +759,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "P",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -715,6 +770,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "N",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
     Spec {
@@ -725,6 +781,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "N",
+        pins: (&[], &[]),
         il: IlForm::None,
     },
 ];
