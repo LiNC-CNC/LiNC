@@ -3394,15 +3394,53 @@ fn arc_points(
         .collect()
 }
 
+/// A contact's two bars, as segments. The painter draws these and the tests
+/// measure them, so a test cannot pass on a figure the picture does not use.
+fn contact_bars(cx: f32, y: f32, s: f32) -> [[egui::Pos2; 2]; 2] {
+    let bar = BAR_HALF * s;
+    let half = BAR_HALF_HEIGHT * s;
+    [
+        [
+            egui::pos2(cx - bar, y - half),
+            egui::pos2(cx - bar, y + half),
+        ],
+        [
+            egui::pos2(cx + bar, y - half),
+            egui::pos2(cx + bar, y + half),
+        ],
+    ]
+}
+
+/// The NC slash: bar to bar at 45 degrees, ending on the bars' ends. It spans the
+/// bars and goes no further; a longer slash reads as a stray stroke beside the
+/// contact rather than part of it.
+fn contact_slash(cx: f32, y: f32, s: f32) -> [egui::Pos2; 2] {
+    let slash = SLASH * s;
+    [
+        egui::pos2(cx - slash, y + slash),
+        egui::pos2(cx + slash, y - slash),
+    ]
+}
+
+/// Where a `P` or `N` edge letter goes: on the conductor, midway between the bars,
+/// which is the only place Table 61 puts it. Above the bars it reads as a separate
+/// annotation and the contact as a different symbol.
+fn edge_letter_at(cx: f32, y: f32, s: f32) -> egui::Pos2 {
+    egui::pos2(cx, y + (EDGE_LETTER_Y - CONDUCTOR_Y) * s)
+}
+
 pub(crate) fn draw_cell_symbol(
     painter: &egui::Painter,
     rect: egui::Rect,
     symbol: CellSymbol,
     color: Color32,
 ) {
-    let line = Stroke::new(1.6, color);
-    let thin = Stroke::new(1.2, color);
-    let y = rect.top() + CONDUCTOR_Y;
+    // D5: the one scale factor. Every dimension below is multiplied by it, so a
+    // resized cell, a zoom or a denser view cannot leave a pixel literal behind.
+    let s = rect.height() / CELL_HEIGHT;
+    let line = Stroke::new(1.6 * s, color);
+    let thin = Stroke::new(1.2 * s, color);
+    let y = rect.top() + CONDUCTOR_Y * s;
     let cx = rect.center().x;
     // Every element's leads run to the strip edges, so neighbouring cells share
     // one unbroken conductor with no visible joint.
@@ -3418,31 +3456,23 @@ pub(crate) fn draw_cell_symbol(
             painter.line_segment([egui::pos2(cx, y), egui::pos2(cx, y + ROW_STRIDE)], line);
         }
         CellSymbol::Contact | CellSymbol::ContactNc | CellSymbol::Edge(_) => {
-            let bar = 6.5;
+            let bar = BAR_HALF * s;
             painter.line_segment([egui::pos2(left, y), egui::pos2(cx - bar, y)], thin);
             painter.line_segment([egui::pos2(cx + bar, y), egui::pos2(right, y)], thin);
-            painter.line_segment(
-                [egui::pos2(cx - bar, y - 8.0), egui::pos2(cx - bar, y + 8.0)],
-                line,
-            );
-            painter.line_segment(
-                [egui::pos2(cx + bar, y - 8.0), egui::pos2(cx + bar, y + 8.0)],
-                line,
-            );
+            for segment in contact_bars(cx, y, s) {
+                painter.line_segment(segment, line);
+            }
             if symbol == CellSymbol::ContactNc {
-                painter.line_segment(
-                    [egui::pos2(cx - 9.0, y + 8.0), egui::pos2(cx + 9.0, y - 8.0)],
-                    line,
-                );
+                painter.line_segment(contact_slash(cx, y, s), line);
             }
             if let CellSymbol::Edge(rising) = symbol {
-                // The letter sits between the bars; an arrow over the bar read
-                // as a stray plus sign at this size.
+                // The letter sits between the bars; an arrow over the bar read as
+                // a stray plus sign at this size.
                 painter.text(
-                    egui::pos2(cx, y - 11.0),
+                    edge_letter_at(cx, y, s),
                     Align2::CENTER_CENTER,
                     if rising { "P" } else { "N" },
-                    FontId::monospace(8.0),
+                    FontId::monospace(8.0 * s),
                     color,
                 );
             }
@@ -3567,6 +3597,52 @@ mod geometry_tests {
     fn the_span_is_exactly_two_positions() {
         assert_eq!(2.0 * (PAD_GAP + VALUE_W + MARGIN) + BLOCK_W, SPAN);
         assert_eq!(SPAN, 2.0 * CELL_WIDTH);
+    }
+
+    /// Rule 4: the slash ends on the bars. A longer one reads as a struck-through
+    /// contact rather than a negated one.
+    #[test]
+    fn the_nc_slash_ends_on_the_bars() {
+        let (cx, y) = (100.0, 200.0);
+        let [start, end] = contact_slash(cx, y, 1.0);
+        assert_eq!(start.x, cx - BAR_HALF);
+        assert_eq!(end.x, cx + BAR_HALF);
+        // 45 degrees, and the ends meet the bars' own ends.
+        assert_eq!(start.y, y + BAR_HALF_HEIGHT);
+        assert_eq!(end.y, y - BAR_HALF_HEIGHT);
+        assert_eq!(BAR_HALF, BAR_HALF_HEIGHT);
+    }
+
+    /// Rule 3: a `P` or `N` sits in the gap, on the conductor. The bars' tops are
+    /// the ceiling, so the letter is inside the symbol rather than above it.
+    #[test]
+    fn the_edge_letter_sits_between_the_bars() {
+        let (cx, y) = (100.0, 200.0);
+        let letter = edge_letter_at(cx, y, 1.0);
+        assert_eq!(letter.x, cx);
+        assert_eq!(letter.y, y);
+        assert!(y - letter.y < BAR_HALF_HEIGHT, "inside the bars' height");
+    }
+
+    /// The bars stand `2 * BAR_HALF` apart and are symmetric about the conductor.
+    #[test]
+    fn the_bars_are_symmetric_about_the_conductor() {
+        let (cx, y) = (100.0, 200.0);
+        let [left, right] = contact_bars(cx, y, 1.0);
+        assert_eq!(right[0].x - left[0].x, 2.0 * BAR_HALF);
+        assert_eq!(left[0].y - y, -(right[1].y - y));
+        assert_eq!(left[0].y, y - BAR_HALF_HEIGHT);
+    }
+
+    /// D5: every dimension follows the cell's scale, so a resized strip is the
+    /// same picture, not a misplaced one.
+    #[test]
+    fn the_symbol_scales_with_the_cell() {
+        let [left, _] = contact_bars(100.0, 200.0, 2.0);
+        assert_eq!(left[0].x, 100.0 - 2.0 * BAR_HALF);
+        let [start, end] = contact_slash(100.0, 200.0, 2.0);
+        assert_eq!(end.x - start.x, 4.0 * SLASH);
+        assert_eq!(edge_letter_at(100.0, 200.0, 2.0).x, 100.0);
     }
 
     /// The body grows a row at a time, and no block is padded with an empty row.
@@ -3859,8 +3935,8 @@ mod label_clearance_tests {
     fn the_label_clears_the_symbol_on_commented_and_plain_rows() {
         const LABEL_HALF: f32 = 4.5; // half a 9 px galley
         const SYMBOL_HALF: f32 = 9.0; // tallest one-position symbol above the conductor
-        // The conductor is centred, so the band above it is `CONDUCTOR_Y` tall
-        // and the label shares it with the symbol's upper half.
+                                      // The conductor is centred, so the band above it is `CONDUCTOR_Y` tall
+                                      // and the label shares it with the symbol's upper half.
         for name_y in [LABEL_Y] {
             let label_bottom = name_y + LABEL_HALF;
             let symbol_top = CONDUCTOR_Y - SYMBOL_HALF;
