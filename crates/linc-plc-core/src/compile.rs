@@ -307,6 +307,8 @@ pub enum Op {
     FbWord(u16),
     /// Push the block's `Q` on the bit stack.
     FbQ(u16),
+    /// Push the block's timing bit: enabled this scan and not yet done.
+    FbTiming(u16),
     /// A two-input latch: pop the reset bit, then the set bit.
     Latch {
         kind: FbKind,
@@ -1487,6 +1489,7 @@ fn push_member(
     use crate::profile::BitMember;
     match member {
         BitMember::Done => ops.push(Op::FbQ(instance)),
+        BitMember::Timing => ops.push(Op::FbTiming(instance)),
         BitMember::Empty => {
             ops.push(Op::FbWord(instance));
             ops.push(Op::LoadConst(0));

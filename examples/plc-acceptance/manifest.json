@@ -98,10 +98,10 @@
    "pous": 1,
    "rungs": 6,
    "converted": true,
-   "blocker": "one-scan offset at scan 503: `.TT` reads true at 502 (the chained TON1 reports done a scan before the reference engine does); trace disagrees by one scan",
+   "blocker": null,
    "stimulus": true,
    "trace": true,
-   "runs": false
+   "runs": true
   },
   {
    "name": "traffic-lights-routines",

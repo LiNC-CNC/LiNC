@@ -471,7 +471,8 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     // end there.
                     let last = cell_index + 1 == crate::grid::POSITIONS;
                     let neighbour = rung.cells.get(cell_index + 1);
-                    if last || matches!(neighbour, Some(neighbour) if !matches!(neighbour, crate::grid::Cell::Wire))
+                    if last
+                        || matches!(neighbour, Some(neighbour) if !matches!(neighbour, crate::grid::Cell::Wire))
                     {
                         diagnostics.push(Diagnostic::error(
                             "block_span",

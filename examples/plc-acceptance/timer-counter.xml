@@ -14,7 +14,7 @@
 <block localId="12" typeName="TON"><connectionPointIn><connection refLocalId="11"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#3000ms</expression></variable></inputVariables></block>
 <contact localId="13"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
 <block localId="14" typeName="TON"><connectionPointIn><connection refLocalId="13"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#2000ms</expression></variable></inputVariables></block>
-<block localId="15" typeName="LT"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>TON0.ET</expression></variable><variable formalParameter="IN"><expression>TON0.PT</expression></variable></inputVariables></block>
+<contact localId="15"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.TT</variable></contact>
 <coil localId="16" storage="none"><connectionPointIn><connection refLocalId="15"/></connectionPointIn><variable>%Q0.0</variable></coil>
 <contact localId="17"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
 <block localId="18" typeName="CTU"><connectionPointIn><connection refLocalId="17"/></connectionPointIn><inputVariables><variable formalParameter="PV"><expression>5</expression></variable></inputVariables></block>

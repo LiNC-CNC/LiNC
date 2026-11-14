@@ -505,6 +505,69 @@ fn il_words_add_and_compare() {
     assert_eq!(vm.outputs(), &[true], "15 is greater than 9");
 }
 
+/// `.TT` is the timing bit: enabled this scan and not yet done. It is **not**
+/// `ET < PT`, which is also true of a timer that has just been reset and is idle —
+/// one scan of difference, and a trace records it.
+#[test]
+fn the_timing_bit_is_enabled_and_not_done() {
+    let mut project = simple_project(
+        Logic::Const { value: true },
+        Coil::new("y", CoilKind::Normal),
+    );
+    // Rung 1 drives the timer; rung 2 reads its timing bit, so the output is the
+    // member itself and not the timer's power.
+    project.sections[0].rungs = vec![
+        Rung {
+            cells: vec![
+                linc_plc_core::Cell::Contact {
+                    var: "a".into(),
+                    negated: false,
+                },
+                linc_plc_core::Cell::Block {
+                    block: "TON".into(),
+                    instance: "TON0".into(),
+                    preset: "T#2s".into(),
+                },
+                // The block's span: its values are drawn in the cell to its right.
+                linc_plc_core::Cell::Wire,
+            ],
+            coil: None,
+            ..Rung::new(
+                Logic::Const { value: true },
+                Coil::new("", CoilKind::Normal),
+            )
+        },
+        Rung {
+            cells: vec![linc_plc_core::Cell::Contact {
+                var: "TON0.TT".into(),
+                negated: false,
+            }],
+            ..Rung::new(
+                Logic::Const { value: true },
+                Coil::new("y", CoilKind::Normal),
+            )
+        },
+    ];
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+
+    // The first scan starts the timer: ET is 0, and the block is still timing.
+    vm.scan(&[true]);
+    assert_eq!(vm.block_value(0), 0);
+    assert_eq!(vm.outputs(), &[true], "enabled and not done is timing");
+
+    // Done is not timing, even though the timer is still enabled.
+    for _ in 0..201 {
+        vm.scan_with_dt(&[true], 10);
+    }
+    assert!(vm.block_q(0));
+    assert_eq!(vm.outputs(), &[false], "done is not timing");
+
+    // Idle is not timing either: ET is 0 again, but nothing is running.
+    vm.scan(&[false]);
+    assert_eq!(vm.block_value(0), 0);
+    assert_eq!(vm.outputs(), &[false], "a reset timer is idle, not timing");
+}
+
 #[test]
 fn a_timer_box_passes_power_after_its_preset() {
     let mut project = simple_project(

@@ -20,6 +20,10 @@ use crate::profile::spec::FbName;
 pub enum BitMember {
     /// `Q`: the block's done output.
     Done,
+    /// `TT`: the block is timing — enabled this scan and not yet done. IEC's
+    /// timing bit, and not the same condition as `ET < PT`: a timer that has been
+    /// reset has `ET = 0` and is idle, not timing.
+    Timing,
     /// `E`: ClassicLadder's empty output, `CV == 0`.
     Empty,
     /// `F`: ClassicLadder's full output, `CV == top`.
@@ -82,6 +86,7 @@ pub fn iec_member(text: &str) -> Option<(u16, BitMember)> {
     let (instance, member) = split(text)?;
     let member = match member.to_ascii_uppercase().as_str() {
         "Q" => BitMember::Done,
+        "TT" => BitMember::Timing,
         "R" => BitMember::Reset,
         "LD" => BitMember::Load,
         _ => return None,
@@ -155,6 +160,12 @@ mod tests {
         assert_eq!(iec_member("CTU0.L"), None, "iec loads with `LD`");
         assert_eq!(iec_member("CTU0.CU"), None, "iec has no count coil");
         assert_eq!(iec_member("CTU0.E"), None, "iec has no empty output");
+
+        // `TT` is a timer's timing bit, and it is not a done bit: a `LT` compare on
+        // `ET < PT` is the same value only while the timer is enabled, and that
+        // difference is one scan long.
+        assert_eq!(iec_member("TON0.TT"), Some((0, BitMember::Timing)));
+        assert!(!BitMember::Timing.is_writable(), "TT is an output");
 
         assert_eq!(classicladder_member("CTU0.Q"), Some((ctu, BitMember::Done)));
         assert_eq!(

@@ -54,16 +54,36 @@ converted, so a conversion is never mistaken for a pass.
 A file listed as blocked but converted is executed by the test anyway and must be
 shown *not* to pass. That is what stops the count from going green by accident.
 
-Today: five convert, five run. `silo` matches all 200 scans, including rung 4's two
+Today: six convert, six run. `silo` matches all 200 scans, including rung 4's two
 coils on parallel branches — the importer turns such a rung into one rung per coil
 and the scan evaluates them in order, so a `Vec<Coil>` model turned out not to be
-needed. The other four converted files each hold a timer on a rung with no coil,
-which the importer now emits instead of dropping. `traffic-lights` is the largest:
-six timers chained through `.DN` contacts.
+needed. Four converted files each hold a timer on a rung with no coil, which the
+importer emits instead of dropping. `traffic-lights` is the largest: six timers
+chained through `.DN` contacts. `timer-counter` is the one that exercises `.TT`.
 
-The seven that remain are named in the manifest: typed tags and user data types
-(five), `.TT` timing members (`timer-counter`), and `INT[1]` bit-of-word operands
-(`start-stop`).
+The six that remain are named in the manifest: typed tags and user data types
+(five), and `INT[1]` bit-of-word operands (`start-stop`).
+
+### One trace, questioned and settled
+
+`timer-counter` first came out one scan ahead of its trace: `%Q0.0` on at scan 502
+where the trace has 503. Both engines were dumped per scan around the point.
+
+| scan | reference `TON0` EN/TT/DN/ACC | reference `TON1` DN/ACC | LiNC `TON0` ET/Q | LiNC `TON1` ET/Q |
+| --- | --- | --- | --- | --- |
+| 501 | 1/0/1/3000 | 1/2000 | 3000/1 | 2000/1 |
+| 502 | 0/0/0/0 | 0/0 | 0/0 | 0/0 |
+| 503 | 1/1/0/0 | 0/0 | 0/0 | 0/0 |
+
+The engines agree on every timer value, so the scan order and the timer arithmetic
+are not in question: rung 1 reads `TON1.DN` as the previous scan left it, resets
+`TON0` at 502, and re-enables it at 503. What differed was the converter, which had
+rendered `.TT` as a `LT` compare on `ET < PT`. That compare is true of a timer that
+has just been reset — `ET = 0`, idle — where the timing bit is false, and it is one
+scan wide, exactly the offset. `.TT` means *enabled and not done*, which the
+reference computes as `not DN` while the block is enabled; LiNC now has the member
+(`TON0.TT`) and the converter emits it. The trace was never touched, and no
+tolerance was introduced.
 
 The converter itself was wrong four times when this corpus first ran, and all four
 are fixed in the out-of-tree tool: it emitted elements without closing tags, so no

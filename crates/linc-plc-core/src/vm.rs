@@ -518,6 +518,17 @@ impl Vm {
                         .unwrap_or(false);
                     push(&mut stack, &mut depth, value);
                 }
+                // The timing bit is "enabled and not done", recomputed from the
+                // state this scan's block run left behind. It is not `ET < PT`: a
+                // timer that has been reset is idle with `ET = 0`, not timing.
+                Op::FbTiming(instance) => {
+                    let value = self
+                        .blocks
+                        .get(instance as usize)
+                        .map(|state| state.input && !state.q)
+                        .unwrap_or(false);
+                    push(&mut stack, &mut depth, value);
+                }
                 Op::Jump(target) => pc = target as usize,
                 Op::JumpIf { target, when } => {
                     // Conditional jumps consume the result bit: the next line
