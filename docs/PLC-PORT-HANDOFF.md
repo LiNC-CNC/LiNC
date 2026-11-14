@@ -750,6 +750,55 @@ alone if it is geometry.
 is owned by other agents while the seam work lands, so this is a single
 comment-only commit made when those files are quiet.
 
+## III.8 The acceptance harness
+
+`examples/plc-acceptance/` now holds twelve ladder programs, twelve stimuli and
+twelve traces, and a manifest that says which of them convert (Appendix E).
+Nothing reads them yet. That is the work, in the order the evidence supports.
+
+### The harness itself
+
+1. **Iterate the corpus.** For each `sources/<name>.plcy`: if `<name>.xml` exists,
+   import, compile, scan once per stimulus step, and compare the outputs after
+   every scan against `traces/<name>.json`. If it does not exist, assert the
+   blocker named in `manifest.json`.
+2. **Replay traces, do not search them.** Every output starts at `"0"` and takes
+   the last change at or before the scan under test. A one-scan offset in a timer
+   is a failure, not a rounding difference.
+3. **Expect the fault.** A trace with a non-null `fault` ends there; the run must
+   end the same way.
+4. **Print the count.** "3 of 12 convertible, 9 blocked" should appear in the test
+   output. It is the number that has to fall, and it should be visible without
+   reading code.
+5. **Read at run time.** No `include_str!`, no fixture embedded in the binary, no
+   build-script reference. §Appendix E makes that a licence requirement, not a
+   preference.
+
+### Then the model changes it will start failing on
+
+| # | change | why |
+| --- | --- | --- |
+| 1 | `coils: Vec<Coil>` in `Rung` | unblocks `silo` (parallel coils) and stops a block-only rung being dropped, which is why tier 1 fails silently today |
+| 2 | instance numbering in `plcopen.rs` | `garage-door` has two timers and three blocks; today every block binds to instance 0 |
+| 3 | `FB_PER_TYPE` above four | `traffic-lights` needs six; the limit is arbitrary and instances are already numbered |
+| 4 | typed data — structs, arrays, indexed fields (III.6) | 4 of the 12 ladder programs |
+| 5 | a timer whose `.DN` can restart the next rung | `traffic-lights` chains six of them |
+
+Items 1 and 2 are worth doing together: both are in the importer's rung path, and
+separately each leaves the corpus half-broken.
+
+### Then the corpus side
+
+- **Extend the converter** for what TC6 expresses faithfully: `RES` onto a
+  counter's `R` input, coils on parallel branches, typed tags and arrays. The
+  convertible count rises with no LiNC change beyond items 1 and 3 above.
+- **Fix the converter's `.TT` → `.Q` mapping**, which inverts a condition.
+- **Add the `debian/copyright` stanza** when the corpus is committed: its own
+  `Files:` line, derivation stated, `GPL-3.0-or-later`.
+- **Keep the reference engine honest.** A trace is only as good as the run that
+  produced it; where it disagrees with IEC 61131-3, IEC wins and the trace gets
+  corrected, not the semantics.
+
 # Part IV — Appendices
 
 ## Appendix A — `.clp` refusal codes, as shipped
@@ -840,13 +889,20 @@ coexist only as **aggregation** — separate programs on one medium, neither
 compiled into the other:
 
 ```text
-examples/plcyard/
+examples/plc-acceptance/
   LICENSE          GPLv3, verbatim
-  README.md        provenance, how each file was produced, what it must match
-  manifest.json    per file: converted / refused, and the cause
-  *.xml            PLCopen TC6, converted from the samples
+  README.md        provenance, licence rules, how to run a comparison
+  manifest.json    all 41 sampled: 12 ladder, 29 excluded, per-file status
+  sources/*.plcy   the programs, verbatim: the authoritative definition
+  *.xml            PLCopen TC6, for the three that convert today
+  stimuli/*.json   the inputs each program is driven with, and for how long
   traces/*.json    expected outputs per scan, produced by the oracle below
 ```
+
+The directory is named for what it is used for, not for where the programs came
+from. Provenance still has to be recorded — in `README.md` and in `manifest.json`
+— because that is what the licence asks for. A name that hides the source would
+be worse than one that mentions it.
 
 The rules that keep that boundary real, matching how `subroutines/probe_basic/`
 already sits in this tree:
@@ -857,60 +913,97 @@ already sits in this tree:
   it at run time;
 - `Cargo.toml` stays `GPL-2.0-or-later`. That line does not change.
 
-### The three tiers
+### What is in it, measured
 
-| tier | files | expected outcome today |
+| | count |
+| --- | --- |
+| sampled files | 41 |
+| ladder only — LD, no FBD, no ST | 12 |
+| excluded: ST only | 19 |
+| excluded: FBD only | 7 |
+| excluded: FBD + LD mixed | 3 |
+| convert to TC6 today | 3 |
+| blocked, with a named cause | 9 |
+
+All twelve ladder programs ship as `sources/*.plcy`, verbatim, so the corpus holds
+the whole ladder target set even where LiNC cannot express it yet. Three ship as
+`.xml` as well. Every one of the twelve ships a stimulus and a trace, including
+the nine that cannot run: the trace is the reference behaviour the program owes if
+and when it becomes expressible.
+
+### The nine, and what each needs
+
+| program | blocked by | what it would take |
 | --- | --- | --- |
-| 1 — converts | 3 | imports, but the block-only rung is dropped, so the timer never fires: **fails on values** |
-| 2 — refused | 6 | typed tags, arrays, structs, PID: must fail with `plcopen_unsupported_element` |
-| 3 — not convertible | 32 | FBD-only, ST-only, ST+LD mixed, a two-coil rung, `RES`, five timers |
-
-Refusal causes across all 41: 26 no LD routine (ST or FBD only), 6 typed tags,
-3 mixed ST+LD, 1 two-coil rung, 1 `RES` block, 1 more than four timers.
-
-Tier 1 exists to catch the specific trap this corpus found: `plcopen::import`
-walks backwards from each `<coil>`, so a `<block>` that feeds no coil is silently
-dropped rather than refused. That is data loss, not a diagnostic, and a test that
-only asserted "imports cleanly" would pass while the timer never ran.
+| `silo` | two coils on parallel branches, one rung | `coils: Vec<Coil>` in `Rung` |
+| `traffic-lights` | six chained timers | `FB_PER_TYPE` is 4; six instances needed |
+| `start-stop` | `ONS` one-shot; `Bits[0].0` bit operand | rising-edge contact; bit-of-word operands |
+| `timer-counter` | `RES` coil; `.TT` is not `.Q` | `RES` → the counter's `R` input; a timing member |
+| `recipes-data-type-ld` | `Recipe[3]` struct array; field presets | typed data, III.6 |
+| `traffic-lights-routines` | `DINT[6]`; JSR routines; DINT counter | typed data plus subroutines |
+| `two-tanks-cascade` | `PID`, `SCP`, `MOV`, `REAL` | analogue blocks and real tags |
+| `motor-starters-function-block` | user FB called with formal parameters | user POUs and parameter binding |
+| `silo-function-block` | FB instance data (`FillStation`) | same |
 
 ### Wrong today, and why
 
 | gap | consequence |
 | --- | --- |
-| `Rung` holds exactly one `Coil` | a rung with a block and no coil cannot be expressed; its timer is dropped |
+| `Rung` holds exactly one `Coil` | `silo` cannot be expressed; and a block feeding no coil is silently dropped, not refused |
 | the same field | a rung with two coils cannot be expressed at all |
-| `plcopen.rs` binds every `<block>` to instance 0 | two timers in one program collide on `TON0`; latent because the above refuse first |
-| no `PouLanguage::St` (III.1) | 26 of 41 are out of reach |
-| no typed data or arrays (III.6) | 6 more |
+| `plcopen.rs` binds every `<block>` to instance 0 | `garage-door` has three blocks, two of them timers; they collide on `TON0` |
+| no `PouLanguage::St` (III.1) | 19 of the 41 sampled files are out of reach |
+| no typed data or arrays (III.6) | 4 of the 12 ladder programs |
 
-`coils: Vec<Coil>` in `Rung` (or `Option`, with validation forbidding more than
-one until the compiler and editor can hold several) is the first of these and the
+The drop is the trap worth naming: `plcopen::import` walks backwards from each
+`<coil>`, so a `<block>` that feeds no coil is dropped rather than refused. That is
+data loss, not a diagnostic, and a test asserting only "imports cleanly" would
+pass while the timer never ran. `start-stop-delay` is the smallest case: five
+rungs, and the 2 s timer is the one that disappears.
+
+`coils: Vec<Coil>` in `Rung` (or `Option`, with validation forbidding more than one
+until the compiler and editor can hold several) is the first of these and the
 cheapest; it unblocks the most programs per line changed.
+
+### The corpus found a converter bug
+
+`MEMBER = {..., "TT": "Q"}` maps a timer's `.TT` (timing) onto `.Q` (done) —
+opposite conditions, so a rung using `.TT` would be inverted. `timer-counter`
+refuses at `RES` before reaching it, which is why it has not surfaced. The
+converter must refuse `.TT` until there is a distinct timing member to map it to.
 
 ### The oracle
 
-Expected traces are produced by running the reference implementation headlessly,
+Traces are produced by running the sources in the reference engine, headlessly,
 out of tree, and are **data** — numbers a program settled to, not code. The
 procedure, so it can be reproduced:
 
-1. Unpack the reference package from its archive (sha-versioned, kept outside the
-   repository).
-2. `Processor(profile)`, `download(program)`, `set_mode("RUN")`, then `tick(10)`
-   once per scan, because its scan period is 10 ms.
-3. Read each output after every scan; write `traces/<name>.json` as
-   `[{scan, outputs:{tag: value}}]`.
-4. Drive inputs from the fixture's scripted stimulus, never from the wall clock.
+1. Unpack the reference package from its archive; it is kept outside the
+   repository and rebuilt on demand.
+2. `Processor(profile)`, `download(program)`, then `set_mode(RUN)`; its scan
+   period is 10 ms, so one `tick(10)` per scan.
+3. Apply each stimulus change before the tick for that scan index.
+4. Read every `%Q` tag the program writes after each scan and keep only the
+   scans where something changed.
+5. Stop at the first fault and record it, so the trace ends where the run did.
 
-The comparison is a trace, not a final state: a one-scan difference in a timer is
-a real difference, and the corpus found exactly that class of bug already (a
-counter's `done` is equality in ClassicLadder but `>=` in IEC).
+The comparison is a trace, not a final state: a one-scan difference is a real
+difference, and this corpus already found that class of bug — a ClassicLadder
+counter's `done` is equality while `CTU.Q` is `>=`.
+
+Known limitation: a trace is only as right as the engine that produced it. Where
+the reference and IEC disagree, IEC wins and the trace is wrong; record the
+disagreement rather than editing the trace to match.
 
 ### Harness contract
 
 - Assert **values per scan** against the trace, not "imports without error".
-- Assert the diagnostic **code** for every tier-2 file, so a refusal is a
+- Replay: every output starts at `"0"` and takes the last change at or before the
+  scan under test.
+- Assert the diagnostic **code** for every blocked file, so a refusal is a
   contract and a change of code is visible.
-- Assert tier-3 refusals by cause, so a file that starts converting is noticed.
-- Tier 1 files must carry a `#[ignore]` or a `known_gap` marker naming the reason,
-  so the suite is green while being honest, and un-ignoring one is the signal
-  that the gap closed.
+- Assert the blocked set by name, so a file that starts converting is noticed
+  rather than quietly passing.
+- Mark blocked files with a reason, so the suite is green while being accurate,
+  and remove the marker when the gap closes.
+- Read the directory at run time. Nothing embedded, nothing `include_str!`.
