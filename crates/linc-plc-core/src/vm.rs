@@ -15,12 +15,25 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::compile::{
-    Bank, Binding, Compiled, FbKind, MathOp, Op, PresetSource, Program, SymbolKind, WordOperand,
+    Bank, Binding, Compiled, FbKind, MathOp, Op, PidConfig, PresetSource, Program, RealOperand,
+    RealTarget, SymbolKind, WordOperand,
 };
 use crate::profile::counter::{CounterDone, CounterRule};
 
 /// Operand-stack depth. Validation caps logic nesting at 64, so this is slack.
 const STACK_DEPTH: usize = 128;
+
+/// One PID controller's state: the positional form keeps the integral, the last error
+/// and value, and when the loop last updated.
+#[derive(Debug, Clone, Copy, Default)]
+struct PidState {
+    cv: f32,
+    integral: f32,
+    last_error: f32,
+    last_pv: f32,
+    last_ms: u32,
+    started: bool,
+}
 
 /// A guard against a jump loop that never terminates. A scan that reaches it
 /// stops executing instructions instead of hanging the scheduler.
@@ -76,6 +89,11 @@ pub struct Vm {
     words: Vec<i32>,
     dt_ms: u16,
     blocks: Vec<FbState>,
+    /// The scan clock, in milliseconds since the VM was built: a PID measures its loop
+    /// time against it, so the interval is the scan interval and not a wall clock.
+    clock_ms: u32,
+    /// One PID controller per declared instance.
+    pids: Vec<PidState>,
     /// Previous value of each edge contact, one slot per contact occurrence.
     edge_prev: Vec<bool>,
     /// Slots declared `retain`, with their names, in program order.
@@ -135,6 +153,8 @@ impl Vm {
             },
             dt_ms: DEFAULT_DT_MS,
             blocks: vec![FbState::default(); compiled.program.fb_count as usize],
+            clock_ms: 0,
+            pids: vec![PidState::default(); usize::from(compiled.program.pid_count)],
             edge_prev: vec![false; compiled.program.edge_count as usize],
             retained,
             layout,
@@ -217,6 +237,9 @@ impl Vm {
     pub fn scan_with_io(&mut self, io: IoFrame<'_>, dt_ms: u16) -> ScanStats {
         let started = Instant::now();
         self.dt_ms = dt_ms.max(1);
+        // The clock a PID measures its loop time against advances with the scan, so
+        // the interval is the scan interval and nothing reads a wall clock.
+        self.clock_ms = self.clock_ms.saturating_add(u32::from(self.dt_ms));
         self.next.copy_from_slice(&self.prev);
         self.write_inputs(&io);
 
@@ -345,6 +368,60 @@ impl Vm {
                     let value = pop_word(&word_stack, &mut word_depth);
                     if let Some(cell) = self.words.get_mut(slot as usize) {
                         *cell = ty.store(value);
+                    }
+                }
+                // `SCP`: scale one range onto another. A zero-width input range is
+                // refused at validation; the scan stores zero rather than dividing by
+                // it, which keeps the scan deterministic (`Op::Pow`'s rule).
+                Op::Scale {
+                    dest,
+                    x,
+                    min_in,
+                    max_in,
+                    min_out,
+                    max_out,
+                } => {
+                    let x = self.real_value(x);
+                    let x0 = self.real_value(min_in);
+                    let x1 = self.real_value(max_in);
+                    let y0 = self.real_value(min_out);
+                    let y1 = self.real_value(max_out);
+                    let value = if x1 == x0 {
+                        0.0
+                    } else {
+                        y0 + (x - x0) * (y1 - y0) / (x1 - x0)
+                    };
+                    self.store_real(dest, value);
+                }
+                Op::Pid {
+                    state,
+                    pv,
+                    sp,
+                    master,
+                    dest,
+                    config,
+                } => {
+                    let raw = self.real_value(pv);
+                    let sp = match (sp, master) {
+                        (Some(sp), _) => Some(self.real_value(sp)),
+                        // A cascade: the master's output in percent becomes this
+                        // loop's setpoint in engineering units.
+                        (None, Some(master)) => {
+                            let span = if config.max_s == config.min_s {
+                                100.0
+                            } else {
+                                config.max_s - config.min_s
+                            };
+                            let cv = match self.pids.get(master as usize) {
+                                Some(state) => state.cv,
+                                None => 0.0,
+                            };
+                            Some(config.min_s + cv * span / 100.0)
+                        }
+                        (None, None) => None,
+                    };
+                    if let Some(value) = self.step_pid(state, raw, sp, &config) {
+                        self.store_real(dest, value);
                     }
                 }
                 Op::StoreWord(index) => {
@@ -698,6 +775,128 @@ impl Vm {
         for (slot, value) in previous.iter().take(self.output_image.len()).enumerate() {
             self.output_image[slot] = *value;
         }
+    }
+
+    /// One analogue operand's value. A REAL slot is read as its `f32` bits, which is
+    /// what makes the value survive the integer bank.
+    fn real_value(&self, operand: RealOperand) -> f32 {
+        match operand {
+            RealOperand::Bits(slot) => f32::from_bits(self.word(slot) as u32),
+            RealOperand::Word(slot) => self.word(slot) as f32,
+            RealOperand::Const(value) => value,
+        }
+    }
+
+    /// Store an analogue result: a REAL slot takes the bits, an integer slot takes
+    /// the value rounded, which is what the reference engine does.
+    fn store_real(&mut self, target: RealTarget, value: f32) {
+        match target {
+            RealTarget::Bits(slot) => self.set_word(slot, value.to_bits() as i32),
+            RealTarget::Word(slot) => self.set_word(slot, value.round() as i32),
+        }
+    }
+
+    /// One PID evaluation. `None` means the loop's update interval has not elapsed, so
+    /// the output is left where it was.
+    ///
+    /// The algorithm is the reference engine's positional form with its gains on the
+    /// error in percent of span: `CV = KP·E + KI·∫E dt + KD·dE/dt + BIAS`, integral
+    /// with anti-reset-windup, and the derivative on the process variable. The members
+    /// are baked by the compiler, so this reads no tag.
+    fn step_pid(
+        &mut self,
+        index: u16,
+        raw_pv: f32,
+        sp: Option<f32>,
+        config: &PidConfig,
+    ) -> Option<f32> {
+        let now = self.clock_ms;
+        let mut state = match self.pids.get(index as usize) {
+            Some(state) => *state,
+            None => return None,
+        };
+        if state.started
+            && config.update_ms > 0
+            && now.saturating_sub(state.last_ms) < config.update_ms
+        {
+            return None;
+        }
+        let dt = if state.started {
+            now.saturating_sub(state.last_ms) as f32 / 1000.0
+        } else {
+            0.0
+        };
+        state.started = true;
+        state.last_ms = now;
+        // The process variable scaled from its raw range into engineering units.
+        let pv = if config.max_i != config.min_i {
+            config.min_s
+                + (raw_pv - config.min_i) * (config.max_s - config.min_s)
+                    / (config.max_i - config.min_i)
+        } else {
+            raw_pv
+        };
+        state.last_pv = pv;
+        let span = if config.max_s == config.min_s {
+            100.0
+        } else {
+            config.max_s - config.min_s
+        };
+        let scale = 100.0 / span;
+        let setpoint = match sp {
+            Some(value) => value,
+            // A loop with no setpoint keeps the one it has; a loop that never had one
+            // is at zero.
+            None => state.last_error + pv,
+        };
+        let error = if config.reverse {
+            pv - setpoint
+        } else {
+            setpoint - pv
+        };
+        let (low, high) = if config.max_o != config.min_o {
+            (config.min_o, config.max_o)
+        } else {
+            (0.0, 100.0)
+        };
+        let cv = if dt <= 0.0 {
+            state.cv.clamp(low, high)
+        } else {
+            let proportional = config.kp * error * scale;
+            let integral = if config.ki > 0.0 {
+                let candidate = state.integral + config.ki * error * scale * dt;
+                let unclamped = proportional + candidate;
+                let winding = (unclamped > high && error > 0.0) || (unclamped < low && error < 0.0);
+                if winding {
+                    state.integral
+                } else {
+                    candidate
+                }
+            } else {
+                0.0
+            };
+            state.integral = integral;
+            let derivative = if config.kd > 0.0 {
+                // On the process variable, so a setpoint move does not kick.
+                let sign = if config.reverse { 1.0 } else { -1.0 };
+                config.kd * (pv - state.last_pv) * sign / dt
+            } else {
+                0.0
+            };
+            (proportional + integral + derivative).clamp(low, high)
+        };
+        state.cv = cv;
+        state.last_error = error;
+        if let Some(cell) = self.pids.get_mut(index as usize) {
+            *cell = state;
+        }
+        // The output leaves as a percentage, scaled to the control variable's range
+        // when the loop declares one.
+        Some(if config.max_cv != config.min_cv {
+            config.min_cv + cv * (config.max_cv - config.min_cv) / 100.0
+        } else {
+            cv
+        })
     }
 
     /// A block's preset for this scan. An array element's index is read from its

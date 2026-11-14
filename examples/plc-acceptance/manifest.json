@@ -127,11 +127,15 @@
    "name": "two-tanks-cascade",
    "pous": 1,
    "rungs": 5,
-   "converted": false,
-   "blocker": "converter: instruction SCP has no faithful rung mapping",
+   "converted": true,
+   "blocker": null,
    "stimulus": true,
    "trace": true,
-   "runs": false
+   "runs": true,
+   "tolerance": {
+    "Setpoint": 0.01,
+    "OuterOut": 0.5
+   }
   }
  ],
  "note": "converted: the converter produced <name>.xml. runs: LiNC imports it and matches its trace after every scan. A converted file that does not run is blocked by a named LiNC-side cause, not by the conversion."

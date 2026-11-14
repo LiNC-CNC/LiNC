@@ -704,6 +704,12 @@ pub enum Logic {
         instance: String,
         #[serde(default)]
         preset: String,
+        /// The block's pins, when it has more than one operand: an analogue block
+        /// takes its inputs and its destination by formal parameter, and the
+        /// destination is the one with `out` set. Empty for a timer or a counter,
+        /// whose single preset is `preset`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<CallArg>,
     },
     /// A rising or falling edge contact.
     Edge {

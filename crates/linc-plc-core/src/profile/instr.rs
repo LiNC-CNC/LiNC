@@ -554,7 +554,13 @@ fn check_logic(logic: &Logic, ctx: &Ctx) -> Vec<Diagnostic> {
             block,
             instance,
             preset,
+            args,
         } => {
+            if let Some(crate::profile::spec::Family::Analog(name)) =
+                crate::profile::spec::spec(block).map(|spec| spec.family)
+            {
+                return check_analog(block, name, args, ctx);
+            }
             // The block and the instance first, with the empty preset that every kind
             // has a default for, so an unreadable preset is not reported as an
             // unknown block.
@@ -739,6 +745,93 @@ fn check_label_coil(
         }
         _ => Vec::new(),
     }
+}
+
+/// An analogue block's pins: every pin it needs, the destination writable, and a
+/// numeric member that is a literal because the scan bakes it.
+fn check_analog(
+    block: &str,
+    name: crate::profile::spec::AnalogName,
+    args: &[crate::model::CallArg],
+    ctx: &Ctx,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let path = format!("{}.args", ctx.path);
+    let Some(spec) = crate::profile::spec::spec(block) else {
+        return diagnostics;
+    };
+    let pin_of = |pin: &str| {
+        args.iter()
+            .find(|argument| argument.pin.eq_ignore_ascii_case(pin))
+    };
+    // Only the pins a block cannot work without are required: a PID's setpoint may
+    // come from a master loop, and its members have defaults.
+    let required: &[&str] = match name {
+        crate::profile::spec::AnalogName::Scale => spec.pins.0,
+        crate::profile::spec::AnalogName::Pid => &["IN"],
+    };
+    for pin in required {
+        if pin_of(pin).is_none() {
+            diagnostics.push(Diagnostic::error(
+                "analog_pin",
+                format!("`{block}` needs its `{pin}` pin"),
+                &path,
+            ));
+        }
+    }
+    if name == crate::profile::spec::AnalogName::Pid
+        && pin_of("SP").is_none()
+        && pin_of("MASTER").is_none()
+    {
+        diagnostics.push(Diagnostic::error(
+            "analog_pin",
+            "`PID` needs a setpoint pin or a master loop",
+            &path,
+        ));
+    }
+    let Some(dest) = spec.pins.1.first() else {
+        return diagnostics;
+    };
+    match pin_of(dest) {
+        None => diagnostics.push(Diagnostic::error(
+            "analog_pin",
+            format!("`{block}` needs a destination on `{dest}`"),
+            &path,
+        )),
+        Some(argument) => {
+            if crate::profile::resolve::resolve(&argument.var, ctx.word_slots).is_err() {
+                diagnostics.push(Diagnostic::error(
+                    "analog_pin",
+                    format!(
+                        "'{dest}' is bound to '{}', which is not a word",
+                        argument.var
+                    ),
+                    &path,
+                ));
+            }
+        }
+    }
+    if name == crate::profile::spec::AnalogName::Pid {
+        // The setup is baked into the block's op, so a member that is not a literal
+        // cannot be one.
+        for pin in [
+            "KP", "KI", "KD", "MAXI", "MINI", "MAXS", "MINS", "MAXCV", "MINCV", "UPD",
+        ] {
+            if let Some(argument) = pin_of(pin) {
+                if argument.var.trim().parse::<f32>().is_err() {
+                    diagnostics.push(Diagnostic::error(
+                        "analog_pin",
+                        format!(
+                            "'{pin}' is '{}', and a controller member must be a number",
+                            argument.var
+                        ),
+                        &path,
+                    ));
+                }
+            }
+        }
+    }
+    diagnostics
 }
 
 /// Is this text a preset the scan can read? A literal, a time, a marker word, a

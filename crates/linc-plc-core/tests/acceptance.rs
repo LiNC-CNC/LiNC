@@ -17,13 +17,13 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use linc_plc_core::model::{IoDirection, Project};
+use linc_plc_core::model::{IoDirection, IoKind, Project};
 use linc_plc_core::{compile, plcopen, validate, Severity, Vm};
 
 /// The files that run and match their trace today: §III.8 rule 4's count. A
 /// constant, so raising it is a visible diff and a file that starts passing is
 /// noticed rather than quietly counted.
-const CONVERTIBLE: [&str; 11] = [
+const CONVERTIBLE: [&str; 12] = [
     "garage-door",
     "motor-star-delta",
     "motor-starters-function-block",
@@ -35,6 +35,7 @@ const CONVERTIBLE: [&str; 11] = [
     "timer-counter",
     "traffic-lights-routines",
     "traffic-lights",
+    "two-tanks-cascade",
 ];
 
 fn corpus() -> PathBuf {
@@ -73,6 +74,9 @@ struct Stimulus {
     held: BTreeMap<String, bool>,
     #[serde(default)]
     inputs: BTreeMap<String, Vec<(u32, bool)>>,
+    /// Analogue inputs: a word point's raw value from a scan onward.
+    #[serde(default)]
+    words: BTreeMap<String, Vec<(u32, i32)>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -83,6 +87,10 @@ struct Manifest {
 #[derive(serde::Deserialize)]
 struct ManifestFile {
     name: String,
+    /// Numeric outputs this file compares within a tolerance instead of exactly. A
+    /// name that is not listed is exact, and a bit is always exact.
+    #[serde(default)]
+    tolerance: BTreeMap<String, f64>,
     /// The converter produced `<name>.xml`.
     converted: bool,
     /// LiNC imports it and matches its trace after every scan.
@@ -94,18 +102,20 @@ struct ManifestFile {
 // Replay. Every output starts at `"0"` and takes the last change at or before
 // the scan under test; a one-scan offset is a failure.
 
-fn expected_at(trace: &Trace, scan: u32) -> BTreeMap<&str, bool> {
+fn expected_at(trace: &Trace, scan: u32) -> BTreeMap<&str, f64> {
     let mut now = trace
         .outputs
         .iter()
-        .map(|tag| (tag.as_str(), false))
+        .map(|tag| (tag.as_str(), 0.0))
         .collect::<BTreeMap<_, _>>();
     for change in &trace.changes {
         if change.scan > scan {
             break;
         }
         for (tag, value) in &change.v {
-            now.insert(tag.as_str(), value == "1");
+            // A bit's level is `1`; a real is its value as written. Both are numbers
+            // here, so the replay holds one table.
+            now.insert(tag.as_str(), value.parse::<f64>().unwrap_or(0.0));
         }
     }
     now
@@ -127,7 +137,12 @@ fn level_at(stimulus: &Stimulus, tag: &str, tick: u32) -> bool {
 
 /// Run the pipeline on one converted file. `Err` is the reason it does not match
 /// its trace: a refusal with its code, or the first scan that differs.
-fn run(xml: &str, trace: &Trace, stimulus: &Stimulus) -> Result<(), String> {
+fn run(
+    xml: &str,
+    trace: &Trace,
+    stimulus: &Stimulus,
+    tolerance: &BTreeMap<String, f64>,
+) -> Result<(), String> {
     let mut project: Project = match plcopen::import(xml) {
         Ok(project) => project,
         Err(diagnostics) => {
@@ -163,7 +178,13 @@ fn run(xml: &str, trace: &Trace, stimulus: &Stimulus) -> Result<(), String> {
     let output_names = project
         .io
         .iter()
-        .filter(|point| point.direction == IoDirection::Out)
+        .filter(|point| point.direction == IoDirection::Out && point.kind == IoKind::Bit)
+        .map(|point| point.name.clone())
+        .collect::<Vec<_>>();
+    let word_outputs = project
+        .io
+        .iter()
+        .filter(|point| point.direction == IoDirection::Out && point.kind != IoKind::Bit)
         .map(|point| point.name.clone())
         .collect::<Vec<_>>();
 
@@ -176,10 +197,36 @@ fn run(xml: &str, trace: &Trace, stimulus: &Stimulus) -> Result<(), String> {
         .iter()
         .map(|tag| plcopen::operand_name(tag))
         .collect::<Vec<_>>();
-    let traced_set = traced.iter().map(String::as_str).collect();
-    if declared != traced_set {
+    let traced_set: std::collections::BTreeSet<&str> = traced.iter().map(String::as_str).collect();
+    // Every bit output is traced, and a trace may add a declared word variable: an
+    // analogue value is observable even though it is not a bit output.
+    let words = compiled
+        .symbols
+        .iter()
+        .filter(|symbol| symbol.bank == linc_plc_core::Bank::Word)
+        .map(|symbol| symbol.name.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let declared_words = word_outputs
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let missing = declared
+        .iter()
+        .chain(declared_words.iter())
+        .filter(|name| !traced_set.contains(**name))
+        .collect::<Vec<_>>();
+    let unknown = traced_set
+        .iter()
+        .filter(|name| {
+            !declared.contains(**name)
+                && !declared_words.contains(**name)
+                && !words.contains(**name)
+        })
+        .collect::<Vec<_>>();
+    if !missing.is_empty() || !unknown.is_empty() {
         return Err(format!(
-            "the program's outputs {declared:?} are not the trace's {traced_set:?}"
+            "the trace's outputs {traced_set:?} do not cover the program's {declared:?} \
+             and name {unknown:?}, which are not declared words"
         ));
     }
 
@@ -205,6 +252,21 @@ fn run(xml: &str, trace: &Trace, stimulus: &Stimulus) -> Result<(), String> {
         if trace.fault.is_some() && scan >= stimulus.scans {
             break;
         }
+        let words = compiled
+            .word_inputs
+            .iter()
+            .map(|binding| {
+                // The stimulus names the point as the source does; the binding names
+                // it as the model does.
+                let tag = stimulus
+                    .words
+                    .keys()
+                    .find(|tag| plcopen::operand_name(tag) == binding.name)
+                    .cloned()
+                    .unwrap_or_else(|| binding.name.clone());
+                level_word(&stimulus, &tag, tick)
+            })
+            .collect::<Vec<_>>();
         let inputs = input_names
             .iter()
             .map(|name| {
@@ -224,7 +286,14 @@ fn run(xml: &str, trace: &Trace, stimulus: &Stimulus) -> Result<(), String> {
                     })
             })
             .collect::<Vec<_>>();
-        vm.scan_with_dt(&inputs, stimulus.scan_ms);
+        vm.scan_with_io(
+            linc_plc_core::IoFrame {
+                bits: &inputs,
+                words: &words,
+                floats: &[],
+            },
+            stimulus.scan_ms,
+        );
         let expected = expected_at(trace, scan);
         let want_of = |name: &str| {
             trace
@@ -235,11 +304,47 @@ fn run(xml: &str, trace: &Trace, stimulus: &Stimulus) -> Result<(), String> {
                 .unwrap_or_else(|| panic!("{name} is not in the trace"))
         };
         for (index, name) in output_names.iter().enumerate() {
-            let want = want_of(name);
+            let want = want_of(name) != 0.0;
             if vm.outputs()[index] != want {
                 return Err(format!(
                     "{name} at scan {scan} is {}, the trace says {want}",
                     vm.outputs()[index]
+                ));
+            }
+        }
+        // A traced word variable is compared with its declared tolerance; a missing
+        // tolerance means exact.
+        for tag in &trace.outputs {
+            let name = plcopen::operand_name(tag);
+            if declared.contains(name.as_str()) || declared_words.contains(name.as_str()) {
+                continue;
+            }
+            let want = want_of(&name);
+            let Some(slot) = vm.word_slot(&name) else {
+                return Err(format!("{name} is traced but the program has no such word"));
+            };
+            let raw = vm.word(slot);
+            let real = compiled
+                .word_types
+                .iter()
+                .find(|(at, _)| *at == slot)
+                .map(|(_, ty)| *ty == linc_plc_core::profile::layout::WordType::REAL)
+                .unwrap_or(false);
+            let got = if real {
+                f64::from(f32::from_bits(raw as u32))
+            } else {
+                f64::from(raw)
+            };
+            // The manifest names the output as the source does.
+            let tolerance = tolerance
+                .iter()
+                .find(|(key, _)| plcopen::operand_name(key) == name)
+                .map(|(_, value)| *value)
+                .unwrap_or(0.0);
+            if (got - want).abs() > tolerance {
+                return Err(format!(
+                    "{name} at scan {scan} is {got}, the trace says {want} \
+                     (tolerance {tolerance})"
                 ));
             }
         }
@@ -278,7 +383,7 @@ fn the_corpus_matches_its_traces_or_names_its_cause() {
                 assert!(xml_path.exists(), "{}: no XML to convert", file.name);
                 // Converted but not passing: prove it does not pass, so a file
                 // that starts matching is noticed instead of staying "blocked".
-                let outcome = run(&read(&xml_path), &trace, &stimulus);
+                let outcome = run(&read(&xml_path), &trace, &stimulus, &file.tolerance);
                 assert!(
                     outcome.is_err(),
                     "{name} is listed as blocked ({blocker}) but it matches its trace; \
@@ -295,7 +400,7 @@ fn the_corpus_matches_its_traces_or_names_its_cause() {
             "{}: runs, but no conversion exists",
             file.name
         );
-        match run(&read(&xml_path), &trace, &stimulus) {
+        match run(&read(&xml_path), &trace, &stimulus, &file.tolerance) {
             Ok(()) => convertible.push(file.name.clone()),
             Err(cause) => panic!("{}: does not run: {cause}", file.name),
         }
@@ -334,10 +439,11 @@ fn a_fault_is_carried_by_its_trace() {
     )
     .expect("the synthetic trace parses");
     assert_eq!(trace.fault.as_deref(), Some("watchdog"));
-    assert!(!expected_at(&trace, 2)["%Q0.0"]);
-    assert!(expected_at(&trace, 3)["%Q0.0"]);
-    assert!(
+    assert_eq!(expected_at(&trace, 2)["%Q0.0"], 0.0);
+    assert_eq!(expected_at(&trace, 3)["%Q0.0"], 1.0);
+    assert_eq!(
         expected_at(&trace, 19)["%Q0.0"],
+        1.0,
         "a change after the fault is not replayed before it"
     );
 }
@@ -358,12 +464,27 @@ fn a_trace_is_replayed_not_searched() {
             .map(|(tag, value)| (tag.to_string(), value))
             .collect::<BTreeMap<_, _>>()
     };
-    assert!(!at(1)["%Q0.0"], "the change starts at scan 2, not before");
-    assert!(at(2)["%Q0.0"]);
-    assert!(at(4)["%Q0.0"]);
-    assert!(!at(5)["%Q0.0"]);
-    assert!(at(5)["%Q0.1"]);
+    assert_eq!(
+        at(1)["%Q0.0"],
+        0.0,
+        "the change starts at scan 2, not before"
+    );
+    assert_eq!(at(2)["%Q0.0"], 1.0);
+    assert_eq!(at(4)["%Q0.0"], 1.0);
+    assert_eq!(at(5)["%Q0.0"], 0.0);
+    assert_eq!(at(5)["%Q0.1"], 1.0);
     assert_eq!(at(9)["%Q0.1"], at(5)["%Q0.1"]);
+}
+
+/// A word input's raw value at a tick: the last write at or before it.
+fn level_word(stimulus: &Stimulus, tag: &str, tick: u32) -> i32 {
+    let mut value = 0;
+    for (at, level) in stimulus.words.get(tag).map(Vec::as_slice).unwrap_or(&[]) {
+        if *at <= tick {
+            value = *level;
+        }
+    }
+    value
 }
 
 /// The stimulus rule: a change applies from its scan onwards, and an input the

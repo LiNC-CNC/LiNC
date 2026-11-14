@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://www.plcopen.org/xml/tc6_0201">
+<fileHeader company="converted" product="plcy2plcopen" version="1"/>
+<contentHeader name="two-tanks-cascade"/>
+<types><dataTypes/></types>
+<instances><configurations/></instances>
+<addData/>
+<pous><pou name="MAIN" pouType="program">
+<interface><inputVars><variable name="%I0.2"><type><BOOL/></type></variable><variable name="%I0.3"><type><BOOL/></type></variable><variable name="%IW64"><type><INT/></type></variable><variable name="%IW66"><type><INT/></type></variable><variable name="%IW68"><type><INT/></type></variable></inputVars><outputVars><variable name="%Q0.2"><type><BOOL/></type></variable><variable name="%QW64"><type><INT/></type></variable><variable name="%QW66"><type><INT/></type></variable></outputVars><localVars><variable name="OuterOut"><type><REAL/></type></variable><variable name="Setpoint"><type><REAL/></type></variable></localVars></interface>
+<body><LD>
+<leftPowerRail localId="0"/>
+<block localId="10" typeName="SCP"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>%IW68</expression></variable><variable formalParameter="MIN_IN"><expression>0</expression></variable><variable formalParameter="MAX_IN"><expression>27648</expression></variable><variable formalParameter="MIN_OUT"><expression>0</expression></variable><variable formalParameter="MAX_OUT"><expression>100</expression></variable><variable formalParameter="OUT"><expression>Setpoint</expression></variable></inputVariables></block>
+<coil localId="11" storage="compute"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><expression>%QW66 = 16589</expression></coil>
+<block localId="12" typeName="PID"><variable>OUTER</variable><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>%IW66</expression></variable><variable formalParameter="OUT"><expression>OuterOut</expression></variable><variable formalParameter="SP"><expression>Setpoint</expression></variable><variable formalParameter="KP"><expression>2.0</expression></variable><variable formalParameter="KI"><expression>0.05</expression></variable><variable formalParameter="MAXI"><expression>27648.0</expression></variable></inputVariables></block>
+<block localId="13" typeName="PID"><variable>INNER</variable><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>%IW64</expression></variable><variable formalParameter="OUT"><expression>%QW64</expression></variable><variable formalParameter="MASTER"><expression>Outer</expression></variable><variable formalParameter="KP"><expression>4.0</expression></variable><variable formalParameter="KI"><expression>0.2</expression></variable><variable formalParameter="MAXI"><expression>27648.0</expression></variable><variable formalParameter="MAXCV"><expression>27648.0</expression></variable></inputVariables></block>
+<contact localId="14"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.2</variable></contact>
+<contact localId="15"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.3</variable></contact>
+<coil localId="16" storage="none"><connectionPointIn><connection refLocalId="14"/><connection refLocalId="15"/></connectionPointIn><variable>%Q0.2</variable></coil>
+<rightPowerRail localId="9999"/>
+</LD></body></pou></pous></project>

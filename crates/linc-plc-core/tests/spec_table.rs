@@ -77,6 +77,9 @@ fn the_compiler_resolves_a_block_math_or_compare_through_its_row() {
                 "`{}` is a compare row",
                 row.mnemonic
             ),
+            // An analogue block is lowered from its pins, so it has no separate
+            // mnemonic table to resolve through.
+            Family::Analog(_) => {}
             Family::Il => {}
         }
     }
@@ -100,7 +103,7 @@ fn the_table_is_the_whole_instruction_set() {
         match row.il {
             IlForm::None => {
                 // A block-only name: it must resolve as a block, math or compare.
-                let block = matches!(row.family, Family::Fb(_));
+                let block = matches!(row.family, Family::Fb(_) | Family::Analog(_));
                 let math = matches!(row.family, Family::Math(_));
                 let compare = matches!(row.family, Family::Compare(_));
                 assert!(
@@ -135,14 +138,16 @@ fn the_table_is_the_whole_instruction_set() {
 #[test]
 fn every_function_block_declares_its_pins() {
     for row in SPECS.iter() {
-        let fb = matches!(row.family, Family::Fb(_));
+        // An analogue block draws its pins like a function block: both are boxes
+        // whose operands sit on their edges.
+        let fb = matches!(row.family, Family::Fb(_) | Family::Analog(_));
         assert_eq!(
             !row.pins.0.is_empty(),
             fb,
             "{} {}",
             row.mnemonic,
             if fb {
-                "is a function block and must declare its input pins"
+                "is a block and must declare its input pins"
             } else {
                 "is not a function block and must not declare pins"
             }

@@ -103,6 +103,26 @@ pub enum Family {
     Compare(CompareName),
     /// A standard function block.
     Fb(FbName),
+    /// An analogue block: stateless scaling, or a controller with its own state.
+    Analog(AnalogName),
+}
+
+/// The analogue blocks: one scale, one controller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalogName {
+    /// `SCP`: linear scaling from one range to another.
+    Scale,
+    /// `PID`: a positional PID controller with its own state per instance.
+    Pid,
+}
+
+impl AnalogName {
+    pub fn code(self) -> u16 {
+        match self {
+            Self::Scale => 0,
+            Self::Pid => 1,
+        }
+    }
 }
 
 /// How the element is drawn. Presentation lives with the instruction so one
@@ -206,7 +226,7 @@ impl Spec {
     }
 }
 
-use Family::{Compare, Fb, Il, Math};
+use Family::{Analog, Compare, Fb, Il, Math};
 use IlForm::{
     And, AndNot, Call, Compare as IlCompare, Jump, Not, Or, OrNot, Push, PushNot, Reset, Return,
     Set, Store, StoreNot, Word as IlWord, Xor, XorNot,
@@ -661,6 +681,37 @@ pub const SPECS: &[Spec] = &[
         letter: "",
         pins: (&[], &[]),
         il: Return(Some(false)),
+    },
+    // --- analogue blocks ----------------------------------------------------
+    //
+    // A block's operands are its pins: the destination is the pin an analogue block
+    // writes, and the rest are values it reads.
+    Spec {
+        mnemonic: "SCP",
+        family: Analog(AnalogName::Scale),
+        operands: &[Word, Word, Word, Word, Word, Word],
+        optional: 0,
+        output: false,
+        shape: Block,
+        letter: "S",
+        pins: (&["IN", "MIN_IN", "MAX_IN", "MIN_OUT", "MAX_OUT"], &["OUT"]),
+        il: IlForm::None,
+    },
+    Spec {
+        mnemonic: "PID",
+        family: Analog(AnalogName::Pid),
+        operands: &[Word],
+        optional: 0,
+        output: false,
+        shape: Block,
+        letter: "P",
+        pins: (
+            &[
+                "IN", "SP", "KP", "KI", "KD", "MAXI", "MINI", "MAXCV", "MINCV", "UPD",
+            ],
+            &["OUT"],
+        ),
+        il: IlForm::None,
     },
     // --- function blocks ----------------------------------------------------
     Spec {

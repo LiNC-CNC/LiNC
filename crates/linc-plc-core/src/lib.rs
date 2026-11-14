@@ -36,7 +36,7 @@ pub use model::{
 };
 pub use protocol::{ProtocolError, Request, Response, RunState, StateSnapshot};
 pub use validate::{validate, Diagnostic, Severity};
-pub use vm::{ScanStats, VarValue, Vm, WordValue};
+pub use vm::{IoFrame, ScanStats, VarValue, Vm, WordValue};
 
 /// Schema version written by this crate and accepted by the validator.
 pub const SCHEMA_VERSION: u32 = 1;

@@ -445,6 +445,7 @@ fn a_coil_on_a_word_point_is_an_operand_side_error() {
 fn a_ladder_node_reports_a_block_it_cannot_compile() {
     let mut project = ld_project();
     project.pous[0].sections[0].rungs[0].logic = Logic::Block {
+        args: Vec::new(),
         block: "FROB".to_string(),
         instance: "FROB0".to_string(),
         preset: String::new(),
@@ -821,6 +822,7 @@ fn an_array_element_preset_is_checked_against_the_array() {
                     block: "TON".into(),
                     instance: "TON0".into(),
                     preset: preset.into(),
+                    args: Vec::new(),
                 },
             ],
         });
@@ -875,6 +877,7 @@ fn a_struct_field_preset_is_checked_against_its_declaration() {
                     block: "TON".into(),
                     instance: "TON0".into(),
                     preset: preset.into(),
+                    args: Vec::new(),
                 },
             ],
         });

@@ -54,7 +54,7 @@ converted, so a conversion is never mistaken for a pass.
 A file listed as blocked but converted is executed by the test anyway and must be
 shown *not* to pass. That is what stops the count from going green by accident.
 
-Today: eleven convert, eleven run. `silo` matches all 200 scans, including rung 4's two
+Today: twelve convert, twelve run. `silo` matches all 200 scans, including rung 4's two
 coils on parallel branches — the importer turns such a rung into one rung per coil
 and the scan evaluates them in order, so a `Vec<Coil>` model turned out not to be
 needed. Four converted files each hold a timer on a rung with no coil, which the
@@ -65,11 +65,8 @@ three routines in one file, called by name, with a timer whose preset is an arra
 element, and the two `-function-block` files are user function blocks: two instances
 of one body, called with their pins bound.
 
-One file remains, and the manifest names it:
-
-| file | the type it declares | the construct that stops it |
-| --- | --- | --- |
-| `two-tanks-cascade` | `REAL`, `PID` twice | `SCP`, a scale instruction, then `PID` |
+Nothing is blocked. The last file, `two-tanks-cascade`, needed the analogue blocks and a
+second trace before it could be counted — see below.
 
 ### A struct array, and a field of one element
 
@@ -85,6 +82,28 @@ Every way the operand can be wrong says which struct, field and bound it broke: 
 unknown field, an element past the array, an index that is not a declared word, an
 array that is not declared. The corpus file's two timings only come out right if the
 index is applied, so the trace checks the arithmetic and not just the count.
+
+### The analogue blocks, and a trace that was a compile test
+
+`two-tanks-cascade` has `REAL` tags, an `SCP` scaling block and two `PID` controllers, one
+cascaded into the other. Its first trace held only `%Q0.2`, an alarm bit from a digital
+input that the loops do not touch — so a `PID` that returned zero would have passed. The
+hole was closed in the corpus, not worked around:
+
+* the controller is the reference engine's positional form: `CV = KP·E + KI·∫E dt + KD·dE/dt`,
+  gains on the error in percent of span, integral with anti-reset-windup, derivative on the
+  process variable, and the loop updates on its declared interval (`UPD`, 100 ms here).
+  The members are baked at compile time, so the scan reads no tag for them.
+* the stimulus format grew **word inputs**, so `%IW68` (the setpoint at 50 %), `%IW66` and
+  `%IW64` are driven, and the loops actually move.
+* the trace now records `Setpoint`, `OuterOut`, `%QW64` and `%QW66` as numbers, and
+  `manifest.json` declares their tolerance — `0.5` for the controller output, `0.01` for the
+  setpoint, exact for the rest. The alarm bit stays exact. The rule the test gained: a
+  numeric output compares within its declared tolerance, a missing tolerance means exact.
+
+The reference computes in double precision and LiNC in single, which is why the tolerance is
+declared rather than assumed: the two agree scan by scan inside it, and the values are not
+the same bits.
 
 ### Instances, and why two callers do not share one
 

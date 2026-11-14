@@ -725,7 +725,7 @@ fn import_ld(
         let assignment = if kind == CoilKind::Compute {
             let text = coil_element
                 .child("expression")
-                .map(plain_text)
+                .map(|expression| sanitise_addresses(&plain_text(expression)))
                 .unwrap_or_default();
             if text.is_empty() {
                 diagnostics.push(error(
@@ -793,6 +793,40 @@ fn import_ld(
     }
     pou.sections = vec![section];
     Ok(())
+}
+
+/// Rewrite the `%` addresses inside an expression to the names the interface declares.
+///
+/// A compute coil's expression is an expression, not one operand, so its addresses have
+/// to be spelled the way the symbols are before the expression engine sees them.
+fn sanitise_addresses(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut token = String::new();
+    let flush = |token: &mut String, out: &mut String| {
+        if token.is_empty() {
+            return;
+        }
+        if token.starts_with('%') && token.len() > 1 {
+            out.push_str(&operand_name(token));
+        } else {
+            out.push_str(token);
+        }
+        token.clear();
+    };
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric()
+            || character == '%'
+            || character == '.'
+            || character == '_'
+        {
+            token.push(character);
+        } else {
+            flush(&mut token, &mut out);
+            out.push(character);
+        }
+    }
+    flush(&mut token, &mut out);
+    out
 }
 
 /// `<variable>` may carry the name as text (the usual LD form) or as an
@@ -1151,6 +1185,69 @@ fn build_block(
         return Err(());
     };
     let name = type_name.to_ascii_uppercase();
+    // An analogue block carries every operand as a pin, so all of its
+    // `inputVariables` are read, and the one the table marks as the output is the
+    // argument with `out` set.
+    let analog = crate::profile::spec::spec(&name)
+        .map(|spec| matches!(spec.family, crate::profile::spec::Family::Analog(_)))
+        .unwrap_or(false);
+    if analog {
+        let mut args = Vec::new();
+        for (section, out) in [("inputVariables", false), ("outputVariables", true)] {
+            let Some(inputs) = block.child(section) else {
+                continue;
+            };
+            for variable in inputs.children_named("variable") {
+                let Some(pin) = variable.attribute("formalParameter") else {
+                    continue;
+                };
+                let value = variable
+                    .child("expression")
+                    .map(|expression| {
+                        let text = plain_text(expression);
+                        // A controller member is a number, not a name: it is baked, so
+                        // it keeps its spelling the way a preset literal does.
+                        if text.trim().parse::<f32>().is_ok() {
+                            text
+                        } else {
+                            operand_spelling(&text)
+                        }
+                    })
+                    .unwrap_or_default();
+                if value.is_empty() {
+                    continue;
+                }
+                args.push(crate::model::CallArg {
+                    pin: operand_name(pin),
+                    var: value,
+                    out,
+                });
+            }
+        }
+        // The destination is the pin the spec's right-hand side names.
+        if let Some(spec) = crate::profile::spec::spec(&name) {
+            if let Some(dest) = spec.pins.1.first() {
+                if let Some(argument) = args
+                    .iter_mut()
+                    .find(|argument| argument.pin.eq_ignore_ascii_case(dest))
+                {
+                    argument.out = true;
+                }
+            }
+        }
+        // The controller tag is the block's instance: its state belongs to it.
+        let instance = block
+            .child("variable")
+            .map(|variable| operand_text_of(variable, &HashSet::new()))
+            .unwrap_or_default()
+            .unwrap_or_default();
+        return Ok(Logic::Block {
+            block: name,
+            instance,
+            preset: String::new(),
+            args,
+        });
+    }
     if crate::compile::compare_op(&name).is_some() {
         // A compare block carries its two values as inVariable expressions.
         let mut values = Vec::new();
@@ -1241,5 +1338,6 @@ fn build_block(
         block: name,
         instance: crate::profile::resolve::block_instance(kind.name(), i32::from(number)),
         preset,
+        args: Vec::new(),
     })
 }

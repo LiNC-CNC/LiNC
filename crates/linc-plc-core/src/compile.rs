@@ -84,6 +84,9 @@ struct Lookup {
     /// The function block an instance is of, by instance name: a call on `pump1`
     /// runs `MotorStarter`'s body.
     fb_type: HashMap<String, String>,
+    /// PID controllers by the instance name the program gives them, in first-use
+    /// order: the index is the controller's state slot.
+    pid_states: HashMap<String, u16>,
 }
 
 /// A declared array as an operand sees it: the first element's slot and how many
@@ -106,6 +109,7 @@ impl Lookup {
             word_vars: Vec::new(),
             arrays: HashMap::new(),
             structs: HashMap::new(),
+            pid_states: HashMap::new(),
             fb_slots: HashMap::new(),
             fb_block_base: HashMap::new(),
             fb_type: HashMap::new(),
@@ -156,6 +160,15 @@ impl Lookup {
         self.fb_slots
             .get(&(instance.to_ascii_lowercase(), var.to_ascii_lowercase()))
             .copied()
+    }
+
+    /// One controller's state slot, assigned the first time the program names it.
+    fn pid_state(&mut self, instance: &str) -> u16 {
+        let next = self.pid_states.len() as u16;
+        *self
+            .pid_states
+            .entry(instance.trim().to_ascii_lowercase())
+            .or_insert(next)
     }
 
     /// A declared array of structs, by any spelling of its name.
@@ -357,7 +370,48 @@ pub enum PresetSource {
     },
 }
 
+/// One operand as an analogue block reads it: a REAL-typed slot is its `f32` bits, an
+/// integer slot or marker word is a number, and a literal is already a number.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RealOperand {
+    Bits(u16),
+    Word(u16),
+    Const(f32),
+}
+
+/// Where an analogue block writes its result: a REAL slot takes the bits, an integer
+/// slot or a marker word takes the value rounded, which is what the reference engine
+/// does when it stores a float into an integer tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RealTarget {
+    Bits(u16),
+    Word(u16),
+}
+
+/// A PID controller's baked setup. The members are the block instance's declared
+/// values, so the scan never looks a tag up.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PidConfig {
+    pub kp: f32,
+    pub ki: f32,
+    pub kd: f32,
+    /// The process variable's raw range, scaled to `min_s..max_s`.
+    pub min_i: f32,
+    pub max_i: f32,
+    pub min_s: f32,
+    pub max_s: f32,
+    /// The output's range in percent, and the range it is scaled to when it leaves.
+    pub min_o: f32,
+    pub max_o: f32,
+    pub min_cv: f32,
+    pub max_cv: f32,
+    /// How often the loop updates, in milliseconds. Zero updates every scan.
+    pub update_ms: u32,
+    /// `CA`: the error is `pv - sp`, for a loop whose output lowers the value.
+    pub reverse: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Op {
     PushConst(bool),
     Push(u16),
@@ -436,6 +490,25 @@ pub enum Op {
         slot: u16,
         ty: crate::profile::layout::WordType,
     },
+    /// `SCP`: scale one range onto another and store it.
+    Scale {
+        dest: RealTarget,
+        x: RealOperand,
+        min_in: RealOperand,
+        max_in: RealOperand,
+        min_out: RealOperand,
+        max_out: RealOperand,
+    },
+    /// `PID`: one evaluation of a controller, which may be a loop update or a skip.
+    Pid {
+        state: u16,
+        pv: RealOperand,
+        sp: Option<RealOperand>,
+        /// The master loop whose output becomes this loop's setpoint.
+        master: Option<u16>,
+        dest: RealTarget,
+        config: PidConfig,
+    },
     /// Push one bit of a bank word on the bit stack: `Bits[0].0`, or a marker
     /// word's bit.
     WordBit {
@@ -512,7 +585,7 @@ pub enum Op {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     pub ops: Vec<Op>,
     /// Bit slots in the scan image: inputs, then outputs, then variables.
@@ -523,6 +596,8 @@ pub struct Program {
     pub words: WordLayout,
     /// Function-block instances: `FB_PER_TYPE` per kind, index `kind*4 + n`.
     pub fb_count: u16,
+    /// PID controllers: one state each, in the order the program first names them.
+    pub pid_count: u16,
     /// Previous-value slots for edge contacts.
     pub edge_count: u16,
     /// The values a declaration says its words start with: slot and value. A scan
@@ -533,7 +608,7 @@ pub struct Program {
     pub output_count: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Compiled {
     pub program: Program,
     pub symbols: Vec<Symbol>,
@@ -547,6 +622,9 @@ pub struct Compiled {
     pub word_outputs: Vec<Binding>,
     pub float_inputs: Vec<Binding>,
     pub float_outputs: Vec<Binding>,
+    /// The width each declared word slot carries, so a reader of the bank knows a
+    /// REAL from an integer. Sorted by slot.
+    pub word_types: Vec<(u16, crate::profile::layout::WordType)>,
     pub hash: String,
     pub warnings: Vec<Diagnostic>,
 }
@@ -823,6 +901,7 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         word_count: words.total(),
         words,
         fb_count: FB_PER_TYPE * 9,
+        pid_count: lookup.pid_states.len() as u16,
         edge_count: edges,
         init: initial_words(&bank.vars),
         ops,
@@ -844,6 +923,15 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         word_outputs,
         float_inputs,
         float_outputs,
+        word_types: {
+            let mut types = lookup
+                .word_types
+                .iter()
+                .map(|(slot, ty)| (*slot, *ty))
+                .collect::<Vec<_>>();
+            types.sort_by_key(|(slot, _)| *slot);
+            types
+        },
         hash: project_hash(project),
         warnings,
     })
@@ -1702,7 +1790,21 @@ fn collect_presets(project: &Project, lookup: &mut Lookup) {
                 block,
                 instance,
                 preset,
-            } => record(block, instance, preset, lookup),
+                args,
+            } => {
+                // An analogue block's operands are its pins: a PID's instance is the
+                // tag it is named with, and its state slot is assigned here so
+                // lowering never has to mutate the table.
+                if let Some(crate::profile::spec::Family::Analog(name)) =
+                    crate::profile::spec::spec(block).map(|spec| spec.family)
+                {
+                    let _ = args;
+                    if name == crate::profile::spec::AnalogName::Pid {
+                        lookup.pid_state(instance);
+                    }
+                }
+                record(block, instance, preset, lookup)
+            }
             Logic::Series { items } | Logic::Parallel { items } => {
                 for item in items {
                     walk(item, lookup);
@@ -1980,6 +2082,134 @@ pub fn compare_op_for(name: CompareName) -> Op {
 ///
 /// The profile parses the name and counts the instances; this maps its kind onto
 /// the compiler's enum.
+/// The operand one analogue pin names, as the scan reads it: a REAL slot is its bits,
+/// an integer slot or marker word is a number, a literal is already one.
+fn real_operand(text: &str, lookup: &Lookup) -> Option<RealOperand> {
+    let text = text.trim();
+    if let Ok(value) = text.parse::<f32>() {
+        return Some(RealOperand::Const(value));
+    }
+    let operand = crate::profile::resolve::resolve(text, lookup.words()).ok()?;
+    match operand {
+        WordOperand::Slot(slot) | WordOperand::Word(slot) => match lookup.slot_type(slot) {
+            Some(ty) if ty == crate::profile::layout::WordType::REAL => {
+                Some(RealOperand::Bits(slot))
+            }
+            _ => Some(RealOperand::Word(slot)),
+        },
+        _ => None,
+    }
+}
+
+/// Where an analogue block stores its result: a REAL slot takes the bits, an integer
+/// slot or a marker word takes the value rounded.
+fn real_target(text: &str, lookup: &Lookup) -> Option<RealTarget> {
+    let operand = crate::profile::resolve::resolve(text.trim(), lookup.words()).ok()?;
+    match operand {
+        WordOperand::Slot(slot) | WordOperand::Word(slot) => match lookup.slot_type(slot) {
+            Some(ty) if ty == crate::profile::layout::WordType::REAL => {
+                Some(RealTarget::Bits(slot))
+            }
+            _ => Some(RealTarget::Word(slot)),
+        },
+        _ => None,
+    }
+}
+
+/// One analogue block's op, from its pins. A pin that does not resolve leaves the op
+/// out: validation refused it, and a false bit keeps the rung alive.
+fn push_analog(
+    ops: &mut Vec<Op>,
+    lookup: &Lowering<'_>,
+    name: crate::profile::spec::AnalogName,
+    instance: &str,
+    args: &[crate::model::CallArg],
+) {
+    let pin = |pin: &str| {
+        args.iter()
+            .find(|argument| argument.pin.eq_ignore_ascii_case(pin))
+            .map(|argument| argument.var.as_str())
+    };
+    match name {
+        crate::profile::spec::AnalogName::Scale => {
+            let (Some(dest), Some(x), Some(min_in), Some(max_in), Some(min_out), Some(max_out)) = (
+                pin("OUT").and_then(|text| real_target(text, lookup)),
+                pin("IN").and_then(|text| real_operand(text, lookup)),
+                pin("MIN_IN").and_then(|text| real_operand(text, lookup)),
+                pin("MAX_IN").and_then(|text| real_operand(text, lookup)),
+                pin("MIN_OUT").and_then(|text| real_operand(text, lookup)),
+                pin("MAX_OUT").and_then(|text| real_operand(text, lookup)),
+            ) else {
+                ops.push(Op::PushConst(false));
+                return;
+            };
+            ops.push(Op::Scale {
+                dest,
+                x,
+                min_in,
+                max_in,
+                min_out,
+                max_out,
+            });
+        }
+        crate::profile::spec::AnalogName::Pid => {
+            let (Some(dest), Some(pv)) = (
+                pin("OUT").and_then(|text| real_target(text, lookup)),
+                pin("IN").and_then(|text| real_operand(text, lookup)),
+            ) else {
+                ops.push(Op::PushConst(false));
+                return;
+            };
+            // The controller's setup is baked, so the scan never reads a tag: a
+            // member that is not a literal is refused by validation.
+            let value = |pin_name: &str, default: f32| {
+                pin(pin_name)
+                    .and_then(|text| text.trim().parse::<f32>().ok())
+                    .unwrap_or(default)
+            };
+            let config = PidConfig {
+                kp: value("KP", 1.0),
+                ki: value("KI", 0.0),
+                kd: value("KD", 0.0),
+                min_i: value("MINI", 0.0),
+                max_i: value("MAXI", 0.0),
+                min_s: value("MINS", 0.0),
+                max_s: value("MAXS", 100.0),
+                min_o: value("MINO", 0.0),
+                max_o: value("MAXO", 100.0),
+                min_cv: value("MINCV", 0.0),
+                max_cv: value("MAXCV", 0.0),
+                // `UPD` is seconds in the reference dialect; the scan clock is
+                // milliseconds.
+                update_ms: (value("UPD", 0.1) * 1000.0).round().max(0.0) as u32,
+                reverse: false,
+            };
+            let state = lookup
+                .pid_states
+                .get(&instance.trim().to_ascii_lowercase())
+                .copied()
+                .unwrap_or(0);
+            let sp = pin("SP").and_then(|text| real_operand(text, lookup));
+            // A cascade: the pin names the master loop, whose output in percent
+            // becomes this loop's setpoint.
+            let master = pin("MASTER").and_then(|text| {
+                lookup
+                    .pid_states
+                    .get(&text.trim().to_ascii_lowercase())
+                    .copied()
+            });
+            ops.push(Op::Pid {
+                state,
+                pv,
+                sp,
+                master,
+                dest,
+                config,
+            });
+        }
+    }
+}
+
 /// A block with its preset resolved through the symbol table: a literal, a time, a
 /// marker word, a declared word, or one element of a declared array.
 ///
@@ -2246,10 +2476,21 @@ fn lower_logic(logic: &Logic, lookup: &Lowering<'_>, edges: &mut u16, ops: &mut 
             block,
             instance,
             preset,
-        } => match block_of(block, instance, preset, lookup) {
-            Some((kind, instance, preset)) => push_block(ops, lookup, kind, instance, preset),
-            None => ops.push(Op::PushConst(false)),
-        },
+            args,
+        } => {
+            // An analogue block's operands are its pins, so it is lowered from the
+            // args rather than from a preset.
+            if let Some(crate::profile::spec::Family::Analog(name)) =
+                crate::profile::spec::spec(block).map(|spec| spec.family)
+            {
+                push_analog(ops, lookup, name, instance, args);
+                return;
+            }
+            match block_of(block, instance, preset, lookup) {
+                Some((kind, instance, preset)) => push_block(ops, lookup, kind, instance, preset),
+                None => ops.push(Op::PushConst(false)),
+            }
+        }
         Logic::Series { items } => {
             // Power flows left to right. A block consumes the power so far as
             // its input and pushes Q, so the rest of the rung continues from
@@ -2261,9 +2502,17 @@ fn lower_logic(logic: &Logic, lookup: &Lowering<'_>, edges: &mut u16, ops: &mut 
                         block,
                         instance,
                         preset,
+                        args,
                     } => {
                         if !powered {
                             ops.push(Op::PushConst(true));
+                        }
+                        if let Some(crate::profile::spec::Family::Analog(name)) =
+                            crate::profile::spec::spec(block).map(|spec| spec.family)
+                        {
+                            push_analog(ops, lookup, name, instance, args);
+                            powered = true;
+                            continue;
                         }
                         match block_of(block, instance, preset, lookup) {
                             Some((kind, instance, preset)) => {

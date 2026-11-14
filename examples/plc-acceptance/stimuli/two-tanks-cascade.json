@@ -3,9 +3,38 @@
   "source": "two-tanks-cascade.plcy",
   "scan_ms": 10,
   "scans": 200,
-  "note": "Two PID loops with an SCP scaling block and a MOV, feeding an analogue output. Only the high-level alarm on %I0.3 is observable as a bit; the loops themselves are analogue.",
+  "note": "Two PID loops with an SCP scaling block and a MOV, feeding an analogue output. The analogue inputs are held: %IW68 sets a 50 % setpoint, %IW66 and %IW64 are the two loops' processes. The alarm bit %I0.3 pulses in the middle. The loops themselves are traced as reals with a declared tolerance.",
   "held": {},
   "inputs": {
-    "%I0.3": [[50, true], [150, false]]
+    "%I0.3": [
+      [
+        50,
+        true
+      ],
+      [
+        150,
+        false
+      ]
+    ]
+  },
+  "words": {
+    "%IW68": [
+      [
+        0,
+        13824
+      ]
+    ],
+    "%IW66": [
+      [
+        0,
+        4000
+      ]
+    ],
+    "%IW64": [
+      [
+        0,
+        8000
+      ]
+    ]
   }
 }
