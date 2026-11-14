@@ -7,7 +7,8 @@ use crate::SCHEMA_VERSION;
 /// Which PLC family's semantics a project is written in.
 ///
 /// One document, two meanings. `iec` is the semantics this tree shipped with:
-/// ZX's grid, the marker-word bank, and a counter whose `Q` is `CV >= PV`.
+/// a nine-position grid, the marker-word bank, and a counter whose `Q` is
+/// `CV >= PV`.
 /// `classicladder`
 /// is the one the `.clp` importer now speaks: its counter's `done` is equality,
 /// it wraps at 0..9999, it carries empty and full outputs, and its addresses are
@@ -273,7 +274,7 @@ impl FbdGrid {
 
 /// One function-block assignment: `output := block(inputs…)`.
 ///
-/// ZX-PLC draws blocks on a grid and lets one block's output feed another's
+/// A block's output may feed another's
 /// input. Here a line is the same idea named once: an input may be any declared
 /// operand, including the output of an earlier line, which is how blocks nest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -311,7 +312,7 @@ pub struct IoPoint {
     pub name: String,
     pub direction: IoDirection,
     pub kind: IoKind,
-    /// Free text shown next to the operand, as ZX-PLC's symbol table has.
+    /// Free text shown next to the operand, as a symbol table has.
     #[serde(default)]
     pub comment: String,
 }

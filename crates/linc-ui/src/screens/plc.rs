@@ -42,8 +42,8 @@ const POLL_CONNECTED: Duration = Duration::from_millis(120);
 const POLL_OFFLINE: Duration = Duration::from_millis(900);
 /// Force lifetime requested from the daemon. The page never holds a force for
 /// ever: a lost HMI must not leave a pin pinned.
-/// A simulation force holds until it is released or the data is reset, as the ZX
-/// simulation's toggles do. It must never expire while the operator navigates.
+/// A simulation force holds until it is released or the data is reset. It must
+/// never expire while the operator navigates.
 const FORCE_TTL_MS: u32 = 0;
 
 /// The watch list holds at most this many operands (manual §11).
@@ -1322,8 +1322,8 @@ impl PlcUi {
         self.project.all_pous().len()
     }
 
-    /// A new POU in `language`, selected and opened for editing. ZX-PLC's
-    /// POU > New asks for the name and language; the name is generated here.
+    /// A new POU in `language`, selected and opened for editing. POU > New asks
+    /// for the name and language; the name is generated here.
     pub fn add_pou(&mut self, language: PouLanguage) {
         let mut pous = self.project.all_pous();
         let name = format!("POU{}", pous.len() + 1);
@@ -2397,7 +2397,7 @@ impl PlcUi {
                         if let Some(mut cells) = migrated {
                             if position < POSITIONS {
                                 cells.resize(POSITIONS, Cell::Wire);
-                                // ZX asks for a box's instance and preset as it
+                                // A box asks for its instance and preset as it
                                 // is placed, so the window opens from the write:
                                 // opening it from the editor ran a frame before
                                 // the cell existed and was then cleared.
@@ -2598,7 +2598,7 @@ impl PlcUi {
 // Drawing
 // ---------------------------------------------------------------------------
 
-/// The page the PLC application shows, as ZX-PLC's VIEW menu chooses it.
+/// The page the PLC application shows, chosen by the VIEW menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlcPage {
     PouList,
@@ -2614,7 +2614,7 @@ pub enum PlcPage {
 /// The page's status bar height, below the content.
 const STATUS_BAR_HEIGHT: f32 = 22.0;
 
-/// The PLC page is the launcher. ZX-PLC is a keyboard application, so the
+/// The PLC page is the launcher. The application is keyboard-driven, so the
 /// workbench itself is a popped-out overlay that owns every key; the page keeps
 /// the project, the service and the way in.
 
@@ -3341,8 +3341,8 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     }
 }
 
-/// ZX-PLC's menu bar: FILE, POU, EDIT, VIEW, RUN, HELP, with the current POU and
-/// its language at the right, as the ZX screen shows `DEMO_LD (L10)`.
+/// The menu bar: FILE, POU, EDIT, VIEW, RUN, HELP, with the current POU and its
+/// language at the right.
 fn page_body(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
     match plc.page {
         PlcPage::PouList => pou_list_page(plc, ui, height, actions),
@@ -3625,7 +3625,7 @@ fn pou_list_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Ac
 }
 
 /// The EDIT page: the selected POU in its own language, with the property
-/// panel on the right. ZX-PLC opens a picker on Enter; the panel is the modern
+/// panel on the right. Enter opens a picker; the panel is the modern
 /// form of the same thing, and it edits the same selection.
 fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
     let language = plc
@@ -3877,7 +3877,7 @@ fn il_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
                             .any(|known| known.eq_ignore_ascii_case(plc.il_buffer.trim()))
                     {
                         // A known mnemonic uppercases and the cursor moves on,
-                        // which is what SPACE does on the ZX line.
+                        // which is what SPACE does in the line editor.
                         plc.il_buffer = format!("{} ", plc.il_buffer.trim().to_ascii_uppercase());
                     } else {
                         plc.il_buffer.push(character);
@@ -3983,7 +3983,7 @@ fn il_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
 }
 
 /// Draw the lines as a diagram: inputs enter on their own rows, the block spans
-/// them, and its output leaves on the top row, which is the shape ZX draws.
+/// them, and its output leaves on the top row.
 /// The value list for an FBD output or input: declared symbols (with their
 /// comments), the word bank, block members, booleans, numbers and times.
 /// Instance and preset of the block on one FBD line. The same choices the ladder/// Instance and preset of the block under the FBD cursor.
@@ -6102,8 +6102,7 @@ fn draw_remote_trend(plc: &PlcUi, ui: &mut Ui) {
 }
 
 /// The simulation panel: one LED per declared I/O point. A click on an input
-/// forces it for the daemon's force TTL, which is how the ZX simulation's LED
-/// panel sets an input. Outputs are read-only.
+/// forces it for the daemon's force TTL. Outputs are read-only.
 /// The configured input at `bit` of the selected byte, if that slot is bound. The
 /// panel shows unbound slots disabled rather than inventing names, as the manual's
 /// 16 fixed inputs do.
@@ -6199,7 +6198,7 @@ fn sim_view(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
     sim_bit_panel(plc, ui, actions);
 }
 
-/// ZX-PLC's status bar: the symbol and comment of the selection on the left,
+/// The status bar: the symbol and comment of the selection on the left,
 /// free space and the run state on the right.
 /// Rename or copy a POU: the name is typed once and applied on Enter.
 fn pou_edit_dialog(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) {
@@ -6284,7 +6283,7 @@ fn pou_edit_dialog(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Actio
 
 /// Copy the marked block (or the cell under the cursor) without a keyboard.
 fn status_bar(plc: &PlcUi, ui: &mut Ui) {
-    // The cell under the cursor wins, because that is what ZX shows; with no
+    // The cell under the cursor wins; with no
     // cursor the selected rung's coil and its comment stand in.
     let sections = plc.current_pou_sections();
     let rung_at = |section: usize, rung: usize| {

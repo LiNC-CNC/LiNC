@@ -1,4 +1,4 @@
-//! The ZX-PLC ladder grid: cells, cursor, element picker, operand list.
+//! The ladder grid: cells, cursor, element picker, operand list.
 //!
 //! The page keeps the state (`cell_cursor`, `picker`, `operand_pick`); this
 //! module draws the grid and owns the keys while the editor overlay is open.
@@ -183,7 +183,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             actions.push(Action::ToggleWatch(operand));
         }
     }
-    // ZX element letters. They live on the page now that the editor overlay owns
+    // Element letters. They live on the page now that the editor overlay owns
     // the keyboard, and a text field's focus stops the handler above.
     let letter = |input: &mut egui::InputState, key: egui::Key| {
         input.consume_key(egui::Modifiers::NONE, key)
@@ -720,7 +720,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         }
     }
     if delete && cursor.2 < POSITIONS {
-        // ZX closes the row up to the left; a wire in place would leave a gap.
+        // Delete closes the row up to the left; a wire in place would leave a gap.
         actions.push(Action::DeleteCell {
             section: cursor.0,
             rung: cursor.1,
@@ -1345,7 +1345,7 @@ fn modal_keys(ctx: &egui::Context) -> ModalKeys {
     keys
 }
 
-/// The element a letter stands for, as the ZX front panel labels it.
+/// The element a letter stands for.
 fn element_for_key(character: char) -> Option<&'static str> {
     Some(match character.to_ascii_uppercase() {
         'W' | '-' => "wire",
@@ -2234,7 +2234,7 @@ fn enter_target(cursor: (usize, usize, usize), cell: Option<&Cell>) -> EnterTarg
     }
 }
 
-/// The six comparison conditions, in the order the ZX operator list shows them,
+/// The six comparison conditions, in operator order,
 /// with the formula the standard writes for each.
 const COMPARE_OPS: [(&str, &str); 6] = [
     ("GT", "A > B"),
@@ -3295,7 +3295,7 @@ pub fn cell_symbol(cell: &Cell) -> CellSymbol {
     }
 }
 
-/// ZX geometry: one continuous conductor per rung, name above the symbol, no
+/// One continuous conductor per rung, name above the symbol, no
 /// cell borders and no spacing between cells. A row is a strip whose conductor
 /// runs along `CONDUCTOR_Y` from its left edge to its right edge.
 pub const CELL_WIDTH: f32 = 48.0;
@@ -3362,7 +3362,7 @@ pub(crate) fn draw_cell_symbol(
                 );
             }
             if let CellSymbol::Edge(rising) = symbol {
-                // ZX writes the letter between the bars; an arrow over the bar read
+                // The letter sits between the bars; an arrow over the bar read
                 // as a stray plus sign at this size.
                 painter.text(
                     egui::pos2(cx, y - 11.0),

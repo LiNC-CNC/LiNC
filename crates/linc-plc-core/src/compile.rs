@@ -107,7 +107,7 @@ impl Lookup {
     }
 }
 
-/// Standard function blocks, four instances each, as ZX-PLC numbers them.
+/// Standard function blocks, four instances each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FbKind {
     Ton,
@@ -214,7 +214,7 @@ impl MathOp {
     }
 }
 
-/// Edge contacts a project may declare, the same 32 ZX-PLC allows.
+/// Edge contacts a project may declare.
 pub const MAX_EDGE_CONTACTS: u16 = 32;
 
 /// Instances per function-block kind. Dialect data now; the name stays here
@@ -525,7 +525,7 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         .iter()
         .map(|pou| (pou.name.to_ascii_uppercase(), pou))
         .collect();
-    // MAIN is the entry point, as the ZX manual states: the scan runs MAIN and
+    // MAIN is the entry point: the scan runs MAIN and
     // MAIN calls the rest. A project without MAIN (older files, tests) keeps
     // the previous rule so nothing stops running silently.
     let main = pous

@@ -1103,7 +1103,7 @@ pub(crate) struct OverlayUi {
     /// the page (see `restore_page_keyboard`).
     pub overlay_was_open: bool,
     pub confirm_token: Option<linc_core::model::ToolChangeToken>,
-    /// The PLC editor is popped out: it owns the whole keyboard, exactly like
-    /// the ZX-PLC application, so the shell's keys must not reach the page.
+    /// The PLC editor is popped out: it owns the whole keyboard, so the shell's
+    /// keys must not reach the page.
     pub plc_editor: bool,
 }

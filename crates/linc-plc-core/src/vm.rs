@@ -26,7 +26,7 @@ const STACK_DEPTH: usize = 128;
 /// stops executing instructions instead of hanging the scheduler.
 const MAX_OPS_PER_SCAN: usize = 100_000;
 
-/// One 20 ms tick, ZX-PLC's scan period.
+/// One 20 ms tick, the default scan period.
 pub const DEFAULT_DT_MS: u16 = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,7 +178,8 @@ impl Vm {
     }
 
     /// Scan with the time since the previous scan. The default is one 20 ms
-    /// tick, which is what ZX-PLC measures in and what deterministic tests use.
+    /// tick, which is the unit the scan measures time in and what deterministic
+    /// tests use.
     pub fn scan(&mut self, inputs: &[bool]) -> ScanStats {
         self.scan_with_dt(inputs, DEFAULT_DT_MS)
     }
@@ -520,7 +521,7 @@ impl Vm {
                 Op::Jump(target) => pc = target as usize,
                 Op::JumpIf { target, when } => {
                     // Conditional jumps consume the result bit: the next line
-                    // starts a new expression, as on the ZX.
+                    // starts a new expression.
                     let value = pop(&stack, &mut depth);
                     if value == when {
                         pc = target as usize;

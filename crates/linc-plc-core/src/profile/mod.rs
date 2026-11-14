@@ -78,7 +78,7 @@ pub trait Profile {
     fn counter_top(&self) -> Option<i32>;
 }
 
-/// The dialect LiNC ships: the ZX-derived instruction set, its sixteen marker
+/// The dialect LiNC ships: its instruction set, its sixteen marker
 /// words and its block members.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Iec;

@@ -1,6 +1,6 @@
 //! The ladder grid: what the editor edits.
 //!
-//! A rung is nine element positions plus a coil position, as ZX-PLC draws it.
+//! A rung is nine element positions plus a coil position.
 //! The compiler lowers a row of cells into the same `Logic` tree the ladder
 //! canvas has always produced, so both representations share one evaluator.
 //!
@@ -32,7 +32,7 @@ pub enum Cell {
     /// `-[P]-` / `-[N]-`: a rising or falling edge. Needs the previous scan's
     /// value of `var`, which the VM does not carry yet.
     Edge { var: String, rising: bool },
-    /// A vertical link that joins the row below: the ZX `V` at this column.
+    /// A vertical link that joins the row below.
     Link,
     /// `TON` / `TOF` / `TP` / `CTU` / `CTD` box.
     Block {

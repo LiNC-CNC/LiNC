@@ -10,8 +10,7 @@ use crate::model::{IoDirection, IoKind, Project};
 use crate::profile::Profile;
 
 /// Marker words the bank begins with: the internal, retained words a program
-/// addresses by number. ZX-PLC has `MW0`-`MW15`, and keeping the same sixteen
-/// means an existing ZX program's words mean the same thing here.
+/// addresses by number: `MW0`-`MW15`, sixteen retained words.
 ///
 /// The spelling of those words is [`crate::profile::resolve::marker_word`]'s, not
 /// this constant's: a count is a width, not a name.
@@ -22,7 +21,7 @@ pub const WORD_COUNT: u16 = 16;
 /// past this is refused rather than truncated.
 pub const MAX_WORDS: u16 = 256;
 
-/// Most edge contacts a project may declare, the same 32 ZX-PLC allows.
+/// Most edge contacts a project may declare.
 pub const MAX_EDGE_CONTACTS: u16 = 32;
 
 /// The word bank's regions, in the fixed order the ABI assigns:
