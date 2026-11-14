@@ -113,12 +113,12 @@ fn the_table_is_the_whole_instruction_set() {
                 // A row with an IL form is either IL-only, or it shares its name
                 // with a block whose family matches the action (`ADD` is Math +
                 // Word, `GT` is Compare + Compare).
-                let consistent = match (row.family, row.il) {
-                    (Family::Il, _) => true,
-                    (Family::Math(_), IlForm::Word(_)) => true,
-                    (Family::Compare(_), IlForm::Compare(_)) => true,
-                    _ => false,
-                };
+                let consistent = matches!(
+                    (row.family, row.il),
+                    (Family::Il, _)
+                        | (Family::Math(_), IlForm::Word(_))
+                        | (Family::Compare(_), IlForm::Compare(_))
+                );
                 assert!(
                     consistent,
                     "`{}`: {:?} with {:?}",

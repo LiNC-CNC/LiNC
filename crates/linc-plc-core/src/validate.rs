@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::il::{parse_line, word_operand, IlLine};
 use crate::model::{IoDirection, IoKind, Logic, PouLanguage, Project, Section};
 use crate::profile::spec::IlForm;
+use crate::profile::SymbolLookup;
 use crate::SCHEMA_VERSION;
 
 /// Maximum accepted logic nesting depth.
@@ -209,10 +210,12 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     let path = format!("pous[{index}].il[{line_index}]");
                     match parse_line(line) {
                         IlLine::Instruction { mnemonic, operand } => {
-                            let operand_is_word = word_operand(&operand).is_some()
-                                || operand.trim().parse::<i32>().is_ok()
-                                || operand.starts_with("T#")
-                                || word_symbols.contains(&operand.trim().to_ascii_lowercase());
+                            // A word operand is whatever the profile resolves: a
+                            // marker word, a time, a literal, a block member or a
+                            // declared word point. The same function the compiler
+                            // addresses with, so flow and code cannot disagree.
+                            let operand_is_word =
+                                crate::profile::resolve::resolve(&operand, &word_slots).is_ok();
                             if !operand.trim().is_empty() {
                                 // Only a mnemonic that fixes the operand's side
                                 // is checked here: `LD`/`LDN`/`ST`/`STN`/`=` take
@@ -351,8 +354,8 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                                                 let timer = block
                                                     .map(|(kind, _, _)| kind.is_timer())
                                                     .unwrap_or(true);
-                                                // A literal preset, `MWn`, or a
-                                                // declared word point; a block
+                                                // A literal preset, a marker word,
+                                                // or a declared word point; a block
                                                 // member is a readable value but
                                                 // not a preset source.
                                                 let ok = crate::compile::preset_source(
@@ -439,7 +442,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         grid,
                         index,
                         &known,
-                        &word_symbols,
+                        &word_slots,
                         &io_kinds,
                         &mut diagnostics,
                     );
@@ -552,7 +555,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                             || !line
                                 .inputs
                                 .iter()
-                                .all(|input| word_operand_known(input, &word_symbols))
+                                .all(|input| word_operand_known(input, &word_slots))
                         {
                             diagnostics.push(Diagnostic::error(
                                 "fbd_input",
@@ -800,7 +803,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                             format!("{rung_path}.cells[{cell_index}]"),
                             &mut diagnostics,
                         );
-                        if !word_operand_known(operand, &word_symbols) {
+                        if !word_operand_known(operand, &word_slots) {
                             diagnostics.push(Diagnostic::error(
                                 "cell_compare_operand",
                                 format!(
@@ -826,11 +829,12 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                             format!("{rung_path}.cells[{cell_index}]"),
                         ));
                     }
-                    if !compute_target_known(target, &word_symbols) {
+                    if !compute_target_known(target, &word_slots) {
                         diagnostics.push(Diagnostic::error(
                             "compute_target",
                             format!(
-                                "'{target}' is not a place to write; use MW0-15, a word point or a block member such as TON0.PT"
+                                "'{target}' is not a place to write; use {}, a word point or a block member such as TON0.PT",
+                                crate::profile::resolve::marker_range()
                             ),
                             format!("{rung_path}.cells[{cell_index}]"),
                         ));
@@ -843,7 +847,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                             format!("{rung_path}.cells[{cell_index}]"),
                             &mut diagnostics,
                         );
-                        if !word_operand_known(operand, &word_symbols) {
+                        if !word_operand_known(operand, &word_slots) {
                             diagnostics.push(Diagnostic::error(
                                 "cell_compute_operand",
                                 format!(
@@ -1128,11 +1132,10 @@ fn kind_label(kind: IoKind) -> &'static str {
     }
 }
 
-/// Is this text a word value? `MWn`, a time, a literal and a block member keep
-/// their old path; a declared word or float point resolves through the bank.
-fn word_operand_known(text: &str, word_symbols: &HashSet<String>) -> bool {
-    crate::compile::word_operand_value(text).is_some()
-        || word_symbols.contains(&text.trim().to_ascii_lowercase())
+/// Is this text a word value? The profile's resolver decides, so validation
+/// accepts exactly what the compiler can address.
+fn word_operand_known(text: &str, word_slots: &SymbolLookup) -> bool {
+    crate::profile::resolve::resolve(text, word_slots).is_ok()
 }
 
 /// Check one expression, mapping the parser's refusal to a diagnostic with its
@@ -1277,12 +1280,11 @@ fn is_il_conditional_call(mnemonic: &str) -> bool {
     matches!(il_form(mnemonic), Some(IlForm::Call(Some(_))))
 }
 
-/// Is this a place a compute coil may write? A bank slot (`MWn` or a declared
-/// word point) or a block member; never a literal. A block member on the left
-/// of a compute is a write, which is what `compute_target` guards.
-fn compute_target_known(text: &str, word_symbols: &HashSet<String>) -> bool {
-    crate::compile::word_operand_value(text).is_some_and(|operand| operand.is_writable())
-        || word_symbols.contains(&text.trim().to_ascii_lowercase())
+/// Is this a place a compute coil may write? A bank slot (a marker word or a
+/// declared word point) or a block member; never a literal. A block member on
+/// the left of a compute is a write, which is what `compute_target` guards.
+fn compute_target_known(text: &str, word_slots: &SymbolLookup) -> bool {
+    crate::profile::resolve::resolve(text, word_slots).is_ok_and(|operand| operand.is_writable())
 }
 
 /// Number of I/O points of one direction and declared kind.
@@ -1318,7 +1320,7 @@ fn check_fbd_grid(
     grid: &crate::model::FbdGrid,
     pou_index: usize,
     known: &HashSet<String>,
-    word_symbols: &HashSet<String>,
+    word_slots: &SymbolLookup,
     io_kinds: &HashMap<&str, IoKind>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -1403,7 +1405,7 @@ fn check_fbd_grid(
             && !inputs
                 .iter()
                 .take(2)
-                .all(|input| word_operand_known(input.trim().trim_start_matches('!'), word_symbols))
+                .all(|input| word_operand_known(input.trim().trim_start_matches('!'), word_slots))
         {
             diagnostics.push(Diagnostic::error(
                 "fbd_input",
@@ -1415,7 +1417,7 @@ fn check_fbd_grid(
             && !inputs
                 .iter()
                 .take(2)
-                .all(|input| word_operand_known(input.trim().trim_start_matches('!'), word_symbols))
+                .all(|input| word_operand_known(input.trim().trim_start_matches('!'), word_slots))
         {
             diagnostics.push(Diagnostic::error(
                 "fbd_input",
@@ -1429,11 +1431,12 @@ fn check_fbd_grid(
                 if compute {
                     // A compute block writes a word; a literal or a bit output
                     // is not a place to put the result.
-                    if !compute_target_known(target, word_symbols) {
+                    if !compute_target_known(target, word_slots) {
                         diagnostics.push(Diagnostic::error(
                             "compute_target",
                             format!(
-                                "'{operand}' is not a place to write; use MW0-15, a word point or a block member such as TON0.PT"
+                                "'{operand}' is not a place to write; use {}, a word point or a block member such as TON0.PT",
+                                crate::profile::resolve::marker_range()
                             ),
                             format!("{path}.row"),
                         ));
@@ -1591,7 +1594,7 @@ fn check_logic(
                     format!("{path}.left"),
                     diagnostics,
                 );
-                if crate::compile::word_operand_value(operand).is_none() {
+                if crate::profile::resolve::resolve(operand, word_slots).is_err() {
                     diagnostics.push(Diagnostic::error(
                         "compare_operand",
                         format!("`{operand}` is not a word, a number or a block member"),

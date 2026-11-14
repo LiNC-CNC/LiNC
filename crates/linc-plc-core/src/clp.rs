@@ -30,6 +30,8 @@ use crate::model::{
     Coil, CoilKind, IoDirection, IoKind, IoPoint, Pou, PouLanguage, Project, Rung, Section, VarDecl,
 };
 use crate::plcopen::operand_name;
+use crate::profile::resolve::{block_instance, block_member, Member};
+use crate::profile::spec::FbName;
 use crate::validate::{validate, Diagnostic, Severity};
 
 /// Rung grid width, from `classicladder.h` (`RUNG_WIDTH`).
@@ -753,7 +755,7 @@ fn import_members(members: &Members) -> Result<Project, Vec<Diagnostic>> {
     // a rung before the counter element, so the directions are known before any
     // rung is mapped. A counter rung also expands to several LiNC rungs, so a
     // jump may not target it.
-    let mut counter_kind: HashMap<i32, &'static str> = HashMap::new();
+    let mut counter_kind: HashMap<i32, FbName> = HashMap::new();
     let mut multi: HashSet<usize> = HashSet::new();
     for (index, rung) in &rungs {
         let Some((x, y)) = counter_position(rung) else {
@@ -766,7 +768,11 @@ fn import_members(members: &Members) -> Result<Project, Vec<Diagnostic>> {
             if existing != kind {
                 return Err(refuse(
                     "clp_rung_syntax",
-                    format!("counter {number} is drawn as both a {existing} and a {kind}"),
+                    format!(
+                        "counter {number} is drawn as both a {} and a {}",
+                        existing.text(),
+                        kind.text()
+                    ),
                 ));
             }
         }
@@ -935,7 +941,7 @@ struct Importer {
     iec_timers: Vec<(i32, i32)>,
     expressions: HashMap<i32, String>,
     /// Counter number -> the direction its wiring selects (`CTU` / `CTD`).
-    counter_kind: HashMap<i32, &'static str>,
+    counter_kind: HashMap<i32, FbName>,
     io: Vec<IoPoint>,
     vars: Vec<VarDecl>,
     /// ClassicLadder name (`%B7`) -> LiNC name, so one variable is declared once
@@ -1032,19 +1038,24 @@ impl Importer {
                 if !(0..crate::compile::WORD_COUNT as i32).contains(&vn) {
                     return Err(refuse(
                         "clp_variable",
-                        format!("`%W{vn}` is outside the marker words MW0..MW15"),
+                        format!(
+                            "`%W{vn}` is outside the marker words {}",
+                            crate::profile::resolve::marker_range()
+                        ),
                     ));
                 }
-                Ok(format!("MW{vn}"))
+                Ok(crate::profile::resolve::marker_word(vn as u16))
             }
             VAR_PHYS_WORD_INPUT => io(self, "IW", IoDirection::In, IoKind::Word),
             VAR_PHYS_WORD_OUTPUT => io(self, "QW", IoDirection::Out, IoKind::Word),
             VAR_PHYS_FLOAT_INPUT => io(self, "IF", IoDirection::In, IoKind::Float),
             VAR_PHYS_FLOAT_OUTPUT => io(self, "QF", IoDirection::Out, IoKind::Float),
-            VAR_TIMER_IEC_PRESET => Ok(format!("{}{vn}.PT", self.timer_kind(vn)?)),
-            VAR_TIMER_IEC_VALUE => Ok(format!("{}{vn}.ET", self.timer_kind(vn)?)),
-            VAR_COUNTER_PRESET => Ok(format!("{}{vn}.PV", self.counter_prefix(vn)?)),
-            VAR_COUNTER_VALUE => Ok(format!("{}{vn}.CV", self.counter_prefix(vn)?)),
+            VAR_TIMER_IEC_PRESET => {
+                Ok(block_member(self.timer_kind(vn)?, vn, Member::Preset))
+            }
+            VAR_TIMER_IEC_VALUE => Ok(block_member(self.timer_kind(vn)?, vn, Member::Value)),
+            VAR_COUNTER_PRESET => Ok(block_member(self.counter_prefix(vn)?, vn, Member::Preset)),
+            VAR_COUNTER_VALUE => Ok(block_member(self.counter_prefix(vn)?, vn, Member::Value)),
             VAR_TIMER_PRESET | VAR_TIMER_VALUE | VAR_MONOSTABLE_PRESET | VAR_MONOSTABLE_VALUE => {
                 Err(refuse(
                     "clp_legacy_timer",
@@ -1058,7 +1069,7 @@ impl Importer {
         }
     }
 
-    fn timer_kind(&self, n: i32) -> Result<&'static str, Vec<Diagnostic>> {
+    fn timer_kind(&self, n: i32) -> Result<FbName, Vec<Diagnostic>> {
         let (preset, mode) = self.iec_timers.get(n as usize).copied().ok_or_else(|| {
             refuse(
                 "clp_member",
@@ -1067,9 +1078,9 @@ impl Importer {
         })?;
         let _ = preset;
         Ok(match mode {
-            TIMER_IEC_MODE_ON => "TON",
-            TIMER_IEC_MODE_OFF => "TOF",
-            TIMER_IEC_MODE_PULSE => "TP",
+            TIMER_IEC_MODE_ON => FbName::Ton,
+            TIMER_IEC_MODE_OFF => FbName::Tof,
+            TIMER_IEC_MODE_PULSE => FbName::Tp,
             other => {
                 return Err(refuse(
                     "clp_member",
@@ -1079,7 +1090,7 @@ impl Importer {
         })
     }
 
-    fn counter_prefix(&self, n: i32) -> Result<&'static str, Vec<Diagnostic>> {
+    fn counter_prefix(&self, n: i32) -> Result<FbName, Vec<Diagnostic>> {
         self.counter_kind.get(&n).copied().ok_or_else(|| {
             refuse(
                 "clp_rung_syntax",
@@ -1346,9 +1357,9 @@ impl Importer {
                     })?;
                     let kind = self.timer_kind(n)?;
                     Cell::Block {
-                        block: kind.to_string(),
-                        instance: format!("{kind}{n}"),
-                        preset: format!("T#{preset}ms"),
+                        block: kind.text().to_string(),
+                        instance: block_instance(kind, n),
+                        preset: crate::profile::resolve::time_preset(preset),
                     }
                 }
                 ELE_TIMER | ELE_MONOSTABLE => {
@@ -1417,10 +1428,10 @@ impl Importer {
                         format!("the ladder reads counter {vn}'s done but counters.csv has no row {vn}"),
                     )
                 })?;
-                let prefix = self.counter_prefix(vn)?;
+                let kind = self.counter_prefix(vn)?;
                 Ok(Cell::Compare {
                     op: if negated { "NE" } else { "EQ" }.to_string(),
-                    left: format!("{prefix}{vn}.CV"),
+                    left: block_member(kind, vn, Member::Value),
                     right: preset.to_string(),
                 })
             }
@@ -1440,7 +1451,7 @@ impl Importer {
                 }
                 let kind = self.timer_kind(vn)?;
                 Ok(Cell::Contact {
-                    var: format!("{kind}{vn}.Q"),
+                    var: format!("{}.Q", block_instance(kind, vn)),
                     negated,
                 })
             }
@@ -1585,7 +1596,7 @@ impl Importer {
             ));
         }
         let kind = self.counter_prefix(n)?;
-        let instance = format!("{kind}{n}");
+        let instance = block_instance(kind, n);
 
         // The four input rows, and the three output rows to the right.
         let mut strips: Vec<Vec<Cell>> = Vec::new();
@@ -1652,10 +1663,11 @@ impl Importer {
         // 1. The counting block. ClassicLadder's counter has no coil, so the
         //    rung ends in a compute coil that writes CV back to itself: the
         //    block's output is consumed and nothing observable is written.
+        let value = block_member(kind, n, Member::Value);
         let count_row = if wired[2] { 2 } else { 3 };
         let mut cells = strips[count_row].clone();
         cells.push(Cell::Block {
-            block: kind.to_string(),
+            block: kind.text().to_string(),
             instance: instance.clone(),
             preset: preset.to_string(),
         });
@@ -1664,14 +1676,14 @@ impl Importer {
             label: label.clone(),
             comment: raw.comment.clone(),
             logic: crate::model::Logic::Const { value: true },
-            coil: Coil::compute(format!("{instance}.CV={instance}.CV")),
+            coil: Coil::compute(format!("{value}={value}")),
             cells,
         });
 
         // 2. The preset load (down counters), then the reset: applied in the
         //    order `CalcTypeCounter` applies them, so the reset wins.
         if wired[1] {
-            if kind == "CTU" {
+            if kind == FbName::Ctu {
                 return Err(refuse(
                     "clp_counter_preset_load",
                     format!(
@@ -1691,7 +1703,7 @@ impl Importer {
             });
         }
         if wired[0] {
-            if kind == "CTD" && preset != 0 {
+            if kind == FbName::Ctd && preset != 0 {
                 return Err(refuse(
                     "clp_counter_reset",
                     format!(
@@ -1708,7 +1720,10 @@ impl Importer {
                 logic: crate::model::Logic::Const { value: true },
                 // A down counter with preset 0: loading PV is `CV := 0`.
                 coil: Coil::new(
-                    format!("{instance}.{}", if kind == "CTU" { "R" } else { "LD" }),
+                    format!(
+                        "{instance}.{}",
+                        if kind == FbName::Ctu { "R" } else { "LD" }
+                    ),
                     CoilKind::Normal,
                 ),
                 cells,
@@ -1720,7 +1735,7 @@ impl Importer {
         if has_content(&right[1]) || !coil_column.is_free() {
             let mut cells = vec![Cell::Compare {
                 op: "EQ".to_string(),
-                left: format!("{instance}.CV"),
+                left: block_member(kind, n, Member::Value),
                 right: preset.to_string(),
             }];
             cells.extend(right[1].clone());
@@ -1820,7 +1835,7 @@ fn footprints(raw: &RawRung) -> Result<HashSet<(usize, usize)>, Vec<Diagnostic>>
 
 /// The direction a counter's wiring selects. Both inputs wired has no single
 /// LiNC counter, and neither wired counts nothing.
-fn counter_direction(raw: &RawRung, x: usize, y: usize) -> Result<&'static str, Vec<Diagnostic>> {
+fn counter_direction(raw: &RawRung, x: usize, y: usize) -> Result<FbName, Vec<Diagnostic>> {
     let number = raw.at(x, y).var_num;
     let wired = |row: usize| {
         (0..x.saturating_sub(1)).any(|column| {
@@ -1836,8 +1851,8 @@ fn counter_direction(raw: &RawRung, x: usize, y: usize) -> Result<&'static str, 
                 raw.index
             ),
         )),
-        (true, false) => Ok("CTU"),
-        (false, true) => Ok("CTD"),
+        (true, false) => Ok(FbName::Ctu),
+        (false, true) => Ok(FbName::Ctd),
         (false, false) => Err(refuse(
             "clp_rung_syntax",
             format!("rung_{}: counter {number} has neither an up nor a down input wired", raw.index),

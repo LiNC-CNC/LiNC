@@ -11,9 +11,8 @@
 //! produces the VM's stack ops: a word expression leaves one word on the word
 //! stack, a condition leaves one bit on the bit stack.
 
-use std::collections::HashMap;
-
-use crate::compile::{word_operand_value, Op, WordOperand};
+use crate::compile::{Op, WordOperand};
+use crate::profile::resolve::resolve;
 
 /// Nesting limit for one expression. The parser must bound its own recursion
 /// before it walks the tokens, or a deep expression would overflow the stack
@@ -23,10 +22,9 @@ pub const MAX_EXPR_DEPTH: usize = 32;
 /// `STACK_DEPTH` deep, and this keeps an expression far inside that.
 pub const MAX_EXPR_OPS: usize = 512;
 
-/// Declared word names, lowercased, mapped to their bank slot. `MWn`, literals
-/// and block members resolve without the table; a word or float point resolves
-/// through it by the name the project gave it.
-pub type SymbolLookup = HashMap<String, u16>;
+/// Declared word names, lowercased, mapped to their bank slot. The resolver owns
+/// the spelling; this table only answers a declared name.
+pub use crate::profile::SymbolLookup;
 
 /// Why an expression was refused. The variant picks the validator's code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -658,7 +656,7 @@ fn parse_target(tokens: &[TokenAt], lookup: &SymbolLookup) -> Result<WordOperand
         [TokenAt { offset, .. }, ..] => Err(ExprError::new(
             ExprErrorKind::Syntax,
             *offset,
-            "an assignment writes a single target: `MWn`, a word point or a block member",
+            "an assignment writes a single target: a marker word, a word point or a block member",
         )),
         [] => Err(ExprError::new(
             ExprErrorKind::Syntax,
@@ -673,45 +671,37 @@ fn resolve_target(
     offset: usize,
     lookup: &SymbolLookup,
 ) -> Result<WordOperand, ExprError> {
-    if let Some(operand) = word_operand_value(name) {
-        if operand.is_writable() {
-            return Ok(operand);
-        }
-        return Err(ExprError::new(
+    match resolve(name, lookup) {
+        Ok(operand) if operand.is_writable() => Ok(operand),
+        Ok(_) => Err(ExprError::new(
             ExprErrorKind::Operand,
             offset,
             format!("`{name}` is a value, not a place to write"),
-        ));
+        )),
+        Err(_) => Err(ExprError::new(
+            ExprErrorKind::Operand,
+            offset,
+            format!(
+                "`{name}` is not a word this project declares; an assignment writes a marker word, a word point or a block member"
+            ),
+        )),
     }
-    if let Some(slot) = lookup.get(&name.to_ascii_lowercase()) {
-        return Ok(WordOperand::Slot(*slot));
-    }
-    Err(ExprError::new(
-        ExprErrorKind::Operand,
-        offset,
-        format!(
-            "`{name}` is not a word this project declares; an assignment writes `MWn`, a word point or a block member"
-        ),
-    ))
 }
 
 fn resolve_operand(name: &str, offset: usize, lookup: &SymbolLookup) -> Result<Node, ExprError> {
-    if let Some(operand) = word_operand_value(name) {
-        return Ok(match operand {
-            WordOperand::Word(slot) | WordOperand::Slot(slot) => Node::Slot(slot),
-            WordOperand::Block(instance) => Node::Block(instance),
-            WordOperand::BlockPreset(instance) => Node::BlockPreset(instance),
-            WordOperand::Const(value) => Node::Const(value),
-        });
+    match resolve(name, lookup) {
+        Ok(WordOperand::Word(slot) | WordOperand::Slot(slot)) => Ok(Node::Slot(slot)),
+        Ok(WordOperand::Block(instance)) => Ok(Node::Block(instance)),
+        Ok(WordOperand::BlockPreset(instance)) => Ok(Node::BlockPreset(instance)),
+        Ok(WordOperand::Const(value)) => Ok(Node::Const(value)),
+        Err(_) => Err(ExprError::new(
+            ExprErrorKind::Operand,
+            offset,
+            format!(
+                "`{name}` is not a marker word, a block member or a word this project declares"
+            ),
+        )),
     }
-    if let Some(slot) = lookup.get(&name.to_ascii_lowercase()) {
-        return Ok(Node::Slot(*slot));
-    }
-    Err(ExprError::new(
-        ExprErrorKind::Operand,
-        offset,
-        format!("`{name}` is not `MWn`, a block member or a word this project declares"),
-    ))
 }
 
 fn function(upper: &str) -> Option<Func> {

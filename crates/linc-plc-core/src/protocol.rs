@@ -46,7 +46,7 @@ pub enum Request {
         value: bool,
         ttl_ms: u32,
     },
-    /// Hold a marker word (`%MW0`..`%MW15`) at a value. Block members cannot
+    /// Hold a marker word at a value. Block members cannot
     /// be forced: they follow their block.
     ForceWord {
         name: String,
@@ -119,7 +119,8 @@ pub struct StateSnapshot {
     #[serde(default)]
     pub timing: crate::timing::TimingSnapshot,
     pub vars: Vec<VarValue>,
-    /// The word bank and the block members (`MW3`, `TON0.ET`, `CTU1.CV`).
+    /// The word bank (the marker words) and the block members (`TON0.ET`,
+    /// `CTU1.CV`).
     #[serde(default)]
     pub words: Vec<WordValue>,
     /// The ladder's output values in compiled order. After a reload this holds

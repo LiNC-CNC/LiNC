@@ -2331,12 +2331,15 @@ fn operand_error(text: &str) -> Option<String> {
     if value.is_empty() {
         return Some("needs a value".to_string());
     }
-    if linc_plc_core::compile::word_operand_value(value).is_some() {
+    if linc_plc_core::profile::resolve::resolve(value, &Default::default()).is_ok() {
         return None;
     }
     let upper = value.to_ascii_uppercase();
-    Some(if upper.starts_with("MW") || upper.starts_with("%MW") {
-        format!("{value} is not a marker word: MW0 to MW15")
+    Some(if linc_plc_core::profile::resolve::looks_like_marker_word(value) {
+        format!(
+            "{value} is not a marker word: {}",
+            linc_plc_core::profile::resolve::marker_range()
+        )
     } else if upper.starts_with("T#") {
         format!("{value} needs a unit: T#250ms, T#2s or T#1m")
     } else if value.starts_with('-') || value.starts_with(|c: char| c.is_ascii_digit()) {
@@ -4304,7 +4307,7 @@ mod compare_window_tests {
         assert_eq!(edit.focus, 1, "the keys stay in the bad field");
         assert_eq!(
             edit.error.as_deref(),
-            Some("A MW99 is not a marker word: MW0 to MW15")
+            Some("A MW99 is not a marker word: MW0-15")
         );
     }
 

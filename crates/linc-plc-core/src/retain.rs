@@ -13,15 +13,16 @@ pub const MAGIC: [u8; 4] = *b"LPRT";
 /// Bumped when the byte layout changes. A reader refuses what it does not know.
 ///
 /// 2 widened a word value from two bytes to four and restricted the store to
-/// `MW0..MW15`, so a format-1 reader must refuse format 2 (and this reader must
-/// refuse format 1) rather than line four-byte values up with two-byte slots.
+/// the marker words, so a format-1 reader must refuse format 2 (and this reader
+/// must refuse format 1) rather than line four-byte values up with two-byte
+/// slots.
 pub const FORMAT: u16 = 2;
 /// A store larger than this is refused before it is parsed; 64 KiB holds every
 /// slot this VM has with room to spare.
 pub const MAX_BLOB: usize = 64 * 1024;
 
-/// The values to keep: retained bit slots by index, and the marker words
-/// `MW0..MW15` by bank slot.
+/// The values to keep: retained bit slots by index, and the marker words by bank
+/// slot.
 ///
 /// The word/float I/O regions are deliberately absent. HAL owns those values: a
 /// restore would inject a stale field value that the next scan overwrites, and

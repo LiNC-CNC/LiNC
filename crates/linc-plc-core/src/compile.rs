@@ -47,7 +47,7 @@ pub struct Binding {
 /// The word bank's regions, in the fixed order the ABI assigns:
 ///
 /// ```text
-/// [  0 .. mw )        MW0..MW15        internal, retained
+/// [  0 .. mw )        marker words     internal, retained
 /// [ mw .. mw+iw )     word inputs      s32 HAL pins, written each scan
 /// [ .. +qw )          word outputs     s32 HAL pins, read each scan
 /// [ .. +fi )          float inputs     float HAL pins, converted to i32
@@ -187,16 +187,20 @@ impl FbKind {
     }
 
     pub fn code(self) -> u16 {
+        self.name().code()
+    }
+
+    fn name(self) -> FbName {
         match self {
-            Self::Ton => 0,
-            Self::Tof => 1,
-            Self::Tp => 2,
-            Self::Ctu => 3,
-            Self::Ctd => 4,
-            Self::Rt => 5,
-            Self::Rf => 6,
-            Self::Sr => 7,
-            Self::Rs => 8,
+            Self::Ton => FbName::Ton,
+            Self::Tof => FbName::Tof,
+            Self::Tp => FbName::Tp,
+            Self::Ctu => FbName::Ctu,
+            Self::Ctd => FbName::Ctd,
+            Self::Rt => FbName::Rt,
+            Self::Rf => FbName::Rf,
+            Self::Sr => FbName::Sr,
+            Self::Rs => FbName::Rs,
         }
     }
 
@@ -245,12 +249,17 @@ impl MathOp {
 /// Edge contacts a project may declare, the same 32 ZX-PLC allows.
 pub const MAX_EDGE_CONTACTS: u16 = 32;
 
-/// Instances per function-block type.
-pub const FB_PER_TYPE: u16 = 4;
+/// Instances per function-block kind. Dialect data now; the name stays here
+/// because every caller already imports it.
+pub use crate::profile::FB_PER_TYPE;
 
-/// Word slots in the bank. ZX-PLC has `MW0`-`MW15`; keeping the same sixteen
-/// means an existing ZX program's `MW` numbers mean the same thing here.
-pub const WORD_COUNT: u16 = 16;
+/// Word slots in the bank. M3 folds this into `WordLayout`; until then the name
+/// stays here for every caller that already imports it.
+pub use crate::profile::resolve::WORD_COUNT;
+
+/// Presets parse in the profile. The name stays here because the tests that pin
+/// which presets are refused, and the importer, already call it.
+pub use crate::profile::resolve::parse_preset;
 
 /// Where a function block's preset comes from.
 ///
@@ -280,11 +289,11 @@ pub enum Op {
     Store(u16),
     Set(u16),
     Reset(u16),
-    /// Push word slot `MWn` on the word stack.
+    /// Push a marker word on the word stack.
     LoadWord(u16),
     /// Push a literal on the word stack.
     LoadConst(i32),
-    /// Pop a word and write it to `MWn`.
+    /// Pop a word and write it to a marker word.
     StoreWord(u16),
     Add,
     Sub,
@@ -794,7 +803,7 @@ fn lower_pou(
                                     .find(|(key, _)| matches!(key.as_str(), "IN" | "CU" | "CD"))
                                     .map(|(_, value)| value.as_str())
                                     .unwrap_or("FALSE");
-                                // `PT:=MW3` is a live source; a literal bakes in.
+                                // A word source is live; a literal bakes in.
                                 // Validation refused anything else, so a failed
                                 // resolve keeps the block's default preset.
                                 let preset = args
@@ -1419,79 +1428,22 @@ fn lower_grid_rung(
     (1, compute)
 }
 
-/// A word-valued operand of a compare contact.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WordOperand {
-    Word(u16),
-    Const(i32),
-    /// A declared word-typed symbol, by bank slot: a word or float I/O point.
-    Slot(u16),
-    /// The block's `ET` / `CV`.
-    Block(u16),
-    /// The block's `PT` / `PV`.
-    BlockPreset(u16),
-}
-
-impl WordOperand {
-    /// Is this somewhere a compute coil may write? A literal is a value, not a
-    /// place; a bank slot and a block member (`PT`/`PV`, `ET`/`CV`) are fields.
-    pub fn is_writable(self) -> bool {
-        matches!(
-            self,
-            Self::Word(_) | Self::Slot(_) | Self::Block(_) | Self::BlockPreset(_)
-        )
-    }
-}
-
-/// Resolve `MW3`, `T#4s`, `-12`, `TON0.ET` or `CTU1.CV`.
-pub fn word_operand_value(text: &str) -> Option<WordOperand> {
-    let text = text.trim();
-    if let Some(rest) = text
-        .strip_suffix(".PT")
-        .or_else(|| text.strip_suffix(".PV"))
-        .or_else(|| text.strip_suffix(".pt"))
-        .or_else(|| text.strip_suffix(".pv"))
-    {
-        let (_, instance, _) = parse_block(rest, rest, "")?;
-        return Some(WordOperand::BlockPreset(instance));
-    }
-    if let Some(rest) = text
-        .strip_suffix(".ET")
-        .or_else(|| text.strip_suffix(".CV"))
-        .or_else(|| text.strip_suffix(".et"))
-        .or_else(|| text.strip_suffix(".cv"))
-    {
-        let (kind, instance, _) = parse_block(rest, rest, "")?;
-        if !kind.is_timer() {
-            // `.ET` of a counter and `.CV` of a timer are the same field.
-        }
-        return Some(WordOperand::Block(instance));
-    }
-    if let Some(index) = crate::il::word_operand(text) {
-        return Some(WordOperand::Word(index));
-    }
-    if text.starts_with("T#") || text.starts_with("t#") {
-        return Some(WordOperand::Const(parse_preset(text, true)?));
-    }
-    text.parse::<i32>().ok().map(WordOperand::Const)
-}
+/// A word-valued operand of a compare contact. The type is the profile's, so the
+/// compiler, the expression parser and the importer share one operand model; the
+/// name stays here because every caller imports it from `compile`.
+pub use crate::profile::resolve::Operand as WordOperand;
 
 /// The block instance a `<instance>.Q` bit operand names. A timer's done output
-/// is not a bank slot, so a ladder contact on `TON0.Q` reads the block's `Q`
-/// through `Op::FbQ` instead of a symbol.
+/// is not a bank slot, so a ladder contact on a timer's done reads the block's
+/// `Q` through `Op::FbQ` instead of a symbol.
 pub fn q_instance(name: &str) -> Option<u16> {
-    let text = name.trim();
-    let rest = text
-        .strip_suffix(".Q")
-        .or_else(|| text.strip_suffix(".q"))?;
-    let (_, instance, _) = parse_block(rest, rest, "")?;
-    Some(instance)
+    crate::profile::resolve::q_instance(name)
 }
 
-/// Resolve a word operand in a context that has the symbol table: `MWn`, a
-/// time, a literal, a block member, or a declared word symbol.
+/// Resolve a word operand through the profile: the dialect's own spellings, then
+/// the declared word symbols.
 fn resolve_word(text: &str, lookup: &Lookup) -> Option<WordOperand> {
-    word_operand_value(text).or_else(|| lookup.word(text.trim()).map(WordOperand::Slot))
+    crate::profile::resolve::resolve(text, lookup.words()).ok()
 }
 
 /// Resolve a preset in a context that has the symbol table: a declared word
@@ -1503,7 +1455,8 @@ fn resolve_preset(text: &str, timer: bool, lookup: &Lookup) -> Option<PresetSour
         .or_else(|| preset_source(text, timer))
 }
 
-/// A preset that needs no symbol table: `MWn`, a time (`T#4s`), or a count.
+/// A preset that needs no symbol table: a marker word, a time (`T#4s`), or a
+/// count.
 /// Validation and the compiler share this, so a preset one accepts is one the
 /// other can resolve.
 pub fn preset_source(text: &str, timer: bool) -> Option<PresetSource> {
@@ -1544,78 +1497,15 @@ pub fn compare_op_for(name: CompareName) -> Op {
 }
 
 /// `TON` + `TON2` + `T#4s` -> kind, instance index, preset in ms or counts.
-pub fn parse_block(block: &str, instance: &str, preset: &str) -> Option<(FbKind, u16, i32)> {
-    let instance = instance.trim();
-    let kind = FbKind::parse(block).or_else(|| {
-        let letters: String = instance
-            .chars()
-            .take_while(|c| c.is_ascii_alphabetic())
-            .collect();
-        FbKind::parse(&letters)
-    })?;
-    let digits: String = instance
-        .chars()
-        .skip_while(|c| c.is_ascii_alphabetic())
-        .collect();
-    let number = digits.parse::<u16>().unwrap_or(0);
-    if number >= FB_PER_TYPE {
-        return None;
-    }
-    let index = kind.code() * FB_PER_TYPE + number;
-    let preset = parse_preset(preset, kind.is_timer())?;
-    Some((kind, index, preset))
-}
-
-/// Presets: `T#4s`, `T#1s500ms`, `T#2m`, or a count. Milliseconds are capped at
-/// what the 16-bit `ET` can hold, which is just under 33 seconds.
-/// Presets: `T#4s`, `T#1s500ms`, `T#2m`, or a count.
 ///
-/// A timer preset is milliseconds and is **not** clamped: the word bank is 32
-/// bits, so `T#5m` is 300,000 ms. An unrepresentable preset is refused (`None`)
-/// rather than silently cut down, because a five-minute dwell that runs for
-/// 32.7 seconds is a wrong value, not a limitation.
-pub fn parse_preset(text: &str, timer: bool) -> Option<i32> {
-    let text = text.trim();
-    if timer {
-        if text.is_empty() {
-            return Some(1000);
-        }
-        let body = text
-            .strip_prefix("T#")
-            .or_else(|| text.strip_prefix("t#"))
-            .unwrap_or(text);
-        let mut total = 0i32;
-        let mut digits = String::new();
-        let mut rest = body;
-        while !rest.is_empty() {
-            let (number, tail) = match rest.find(|c: char| c.is_ascii_alphabetic()) {
-                Some(index) => rest.split_at(index),
-                None => (rest, ""),
-            };
-            digits.clear();
-            digits.push_str(number);
-            let value: i32 = digits.parse().ok()?;
-            let (unit, tail) = if let Some(tail) = tail.strip_prefix("ms") {
-                (1, tail)
-            } else if let Some(tail) = tail.strip_prefix('s') {
-                (1000, tail)
-            } else {
-                let tail = tail.strip_prefix('m')?;
-                (60_000, tail)
-            };
-            total = total.checked_add(value.checked_mul(unit)?)?;
-            rest = tail;
-        }
-        Some(total.max(0))
-    } else {
-        if text.is_empty() {
-            return Some(10);
-        }
-        text.parse::<i32>().ok()
-    }
+/// The profile parses the name and counts the instances; this maps its kind onto
+/// the compiler's enum.
+pub fn parse_block(block: &str, instance: &str, preset: &str) -> Option<(FbKind, u16, i32)> {
+    let (name, index, preset) = crate::profile::resolve::parse_block(block, instance, preset)?;
+    Some((FbKind::from_name(name), index, preset))
 }
 
-/// Resolve an IL operand: `MWn`, a decimal literal, or a declared symbol of
+/// Resolve an IL operand: a marker word, a decimal literal, or a declared
 /// either bank. A word symbol resolves to its bank slot, never to a bit slot.
 fn il_operand(operand: &str, lookup: &Lookup) -> IlOperand {
     let text = operand.trim();

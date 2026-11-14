@@ -367,8 +367,8 @@ pub enum Logic {
         negated: bool,
     },
     /// A free-text boolean expression, the tree form of `Cell::Expr`. The text
-    /// is the ClassicLadder operand spelling after import (`MW1<2*MW2`), parsed
-    /// by `crate::expr`.
+    /// is the ClassicLadder operand spelling after import (a comparison over
+    /// marker words), parsed by `crate::expr`.
     Expr {
         text: String,
     },
@@ -384,7 +384,8 @@ pub enum Logic {
 pub struct Coil {
     pub var: String,
     pub kind: CoilKind,
-    /// A compute coil's assignment text (`MW3=MW1*2+5`). Only `CoilKind::Compute`
+    /// A compute coil's assignment text (an assignment over marker words). Only
+    /// `CoilKind::Compute`
     /// reads it; validation refuses the field on any other kind rather than
     /// ignoring it.
     #[serde(default)]

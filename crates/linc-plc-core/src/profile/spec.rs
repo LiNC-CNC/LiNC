@@ -32,6 +32,34 @@ pub enum FbName {
     Rf,
 }
 
+impl FbName {
+    /// The mnemonic this kind is drawn and imported as, read from the table so
+    /// the spelling has one source.
+    pub fn text(self) -> &'static str {
+        SPECS
+            .iter()
+            .find(|row| row.family == Family::Fb(self))
+            .map(|row| row.mnemonic)
+            .expect("every block kind has a table row")
+    }
+
+    /// The ABI code, `0..=8`, in the order the instance slots are numbered.
+    /// `compile::FbKind::code` delegates here, so the numbering has one source.
+    pub fn code(self) -> u16 {
+        match self {
+            Self::Ton => 0,
+            Self::Tof => 1,
+            Self::Tp => 2,
+            Self::Ctu => 3,
+            Self::Ctd => 4,
+            Self::Rt => 5,
+            Self::Rf => 6,
+            Self::Sr => 7,
+            Self::Rs => 8,
+        }
+    }
+}
+
 /// Block arithmetic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MathName {

@@ -44,7 +44,8 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// Bumped when a snapshot gains a field the other side must understand. 2 adds
 /// the word bank, 3 the per-scan trend, 4 the single-operand unforce, 5 the trend window, 6 scan timing.
 /// 8 widens the word bank and the `WordValue` wire type to 32 bits; a 7 client
-/// would decode `MW0 = 100000` as a truncated value, so the mismatch is refused.
+/// would decode a marker word of 100000 as a truncated value, so the mismatch is
+/// refused.
 pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Largest accepted frame payload, in bytes.

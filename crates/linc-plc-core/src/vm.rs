@@ -34,7 +34,7 @@ pub struct ScanStats {
     pub scan_count: u64,
 }
 
-/// One word of the bank in a snapshot: `MW3`, a word point, or a block member
+/// One word of the bank in a snapshot: a marker word, a word point, or a block
 /// `TON0.ET`. The value is 32 bits; the wire type widened at protocol 8.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WordValue {
@@ -66,7 +66,7 @@ pub struct Vm {
     program: Program,
     names: Vec<(String, SymbolKind)>,
     /// Declared word symbols by bank slot, so the snapshot can name `IW`/`QW`
-    /// slots the way the project does instead of calling them `MW16`.
+    /// slots the way the project does instead of by a bare slot number.
     word_names: Vec<(String, u16)>,
     inputs: Vec<Binding>,
     outputs: Vec<Binding>,
@@ -524,7 +524,7 @@ impl Vm {
         }
     }
 
-    /// The retained slots and `MW0..MW15`, ready to store. The I/O regions are
+    /// The retained slots and the marker words, ready to store. The I/O regions are
     /// not packed: HAL owns them, and a restored `QW` would be a value nobody
     /// commanded.
     pub fn retain_pack(&self) -> crate::retain::Retained {
@@ -551,7 +551,7 @@ impl Vm {
 
     /// Restore values. This writes the two scan images and the marker words; it
     /// never touches forces, so a restore cannot silently force the plant, and
-    /// it refuses a slot outside `MW0..MW15`, so a crafted store cannot command
+    /// it refuses a slot outside the marker words, so a crafted store cannot
     /// an output.
     pub fn retain_unpack(&mut self, retained: &crate::retain::Retained) {
         for (slot, value) in &retained.bits {
@@ -660,7 +660,7 @@ impl Vm {
     }
 
     /// The bank slot of a declared word point, by name. Word points do not
-    /// follow the `MWn` spelling, so a watch entry or a trend needs this lookup
+    /// follow the marker-word spelling, so a watch entry or a trend needs this
     /// rather than the operand parser.
     pub fn word_slot(&self, name: &str) -> Option<u16> {
         self.word_names
@@ -707,8 +707,8 @@ impl Vm {
     }
 
     /// Words and block members with their names, in a stable order. The marker
-    /// words are `MW0..MW15`; every other slot carries the name its project gave
-    /// it, so a watch entry for a word point resolves like any other operand.
+    /// words are the marker words; every other slot carries the name its project
+    /// gave it, so a watch entry for a word point resolves like any other operand.
     pub fn word_snapshot(&self) -> Vec<WordValue> {
         let mw = self.program.words.mw as usize;
         let mut values = self
@@ -717,7 +717,7 @@ impl Vm {
             .enumerate()
             .map(|(index, value)| WordValue {
                 name: if index < mw {
-                    format!("MW{index}")
+                    crate::profile::resolve::marker_word(index as u16)
                 } else {
                     self.word_names
                         .iter()

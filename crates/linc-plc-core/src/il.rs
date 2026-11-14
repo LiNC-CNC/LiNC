@@ -50,15 +50,12 @@ pub fn parse_call(operand: &str) -> Option<(String, Vec<(String, String)>)> {
     Some((name, args))
 }
 
-/// A word operand of the `MWn` bank, as the compiler resolves it.
+/// A marker-word operand, as its bank slot.
+///
+/// The profile owns the spelling; this is the narrow form the daemon's word
+/// force and the editor's marker-word check need, and it accepts nothing else.
 pub fn word_operand(operand: &str) -> Option<u16> {
-    let text = operand.trim();
-    let bare = text.strip_prefix('%').unwrap_or(text);
-    let digits = bare
-        .strip_prefix("MW")
-        .or_else(|| bare.strip_prefix("mw"))?;
-    let index = digits.parse::<u16>().ok()?;
-    (index < crate::compile::WORD_COUNT).then_some(index)
+    crate::profile::resolve::marker_word_slot(operand)
 }
 
 pub fn parse_line(line: &str) -> IlLine {
@@ -104,8 +101,8 @@ pub fn parse_line(line: &str) -> IlLine {
 /// Append the ops for one instruction. `index` is the resolved symbol slot.
 /// What an IL operand resolved to: a bit slot, a word slot, or a literal.
 ///
-/// `Word` is a slot in the word bank, so `MWn` and a declared word point share
-/// one path.
+/// `Word` is a slot in the word bank, so a marker word and a declared word point
+/// share one path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IlOperand {
     Bit(u16),
