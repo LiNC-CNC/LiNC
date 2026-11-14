@@ -843,6 +843,72 @@ fn an_array_element_preset_is_checked_against_the_array() {
     assert!(text.contains("'nope' is not a declared array"), "{text}");
 }
 
+/// A field of one element of an array of structs is a preset, and every way it can be
+/// wrong says which struct, field and bound it broke.
+#[test]
+fn a_struct_field_preset_is_checked_against_its_declaration() {
+    use linc_plc_core::model::{StructDecl, VarType};
+
+    let project = |preset: &str| {
+        let mut project = ld_project();
+        project.structs = vec![StructDecl {
+            name: "Recipe".into(),
+            fields: vec![
+                VarDecl::typed("FillTime", VarType::Dint),
+                VarDecl::typed("MixTime", VarType::Dint),
+            ],
+        }];
+        project.vars = vec![
+            VarDecl::typed(
+                "recipes",
+                VarType::Array {
+                    base: Box::new(VarType::Derived("Recipe".into())),
+                    len: 3,
+                },
+            ),
+            VarDecl::typed("sel", VarType::Dint),
+        ];
+        project.pous[0].sections[0].rungs[0] = Rung::without_coil(Logic::Series {
+            items: vec![
+                Logic::Const { value: true },
+                Logic::Block {
+                    block: "TON".into(),
+                    instance: "TON0".into(),
+                    preset: preset.into(),
+                },
+            ],
+        });
+        project
+    };
+
+    // A declared index and a literal one are both fine.
+    assert!(codes(&project("recipes[sel].filltime")).is_empty());
+    assert!(codes(&project("recipes[2].mixtime")).is_empty());
+
+    let text = messages(&project("recipes[sel].lamp")).join("\n");
+    assert!(
+        text.contains("'recipes[sel].lamp' names no field of `recipes` (Recipe)"),
+        "{text}"
+    );
+    let text = messages(&project("recipes[3].filltime")).join("\n");
+    assert!(
+        text.contains(
+            "'recipes[3].filltime' is element 3 of `recipes` (Recipe[3]), which has 3 elements"
+        ),
+        "{text}"
+    );
+    let text = messages(&project("recipes[nope].filltime")).join("\n");
+    assert!(
+        text.contains("'nope' is not a declared word, so it cannot index `recipes`"),
+        "{text}"
+    );
+    let text = messages(&project("nope[0].filltime")).join("\n");
+    assert!(
+        text.contains("'nope' is not a declared array of structs"),
+        "{text}"
+    );
+}
+
 /// A structured declaration is readable and refused: this build has no storage for
 /// it, and the refusal says which variable and which type.
 #[test]

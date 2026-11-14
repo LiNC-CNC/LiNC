@@ -38,6 +38,8 @@ pub struct Ctx<'a> {
     /// The typed declarations that own bank slots: what a bit-of-word operand
     /// (`Bits[0].0`) resolves its element and its width against.
     pub word_vars: &'a [crate::profile::layout::WordVar],
+    /// Declared arrays of structs: a preset may name one field of one element.
+    pub structs: &'a [crate::profile::layout::StructLayout],
     /// Declared instances, lowercased name to the function block's upper-cased name:
     /// what a call may target, and what its pins must exist on.
     pub instances: &'a HashMap<String, String>,
@@ -752,6 +754,47 @@ fn check_preset(text: &str, timer: bool, ctx: &Ctx) -> Result<(), String> {
     if crate::compile::preset_source(text, timer).is_some()
         || ctx.word_slots.contains_key(&text.to_ascii_lowercase())
     {
+        return Ok(());
+    }
+    // One field of one element of an array of structs.
+    if let Some(operand) = crate::model::ArrayField::parse(text) {
+        let lower = operand.array.to_ascii_lowercase();
+        let Some(structure) = ctx
+            .structs
+            .iter()
+            .find(|structure| structure.name.to_ascii_lowercase() == lower)
+        else {
+            return Err(format!(
+                "'{}' is not a declared array of structs",
+                operand.array
+            ));
+        };
+        if !structure
+            .fields
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case(&operand.field))
+        {
+            return Err(format!(
+                "'{text}' names no field of `{}` ({})",
+                structure.name, structure.ty
+            ));
+        }
+        if let Ok(number) = operand.index.trim().parse::<i64>() {
+            if number < 0 || number >= i64::from(structure.elements) {
+                return Err(format!(
+                    "'{text}' is element {number} of `{}` ({}[{}]), which has {} elements",
+                    structure.name, structure.ty, structure.elements, structure.elements
+                ));
+            }
+        } else if !ctx
+            .word_slots
+            .contains_key(&operand.index.to_ascii_lowercase())
+        {
+            return Err(format!(
+                "'{}' is not a declared word, so it cannot index `{}`",
+                operand.index, structure.name
+            ));
+        }
         return Ok(());
     }
     let Some(operand) = crate::model::ArrayElement::parse(text) else {

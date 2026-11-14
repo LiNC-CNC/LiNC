@@ -719,6 +719,86 @@ fn a_marker_words_bit_is_an_operand_too() {
     assert_eq!(vm.outputs(), &[true], "and a contact reads it back");
 }
 
+/// An array of structs gives a timer its preset per element: the same rung, the same
+/// body, and two recipes with different fill times.
+#[test]
+fn a_struct_field_preset_follows_the_selected_element() {
+    use linc_plc_core::model::{ArrayField, Rung, Section, StructDecl, VarDecl, VarType};
+
+    let mut project = Project::new("structs");
+    project.structs = vec![StructDecl {
+        name: "Recipe".into(),
+        fields: vec![
+            VarDecl::typed("FillTime", VarType::Dint),
+            VarDecl::typed("MixTime", VarType::Dint),
+        ],
+    }];
+    let mut recipes = VarDecl::typed(
+        "recipes",
+        VarType::Array {
+            base: Box::new(VarType::Derived("Recipe".into())),
+            len: 3,
+        },
+    );
+    // Element-major, field order: (1s, 2s), (3s, 4s), (5s, 6s).
+    recipes.init = vec![1000, 2000, 3000, 4000, 5000, 6000];
+    project.vars = vec![recipes, VarDecl::typed("sel", VarType::Dint)];
+    project.pous = vec![linc_plc_core::model::Pou {
+        name: "MAIN".into(),
+        language: linc_plc_core::PouLanguage::Ld,
+        sections: vec![Section {
+            name: "main".into(),
+            rungs: vec![Rung::without_coil(Logic::Series {
+                items: vec![
+                    Logic::Const { value: true },
+                    Logic::Block {
+                        block: "TON".into(),
+                        instance: "TON0".into(),
+                        preset: "recipes[sel].filltime".into(),
+                    },
+                ],
+            })],
+        }],
+        ..linc_plc_core::model::Pou::new("MAIN", linc_plc_core::PouLanguage::Ld)
+    }];
+    let compiled = compile(&project).expect("a struct field preset compiles");
+    let dints = compiled.program.words.dint_base();
+    assert_eq!(
+        compiled.program.init,
+        vec![
+            (dints, 1000),
+            (dints + 1, 2000),
+            (dints + 2, 3000),
+            (dints + 3, 4000),
+            (dints + 4, 5000),
+            (dints + 5, 6000),
+        ],
+        "an element owns one slot per field, and the array is element-major"
+    );
+    let sel = dints + 6;
+    let mut vm = Vm::new(&compiled);
+
+    // Element 2's fill time is 5 s: 2.5 s of it is not enough, 5 s is.
+    vm.set_word(sel, 2);
+    for _ in 0..250 {
+        vm.scan_with_dt(&[], 10);
+    }
+    assert!(!vm.block_q(0), "2.5 s of a 5 s fill");
+    for _ in 0..251 {
+        vm.scan_with_dt(&[], 10);
+    }
+    assert!(vm.block_q(0), "5 s of a 5 s fill, counted from the rise");
+
+    // Element 0's fill time is 1 s, so it expires as soon as the preset changes and
+    // the program resets the timer.
+    vm.set_word(sel, 0);
+    vm.scan_with_dt(&[], 10);
+    assert!(
+        vm.block_value(0) >= 1000,
+        "the elapsed time is capped at the new preset"
+    );
+}
+
 /// Two instances of one function block have two sets of variables and two timers:
 /// Pump1's ready is on while Pump2's stays off. A single instance register would pass
 /// the first half of this and fail the second.

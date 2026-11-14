@@ -52,6 +52,10 @@ pub struct Project {
     pub description: String,
     pub io: Vec<IoPoint>,
     pub vars: Vec<VarDecl>,
+    /// The project's own struct types: a declaration whose type names one owns a run
+    /// of word slots per element.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub structs: Vec<StructDecl>,
     /// Operands pinned to the watch and trend pages, at most sixteen.
     #[serde(default)]
     pub watch: Vec<String>,
@@ -551,6 +555,78 @@ impl WordBit {
     }
 }
 
+/// A struct type the project declares: `Recipe { FillTime, MixTime, Lamp }`.
+///
+/// A struct's fields share one word type, so its elements are contiguous in that
+/// type's region and an element can be found by arithmetic. A struct whose fields
+/// differ, or hold bits, is refused by name: there is no layout for it yet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StructDecl {
+    pub name: String,
+    pub fields: Vec<VarDecl>,
+}
+
+impl StructDecl {
+    /// The word type every field shares, or `None` when they do not share one.
+    pub fn common_type(&self) -> Option<&VarType> {
+        let mut fields = self.fields.iter();
+        let first = &fields.next()?.ty;
+        fields.all(|field| field.ty == *first).then_some(first)
+    }
+
+    /// Where one field sits inside an element, in slots.
+    pub fn offset(&self, field: &str) -> Option<u16> {
+        self.fields
+            .iter()
+            .position(|candidate| candidate.name.eq_ignore_ascii_case(field))
+            .map(|index| index as u16)
+    }
+
+    /// How many slots one element owns.
+    pub fn stride(&self) -> u16 {
+        self.fields.len() as u16
+    }
+}
+
+/// One field of one element of a declared array of structs: `Recipes[Sel].FillTime`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArrayField {
+    pub array: String,
+    pub index: String,
+    pub field: String,
+}
+
+impl ArrayField {
+    /// Read one operand's spelling. The bracket and the field have to be the whole
+    /// tail, so `Bits[0].0` is a bit of a word and not this form.
+    pub fn parse(text: &str) -> Option<Self> {
+        let text = text.trim();
+        let (head, field) = text.rsplit_once('.')?;
+        // A numeric tail is a bit of a word (`Bits[0].0`), not a field: a field's name
+        // starts with a letter.
+        if field.is_empty()
+            || !field
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric())
+            || field.starts_with(|character: char| character.is_ascii_digit())
+        {
+            return None;
+        }
+        let inner = head.strip_suffix(']')?;
+        let (array, index) = inner.split_once('[')?;
+        let array = array.trim();
+        let index = index.trim();
+        if array.is_empty() || index.is_empty() || index.contains(['[', ']', '.']) {
+            return None;
+        }
+        Some(Self {
+            array: array.to_string(),
+            index: index.to_string(),
+            field: field.to_string(),
+        })
+    }
+}
+
 /// One element of a declared array, read as an operand: `Durations[Phase]`.
 ///
 /// The array and the index are separate so each is resolved against its own
@@ -703,6 +779,7 @@ impl Project {
         Self {
             schema: SCHEMA_VERSION,
             name: name.into(),
+            structs: Vec::new(),
             description: String::new(),
             io: Vec::new(),
             vars: Vec::new(),

@@ -70,6 +70,9 @@ struct Lookup {
     /// The declared arrays, by lowercased name: an element read (`Durations[Phase]`)
     /// needs the first slot and the element count.
     arrays: HashMap<String, ArraySlot>,
+    /// Declared arrays of structs, by lowercased name: a field of an element
+    /// (`Recipes[Sel].FillTime`) adds the field's offset to the element's slot.
+    structs: HashMap<String, crate::profile::layout::StructLayout>,
     /// A function block instance's variables: (instance, variable) to the bit slot it
     /// owns. Two instances of one block have two sets, which is the whole point of an
     /// instance.
@@ -102,6 +105,7 @@ impl Lookup {
             word_types: HashMap::new(),
             word_vars: Vec::new(),
             arrays: HashMap::new(),
+            structs: HashMap::new(),
             fb_slots: HashMap::new(),
             fb_block_base: HashMap::new(),
             fb_type: HashMap::new(),
@@ -152,6 +156,13 @@ impl Lookup {
         self.fb_slots
             .get(&(instance.to_ascii_lowercase(), var.to_ascii_lowercase()))
             .copied()
+    }
+
+    /// A declared array of structs, by any spelling of its name.
+    fn struct_of(&self, name: &str) -> Option<&crate::profile::layout::StructLayout> {
+        self.structs
+            .get(name)
+            .or_else(|| self.structs.get(&name.to_ascii_lowercase()))
     }
 
     /// The global block index for the instance this lowering pass is in. Outside a
@@ -340,6 +351,9 @@ pub enum PresetSource {
         base: u16,
         index: u16,
         len: u16,
+        /// How many slots apart two elements are. One for an array of words, and the
+        /// struct's field count for an array of structs.
+        stride: u16,
     },
 }
 
@@ -699,6 +713,11 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
     }
 
     lookup.word_vars = bank.vars.clone();
+    for structure in &bank.structs {
+        lookup
+            .structs
+            .insert(structure.name.clone(), structure.clone());
+    }
     for var in &bank.vars {
         // The name addresses element 0, and the declaration says how many follow.
         lookup.arrays.insert(
@@ -853,9 +872,10 @@ fn initial_words(vars: &[crate::profile::layout::WordVar]) -> Vec<(u16, i32)> {
     let mut init = Vec::new();
     for var in vars {
         for (offset, value) in var.init.iter().enumerate() {
-            let slot = var.slot.saturating_add(offset as u16);
-            if offset < usize::from(var.ty.slots()) {
-                init.push((slot, *value));
+            // The declaration's own slot count: an array of structs owns one slot per
+            // field per element.
+            if offset < usize::from(var.slots) {
+                init.push((var.slot.saturating_add(offset as u16), *value));
             }
         }
     }
@@ -1864,6 +1884,31 @@ fn resolve_preset(text: &str, timer: bool, lookup: &Lookup) -> Option<PresetSour
 /// validation has already refused one past the array. A declared index stays a slot:
 /// the scan reads it, clamps, and adds it to the base.
 fn indexed_word(text: &str, lookup: &Lookup) -> Option<PresetSource> {
+    // A field of one element of an array of structs: the element's slot plus the
+    // field's offset inside it.
+    if let Some(operand) = crate::model::ArrayField::parse(text) {
+        let structure = lookup.struct_of(&operand.array)?;
+        let (_, offset, _) = structure
+            .fields
+            .iter()
+            .find(|(name, _, _)| name.eq_ignore_ascii_case(&operand.field))?;
+        let base = structure.base.saturating_add(*offset);
+        if let Some(index) = lookup.word(&operand.index) {
+            return Some(PresetSource::Indexed {
+                base,
+                index,
+                len: structure.elements,
+                stride: structure.stride,
+            });
+        }
+        // A literal element is a fixed slot: there is nothing for the scan to read.
+        let number = operand.index.trim().parse::<i64>().ok()?;
+        if number < 0 || number >= i64::from(structure.elements) {
+            return None;
+        }
+        let at = (number as u16).saturating_mul(structure.stride);
+        return Some(PresetSource::Word(base.saturating_add(at)));
+    }
     let operand = crate::model::ArrayElement::parse(text)?;
     let var = lookup.array(&operand.array.to_ascii_lowercase())?;
     let element = match lookup.word(&operand.index) {
@@ -1871,6 +1916,7 @@ fn indexed_word(text: &str, lookup: &Lookup) -> Option<PresetSource> {
             base: var.slot,
             index: slot,
             len: var.elements,
+            stride: 1,
         },
         None => {
             let number = operand.literal()?;

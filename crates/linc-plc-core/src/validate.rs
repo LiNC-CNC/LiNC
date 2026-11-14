@@ -42,6 +42,7 @@ struct Facts<'a> {
     word_vars: &'a [crate::profile::layout::WordVar],
     instances: &'a HashMap<String, String>,
     fb_vars: &'a HashMap<String, &'a [VarDecl]>,
+    structs: &'a [crate::profile::layout::StructLayout],
     pou_names: &'a HashSet<String>,
     section_rungs: &'a [Rung],
     labels: &'a HashSet<String>,
@@ -60,6 +61,7 @@ impl Facts<'_> {
             word_vars: self.word_vars,
             instances: self.instances,
             fb_vars: self.fb_vars,
+            structs: self.structs,
             pou_names: self.pou_names,
             section_rungs: self.section_rungs,
             labels: self.labels,
@@ -151,11 +153,24 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         // A derived type that names one of the project's function blocks is an
         // *instance*: it has data, one set per instance. Any other derived type is a
         // structure this build cannot lay out.
-        let is_instance = match &var.ty {
-            VarType::Derived(name) => pous.iter().any(|pou| {
+        let names_block = |name: &str| {
+            pous.iter().any(|pou| {
                 pou.kind == crate::model::PouKind::FunctionBlock
                     && pou.name.eq_ignore_ascii_case(name)
-            }),
+            })
+        };
+        let names_struct = |name: &str| {
+            project
+                .structs
+                .iter()
+                .any(|structure| structure.name.eq_ignore_ascii_case(name))
+        };
+        let is_instance = match &var.ty {
+            VarType::Derived(name) => names_block(name) || names_struct(name),
+            VarType::Array { base, .. } => match base.as_ref() {
+                VarType::Derived(name) => names_struct(name) || names_block(name),
+                _ => false,
+            },
             _ => false,
         };
         if var.ty.is_structured() && !is_instance {
@@ -257,6 +272,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     word_vars: &bank.vars,
                     instances: &instances,
                     fb_vars: &fb_vars,
+                    structs: &bank.structs,
                     pou_names: &pou_names,
                     section_rungs: &[],
                     labels: &labels,
@@ -298,6 +314,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     word_vars: &bank.vars,
                     instances: &instances,
                     fb_vars: &fb_vars,
+                    structs: &bank.structs,
                     pou_names: &pou_names,
                     section_rungs: &[],
                     labels: &HashSet::new(),
@@ -572,6 +589,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             word_vars: &bank.vars,
             instances: &instances,
             fb_vars: &fb_vars,
+            structs: &bank.structs,
             pou_names: &pou_names,
             section_rungs: &section.rungs,
             labels: &no_labels,

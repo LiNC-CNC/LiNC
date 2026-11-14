@@ -54,7 +54,7 @@ converted, so a conversion is never mistaken for a pass.
 A file listed as blocked but converted is executed by the test anyway and must be
 shown *not* to pass. That is what stops the count from going green by accident.
 
-Today: ten convert, ten run. `silo` matches all 200 scans, including rung 4's two
+Today: eleven convert, eleven run. `silo` matches all 200 scans, including rung 4's two
 coils on parallel branches — the importer turns such a rung into one rung per coil
 and the scan evaluates them in order, so a `Vec<Coil>` model turned out not to be
 needed. Four converted files each hold a timer on a rung with no coil, which the
@@ -65,12 +65,26 @@ three routines in one file, called by name, with a timer whose preset is an arra
 element, and the two `-function-block` files are user function blocks: two instances
 of one body, called with their pins bound.
 
-The two that remain are named in the manifest:
+One file remains, and the manifest names it:
 
 | file | the type it declares | the construct that stops it |
 | --- | --- | --- |
-| `recipes-data-type-ld` | `Recipe[3]`, `DINT`, `TIMER` | `Recipes[Sel].FillTime`: a member of an array element |
 | `two-tanks-cascade` | `REAL`, `PID` twice | `SCP`, a scale instruction, then `PID` |
+
+### A struct array, and a field of one element
+
+`Recipe { FillTime, MixTime, Lamp }` is a declared type, `Recipes: Recipe[3]` is an
+array of it, and `TON,Fill,Recipes[Sel].FillTime` is a timer whose preset moves with
+the selected recipe. The fields share one word type, which is what makes the run of
+slots contiguous in that type's region: element `n`'s field `f` is at
+`base + n*stride + f`, so one operand form finds any of them and no second bank is
+needed. A struct whose fields differ, or hold bits, is refused by name — there is no
+layout for it yet.
+
+Every way the operand can be wrong says which struct, field and bound it broke: an
+unknown field, an element past the array, an index that is not a declared word, an
+array that is not declared. The corpus file's two timings only come out right if the
+index is applied, so the trace checks the arithmetic and not just the count.
 
 ### Instances, and why two callers do not share one
 

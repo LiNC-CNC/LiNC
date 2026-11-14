@@ -190,6 +190,79 @@ fn an_unknown_element_is_refused_by_name() {
 /// Every type this build reads, in one interface: the declaration survives the
 /// import, arrays keep their length, a derived type keeps its name, and a type with
 /// no width is still refused by name.
+/// A struct type and an array of it: the fields import with their types, the array's
+/// starting values are read element-major, and a field of one element stays an operand
+/// rather than being flattened into a name.
+#[test]
+fn a_struct_type_and_an_array_of_it_import() {
+    let xml = r#"<?xml version="1.0"?>
+<project>
+  <contentHeader name="structs"/>
+  <types>
+    <dataTypes>
+      <dataType name="Recipe"><struct>
+        <variable name="FillTime"><type><DINT/></type></variable>
+        <variable name="MixTime"><type><DINT/></type></variable>
+      </struct></dataType>
+    </dataTypes>
+    <pous><pou name="MAIN" pouType="program">
+    <interface><localVars>
+      <variable name="Recipes"><type><array><baseElementType><derived name="Recipe"/></baseElementType><dimension lower="0" upper="1"/></array></type><initialValue><arrayValue><value>1000</value><value>2000</value><value>3000</value><value>4000</value></arrayValue></initialValue></variable>
+      <variable name="Sel"><type><DINT/></type></variable>
+    </localVars></interface>
+    <body><LD>
+      <leftPowerRail localId="0"/>
+      <rightPowerRail localId="99"/>
+      <block localId="1" typeName="TON"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>Recipes[Sel].FillTime</expression></variable></inputVariables></block>
+    </LD></body>
+  </pou></pous>
+  </types>
+</project>"#;
+    let project = imported(xml);
+    assert_eq!(project.structs.len(), 1);
+    assert_eq!(project.structs[0].name, "Recipe");
+    let fields: Vec<String> = project.structs[0]
+        .fields
+        .iter()
+        .map(|field| field.ty.label())
+        .collect();
+    assert_eq!(fields, vec!["DINT".to_string(), "DINT".to_string()]);
+    assert_eq!(
+        project
+            .vars
+            .iter()
+            .find(|var| var.name == "recipes")
+            .map(|var| var.ty.label()),
+        Some("Recipe[2]".to_string())
+    );
+    assert_eq!(
+        project
+            .vars
+            .iter()
+            .find(|var| var.name == "recipes")
+            .map(|var| var.init.clone()),
+        Some(vec![1000, 2000, 3000, 4000]),
+        "an array of structs is element-major"
+    );
+    // The preset keeps its shape, so the scan can find the field by arithmetic.
+    let logic = &project.all_pous()[0].sections[0].rungs[0].logic;
+    let preset = match logic {
+        Logic::Series { items } => items.iter().find_map(|item| match item {
+            Logic::Block { preset, .. } => Some(preset.clone()),
+            _ => None,
+        }),
+        _ => None,
+    };
+    assert_eq!(preset.as_deref(), Some("Recipes[Sel].FillTime"));
+
+    let compiled = compile(&project).expect("the struct array compiles");
+    assert_eq!(
+        compiled.program.words.dints, 5,
+        "two fields times two elements, plus `Sel`"
+    );
+    assert_eq!(compiled.program.init.len(), 4);
+}
+
 #[test]
 fn declared_types_are_read_and_carried() {
     use linc_plc_core::model::VarType;

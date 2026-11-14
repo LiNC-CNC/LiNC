@@ -6,7 +6,7 @@
 //! module owns all three, and [`crate::profile::Profile::layout`] names the seam:
 //! a second dialect declares its own region order and its own marker words.
 
-use crate::model::{IoDirection, IoKind, Project, VarType, WordBit};
+use crate::model::{IoDirection, IoKind, Project, StructDecl, VarType, WordBit};
 
 /// Marker words the bank begins with: the internal, retained words a program
 /// addresses by number: `MW0`-`MW15`, sixteen retained words.
@@ -352,6 +352,9 @@ impl WordLayout {
 pub struct WordVar {
     pub name: String,
     pub slot: u16,
+    /// How many bank slots the declaration owns: an array's elements, and an
+    /// element's fields when it is a struct.
+    pub slots: u16,
     pub ty: VarType,
     /// The initial values the declaration carried, in element order.
     pub init: Vec<i32>,
@@ -459,6 +462,26 @@ pub fn word_bit(text: &str, vars: &[WordVar]) -> Result<(u16, u8), WordBitError>
     Ok((var.slot + element as u16, operand.bit))
 }
 
+/// One struct variable's storage: where its first element starts, how far apart
+/// elements are, and where each field sits inside one element.
+///
+/// The fields share one word type, so the whole run lives in that type's region and
+/// `element * stride + offset` finds any field without a second table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructLayout {
+    /// The variable's own name, lowercased the way a symbol table holds it.
+    pub name: String,
+    /// The declared type's name, as written.
+    pub ty: String,
+    pub base: u16,
+    pub elements: u16,
+    pub stride: u16,
+    /// Field name, its offset inside one element, and the type it holds.
+    pub fields: Vec<(String, u16, WordType)>,
+    /// Which region the run lives in, so `layout_hash` sees it through the table.
+    pub region: TypedRegion,
+}
+
 /// The project's word bank: its layout, its declared word and float points, and its
 /// typed variables, in ABI order.
 ///
@@ -472,6 +495,8 @@ pub struct WordBank {
     pub io: Vec<(String, u16, IoKind, IoDirection)>,
     /// Typed variables: name, first slot, declared type.
     pub vars: Vec<WordVar>,
+    /// Declared arrays of structs, with the field offsets an operand needs.
+    pub structs: Vec<StructLayout>,
 }
 
 pub fn word_points(project: &Project) -> WordBank {
@@ -510,7 +535,47 @@ pub fn word_points(project: &Project) -> WordBank {
         layout.time_base(),
     ];
     let mut vars = Vec::new();
+    let mut structs = Vec::new();
     for var in &project.vars {
+        // A struct declaration owns a run of slots in the region its fields share:
+        // an element is `stride` slots, and an array's elements are consecutive.
+        if let Some(structure) = struct_of(project, &var.ty) {
+            let Some(region) = structure.common_type().and_then(typed_region) else {
+                continue;
+            };
+            let at = region.index();
+            let stride = structure.stride();
+            let elements = elements_of(&var.ty);
+            let slot = cursor[at];
+            cursor[at] = cursor[at].saturating_add(stride.saturating_mul(elements));
+            structs.push(StructLayout {
+                name: var.name.to_ascii_lowercase(),
+                ty: structure.name.clone(),
+                base: slot,
+                elements,
+                stride,
+                fields: structure
+                    .fields
+                    .iter()
+                    .filter_map(|field| {
+                        Some((
+                            field.name.to_ascii_lowercase(),
+                            structure.offset(&field.name)?,
+                            word_type(&field.ty)?,
+                        ))
+                    })
+                    .collect(),
+                region,
+            });
+            vars.push(WordVar {
+                name: var.name.clone(),
+                slot,
+                slots: stride.saturating_mul(elements),
+                ty: var.ty.clone(),
+                init: var.init.clone(),
+            });
+            continue;
+        }
         let Some(region) = typed_region(&var.ty) else {
             continue;
         };
@@ -520,17 +585,52 @@ pub fn word_points(project: &Project) -> WordBank {
         vars.push(WordVar {
             name: var.name.clone(),
             slot,
+            slots: var.ty.slots(),
             ty: var.ty.clone(),
             init: var.init.clone(),
         });
     }
-    WordBank { layout, io, vars }
+    WordBank {
+        layout,
+        io,
+        vars,
+        structs,
+    }
 }
 
-/// Slots each typed region needs, in slots: a `DINT[6]` adds six to `dints`.
+/// The struct declaration a variable's type names, when it names one.
+fn struct_of<'a>(project: &'a Project, ty: &VarType) -> Option<&'a StructDecl> {
+    let name = match ty {
+        VarType::Derived(name) => name,
+        VarType::Array { base, .. } => match base.as_ref() {
+            VarType::Derived(name) => name,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    project
+        .structs
+        .iter()
+        .find(|structure| structure.name.eq_ignore_ascii_case(name))
+}
+
+/// How many elements a declaration has: an array's length, or one.
+fn elements_of(ty: &VarType) -> u16 {
+    ty.elements()
+}
+
+/// Slots each typed region needs, in slots: a `DINT[6]` adds six to `dints`, and an
+/// array of structs adds its elements' full stride.
 fn typed_counts(project: &Project) -> Typed {
     let mut typed = Typed::default();
     for var in &project.vars {
+        if let Some(structure) = struct_of(project, &var.ty) {
+            if let Some(region) = structure.common_type().and_then(typed_region) {
+                let slots = structure.stride().saturating_mul(var.ty.elements());
+                *typed.count_mut(region) = typed.count_mut(region).saturating_add(slots);
+            }
+            continue;
+        }
         if let Some(region) = typed_region(&var.ty) {
             let slots = var.ty.slots();
             *typed.count_mut(region) = typed.count_mut(region).saturating_add(slots);
@@ -740,6 +840,57 @@ mod tests {
                 ("more", layout.dint_base() + 4, "DINT".to_string()),
             ],
             "each region fills in declaration order, and an array owns its length"
+        );
+    }
+
+    #[test]
+    fn a_struct_array_owns_a_run_of_slots_in_its_fields_region() {
+        use super::StructLayout;
+        use crate::model::StructDecl;
+
+        let mut project = Project::new("structs");
+        project.structs = vec![StructDecl {
+            name: "Recipe".into(),
+            fields: vec![
+                VarDecl::typed("FillTime", VarType::Dint),
+                VarDecl::typed("MixTime", VarType::Dint),
+            ],
+        }];
+        let mut recipes = VarDecl::typed(
+            "recipes",
+            VarType::Array {
+                base: Box::new(VarType::Derived("Recipe".into())),
+                len: 3,
+            },
+        );
+        recipes.init = vec![1000, 2000, 3000, 4000, 5000, 6000];
+        project.vars = vec![recipes, VarDecl::typed("sel", VarType::Dint)];
+
+        let bank = word_points(&project);
+        // Two DINT fields per element, three elements: six slots in the `dint` region,
+        // after the plain DINT declaration.
+        assert_eq!(bank.layout.dints, 7);
+        let structure: &StructLayout = &bank.structs[0];
+        assert_eq!(structure.ty, "Recipe");
+        assert_eq!(structure.elements, 3);
+        assert_eq!(structure.stride, 2, "one slot per field");
+        assert_eq!(structure.base, bank.layout.dint_base());
+        assert_eq!(
+            structure.fields,
+            vec![
+                ("filltime".to_string(), 0, super::WordType::DINT),
+                ("mixtime".to_string(), 1, super::WordType::DINT),
+            ],
+            "the field offsets are the declaration's order"
+        );
+        assert_eq!(
+            bank.vars[0].slots, 6,
+            "the declaration owns one slot per field per element"
+        );
+        assert_eq!(
+            bank.layout.total(),
+            bank.layout.dint_base() + 7,
+            "the run is inside the one bank, not beside it"
         );
     }
 

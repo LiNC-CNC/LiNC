@@ -47,11 +47,11 @@
    "name": "recipes-data-type-ld",
    "pous": 1,
    "rungs": 11,
-   "converted": false,
-   "blocker": "converter: timer preset 'Recipes[Sel].FillTime' is not a number of ms",
+   "converted": true,
+   "blocker": null,
    "stimulus": true,
    "trace": true,
-   "runs": false
+   "runs": true
   },
   {
    "name": "silo-function-block",

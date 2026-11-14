@@ -707,13 +707,19 @@ impl Vm {
         match preset {
             PresetSource::Const(value) => value,
             PresetSource::Word(slot) => self.word(slot),
-            PresetSource::Indexed { base, index, len } => {
+            PresetSource::Indexed {
+                base,
+                index,
+                len,
+                stride,
+            } => {
                 let element = if len == 0 {
                     0
                 } else {
                     self.word(index).clamp(0, i32::from(len) - 1) as u16
                 };
-                self.word(base.saturating_add(element))
+                let at = element.saturating_mul(stride);
+                self.word(base.saturating_add(at))
             }
         }
     }

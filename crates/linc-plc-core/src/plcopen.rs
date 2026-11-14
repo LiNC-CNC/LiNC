@@ -256,6 +256,45 @@ pub fn import(xml: &str) -> Result<Project, Vec<Diagnostic>> {
         }
     }
 
+    // The project's own types: a `<dataType>` holding a `<struct>` is a struct whose
+    // fields share one word type, which is what makes its elements addressable.
+    if let Some(types) = project_element
+        .child("types")
+        .and_then(|types| types.child("dataTypes"))
+    {
+        for data_type in types.children_named("dataType") {
+            let Some(name) = data_type.attribute("name") else {
+                continue;
+            };
+            let Some(block) = data_type.child("struct") else {
+                continue;
+            };
+            let mut fields = Vec::new();
+            let mut readable = true;
+            for variable in block.children_named("variable") {
+                let Some(field) = variable.attribute("name") else {
+                    continue;
+                };
+                let Some(ty) = declared_type(variable) else {
+                    diagnostics.push(error(
+                        "plcopen_unsupported_element",
+                        format!("struct '{name}' field '{field}' has a type with no LiNC form"),
+                        format!("types.{name}.{field}"),
+                    ));
+                    readable = false;
+                    continue;
+                };
+                fields.push(VarDecl::typed(operand_name(field), ty));
+            }
+            if readable && !fields.is_empty() {
+                project.structs.push(crate::model::StructDecl {
+                    name: name.to_string(),
+                    fields,
+                });
+            }
+        }
+    }
+
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
@@ -345,16 +384,6 @@ fn import_pou(
             None
         }
     }
-}
-
-fn import_interface(
-    interface: &Element,
-    path: &str,
-    io: &mut Vec<IoPoint>,
-    vars: &mut Vec<VarDecl>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    import_interface_of(interface, path, io, vars, false, diagnostics)
 }
 
 /// Read one `<interface>`. A function block's variables are its own — its pins and
@@ -768,10 +797,6 @@ fn import_ld(
 
 /// `<variable>` may carry the name as text (the usual LD form) or as an
 /// `@name`; both are the same operand.
-fn operand_text(variable: &Element) -> Option<String> {
-    operand_text_of(variable, &HashSet::new())
-}
-
 fn operand_text_of(variable: &Element, instances: &HashSet<String>) -> Option<String> {
     let raw = match variable.attribute("name") {
         Some(name) => name.to_string(),
@@ -813,6 +838,17 @@ pub fn operand_spelling_of(raw: &str, instances: &HashSet<String>) -> String {
         {
             return format!("{}.{}", operand_name(base), field.to_ascii_lowercase());
         }
+    }
+    // One field of one element of an array of structs, `Recipes[Sel].FillTime`: the
+    // array, the index and the field are names, so each is spelled the way its
+    // declaration is and the brackets stay.
+    if let Some(operand) = crate::model::ArrayField::parse(raw) {
+        return format!(
+            "{}[{}].{}",
+            operand_name(&operand.array),
+            array_index_spelling(&operand.index),
+            operand_name(&operand.field)
+        );
     }
     // An array element read, `Durations[Phase]`: the array and the index are both
     // declared names, so both are spelled the way their declarations are and the

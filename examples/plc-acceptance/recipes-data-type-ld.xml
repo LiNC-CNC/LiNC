@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://www.plcopen.org/xml/tc6_0201">
+<fileHeader company="converted" product="plcy2plcopen" version="1"/>
+<contentHeader name="recipes-data-type-ld"/>
+<types><dataTypes><dataType name="Recipe"><struct><variable name="FillTime"><type><DINT/></type></variable><variable name="MixTime"><type><DINT/></type></variable><variable name="Lamp"><type><DINT/></type></variable></struct></dataType></dataTypes></types>
+<instances><configurations/></instances>
+<addData/>
+<pous><pou name="MAIN" pouType="program">
+<interface><inputVars><variable name="%I0.0"><type><BOOL/></type></variable><variable name="%I0.1"><type><BOOL/></type></variable><variable name="%I0.2"><type><BOOL/></type></variable></inputVars><outputVars><variable name="%Q0.0"><type><BOOL/></type></variable><variable name="%Q0.1"><type><BOOL/></type></variable><variable name="%Q0.2"><type><BOOL/></type></variable><variable name="%Q0.3"><type><BOOL/></type></variable></outputVars><localVars><variable name="Busy"><type><BOOL/></type></variable><variable name="Recipes"><type><array><baseElementType><derived name="Recipe"/></baseElementType><dimension lower="0" upper="2"/></array></type><initialValue><arrayValue><value>2000</value><value>3000</value><value>0</value><value>4000</value><value>2000</value><value>0</value><value>1000</value><value>6000</value><value>0</value></arrayValue></initialValue></variable><variable name="Sel"><type><DINT/></type></variable></localVars></interface>
+<body><LD>
+<leftPowerRail localId="0"/>
+<coil localId="10" storage="compute"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><expression>Sel = 0</expression></coil>
+<contact localId="11"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.1</variable></contact>
+<coil localId="12" storage="compute"><connectionPointIn><connection refLocalId="11"/></connectionPointIn><expression>Sel = 1</expression></coil>
+<contact localId="13"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.2</variable></contact>
+<coil localId="14" storage="compute"><connectionPointIn><connection refLocalId="13"/></connectionPointIn><expression>Sel = 2</expression></coil>
+<contact localId="15"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.0</variable></contact>
+<contact localId="16" negated="true"><connectionPointIn><connection refLocalId="15"/></connectionPointIn><variable>Busy</variable></contact>
+<coil localId="17" storage="set"><connectionPointIn><connection refLocalId="16"/></connectionPointIn><variable>Busy</variable></coil>
+<contact localId="18"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Busy</variable></contact>
+<block localId="19" typeName="TON"><connectionPointIn><connection refLocalId="18"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>Recipes[Sel].FillTime</expression></variable></inputVariables></block>
+<contact localId="20"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<block localId="21" typeName="TON"><connectionPointIn><connection refLocalId="20"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>Recipes[Sel].MixTime</expression></variable></inputVariables></block>
+<contact localId="22"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON1.Q</variable></contact>
+<coil localId="23" storage="reset"><connectionPointIn><connection refLocalId="22"/></connectionPointIn><variable>Busy</variable></coil>
+<contact localId="24"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Busy</variable></contact>
+<contact localId="25" negated="true"><connectionPointIn><connection refLocalId="24"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<coil localId="26" storage="none"><connectionPointIn><connection refLocalId="25"/></connectionPointIn><variable>%Q0.0</variable></coil>
+<contact localId="27"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<contact localId="28" negated="true"><connectionPointIn><connection refLocalId="27"/></connectionPointIn><variable>TON1.Q</variable></contact>
+<coil localId="29" storage="none"><connectionPointIn><connection refLocalId="28"/></connectionPointIn><variable>%Q0.1</variable></coil>
+<contact localId="30"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.1</variable></contact>
+<coil localId="31" storage="none"><connectionPointIn><connection refLocalId="30"/></connectionPointIn><variable>%Q0.2</variable></coil>
+<contact localId="32"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.2</variable></contact>
+<coil localId="33" storage="none"><connectionPointIn><connection refLocalId="32"/></connectionPointIn><variable>%Q0.3</variable></coil>
+<rightPowerRail localId="9999"/>
+</LD></body></pou></pous></project>
