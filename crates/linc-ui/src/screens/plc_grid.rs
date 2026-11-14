@@ -204,6 +204,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         compute,
         set_coil,
         reset_coil,
+        jump_coil,
     ) = ui.input_mut(|input| {
         (
             letter(input, egui::Key::C),
@@ -221,6 +222,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             letter(input, egui::Key::M),
             letter(input, egui::Key::S),
             letter(input, egui::Key::R),
+            letter(input, egui::Key::J),
         )
     });
     // Ctrl+Enter adds a row below the cursor, the manual's SS+ENTER substitute.
@@ -320,8 +322,9 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         return;
     }
     if cursor.2 >= POSITIONS {
-        // Space cycles the coil's kind: Normal, Set, Reset, Negated. The coil
-        // letters and their rail group are gone; one cell key does the job.
+        // Space cycles the coil's kind: Normal, Set, Reset, Negated, Jump,
+        // Call. The coil letters and their rail group are gone; one cell key
+        // does the job.
         let space =
             ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space));
         if space {
@@ -333,7 +336,9 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                     CoilKind::Normal => CoilKind::Set,
                     CoilKind::Set => CoilKind::Reset,
                     CoilKind::Reset => CoilKind::Negated,
-                    CoilKind::Negated => CoilKind::Normal,
+                    CoilKind::Negated => CoilKind::Jump,
+                    CoilKind::Jump => CoilKind::Call,
+                    CoilKind::Call => CoilKind::Normal,
                 };
                 actions.push(Action::SetCoil {
                     section: cursor.0,
@@ -350,7 +355,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                 .and_then(|section| section.rungs.get(cursor.1))
                 .map(|rung| rung.coil.var.clone())
                 .unwrap_or_default();
-            app.plc.operand_cursor = coil_position(&app.plc, &var);
+            app.plc.operand_cursor = coil_position(&app.plc, cursor.0, cursor.1, &var);
             app.plc.operand_filter.clear();
             app.plc.coil_pick = Some((cursor.0, cursor.1));
         }
@@ -362,6 +367,8 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             Some(CoilKind::Set)
         } else if reset_coil {
             Some(CoilKind::Reset)
+        } else if jump_coil {
+            Some(CoilKind::Jump)
         } else {
             None
         };
@@ -701,7 +708,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                     .and_then(|section| section.rungs.get(rung))
                     .map(|rung| rung.coil.var.clone())
                     .unwrap_or_default();
-                app.plc.operand_cursor = coil_position(&app.plc, &var);
+                app.plc.operand_cursor = coil_position(&app.plc, section, rung, &var);
                 app.plc.operand_filter.clear();
                 app.plc.coil_pick = Some((section, rung));
             }
@@ -1513,12 +1520,18 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
             ("Coil", CoilKind::Normal),
             ("Set coil", CoilKind::Set),
             ("Reset coil", CoilKind::Reset),
+            ("Jump coil", CoilKind::Jump),
+            // `C` already sets a normal coil at this cursor, so a call has no
+            // direct key; the list and the Space cycle reach it.
+            ("Call coil", CoilKind::Call),
         ] {
             let chord = match kind {
                 CoilKind::Normal => "C",
                 CoilKind::Set => "S",
                 CoilKind::Reset => "R",
                 CoilKind::Negated => "N",
+                CoilKind::Jump => "J",
+                CoilKind::Call => "",
             };
             items.push(Item {
                 group: "COIL",
@@ -1976,26 +1989,61 @@ pub fn with_operand(cell: &Cell, name: &str) -> Cell {
 /// The symbols a coil can write: every output and every variable, never an
 /// input. The validator rejects an input as a coil target, so the list must not
 /// offer one.
-fn coil_position(plc: &PlcUi, name: &str) -> usize {
-    coil_choices(plc)
+fn coil_position(plc: &PlcUi, section: usize, rung: usize, name: &str) -> usize {
+    coil_choices(plc, section, rung)
         .iter()
         .position(|(candidate, _)| candidate == name)
         .unwrap_or(0)
 }
 
-fn coil_choices(plc: &PlcUi) -> Vec<(String, String)> {
-    plc.project
-        .io
-        .iter()
-        .filter(|point| point.direction == linc_plc_core::model::IoDirection::Out)
-        .map(|point| (point.name.clone(), "OUT".to_string()))
-        .chain(
+fn coil_choices(plc: &PlcUi, section: usize, rung: usize) -> Vec<(String, String)> {
+    // A jump names a label in its own section and a call names a POU; only a
+    // bit coil names a writable symbol. Offering bit variables for a jump would
+    // hand the operator a target the validator refuses.
+    let kind = plc
+        .current_pou_sections()
+        .get(section)
+        .and_then(|section| section.rungs.get(rung))
+        .map(|rung| rung.coil.kind);
+    match kind {
+        Some(CoilKind::Jump) => plc
+            .current_pou_sections()
+            .get(section)
+            .map(|section| {
+                section
+                    .rungs
+                    .iter()
+                    .map(|rung| rung.label.trim())
+                    .filter(|label| !label.is_empty())
+                    .map(|label| (label.to_string(), "LABEL".to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        Some(CoilKind::Call) => {
+            // Calling the POU that is being edited is a cycle, so it is not
+            // offered; every other POU is a legal target.
+            let current = plc.current_pou().map(|pou| pou.name).unwrap_or_default();
             plc.project
-                .vars
-                .iter()
-                .map(|var| (var.name.clone(), "VAR".to_string())),
-        )
-        .collect()
+                .all_pous()
+                .into_iter()
+                .filter(|pou| !pou.name.eq_ignore_ascii_case(&current))
+                .map(|pou| (pou.name, "POU".to_string()))
+                .collect()
+        }
+        _ => plc
+            .project
+            .io
+            .iter()
+            .filter(|point| point.direction == linc_plc_core::model::IoDirection::Out)
+            .map(|point| (point.name.clone(), "OUT".to_string()))
+            .chain(
+                plc.project
+                    .vars
+                    .iter()
+                    .map(|var| (var.name.clone(), "VAR".to_string())),
+            )
+            .collect(),
+    }
 }
 
 fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) -> bool {
@@ -2013,7 +2061,7 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
         .and_then(|section| section.rungs.get(rung))
         .map(|rung| rung.coil.var.clone())
         .unwrap_or_default();
-    let mut names = coil_choices(plc);
+    let mut names = coil_choices(plc, section, rung);
     if !current.is_empty() && !names.iter().any(|(name, _)| *name == current) {
         names.insert(0, (current.clone(), "IN".to_string()));
     }
@@ -3108,7 +3156,11 @@ pub fn grid_rung(
     let local = previewing.then(|| preview_scan(plc, &cells));
     // The comment sits inside the strip's upper band so every rung is exactly
     // `CELL_HEIGHT` tall: the link's drop to the branch row stays exact.
+    let label = rung.label.trim();
     let commented = !rung.comment.is_empty();
+    // A labelled rung needs the same upper band a commented one has, so the
+    // label has somewhere to sit.
+    let banded = commented || !label.is_empty();
     let strip = ui.horizontal(|ui| {
         // Zero spacing: neighbouring cells share one conductor with no joint.
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -3124,7 +3176,7 @@ pub fn grid_rung(
                 &label,
                 matches!(cell, Cell::Wire),
                 cell_symbol(&cell),
-                if commented { 18.0 } else { 16.0 },
+                if banded { 18.0 } else { 16.0 },
                 local
                     .as_ref()
                     .and_then(|(values, _)| values.get(position).copied().flatten())
@@ -3144,7 +3196,7 @@ pub fn grid_rung(
             &coil,
             rung.coil.var.is_empty(),
             CellSymbol::Coil(rung.coil.kind),
-            if commented { 18.0 } else { 16.0 },
+            if banded { 18.0 } else { 16.0 },
             // A compute rung writes through its cell, so its coil slot is unused
             // and must not light up from a variable of the same name.
             if let Some((_, coil)) = &local {
@@ -3172,14 +3224,19 @@ pub fn grid_rung(
             Color32::from_rgba_unmultiplied(0x4d, 0xa3, 0xff, 36),
         );
     }
-    if commented {
+    if banded {
         // Inside the strip: the rung stays exactly CELL_HEIGHT tall, so the link's
         // drop to the branch row lands on that row's conductor.
+        let band = match (label.is_empty(), commented) {
+            (false, true) => format!("{label}: // {}", rung.comment),
+            (false, false) => format!("{label}:"),
+            (true, _) => format!("// {}", rung.comment),
+        };
         let rect = strip.response.rect;
         ui.painter().text(
             egui::pos2(rect.left() + 2.0, rect.top() + 8.0),
             Align2::LEFT_CENTER,
-            format!("// {}", rung.comment),
+            band,
             FontId::monospace(theme::font_size(8.0)),
             theme::COMMENT,
         );
@@ -3315,8 +3372,13 @@ pub(crate) fn draw_cell_symbol(
             painter.add(egui::Shape::line(left_arc, line));
             painter.add(egui::Shape::line(right_arc, line));
             match kind {
-                CoilKind::Set | CoilKind::Reset => {
-                    let letter = if kind == CoilKind::Set { "S" } else { "R" };
+                CoilKind::Set | CoilKind::Reset | CoilKind::Jump | CoilKind::Call => {
+                    let letter = match kind {
+                        CoilKind::Set => "S",
+                        CoilKind::Reset => "R",
+                        CoilKind::Jump => "J",
+                        _ => "C",
+                    };
                     painter.text(
                         egui::pos2(cx - radius - 5.0, y - 9.0),
                         Align2::CENTER_CENTER,
@@ -3681,6 +3743,7 @@ mod rung_pitch_tests {
     fn consecutive_rungs_are_one_strip_apart_in_the_layout() {
         let mut plc = PlcUi::default();
         let rung = Rung {
+            label: String::new(),
             cells: vec![Cell::Wire],
             comment: String::new(),
             logic: linc_plc_core::model::Logic::Const { value: true },
@@ -3805,6 +3868,7 @@ mod block_window_tests {
         pou.sections = vec![linc_plc_core::model::Section {
             name: String::new(),
             rungs: vec![linc_plc_core::model::Rung {
+                label: String::new(),
                 comment: String::new(),
                 logic: linc_plc_core::model::Logic::Const { value: true },
                 coil: linc_plc_core::model::Coil::new("", linc_plc_core::model::CoilKind::Normal),
@@ -4012,7 +4076,7 @@ mod compare_window_tests {
             retain: false,
             comment: String::new(),
         });
-        let names: Vec<String> = coil_choices(&plc)
+        let names: Vec<String> = coil_choices(&plc, 0, 0)
             .into_iter()
             .map(|(name, _)| name)
             .collect();
@@ -4022,6 +4086,46 @@ mod compare_window_tests {
         );
         assert!(names.contains(&"run".to_string()));
         assert!(names.contains(&"seal".to_string()));
+    }
+
+    /// A jump's operand is a label in its own section and a call's is a POU;
+    /// offering bit symbols for either would hand the operator a target the
+    /// validator refuses.
+    #[test]
+    fn a_jump_or_call_coil_offers_its_own_targets() {
+        let mut plc = PlcUi::default();
+        let mut main = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Ld);
+        main.sections = vec![linc_plc_core::Section {
+            name: "main".into(),
+            rungs: vec![
+                Rung::new(
+                    linc_plc_core::Logic::Const { value: true },
+                    Coil::new("LOOP", CoilKind::Normal),
+                ),
+                Rung::new(
+                    linc_plc_core::Logic::Const { value: true },
+                    Coil::new("", CoilKind::Jump),
+                ),
+            ],
+        }];
+        main.sections[0].rungs[0].label = "LOOP".to_string();
+        plc.project.set_pous(vec![
+            main,
+            linc_plc_core::Pou::new("SUB", linc_plc_core::PouLanguage::Ld),
+        ]);
+
+        assert_eq!(
+            coil_choices(&plc, 0, 1),
+            vec![("LOOP".to_string(), "LABEL".to_string())],
+            "a jump offers the section's labels"
+        );
+
+        plc.project.pous[0].sections[0].rungs[1].coil = Coil::new("SUB", CoilKind::Call);
+        assert_eq!(
+            coil_choices(&plc, 0, 1),
+            vec![("SUB".to_string(), "POU".to_string())],
+            "a call offers the other POUs, never the one being edited"
+        );
     }
 
     /// The coil slot and a contact each have their own Enter target: the operand
@@ -4211,6 +4315,7 @@ mod compare_window_tests {
         pou.sections = vec![linc_plc_core::model::Section {
             name: String::new(),
             rungs: vec![linc_plc_core::model::Rung {
+                label: String::new(),
                 comment: String::new(),
                 logic: linc_plc_core::model::Logic::Const { value: true },
                 coil: linc_plc_core::model::Coil::new("", linc_plc_core::model::CoilKind::Normal),

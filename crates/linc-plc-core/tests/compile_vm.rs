@@ -1402,6 +1402,7 @@ fn cross_coupled_tp_blocks_alternate() {
 fn compute_rows_run_and_chain_their_words() {
     use linc_plc_core::grid::Cell;
     let compute = |target: &str, left: &str, right: &str| Rung {
+        label: String::new(),
         cells: vec![Cell::Compute {
             op: "ADD".to_string(),
             target: target.to_string(),
@@ -1916,6 +1917,7 @@ fn a_word_bank_over_256_slots_is_refused() {
 /// A compute (MOVE) coil on a rung of its own. Its coil slot is unused.
 fn compute_rung(target: &str, op: &str, left: &str, right: &str) -> Rung {
     Rung {
+        label: String::new(),
         cells: vec![linc_plc_core::grid::Cell::Compute {
             op: op.to_string(),
             target: target.to_string(),
@@ -2128,4 +2130,246 @@ fn a_block_reasserts_its_own_preset_after_a_write() {
         "the timer re-asserted its literal after the write"
     );
     assert_eq!(vm.block_value(0), 1_000, "and it counts toward its own 4 s");
+}
+
+// --- item 4: jump and call coils --------------------------------------------
+
+/// A rung that stores on every scan, so a skipped one is visible in the image.
+fn tap(var: &str) -> Rung {
+    Rung::new(Logic::Const { value: true }, Coil::new(var, CoilKind::Normal))
+}
+
+fn coil_project(outputs: &[&str], rungs: Vec<Rung>) -> Project {
+    project_with(
+        outputs
+            .iter()
+            .map(|name| IoPoint::new(*name, IoDirection::Out))
+            .collect(),
+        Vec::new(),
+        vec![section("main", rungs)],
+    )
+}
+
+/// A jump over a rung: the rows between the coil and its label never run, so the
+/// skipped coil cannot store. Rungs after the label run as usual.
+#[test]
+fn a_forward_jump_coil_skips_the_rows_it_names() {
+    let mut landing = tap("y2");
+    landing.label = "END".to_string();
+    let project = coil_project(
+        &["y0", "y1", "y2"],
+        vec![
+            tap("y0"),
+            Rung::new(
+                Logic::Const { value: true },
+                Coil::new("END", CoilKind::Jump),
+            ),
+            tap("y1"),
+            landing,
+        ],
+    );
+    let compiled = compile(&project).expect("the jump compiles");
+    let mut vm = Vm::new(&compiled);
+    vm.scan(&[]);
+    assert_eq!(
+        vm.outputs(),
+        &[true, false, true],
+        "y0 stored before the jump, y1 was skipped, y2 is the landing"
+    );
+}
+
+/// A backward jump loops. A counter in the rung that jumps stops it, and a jump
+/// that never stops still returns: the op budget ends the scan instead of
+/// hanging the scheduler.
+#[test]
+fn a_backward_jump_coil_is_bounded_by_the_op_budget() {
+    use linc_plc_core::grid::Cell;
+    // LOOP: MW0 := MW0 + 1, then jump back while MW0 < 3.
+    let mut count = compute_rung("MW0", "ADD", "MW0", "1");
+    count.label = "LOOP".to_string();
+    let test = Rung {
+        label: String::new(),
+        cells: vec![Cell::Compare {
+            op: "LT".to_string(),
+            left: "MW0".to_string(),
+            right: "3".to_string(),
+        }],
+        comment: String::new(),
+        logic: Logic::Const { value: true },
+        coil: Coil::new("LOOP", CoilKind::Jump),
+    };
+    let project = project_with(
+        Vec::new(),
+        Vec::new(),
+        vec![section("main", vec![count, test])],
+    );
+    let mut vm = Vm::new(&compile(&project).expect("the loop compiles"));
+    let stats = vm.scan(&[]);
+    assert_eq!(vm.word(0), 3, "three passes, then the compare fell through");
+    assert_eq!(stats.scan_count, 1);
+
+    // An always-powered backward jump is the runaway case.
+    let mut forever = compute_rung("MW1", "ADD", "MW1", "1");
+    forever.label = "TOP".to_string();
+    let jump = Rung::new(
+        Logic::Const { value: true },
+        Coil::new("TOP", CoilKind::Jump),
+    );
+    let project = project_with(
+        Vec::new(),
+        Vec::new(),
+        vec![section("main", vec![forever, jump])],
+    );
+    let mut vm = Vm::new(&compile(&project).expect("the runaway compiles"));
+    let stats = vm.scan(&[]);
+    assert_eq!(stats.scan_count, 1, "the scan returned instead of hanging");
+}
+
+/// Every refusal a jump or call coil can produce, with the operand named.
+#[test]
+fn a_jump_or_call_with_a_bad_target_is_refused() {
+    let missing = coil_project(
+        &["y"],
+        vec![Rung::new(
+            Logic::Const { value: true },
+            Coil::new("NOWHERE", CoilKind::Jump),
+        )],
+    );
+    let diagnostics = validate(&missing);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|item| item.code == "jump_target_missing" && item.message.contains("NOWHERE")),
+        "{diagnostics:?}"
+    );
+
+    let empty = coil_project(
+        &["y"],
+        vec![Rung::new(
+            Logic::Const { value: true },
+            Coil::new("", CoilKind::Jump),
+        )],
+    );
+    assert!(
+        codes(&validate(&empty)).contains(&"rung_label_missing".to_string()),
+        "{:?}",
+        validate(&empty)
+    );
+
+    let mut first = tap("y");
+    first.label = "LOOP".to_string();
+    let mut second = tap("y2");
+    second.label = "loop".to_string();
+    let duplicate = coil_project(&["y", "y2"], vec![first, second]);
+    assert!(
+        codes(&validate(&duplicate)).contains(&"rung_label_duplicate".to_string()),
+        "{:?}",
+        validate(&duplicate)
+    );
+
+    let bad_call = coil_project(
+        &["y"],
+        vec![Rung::new(
+            Logic::Const { value: true },
+            Coil::new("NOPE", CoilKind::Call),
+        )],
+    );
+    let diagnostics = validate(&bad_call);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|item| item.code == "call_target_missing" && item.message.contains("NOPE")),
+        "{diagnostics:?}"
+    );
+}
+
+/// A call coil inlines the callee at the coil position and is gated by the
+/// rung's power, so an unpowered call runs nothing.
+#[test]
+fn a_call_coil_inlines_the_pou_and_follows_the_rung() {
+    let mut project = project_with(
+        vec![
+            IoPoint::new("go", IoDirection::In),
+            IoPoint::new("y", IoDirection::Out),
+        ],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut main = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Ld);
+    main.sections = vec![section(
+        "main",
+        vec![Rung::new(
+            Logic::contact("go", false),
+            Coil::new("SUB", CoilKind::Call),
+        )],
+    )];
+    let mut sub = linc_plc_core::Pou::new("SUB", linc_plc_core::PouLanguage::Ld);
+    sub.sections = vec![section("body", vec![tap("y")])];
+    project.pous = vec![main, sub];
+
+    let compiled = compile(&project).expect("the call compiles");
+    assert_eq!(
+        compiled
+            .program
+            .ops
+            .iter()
+            .filter(|op| matches!(op, Op::Store(_)))
+            .count(),
+        1,
+        "SUB is inlined once and not also run on its own"
+    );
+    let mut vm = Vm::new(&compiled);
+    vm.scan(&[false]);
+    assert_eq!(vm.outputs(), &[false], "an unpowered call runs nothing");
+    vm.scan(&[true]);
+    assert_eq!(vm.outputs(), &[true], "the inlined coil stored this scan");
+}
+
+/// A ladder recursion is a call cycle like an IL one: refused, not inlined until
+/// the depth guard stops it.
+#[test]
+fn a_recursive_call_coil_is_refused() {
+    let mut project = project_with(Vec::new(), Vec::new(), Vec::new());
+    let mut main = linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Ld);
+    main.sections = vec![section(
+        "main",
+        vec![Rung::new(
+            Logic::Const { value: true },
+            Coil::new("SUB", CoilKind::Call),
+        )],
+    )];
+    let mut sub = linc_plc_core::Pou::new("SUB", linc_plc_core::PouLanguage::Ld);
+    sub.sections = vec![section(
+        "body",
+        vec![Rung::new(
+            Logic::Const { value: true },
+            Coil::new("MAIN", CoilKind::Call),
+        )],
+    )];
+    project.pous = vec![main, sub];
+
+    let diagnostics = validate(&project);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|item| item.code == "cal_cycle" && item.message.contains("MAIN")),
+        "{diagnostics:?}"
+    );
+    assert!(compile(&project).is_err(), "a cycle must not compile");
+}
+
+/// A compute cell consumes the rung's power and pushes nothing, so a jump or
+/// call coil on that row has nothing to test; it is refused rather than dropped.
+#[test]
+fn a_jump_coil_on_a_compute_row_is_refused() {
+    let mut rung = compute_rung("MW0", "ADD", "MW0", "1");
+    rung.coil = Coil::new("NOWHERE", CoilKind::Jump);
+    let project = project_with(Vec::new(), Vec::new(), vec![section("main", vec![rung])]);
+    let diagnostics = validate(&project);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|item| item.code == "cell_compute" && item.message.contains("jump")),
+        "{diagnostics:?}"
+    );
 }

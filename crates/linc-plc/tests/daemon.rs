@@ -749,6 +749,7 @@ fn a_forced_word_holds_against_the_program_and_releases() {
     project.sections = vec![Section {
         name: "main".to_string(),
         rungs: vec![Rung {
+            label: String::new(),
             comment: String::new(),
             logic: Logic::Const { value: true },
             coil: Coil::new("out", CoilKind::Normal),

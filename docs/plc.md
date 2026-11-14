@@ -114,9 +114,9 @@ sections of rungs. A rung is a `Logic` tree plus a coil:
 }
 ```
 
-Supported in this slice: NO/NC contacts, normal/set/reset coils,
-series/parallel branches, multiple sections, constants, a 32-bit word bank with
-`word` and `float` I/O points, validation, local offline editing, download,
+Supported in this slice: NO/NC contacts, normal/set/reset coils, jump and call
+coils, series/parallel branches, multiple sections, constants, a 32-bit word bank
+with `word` and `float` I/O points, validation, local offline editing, download,
 start/stop, live monitoring and forcing.
 
 Not yet: SFC, `.clp`, Modbus, true hot
@@ -220,6 +220,25 @@ block's own instruction stores its source into that field on every execution, so
 a preset written by a compute coil holds only until the block runs again. When
 the preset must stay under the ladder's control, source it from a word instead
 of writing it once.
+
+## Jump and call coils
+
+A rung may carry a **label**, and two coil kinds use one:
+
+- `-[J]-` (jump) names a label in its **own section**. The rung's power decides:
+  powered jumps to the labelled rung, unpowered falls through. A forward jump
+  skips the rows in between; a backward jump loops, and a loop that never ends is
+  stopped by the scan's op budget (100,000 ops) instead of hanging the scan.
+- `-[C]-` (call) names a POU. It is an **inline**, exactly like the IL `CAL`
+  instruction: no locals, no stack frame, and the callee's coils and timers are
+  the ones it owns when it runs. The rung's power gates the call, so an unpowered
+  call coil runs nothing.
+
+Labels are section-local and must be unique in their section. A jump with no
+label is `rung_label_missing`, two rungs with one label is
+`rung_label_duplicate`, a jump to a label the section does not declare is
+`jump_target_missing`, and a call to a POU the project does not declare is
+`call_target_missing`. A call cycle — ladder, IL, or a mix — is `cal_cycle`.
 
 ## Retained values
 

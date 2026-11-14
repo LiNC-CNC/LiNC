@@ -244,3 +244,40 @@ fn set_cell_grows_columns_from_zero() {
         "the cell is stored, not dropped"
     );
 }
+
+/// `Rung.label` and the jump/call coil kinds are additive, so a file written
+/// before them still decodes, and a new file round-trips.
+#[test]
+fn rung_labels_and_jump_call_coils_round_trip() {
+    let mut project = Project::example();
+    project.sections[0].rungs[0].label = "LOOP".to_string();
+    project.sections[0].rungs[1].coil = Coil::new("LOOP", CoilKind::Jump);
+    project.sections[0].rungs[2].coil = Coil::new("MAIN", CoilKind::Call);
+
+    let json = serde_json::to_string(&project).expect("json");
+    assert!(json.contains("\"label\":\"LOOP\""), "{json}");
+    assert!(json.contains("\"kind\":\"jump\""), "{json}");
+    assert!(json.contains("\"kind\":\"call\""), "{json}");
+    let back: Project = serde_json::from_str(&json).expect("decode");
+    assert_eq!(back, project, "the schema stays 1 and the new fields round-trip");
+
+    // The version-1 file from before labels existed still decodes.
+    let old = r#"{"schema":1,"name":"old","io":[],"vars":[],"sections":[{"name":"main","rungs":[{"logic":{"op":"const","value":true},"coil":{"var":"x","kind":"normal"}}]}]}"#;
+    let decoded: Project = serde_json::from_str(old).expect("old file");
+    assert_eq!(decoded.sections[0].rungs[0].label, "");
+}
+
+/// Laying a tree rung out on the grid rewrites its cells in place, so the label
+/// a jump coil names survives the migration.
+#[test]
+fn migrating_a_tree_rung_keeps_its_label() {
+    let mut project = Project::example();
+    project.sections[0].rungs[0].label = "LOOP".to_string();
+    project.normalise();
+    let labels = project.all_pous()[0].sections[0]
+        .rungs
+        .iter()
+        .map(|rung| rung.label.clone())
+        .collect::<Vec<_>>();
+    assert!(labels.iter().any(|label| label == "LOOP"), "{labels:?}");
+}

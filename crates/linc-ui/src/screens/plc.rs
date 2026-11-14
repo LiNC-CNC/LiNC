@@ -162,6 +162,8 @@ pub enum Action {
     SetCoilVariable(String),
     SetCoilKind(CoilKind),
     SetComment(String),
+    /// The label a jump coil in this section can name.
+    SetRungLabel(String),
     WrapSeries,
     WrapParallel,
     Delete,
@@ -511,6 +513,7 @@ pub fn add_rung(project: &mut Project, section: usize, after: Option<usize>) -> 
     target.rungs.insert(
         at,
         Rung {
+            label: String::new(),
             cells: Vec::new(),
             comment: String::new(),
             logic: Logic::Contact {
@@ -559,15 +562,8 @@ pub fn coil_label(kind: CoilKind) -> &'static str {
         CoilKind::Negated => "(/)",
         CoilKind::Set => "(S)",
         CoilKind::Reset => "(R)",
-    }
-}
-
-fn coil_index(kind: &CoilKind) -> usize {
-    match kind {
-        CoilKind::Normal => 0,
-        CoilKind::Negated => 1,
-        CoilKind::Set => 2,
-        CoilKind::Reset => 3,
+        CoilKind::Jump => "J",
+        CoilKind::Call => "C",
     }
 }
 
@@ -954,6 +950,7 @@ pub struct PlcUi {
     var_text: String,
     coil_text: String,
     comment_text: String,
+    label_text: String,
     buffer_key: Option<NodePath>,
     link: Option<Link>,
     pub online: bool,
@@ -1128,6 +1125,7 @@ impl Default for PlcUi {
             var_text: String::new(),
             coil_text: String::new(),
             comment_text: String::new(),
+            label_text: String::new(),
             buffer_key: None,
             link: None,
             online: false,
@@ -1667,6 +1665,7 @@ impl PlcUi {
             self.var_text.clear();
             self.coil_text.clear();
             self.comment_text.clear();
+            self.label_text.clear();
             return;
         };
         self.var_text = match logic_at(&self.project, &node) {
@@ -1678,6 +1677,9 @@ impl PlcUi {
             .unwrap_or_default();
         self.comment_text = rung_at(&self.project, &node)
             .map(|rung| rung.comment.clone())
+            .unwrap_or_default();
+        self.label_text = rung_at(&self.project, &node)
+            .map(|rung| rung.label.clone())
             .unwrap_or_default();
     }
 
@@ -1748,6 +1750,13 @@ impl PlcUi {
                 if let Some(node) = self.selection.clone() {
                     if let Some(rung) = rung_at_mut(&mut self.project, &node) {
                         rung.comment = text;
+                    }
+                }
+            }
+            Action::SetRungLabel(text) => {
+                if let Some(node) = self.selection.clone() {
+                    if let Some(rung) = rung_at_mut(&mut self.project, &node) {
+                        rung.label = text;
                     }
                 }
             }
@@ -1826,6 +1835,7 @@ impl PlcUi {
                         target.rungs.insert(
                             at,
                             Rung {
+                                label: String::new(),
                                 cells: Vec::new(),
                                 comment: String::new(),
                                 logic: Logic::Contact {
@@ -1888,6 +1898,7 @@ impl PlcUi {
                         target.rungs.insert(
                             at,
                             Rung {
+                                label: String::new(),
                                 cells: Vec::new(),
                                 comment: String::new(),
                                 logic: Logic::Contact {
@@ -6845,9 +6856,17 @@ fn property_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
         Some(Logic::Compare { .. }) => "COMPARE",
         None => "RUNG",
     };
+    let rung_label = rung_at(&plc.project, &node)
+        .map(|rung| rung.label.trim().to_string())
+        .unwrap_or_default();
+    let header = if rung_label.is_empty() {
+        node.label()
+    } else {
+        format!("{} · {rung_label}", node.label())
+    };
     ui.horizontal(|ui| {
         ui.label(
-            RichText::new(node.label())
+            RichText::new(header)
                 .monospace()
                 .size(theme::font_size(10.0))
                 .color(theme::FG),
@@ -6903,7 +6922,7 @@ fn property_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
                     .size(theme::font_size(9.0))
                     .color(theme::MUTED),
             );
-            let width = (ui.available_width() - 230.0).max(60.0);
+            let width = ui.available_width().max(60.0);
             let response = ui.add_sized(
                 [width, theme::MIN_TARGET],
                 egui::TextEdit::singleline(&mut plc.coil_text)
@@ -6920,14 +6939,23 @@ fn property_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
             if response.changed() {
                 actions.push(Action::SetCoilVariable(plc.coil_text.clone()));
             }
-            let active = coil_index(&coil.kind);
-            for (index, candidate) in [CoilKind::Normal, CoilKind::Set, CoilKind::Reset]
-                .into_iter()
-                .enumerate()
-            {
-                let is_active = index == active;
+        });
+
+        // The kind picker gets its own row: five glyphs do not fit beside the
+        // operand field in a 320 px panel. The comparison is by kind, so the
+        // button that highlights is the coil's actual kind.
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for candidate in [
+                CoilKind::Normal,
+                CoilKind::Set,
+                CoilKind::Reset,
+                CoilKind::Jump,
+                CoilKind::Call,
+            ] {
+                let is_active = coil.kind == candidate;
                 let response = ui.add_sized(
-                    [60.0, theme::MIN_TARGET],
+                    [theme::MIN_TARGET, theme::MIN_TARGET],
                     egui::Button::new(
                         RichText::new(coil_label(candidate))
                             .monospace()
@@ -6954,7 +6982,42 @@ fn property_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
                 }
             }
         });
+
+        if coil.kind == CoilKind::Call {
+            // A call names a POU; offer the project's list instead of a guess.
+            // The calling POU is left out: calling itself is a cycle.
+            let current = plc.current_pou().map(|pou| pou.name).unwrap_or_default();
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                for pou in plc.project.all_pous() {
+                    if pou.name.eq_ignore_ascii_case(&current) {
+                        continue;
+                    }
+                    if theme::action_button(ui, &pou.name, true).clicked() {
+                        actions.push(Action::SetCoilVariable(pou.name.clone()));
+                    }
+                }
+            });
+        }
     }
+
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("LABEL")
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
+        let response = ui.add_sized(
+            [ui.available_width(), theme::MIN_TARGET],
+            egui::TextEdit::singleline(&mut plc.label_text)
+                .id(egui::Id::unique("linc-plc-label"))
+                .font(egui::FontId::monospace(theme::font_size(10.0))),
+        );
+        theme::focus_ring(ui, &response);
+        if response.changed() {
+            actions.push(Action::SetRungLabel(plc.label_text.clone()));
+        }
+    });
 
     ui.horizontal(|ui| {
         ui.label(
@@ -7475,6 +7538,8 @@ mod tests {
         assert_eq!(coil_label(CoilKind::Normal), "( )");
         assert_eq!(coil_label(CoilKind::Set), "(S)");
         assert_eq!(coil_label(CoilKind::Reset), "(R)");
+        assert_eq!(coil_label(CoilKind::Jump), "J");
+        assert_eq!(coil_label(CoilKind::Call), "C");
     }
 
     #[test]
@@ -8880,6 +8945,7 @@ mod new_row_tests {
         plc.project.sections = vec![linc_plc_core::model::Section {
             name: "main".into(),
             rungs: vec![linc_plc_core::model::Rung {
+                label: String::new(),
                 comment: String::new(),
                 logic: linc_plc_core::model::Logic::Const { value: true },
                 coil: linc_plc_core::model::Coil::new(
@@ -8962,6 +9028,7 @@ mod trend_tests {
         pou.sections = vec![linc_plc_core::Section {
             name: String::new(),
             rungs: vec![linc_plc_core::Rung {
+                label: String::new(),
                 comment: String::new(),
                 logic: Logic::Const { value: true },
                 coil: Coil::new("start", CoilKind::Normal),
@@ -9446,6 +9513,7 @@ mod symbol_rename_tests {
         pou.sections = vec![linc_plc_core::model::Section {
             name: String::new(),
             rungs: vec![linc_plc_core::model::Rung {
+                label: String::new(),
                 comment: String::new(),
                 logic: linc_plc_core::model::Logic::Const { value: true },
                 coil: linc_plc_core::model::Coil::new(

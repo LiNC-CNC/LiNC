@@ -595,7 +595,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     let calls: HashMap<String, Vec<String>> = pous
         .iter()
         .map(|pou| {
-            let targets = pou
+            let mut targets = pou
                 .il
                 .iter()
                 .filter_map(|line| match parse_line(line) {
@@ -609,6 +609,16 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     _ => None,
                 })
                 .collect::<Vec<_>>();
+            // A call coil is a call edge in the graph too, so a ladder-only
+            // recursion is caught by the same walk.
+            targets.extend(
+                pou.sections
+                    .iter()
+                    .flat_map(|section| section.rungs.iter())
+                    .filter(|rung| rung.coil.kind == crate::model::CoilKind::Call)
+                    .map(|rung| rung.coil.var.trim().to_ascii_uppercase())
+                    .filter(|name| !name.is_empty()),
+            );
             (pou.name.to_ascii_uppercase(), targets)
         })
         .collect();
@@ -724,6 +734,23 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 format!("duplicate section name `{}`", section.name),
                 format!("{section_path}.name"),
             ));
+        }
+
+        // A label is local to its section and names a jump target, so it must be
+        // unique here. Two rungs with one name would leave the target ambiguous.
+        let mut section_labels: HashSet<String> = HashSet::new();
+        for (rung_index, rung) in section.rungs.iter().enumerate() {
+            let label = rung.label.trim();
+            if label.is_empty() {
+                continue;
+            }
+            if !section_labels.insert(label.to_ascii_uppercase()) {
+                diagnostics.push(Diagnostic::error(
+                    "rung_label_duplicate",
+                    format!("label '{label}' is declared twice in this section"),
+                    format!("{section_path}.rungs[{rung_index}].label"),
+                ));
+            }
         }
 
         // Per target: which coil kinds wrote it. Write conflicts with anything,
@@ -878,6 +905,39 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 continue;
             }
             let coil_path = format!("{rung_path}.coil.var");
+            // A jump or call coil's operand is a label or a POU name, not a
+            // writable bit, so it leaves the bit-coil rules alone.
+            if matches!(
+                rung.coil.kind,
+                crate::model::CoilKind::Jump | crate::model::CoilKind::Call
+            ) {
+                let jump = rung.coil.kind == crate::model::CoilKind::Jump;
+                if rung
+                    .cells
+                    .iter()
+                    .any(|cell| matches!(cell, crate::grid::Cell::Compute { .. }))
+                {
+                    // A compute cell consumes the power bit and pushes nothing,
+                    // so a jump or call coil after it would test garbage.
+                    diagnostics.push(Diagnostic::error(
+                        "cell_compute",
+                        format!(
+                            "a compute row leaves no power bit, so its coil cannot be a {}",
+                            if jump { "jump" } else { "call" }
+                        ),
+                        &coil_path,
+                    ));
+                } else {
+                    check_label_coil(
+                        rung,
+                        &section.rungs,
+                        &pou_names,
+                        &coil_path,
+                        &mut diagnostics,
+                    );
+                }
+                continue;
+            }
             if !rung.coil.var.trim().is_empty() {
                 check_io_kind(
                     &rung.coil.var,
@@ -1031,6 +1091,57 @@ fn kind_label(kind: IoKind) -> &'static str {
 fn word_operand_known(text: &str, word_symbols: &HashSet<String>) -> bool {
     crate::compile::word_operand_value(text).is_some()
         || word_symbols.contains(&text.trim().to_ascii_lowercase())
+}
+
+/// Check a jump or call coil: a jump needs a label in its own section, a call
+/// needs a POU. An empty operand is named rather than left as an unpatched jump.
+fn check_label_coil(
+    rung: &crate::model::Rung,
+    section_rungs: &[crate::model::Rung],
+    pou_names: &HashSet<String>,
+    coil_path: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let target = rung.coil.var.trim();
+    match rung.coil.kind {
+        crate::model::CoilKind::Jump => {
+            if target.is_empty() {
+                diagnostics.push(Diagnostic::error(
+                    "rung_label_missing",
+                    "a jump coil needs the label of the rung to jump to",
+                    coil_path,
+                ));
+                return;
+            }
+            let wanted = target.to_ascii_uppercase();
+            let found = section_rungs
+                .iter()
+                .any(|rung| rung.label.trim().to_ascii_uppercase() == wanted);
+            if !found {
+                diagnostics.push(Diagnostic::error(
+                    "jump_target_missing",
+                    format!("no rung in this section carries the label '{target}'"),
+                    coil_path,
+                ));
+            }
+        }
+        crate::model::CoilKind::Call => {
+            if target.is_empty() {
+                diagnostics.push(Diagnostic::error(
+                    "call_target_missing",
+                    "a call coil needs the name of the POU to call",
+                    coil_path,
+                ));
+            } else if !pou_names.contains(&target.to_ascii_uppercase()) {
+                diagnostics.push(Diagnostic::error(
+                    "call_target_missing",
+                    format!("'{target}' is not a POU in this project"),
+                    coil_path,
+                ));
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Is this a place a compute coil may write? A bank slot (`MWn` or a declared

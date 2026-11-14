@@ -536,6 +536,15 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
                 }
             }
         }
+        // A call coil names its POU the same way a `CAL` line does, so the
+        // callee is a routine here too and does not also run on its own.
+        for section in &pou.sections {
+            for rung in &section.rungs {
+                if rung.coil.kind == CoilKind::Call {
+                    called.insert(rung.coil.var.trim().to_ascii_uppercase());
+                }
+            }
+        }
     }
     let by_name: HashMap<String, &crate::model::Pou> = pous
         .iter()
@@ -668,12 +677,18 @@ fn lower_pou(
     match pou.language {
         PouLanguage::Ld => {
             for section in &pou.sections {
+                // Labels are local to a section, as jump targets are. The patch
+                // waits until the whole section is lowered, so a forward jump
+                // and a backward one take the same path.
+                let mut labels: HashMap<String, usize> = HashMap::new();
+                let mut jumps: Vec<(usize, String)> = Vec::new();
                 let mut index = 0;
                 while index < section.rungs.len() {
                     if section.rungs[index].cells.is_empty() {
                         let rung = &section.rungs[index];
+                        record_label(&mut labels, &rung.label, ops.len());
                         lower_logic(&rung.logic, lookup, edges, ops);
-                        store_coil(ops, lookup, &rung.coil);
+                        lower_coil(ops, lookup, pous, &rung.coil, &mut jumps, edges, depth);
                         index += 1;
                         continue;
                     }
@@ -685,17 +700,33 @@ fn lower_pou(
                         if row.cells.is_empty() {
                             break;
                         }
+                        // A row linked under another is part of that row's
+                        // group, so a label there names the group's start.
+                        record_label(&mut labels, &row.label, ops.len());
                         run.push(row.cells.clone());
                     }
                     let mut offset = 0;
                     while offset < run.len() {
                         let (used, compute) = lower_grid_rung(&run, offset, lookup, ops, edges);
                         if !compute {
-                            store_coil(ops, lookup, &section.rungs[index + offset].coil);
+                            lower_coil(
+                                ops,
+                                lookup,
+                                pous,
+                                &section.rungs[index + offset].coil,
+                                &mut jumps,
+                                edges,
+                                depth,
+                            );
                         }
                         offset += used;
                     }
                     index += run.len();
+                }
+                for (at, label) in jumps {
+                    if let Some(target) = labels.get(&label) {
+                        patch_jump(ops, at, *target as u16);
+                    }
                 }
             }
         }
@@ -1560,7 +1591,65 @@ fn il_operand(operand: &str, lookup: &Lookup) -> IlOperand {
     IlOperand::Bit(lookup.bit(text).unwrap_or(0))
 }
 
+/// Register a rung label against the op index its row starts at. A blank label
+/// is not a label; validation refuses a jump that names one.
+fn record_label(labels: &mut HashMap<String, usize>, label: &str, at: usize) {
+    let label = label.trim();
+    if !label.is_empty() {
+        labels.insert(label.to_ascii_uppercase(), at);
+    }
+}
+
+/// Lower a rung's coil.
+///
+/// A `Jump` reserves a conditional jump the section patches once its labels are
+/// known. A `Call` inlines the callee, guarded by the rung's power: a call is an
+/// inline, so there are no locals and no stack frame, the same trade-off `CAL`
+/// makes. Both consume the power bit, so the operand stack stays as balanced as
+/// a store leaves it.
+fn lower_coil(
+    ops: &mut Vec<Op>,
+    lookup: &Lookup,
+    pous: &HashMap<String, &crate::model::Pou>,
+    coil: &crate::model::Coil,
+    jumps: &mut Vec<(usize, String)>,
+    edges: &mut u16,
+    depth: u8,
+) {
+    match coil.kind {
+        CoilKind::Jump => {
+            // `when: true` is the jump taken while the rung passes.
+            jumps.push((ops.len(), coil.var.trim().to_ascii_uppercase()));
+            ops.push(Op::JumpIf {
+                target: 0,
+                when: true,
+            });
+        }
+        CoilKind::Call => {
+            // Skip the inlined body when the rung does not pass. `when: false`
+            // is a jump taken while the power bit is false.
+            let skip = ops.len();
+            ops.push(Op::JumpIf {
+                target: 0,
+                when: false,
+            });
+            if let Some(callee) = pous.get(&coil.var.trim().to_ascii_uppercase()) {
+                lower_pou(callee, pous, lookup, ops, edges, depth + 1);
+            }
+            let after = ops.len() as u16;
+            if let Op::JumpIf { target, .. } = &mut ops[skip] {
+                *target = after;
+            }
+        }
+        _ => store_coil(ops, lookup, coil),
+    }
+}
+
 fn store_coil(ops: &mut Vec<Op>, lookup: &Lookup, coil: &crate::model::Coil) {
+    // `lower_coil` routes these before they get here.
+    if matches!(coil.kind, CoilKind::Jump | CoilKind::Call) {
+        return;
+    }
     // `CTU0.R` and `CTD0.LD` are coils on a counter, not on a bit.
     if let Some((rest, load)) = coil
         .var
@@ -1586,6 +1675,8 @@ fn store_coil(ops: &mut Vec<Op>, lookup: &Lookup, coil: &crate::model::Coil) {
         CoilKind::Normal | CoilKind::Negated => Op::Store(index),
         CoilKind::Set => Op::Set(index),
         CoilKind::Reset => Op::Reset(index),
+        // The guard at the top of this function returned for both.
+        CoilKind::Jump | CoilKind::Call => return,
     });
 }
 

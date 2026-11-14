@@ -320,6 +320,11 @@ pub struct Section {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rung {
+    /// The label a jump coil in this section can name. It marks the point
+    /// before this rung's logic, and it is local to its section: two sections
+    /// may each have a `LOOP`.
+    #[serde(default)]
+    pub label: String,
     #[serde(default)]
     pub comment: String,
     pub logic: Logic,
@@ -383,6 +388,12 @@ pub enum CoilKind {
     Negated,
     Set,
     Reset,
+    /// `-[J]-`: jump to the rung whose label is `coil.var`, in this section.
+    /// The rung's power decides: powered jumps, unpowered falls through.
+    Jump,
+    /// `-[C]-`: call the POU named by `coil.var` and return. The callee is
+    /// inlined, so a call has no locals and no stack frame.
+    Call,
 }
 
 impl Project {
@@ -474,6 +485,7 @@ impl Project {
             name: "main".to_string(),
             rungs: vec![
                 Rung {
+                    label: String::new(),
                     cells: Vec::new(),
                     comment: "Seal in: start picks the seal up, stop breaks it.".to_string(),
                     logic: Logic::series(vec![
@@ -486,12 +498,14 @@ impl Project {
                     coil: Coil::new("seal", CoilKind::Normal),
                 },
                 Rung {
+                    label: String::new(),
                     cells: Vec::new(),
                     comment: "The seal drives the run output.".to_string(),
                     logic: Logic::contact("seal", false),
                     coil: Coil::new("run", CoilKind::Normal),
                 },
                 Rung {
+                    label: String::new(),
                     cells: Vec::new(),
                     comment: "Stopping while running latches the alarm.".to_string(),
                     // The falling edge of `run` is the stop that must be caught:
@@ -555,7 +569,10 @@ impl Rung {
     }
 
     pub fn is_comment_row(&self) -> bool {
-        self.coil.var.trim().is_empty()
+        // A jump or call coil is an instruction even with no operand: an empty
+        // one is an error the validator must see, not a comment.
+        !matches!(self.coil.kind, CoilKind::Jump | CoilKind::Call)
+            && self.coil.var.trim().is_empty()
             && self
                 .cells
                 .iter()
@@ -564,6 +581,7 @@ impl Rung {
 
     pub fn new(logic: Logic, coil: Coil) -> Self {
         Self {
+            label: String::new(),
             comment: String::new(),
             logic,
             coil,
