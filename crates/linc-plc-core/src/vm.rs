@@ -811,9 +811,9 @@ impl Vm {
         config: &PidConfig,
     ) -> Option<f32> {
         let now = self.clock_ms;
-        let mut state = match self.pids.get(index as usize) {
-            Some(state) => *state,
-            None => return None,
+        let mut state = {
+            let state = self.pids.get(index as usize)?;
+            *state
         };
         if state.started
             && config.update_ms > 0
