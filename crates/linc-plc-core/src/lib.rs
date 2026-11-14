@@ -12,6 +12,7 @@
 
 pub mod clp;
 pub mod compile;
+pub mod diagnostic;
 pub mod expr;
 pub mod grid;
 pub mod il;

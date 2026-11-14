@@ -38,6 +38,51 @@ fn no_module_outside_the_profile_spells_a_marker_word() {
     }
 }
 
+/// M4's acceptance: the validator names no instruction and no operand format.
+/// The rules are `profile/instr.rs`'s; `validate.rs` walks the document and
+/// checks its structure, so a new mnemonic or a changed operand spelling cannot
+/// need an edit there.
+#[test]
+fn validate_spells_no_mnemonic_and_no_operand_format() {
+    let validate = include_str!("../src/validate.rs");
+    for row in linc_plc_core::profile::spec::SPECS {
+        let literal = format!("\"{}\"", row.mnemonic);
+        assert!(
+            !validate.contains(&literal),
+            "validate.rs spells `{}`; its rule belongs in `profile/instr.rs`",
+            row.mnemonic
+        );
+    }
+    for token in [
+        linc_plc_core::profile::resolve::MARKER_PREFIX,
+        linc_plc_core::profile::resolve::TIME_PREFIX,
+        ".PT",
+        ".PV",
+        ".ET",
+        ".CV",
+    ] {
+        let literal = format!("\"{token}\"");
+        assert!(
+            !validate.contains(&literal),
+            "validate.rs spells the operand format `{token}`; `resolve` owns it"
+        );
+    }
+    // The instruction rules moved, not vanished: each family still has its home.
+    let instr = include_str!("../src/profile/instr.rs");
+    for marker in [
+        "il_type",
+        "cell_block",
+        "coil_expr",
+        "fbd_input",
+        "compute_target",
+    ] {
+        assert!(
+            instr.contains(marker),
+            "`{marker}` should be an instruction rule, in `profile/instr.rs`"
+        );
+    }
+}
+
 /// The bank's width is the layout's. M3's acceptance: no module outside
 /// `src/profile/` names the marker-word count, so a second dialect can change it
 /// without editing the compiler, the importer, the validator or the editor.

@@ -3,12 +3,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use serde::{Deserialize, Serialize};
-
-use crate::il::{parse_line, word_operand, IlLine};
-use crate::model::{IoDirection, IoKind, Logic, PouLanguage, Project, Section};
-use crate::profile::spec::IlForm;
-use crate::profile::SymbolLookup;
+use crate::il::{parse_line, IlLine};
+use crate::model::{FbdGrid, IoDirection, IoKind, Logic, PouLanguage, Project, Rung, Section};
+use crate::profile::instr::{Ctx, Instr};
+use crate::profile::Profile;
 use crate::SCHEMA_VERSION;
 
 /// Maximum accepted logic nesting depth.
@@ -19,61 +17,43 @@ const MAX_SYMBOLS: usize = 4096;
 const MAX_RUNGS: usize = 4096;
 /// Maximum project-name length, in characters.
 const MAX_NAME: usize = 64;
-/// Maximum word-bank slots: 16 marker words plus every word and float point.
-/// The bank is a fixed table in the scan image, so a project past this is
-/// refused rather than truncated.
-const MAX_WORDS: u16 = 256;
-
 const RESERVED: [&str; 5] = ["alive", "scan-count", "scan-time-us", "fault", "overruns"];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Severity {
-    Error,
-    Warning,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Diagnostic {
-    pub severity: Severity,
-    pub code: String,
-    pub message: String,
-    pub path: String,
-}
-
-impl Diagnostic {
-    pub fn error(
-        code: impl Into<String>,
-        message: impl Into<String>,
-        path: impl Into<String>,
-    ) -> Self {
-        Self {
-            severity: Severity::Error,
-            code: code.into(),
-            message: message.into(),
-            path: path.into(),
-        }
-    }
-
-    pub fn warning(
-        code: impl Into<String>,
-        message: impl Into<String>,
-        path: impl Into<String>,
-    ) -> Self {
-        Self {
-            severity: Severity::Warning,
-            code: code.into(),
-            message: message.into(),
-            path: path.into(),
-        }
-    }
-}
+pub use crate::diagnostic::{Diagnostic, Severity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SymbolClass {
     Input,
     Output,
     Var,
+}
+
+/// The project facts the profile's instruction rules read, bundled once and lent
+/// to each check. The validator owns them; nothing here decides a rule.
+#[derive(Clone, Copy)]
+struct Facts<'a> {
+    known: &'a HashSet<String>,
+    word_slots: &'a HashMap<String, u16>,
+    io_kinds: &'a HashMap<&'a str, IoKind>,
+    pou_names: &'a HashSet<String>,
+    section_rungs: &'a [Rung],
+    labels: &'a HashSet<String>,
+    grid: Option<&'a FbdGrid>,
+}
+
+impl Facts<'_> {
+    fn ctx<'b>(&'b self, path: &'b str) -> Ctx<'b> {
+        Ctx {
+            path,
+            known: self.known,
+            word_slots: self.word_slots,
+            io_kinds: self.io_kinds,
+            pou_names: self.pou_names,
+            section_rungs: self.section_rungs,
+            labels: self.labels,
+            grid: self.grid,
+        }
+    }
 }
 
 pub fn validate(project: &Project) -> Vec<Diagnostic> {
@@ -144,12 +124,6 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     for point in &project.io {
         io_kinds.insert(point.name.as_str(), point.kind);
     }
-    let word_symbols: HashSet<String> = project
-        .io
-        .iter()
-        .filter(|point| point.kind != IoKind::Bit)
-        .map(|point| point.name.to_ascii_lowercase())
-        .collect();
     // The expression resolver reads the same name -> slot map and the same bank
     // geometry the compiler binds, so a name one accepts is a name the other can
     // resolve, and the two cannot disagree about a slot.
@@ -158,11 +132,12 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         .iter()
         .map(|(name, slot, _, _)| (name.to_ascii_lowercase(), *slot))
         .collect();
-    if layout.total() > MAX_WORDS {
+    let max_words = crate::profile::profile().max_words();
+    if layout.total() > max_words {
         diagnostics.push(Diagnostic::error(
             "too_large",
             format!(
-                "the word bank needs {} slots ({} marker words plus the word and float points); the maximum is {MAX_WORDS}",
+                "the word bank needs {} slots ({} marker words plus the word and float points); the maximum is {max_words}",
                 layout.total(),
                 layout.mw
             ),
@@ -202,226 +177,31 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         }
                     }
                 }
+                let facts = Facts {
+                    known: &known,
+                    word_slots: &word_slots,
+                    io_kinds: &io_kinds,
+                    pou_names: &pou_names,
+                    section_rungs: &[],
+                    labels: &labels,
+                    grid: None,
+                };
                 for (line_index, line) in pou.il.iter().enumerate() {
                     let path = format!("pous[{index}].il[{line_index}]");
                     match parse_line(line) {
                         IlLine::Instruction { mnemonic, operand } => {
-                            // A word operand is whatever the profile resolves: a
-                            // marker word, a time, a literal, a block member or a
-                            // declared word point. The same function the compiler
-                            // addresses with, so flow and code cannot disagree.
-                            let operand_is_word =
-                                crate::profile::resolve::resolve(&operand, &word_slots).is_ok();
-                            if !operand.trim().is_empty() {
-                                // Only a mnemonic that fixes the operand's side
-                                // is checked here: `LD`/`LDN`/`ST`/`STN`/`=` take
-                                // either side, and the type flow above already
-                                // reports an accumulator mismatch.
-                                if is_il_bit_operand(&mnemonic) {
-                                    check_io_kind(
-                                        &operand,
-                                        true,
-                                        &io_kinds,
-                                        path.clone(),
-                                        &mut diagnostics,
-                                    );
-                                } else if is_il_word_operand(&mnemonic) {
-                                    check_io_kind(
-                                        &operand,
-                                        false,
-                                        &io_kinds,
-                                        path.clone(),
-                                        &mut diagnostics,
-                                    );
-                                }
-                            }
-                            if is_il_store(&mnemonic) {
-                                if let Some(current) = accumulator {
-                                    if current != operand_is_word {
-                                        diagnostics.push(Diagnostic::error(
-                                            "il_type",
-                                            format!(
-                                                "'{mnemonic}' stores a {}, but the accumulator holds a {}",
-                                                if operand_is_word { "word" } else { "bit" },
-                                                if current { "word" } else { "bit" },
-                                            ),
-                                            path.clone(),
-                                        ));
-                                    }
-                                }
-                            }
-                            if is_il_load(&mnemonic) {
-                                accumulator = Some(operand_is_word);
-                            } else if is_il_bit_combinator(&mnemonic) {
-                                if let Some(true) = accumulator {
-                                    diagnostics.push(Diagnostic::error(
-                                        "il_type",
-                                        format!(
-                                            "'{mnemonic}' needs a bit in the accumulator, not a word"
-                                        ),
-                                        path.clone(),
-                                    ));
-                                }
-                            }
-                            if is_il_plain_return(&mnemonic) {
-                                continue;
-                            }
-                            if is_il_jump(&mnemonic) {
-                                if accumulator == Some(true) {
-                                    diagnostics.push(Diagnostic::error(
-                                        "il_type",
-                                        format!(
-                                            "'{mnemonic}' needs a bit result to test, not a word"
-                                        ),
-                                        path.clone(),
-                                    ));
-                                }
-                                if !labels.contains(&operand.trim().to_ascii_uppercase()) {
-                                    diagnostics.push(Diagnostic::error(
-                                        "il_label_missing",
-                                        format!(
-                                            "'{operand}' is not a label in this POU; declare it as `LABEL:`"
-                                        ),
-                                        path.clone(),
-                                    ));
-                                }
-                                continue;
-                            }
-                            if is_il_conditional_return(&mnemonic) {
-                                if accumulator == Some(true) {
-                                    diagnostics.push(Diagnostic::error(
-                                        "il_type",
-                                        format!(
-                                            "'{mnemonic}' needs a bit result to test, not a word"
-                                        ),
-                                        path.clone(),
-                                    ));
-                                }
-                                continue;
-                            }
-                            if is_il_conditional_call(&mnemonic) {
-                                if accumulator == Some(true) {
-                                    diagnostics.push(Diagnostic::error(
-                                        "il_type",
-                                        format!(
-                                            "'{mnemonic}' needs a bit result to test, not a word"
-                                        ),
-                                        path.clone(),
-                                    ));
-                                }
-                                if !pou_names.contains(&operand.trim().to_ascii_uppercase()) {
-                                    diagnostics.push(Diagnostic::error(
-                                        "cal_target",
-                                        format!(
-                                            "'{operand}' is not a POU in this project; CALC calls a POU, not a block"
-                                        ),
-                                        path.clone(),
-                                    ));
-                                }
-                                continue;
-                            }
-                            if is_il_plain_call(&mnemonic) {
-                                if let Some((name, args)) = crate::il::parse_call(&operand) {
-                                    let block = crate::compile::parse_block(&name, &name, "");
-                                    if block.is_none() {
-                                        diagnostics.push(Diagnostic::error(
-                                            "cal_block",
-                                            format!(
-                                                "'{name}' is not a block instance; use TON0-3, TOF0-3, TP0-3, CTU0-3 or CTD0-3"
-                                            ),
-                                            path.clone(),
-                                        ));
-                                    }
-                                    for (key, value) in args {
-                                        match key.as_str() {
-                                            "IN" | "CU" | "CD" => {
-                                                if !known.contains(&value.to_ascii_lowercase())
-                                                    && !value.eq_ignore_ascii_case("TRUE")
-                                                    && !value.eq_ignore_ascii_case("FALSE")
-                                                {
-                                                    diagnostics.push(Diagnostic::error(
-                                                        "cal_arg",
-                                                        format!("'{value}' is not a declared input"),
-                                                        path.clone(),
-                                                    ));
-                                                }
-                                            }
-                                            "PT" | "PV" => {
-                                                let timer = block
-                                                    .map(|(kind, _, _)| kind.is_timer())
-                                                    .unwrap_or(true);
-                                                // A literal preset, a marker word,
-                                                // or a declared word point; a block
-                                                // member is a readable value but
-                                                // not a preset source.
-                                                let ok = crate::compile::preset_source(
-                                                    &value, timer,
-                                                )
-                                                .is_some()
-                                                    || word_symbols.contains(
-                                                        &value.trim().to_ascii_lowercase(),
-                                                    );
-                                                if !ok {
-                                                    diagnostics.push(Diagnostic::error(
-                                                        "cal_arg",
-                                                        format!(
-                                                            "'{value}' is not a valid preset or a declared word"
-                                                        ),
-                                                        path.clone(),
-                                                    ));
-                                                }
-                                            }
-                                            other => diagnostics.push(Diagnostic::error(
-                                                "cal_arg",
-                                                format!(
-                                                    "'{other}' is not an argument; use IN, CU, CD, PT or PV"
-                                                ),
-                                                path.clone(),
-                                            )),
-                                        }
-                                    }
-                                } else if !pou_names.contains(&operand.trim().to_ascii_uppercase())
-                                {
-                                    diagnostics.push(Diagnostic::error(
-                                        "cal_target",
-                                        format!("'{operand}' is not a POU in this project"),
-                                        path,
-                                    ));
-                                }
-                            } else if is_il_compare(&mnemonic) {
-                                if let Some(false) = accumulator {
-                                    diagnostics.push(Diagnostic::error(
-                                        "il_type",
-                                        format!(
-                                            "'{mnemonic}' needs a word in the accumulator, not a bit"
-                                        ),
-                                        path.clone(),
-                                    ));
-                                }
-                                accumulator = Some(false);
-                            } else if is_il_word_op(&mnemonic) {
-                                if let Some(false) = accumulator {
-                                    diagnostics.push(Diagnostic::error(
-                                        "il_type",
-                                        format!(
-                                            "'{mnemonic}' needs a word in the accumulator, not a bit"
-                                        ),
-                                        path.clone(),
-                                    ));
-                                }
-                                // Arithmetic leaves a word, a compare a bit.
-                                accumulator = Some(true);
-                            } else if word_operand(&operand).is_none()
-                                && operand.trim().parse::<i32>().is_err()
-                                && !known.contains(&operand.to_ascii_lowercase())
-                            {
-                                diagnostics.push(Diagnostic::error(
-                                    "il_operand",
-                                    format!(
-                                        "'{operand}' is not a declared input, output or variable"
-                                    ),
-                                    path,
-                                ));
+                            // The rules are the profile's; the flow they carry
+                            // (a word operation leaves a word) is the only state
+                            // the validator has to keep.
+                            let verdict = crate::profile::instr::check_il_line(
+                                &mnemonic,
+                                &operand,
+                                accumulator,
+                                &facts.ctx(&path),
+                            );
+                            diagnostics.extend(verdict.diagnostics);
+                            if let Some(next) = verdict.accumulator {
+                                accumulator = Some(next);
                             }
                         }
                         IlLine::Label(_) => {}
@@ -433,15 +213,27 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 }
             }
             PouLanguage::Fbd => {
+                let facts = Facts {
+                    known: &known,
+                    word_slots: &word_slots,
+                    io_kinds: &io_kinds,
+                    pou_names: &pou_names,
+                    section_rungs: &[],
+                    labels: &HashSet::new(),
+                    grid: None,
+                };
                 if let Some(grid) = pou.fbd_grid.as_ref().filter(|grid| !grid.blocks.is_empty()) {
-                    check_fbd_grid(
-                        grid,
-                        index,
-                        &known,
-                        &word_slots,
-                        &io_kinds,
-                        &mut diagnostics,
-                    );
+                    let facts = Facts {
+                        grid: Some(grid),
+                        ..facts
+                    };
+                    for (block_index, block) in grid.blocks.iter().enumerate() {
+                        let path = format!("pous[{index}].fbd_grid.blocks[{block_index}]");
+                        diagnostics.extend(crate::profile::instr::check_instruction(
+                            &Instr::Fbd { block },
+                            &facts.ctx(&path),
+                        ));
+                    }
                     if pou.name.trim().is_empty() {
                         diagnostics.push(Diagnostic::error(
                             "pou_name",
@@ -453,119 +245,13 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 }
                 for (line_index, line) in pou.fbd.iter().enumerate() {
                     let path = format!("pous[{index}].fbd[{line_index}]");
-                    let block = line.block.trim().to_ascii_uppercase();
-                    let output_name = line
-                        .output
-                        .trim()
-                        .strip_prefix('!')
-                        .unwrap_or_else(|| line.output.trim());
-                    let declared = known.contains(&output_name.to_ascii_lowercase());
-                    if !declared {
-                        diagnostics.push(Diagnostic::error(
-                            "fbd_output",
-                            format!("'{}' is not a declared output or variable", line.output),
-                            format!("{path}.output"),
-                        ));
-                    }
-                    let reference = |input: &str| -> Option<usize> {
-                        input
-                            .trim()
-                            .strip_prefix('@')
-                            .and_then(|number| number.parse::<usize>().ok())
-                    };
-                    for input in &line.inputs {
-                        if let Some(target) = reference(input) {
-                            if target == 0 || target > line_index {
-                                diagnostics.push(Diagnostic::error(
-                                    "fbd_ref",
-                                    format!(
-                                        "'{input}' is not an earlier line; a block can only read a pin above it"
-                                    ),
-                                    format!("{path}.inputs"),
-                                ));
-                            }
-                        }
-                    }
-                    let bit_ok = line.inputs.iter().all(|input| {
-                        let input = input.trim().strip_prefix('!').unwrap_or(input.trim());
-                        input.eq_ignore_ascii_case("TRUE")
-                            || input.eq_ignore_ascii_case("FALSE")
-                            || known.contains(&input.to_ascii_lowercase())
-                            || reference(input).map(|target| target >= 1).unwrap_or(false)
-                    });
-                    let word_block = crate::compile::compare_op(&block).is_some();
-                    for input in &line.inputs {
-                        check_io_kind(
-                            input.trim().trim_start_matches('!'),
-                            !word_block,
-                            &io_kinds,
-                            format!("{path}.inputs"),
-                            &mut diagnostics,
-                        );
-                    }
-                    let form = il_form(&block);
-                    if matches!(
-                        form,
-                        Some(IlForm::And | IlForm::Or | IlForm::Xor | IlForm::Not)
-                    ) {
-                        if !bit_ok {
-                            diagnostics.push(Diagnostic::error(
-                                "fbd_input",
-                                format!("{block} takes declared inputs"),
-                                format!("{path}.inputs"),
-                            ));
-                        }
-                        let not = matches!(form, Some(IlForm::Not));
-                        let needed = if not { 1 } else { 2 };
-                        if not && line.inputs.len() != needed {
-                            diagnostics.push(Diagnostic::error(
-                                "fbd_arity",
-                                "NOT takes one input",
-                                format!("{path}.inputs"),
-                            ));
-                        }
-                    } else if let Some((kind, _, _)) =
-                        crate::compile::parse_block(&block, &block, &line.preset)
-                    {
-                        let needed = if kind.is_latch() { 2 } else { 1 };
-                        if !bit_ok || line.inputs.len() < needed {
-                            diagnostics.push(Diagnostic::error(
-                                "fbd_input",
-                                format!(
-                                    "{block} takes {needed} declared input{}",
-                                    if needed == 1 { "" } else { "s" }
-                                ),
-                                format!("{path}.inputs"),
-                            ));
-                        }
-                    } else if crate::compile::parse_block(&block, &block, &line.preset).is_some() {
-                        if !bit_ok || line.inputs.is_empty() {
-                            diagnostics.push(Diagnostic::error(
-                                "fbd_input",
-                                format!("{block} takes one declared input"),
-                                format!("{path}.inputs"),
-                            ));
-                        }
-                    } else if crate::compile::compare_op(&block).is_some() {
-                        if line.inputs.len() != 2
-                            || !line
-                                .inputs
-                                .iter()
-                                .all(|input| word_operand_known(input, &word_slots))
-                        {
-                            diagnostics.push(Diagnostic::error(
-                                "fbd_input",
-                                format!("{block} takes two word values"),
-                                format!("{path}.inputs"),
-                            ));
-                        }
-                    } else {
-                        diagnostics.push(Diagnostic::error(
-                            "fbd_block",
-                            format!("'{block}' is not a block; use AND, OR, XOR, NOT, a TON/TOF/TP/CTU/CTD instance or a compare"),
-                            format!("{path}.block"),
-                        ));
-                    }
+                    diagnostics.extend(crate::profile::instr::check_instruction(
+                        &Instr::FbdLine {
+                            line,
+                            index: line_index,
+                        },
+                        &facts.ctx(&path),
+                    ));
                 }
             }
         }
@@ -587,7 +273,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 .iter()
                 .filter_map(|line| match parse_line(line) {
                     IlLine::Instruction { mnemonic, operand }
-                        if matches!(il_form(&mnemonic), Some(IlForm::Call(_))) =>
+                        if crate::profile::instr::is_call_mnemonic(&mnemonic) =>
                     {
                         let target = operand.trim();
                         // `CAL TON0(IN:=..)` is a block, not a POU.
@@ -665,13 +351,11 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         .flat_map(|rung| rung.cells.iter())
         .filter(|cell| matches!(cell, crate::grid::Cell::Edge { .. }))
         .count();
-    if edge_contacts > usize::from(crate::compile::MAX_EDGE_CONTACTS) {
+    let max_edges = crate::profile::profile().max_edge_contacts();
+    if edge_contacts > usize::from(max_edges) {
         diagnostics.push(Diagnostic::error(
             "edge_limit",
-            format!(
-                "{edge_contacts} edge contacts; at most {} are supported",
-                crate::compile::MAX_EDGE_CONTACTS
-            ),
+            format!("{edge_contacts} edge contacts; at most {max_edges} are supported"),
             "sections",
         ));
     }
@@ -744,6 +428,18 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         // Set and Reset together are a latch, and set-set or reset-reset are
         // ambiguous.
         let mut coils: HashMap<String, (bool, bool, bool)> = HashMap::new();
+        // Ladder instructions read their own section and no labels: a jump coil
+        // names a rung label, which is checked against these rungs.
+        let no_labels: HashSet<String> = HashSet::new();
+        let facts = Facts {
+            known: &known,
+            word_slots: &word_slots,
+            io_kinds: &io_kinds,
+            pou_names: &pou_names,
+            section_rungs: &section.rungs,
+            labels: &no_labels,
+            grid: None,
+        };
         for (rung_index, rung) in section.rungs.iter().enumerate() {
             let rung_path = format!("{section_path}.rungs[{rung_index}]");
             let logic_path = format!("{rung_path}.logic");
@@ -765,122 +461,11 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         format!("{rung_path}.cells[{cell_index}]"),
                     ));
                 }
-                if let crate::grid::Cell::Block {
-                    block,
-                    instance,
-                    preset,
-                } = cell
-                {
-                    if crate::compile::parse_block(block, instance, preset).is_none() {
-                        diagnostics.push(Diagnostic::error(
-                            "cell_block",
-                            format!(
-                                "'{instance}' with preset '{preset}' is not a valid block; use \
-                                 TON0-3, TOF0-3, TP0-3, CTU0-3 or CTD0-3 and a preset like T#4s"
-                            ),
-                            format!("{rung_path}.cells[{cell_index}]"),
-                        ));
-                    }
-                } else if let crate::grid::Cell::Compare { op, left, right } = cell {
-                    if crate::compile::compare_op(op).is_none() {
-                        diagnostics.push(Diagnostic::error(
-                            "cell_compare",
-                            format!(
-                                "'{op}' is not a compare operator; use GT, GE, EQ, NE, LE or LT"
-                            ),
-                            format!("{rung_path}.cells[{cell_index}]"),
-                        ));
-                    }
-                    for operand in [left, right] {
-                        check_io_kind(
-                            operand,
-                            false,
-                            &io_kinds,
-                            format!("{rung_path}.cells[{cell_index}]"),
-                            &mut diagnostics,
-                        );
-                        if !word_operand_known(operand, &word_slots) {
-                            diagnostics.push(Diagnostic::error(
-                                "cell_compare_operand",
-                                format!(
-                                    "'{operand}' is not a word, a number, a time or a block member"
-                                ),
-                                format!("{rung_path}.cells[{cell_index}]"),
-                            ));
-                        }
-                    }
-                } else if let crate::grid::Cell::Compute {
-                    op,
-                    target,
-                    left,
-                    right,
-                } = cell
-                {
-                    if crate::compile::MathOp::parse(op).is_none() {
-                        diagnostics.push(Diagnostic::error(
-                            "cell_compute",
-                            format!(
-                                "'{op}' is not a compute operator; use ADD, SUB, MUL, DIV or MOVE"
-                            ),
-                            format!("{rung_path}.cells[{cell_index}]"),
-                        ));
-                    }
-                    if !compute_target_known(target, &word_slots) {
-                        diagnostics.push(Diagnostic::error(
-                            "compute_target",
-                            format!(
-                                "'{target}' is not a place to write; use {}, a word point or a block member such as TON0.PT",
-                                crate::profile::resolve::marker_range()
-                            ),
-                            format!("{rung_path}.cells[{cell_index}]"),
-                        ));
-                    }
-                    for operand in [left, right] {
-                        check_io_kind(
-                            operand,
-                            false,
-                            &io_kinds,
-                            format!("{rung_path}.cells[{cell_index}]"),
-                            &mut diagnostics,
-                        );
-                        if !word_operand_known(operand, &word_slots) {
-                            diagnostics.push(Diagnostic::error(
-                                "cell_compute_operand",
-                                format!(
-                                    "'{operand}' is not a word, a number, a time or a block member"
-                                ),
-                                format!("{rung_path}.cells[{cell_index}]"),
-                            ));
-                        }
-                    }
-                } else if let crate::grid::Cell::Expr { text } = cell {
-                    check_expression(
-                        text,
-                        false,
-                        &format!("{rung_path}.cells[{cell_index}]"),
-                        &word_slots,
-                        &mut diagnostics,
-                    );
-                } else if let Some(operand) = cell.operand() {
-                    check_io_kind(
-                        operand,
-                        true,
-                        &io_kinds,
-                        format!("{rung_path}.cells[{cell_index}]"),
-                        &mut diagnostics,
-                    );
-                    let known = symbols
-                        .keys()
-                        .any(|name| name.eq_ignore_ascii_case(operand))
-                        || crate::compile::q_instance(operand).is_some();
-                    if !known {
-                        diagnostics.push(Diagnostic::error(
-                            "cell_operand",
-                            format!("'{operand}' is not a declared input, output or variable"),
-                            format!("{rung_path}.cells[{cell_index}]"),
-                        ));
-                    }
-                }
+                let cell_path = format!("{rung_path}.cells[{cell_index}]");
+                diagnostics.extend(crate::profile::instr::check_instruction(
+                    &Instr::Cell(cell),
+                    &facts.ctx(&cell_path),
+                ));
             }
             if logic_depth(&rung.logic) > MAX_DEPTH {
                 diagnostics.push(Diagnostic::error(
@@ -889,62 +474,44 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     &logic_path,
                 ));
             } else {
-                check_logic(
-                    &rung.logic,
-                    &logic_path,
-                    &symbols,
-                    &io_kinds,
-                    &word_slots,
-                    &mut diagnostics,
-                );
+                check_logic(&rung.logic, &logic_path, &facts, &mut diagnostics);
             }
 
             if rung.is_comment_row() {
                 continue;
             }
             let coil_path = format!("{rung_path}.coil.var");
+            let ctx = facts.ctx(&rung_path);
+            // A compute cell ends the rung before the coil, so an instruction
+            // after it would never run or would test a bit nobody pushed.
+            let compute_cell = rung
+                .cells
+                .iter()
+                .any(|cell| matches!(cell, crate::grid::Cell::Compute { .. }));
             // `expr` is a compute coil's operand. On any other kind it would be
             // silently ignored, so it is refused instead.
-            if rung.coil.kind != crate::model::CoilKind::Compute && rung.coil.expr.is_some() {
-                diagnostics.push(Diagnostic::error(
-                    "coil_expr",
-                    format!(
-                        "`expr` belongs to a compute coil; `{}` does not read it",
-                        rung.coil.var
-                    ),
-                    format!("{rung_path}.coil.expr"),
-                ));
+            if rung.coil.kind != crate::model::CoilKind::Compute {
+                if let Some(expr) = rung.coil.expr.as_deref() {
+                    diagnostics.extend(crate::profile::instr::check_instruction(
+                        &Instr::CoilExpr {
+                            kind: rung.coil.kind,
+                            var: &rung.coil.var,
+                            expr,
+                        },
+                        &ctx,
+                    ));
+                }
             }
             // A compute coil writes through its expression: its slot is unused,
             // and its text is the whole operand.
             if rung.coil.kind == crate::model::CoilKind::Compute {
-                if rung
-                    .cells
-                    .iter()
-                    .any(|cell| matches!(cell, crate::grid::Cell::Compute { .. }))
-                {
-                    // A compute cell ends the rung before the coil, so the
-                    // assignment would never run.
-                    diagnostics.push(Diagnostic::error(
-                        "cell_compute",
-                        "a rung cannot carry both a compute cell and a compute coil",
-                        &coil_path,
-                    ));
-                }
-                match rung.coil.expr.as_deref() {
-                    Some(text) => check_expression(
-                        text,
-                        true,
-                        &format!("{rung_path}.coil.expr"),
-                        &word_slots,
-                        &mut diagnostics,
-                    ),
-                    None => diagnostics.push(Diagnostic::error(
-                        "coil_expr",
-                        "a compute coil needs an expression: `target = value`",
-                        format!("{rung_path}.coil.expr"),
-                    )),
-                }
+                diagnostics.extend(crate::profile::instr::check_instruction(
+                    &Instr::ComputeCoil {
+                        expr: rung.coil.expr.as_deref(),
+                        compute_cell,
+                    },
+                    &ctx,
+                ));
                 continue;
             }
             // A jump or call coil's operand is a label or a POU name, not a
@@ -953,72 +520,30 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 rung.coil.kind,
                 crate::model::CoilKind::Jump | crate::model::CoilKind::Call
             ) {
-                let jump = rung.coil.kind == crate::model::CoilKind::Jump;
-                if rung
-                    .cells
-                    .iter()
-                    .any(|cell| matches!(cell, crate::grid::Cell::Compute { .. }))
-                {
-                    // A compute cell consumes the power bit and pushes nothing,
-                    // so a jump or call coil after it would test garbage.
-                    diagnostics.push(Diagnostic::error(
-                        "cell_compute",
-                        format!(
-                            "a compute row leaves no power bit, so its coil cannot be a {}",
-                            if jump { "jump" } else { "call" }
-                        ),
-                        &coil_path,
-                    ));
-                } else {
-                    check_label_coil(
-                        rung,
-                        &section.rungs,
-                        &pou_names,
-                        &coil_path,
-                        &mut diagnostics,
-                    );
-                }
+                diagnostics.extend(crate::profile::instr::check_instruction(
+                    &Instr::LabelCoil {
+                        kind: rung.coil.kind,
+                        var: &rung.coil.var,
+                        compute_cell,
+                    },
+                    &ctx,
+                ));
                 continue;
             }
-            if !rung.coil.var.trim().is_empty() {
-                check_io_kind(
-                    &rung.coil.var,
-                    true,
-                    &io_kinds,
-                    coil_path.clone(),
-                    &mut diagnostics,
-                );
-            }
+            let verdict = crate::profile::instr::coil(
+                &Instr::Coil {
+                    var: &rung.coil.var,
+                },
+                &ctx,
+            );
+            diagnostics.extend(verdict.diagnostics);
             // A counter's reset/load is a coil on the instance, not on a bit.
-            let counter_coil = rung
-                .coil
-                .var
-                .strip_suffix(".R")
-                .or_else(|| rung.coil.var.strip_suffix(".LD"))
-                .and_then(|rest| crate::compile::parse_block(rest, rest, ""));
-            if let Some((kind, _, _)) = counter_coil {
-                if !matches!(
-                    kind,
-                    crate::compile::FbKind::Ctu | crate::compile::FbKind::Ctd
-                ) {
-                    diagnostics.push(Diagnostic::error(
-                        "coil_target",
-                        format!(
-                            "`{}` is not a counter; only CTU and CTD have R and LD",
-                            rung.coil.var
-                        ),
-                        &coil_path,
-                    ));
-                }
+            if verdict.target_judged {
                 continue;
             }
             // A compute rung writes through its `Compute` cell, so its coil slot is
             // unused: neither an empty target nor a duplicate there means anything.
-            if rung
-                .cells
-                .iter()
-                .any(|cell| matches!(cell, crate::grid::Cell::Compute { .. }))
-            {
+            if compute_cell {
                 continue;
             }
             // A blank coil is the linked continuation row: the row holds the
@@ -1086,204 +611,6 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     diagnostics
 }
 
-/// `io_kind`: a declared point used on the wrong side of the model. A bit point
-/// has no word slot and a word point has no bit slot, so accepting the name
-/// would silently address the wrong image; validation refuses it instead.
-fn check_io_kind(
-    name: &str,
-    want_bit: bool,
-    io_kinds: &HashMap<&str, IoKind>,
-    path: String,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let name = name.trim();
-    let Some(kind) = io_kinds.get(name) else {
-        return;
-    };
-    if want_bit {
-        if *kind != IoKind::Bit {
-            diagnostics.push(Diagnostic::error(
-                "io_kind",
-                format!(
-                    "`{name}` is a {} point and cannot be read as a bit contact or coil",
-                    kind_label(*kind)
-                ),
-                path,
-            ));
-        }
-    } else if *kind == IoKind::Bit {
-        diagnostics.push(Diagnostic::error(
-            "io_kind",
-            format!("`{name}` is a bit point and cannot be used as a word value"),
-            path,
-        ));
-    }
-}
-
-fn kind_label(kind: IoKind) -> &'static str {
-    match kind {
-        IoKind::Bit => "bit",
-        IoKind::Word => "word",
-        IoKind::Float => "float",
-    }
-}
-
-/// Is this text a word value? The profile's resolver decides, so validation
-/// accepts exactly what the compiler can address.
-fn word_operand_known(text: &str, word_slots: &SymbolLookup) -> bool {
-    crate::profile::resolve::resolve(text, word_slots).is_ok()
-}
-
-/// Check one expression, mapping the parser's refusal to a diagnostic with its
-/// own code and the byte offset of the offending token.
-fn check_expression(
-    text: &str,
-    assignment: bool,
-    path: &str,
-    word_slots: &HashMap<String, u16>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let result = if assignment {
-        crate::expr::lower_assignment(text, word_slots).map(|_| ())
-    } else {
-        crate::expr::lower_bit(text, word_slots).map(|_| ())
-    };
-    if let Err(error) = result {
-        diagnostics.push(Diagnostic::error(
-            error.code(),
-            format!("{} (at byte {})", error.message, error.offset),
-            path,
-        ));
-    }
-}
-
-/// Check a jump or call coil: a jump needs a label in its own section, a call
-/// needs a POU. An empty operand is named rather than left as an unpatched jump.
-fn check_label_coil(
-    rung: &crate::model::Rung,
-    section_rungs: &[crate::model::Rung],
-    pou_names: &HashSet<String>,
-    coil_path: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let target = rung.coil.var.trim();
-    match rung.coil.kind {
-        crate::model::CoilKind::Jump => {
-            if target.is_empty() {
-                diagnostics.push(Diagnostic::error(
-                    "rung_label_missing",
-                    "a jump coil needs the label of the rung to jump to",
-                    coil_path,
-                ));
-                return;
-            }
-            let wanted = target.to_ascii_uppercase();
-            let found = section_rungs
-                .iter()
-                .any(|rung| rung.label.trim().to_ascii_uppercase() == wanted);
-            if !found {
-                diagnostics.push(Diagnostic::error(
-                    "jump_target_missing",
-                    format!("no rung in this section carries the label '{target}'"),
-                    coil_path,
-                ));
-            }
-        }
-        crate::model::CoilKind::Call => {
-            if target.is_empty() {
-                diagnostics.push(Diagnostic::error(
-                    "call_target_missing",
-                    "a call coil needs the name of the POU to call",
-                    coil_path,
-                ));
-            } else if !pou_names.contains(&target.to_ascii_uppercase()) {
-                diagnostics.push(Diagnostic::error(
-                    "call_target_missing",
-                    format!("'{target}' is not a POU in this project"),
-                    coil_path,
-                ));
-            }
-        }
-        _ => {}
-    }
-}
-
-// The IL type flow classifies a mnemonic from its instruction-table row, so a
-// name the validator understands is a name the parser and the compiler know.
-
-fn il_form(mnemonic: &str) -> Option<IlForm> {
-    crate::profile::spec::spec(mnemonic).map(|spec| spec.il)
-}
-
-fn is_il_load(mnemonic: &str) -> bool {
-    matches!(il_form(mnemonic), Some(IlForm::Push | IlForm::PushNot))
-}
-
-fn is_il_store(mnemonic: &str) -> bool {
-    matches!(il_form(mnemonic), Some(IlForm::Store | IlForm::StoreNot))
-}
-
-fn is_il_bit_combinator(mnemonic: &str) -> bool {
-    matches!(
-        il_form(mnemonic),
-        Some(
-            IlForm::And
-                | IlForm::AndNot
-                | IlForm::Or
-                | IlForm::OrNot
-                | IlForm::Xor
-                | IlForm::XorNot
-                | IlForm::Not
-        )
-    )
-}
-
-/// A mnemonic whose operand is a bit: the combinators and the coils.
-fn is_il_bit_operand(mnemonic: &str) -> bool {
-    is_il_bit_combinator(mnemonic) || matches!(il_form(mnemonic), Some(IlForm::Set | IlForm::Reset))
-}
-
-/// A mnemonic whose operand is a word: arithmetic and compares.
-fn is_il_word_operand(mnemonic: &str) -> bool {
-    is_il_word_op(mnemonic) || is_il_compare(mnemonic)
-}
-
-fn is_il_word_op(mnemonic: &str) -> bool {
-    matches!(il_form(mnemonic), Some(IlForm::Word(_)))
-}
-
-fn is_il_compare(mnemonic: &str) -> bool {
-    matches!(il_form(mnemonic), Some(IlForm::Compare(_)))
-}
-
-fn is_il_jump(mnemonic: &str) -> bool {
-    matches!(il_form(mnemonic), Some(IlForm::Jump(_)))
-}
-
-fn is_il_plain_return(mnemonic: &str) -> bool {
-    matches!(il_form(mnemonic), Some(IlForm::Return(None)))
-}
-
-fn is_il_conditional_return(mnemonic: &str) -> bool {
-    matches!(il_form(mnemonic), Some(IlForm::Return(Some(_))))
-}
-
-fn is_il_plain_call(mnemonic: &str) -> bool {
-    matches!(il_form(mnemonic), Some(IlForm::Call(None)))
-}
-
-fn is_il_conditional_call(mnemonic: &str) -> bool {
-    matches!(il_form(mnemonic), Some(IlForm::Call(Some(_))))
-}
-
-/// Is this a place a compute coil may write? A bank slot (a marker word or a
-/// declared word point) or a block member; never a literal. A block member on
-/// the left of a compute is a write, which is what `compute_target` guards.
-fn compute_target_known(text: &str, word_slots: &SymbolLookup) -> bool {
-    crate::profile::resolve::resolve(text, word_slots).is_ok_and(|operand| operand.is_writable())
-}
-
-/// Number of I/O points of one direction and declared kind.
 fn register<'a>(
     symbols: &mut HashMap<&'a str, SymbolClass>,
     name: &'a str,
@@ -1302,155 +629,6 @@ fn register<'a>(
     symbols.insert(name, class);
 }
 
-/// A drawn grid: every block must be one the compiler knows, every input must
-/// come from somewhere, and every output must name something to store.
-fn check_fbd_grid(
-    grid: &crate::model::FbdGrid,
-    pou_index: usize,
-    known: &HashSet<String>,
-    word_slots: &SymbolLookup,
-    io_kinds: &HashMap<&str, IoKind>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for (block_index, block) in grid.blocks.iter().enumerate() {
-        let path = format!("pous[{pou_index}].fbd_grid.blocks[{block_index}]");
-        let name = block.kind.trim().to_ascii_uppercase();
-        let reference = |input: &str| -> Option<usize> {
-            input
-                .trim()
-                .strip_prefix('@')
-                .and_then(|number| number.parse::<usize>().ok())
-        };
-        let bit_ok = |input: &str| -> bool {
-            let input = input.trim().trim_start_matches('!');
-            input.is_empty()
-                || input.eq_ignore_ascii_case("TRUE")
-                || input.eq_ignore_ascii_case("FALSE")
-                || known.contains(&input.to_ascii_lowercase())
-                || reference(input)
-                    .map(|target| target >= 1 && target <= grid.blocks.len())
-                    .unwrap_or(false)
-        };
-        let inputs = (0..block.ins.max(1))
-            .map(|offset| {
-                grid.input_at(block.row + offset, block.col.saturating_sub(1))
-                    .unwrap_or_default()
-            })
-            .collect::<Vec<_>>();
-        let mut needs_bit = false;
-        let mut needs_two_bits = false;
-        let mut needs_words = false;
-        let mut compute = false;
-        if matches!(
-            il_form(&name),
-            Some(IlForm::And | IlForm::Or | IlForm::Xor | IlForm::Not)
-        ) {
-            needs_bit = true;
-        } else if let Some((kind, _, _)) = crate::compile::parse_block(&name, &name, &block.preset)
-        {
-            if kind.is_latch() {
-                needs_two_bits = true;
-            } else {
-                needs_bit = true;
-            }
-        } else if crate::compile::compare_op(&name).is_some() {
-            needs_words = true;
-        } else if crate::compile::MathOp::parse(&name).is_some() {
-            compute = true;
-        } else {
-            diagnostics.push(Diagnostic::error(
-                "fbd_block",
-                format!("'{name}' is not a block"),
-                format!("{path}.kind"),
-            ));
-            continue;
-        }
-        let inputs_path = format!("{path}.row");
-        for input in inputs.iter().take(if needs_two_bits { 2 } else { 1 }) {
-            check_io_kind(
-                input.trim().trim_start_matches('!'),
-                needs_bit || needs_two_bits,
-                io_kinds,
-                inputs_path.clone(),
-                diagnostics,
-            );
-        }
-        if needs_bit && (inputs.is_empty() || !bit_ok(&inputs[0])) {
-            diagnostics.push(Diagnostic::error(
-                "fbd_open",
-                format!("{name} has no input to read"),
-                format!("{path}.row"),
-            ));
-        }
-        if needs_two_bits && !inputs.get(1).map(|input| bit_ok(input)).unwrap_or(false) {
-            diagnostics.push(Diagnostic::error(
-                "fbd_open",
-                format!("{name} needs two inputs"),
-                format!("{path}.row"),
-            ));
-        }
-        if needs_words
-            && !inputs
-                .iter()
-                .take(2)
-                .all(|input| word_operand_known(input.trim().trim_start_matches('!'), word_slots))
-        {
-            diagnostics.push(Diagnostic::error(
-                "fbd_input",
-                format!("{name} takes two word values"),
-                format!("{path}.row"),
-            ));
-        }
-        if compute
-            && !inputs
-                .iter()
-                .take(2)
-                .all(|input| word_operand_known(input.trim().trim_start_matches('!'), word_slots))
-        {
-            diagnostics.push(Diagnostic::error(
-                "fbd_input",
-                format!("{name} takes two word values"),
-                format!("{path}.row"),
-            ));
-        }
-        match grid.cell(block.row, block.col + 1) {
-            crate::model::FbdCell::Out { operand } => {
-                let target = operand.trim().trim_start_matches('!');
-                if compute {
-                    // A compute block writes a word; a literal or a bit output
-                    // is not a place to put the result.
-                    if !compute_target_known(target, word_slots) {
-                        diagnostics.push(Diagnostic::error(
-                            "compute_target",
-                            format!(
-                                "'{operand}' is not a place to write; use {}, a word point or a block member such as TON0.PT",
-                                crate::profile::resolve::marker_range()
-                            ),
-                            format!("{path}.row"),
-                        ));
-                    }
-                } else {
-                    let declared = known.contains(&target.to_ascii_lowercase());
-                    let word = crate::il::word_operand(target).is_some();
-                    if !declared && !word {
-                        diagnostics.push(Diagnostic::error(
-                            "fbd_output",
-                            format!("'{operand}' is not a declared output or variable"),
-                            format!("{path}.row"),
-                        ));
-                    }
-                }
-            }
-            _ => diagnostics.push(Diagnostic::error(
-                "fbd_dangling",
-                format!("{name} has nothing on its output"),
-                format!("{path}.row"),
-            )),
-        }
-    }
-}
-
-/// Depth-first walk of the call graph, returning the path that closes a cycle.
 fn find_cycle(
     name: &str,
     calls: &HashMap<String, Vec<String>>,
@@ -1520,99 +698,17 @@ fn logic_depth(root: &Logic) -> usize {
     deepest
 }
 
-fn check_logic(
-    logic: &Logic,
-    path: &str,
-    symbols: &HashMap<&str, SymbolClass>,
-    io_kinds: &HashMap<&str, IoKind>,
-    word_slots: &HashMap<String, u16>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn check_logic(logic: &Logic, path: &str, facts: &Facts, diagnostics: &mut Vec<Diagnostic>) {
+    // The node's rule is the profile's; the walk and the emptiness warnings are
+    // the tree's shape, which is this module's job.
+    diagnostics.extend(crate::profile::instr::check_instruction(
+        &Instr::Logic(logic),
+        &facts.ctx(path),
+    ));
     match logic {
-        Logic::Const { .. } => {}
-        Logic::Expr { text } => {
-            check_expression(
-                text,
-                false,
-                &format!("{path}.text"),
-                word_slots,
-                diagnostics,
-            );
-        }
-        Logic::Contact { var, .. } | Logic::Edge { var, .. } => {
-            check_io_kind(var, true, io_kinds, format!("{path}.var"), diagnostics);
-            if !symbols.contains_key(var.as_str()) && crate::compile::q_instance(var).is_none() {
-                diagnostics.push(Diagnostic::error(
-                    "unknown_symbol",
-                    format!("contact `{var}` is not declared"),
-                    format!("{path}.var"),
-                ));
-            }
-        }
-        Logic::Block {
-            block,
-            instance,
-            preset,
-        } => {
-            if crate::compile::parse_block(block, instance, preset).is_none() {
-                diagnostics.push(Diagnostic::error(
-                    "unknown_block",
-                    format!("`{block}` is not a block; use TON/TOF/TP/CTU/CTD/SR/RS/RT/RF"),
-                    format!("{path}.block"),
-                ));
-            }
-        }
-        Logic::Compare {
-            operator,
-            left,
-            right,
-        } => {
-            if crate::compile::compare_op(operator).is_none() {
-                diagnostics.push(Diagnostic::error(
-                    "compare_operator",
-                    format!("`{operator}` is not GT, GE, EQ, NE, LE or LT"),
-                    format!("{path}.operator"),
-                ));
-            }
-            for operand in [left, right] {
-                check_io_kind(
-                    operand,
-                    false,
-                    io_kinds,
-                    format!("{path}.left"),
-                    diagnostics,
-                );
-                if crate::profile::resolve::resolve(operand, word_slots).is_err() {
-                    diagnostics.push(Diagnostic::error(
-                        "compare_operand",
-                        format!("`{operand}` is not a word, a number or a block member"),
-                        format!("{path}.left"),
-                    ));
-                }
-            }
-        }
-        Logic::Series { items } => {
-            check_items(
-                items,
-                path,
-                true,
-                symbols,
-                io_kinds,
-                word_slots,
-                diagnostics,
-            );
-        }
-        Logic::Parallel { items } => {
-            check_items(
-                items,
-                path,
-                false,
-                symbols,
-                io_kinds,
-                word_slots,
-                diagnostics,
-            );
-        }
+        Logic::Series { items } => check_items(items, path, true, facts, diagnostics),
+        Logic::Parallel { items } => check_items(items, path, false, facts, diagnostics),
+        _ => {}
     }
 }
 
@@ -1620,9 +716,7 @@ fn check_items(
     items: &[Logic],
     path: &str,
     series: bool,
-    symbols: &HashMap<&str, SymbolClass>,
-    io_kinds: &HashMap<&str, IoKind>,
-    word_slots: &HashMap<String, u16>,
+    facts: &Facts,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if items.is_empty() {
@@ -1641,13 +735,6 @@ fn check_items(
         }
     }
     for (index, item) in items.iter().enumerate() {
-        check_logic(
-            item,
-            &format!("{path}.items[{index}]"),
-            symbols,
-            io_kinds,
-            word_slots,
-            diagnostics,
-        );
+        check_logic(item, &format!("{path}.items[{index}]"), facts, diagnostics);
     }
 }

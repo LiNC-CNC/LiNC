@@ -17,6 +17,14 @@ use crate::profile::Profile;
 /// this constant's: a count is a width, not a name.
 pub const WORD_COUNT: u16 = 16;
 
+/// Most word-bank slots a project may ask for: the marker words plus every word
+/// and float point. The bank is a fixed table in the scan image, so a project
+/// past this is refused rather than truncated.
+pub const MAX_WORDS: u16 = 256;
+
+/// Most edge contacts a project may declare, the same 32 ZX-PLC allows.
+pub const MAX_EDGE_CONTACTS: u16 = 32;
+
 /// The word bank's regions, in the fixed order the ABI assigns:
 ///
 /// ```text

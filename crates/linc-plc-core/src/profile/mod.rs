@@ -14,6 +14,7 @@
 //! their own types. That direction is what lets the rest of the strangler move
 //! without a cycle.
 
+pub mod instr;
 pub mod layout;
 pub mod resolve;
 pub mod spec;
@@ -53,6 +54,12 @@ pub trait Profile {
     /// point counts. The library's one implementation fixes the order the ABI
     /// documents; a dialect is free to differ and then say so here.
     fn layout(&self, iw: u16, qw: u16, fi: u16, fo: u16) -> WordLayout;
+
+    /// Most word-bank slots a project may declare.
+    fn max_words(&self) -> u16;
+
+    /// Most edge contacts the scan can carry.
+    fn max_edge_contacts(&self) -> u16;
 }
 
 /// The dialect LiNC ships: the ZX-derived instruction set, its sixteen marker
@@ -79,6 +86,14 @@ impl Profile for Iec {
 
     fn layout(&self, iw: u16, qw: u16, fi: u16, fo: u16) -> WordLayout {
         WordLayout::new(iw, qw, fi, fo)
+    }
+
+    fn max_words(&self) -> u16 {
+        layout::MAX_WORDS
+    }
+
+    fn max_edge_contacts(&self) -> u16 {
+        layout::MAX_EDGE_CONTACTS
     }
 }
 
