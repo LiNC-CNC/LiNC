@@ -129,6 +129,15 @@ pub(crate) enum Command {
         watch: Vec<String>,
         reply: mpsc::Sender<linc_plc_core::protocol::Response>,
     },
+    /// Swap the program at the top of a scan, keeping the phase and the field
+    /// outputs. Accepted while `Loaded` or `Running`; `Load` remains the request
+    /// that stops the ladder.
+    Reload {
+        compiled: Box<Compiled>,
+        warnings: Vec<Diagnostic>,
+        watch: Vec<String>,
+        reply: mpsc::Sender<linc_plc_core::protocol::Response>,
+    },
     Start {
         reply: mpsc::Sender<linc_plc_core::protocol::Response>,
     },
@@ -300,6 +309,7 @@ pub fn run(config: Config, shutdown: Arc<AtomicBool>) -> Result<(), Error> {
             timing: linc_plc_core::timing::TimingSnapshot::default(),
             vars: Vec::new(),
             words: Vec::new(),
+            output_image: Vec::new(),
             forced: Vec::new(),
         })),
         shutdown: Arc::clone(&shutdown),

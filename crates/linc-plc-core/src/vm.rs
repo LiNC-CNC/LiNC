@@ -603,6 +603,19 @@ impl Vm {
         &self.output_image
     }
 
+    /// Record the values the field is still driving from the previous program.
+    ///
+    /// Only a reload uses this: the pins keep their last values across the swap,
+    /// so the snapshot between the swap and the first scan reports what the
+    /// machine is actually driving instead of the new program's empty image. The
+    /// first scan overwrites it. The binding lists match (the pin map is frozen),
+    /// so the copy is by position.
+    pub fn hold_outputs(&mut self, previous: &[bool]) {
+        for (slot, value) in previous.iter().take(self.output_image.len()).enumerate() {
+            self.output_image[slot] = *value;
+        }
+    }
+
     fn word_value(&self, value: WordOperand) -> i32 {
         match value {
             WordOperand::Word(index) | WordOperand::Slot(index) => self.word(index),

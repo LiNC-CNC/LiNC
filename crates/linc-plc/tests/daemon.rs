@@ -851,3 +851,336 @@ fn a_forced_word_holds_against_the_program_and_releases() {
     client.call(&Request::Shutdown).expect("shutdown");
     harness.finish();
 }
+
+// --- item 6: reload without dropping outputs --------------------------------
+
+/// A one-rung ladder whose output is high on every scan, so a reload that
+/// zeroed the field would be visible.
+fn always_on(name: &str) -> Project {
+    let mut project = Project::new(name);
+    project.io = vec![IoPoint::new("run", IoDirection::Out)];
+    project.sections = vec![Section {
+        name: "main".to_string(),
+        rungs: vec![Rung::new(
+            Logic::Const { value: true },
+            Coil::new("run", CoilKind::Normal),
+        )],
+    }];
+    project
+}
+
+fn word_value(snapshot: &StateSnapshot, name: &str) -> i32 {
+    snapshot
+        .words
+        .iter()
+        .find(|word| word.name == name)
+        .unwrap_or_else(|| panic!("the snapshot has no word named {name}"))
+        .value
+}
+
+/// The value of one retained word in a store blob, so a test can wait for the
+/// flush that carries it.
+fn retained_word(bytes: &[u8], slot: u16) -> Option<i32> {
+    if bytes.len() < 4 + 2 + 8 + 1 + 2 + 2 + 4 || bytes[0..4] != *b"LPRT" {
+        return None;
+    }
+    let mut cursor = 14usize;
+    let hash_len = *bytes.get(cursor)? as usize;
+    cursor += 1 + hash_len;
+    let bits = u16::from_le_bytes([*bytes.get(cursor)?, *bytes.get(cursor + 1)?]) as usize;
+    cursor += 2 + bits * 3;
+    let words = u16::from_le_bytes([*bytes.get(cursor)?, *bytes.get(cursor + 1)?]) as usize;
+    cursor += 2;
+    for _ in 0..words {
+        let at = u16::from_le_bytes([*bytes.get(cursor)?, *bytes.get(cursor + 1)?]);
+        let value = i32::from_le_bytes(bytes.get(cursor + 2..cursor + 6)?.try_into().ok()?);
+        cursor += 6;
+        if at == slot {
+            return Some(value);
+        }
+    }
+    None
+}
+
+/// A reload while running keeps the phase and the field: no stop, no
+/// outputs-false, no start. The snapshot's output image carries the values the
+/// pins still hold until the first scan writes the new program's own.
+#[test]
+fn a_reload_while_running_keeps_the_outputs_and_the_phase() {
+    let project = always_on("reload");
+    let mut harness = Harness::start(&project, false);
+    let mut client = harness.client();
+    client
+        .call(&Request::Hello {
+            protocol: PROTOCOL_VERSION,
+        })
+        .expect("hello");
+    client
+        .call(&Request::Load {
+            project: project.clone(),
+        })
+        .expect("load");
+    let running = expect_state(client.call(&Request::Start).expect("start"));
+    assert_eq!(state_name(&running), "running");
+    let running = wait_for_var(&mut client, "run", (true, false));
+    assert_eq!(running.output_image, vec![true]);
+
+    let reply = client
+        .call(&Request::Reload {
+            project: project.clone(),
+        })
+        .expect("reload");
+    assert!(
+        matches!(reply, Response::Loaded { .. }),
+        "{}",
+        describe(&reply)
+    );
+
+    // It keeps scanning: the phase never leaves Running and the output image
+    // never reads false.
+    let deadline = Instant::now() + Duration::from_millis(250);
+    let mut samples = 0;
+    while Instant::now() < deadline {
+        let snapshot = expect_state(client.call(&Request::Snapshot).expect("snapshot"));
+        assert_eq!(
+            state_name(&snapshot),
+            "running",
+            "the reload did not stop the ladder"
+        );
+        assert_eq!(snapshot.output_image, vec![true], "the output never dropped");
+        samples += 1;
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(samples > 10, "the poll ran");
+    // The reload's own snapshot precedes the new program's first scan, so the
+    // bit image is fresh (false) while the pins hold (true). One scan later the
+    // program has written the output again.
+    let after = wait_for_var(&mut client, "run", (true, false));
+    assert_eq!(after.output_image, vec![true]);
+    client.call(&Request::Shutdown).expect("shutdown");
+    harness.finish();
+}
+
+/// A reload while loaded leaves the ladder loaded: it does not start it.
+#[test]
+fn a_reload_while_loaded_stays_loaded() {
+    let project = always_on("reload-loaded");
+    let mut harness = Harness::start(&project, false);
+    let mut client = harness.client();
+    client
+        .call(&Request::Hello {
+            protocol: PROTOCOL_VERSION,
+        })
+        .expect("hello");
+    client
+        .call(&Request::Load {
+            project: project.clone(),
+        })
+        .expect("load");
+    let loaded = expect_state(client.call(&Request::Snapshot).expect("snapshot"));
+    assert_eq!(state_name(&loaded), "loaded");
+
+    let reply = client
+        .call(&Request::Reload { project })
+        .expect("reload");
+    assert!(
+        matches!(reply, Response::Loaded { .. }),
+        "{}",
+        describe(&reply)
+    );
+    let after = expect_state(client.call(&Request::Snapshot).expect("snapshot"));
+    assert_eq!(state_name(&after), "loaded", "a reload does not start the ladder");
+    client.call(&Request::Shutdown).expect("shutdown");
+    harness.finish();
+}
+
+/// The pin map is frozen, so a reload may not change the I/O bindings, even
+/// though it may change everything else.
+#[test]
+fn a_reload_with_different_bindings_is_refused() {
+    let project = always_on("reload-map");
+    let mut harness = Harness::start(&project, false);
+    let mut client = harness.client();
+    client
+        .call(&Request::Hello {
+            protocol: PROTOCOL_VERSION,
+        })
+        .expect("hello");
+    client
+        .call(&Request::Load {
+            project: project.clone(),
+        })
+        .expect("load");
+    client.call(&Request::Start).expect("start");
+
+    let mut other = project;
+    other.io.push(IoPoint::new("lamp", IoDirection::Out));
+    let (code, message) = expect_error(client.call(&Request::Reload { project: other }).expect("reload"));
+    assert_eq!(code, "io_map_locked", "{message}");
+    client.call(&Request::Shutdown).expect("shutdown");
+    harness.finish();
+}
+
+/// A force follows its name, not its slot: one on a surviving symbol stays, one
+/// on a symbol the new program does not declare is dropped from both the force
+/// list and the scan image.
+#[test]
+fn a_force_follows_its_name_across_a_reload() {
+    let mut before = always_on("reload-forces");
+    before.vars = vec![VarDecl::new("seal"), VarDecl::new("spare")];
+    let mut harness = Harness::start(&before, true);
+    let mut client = harness.client();
+    client
+        .call(&Request::Hello {
+            protocol: PROTOCOL_VERSION,
+        })
+        .expect("hello");
+    client
+        .call(&Request::Load {
+            project: before.clone(),
+        })
+        .expect("load");
+    client.call(&Request::Start).expect("start");
+    for name in ["seal", "spare"] {
+        client
+            .call(&Request::Force {
+                name: name.to_string(),
+                value: true,
+                ttl_ms: 0,
+            })
+            .expect("force");
+    }
+    wait_for_var(&mut client, "seal", (true, true));
+    wait_for_var(&mut client, "spare", (true, true));
+
+    let mut after = always_on("reload-forces");
+    after.vars = vec![VarDecl::new("seal")];
+    let reply = client
+        .call(&Request::Reload { project: after })
+        .expect("reload");
+    assert!(
+        matches!(reply, Response::Loaded { .. }),
+        "{}",
+        describe(&reply)
+    );
+
+    let snapshot = wait_for_var(&mut client, "seal", (true, true));
+    assert!(
+        !snapshot.forced.iter().any(|name| name == "spare"),
+        "a dropped force must not be listed: {:?}",
+        snapshot.forced
+    );
+    assert!(
+        snapshot.vars.iter().all(|var| var.name != "spare"),
+        "and its symbol is gone from the image"
+    );
+    let (code, _) = expect_error(
+        client
+            .call(&Request::Force {
+                name: "spare".to_string(),
+                value: true,
+                ttl_ms: 0,
+            })
+            .expect("force"),
+    );
+    assert_eq!(code, "invalid_force", "the VM no longer knows the name");
+    client.call(&Request::Shutdown).expect("shutdown");
+    harness.finish();
+}
+
+/// Reload is refused before a program is loaded. `Fault` shares the arm; no HAL
+/// error can produce a fault under `--no-hal`, so this is the reachable test of
+/// the branch.
+#[test]
+fn a_reload_before_a_load_answers_state() {
+    let project = always_on("reload-idle");
+    let mut harness = Harness::start(&project, false);
+    let mut client = harness.client();
+    client
+        .call(&Request::Hello {
+            protocol: PROTOCOL_VERSION,
+        })
+        .expect("hello");
+    let (code, message) = expect_error(client.call(&Request::Reload { project }).expect("reload"));
+    assert_eq!(code, "state", "{message}");
+    assert!(message.contains("Load"), "{message}");
+    client.call(&Request::Shutdown).expect("shutdown");
+    harness.finish();
+}
+
+/// A retained value comes back through the store the normal load path reads.
+/// The program never writes MW2, so after the reload it can only be the store.
+#[test]
+fn a_retained_value_survives_a_reload() {
+    let project = always_on("reload-retain");
+    let directory = tempfile::tempdir().expect("temp dir");
+    let retain = directory.path().join("retain.bin");
+    let mut harness = Harness::start_in(&project, true, Some(retain.clone()), directory);
+    let mut client = harness.client();
+    client
+        .call(&Request::Hello {
+            protocol: PROTOCOL_VERSION,
+        })
+        .expect("hello");
+    client
+        .call(&Request::Load {
+            project: project.clone(),
+        })
+        .expect("load");
+    client.call(&Request::Start).expect("start");
+    client
+        .call(&Request::ForceWord {
+            name: "MW2".to_string(),
+            value: 7,
+            ttl_ms: 0,
+        })
+        .expect("force the marker word");
+
+    // Wait for the store itself to carry the value: the daemon publishes it
+    // once a second.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Ok(bytes) = fs::read(&retain) {
+            if retained_word(&bytes, 2) == Some(7) {
+                break;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the retain store never carried MW2 = 7"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    // Release the force after the store has been written, then reload: the new
+    // VM starts empty, so 7 can only come from the restore.
+    client
+        .call(&Request::UnforceWord {
+            name: "MW2".to_string(),
+        })
+        .expect("unforce");
+    let reply = client
+        .call(&Request::Reload { project: project.clone() })
+        .expect("reload");
+    assert!(
+        matches!(reply, Response::Loaded { .. }),
+        "{}",
+        describe(&reply)
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let snapshot = expect_state(client.call(&Request::Snapshot).expect("snapshot"));
+        if word_value(&snapshot, "MW2") == 7 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "MW2 = {} after the reload, not the store's 7",
+            word_value(&snapshot, "MW2")
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    client.call(&Request::Shutdown).expect("shutdown");
+    harness.finish();
+}

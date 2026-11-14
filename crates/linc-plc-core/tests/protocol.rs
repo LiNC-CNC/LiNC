@@ -29,6 +29,7 @@ fn snapshot() -> StateSnapshot {
             name: "MW0".to_string(),
             value: -7,
         }],
+        output_image: vec![true],
         forced: Vec::new(),
     }
 }
@@ -228,6 +229,7 @@ fn wire_envelope_uses_adjacent_tagging() {
                 },
                 "vars": [{"name": "run", "value": true, "kind": "output", "forced": false}],
                 "words": [{"name": "MW0", "value": -7}],
+                "output_image": [true],
                 "forced": [],
             }
         })

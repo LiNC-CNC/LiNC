@@ -17,7 +17,7 @@ use std::thread;
 use std::time::Duration;
 
 use linc_plc_core::protocol::{self, Request, Response, PROTOCOL_VERSION};
-use linc_plc_core::{Project, ProtocolError, SCHEMA_VERSION};
+use linc_plc_core::{Compiled, Diagnostic, Project, ProtocolError, SCHEMA_VERSION};
 
 use crate::{evaluate, summarize, Command, Error, Shared};
 
@@ -151,6 +151,8 @@ fn handle_request(request: Request, shared: &Shared) -> Result<Outcome, Error> {
 
         Request::Load { project } => Outcome::Reply(load(project, shared)?),
 
+        Request::Reload { project } => Outcome::Reply(reload(project, shared)?),
+
         Request::Start => Outcome::Reply(dispatch(shared, |reply| Command::Start { reply })),
         Request::Step => Outcome::Reply(dispatch(shared, |reply| Command::Step { reply })),
         Request::ResetData => {
@@ -245,24 +247,25 @@ fn handle_request(request: Request, shared: &Shared) -> Result<Outcome, Error> {
 }
 
 /// Compile, check the frozen I/O map, persist, then hand the program to the
-/// scan loop for a scan-boundary swap.
-fn load(project: Project, shared: &Shared) -> Result<Response, Error> {
-    let (ok, diagnostics, compiled) = evaluate(&project);
+/// scan loop for a scan-boundary swap. `Load` stops the ladder; `Reload` keeps
+/// it running.
+fn prepare(project: &Project, shared: &Shared) -> Result<(Compiled, Vec<Diagnostic>), Response> {
+    let (ok, diagnostics, compiled) = evaluate(project);
     let Some(compiled) = compiled else {
-        return Ok(Response::Error {
+        return Err(Response::Error {
             code: "invalid".to_string(),
             message: summarize(&diagnostics),
         });
     };
     if !ok {
-        return Ok(Response::Error {
+        return Err(Response::Error {
             code: "invalid".to_string(),
             message: summarize(&diagnostics),
         });
     }
     if !shared.io_map.accepts(&compiled) {
-        let wanted = describe_map(&project);
-        return Ok(Response::Error {
+        let wanted = describe_map(project);
+        return Err(Response::Error {
             code: "io_map_locked".to_string(),
             message: format!(
                 "the project's I/O bindings ({wanted}) differ from the pin map this daemon \
@@ -270,21 +273,42 @@ fn load(project: Project, shared: &Shared) -> Result<Response, Error> {
             ),
         });
     }
-    if let Err(error) = persist(&shared.project, &project) {
-        return Ok(Response::Error {
+    if let Err(error) = persist(&shared.project, project) {
+        return Err(Response::Error {
             code: "persist".to_string(),
             message: error.to_string(),
         });
     }
-
     let warnings = compiled.warnings.clone();
-    let response = dispatch(shared, |reply| Command::Load {
+    Ok((compiled, warnings))
+}
+
+fn load(project: Project, shared: &Shared) -> Result<Response, Error> {
+    let (compiled, warnings) = match prepare(&project, shared) {
+        Ok(prepared) => prepared,
+        Err(response) => return Ok(response),
+    };
+    Ok(dispatch(shared, |reply| Command::Load {
         watch: project.watch.clone(),
         compiled: Box::new(compiled),
         warnings,
         reply,
-    });
-    Ok(response)
+    }))
+}
+
+/// Swap the program without stopping. The daemon decides whether its phase
+/// accepts it (`Loaded` and `Running` do) and answers `state` otherwise.
+fn reload(project: Project, shared: &Shared) -> Result<Response, Error> {
+    let (compiled, warnings) = match prepare(&project, shared) {
+        Ok(prepared) => prepared,
+        Err(response) => return Ok(response),
+    };
+    Ok(dispatch(shared, |reply| Command::Reload {
+        watch: project.watch.clone(),
+        compiled: Box::new(compiled),
+        warnings,
+        reply,
+    }))
 }
 
 /// Send one command to the scan loop and wait a bounded time for its answer.

@@ -73,9 +73,24 @@ cargo build --release -p linc-plc
 
 The component and pin map are created before `hal_ready()`. Changing the
 project's I/O bindings needs a daemon restart; the socket answers a mismatched
-`Load` with error code `io_map_locked`. Logic-only changes load at a scan
-boundary, but **Load sets the daemon to Loaded and drives every output false**;
-press START afterwards. There is no hot swap in this slice.
+`Load` or `Reload` with error code `io_map_locked`.
+
+There are two ways to hand the daemon a program:
+
+- **Load** stops the ladder: it leaves the daemon `Loaded` and drives every
+  output false, so a start press follows.
+- **Reload** swaps the program at the top of a scan while the ladder keeps
+  running. The phase is preserved (`Running` stays `Running`, `Loaded` stays
+  `Loaded`), and the field outputs keep their last values until the new
+  program's first scan writes them, so a running machine does not drop its
+  outputs. Forces are re-applied by name, so a renumbered slot never inherits
+  one; a force whose symbol the new program does not declare is dropped, and the
+  log says how many. Retained values are restored through the usual store. From
+  `Idle` or `Fault` a reload answers `state`: call `Load` instead.
+
+Both accept logic-only changes; neither may change the I/O bindings. The
+program is swapped at the top of a scan, never inside one, so no input decodes
+against two programs.
 
 Options: `--project` (env `LINC_PLC_PROJECT`), `--socket` (env
 `LINC_PLC_SOCKET`, default `$XDG_RUNTIME_DIR/linc/plc-<uid>.sock`),
@@ -399,6 +414,7 @@ shows scan, cycle and lateness.
 ```
 {"request":"hello","data":{"protocol":8}}
 {"request":"load","data":{"project":{...}}}
+{"request":"reload","data":{"project":{...}}}
 {"request":"start"}
 {"response":"state","data":{ ... StateSnapshot ... }}
 {"response":"error","data":{"code":"...","message":"..."}}
@@ -406,7 +422,10 @@ shows scan, cycle and lateness.
 
 Protocol 8 widens the word bank and the `WordValue` wire type to 32 bits. The
 version is checked on `Hello`, so a 7 client attached to an 8 daemon (or the
-reverse) is told the numbers differ instead of decoding a truncated word.
+reverse) is told the numbers differ instead of decoding a truncated word. The
+snapshot's `output_image` is the ladder's output values in compiled order; after
+a reload it holds the values the field is still driving until the first scan
+writes the new program's own.
 
 Dashboard pins: `linc_plc.<binding>` for each I/O point — `HAL_BIT` for a bit
 point, `HAL_S32` for a word point, `HAL_FLOAT` for a float point — plus

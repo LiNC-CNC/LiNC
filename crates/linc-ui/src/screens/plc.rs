@@ -143,6 +143,7 @@ impl Action {
             Self::Select(_)
                 | Self::Validate
                 | Self::Download
+                | Self::Reload
                 | Self::Start
                 | Self::Stop
                 | Self::ClearForces
@@ -177,6 +178,8 @@ pub enum Action {
     Save,
     Validate,
     Download,
+    /// Swap the program in a running daemon without dropping the outputs.
+    Reload,
     Start,
     /// Load the project, then start it: the daemon refuses a bare Start unless
     /// it is Loaded, so the manual's Run is the pair.
@@ -702,6 +705,7 @@ enum Tag {
     Trend,
     Validate,
     Load,
+    Reload,
     Start,
     Stop,
     Snapshot,
@@ -1583,6 +1587,21 @@ impl PlcUi {
                     format!("DOWNLOADED {hash}")
                 };
             }
+            (Tag::Reload, Response::Loaded { hash, diagnostics }) => {
+                self.hash = hash;
+                self.daemon_diags = diagnostics;
+                // The daemon preserves the phase; ask what it now holds so the
+                // message states the returned state rather than a guess.
+                self.send(Tag::Reload, Request::Snapshot);
+            }
+            (Tag::Reload, Response::State(snapshot)) => {
+                let state = snapshot.state;
+                self.adopt(snapshot);
+                self.message = match state {
+                    RunState::Running => "RELOADED — RUNNING".to_string(),
+                    _ => "RELOADED — STOPPED".to_string(),
+                };
+            }
             (_, Response::State(snapshot)) => self.adopt(snapshot),
             (Tag::Start, _) => self.message = "START SENT".to_string(),
             (Tag::Stop, _) => self.message = "STOP SENT".to_string(),
@@ -1975,6 +1994,7 @@ impl PlcUi {
             Action::Save => self.save(),
             Action::Validate => self.validate(),
             Action::Download => self.download(),
+            Action::Reload => self.reload(),
             Action::Start => {
                 if std::env::var_os("LINC_PLC_KEY_DEBUG").is_some() {
                     eprintln!("apply Start online={} state={:?}", self.online, self.state);
@@ -2530,6 +2550,28 @@ impl PlcUi {
         }
     }
 
+    /// Swap the program in a running daemon.
+    ///
+    /// The daemon replaces the program at the top of a scan and leaves every
+    /// field output at its last value, so a running ladder keeps running: no
+    /// Stop, no outputs-false, no Start. The message names the state the daemon
+    /// returns, which differs from DOWNLOAD's "ladder stopped, press start".
+    pub fn reload(&mut self) {
+        self.validate();
+        self.save();
+        self.send(
+            Tag::Reload,
+            Request::Reload {
+                project: self.project.clone(),
+            },
+        );
+        self.message = if !self.online {
+            "SAVED — NO DAEMON".to_string()
+        } else {
+            "RELOAD SENT".to_string()
+        };
+    }
+
     pub fn download(&mut self) {
         self.validate();
         // The daemon stores what it loads; the file keeps the operator's copy
@@ -2639,6 +2681,8 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             actions.push(Action::Stop);
         } else if app.overlay.modal.is_none() && ctrl_key(ui, egui::Key::Enter) {
             actions.push(Action::Start);
+        } else if app.overlay.modal.is_none() && ctrl_key(ui, egui::Key::R) {
+            actions.push(Action::Reload);
         }
     }
     // The rail advertises Ctrl+S on this screen, so the screen answers it: the
@@ -2788,6 +2832,7 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
             entries.push(Heading("RUN"));
             entries.push(row("Start", "Ctrl+Enter", false));
             entries.push(row("Stop", "Ctrl+Shift+Enter", false));
+            entries.push(row("Reload", "Ctrl+R", false));
             entries.push(Heading("SAVE"));
             entries.push(row("Save project", "Ctrl+S", false));
         }
@@ -6540,6 +6585,13 @@ fn status_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
         if theme::action_button(ui, "STOP", online && running).clicked() {
             actions.push(Action::Stop);
         }
+        // Reload is the running-machine edit: it is offered whenever the daemon
+        // holds a program, because keeping the outputs is also useful while the
+        // ladder is merely loaded.
+        let reloadable = online && !matches!(plc.state, RunState::Idle | RunState::Fault);
+        if theme::action_button(ui, "RELOAD", reloadable).clicked() {
+            actions.push(Action::Reload);
+        }
     });
     ui.label(
         RichText::new(if running {
@@ -6551,7 +6603,7 @@ fn status_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
         .color(theme::MUTED),
     );
     ui.label(
-        RichText::new("Ctrl+Enter START · Ctrl+Shift+Enter STOP")
+        RichText::new("Ctrl+Enter START · Ctrl+Shift+Enter STOP · Ctrl+R RELOAD")
             .size(theme::font_size(9.0))
             .color(theme::MUTED),
     );
@@ -7579,6 +7631,7 @@ mod tests {
                     forced: false,
                 }],
                 words: Vec::new(),
+                output_image: vec![true],
                 forced: vec!["start".into()],
             });
             while let Ok(request) = linc_plc_core::protocol::read_message::<_, Request>(&mut stream)
@@ -7596,6 +7649,20 @@ mod tests {
                     Request::Snapshot => {
                         let _ = seen_tx.send("snapshot".into());
                         snapshot.clone()
+                    }
+                    Request::Validate { .. } => {
+                        let _ = seen_tx.send("validate".into());
+                        Response::Validated {
+                            ok: true,
+                            diagnostics: Vec::new(),
+                        }
+                    }
+                    Request::Reload { .. } => {
+                        let _ = seen_tx.send("reload".into());
+                        Response::Loaded {
+                            hash: "beef".into(),
+                            diagnostics: Vec::new(),
+                        }
                     }
                     Request::Force {
                         name,
@@ -7644,6 +7711,21 @@ mod tests {
             plc.poll();
             thread::sleep(Duration::from_millis(20));
         }
+
+        // RELOAD: the request travels, the reply's hash is adopted, and the
+        // message names the state the daemon returned — not DOWNLOAD's "ladder
+        // stopped, press start".
+        plc.path_text = directory.path().join("ladder.json").display().to_string();
+        plc.apply(Action::Reload);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline && !plc.message.contains("RELOADED") {
+            plc.poll();
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            plc.message, "RELOADED — RUNNING",
+            "the message names the returned state"
+        );
         drop(plc);
         assert!(server.join().is_ok(), "the fake daemon finished cleanly");
 
@@ -7660,6 +7742,10 @@ mod tests {
             seen.iter()
                 .any(|request| request == "force seal=true ttl 0"),
             "a simulation force is persistent until released: {seen:?}"
+        );
+        assert!(
+            seen.iter().any(|request| request == "reload"),
+            "RELOAD travels as its own request: {seen:?}"
         );
     }
 

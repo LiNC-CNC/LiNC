@@ -70,6 +70,9 @@ pub(crate) struct Daemon {
     alive: bool,
     /// Watch list of the loaded project, sampled per scan.
     watch: Vec<String>,
+    /// Output binding names of the installed program, in compiled order. A reload
+    /// compares the new program's list against this one.
+    output_names: Vec<String>,
     /// Configured scan period, used to turn a window in milliseconds into a
     /// stride in scans.
     period_us: u64,
@@ -106,6 +109,7 @@ impl Daemon {
             timing: ScanTiming::new(Duration::from_millis(2), Instant::now()),
             alive: false,
             watch: Vec::new(),
+            output_names: Vec::new(),
             period_us: 2000,
             retain_path,
             retain_flush,
@@ -219,6 +223,11 @@ impl Daemon {
                 // The program is swapped at the top of a scan, never inside
                 // one, so an input decodes against exactly one program.
                 self.vm = Some(Vm::new(&compiled));
+                self.output_names = compiled
+                    .outputs
+                    .iter()
+                    .map(|binding| binding.name.clone())
+                    .collect();
                 self.set_watch(watch, shared);
                 self.hash = compiled.hash.clone();
                 self.restore_retained();
@@ -238,6 +247,15 @@ impl Daemon {
                         diagnostics: warnings,
                     },
                 );
+            }
+
+            Command::Reload {
+                compiled,
+                warnings,
+                watch,
+                reply,
+            } => {
+                self.reload(*compiled, warnings, watch, hal, shared, reply);
             }
 
             Command::Start { reply } => {
@@ -479,6 +497,115 @@ impl Daemon {
         }
     }
 
+    /// Swap the program without stopping the ladder.
+    ///
+    /// The order is the handoff's §6.2, and each step is deliberate: the field
+    /// keeps its last output values because nothing drives them, the phase is
+    /// preserved so a running ladder keeps running, and a force follows its
+    /// *name* so a renumbered slot never inherits one.
+    fn reload(
+        &mut self,
+        compiled: linc_plc_core::Compiled,
+        warnings: Vec<linc_plc_core::Diagnostic>,
+        watch: Vec<String>,
+        hal: &Hal,
+        shared: &Shared,
+        reply: Sender<Response>,
+    ) {
+        if matches!(self.phase, Phase::Idle | Phase::Fault) {
+            answer(
+                reply,
+                Response::Error {
+                    code: "state".to_string(),
+                    message: "reload needs a loaded project; use Load from Idle or Fault"
+                        .to_string(),
+                },
+            );
+            return;
+        }
+
+        // 1. The binding set and the values the field is still driving.
+        let old_names = std::mem::take(&mut self.output_names);
+        let new_names = compiled
+            .outputs
+            .iter()
+            .map(|binding| binding.name.clone())
+            .collect::<Vec<_>>();
+        let last_outputs = self
+            .vm
+            .as_ref()
+            .map(|vm| vm.outputs().to_vec())
+            .unwrap_or_default();
+
+        // 2. Build the new program, and record the values the pins still hold.
+        let mut vm = Vm::new(&compiled);
+        vm.hold_outputs(&last_outputs);
+
+        // 3. Forces follow their names, never their slots.
+        let forces_before = self.forces.len();
+        self.forces
+            .retain(|force| vm.set_force(&force.name, force.value).is_ok());
+        let dropped = forces_before - self.forces.len();
+        let words_before = self.word_forces.len();
+        self.word_forces
+            .retain(|force| linc_plc_core::il::word_operand(&force.name).is_some());
+        let words_dropped = words_before - self.word_forces.len();
+        if dropped > 0 || words_dropped > 0 {
+            log::info!(
+                "linc-plc: reload dropped {dropped} force(s) and {words_dropped} word force(s) whose names no longer resolve"
+            );
+        }
+
+        // 4. Retained values, through the store the normal load path uses.
+        self.vm = Some(vm);
+        self.hash = compiled.hash.clone();
+        self.set_watch(watch, shared);
+        self.restore_retained();
+
+        // 5. Outputs. The decision is a pure function of the two binding sets,
+        //    so the policy is testable without a HAL: a shared binding keeps its
+        //    value, a removed one cannot be reached through the frozen pin map
+        //    and faults, and an added one has no pin at all.
+        self.output_names = new_names;
+        match reload_outputs(&old_names, &self.output_names) {
+            OutputAction::Hold => {}
+            OutputAction::ZeroAdded(names) => {
+                // A future map-creation path would drive these false once. The
+                // map is frozen today, so they have no pin to drive.
+                log::warn!(
+                    "linc-plc: reload added the output binding(s) {}; the pin map is frozen, so they have no pin",
+                    names.join(", ")
+                );
+            }
+            OutputAction::Fault(names) => {
+                let message = format!(
+                    "reload removed the output binding(s) {}; the pin map is frozen",
+                    names.join(", ")
+                );
+                self.fail(message.clone(), hal, shared);
+                answer(
+                    reply,
+                    Response::Error {
+                        code: "layout".to_string(),
+                        message,
+                    },
+                );
+                return;
+            }
+        }
+
+        // 6. The phase is untouched: Running stays Running, Loaded stays Loaded.
+        // 7. Publish, then answer.
+        self.publish(shared);
+        answer(
+            reply,
+            Response::Loaded {
+                hash: self.hash.clone(),
+                diagnostics: warnings,
+            },
+        );
+    }
+
     /// One ladder scan: read the bound inputs, run the program, write the
     /// bound outputs.
     fn execute(&mut self, hal: &Hal, shared: &Shared) -> Result<(), String> {
@@ -712,9 +839,14 @@ impl Daemon {
     }
 
     fn snapshot(&self) -> StateSnapshot {
-        let (vars, words, mut forced) = match &self.vm {
-            Some(vm) => (vm.snapshot(), vm.word_snapshot(), vm.forced()),
-            None => (Vec::new(), Vec::new(), Vec::new()),
+        let (vars, words, output_image, mut forced) = match &self.vm {
+            Some(vm) => (
+                vm.snapshot(),
+                vm.word_snapshot(),
+                vm.outputs().to_vec(),
+                vm.forced(),
+            ),
+            None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
         };
         forced.extend(self.word_forces.iter().map(|force| force.name.clone()));
         StateSnapshot {
@@ -734,6 +866,7 @@ impl Daemon {
             fault: self.fault.clone(),
             vars,
             words,
+            output_image,
             forced,
         }
     }
@@ -744,6 +877,43 @@ impl Daemon {
             Ok(mut guard) => *guard = snapshot,
             Err(_) => log::warn!("linc-plc: the snapshot lock is poisoned"),
         }
+    }
+}
+
+/// What a reload must do to the field outputs.
+///
+/// `io_map_locked` means the two binding sets are equal in practice, so `Hold`
+/// is the only arm a reload takes today. The other two are kept as the policy a
+/// future map-creation path would need, and they are what the handoff's §6.2
+/// step 5 names.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum OutputAction {
+    /// A binding present before and after: leave the pin at its last value.
+    Hold,
+    /// A binding the reload added has never been driven: write false once.
+    ZeroAdded(Vec<String>),
+    /// A removed binding cannot be reached: fault with `layout`.
+    Fault(Vec<String>),
+}
+
+pub(crate) fn reload_outputs(before: &[String], after: &[String]) -> OutputAction {
+    let removed = before
+        .iter()
+        .filter(|name| !after.contains(name))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !removed.is_empty() {
+        return OutputAction::Fault(removed);
+    }
+    let added = after
+        .iter()
+        .filter(|name| !before.contains(name))
+        .cloned()
+        .collect::<Vec<_>>();
+    if added.is_empty() {
+        OutputAction::Hold
+    } else {
+        OutputAction::ZeroAdded(added)
     }
 }
 
@@ -771,4 +941,43 @@ fn publish_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         let _ = folder.sync_all();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{reload_outputs, OutputAction};
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|name| (*name).to_string()).collect()
+    }
+
+    /// The normal reload: the same bindings drive the same pins, so nothing is
+    /// written and the field keeps its values.
+    #[test]
+    fn an_unchanged_map_holds_every_output() {
+        assert_eq!(
+            reload_outputs(&names(&["run", "lamp"]), &names(&["run", "lamp"])),
+            OutputAction::Hold
+        );
+    }
+
+    /// A binding the old program did not drive would be zeroed once, because its
+    /// pin has never been written.
+    #[test]
+    fn an_added_output_is_zeroed_once() {
+        assert_eq!(
+            reload_outputs(&names(&["run"]), &names(&["run", "lamp"])),
+            OutputAction::ZeroAdded(names(&["lamp"]))
+        );
+    }
+
+    /// A removed output cannot be reached through the frozen pin map, so it is a
+    /// layout fault rather than a silent leftover.
+    #[test]
+    fn a_removed_output_is_a_layout_fault() {
+        assert_eq!(
+            reload_outputs(&names(&["run", "lamp"]), &names(&["run"])),
+            OutputAction::Fault(names(&["lamp"]))
+        );
+    }
 }

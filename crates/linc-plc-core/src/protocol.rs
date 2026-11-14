@@ -23,6 +23,12 @@ pub enum Request {
     Load {
         project: Project,
     },
+    /// Swap the program at the top of a scan without stopping the ladder. The
+    /// phase is preserved and the field outputs keep their values until the
+    /// first scan writes them; `Load` is still the request that stops.
+    Reload {
+        project: Project,
+    },
     Start,
     Stop,
     /// One scan while the ladder is paused: the manual's `S`.
@@ -116,6 +122,11 @@ pub struct StateSnapshot {
     /// The word bank and the block members (`MW3`, `TON0.ET`, `CTU1.CV`).
     #[serde(default)]
     pub words: Vec<WordValue>,
+    /// The ladder's output values in compiled order. After a reload this holds
+    /// the values the field is still driving until the first scan writes the new
+    /// program's own, so a reader can see that the pins never dropped.
+    #[serde(default)]
+    pub output_image: Vec<bool>,
     pub forced: Vec<String>,
 }
 
