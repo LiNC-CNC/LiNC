@@ -103,7 +103,7 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 /// Both counts enter the hash on purpose. `mw` is how many word slots the store
 /// holds; `total` is the whole bank, so adding a word or float point invalidates
 /// a store that would otherwise still line up slot for slot.
-pub fn layout_hash(retained_names: &[(u16, &str)], words: crate::compile::WordLayout) -> u64 {
+pub fn layout_hash(retained_names: &[(u16, &str)], words: crate::profile::WordLayout) -> u64 {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&words.mw.to_le_bytes());
     bytes.extend_from_slice(&words.total().to_le_bytes());

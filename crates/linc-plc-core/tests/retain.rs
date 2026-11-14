@@ -136,6 +136,59 @@ fn the_vm_packs_restored_values_and_never_a_force() {
     );
 }
 
+/// The layout hash is what makes a store from another bank shape unusable. M3
+/// moved the bank geometry into the profile; this pins that a moved slot is still
+/// noticed, because `total` and `mw` are the only things the hash sees about the
+/// bank and nothing else would catch a store that lined up by accident.
+#[test]
+fn the_layout_hash_notices_a_changed_bank_shape() {
+    use linc_plc_core::profile::WordLayout;
+
+    let names = [(0u16, "run")];
+    let base = retain::layout_hash(&names, WordLayout::new(1, 0, 0, 0));
+    assert_eq!(
+        base,
+        retain::layout_hash(&names, WordLayout::new(1, 0, 0, 0)),
+        "the same shape hashes the same"
+    );
+    for moved in [
+        WordLayout::new(2, 0, 0, 0),
+        WordLayout::new(1, 1, 0, 0),
+        WordLayout::new(1, 0, 1, 0),
+        WordLayout::new(1, 0, 0, 1),
+    ] {
+        assert_ne!(
+            base,
+            retain::layout_hash(&names, moved),
+            "a point in another region moves the bank: {moved:?}"
+        );
+    }
+    assert_ne!(
+        base,
+        retain::layout_hash(&[], WordLayout::new(1, 0, 0, 0)),
+        "a retained slot that disappears is a layout the store no longer fits"
+    );
+    assert_ne!(
+        retain::layout_hash(&names, WordLayout::new(1, 0, 0, 0)),
+        retain::layout_hash(&[(1u16, "run")], WordLayout::new(1, 0, 0, 0)),
+        "the same name at another index is another layout"
+    );
+}
+
+/// The bank is the profile's: the shipped dialect fills the shape the ABI
+/// documents, and a second dialect is free to answer differently.
+#[test]
+fn the_profile_builds_the_bank() {
+    use linc_plc_core::profile::{profile, Profile, WordLayout};
+
+    assert_eq!(
+        profile().layout(1, 2, 3, 4),
+        WordLayout::new(1, 2, 3, 4),
+        "the shipped dialect keeps the documented region order"
+    );
+    assert_eq!(profile().layout(1, 2, 3, 4).total(), 16 + 10);
+}
+
 #[test]
 fn a_variable_that_is_not_retained_stays_out_of_the_store() {
     let compiled = compile(&project(false)).expect("compile");

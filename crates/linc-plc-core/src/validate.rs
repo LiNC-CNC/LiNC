@@ -150,25 +150,21 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         .filter(|point| point.kind != IoKind::Bit)
         .map(|point| point.name.to_ascii_lowercase())
         .collect();
-    // The expression resolver reads the same name -> slot map the compiler
-    // binds, so a name one accepts is a name the other can resolve.
-    let (_, word_points) = crate::compile::word_points(project);
+    // The expression resolver reads the same name -> slot map and the same bank
+    // geometry the compiler binds, so a name one accepts is a name the other can
+    // resolve, and the two cannot disagree about a slot.
+    let (layout, word_points) = crate::profile::layout::word_points(project);
     let word_slots: HashMap<String, u16> = word_points
         .iter()
         .map(|(name, slot, _, _)| (name.to_ascii_lowercase(), *slot))
         .collect();
-    let layout = crate::compile::WordLayout::new(
-        count_points(project, IoDirection::In, IoKind::Word),
-        count_points(project, IoDirection::Out, IoKind::Word),
-        count_points(project, IoDirection::In, IoKind::Float),
-        count_points(project, IoDirection::Out, IoKind::Float),
-    );
     if layout.total() > MAX_WORDS {
         diagnostics.push(Diagnostic::error(
             "too_large",
             format!(
-                "the word bank needs {} slots (16 marker words plus the word and float points); the maximum is {MAX_WORDS}",
-                layout.total()
+                "the word bank needs {} slots ({} marker words plus the word and float points); the maximum is {MAX_WORDS}",
+                layout.total(),
+                layout.mw
             ),
             "io",
         ));
@@ -1288,14 +1284,6 @@ fn compute_target_known(text: &str, word_slots: &SymbolLookup) -> bool {
 }
 
 /// Number of I/O points of one direction and declared kind.
-fn count_points(project: &Project, direction: IoDirection, kind: IoKind) -> u16 {
-    project
-        .io
-        .iter()
-        .filter(|point| point.direction == direction && point.kind == kind)
-        .count() as u16
-}
-
 fn register<'a>(
     symbols: &mut HashMap<&'a str, SymbolClass>,
     name: &'a str,

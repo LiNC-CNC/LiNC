@@ -2266,8 +2266,8 @@ impl Choice {
 /// and times are open-ended, so the list carries the common forms and the field
 /// takes any other.
 fn compare_choices(plc: &PlcUi) -> Vec<Choice> {
-    let mut choices: Vec<Choice> = (0..linc_plc_core::compile::WORD_COUNT)
-        .map(|index| Choice::new(format!("MW{index}"), "WORD"))
+    let mut choices: Vec<Choice> = linc_plc_core::profile::resolve::marker_words()
+        .map(|(_, text)| Choice::new(text, "WORD"))
         .collect();
     for (instance, kind) in used_block_instances(plc) {
         choices.push(Choice::new(format!("{instance}.{kind}"), "BLOCK"));
@@ -2335,18 +2335,20 @@ fn operand_error(text: &str) -> Option<String> {
         return None;
     }
     let upper = value.to_ascii_uppercase();
-    Some(if linc_plc_core::profile::resolve::looks_like_marker_word(value) {
-        format!(
-            "{value} is not a marker word: {}",
-            linc_plc_core::profile::resolve::marker_range()
-        )
-    } else if upper.starts_with("T#") {
-        format!("{value} needs a unit: T#250ms, T#2s or T#1m")
-    } else if value.starts_with('-') || value.starts_with(|c: char| c.is_ascii_digit()) {
-        format!("{value} is not a whole number inside -32768 to 32767")
-    } else {
-        format!("{value} is not an operand: a word, a number, a time or a block value")
-    })
+    Some(
+        if linc_plc_core::profile::resolve::looks_like_marker_word(value) {
+            format!(
+                "{value} is not a marker word: {}",
+                linc_plc_core::profile::resolve::marker_range()
+            )
+        } else if upper.starts_with("T#") {
+            format!("{value} needs a unit: T#250ms, T#2s or T#1m")
+        } else if value.starts_with('-') || value.starts_with(|c: char| c.is_ascii_digit()) {
+            format!("{value} is not a whole number inside -32768 to 32767")
+        } else {
+            format!("{value} is not an operand: a word, a number, a time or a block value")
+        },
+    )
 }
 
 /// One row of the window's tables: the value on the left, what it is on the
@@ -2745,8 +2747,8 @@ const COMPUTE_OPS: [(&str, &str); 5] = [
 /// compiler writes compute results to `MWn`, so offering a literal or a block
 /// member here would only produce a cell that never runs.
 fn destination_choices() -> Vec<Choice> {
-    (0..linc_plc_core::compile::WORD_COUNT)
-        .map(|index| Choice::new(format!("MW{index}"), "WORD"))
+    linc_plc_core::profile::resolve::marker_words()
+        .map(|(_, text)| Choice::new(text, "WORD"))
         .collect()
 }
 

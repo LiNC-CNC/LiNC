@@ -12,13 +12,9 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use crate::profile::layout::WORD_COUNT;
 use crate::profile::spec::{self, Family, FbName};
 use crate::profile::{SymbolLookup, FB_PER_TYPE};
-
-/// Marker words in the bank: the internal words the dialect reserves before the
-/// word I/O regions. M3 folds this into `WordLayout`; the resolver needs the
-/// bound now so an out-of-bank name is refused instead of addressing nothing.
-pub const WORD_COUNT: u16 = 16;
 
 /// A marker word's spelling prefix.
 pub const MARKER_PREFIX: &str = "MW";
@@ -27,6 +23,20 @@ pub const MARKER_PREFIX: &str = "MW";
 /// the snapshot and the importer ask for it instead of formatting their own.
 pub fn marker_word(index: u16) -> String {
     format!("{MARKER_PREFIX}{index}")
+}
+
+/// How many marker words the bank begins with.
+///
+/// The editor and the importer need the bound; only the profile needs the
+/// constant.
+pub fn marker_word_count() -> u16 {
+    WORD_COUNT
+}
+
+/// Every marker word in the bank, in slot order. The editor lists these, and the
+/// spelling stays here rather than in the window that draws them.
+pub fn marker_words() -> impl Iterator<Item = (u16, String)> {
+    (0..WORD_COUNT).map(|index| (index, marker_word(index)))
 }
 
 /// The marker-word range as diagnostics print it, e.g. `MW0-15`.

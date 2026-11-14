@@ -1035,7 +1035,7 @@ impl Importer {
         };
         match vt {
             VAR_MEM_WORD => {
-                if !(0..crate::compile::WORD_COUNT as i32).contains(&vn) {
+                if !(0..crate::profile::resolve::marker_word_count() as i32).contains(&vn) {
                     return Err(refuse(
                         "clp_variable",
                         format!(

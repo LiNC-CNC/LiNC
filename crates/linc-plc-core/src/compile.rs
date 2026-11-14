@@ -44,60 +44,6 @@ pub struct Binding {
     pub index: u16,
 }
 
-/// The word bank's regions, in the fixed order the ABI assigns:
-///
-/// ```text
-/// [  0 .. mw )        marker words     internal, retained
-/// [ mw .. mw+iw )     word inputs      s32 HAL pins, written each scan
-/// [ .. +qw )          word outputs     s32 HAL pins, read each scan
-/// [ .. +fi )          float inputs     float HAL pins, converted to i32
-/// [ .. +fo )          float outputs    converted from i32 to float
-/// ```
-///
-/// The order is part of the ABI: inserting a word point renumbers every slot
-/// after it, exactly as the bit image does, and the retain layout hash notices.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WordLayout {
-    /// `WORD_COUNT`: the retained marker words.
-    pub mw: u16,
-    pub iw: u16,
-    pub qw: u16,
-    pub fi: u16,
-    pub fo: u16,
-}
-
-impl WordLayout {
-    pub fn new(iw: u16, qw: u16, fi: u16, fo: u16) -> Self {
-        Self {
-            mw: WORD_COUNT,
-            iw,
-            qw,
-            fi,
-            fo,
-        }
-    }
-
-    pub fn total(&self) -> u16 {
-        self.mw + self.iw + self.qw + self.fi + self.fo
-    }
-
-    pub fn iw_base(&self) -> u16 {
-        self.mw
-    }
-
-    pub fn qw_base(&self) -> u16 {
-        self.mw + self.iw
-    }
-
-    pub fn fi_base(&self) -> u16 {
-        self.mw + self.iw + self.qw
-    }
-
-    pub fn fo_base(&self) -> u16 {
-        self.mw + self.iw + self.qw + self.fi
-    }
-}
-
 /// The compiled symbol table split by bank. Bit slots and word-bank slots are
 /// separate namespaces, so every lookup says which one it wants; a word point
 /// can never be read as a bit slot by accident.
@@ -252,10 +198,6 @@ pub const MAX_EDGE_CONTACTS: u16 = 32;
 /// Instances per function-block kind. Dialect data now; the name stays here
 /// because every caller already imports it.
 pub use crate::profile::FB_PER_TYPE;
-
-/// Word slots in the bank. M3 folds this into `WordLayout`; until then the name
-/// stays here for every caller that already imports it.
-pub use crate::profile::resolve::WORD_COUNT;
 
 /// Presets parse in the profile. The name stays here because the tests that pin
 /// which presets are refused, and the importer, already call it.
@@ -587,46 +529,10 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
     })
 }
 
-/// The project's word bank: its region layout and every declared word or float
-/// point with the slot it owns, in ABI order.
-///
-/// Compile builds the symbol table and the HAL bindings from this list, and
-/// validation resolves expression operands through it, so a slot and a name can
-/// never differ between the two.
-pub fn word_points(project: &Project) -> (WordLayout, Vec<(String, u16, IoKind, IoDirection)>) {
-    let words = WordLayout::new(
-        count_points(project, IoDirection::In, IoKind::Word),
-        count_points(project, IoDirection::Out, IoKind::Word),
-        count_points(project, IoDirection::In, IoKind::Float),
-        count_points(project, IoDirection::Out, IoKind::Float),
-    );
-    let mut points = Vec::with_capacity((words.iw + words.qw + words.fi + words.fo) as usize);
-    let mut push = |direction: IoDirection, kind: IoKind, base: u16| {
-        for (offset, point) in project
-            .io
-            .iter()
-            .filter(|point| point.direction == direction && point.kind == kind)
-            .enumerate()
-        {
-            points.push((point.name.clone(), base + offset as u16, kind, direction));
-        }
-    };
-    // The order is the ABI; see `WordLayout`.
-    push(IoDirection::In, IoKind::Word, words.iw_base());
-    push(IoDirection::Out, IoKind::Word, words.qw_base());
-    push(IoDirection::In, IoKind::Float, words.fi_base());
-    push(IoDirection::Out, IoKind::Float, words.fo_base());
-    (words, points)
-}
-
-/// Number of I/O points of one direction and declared kind.
-fn count_points(project: &Project, direction: IoDirection, kind: IoKind) -> u16 {
-    project
-        .io
-        .iter()
-        .filter(|point| point.direction == direction && point.kind == kind)
-        .count() as u16
-}
+/// The project's word bank and every declared word or float point, in ABI order.
+/// The profile owns the geometry and the region order; this name stays here
+/// because the compiler and the validator already import it.
+pub use crate::profile::layout::{word_points, WordLayout};
 
 /// Stable FNV-1a 64-bit digest of the serialised project, as 16 lowercase hex digits.
 pub fn project_hash(project: &Project) -> String {

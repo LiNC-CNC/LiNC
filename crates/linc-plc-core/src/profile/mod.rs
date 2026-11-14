@@ -6,18 +6,21 @@
 //!
 //! M1 put the instruction set here as data ([`spec`]). M2 put operand
 //! resolution here ([`resolve`]) and the [`Profile`] interface that names both.
-//! M3–M5 add the memory layout, the instruction-validity split and the device.
+//! M3 put the word bank's shape here ([`layout`]): its regions, their order and
+//! the marker words. M4–M5 add the instruction-validity split and the device.
 //!
 //! Nothing in this module depends on `compile`, `vm` or `validate`: a dialect is
 //! data and a few pure functions, and the modules that use it map that data onto
 //! their own types. That direction is what lets the rest of the strangler move
 //! without a cycle.
 
+pub mod layout;
 pub mod resolve;
 pub mod spec;
 
 use std::collections::HashMap;
 
+pub use layout::WordLayout;
 use resolve::{Operand, OperandError};
 use spec::Spec;
 
@@ -31,9 +34,9 @@ pub type SymbolLookup = HashMap<String, u16>;
 
 /// Everything that differs between PLC families.
 ///
-/// Small on purpose; a cell is added when a second dialect needs it. `layout`,
-/// `intern`, `languages` and `check_instruction` arrive with M3–M5, in the
-/// handoff's order.
+/// Small on purpose; a cell is added when a second dialect needs it. `intern`,
+/// `languages` and `check_instruction` arrive with M4–M5, in the handoff's
+/// order.
 pub trait Profile {
     fn name(&self) -> &'static str;
 
@@ -45,6 +48,11 @@ pub trait Profile {
 
     /// Resolve one operand's text to something the compiler can address.
     fn resolve(&self, text: &str, symbols: &SymbolLookup) -> Result<Operand, OperandError>;
+
+    /// The word bank, in this dialect's region order, from the project's four
+    /// point counts. The library's one implementation fixes the order the ABI
+    /// documents; a dialect is free to differ and then say so here.
+    fn layout(&self, iw: u16, qw: u16, fi: u16, fo: u16) -> WordLayout;
 }
 
 /// The dialect LiNC ships: the ZX-derived instruction set, its sixteen marker
@@ -67,6 +75,10 @@ impl Profile for Iec {
 
     fn resolve(&self, text: &str, symbols: &SymbolLookup) -> Result<Operand, OperandError> {
         resolve::resolve(text, symbols)
+    }
+
+    fn layout(&self, iw: u16, qw: u16, fi: u16, fo: u16) -> WordLayout {
+        WordLayout::new(iw, qw, fi, fo)
     }
 }
 

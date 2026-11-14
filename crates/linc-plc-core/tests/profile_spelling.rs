@@ -38,6 +38,20 @@ fn no_module_outside_the_profile_spells_a_marker_word() {
     }
 }
 
+/// The bank's width is the layout's. M3's acceptance: no module outside
+/// `src/profile/` names the marker-word count, so a second dialect can change it
+/// without editing the compiler, the importer, the validator or the editor.
+#[test]
+fn no_module_outside_the_profile_names_the_word_count() {
+    for (name, text) in sources() {
+        assert!(
+            !text.contains("WORD_COUNT"),
+            "{name} names the marker-word count; ask the profile (`marker_word_count`, \
+             `marker_words`, `WordLayout`) instead"
+        );
+    }
+}
+
 /// A time preset's spelling and a block member's suffix are the resolver's, so no
 /// other module builds either. Diagnostic sentences and doc examples may still
 /// name them — they are the user's words, not a second parser — so the scan looks
