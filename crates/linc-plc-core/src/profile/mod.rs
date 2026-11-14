@@ -63,7 +63,7 @@ pub trait Profile {
     /// The word bank, in this dialect's region order, from the project's four
     /// point counts. The library's one implementation fixes the order the ABI
     /// documents; a dialect is free to differ and then say so here.
-    fn layout(&self, iw: u16, qw: u16, fi: u16, fo: u16) -> WordLayout;
+    fn layout(&self, iw: u16, qw: u16, fi: u16, fo: u16, typed: layout::Typed) -> WordLayout;
 
     /// Most word-bank slots a project may declare.
     fn max_words(&self) -> u16;
@@ -106,8 +106,8 @@ impl Profile for Iec {
         resolve::resolve(text, symbols)
     }
 
-    fn layout(&self, iw: u16, qw: u16, fi: u16, fo: u16) -> WordLayout {
-        WordLayout::new(iw, qw, fi, fo)
+    fn layout(&self, iw: u16, qw: u16, fi: u16, fo: u16, typed: layout::Typed) -> WordLayout {
+        WordLayout::new(iw, qw, fi, fo, typed)
     }
 
     fn max_words(&self) -> u16 {
@@ -167,8 +167,8 @@ impl Profile for ClassicLadder {
         }
     }
 
-    fn layout(&self, iw: u16, qw: u16, fi: u16, fo: u16) -> WordLayout {
-        WordLayout::new(iw, qw, fi, fo)
+    fn layout(&self, iw: u16, qw: u16, fi: u16, fo: u16, typed: layout::Typed) -> WordLayout {
+        WordLayout::new(iw, qw, fi, fo, typed)
     }
 
     fn max_words(&self) -> u16 {

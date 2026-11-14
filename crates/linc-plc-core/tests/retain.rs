@@ -142,20 +142,21 @@ fn the_vm_packs_restored_values_and_never_a_force() {
 /// bank and nothing else would catch a store that lined up by accident.
 #[test]
 fn the_layout_hash_notices_a_changed_bank_shape() {
+    use linc_plc_core::profile::layout::Typed;
     use linc_plc_core::profile::WordLayout;
 
     let names = [(0u16, "run")];
-    let base = retain::layout_hash(&names, WordLayout::new(1, 0, 0, 0));
+    let base = retain::layout_hash(&names, WordLayout::new(1, 0, 0, 0, Typed::default()));
     assert_eq!(
         base,
-        retain::layout_hash(&names, WordLayout::new(1, 0, 0, 0)),
+        retain::layout_hash(&names, WordLayout::new(1, 0, 0, 0, Typed::default())),
         "the same shape hashes the same"
     );
     for moved in [
-        WordLayout::new(2, 0, 0, 0),
-        WordLayout::new(1, 1, 0, 0),
-        WordLayout::new(1, 0, 1, 0),
-        WordLayout::new(1, 0, 0, 1),
+        WordLayout::new(2, 0, 0, 0, Typed::default()),
+        WordLayout::new(1, 1, 0, 0, Typed::default()),
+        WordLayout::new(1, 0, 1, 0, Typed::default()),
+        WordLayout::new(1, 0, 0, 1, Typed::default()),
     ] {
         assert_ne!(
             base,
@@ -165,13 +166,53 @@ fn the_layout_hash_notices_a_changed_bank_shape() {
     }
     assert_ne!(
         base,
-        retain::layout_hash(&[], WordLayout::new(1, 0, 0, 0)),
+        retain::layout_hash(&[], WordLayout::new(1, 0, 0, 0, Typed::default())),
         "a retained slot that disappears is a layout the store no longer fits"
     );
     assert_ne!(
-        retain::layout_hash(&names, WordLayout::new(1, 0, 0, 0)),
-        retain::layout_hash(&[(1u16, "run")], WordLayout::new(1, 0, 0, 0)),
+        retain::layout_hash(&names, WordLayout::new(1, 0, 0, 0, Typed::default())),
+        retain::layout_hash(
+            &[(1u16, "run")],
+            WordLayout::new(1, 0, 0, 0, Typed::default())
+        ),
         "the same name at another index is another layout"
+    );
+}
+
+/// A bank of the same size but another shape is another layout: the region table
+/// is what the hash sees, not just the total. A typed region grown while a float
+/// region shrank keeps `total` the same and still moves every slot after the change.
+#[test]
+fn the_layout_hash_notices_a_reshaped_bank_of_the_same_size() {
+    use linc_plc_core::profile::layout::Typed;
+    use linc_plc_core::profile::WordLayout;
+
+    let names = [(0u16, "run")];
+    let dints = WordLayout::new(
+        1,
+        0,
+        0,
+        0,
+        Typed {
+            dints: 2,
+            ..Typed::default()
+        },
+    );
+    let reals = WordLayout::new(
+        1,
+        0,
+        0,
+        0,
+        Typed {
+            reals: 2,
+            ..Typed::default()
+        },
+    );
+    assert_eq!(dints.total(), reals.total(), "the same number of slots");
+    assert_ne!(
+        retain::layout_hash(&names, dints),
+        retain::layout_hash(&names, reals),
+        "the same size in another shape is another layout"
     );
 }
 
@@ -179,14 +220,18 @@ fn the_layout_hash_notices_a_changed_bank_shape() {
 /// documents, and a second dialect is free to answer differently.
 #[test]
 fn the_profile_builds_the_bank() {
+    use linc_plc_core::profile::layout::Typed;
     use linc_plc_core::profile::{profile, Profile, WordLayout};
 
     assert_eq!(
-        profile().layout(1, 2, 3, 4),
-        WordLayout::new(1, 2, 3, 4),
+        profile().layout(1, 2, 3, 4, Typed::default()),
+        WordLayout::new(1, 2, 3, 4, Typed::default()),
         "the shipped dialect keeps the documented region order"
     );
-    assert_eq!(profile().layout(1, 2, 3, 4).total(), 16 + 10);
+    assert_eq!(
+        profile().layout(1, 2, 3, 4, Typed::default()).total(),
+        16 + 10
+    );
 }
 
 #[test]

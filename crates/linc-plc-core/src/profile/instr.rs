@@ -32,6 +32,9 @@ pub struct Ctx<'a> {
     pub word_slots: &'a SymbolLookup,
     /// Declared I/O points and their kinds, by name.
     pub io_kinds: &'a HashMap<&'a str, IoKind>,
+    /// Declared variables and their types, by lowercased name: what a contact may
+    /// not read and a word operand may.
+    pub var_types: &'a HashMap<String, crate::model::VarType>,
     /// Every POU name, uppercased: what a call may name.
     pub pou_names: &'a HashSet<String>,
     /// The rungs of the section this instruction is in: what a jump may name.
@@ -948,6 +951,29 @@ fn check_fbd_line(line: &FbdLine, index: usize, ctx: &Ctx) -> Vec<Diagnostic> {
 /// would silently address the wrong image; validation refuses it instead.
 fn io_kind(name: &str, want_bit: bool, path: &str, ctx: &Ctx, diagnostics: &mut Vec<Diagnostic>) {
     let name = name.trim();
+    // A declared variable is typed too, and the type decides which side it may be
+    // used on: a contact reads a BOOL, a word operand reads INT, DINT, REAL or TIME.
+    // The message names the variable and the type it was declared with.
+    if let Some(ty) = ctx.var_types.get(&name.to_ascii_lowercase()) {
+        if want_bit && !ty.is_bool() {
+            diagnostics.push(Diagnostic::error(
+                "var_type",
+                format!(
+                    "`{name}` is {} and cannot be read as a bit contact or coil; \
+                     a contact reads a BOOL",
+                    ty.label()
+                ),
+                path,
+            ));
+        } else if !want_bit && ty.is_bool() {
+            diagnostics.push(Diagnostic::error(
+                "var_type",
+                format!("`{name}` is BOOL and cannot be used as a word value; declare it INT, DINT, REAL or TIME"),
+                path,
+            ));
+        }
+        return;
+    }
     let Some(kind) = ctx.io_kinds.get(name) else {
         return;
     };

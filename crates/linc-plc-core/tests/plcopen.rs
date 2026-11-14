@@ -187,6 +187,139 @@ fn an_unknown_element_is_refused_by_name() {
     );
 }
 
+/// Every type this build reads, in one interface: the declaration survives the
+/// import, arrays keep their length, a derived type keeps its name, and a type with
+/// no width is still refused by name.
+#[test]
+fn declared_types_are_read_and_carried() {
+    use linc_plc_core::model::VarType;
+
+    let xml = r#"<?xml version="1.0"?>
+<project>
+  <contentHeader name="typed"/>
+  <types><pous><pou name="P" pouType="program">
+    <interface><localVars>
+      <variable name="Count"><type><INT/></type></variable>
+      <variable name="Total"><type><DINT/></type></variable>
+      <variable name="Level"><type><REAL/></type></variable>
+      <variable name="Dwell"><type><TIME/></type></variable>
+      <variable name="Steps"><type><array><baseElementType><DINT/></baseElementType><dimension lower="0" upper="5"/></array></type></variable>
+      <variable name="Station"><type><derived name="FillStation"/></type></variable>
+      <variable name="Flag"><type><BOOL/></type></variable>
+    </localVars>
+    <inputVars>
+      <variable name="Start"><type><BOOL/></type></variable>
+      <variable name="Speed"><type><INT/></type></variable>
+      <variable name="Pressure"><type><REAL/></type></variable>
+    </inputVars></interface>
+    <body><LD>
+      <leftPowerRail localId="1"/>
+      <rightPowerRail localId="2"/>
+      <contact localId="3"><connectionPointIn><connection refLocalId="1"/></connectionPointIn><variable>Start</variable></contact>
+      <coil localId="4"><connectionPointIn><connection refLocalId="3"/></connectionPointIn><variable>Flag</variable></coil>
+    </LD></body>
+  </pou></pous></types>
+</project>"#;
+    let project = imported(xml);
+    let types: Vec<(String, String)> = project
+        .vars
+        .iter()
+        .map(|var| (var.name.clone(), var.ty.label()))
+        .collect();
+    assert_eq!(
+        types,
+        vec![
+            ("count".to_string(), "INT".to_string()),
+            ("total".to_string(), "DINT".to_string()),
+            ("level".to_string(), "REAL".to_string()),
+            ("dwell".to_string(), "TIME".to_string()),
+            ("steps".to_string(), "DINT[6]".to_string()),
+            ("station".to_string(), "FillStation".to_string()),
+            ("flag".to_string(), "BOOL".to_string()),
+        ],
+        "each declaration keeps the type it was imported with"
+    );
+    assert_eq!(
+        project.vars[4].ty,
+        VarType::Array {
+            base: Box::new(VarType::Dint),
+            len: 6
+        }
+    );
+    // A point's type picks its HAL pin, so an INT input is a word and a REAL input
+    // is a float; the importer must not make them all bits.
+    let kinds: Vec<(&str, linc_plc_core::IoKind)> = project
+        .io
+        .iter()
+        .map(|point| (point.name.as_str(), point.kind))
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            ("start", linc_plc_core::IoKind::Bit),
+            ("speed", linc_plc_core::IoKind::Word),
+            ("pressure", linc_plc_core::IoKind::Float),
+        ]
+    );
+
+    // A structured declaration is named and refused: the type is readable, the
+    // storage is not there yet.
+    let refused = compile(&project).expect_err("a structured declaration has no storage");
+    assert!(
+        refused
+            .iter()
+            .any(|item| item.code == "var_type" && item.message.contains("FillStation")),
+        "{refused:#?}"
+    );
+
+    // The typed declarations are storage the scan can reach: a compile has to lay
+    // out slots for them and keep the bit variable a bit.
+    let mut storable = project.clone();
+    storable.vars.retain(|var| !var.ty.is_structured());
+    let compiled = compile(&storable).expect("typed declarations compile");
+    assert_eq!(
+        compiled.program.words.dints, 7,
+        "the array owns six slots and `Total` one"
+    );
+    assert_eq!(compiled.program.words.ints, 1);
+    assert_eq!(compiled.program.words.reals, 1);
+    assert_eq!(compiled.program.words.times, 1);
+}
+
+#[test]
+fn a_type_with_no_width_is_refused_by_name() {
+    let xml = r#"<?xml version="1.0"?>
+<project>
+  <contentHeader name="odd"/>
+  <types><pous><pou name="P" pouType="program">
+    <interface><localVars>
+      <variable name="Weird"><type><LREAL/></type></variable>
+      <variable name="Broken"><type/></variable>
+      <variable name="NoType"/>
+    </localVars></interface>
+    <body><LD><leftPowerRail localId="1"/><rightPowerRail localId="2"/></LD></body>
+  </pou></pous></types>
+</project>"#;
+    let diagnostics = plcopen::import(xml).expect_err("an unknown type is refused");
+    let messages: Vec<&str> = diagnostics
+        .iter()
+        .filter(|item| item.code == "plcopen_unsupported_element")
+        .map(|item| item.message.as_str())
+        .collect();
+    assert!(
+        messages.contains(&"variable 'Weird' has a type with no LiNC form"),
+        "{diagnostics:#?}"
+    );
+    assert!(
+        messages.contains(&"variable 'Broken' has a type with no LiNC form"),
+        "{diagnostics:#?}"
+    );
+    assert!(
+        messages.contains(&"variable 'NoType' has a type with no LiNC form"),
+        "{diagnostics:#?}"
+    );
+}
+
 /// One block rung, built by hand: the body the importer's backwards walk cannot
 /// reach yet, but the model and the compiler can now express and run it.
 #[test]

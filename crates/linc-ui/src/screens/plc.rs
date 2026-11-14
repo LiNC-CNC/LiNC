@@ -2141,6 +2141,7 @@ impl PlcUi {
                     self.project.vars.push(linc_plc_core::model::VarDecl {
                         name,
                         kind: linc_plc_core::model::VarKind::Bit,
+                        ty: linc_plc_core::model::VarType::Bool,
                         retain: false,
                         comment: String::new(),
                     });

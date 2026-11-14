@@ -4,7 +4,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::il::{parse_line, IlLine};
-use crate::model::{FbdGrid, IoDirection, IoKind, Logic, PouLanguage, Project, Rung, Section};
+use crate::model::{
+    FbdGrid, IoDirection, IoKind, Logic, PouLanguage, Project, Rung, Section, VarType,
+};
 use crate::profile::instr::{Ctx, Instr};
 use crate::profile::Profile;
 use crate::SCHEMA_VERSION;
@@ -36,6 +38,7 @@ struct Facts<'a> {
     known: &'a HashSet<String>,
     word_slots: &'a HashMap<String, u16>,
     io_kinds: &'a HashMap<&'a str, IoKind>,
+    var_types: &'a HashMap<String, VarType>,
     pou_names: &'a HashSet<String>,
     section_rungs: &'a [Rung],
     labels: &'a HashSet<String>,
@@ -50,6 +53,7 @@ impl Facts<'_> {
             known: self.known,
             word_slots: self.word_slots,
             io_kinds: self.io_kinds,
+            var_types: self.var_types,
             pou_names: self.pou_names,
             section_rungs: self.section_rungs,
             labels: self.labels,
@@ -130,20 +134,44 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     for point in &project.io {
         io_kinds.insert(point.name.as_str(), point.kind);
     }
+    // The declared types, by lowercased name: an operand's type decides which side
+    // of the program it may be used on, and a structured declaration has no storage.
+    let mut var_types: HashMap<String, VarType> = HashMap::with_capacity(project.vars.len());
+    for (index, var) in project.vars.iter().enumerate() {
+        var_types.insert(var.name.to_ascii_lowercase(), var.ty.clone());
+        if var.ty.is_structured() {
+            diagnostics.push(Diagnostic::error(
+                "var_type",
+                format!(
+                    "variable '{}' has type {}; a structured type has no storage in this build",
+                    var.name,
+                    var.ty.label()
+                ),
+                format!("vars[{index}].ty"),
+            ));
+        }
+    }
     // The expression resolver reads the same name -> slot map and the same bank
     // geometry the compiler binds, so a name one accepts is a name the other can
     // resolve, and the two cannot disagree about a slot.
-    let (layout, word_points) = crate::profile::layout::word_points(project);
-    let word_slots: HashMap<String, u16> = word_points
+    let bank = crate::profile::layout::word_points(project);
+    let layout = bank.layout;
+    let mut word_slots: HashMap<String, u16> = bank
+        .io
         .iter()
         .map(|(name, slot, _, _)| (name.to_ascii_lowercase(), *slot))
         .collect();
+    // A typed declaration addresses its first slot by name, exactly as the compiler
+    // binds it, so an operand resolves to the slot the scan reads.
+    for var in &bank.vars {
+        word_slots.insert(var.name.to_ascii_lowercase(), var.slot);
+    }
     let max_words = crate::profile::profile().max_words();
     if layout.total() > max_words {
         diagnostics.push(Diagnostic::error(
             "too_large",
             format!(
-                "the word bank needs {} slots ({} marker words plus the word and float points); the maximum is {max_words}",
+                "the word bank needs {} slots ({} marker words plus the word points, float points and typed declarations); the maximum is {max_words}",
                 layout.total(),
                 layout.mw
             ),
@@ -188,6 +216,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     known: &known,
                     word_slots: &word_slots,
                     io_kinds: &io_kinds,
+                    var_types: &var_types,
                     pou_names: &pou_names,
                     section_rungs: &[],
                     labels: &labels,
@@ -225,6 +254,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     known: &known,
                     word_slots: &word_slots,
                     io_kinds: &io_kinds,
+                    var_types: &var_types,
                     pou_names: &pou_names,
                     section_rungs: &[],
                     labels: &HashSet::new(),
@@ -444,6 +474,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             known: &known,
             word_slots: &word_slots,
             io_kinds: &io_kinds,
+            var_types: &var_types,
             pou_names: &pou_names,
             section_rungs: &section.rungs,
             labels: &no_labels,

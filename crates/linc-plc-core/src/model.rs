@@ -343,6 +343,14 @@ pub enum IoKind {
 pub struct VarDecl {
     pub name: String,
     pub kind: VarKind,
+    /// The declared type, as the importer read it.
+    ///
+    /// Additive and defaulted: a version-1 project has no `ty` key and decodes to
+    /// `Bool`, and a `Bool` is not written back, so a project that declares no
+    /// types serialises byte for byte as it did and its `project_hash` does not
+    /// move.
+    #[serde(default, skip_serializing_if = "VarType::is_bool")]
+    pub ty: VarType,
     #[serde(default)]
     pub retain: bool,
     #[serde(default)]
@@ -353,6 +361,72 @@ pub struct VarDecl {
 #[serde(rename_all = "snake_case")]
 pub enum VarKind {
     Bit,
+}
+
+/// A declared variable's type.
+///
+/// The importer reads it, the word bank gives the word types a slot, and a
+/// refusal can name it. `Derived` is a type this project declares itself: the name
+/// is kept rather than resolved, so the refusal says `MotorStarter` and not
+/// "unknown type".
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VarType {
+    #[default]
+    Bool,
+    Int,
+    Dint,
+    Real,
+    /// Milliseconds, as `s32` — the bank's unit for a time value.
+    Time,
+    /// A type the project declares in its own `<dataTypes>`.
+    Derived(String),
+    Array {
+        base: Box<VarType>,
+        len: u32,
+    },
+}
+
+impl VarType {
+    /// How many word-bank slots the declaration owns. A bit variable owns none:
+    /// it lives in the bit image. A structured type owns none either, and a
+    /// declaration of one is refused by validation rather than laid out.
+    pub fn slots(&self) -> u16 {
+        match self {
+            Self::Bool | Self::Derived(_) => 0,
+            Self::Int | Self::Dint | Self::Real | Self::Time => 1,
+            Self::Array { base, len } => base
+                .slots()
+                .saturating_mul(u16::try_from(*len).unwrap_or(u16::MAX)),
+        }
+    }
+
+    /// The declared type as an operator reads it: `DINT`, `INT[1]`, `Recipe[3]`.
+    pub fn label(&self) -> String {
+        match self {
+            Self::Bool => "BOOL".to_string(),
+            Self::Int => "INT".to_string(),
+            Self::Dint => "DINT".to_string(),
+            Self::Real => "REAL".to_string(),
+            Self::Time => "TIME".to_string(),
+            Self::Derived(name) => name.clone(),
+            Self::Array { base, len } => format!("{}[{len}]", base.label()),
+        }
+    }
+
+    pub fn is_bool(&self) -> bool {
+        *self == Self::Bool
+    }
+
+    /// A type this build can name but has no storage for: a structured type, or an
+    /// array of one.
+    pub fn is_structured(&self) -> bool {
+        match self {
+            Self::Derived(_) => true,
+            Self::Array { base, .. } => base.is_structured(),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -610,8 +684,17 @@ impl VarDecl {
         Self {
             name: name.into(),
             kind: VarKind::Bit,
+            ty: VarType::Bool,
             retain: false,
             comment: String::new(),
+        }
+    }
+
+    /// A declared variable with a word type: it owns bank slots instead of a bit.
+    pub fn typed(name: impl Into<String>, ty: VarType) -> Self {
+        Self {
+            ty,
+            ..Self::new(name)
         }
     }
 }

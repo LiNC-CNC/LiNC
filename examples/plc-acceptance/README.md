@@ -61,8 +61,45 @@ needed. Four converted files each hold a timer on a rung with no coil, which the
 importer emits instead of dropping. `traffic-lights` is the largest: six timers
 chained through `.DN` contacts. `timer-counter` is the one that exercises `.TT`.
 
-The six that remain are named in the manifest: typed tags and user data types
-(five), and `INT[1]` bit-of-word operands (`start-stop`).
+The six that remain are named in the manifest, and the reason has changed: the
+converter and the importer both accept declared types now, so no file is refused for
+its *types* any more. Each one stops at the construct behind the type. This table is
+what the manifest diff records, and what the next step has to answer:
+
+| file | the type it declares | the construct that stops it |
+| --- | --- | --- |
+| `motor-starters-function-block` | `MotorStarter` twice | the file also declares the function block body, as a second program |
+| `silo-function-block` | `FillStation` | the same, for `FillStation` |
+| `traffic-lights-routines` | `DINT`, `DINT[6]`, `TIMER` | three programs and two `JSR` calls |
+| `recipes-data-type-ld` | `Recipe[3]`, `DINT`, `TIMER` | `MOV`: a word write has no PLCopen form yet |
+| `start-stop` | `INT[1]` | two coils in series on one branch, which a rung cannot hold |
+| `two-tanks-cascade` | `REAL`, `PID` twice | `SCP`, a scale instruction, then `PID` |
+
+Behind each of those, the type work is what the file needs next: `Bits[0].0` in
+`start-stop` is a bit of a word, `Recipes[Sel].FillTime` in `recipes` is a member of
+an array element, and `Durations[Phase]` in `traffic-lights-routines` is an array
+indexed by a variable.
+
+### Declared types, and the gate they were hiding
+
+LiNC's importer refused every declaration that was not `BOOL`, and it refused it first,
+so five of the twelve files could not report what actually stopped them. The importer
+now reads `BOOL`, `INT`, `DINT`, `REAL`, `TIME`, an array of any of them, and a type
+name the project declares itself; a name it keeps rather than resolves, so a refusal
+says `MotorStarter` and not "unknown type". A type with no width for this build is
+still refused, by name, and the project's own types are refused by validation because
+there is no storage for them yet.
+
+The word bank grew named typed regions for the declarations — `int`, `dint`, `real`,
+`time` — appended to the existing one bank, so a project that declares types gains
+slots at the end and every word and float point keeps its number. A load sign-extends
+a 16-bit variable and a store keeps its low half, so two reads of an `INT` cannot
+disagree; a `DINT` and a `TIME` are 32 bits; a `REAL` is its own 32 bits, unchanged.
+The retain layout hash now covers the region table, not just the bank's size: a bank
+that is the same size in another shape would put a retained word at the wrong slot.
+
+The count did not move — six of twelve — and that is the point of the step: the gate
+moved from the types to the constructs.
 
 ### One trace, questioned and settled
 

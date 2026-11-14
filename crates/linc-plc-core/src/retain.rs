@@ -95,18 +95,29 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// The layout hash: the retained slots by name and index, the marker-word count
-/// and the whole bank size. Reordering a project keeps the program hash only if
-/// the shape is identical, and this catches the case where the shape moved under
-/// the same text.
+/// The layout hash: the region table, the retained slots by name and index, and
+/// the whole bank size. Reordering a project keeps the program hash only if the
+/// shape is identical, and this catches the case where the shape moved under the
+/// same text.
 ///
-/// Both counts enter the hash on purpose. `mw` is how many word slots the store
-/// holds; `total` is the whole bank, so adding a word or float point invalidates
-/// a store that would otherwise still line up slot for slot.
+/// The region table enters the hash, not just the total. A bank can be the same
+/// size with a different shape — a region inserted in the middle, or a typed region
+/// grown while a float region shrank — and a retained marker word would then sit at
+/// a slot the store did not write. Hashing each region's name and length makes a
+/// reshaped bank a different layout, so the store is refused rather than restored
+/// into the wrong slots. `mw` is how many word slots the store holds; `total` is the
+/// whole bank, so adding a point invalidates a store that would otherwise still
+/// line up slot for slot.
 pub fn layout_hash(retained_names: &[(u16, &str)], words: crate::profile::WordLayout) -> u64 {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&words.mw.to_le_bytes());
     bytes.extend_from_slice(&words.total().to_le_bytes());
+    for region in words.regions() {
+        bytes.extend_from_slice(region.name.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(&region.base.to_le_bytes());
+        bytes.extend_from_slice(&region.len.to_le_bytes());
+    }
     for (index, name) in retained_names {
         bytes.extend_from_slice(&index.to_le_bytes());
         bytes.extend_from_slice(name.as_bytes());

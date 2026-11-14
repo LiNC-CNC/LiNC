@@ -616,6 +616,109 @@ fn structural_refusals_are_still_the_validators_own() {
     assert!(codes(&project).contains(&"too_deep".to_string()));
 }
 
+/// A declaration's type decides which side of the program it may be used on, and a
+/// refusal names both the variable and the type it was declared with.
+#[test]
+fn a_type_error_names_the_variable_and_the_expected_type() {
+    use linc_plc_core::model::VarType;
+
+    // A DINT read as a contact: the message names the variable and its type.
+    let mut project = ld_project();
+    project.vars = vec![VarDecl::typed("count", VarType::Dint)];
+    project.pous[0].sections[0].rungs[0] = Rung::new(
+        Logic::Contact {
+            var: "count".into(),
+            negated: false,
+        },
+        Coil::new("y", CoilKind::Normal),
+    );
+    let text = messages(&project).join("\n");
+    assert!(
+        text.contains("`count` is DINT and cannot be read as a bit contact or coil")
+            && text.contains("a contact reads a BOOL"),
+        "{text}"
+    );
+    assert!(codes(&project).contains(&"var_type".to_string()), "{text}");
+
+    // The same variable as a coil target: a coil writes a bit.
+    let mut project = ld_project();
+    project.vars = vec![VarDecl::typed("count", VarType::Int)];
+    project.pous[0].sections[0].rungs[0] = Rung::new(
+        Logic::Const { value: true },
+        Coil::new("count", CoilKind::Normal),
+    );
+    let text = messages(&project).join("\n");
+    assert!(
+        text.contains("`count` is INT and cannot be read as a bit contact or coil"),
+        "{text}"
+    );
+
+    // A BOOL read as a word: the message names the variable and says what a word
+    // operand has to be.
+    let mut project = ld_project();
+    project.pous[0].sections[0].rungs[0] = Rung::new(
+        Logic::Compare {
+            operator: "GT".into(),
+            left: "run".into(),
+            right: "1".into(),
+        },
+        Coil::new("y", CoilKind::Normal),
+    );
+    let text = messages(&project).join("\n");
+    assert!(
+        text.contains("`run` is BOOL and cannot be used as a word value")
+            && text.contains("declare it INT, DINT, REAL or TIME"),
+        "{text}"
+    );
+
+    // A typed variable as a word operand is what the type is for, so it is clean.
+    let mut project = ld_project();
+    project.vars = vec![VarDecl::new("run"), VarDecl::typed("count", VarType::Int)];
+    project.pous[0].sections[0].rungs[0] = Rung::new(
+        Logic::Compare {
+            operator: "GT".into(),
+            left: "count".into(),
+            right: "1".into(),
+        },
+        Coil::new("y", CoilKind::Normal),
+    );
+    let errors: Vec<String> = validate(&project)
+        .into_iter()
+        .filter(|item| item.code == "var_type")
+        .map(|item| item.message)
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// A structured declaration is readable and refused: this build has no storage for
+/// it, and the refusal says which variable and which type.
+#[test]
+fn a_structured_declaration_is_refused_by_name() {
+    use linc_plc_core::model::VarType;
+
+    let mut project = ld_project();
+    project.vars = vec![
+        VarDecl::new("run"),
+        VarDecl::typed("pump", VarType::Derived("MotorStarter".into())),
+        VarDecl::typed(
+            "recipes",
+            VarType::Array {
+                base: Box::new(VarType::Derived("Recipe".into())),
+                len: 3,
+            },
+        ),
+    ];
+    let text = messages(&project).join("\n");
+    assert!(
+        text.contains("variable 'pump' has type MotorStarter; a structured type has no storage"),
+        "{text}"
+    );
+    assert!(
+        text.contains("variable 'recipes' has type Recipe[3]; a structured type has no storage"),
+        "{text}"
+    );
+}
+
 #[test]
 fn the_bank_and_edge_caps_are_the_profiles_and_are_reported_here() {
     let mut project = ld_project();
@@ -630,9 +733,9 @@ fn the_bank_and_edge_caps_are_the_profiles_and_are_reported_here() {
     let diagnostics = validate(&project);
     assert!(
         diagnostics.iter().any(|item| item.code == "too_large"
-            && item
-                .message
-                .contains("marker words plus the word and float points")),
+            && item.message.contains(
+                "marker words plus the word points, float points and typed declarations"
+            )),
         "{diagnostics:?}"
     );
 

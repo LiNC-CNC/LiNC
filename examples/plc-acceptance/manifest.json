@@ -38,7 +38,7 @@
    "pous": 2,
    "rungs": 5,
    "converted": false,
-   "blocker": "tag types: MotorStarter",
+   "blocker": "converter: only a single LD routine converts; the file declares the MotorStarter function block body as a second program",
    "stimulus": true,
    "trace": true,
    "runs": false
@@ -48,7 +48,7 @@
    "pous": 1,
    "rungs": 11,
    "converted": false,
-   "blocker": "tag types: DINT,Recipe[3],TIMER",
+   "blocker": "converter: instruction MOV has no faithful rung mapping",
    "stimulus": true,
    "trace": true,
    "runs": false
@@ -58,7 +58,7 @@
    "pous": 2,
    "rungs": 8,
    "converted": false,
-   "blocker": "tag types: FillStation",
+   "blocker": "converter: only a single LD routine converts; the file declares the FillStation function block body as a second program",
    "stimulus": true,
    "trace": true,
    "runs": false
@@ -88,7 +88,7 @@
    "pous": 1,
    "rungs": 6,
    "converted": false,
-   "blocker": "tag types: INT[1]",
+   "blocker": "converter: two coils in series on one branch: a LiNC rung ends in one coil",
    "stimulus": true,
    "trace": true,
    "runs": false
@@ -108,7 +108,7 @@
    "pous": 3,
    "rungs": 11,
    "converted": false,
-   "blocker": "tag types: DINT,DINT[6],TIMER",
+   "blocker": "converter: only a single LD routine converts; three programs and two JSR calls",
    "stimulus": true,
    "trace": true,
    "runs": false
@@ -128,7 +128,7 @@
    "pous": 1,
    "rungs": 5,
    "converted": false,
-   "blocker": "tag types: PID,REAL",
+   "blocker": "converter: instruction SCP has no faithful rung mapping",
    "stimulus": true,
    "trace": true,
    "runs": false

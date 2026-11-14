@@ -300,6 +300,17 @@ impl Vm {
                     push_word(&mut word_stack, &mut word_depth, value);
                 }
                 Op::LoadConst(value) => push_word(&mut word_stack, &mut word_depth, value),
+                // A declared variable is read at the width it was declared with.
+                Op::LoadTyped { slot, ty } => {
+                    let raw = self.words.get(slot as usize).copied().unwrap_or(0);
+                    push_word(&mut word_stack, &mut word_depth, ty.load(raw));
+                }
+                Op::StoreTyped { slot, ty } => {
+                    let value = pop_word(&word_stack, &mut word_depth);
+                    if let Some(cell) = self.words.get_mut(slot as usize) {
+                        *cell = ty.store(value);
+                    }
+                }
                 Op::StoreWord(index) => {
                     let value = pop_word(&word_stack, &mut word_depth);
                     if let Some(cell) = self.words.get_mut(index as usize) {
@@ -483,6 +494,7 @@ impl Vm {
                 Op::Compute {
                     op,
                     target,
+                    target_ty,
                     left,
                     right,
                 } => {
@@ -502,6 +514,13 @@ impl Vm {
                                 }
                             }
                             MathOp::Move => left,
+                        };
+                        // A declared variable holds the value its width can hold, so
+                        // a compute writing one is stored the same way a rung's
+                        // compute coil stores it.
+                        let result = match target_ty {
+                            Some(ty) => ty.store(result),
+                            None => result,
                         };
                         self.write_word(target, result);
                     }

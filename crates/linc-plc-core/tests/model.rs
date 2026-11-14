@@ -24,6 +24,71 @@ fn base_project() -> Project {
     project
 }
 
+/// A version-1 project has no `ty` key on its variables: it decodes to `Bool`, and a
+/// `Bool` is not written back, so the text a project serialises to is unchanged and
+/// its `project_hash` does not move. The shipped config is the witness.
+#[test]
+fn a_version_1_variable_decodes_to_bool_and_serialises_unchanged() {
+    use linc_plc_core::model::VarType;
+
+    let text = r#"{"schema":1,"name":"old","io":[],"vars":[
+        {"name":"seal","kind":"bit","retain":false,"comment":""}
+    ],"sections":[{"name":"main","rungs":[
+        {"logic":{"op":"const","value":true},"coil":{"var":"seal","kind":"normal"}}
+    ]}]}"#;
+    let project: Project = serde_json::from_str(text).expect("a version-1 file decodes");
+    assert_eq!(project.vars[0].ty, VarType::Bool, "the default is a bit");
+
+    let written = serde_json::to_string(&project).expect("the project serialises");
+    assert!(
+        !written.contains("\"ty\""),
+        "a BOOL carries no type key, so an old file round-trips: {written}"
+    );
+    let again: Project = serde_json::from_str(&written).expect("the output decodes");
+    assert_eq!(again.vars[0].ty, VarType::Bool);
+
+    // The shipped simulation config is such a file: it decodes, and its variables
+    // carry no type key, so writing it back cannot change its hash.
+    let config = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/plc-sim.json"),
+    )
+    .expect("the shipped config is readable");
+    let project: Project = serde_json::from_str(&config).expect("the shipped config decodes");
+    assert!(project.vars.iter().all(|var| var.ty == VarType::Bool));
+    let written = serde_json::to_string_pretty(&project).expect("it serialises");
+    assert!(!written.contains("\"ty\""));
+}
+
+/// A typed declaration serialises its type, and an array keeps its length and its
+/// element type.
+#[test]
+fn a_typed_variable_round_trips_through_json() {
+    use linc_plc_core::model::VarType;
+
+    let mut project = base_project();
+    project.vars = vec![
+        VarDecl::new("seal"),
+        VarDecl::typed("count", VarType::Int),
+        VarDecl::typed(
+            "steps",
+            VarType::Array {
+                base: Box::new(VarType::Dint),
+                len: 6,
+            },
+        ),
+        VarDecl::typed("station", VarType::Derived("FillStation".into())),
+    ];
+    let text = serde_json::to_string(&project).expect("a typed project serialises");
+    assert!(text.contains("\"ty\":\"int\""), "{text}");
+    assert!(
+        text.contains("\"ty\":{\"array\":{\"base\":\"dint\",\"len\":6}}"),
+        "{text}"
+    );
+    let again: Project = serde_json::from_str(&text).expect("it decodes again");
+    assert_eq!(again.vars, project.vars);
+    assert_eq!(again.vars[2].ty.label(), "DINT[6]");
+}
+
 #[test]
 fn example_validates_without_errors() {
     let diagnostics = validate(&Project::example());

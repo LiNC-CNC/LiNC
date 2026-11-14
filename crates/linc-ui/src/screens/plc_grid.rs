@@ -4565,6 +4565,7 @@ mod compare_window_tests {
         plc.project.vars.push(linc_plc_core::model::VarDecl {
             name: "seal".into(),
             kind: linc_plc_core::model::VarKind::Bit,
+            ty: linc_plc_core::model::VarType::Bool,
             retain: false,
             comment: String::new(),
         });

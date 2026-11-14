@@ -24,7 +24,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::model::{
-    Coil, CoilKind, IoDirection, IoPoint, Logic, Pou, PouLanguage, Project, Rung, Section, VarDecl,
+    Coil, CoilKind, IoDirection, IoKind, IoPoint, Logic, Pou, PouLanguage, Project, Rung, Section,
+    VarDecl, VarType,
 };
 use crate::validate::Diagnostic;
 use crate::SCHEMA_VERSION;
@@ -349,28 +350,107 @@ fn import_interface(
                 ));
                 continue;
             };
-            if !is_bool(variable) {
+            let Some(ty) = declared_type(variable) else {
                 diagnostics.push(error(
                     "plcopen_unsupported_element",
-                    format!("variable '{name}' is not BOOL"),
+                    format!("variable '{name}' has a type with no LiNC form"),
                     format!("{path}.interface.{name}"),
                 ));
                 continue;
-            }
+            };
             let name = operand_name(name);
             match direction {
-                Some(direction) => io.push(IoPoint::new(name, direction)),
-                None => vars.push(VarDecl::new(name)),
+                Some(direction) => {
+                    // A point's kind decides its HAL pin: a bit is a coil's
+                    // contact, a word is an `s32` pin, a float is a `float` pin the
+                    // scan sees as its integer view.
+                    let Some(kind) = point_kind(&ty) else {
+                        diagnostics.push(error(
+                            "plcopen_unsupported_element",
+                            format!(
+                                "variable '{name}' is {} and cannot be an I/O point; \
+                                 a point is BOOL, INT, DINT, REAL or TIME",
+                                ty.label()
+                            ),
+                            format!("{path}.interface.{name}"),
+                        ));
+                        continue;
+                    };
+                    io.push(IoPoint {
+                        name,
+                        direction,
+                        kind,
+                        comment: String::new(),
+                    });
+                }
+                None => vars.push(VarDecl::typed(name, ty)),
             }
         }
     }
 }
 
-fn is_bool(variable: &Element) -> bool {
-    variable
-        .child("type")
-        .map(|kind| kind.child("BOOL").is_some())
-        .unwrap_or(false)
+/// The declared type of a `<variable>`, or `None` when the element has no `<type>`
+/// or names one this build cannot read.
+fn declared_type(variable: &Element) -> Option<VarType> {
+    read_type(variable.child("type")?)
+}
+
+/// Read a type element: `<BOOL/>`, `<INT/>`, `<DINT/>`, `<REAL/>`, `<TIME/>`,
+/// `<derived name="X"/>`, or `<array>` over one of them.
+///
+/// A derived type is *named*, not resolved: its declaration is the project's own,
+/// and a refusal that says `MotorStarter` is worth more than one that says
+/// "unknown type". A type element with more than one child, or a name this build
+/// has no width for, answers `None` and the caller reports it.
+fn read_type(kind: &Element) -> Option<VarType> {
+    let mut children = kind.children.iter();
+    let child = children.next()?;
+    if children.next().is_some() {
+        return None;
+    }
+    match child.name.as_str() {
+        "BOOL" => Some(VarType::Bool),
+        "INT" => Some(VarType::Int),
+        "DINT" => Some(VarType::Dint),
+        "REAL" => Some(VarType::Real),
+        "TIME" => Some(VarType::Time),
+        "derived" => child
+            .attribute("name")
+            .map(|name| VarType::Derived(name.to_string())),
+        // `<array>` holds the element type and its bounds; the bounds are the
+        // standard's inclusive `lower`/`upper`, and the bank indexes from zero.
+        "array" => {
+            let base = read_type(child.child("baseElementType")?)?;
+            let dimension = child.child("dimension")?;
+            let bound = |name: &str| {
+                dimension
+                    .attribute(name)
+                    .and_then(|text| text.trim().parse::<i64>().ok())
+            };
+            let lower = bound("lower").unwrap_or(1);
+            let upper = bound("upper")?;
+            let len = upper.checked_sub(lower)?.checked_add(1)?;
+            if len <= 0 {
+                return None;
+            }
+            Some(VarType::Array {
+                base: Box::new(base),
+                len: u32::try_from(len).ok()?,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The HAL pin an I/O point of this type uses. An array or a structured type is not
+/// a point: a pin carries one value.
+fn point_kind(ty: &VarType) -> Option<IoKind> {
+    match ty {
+        VarType::Bool => Some(IoKind::Bit),
+        VarType::Int | VarType::Dint | VarType::Time => Some(IoKind::Word),
+        VarType::Real => Some(IoKind::Float),
+        VarType::Derived(_) | VarType::Array { .. } => None,
+    }
 }
 
 /// Markup in `<documentation>` is stripped: the model stores plain text.

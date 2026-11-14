@@ -766,6 +766,10 @@ fn combine(
 fn emit(node: &Node, ops: &mut Vec<Op>) {
     match node {
         Node::Const(value) => ops.push(Op::LoadConst(*value)),
+        // A declared variable is read raw here. Its width is honoured on the store
+        // path (`Op::StoreTyped`), so the slot already holds the canonical value and
+        // a raw read returns it; a load at the declared width is what the rung
+        // compiler emits for a compare, not what the expression parser emits.
         Node::Slot(slot) => ops.push(Op::LoadWord(*slot)),
         Node::Block(instance) => ops.push(Op::FbWord(*instance)),
         Node::BlockPreset(instance) => ops.push(Op::FbPreset(*instance)),

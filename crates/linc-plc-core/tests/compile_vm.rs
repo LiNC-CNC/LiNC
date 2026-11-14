@@ -505,6 +505,112 @@ fn il_words_add_and_compare() {
     assert_eq!(vm.outputs(), &[true], "15 is greater than 9");
 }
 
+/// A declared type is a width and a signedness the scan honours: an INT keeps 16
+/// bits, a DINT and a TIME keep 32, and a REAL moves the same 32 bits as its value.
+#[test]
+fn a_typed_variable_keeps_its_width_and_signedness() {
+    use linc_plc_core::model::{Coil, Rung, Section, VarDecl, VarType};
+
+    let mut project = Project::new("typed");
+    project.vars = vec![
+        VarDecl::typed("count", VarType::Int),
+        VarDecl::typed("total", VarType::Dint),
+        VarDecl::typed("dwell", VarType::Time),
+        VarDecl::typed("level", VarType::Real),
+    ];
+    let compute = |expr: &str| {
+        let mut coil = Coil::new("", CoilKind::Compute);
+        coil.expr = Some(expr.to_string());
+        coil
+    };
+    let rung = |expr: &str| Rung::new(Logic::Const { value: true }, compute(expr));
+    project.pous = vec![linc_plc_core::model::Pou {
+        name: "MAIN".into(),
+        language: linc_plc_core::PouLanguage::Ld,
+        sections: vec![Section {
+            name: "main".into(),
+            rungs: vec![
+                rung("count = 70000"),
+                rung("total = 70000"),
+                rung("dwell = 3000"),
+                // 1.5f32 is 0x3FC00000: a REAL keeps the bits, it does not round.
+                rung("level = 1069547520"),
+            ],
+        }],
+        ..linc_plc_core::model::Pou::new("MAIN", linc_plc_core::PouLanguage::Ld)
+    }];
+    let compiled = compile(&project).expect("typed compute coils compile");
+    let words = compiled.program.words;
+    assert_eq!(words.ints, 1);
+    assert_eq!(words.dints, 1);
+    assert_eq!(words.times, 1);
+    assert_eq!(words.reals, 1);
+
+    let mut vm = Vm::new(&compiled);
+    vm.scan(&[]);
+    let int = vm.word(words.int_base());
+    assert_eq!(
+        int,
+        70_000 - 65_536,
+        "an INT keeps its low 16 bits, sign-extended"
+    );
+    assert_eq!(
+        vm.word(words.dint_base()),
+        70_000,
+        "a DINT is 32 bits, so 70000 is 70000"
+    );
+    assert_eq!(vm.word(words.time_base()), 3000, "a TIME is milliseconds");
+    assert_eq!(
+        vm.word(words.real_base()),
+        1.5f32.to_bits() as i32,
+        "a REAL is the same 32 bits"
+    );
+}
+
+/// The same value read back the way a compare reads it: the load is typed too, so a
+/// negative INT compares as a negative number and not as 0x0000FFFF.
+#[test]
+fn a_typed_load_reads_the_declared_width() {
+    use linc_plc_core::model::{Coil, Rung, Section, VarDecl, VarType};
+
+    let mut project = Project::new("typed-load");
+    project.io = vec![
+        linc_plc_core::IoPoint::new("go", linc_plc_core::IoDirection::In),
+        linc_plc_core::IoPoint::new("y", linc_plc_core::IoDirection::Out),
+    ];
+    project.vars = vec![VarDecl::typed("count", VarType::Int)];
+    // A raw word slot can hold 0x0000FFFF; an INT variable reads that as -1, so a
+    // compare against -1 is true while a compare against 65535 is not.
+    let mut rung = Rung::new(
+        Logic::Compare {
+            operator: "EQ".into(),
+            left: "count".into(),
+            right: "-1".into(),
+        },
+        Coil::new("y", CoilKind::Normal),
+    );
+    rung.coil = Some(Coil::new("y", CoilKind::Normal));
+    project.pous = vec![linc_plc_core::model::Pou {
+        name: "MAIN".into(),
+        language: linc_plc_core::PouLanguage::Ld,
+        sections: vec![Section {
+            name: "main".into(),
+            rungs: vec![rung],
+        }],
+        ..linc_plc_core::model::Pou::new("MAIN", linc_plc_core::PouLanguage::Ld)
+    }];
+    let compiled = compile(&project).expect("the compare compiles");
+    let slot = compiled.program.words.int_base();
+    let mut vm = Vm::new(&compiled);
+    vm.set_word(slot, 0x0001_FFFF);
+    vm.scan(&[true]);
+    assert_eq!(
+        vm.outputs(),
+        &[true],
+        "an INT load sign-extends, so 0x0000FFFF is -1"
+    );
+}
+
 /// `.TT` is the timing bit: enabled this scan and not yet done. It is **not**
 /// `ET < PT`, which is also true of a timer that has just been reset and is idle —
 /// one scan of difference, and a trace records it.

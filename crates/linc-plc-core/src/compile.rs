@@ -60,6 +60,10 @@ struct Lookup {
     /// IL operands are typed by hand; accept any spelling of a declared name.
     bit_ci: HashMap<String, u16>,
     word: HashMap<String, u16>,
+    /// Bank slot -> the width and signedness the declaration gave it. A slot with
+    /// no entry is a raw 32-bit word: a marker word, a HAL point, or a dialect's
+    /// own address.
+    word_types: HashMap<u16, crate::profile::layout::WordType>,
 }
 
 impl Lookup {
@@ -70,6 +74,7 @@ impl Lookup {
             bit: HashMap::new(),
             bit_ci: HashMap::new(),
             word: HashMap::new(),
+            word_types: HashMap::new(),
         }
     }
 
@@ -104,6 +109,11 @@ impl Lookup {
     /// The declared word names and slots, for the expression resolver.
     fn words(&self) -> &HashMap<String, u16> {
         &self.word
+    }
+
+    /// The type a slot was declared with, if it has one.
+    fn slot_type(&self, slot: u16) -> Option<crate::profile::layout::WordType> {
+        self.word_types.get(&slot).copied()
     }
 }
 
@@ -305,6 +315,18 @@ pub enum Op {
     },
     /// Push the block's `ET` (timers) or `CV` (counters) on the word stack.
     FbWord(u16),
+    /// Push a bank slot's value as the declared type reads it: a 16-bit variable
+    /// sign-extends, a 32-bit one is already the value.
+    LoadTyped {
+        slot: u16,
+        ty: crate::profile::layout::WordType,
+    },
+    /// Pop a value and write it as the declared type writes it: a 16-bit variable
+    /// keeps its low half, sign-extended, so two reads of it cannot disagree.
+    StoreTyped {
+        slot: u16,
+        ty: crate::profile::layout::WordType,
+    },
     /// Push the block's `Q` on the bit stack.
     FbQ(u16),
     /// Push the block's timing bit: enabled this scan and not yet done.
@@ -338,6 +360,9 @@ pub enum Op {
     Compute {
         op: MathOp,
         target: WordOperand,
+        /// The width the target is written at, when the target is a declared
+        /// variable. A marker word or a HAL point has none and is written raw.
+        target_ty: Option<crate::profile::layout::WordType>,
         left: WordOperand,
         right: WordOperand,
     },
@@ -467,8 +492,9 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
     // Word points second: their index is their slot in the bank. `word_points`
     // owns the slot arithmetic, so validation and the expression resolver name
     // the same slot the compiler binds.
-    let (words, word_points) = word_points(project);
-    for (name, slot, kind, direction) in &word_points {
+    let bank = word_points(project);
+    let words = bank.layout;
+    for (name, slot, kind, direction) in &bank.io {
         let symbol_kind = match direction {
             IoDirection::In => SymbolKind::Input,
             IoDirection::Out => SymbolKind::Output,
@@ -492,6 +518,25 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
             (IoDirection::In, IoKind::Float) => float_inputs.push(binding),
             (IoDirection::Out, IoKind::Float) => float_outputs.push(binding),
             _ => {}
+        }
+    }
+    // Typed declarations: their name addresses the first slot, and every element of
+    // an array carries the same type, so an indexed element (a later step) reads the
+    // same width as the name does today.
+    for var in &bank.vars {
+        intern(
+            &mut symbols,
+            &mut lookup,
+            &var.name,
+            SymbolKind::Var,
+            false,
+            Bank::Word,
+            Some(var.slot),
+        );
+        if let Some(ty) = crate::profile::layout::word_type(&var.ty) {
+            for offset in 0..var.ty.slots() {
+                lookup.word_types.insert(var.slot + offset, ty);
+            }
         }
     }
 
@@ -968,8 +1013,8 @@ fn lower_fbd_grid_block(
                     ops.push(Op::PushConst(false));
                     return;
                 };
-                emit_word(ops, left);
-                emit_word(ops, right);
+                emit_word(ops, left, lookup);
+                emit_word(ops, right, lookup);
                 ops.push(compare);
             } else if let Some(math) = MathOp::parse(&name) {
                 // A compute block: `row` holds A, the next holds B, and the
@@ -989,6 +1034,7 @@ fn lower_fbd_grid_block(
                 ops.push(Op::PushConst(true));
                 ops.push(Op::Compute {
                     op: math,
+                    target_ty: target_type(&target, lookup),
                     target,
                     left,
                     right,
@@ -1151,8 +1197,8 @@ fn lower_fbd_block(
                     ops.push(Op::PushConst(false));
                     return;
                 };
-                emit_word(ops, left);
-                emit_word(ops, right);
+                emit_word(ops, left, lookup);
+                emit_word(ops, right, lookup);
                 ops.push(compare);
             } else {
                 ops.push(Op::PushConst(false));
@@ -1247,8 +1293,8 @@ fn lower_cells(
                 else {
                     continue;
                 };
-                emit_word(ops, left);
-                emit_word(ops, right);
+                emit_word(ops, left, lookup);
+                emit_word(ops, right, lookup);
                 match compare_op(op) {
                     Some(compare) => ops.push(compare),
                     None => continue,
@@ -1281,6 +1327,7 @@ fn lower_cells(
                 }
                 ops.push(Op::Compute {
                     op: math,
+                    target_ty: target_type(&target, lookup),
                     target,
                     left,
                     right,
@@ -1508,6 +1555,15 @@ fn push_member(
     }
 }
 
+/// The width a compute's target is written at, when the target is a declared
+/// variable rather than a marker word or a HAL point.
+fn target_type(target: &WordOperand, lookup: &Lookup) -> Option<crate::profile::layout::WordType> {
+    match target {
+        WordOperand::Slot(index) => lookup.slot_type(*index),
+        _ => None,
+    }
+}
+
 /// Resolve a word operand through the profile: the dialect's own spellings, then
 /// the declared word symbols.
 fn resolve_word(text: &str, lookup: &Lookup) -> Option<WordOperand> {
@@ -1534,9 +1590,15 @@ pub fn preset_source(text: &str, timer: bool) -> Option<PresetSource> {
     }
 }
 
-fn emit_word(ops: &mut Vec<Op>, value: WordOperand) {
+fn emit_word(ops: &mut Vec<Op>, value: WordOperand, lookup: &Lookup) {
     match value {
-        WordOperand::Word(index) | WordOperand::Slot(index) => ops.push(Op::LoadWord(index)),
+        // A declared variable is read at its own width; a marker word or a HAL
+        // point is the raw 32 bits, because nothing declared a width for it.
+        WordOperand::Slot(index) => match lookup.slot_type(index) {
+            Some(ty) => ops.push(Op::LoadTyped { slot: index, ty }),
+            None => ops.push(Op::LoadWord(index)),
+        },
+        WordOperand::Word(index) => ops.push(Op::LoadWord(index)),
         WordOperand::Const(value) => ops.push(Op::LoadConst(value)),
         WordOperand::Block(index) => ops.push(Op::FbWord(index)),
         WordOperand::BlockPreset(index) => ops.push(Op::FbPreset(index)),
@@ -1651,7 +1713,16 @@ fn lower_coil(
             if let Some(text) = coil.expr.as_deref() {
                 if let Ok((target, value)) = crate::expr::lower_assignment(text, lookup.words()) {
                     ops.extend(value);
-                    ops.push(Op::StoreTarget(target));
+                    // A declared variable is written at its own width, so the value
+                    // two reads see is the value the type can hold. A marker word or
+                    // a HAL point is written raw.
+                    match target {
+                        WordOperand::Slot(index) => match lookup.slot_type(index) {
+                            Some(ty) => ops.push(Op::StoreTyped { slot: index, ty }),
+                            None => ops.push(Op::StoreTarget(target)),
+                        },
+                        _ => ops.push(Op::StoreTarget(target)),
+                    }
                 }
             }
             let after = ops.len() as u16;
@@ -1748,8 +1819,8 @@ fn lower_logic(logic: &Logic, lookup: &Lookup, edges: &mut u16, ops: &mut Vec<Op
                 ops.push(Op::PushConst(false));
                 return;
             };
-            emit_word(ops, left);
-            emit_word(ops, right);
+            emit_word(ops, left, lookup);
+            emit_word(ops, right, lookup);
             match compare_op(operator) {
                 Some(compare) => ops.push(compare),
                 None => ops.push(Op::PushConst(false)),
