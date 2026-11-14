@@ -62,10 +62,10 @@ nothing should be imported from it.
    "no helper process, no Python runtime and no web service between the screen and
    LinuxCNC", 2 ms scan, `linc_plc.*` HAL pins owned by `linc-plc`. Shipping
    Chromium on the controller is the opposite direction.
-3. **Dialect differs.** This PLC is ZX-PLC-flavoured: nine element positions plus
-   a coil position (`grid::POSITIONS`), a fixed FB set (TON/TOF/TP/CTU/CTD/SR/RS/
-   R_TRIG/F_TRIG, four instances each, numbered as the ZX manual numbers them),
-   symbolic I/O instead of `%IX/%QW`. Their feature list (SFC, EtherCAT
+3. **Dialect differs.** This PLC has its own compact dialect: nine element
+   positions plus a coil position (`grid::POSITIONS`), a fixed FB set
+   (TON/TOF/TP/CTU/CTD/SR/RS/R_TRIG/F_TRIG, four instances each), symbolic I/O
+   instead of `%IX/%QW`. Their feature list (SFC, EtherCAT
    configurator, Modbus groups, debugger over sockets, PDF export, vendor
    configurators) is mostly out of scope here.
 4. **Licence.** `GPL-3.0-only` combined with this repo's `GPL-2.0-or-later` makes
@@ -160,7 +160,8 @@ symbols, the nine FB kinds), refusing the rest by the same rule.
 ## 4. Optional, deferred: `%` addressing
 
 They address I/O as `%IX0.0` / `%QW1` (`docs/iec-address-registry.md`). This PLC
-uses symbolic names and a ZX numbering (`Binding`, `Symbol { index, kind }`).
+uses symbolic names and a compact numeric index (`Binding`,
+`Symbol { index, kind }`).
 Do not add a second addressing scheme to the runtime. If imported files carry
 addresses, translate them in the importer: an `@address` becomes an `IoPoint`
 named after the address with the numeric index recovered from it, and the
@@ -199,7 +200,7 @@ is test *data* for the importer — do not check it in.
 Re-open only if one of these becomes true:
 
 1. The machine needs full IEC 61131-3 authoring — SFC and ST with a code
-   generation target — not ZX-PLC ladder.
+   generation target — not a compact ladder dialect.
 2. Running Chromium and Node on the controller becomes acceptable, i.e. the
    in-process constraint in `README.md` and `docs/plc.md` is dropped.
 3. The PLC must exchange programs with third-party PLCs over Modbus/EtherCAT

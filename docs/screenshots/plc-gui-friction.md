@@ -117,5 +117,5 @@ Screenshots:
 - `linc-plc` still persists the loaded project to `--project`.
 - A new I/O pin needs a service restart before it binds; the banner says so,
   but there is no rebind action.
-- ZX-derived limits remain: four instances per block type, 16 watch rows,
+- These limits remain: four instances per block type, 16 watch rows,
   8-character names.
