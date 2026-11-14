@@ -1,8 +1,8 @@
+use linc_plc_core::validate::validate;
 use linc_plc_core::{
     compile, project_hash, Coil, CoilKind, IoDirection, IoKind, IoPoint, Logic, Op, PresetSource,
     Project, Rung, Section, SymbolKind, VarDecl, Vm,
 };
-use linc_plc_core::validate::validate;
 
 fn codes(diagnostics: &[linc_plc_core::Diagnostic]) -> Vec<String> {
     diagnostics
@@ -524,8 +524,12 @@ fn a_timer_box_passes_power_after_its_preset() {
     ];
     let mut vm = Vm::new(&compile(&project).expect("compile"));
 
+    // The scan that first sees the rung true starts the clock; it does not add a
+    // tick, so two seconds of a 2 s preset is the third scan, not the second.
     vm.scan_with_dt(&[true], 1000);
-    assert_eq!(vm.outputs(), &[false], "one second is not two");
+    assert_eq!(vm.outputs(), &[false], "the timer has only started");
+    vm.scan_with_dt(&[true], 1000);
+    assert_eq!(vm.outputs(), &[false], "one second elapsed is not two");
     vm.scan_with_dt(&[true], 1000);
     assert_eq!(vm.outputs(), &[true], "two seconds elapsed");
     assert_eq!(vm.block_value(0), 2000, "ET stops at PT");
@@ -554,14 +558,17 @@ fn a_counter_counts_rising_edges() {
     ];
     let mut vm = Vm::new(&compile(&project).expect("compile"));
 
+    let ctu = linc_plc_core::compile::parse_block("CTU", "CTU1", "2")
+        .expect("the table knows CTU")
+        .1;
     vm.scan(&[true]);
-    assert_eq!(vm.block_value(13), 1, "one rising edge");
+    assert_eq!(vm.block_value(ctu), 1, "one rising edge");
     assert_eq!(vm.outputs(), &[false]);
     vm.scan(&[true]);
-    assert_eq!(vm.block_value(13), 1, "a held input is not another edge");
+    assert_eq!(vm.block_value(ctu), 1, "a held input is not another edge");
     vm.scan(&[false]);
     vm.scan(&[true]);
-    assert_eq!(vm.block_value(13), 2);
+    assert_eq!(vm.block_value(ctu), 2);
     assert_eq!(vm.outputs(), &[true], "CV reached PV");
 }
 
@@ -628,12 +635,14 @@ fn a_compare_can_read_a_timer_elapsed_time() {
     let mut vm = Vm::new(&compile(&project).expect("compile"));
 
     vm.scan_with_dt(&[true], 500);
-    assert_eq!(vm.outputs(), &[false, false], "ET is under a second");
+    assert_eq!(vm.outputs(), &[false, false], "the timer has just started");
+    vm.scan_with_dt(&[true], 700);
+    assert_eq!(vm.outputs(), &[false, false], "ET is 700 ms");
     vm.scan_with_dt(&[true], 700);
     assert_eq!(
         vm.outputs(),
         &[true, false],
-        "ET is 1200 ms, Q is still low"
+        "ET is 1400 ms, Q is still low"
     );
 }
 
@@ -787,7 +796,9 @@ fn an_fbd_timer_and_compare_share_the_ladder_machinery() {
 
     let mut vm = Vm::new(&compile(&project).expect("compile"));
     vm.scan_with_dt(&[true], 400);
-    assert_eq!(vm.outputs(), &[false, false], "under half a second");
+    assert_eq!(vm.outputs(), &[false, false], "the timer has just started");
+    vm.scan_with_dt(&[true], 400);
+    assert_eq!(vm.outputs(), &[false, false], "ET is 400 ms");
     vm.scan_with_dt(&[true], 400);
     assert_eq!(
         vm.outputs(),
@@ -867,6 +878,8 @@ fn an_il_fb_call_runs_a_timer_with_its_arguments() {
     let mut vm = Vm::new(&compile(&project).expect("compile"));
     vm.scan_with_dt(&[true], 400);
     assert_eq!(vm.outputs(), &[false], "the timer is still counting");
+    vm.scan_with_dt(&[true], 700);
+    assert_eq!(vm.outputs(), &[false], "700 ms is not a second");
     vm.scan_with_dt(&[true], 700);
     assert_eq!(vm.outputs(), &[true], "ET passed the preset");
     assert_eq!(vm.block_value(0), 1000);
@@ -1071,14 +1084,17 @@ fn a_counter_resets_from_a_coil_and_its_pv_can_be_read() {
         "{diagnostics:?}"
     );
 
+    let ctu = linc_plc_core::compile::parse_block("CTU", "CTU0", "3")
+        .expect("the table knows CTU")
+        .1;
     let mut vm = Vm::new(&compile(&project).expect("compile"));
     vm.scan(&[true, false]);
     vm.scan(&[false, false]);
     vm.scan(&[true, false]);
-    assert_eq!(vm.block_value(12), 2, "two rising edges");
+    assert_eq!(vm.block_value(ctu), 2, "two rising edges");
     assert_eq!(vm.outputs(), &[false, true], "below PV");
     vm.scan(&[false, true]);
-    assert_eq!(vm.block_value(12), 0, "the reset coil cleared CV");
+    assert_eq!(vm.block_value(ctu), 0, "the reset coil cleared CV");
 }
 
 #[test]
@@ -1265,9 +1281,9 @@ fn a_tree_rung_can_hold_a_block_an_edge_and_a_compare() {
     vm.scan_with_dt(&[true, false], 400);
     assert_eq!(vm.outputs(), &[false], "the timer is still counting");
     vm.scan_with_dt(&[true, false], 700);
-    assert_eq!(vm.outputs(), &[false], "Q is on but b has not risen");
-    vm.scan_with_dt(&[true, true], 20);
-    assert_eq!(vm.outputs(), &[true], "b rose");
+    assert_eq!(vm.outputs(), &[false], "700 ms is not a second");
+    vm.scan_with_dt(&[true, true], 400);
+    assert_eq!(vm.outputs(), &[true], "Q is on and b rose");
 
     // A compare in a series behaves like a contact.
     project.sections[0].rungs[0].logic = Logic::series(vec![Logic::Compare {
@@ -1450,7 +1466,10 @@ fn a_compute_rung_does_not_count_as_a_coil_write() {
             )],
         )],
     );
-    let mut compute_row = Rung::new(Logic::Const { value: true }, Coil::new("run", CoilKind::Normal));
+    let mut compute_row = Rung::new(
+        Logic::Const { value: true },
+        Coil::new("run", CoilKind::Normal),
+    );
     compute_row.cells = vec![Cell::Compute {
         op: "ADD".to_string(),
         target: "MW2".to_string(),
@@ -1464,11 +1483,16 @@ fn a_compute_rung_does_not_count_as_a_coil_write() {
         validate(&project)
     );
     // Two ordinary writes of the same kind are still ambiguous.
-    let mut second = Rung::new(Logic::contact("start", false), Coil::new("run", CoilKind::Normal));
+    let mut second = Rung::new(
+        Logic::contact("start", false),
+        Coil::new("run", CoilKind::Normal),
+    );
     second.cells = Vec::new();
     project.sections[0].rungs.push(second);
     assert!(
-        codes(&validate(&project)).iter().any(|code| code == "duplicate_coil"),
+        codes(&validate(&project))
+            .iter()
+            .any(|code| code == "duplicate_coil"),
         "ordinary duplicate writes are still caught"
     );
 }
@@ -1478,7 +1502,10 @@ fn a_compute_rung_does_not_count_as_a_coil_write() {
 #[test]
 fn block_outputs_are_published_with_the_snapshot() {
     use linc_plc_core::grid::Cell;
-    let mut rung = Rung::new(Logic::Const { value: true }, Coil::new("lamp", CoilKind::Normal));
+    let mut rung = Rung::new(
+        Logic::Const { value: true },
+        Coil::new("lamp", CoilKind::Normal),
+    );
     rung.cells = vec![
         Cell::Contact {
             var: "start".into(),
@@ -1537,7 +1564,11 @@ fn a_jump_skips_to_its_label() {
     project.pous = vec![pou];
     let mut vm = Vm::new(&compile(&project).expect("jumps compile"));
     vm.scan(&[true, true]);
-    assert_eq!(vm.outputs(), &[false, true], "skipped stays false, out follows stop");
+    assert_eq!(
+        vm.outputs(),
+        &[false, true],
+        "skipped stays false, out follows stop"
+    );
 }
 
 /// JMPC jumps on a true result and JMPCN on a false one; the lines under the
@@ -1749,7 +1780,8 @@ fn a_five_minute_timer_is_not_clamped_to_thirty_two_seconds() {
     let mut vm = Vm::new(&compiled);
     // TON is block kind 0, so TON0 is instance 0.
     let ton = 0;
-    for _ in 0..299 {
+    // The first scan starts the clock, so 300 scans is 299 s of counting.
+    for _ in 0..300 {
         vm.scan_with_dt(&[true], 1000);
     }
     assert_eq!(vm.block_value(ton), 299_000, "299 s elapsed");
@@ -1804,10 +1836,16 @@ fn a_word_input_is_live_and_a_word_output_follows_the_scan() {
         vec!["LD iw0", "ADD 1", "ST qw0"],
     );
     let compiled = compile(&project).expect("compile");
-    assert_eq!(compiled.word_inputs[0].index, 16, "first word slot after MW");
+    assert_eq!(
+        compiled.word_inputs[0].index, 16,
+        "first word slot after MW"
+    );
     assert_eq!(compiled.word_outputs[0].index, 17);
     assert_eq!(compiled.program.words.total(), 18);
-    assert_eq!(compiled.program.var_count, 0, "no bit image for word points");
+    assert_eq!(
+        compiled.program.var_count, 0,
+        "no bit image for word points"
+    );
 
     let mut vm = Vm::new(&compiled);
     let frame = |words: &'static [i32]| linc_plc_core::vm::IoFrame {
@@ -1872,9 +1910,7 @@ fn a_word_point_used_as_a_contact_is_refused() {
         Logic::contact("iw0", false),
         Coil::new("y", CoilKind::Normal),
     );
-    project
-        .io
-        .push(point("iw0", IoDirection::In, IoKind::Word));
+    project.io.push(point("iw0", IoDirection::In, IoKind::Word));
     let codes = codes(&validate(&project));
     assert!(codes.contains(&"io_kind".to_string()), "{codes:?}");
 }
@@ -1951,7 +1987,8 @@ fn a_timer_preset_can_come_from_a_word() {
 
     let mut vm = Vm::new(&compiled);
     vm.set_word(3, 5_000);
-    for _ in 0..4 {
+    // One scan to start the clock, then one per second.
+    for _ in 0..5 {
         vm.scan_with_dt(&[true], 1000);
     }
     assert_eq!(vm.block_value(0), 4_000, "4 s elapsed");
@@ -1964,7 +2001,8 @@ fn a_timer_preset_can_come_from_a_word() {
     vm.scan_with_dt(&[false], 1000);
     assert_eq!(vm.block_value(0), 0, "input off resets ET");
     vm.set_word(3, 3_000);
-    for _ in 0..2 {
+    // Again one scan to start the clock, then one per second.
+    for _ in 0..3 {
         vm.scan_with_dt(&[true], 1000);
     }
     assert_eq!(vm.block_preset(0), 3_000, "the preset follows the word");
@@ -2005,7 +2043,10 @@ fn a_compute_coil_can_write_a_word_point() {
     let project = project_with(
         vec![point("qw0", IoDirection::Out, IoKind::Word)],
         Vec::new(),
-        vec![section("main", vec![compute_rung("qw0", "MOVE", "MW0", "0")])],
+        vec![section(
+            "main",
+            vec![compute_rung("qw0", "MOVE", "MW0", "0")],
+        )],
     );
     let compiled = compile(&project).expect("compile");
     let mut vm = Vm::new(&compiled);
@@ -2033,10 +2074,10 @@ fn a_literal_preset_still_works_and_reports_its_value() {
         }
     );
     let mut vm = Vm::new(&compiled);
-    for _ in 0..3 {
+    for _ in 0..4 {
         vm.scan_with_dt(&[true], 1000);
     }
-    assert!(!vm.block_q(0), "not due at 3 s");
+    assert!(!vm.block_q(0), "not due at 3 s of counting");
     vm.scan_with_dt(&[true], 1000);
     assert!(vm.block_q(0), "due at 4 s");
     assert_eq!(vm.block_preset(0), 4_000);
@@ -2124,6 +2165,7 @@ fn a_block_reasserts_its_own_preset_after_a_write() {
     );
     let mut vm = Vm::new(&compile(&project).expect("compile"));
     vm.scan_with_dt(&[true], 1000);
+    vm.scan_with_dt(&[true], 1000);
     assert_eq!(
         vm.block_preset(0),
         4_000,
@@ -2136,7 +2178,10 @@ fn a_block_reasserts_its_own_preset_after_a_write() {
 
 /// A rung that stores on every scan, so a skipped one is visible in the image.
 fn tap(var: &str) -> Rung {
-    Rung::new(Logic::Const { value: true }, Coil::new(var, CoilKind::Normal))
+    Rung::new(
+        Logic::Const { value: true },
+        Coil::new(var, CoilKind::Normal),
+    )
 }
 
 fn coil_project(outputs: &[&str], rungs: Vec<Rung>) -> Project {
@@ -2524,7 +2569,10 @@ fn a_compute_coil_writes_an_expression_and_follows_its_rung() {
 fn a_deeply_nested_expression_is_refused() {
     let nested = format!("{}MW0{}", "(".repeat(40), ")".repeat(40));
     let project = expr_project(
-        vec![expr_rung(&format!("{nested}=1"), Coil::new("y", CoilKind::Normal))],
+        vec![expr_rung(
+            &format!("{nested}=1"),
+            Coil::new("y", CoilKind::Normal),
+        )],
         &["y"],
     );
     let diagnostics = validate(&project);
@@ -2749,7 +2797,11 @@ fn the_remaining_grammar_lowers() {
         vm.set_word(0, first);
         vm.set_word(1, second);
         vm.scan(&[]);
-        assert_eq!(vm.outputs(), &[wanted], "{text} at MW0={first}, MW1={second}");
+        assert_eq!(
+            vm.outputs(),
+            &[wanted],
+            "{text} at MW0={first}, MW1={second}"
+        );
     }
 }
 

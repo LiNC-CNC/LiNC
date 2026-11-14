@@ -18,20 +18,20 @@
       "pous": 1,
       "rungs": 7,
       "converted": true,
-      "blocker": "its 1 s blink timer sits on a rung with no coil, which the importer's backwards walk never reaches; the 10 s TOF also lands one scan early",
+      "blocker": null,
       "stimulus": true,
       "trace": true,
-      "runs": false
+      "runs": true
     },
     {
       "name": "motor-star-delta",
       "pous": 1,
       "rungs": 7,
       "converted": true,
-      "blocker": "the star-to-delta timer sits on a rung with no coil, which the importer's backwards walk never reaches",
+      "blocker": null,
       "stimulus": true,
       "trace": true,
-      "runs": false
+      "runs": true
     },
     {
       "name": "motor-starters-function-block",
@@ -78,10 +78,10 @@
       "pous": 1,
       "rungs": 5,
       "converted": true,
-      "blocker": "the 2 s timer sits on a rung with no coil, which the importer's backwards walk never reaches",
+      "blocker": null,
       "stimulus": true,
       "trace": true,
-      "runs": false
+      "runs": true
     },
     {
       "name": "start-stop",
@@ -117,11 +117,11 @@
       "name": "traffic-lights",
       "pous": 1,
       "rungs": 12,
-      "converted": false,
-      "blocker": "rung 4: more than 4 TON instances (FB_PER_TYPE = 4)",
+      "converted": true,
+      "blocker": null,
       "stimulus": true,
       "trace": true,
-      "runs": false
+      "runs": true
     },
     {
       "name": "two-tanks-cascade",

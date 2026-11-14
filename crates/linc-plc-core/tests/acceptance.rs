@@ -23,7 +23,13 @@ use linc_plc_core::{compile, plcopen, validate, Severity, Vm};
 /// The files that run and match their trace today: §III.8 rule 4's count. A
 /// constant, so raising it is a visible diff and a file that starts passing is
 /// noticed rather than quietly counted.
-const CONVERTIBLE: [&str; 1] = ["silo"];
+const CONVERTIBLE: [&str; 5] = [
+    "garage-door",
+    "motor-star-delta",
+    "silo",
+    "start-stop-delay",
+    "traffic-lights",
+];
 
 fn corpus() -> PathBuf {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plc-acceptance");
@@ -103,12 +109,7 @@ fn expected_at(trace: &Trace, scan: u32) -> BTreeMap<&str, bool> {
 /// it, so tick `k` is compared with scan `k + 1`.
 fn level_at(stimulus: &Stimulus, tag: &str, tick: u32) -> bool {
     let mut value = stimulus.held.get(tag).copied().unwrap_or(false);
-    for (at, level) in stimulus
-        .inputs
-        .get(tag)
-        .map(Vec::as_slice)
-        .unwrap_or(&[])
-    {
+    for (at, level) in stimulus.inputs.get(tag).map(Vec::as_slice).unwrap_or(&[]) {
         if *at <= tick {
             value = *level;
         }
@@ -125,7 +126,10 @@ fn run(xml: &str, trace: &Trace, stimulus: &Stimulus) -> Result<(), String> {
         Ok(project) => project,
         Err(diagnostics) => {
             let first = &diagnostics[0];
-            return Err(format!("import refused: {} — {}", first.code, first.message));
+            return Err(format!(
+                "import refused: {} — {}",
+                first.code, first.message
+            ));
         }
     };
     let errors = validate(&project)

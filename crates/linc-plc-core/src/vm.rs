@@ -906,7 +906,17 @@ fn run_block(
     match kind {
         FbKind::Ton => {
             if input {
-                state.value = state.value.saturating_add(dt).min(preset);
+                // Elapsed starts at zero on the scan the input is first seen
+                // true: the interval before that scan happened before the timer
+                // was running, so it is not the timer's to count. A timer with
+                // `T#2s` on a 10 ms scan therefore expires on the 201st scan,
+                // not the 200th — the same instant the reference engine and a
+                // real PLC report.
+                if !state.input {
+                    state.value = 0;
+                } else {
+                    state.value = state.value.saturating_add(dt).min(preset);
+                }
                 state.q = state.value >= preset;
             } else {
                 state.value = 0;
@@ -919,11 +929,17 @@ fn run_block(
                 state.q = true;
                 state.running = false;
             } else if state.q {
-                state.value = state.value.saturating_add(dt).min(preset);
-                state.running = true;
-                if state.value >= preset {
-                    state.q = false;
-                    state.running = false;
+                // The same rule on the falling edge: the delay is measured from
+                // the scan that saw the input go false.
+                if state.input {
+                    state.value = 0;
+                    state.running = true;
+                } else {
+                    state.value = state.value.saturating_add(dt).min(preset);
+                    if state.value >= preset {
+                        state.q = false;
+                        state.running = false;
+                    }
                 }
             }
         }

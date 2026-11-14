@@ -30,7 +30,7 @@
 <contact localId="19" negated="true"><connectionPointIn><connection refLocalId="18"/></connectionPointIn><variable>Reverse</variable></contact>
 <coil localId="20" storage="none"><connectionPointIn><connection refLocalId="19"/></connectionPointIn><variable>%Q0.1</variable></coil>
 <contact localId="21" negated="true"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
-<block localId="22" typeName="TON"><connectionPointIn><connection refLocalId="21"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>1000</expression></variable></inputVariables></block>
+<block localId="22" typeName="TON"><connectionPointIn><connection refLocalId="21"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#1000ms</expression></variable></inputVariables></block>
 <contact localId="23"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
 <contact localId="24"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
 <block localId="25" typeName="LT"><connectionPointIn><connection refLocalId="23"/><connection refLocalId="24"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>TON0.ET</expression></variable><variable formalParameter="IN"><expression>500</expression></variable></inputVariables></block>

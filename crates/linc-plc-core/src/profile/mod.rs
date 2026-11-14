@@ -31,7 +31,13 @@ use spec::{FbName, Spec};
 
 /// Instances per function-block kind. Part of the dialect: the instance index is
 /// `kind * FB_PER_TYPE + number`, and the editor offers exactly this many.
-pub const FB_PER_TYPE: u16 = 4;
+///
+/// It was four, which is not a limit the scan has: the block array is
+/// `kind * FB_PER_TYPE + number` either way, and the acceptance corpus has a
+/// program with six timers — `traffic-lights` — that is refused for the count
+/// alone. Eight keeps the index arithmetic small and leaves the marker-word and
+/// edge budgets untouched.
+pub const FB_PER_TYPE: u16 = 8;
 
 /// Declared word names, lowercased, mapped to their bank slot. A word or float
 /// point resolves through it by the name the project gave it.

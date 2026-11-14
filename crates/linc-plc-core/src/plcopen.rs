@@ -389,7 +389,7 @@ fn import_ld(
     instances: &mut HashMap<crate::profile::spec::FbName, u16>,
 ) -> Result<(), Vec<Diagnostic>> {
     let mut diagnostics = Vec::new();
-    let mut coils = Vec::new();
+    let mut order = Vec::new();
     let mut elements: HashMap<String, &Element> = HashMap::new();
     let mut left_rails = HashSet::new();
     let mut right_rails = HashSet::new();
@@ -416,9 +416,7 @@ fn import_ld(
                     ));
                     continue;
                 };
-                if child.name == "coil" {
-                    coils.push(id.clone());
-                }
+                order.push(id.clone());
                 elements.insert(id, child);
             }
             "comment" | "documentation" => {}
@@ -433,18 +431,81 @@ fn import_ld(
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
-    if coils.is_empty() {
+    // A rung ends where nothing consumes the wire: at a coil, always, and at a
+    // block that drives nothing. The second kind is a rung in IEC 61131-3 —
+    // `TON` on a condition with no output — and walking back only from coils
+    // dropped it, which made a program run without its timer.
+    let mut consumed = HashSet::new();
+    for id in &order {
+        for source in connection_refs(elements[id]) {
+            consumed.insert(source);
+        }
+    }
+    let terminators = order
+        .iter()
+        .filter(|id| !consumed.contains(*id) && elements[*id].name != "contact")
+        .cloned()
+        .collect::<Vec<_>>();
+    if terminators.is_empty() {
         diagnostics.push(error(
             "plcopen_unreachable",
-            "the ladder has no <coil>, so there is no rung to rebuild",
+            "the ladder has no <coil> and no block that ends a rung",
             format!("{path}.body.LD"),
         ));
         return Err(diagnostics);
     }
 
     let mut section = Section::new("main");
-    for (index, coil_id) in coils.iter().enumerate() {
-        let coil_element = elements[coil_id];
+    for (index, terminator) in terminators.iter().enumerate() {
+        let end = elements[terminator];
+        if end.name == "block" {
+            // A block that drives nothing ends the rung all the same: the rung is
+            // what feeds it, series with the block itself. `resolve_input` returns
+            // the feeding side only, which is right for a coil (the coil is the
+            // rung's own field) and wrong here.
+            let path = format!("{path}.body.LD.block[{index}]");
+            let mut visiting = HashSet::new();
+            let feeding = match resolve_input(
+                end,
+                &elements,
+                &left_rails,
+                &right_rails,
+                &mut visiting,
+                instances,
+                &path,
+                &mut diagnostics,
+            ) {
+                Ok(logic) => logic,
+                Err(()) => continue,
+            };
+            let block = match build_block(
+                end,
+                &elements,
+                &left_rails,
+                &right_rails,
+                &mut HashSet::new(),
+                instances,
+                &path,
+                &mut diagnostics,
+            ) {
+                Ok(logic) => logic,
+                Err(()) => continue,
+            };
+            let logic = match (feeding, block) {
+                (feeding @ Logic::Const { value: true }, block) => {
+                    let _ = feeding;
+                    block
+                }
+                (feeding, block) => Logic::series(vec![feeding, block]),
+            };
+            let mut rung = Rung::without_coil(logic);
+            if let Some(documentation) = end.child("documentation") {
+                rung.comment = plain_text(documentation);
+            }
+            section.rungs.push(rung);
+            continue;
+        }
+        let coil_element = end;
         let Some(variable) = coil_element.child("variable") else {
             diagnostics.push(error(
                 "plcopen_unsupported_element",
@@ -515,7 +576,9 @@ pub fn operand_spelling(raw: &str) -> String {
     if let Some((base, member)) = raw.split_once('.') {
         let instance = !base.is_empty()
             && base.chars().any(|character| character.is_ascii_digit())
-            && base.chars().all(|character| character.is_ascii_alphanumeric());
+            && base
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric());
         let named = !member.is_empty()
             && member
                 .chars()

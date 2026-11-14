@@ -112,7 +112,13 @@ fn timer_keeps_its_preset_and_writes_it_from_an_expression() {
     }
     assert_eq!(vm.get("held"), Some(false), "not due at three seconds");
     vm.scan_with_dt(&frame, 1000);
-    assert_eq!(vm.get("held"), Some(true), "due at four seconds");
+    assert_eq!(
+        vm.get("held"),
+        Some(false),
+        "the scan that first sees the input adds nothing, so four is not yet four"
+    );
+    vm.scan_with_dt(&frame, 1000);
+    assert_eq!(vm.get("held"), Some(true), "due at four seconds of running");
 }
 
 #[test]
@@ -464,15 +470,27 @@ fn coils_match_the_classicladder_reference_over_a_power_sequence() {
 
 /// `CalcTypeTimerIEC` mode ON: elapsed time accumulates while the input is on,
 /// resets to zero when it is off, and the output follows `elapsed >= preset`.
-fn reference_timer_on(input: bool, elapsed: &mut i32, preset: i32, tick: i32) -> bool {
+fn reference_timer_on(
+    input: bool,
+    elapsed: &mut i32,
+    preset: i32,
+    tick: i32,
+    was_input: &mut bool,
+) -> bool {
     if !input {
         *elapsed = 0;
+        *was_input = false;
         false
-    } else if *elapsed < preset {
-        *elapsed += tick;
-        *elapsed >= preset
     } else {
-        true
+        // Zero on the scan the input is first seen true, then one tick per scan.
+        // The interval before that scan ran before the timer did.
+        if !*was_input {
+            *elapsed = 0;
+        } else {
+            *elapsed = (*elapsed + tick).min(preset);
+        }
+        *was_input = true;
+        *elapsed >= preset
     }
 }
 
@@ -493,13 +511,14 @@ fn a_ton_matches_the_reference_over_a_pulse_sequence() {
     let frame = |on: bool| vec![on; compiled.inputs.len()];
     let (preset, tick) = (30, 20);
     let mut elapsed = 0;
+    let mut was_input = false;
     // A pulse, a hold through the preset, then a release and a second pulse.
     for (scan, input) in [true, true, true, true, false, false, true, true]
         .into_iter()
         .enumerate()
     {
         vm.scan_with_dt(&frame(input), tick as u16);
-        let wanted = reference_timer_on(input, &mut elapsed, preset, tick);
+        let wanted = reference_timer_on(input, &mut elapsed, preset, tick, &mut was_input);
         assert_eq!(vm.get("out"), Some(wanted), "scan {scan} input {input}");
     }
 }
@@ -607,6 +626,8 @@ fn a_timer_done_contact_reads_the_blocks_own_output() {
     let frame = vec![true; compiled.inputs.len()];
     assert_eq!(vm.get("done"), Some(false));
     vm.scan_with_dt(&frame, 20);
+    vm.scan_with_dt(&frame, 20);
+    assert_eq!(vm.get("lit"), Some(false), "20 ms twice is not yet 40");
     vm.scan_with_dt(&frame, 20);
     assert_eq!(vm.get("lit"), Some(true), "the timer is done at 40 ms");
     assert_eq!(vm.get("done"), Some(true), "and the next rung reads its Q");

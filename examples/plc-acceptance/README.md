@@ -54,16 +54,24 @@ converted, so a conversion is never mistaken for a pass.
 A file listed as blocked but converted is executed by the test anyway and must be
 shown *not* to pass. That is what stops the count from going green by accident.
 
-Today: four convert, one runs. `silo` matches all 200 scans, including rung 4's two
-coils on parallel branches. The other three converted files each lose a timer that
-sits on a rung with no coil, which the importer's backwards walk from `<coil>`
-never reaches.
+Today: five convert, five run. `silo` matches all 200 scans, including rung 4's two
+coils on parallel branches — the importer turns such a rung into one rung per coil
+and the scan evaluates them in order, so a `Vec<Coil>` model turned out not to be
+needed. The other four converted files each hold a timer on a rung with no coil,
+which the importer now emits instead of dropping. `traffic-lights` is the largest:
+six timers chained through `.DN` contacts.
 
-The converter itself was wrong twice when this corpus first ran, and both are
-fixed in the out-of-tree tool: it emitted elements without closing tags, so no
-output was well-formed XML at all, and it wired a parallel block's branches from
-the left rail instead of from the power node the rung had reached, so a branch's
-first contact dropped the series before it.
+The seven that remain are named in the manifest: typed tags and user data types
+(five), `.TT` timing members (`timer-counter`), and `INT[1]` bit-of-word operands
+(`start-stop`).
+
+The converter itself was wrong four times when this corpus first ran, and all four
+are fixed in the out-of-tree tool: it emitted elements without closing tags, so no
+output was well-formed XML at all; it wired a parallel block's branches from the
+left rail instead of from the power node the rung had reached, so a branch's first
+contact dropped the series before it; it mapped `.TT` (timing) onto `.Q` (done),
+inverting any rung that used it, and now refuses it; and it wrote a bare number as
+a timer preset where TC6 wants a time literal, so `1000` became `T#1000ms`.
 
 ## Running a comparison
 

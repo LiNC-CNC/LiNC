@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://www.plcopen.org/xml/tc6_0201">
+<fileHeader company="converted" product="plcy2plcopen" version="1"/>
+<contentHeader name="traffic-lights"/>
+<types><dataTypes/></types>
+<instances><configurations/></instances>
+<addData/>
+<pous><pou name="MAIN" pouType="program">
+<interface><outputVars><variable name="%Q0.2"><type><BOOL/></type></variable><variable name="%Q0.1"><type><BOOL/></type></variable><variable name="%Q0.0"><type><BOOL/></type></variable><variable name="%Q0.6"><type><BOOL/></type></variable><variable name="%Q0.5"><type><BOOL/></type></variable><variable name="%Q0.4"><type><BOOL/></type></variable></outputVars></interface>
+<body><LD>
+<leftPowerRail localId="0"/>
+<contact localId="1" negated="true"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON5.Q</variable></contact>
+<block localId="2" typeName="TON"><connectionPointIn><connection refLocalId="1"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#6000ms</expression></variable></inputVariables></block>
+<contact localId="3"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<block localId="4" typeName="TON"><connectionPointIn><connection refLocalId="3"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#2000ms</expression></variable></inputVariables></block>
+<contact localId="5"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON1.Q</variable></contact>
+<block localId="6" typeName="TON"><connectionPointIn><connection refLocalId="5"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#1000ms</expression></variable></inputVariables></block>
+<contact localId="7"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON2.Q</variable></contact>
+<block localId="8" typeName="TON"><connectionPointIn><connection refLocalId="7"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#6000ms</expression></variable></inputVariables></block>
+<contact localId="9"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON3.Q</variable></contact>
+<block localId="10" typeName="TON"><connectionPointIn><connection refLocalId="9"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#2000ms</expression></variable></inputVariables></block>
+<contact localId="11"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON4.Q</variable></contact>
+<block localId="12" typeName="TON"><connectionPointIn><connection refLocalId="11"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#1000ms</expression></variable></inputVariables></block>
+<contact localId="13" negated="true"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<coil localId="14" storage="none"><connectionPointIn><connection refLocalId="13"/></connectionPointIn><variable>%Q0.2</variable></coil>
+<contact localId="15"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<contact localId="16" negated="true"><connectionPointIn><connection refLocalId="15"/></connectionPointIn><variable>TON1.Q</variable></contact>
+<coil localId="17" storage="none"><connectionPointIn><connection refLocalId="16"/></connectionPointIn><variable>%Q0.1</variable></coil>
+<contact localId="18"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON1.Q</variable></contact>
+<coil localId="19" storage="none"><connectionPointIn><connection refLocalId="18"/></connectionPointIn><variable>%Q0.0</variable></coil>
+<contact localId="20"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON2.Q</variable></contact>
+<contact localId="21" negated="true"><connectionPointIn><connection refLocalId="20"/></connectionPointIn><variable>TON3.Q</variable></contact>
+<coil localId="22" storage="none"><connectionPointIn><connection refLocalId="21"/></connectionPointIn><variable>%Q0.6</variable></coil>
+<contact localId="23"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON3.Q</variable></contact>
+<contact localId="24" negated="true"><connectionPointIn><connection refLocalId="23"/></connectionPointIn><variable>TON4.Q</variable></contact>
+<coil localId="25" storage="none"><connectionPointIn><connection refLocalId="24"/></connectionPointIn><variable>%Q0.5</variable></coil>
+<contact localId="26" negated="true"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON2.Q</variable></contact>
+<contact localId="27"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON4.Q</variable></contact>
+<coil localId="28" storage="none"><connectionPointIn><connection refLocalId="26"/><connection refLocalId="27"/></connectionPointIn><variable>%Q0.4</variable></coil>
+<rightPowerRail localId="9999"/>
+</LD></body></pou></pous></project>

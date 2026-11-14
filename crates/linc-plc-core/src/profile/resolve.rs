@@ -342,7 +342,8 @@ mod tests {
             "case-insensitive"
         );
         assert_eq!(resolve("TON0.ET", &table), Ok(Operand::Block(0)));
-        assert_eq!(resolve("CTU1.CV", &table), Ok(Operand::Block(13)));
+        let counter = crate::profile::FbName::Ctu.code() * crate::profile::FB_PER_TYPE + 1;
+        assert_eq!(resolve("CTU1.CV", &table), Ok(Operand::Block(counter)));
         assert_eq!(resolve("TON2.PT", &table), Ok(Operand::BlockPreset(2)));
         assert!(resolve("NOPE", &table).is_err());
         assert!(resolve("TON0.Q", &table).is_err(), "Q is a bit, not a word");
@@ -403,8 +404,12 @@ mod tests {
         assert_eq!(index, name.code() * crate::profile::FB_PER_TYPE);
         assert_eq!(preset, 5);
         assert!(
-            parse_block("CTU", "CTU4", "5").is_none(),
-            "four instances per kind"
+            parse_block("CTU", "CTU4", "5").is_some(),
+            "the fifth instance fits"
+        );
+        assert!(
+            parse_block("CTU", &format!("CTU{}", crate::profile::FB_PER_TYPE), "5").is_none(),
+            "one past the last instance does not"
         );
         assert!(parse_block("FROB", "FROB0", "5").is_none());
     }

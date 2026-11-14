@@ -84,6 +84,8 @@ fn a_parallel_pair_feeding_a_timer_keeps_its_shape() {
     // And it runs: A or B feeds the timer.
     let compiled = compile(&project).expect("compile");
     let mut vm = Vm::new(&compiled);
+    // The first scan starts the timer; the second brings 2.1 s, past the preset.
+    vm.scan_with_dt(&[false, true], 2100);
     vm.scan_with_dt(&[false, true], 2100);
     assert_eq!(vm.outputs(), &[true], "B alone reached the timer");
 }
