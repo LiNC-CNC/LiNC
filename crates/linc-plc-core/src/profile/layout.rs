@@ -6,7 +6,7 @@
 //! module owns all three, and [`crate::profile::Profile::layout`] names the seam:
 //! a second dialect declares its own region order and its own marker words.
 
-use crate::model::{IoDirection, IoKind, Project, VarType};
+use crate::model::{IoDirection, IoKind, Project, VarType, WordBit};
 
 /// Marker words the bank begins with: the internal, retained words a program
 /// addresses by number: `MW0`-`MW15`, sixteen retained words.
@@ -355,6 +355,108 @@ pub struct WordVar {
     pub ty: VarType,
 }
 
+impl WordVar {
+    /// How many bank slots one element owns. An array's elements are consecutive, so
+    /// element `n` starts at `slot + n`.
+    pub fn stride(&self) -> u16 {
+        self.ty.slots() / self.ty.elements()
+    }
+}
+
+/// Why a bit-of-word operand did not resolve.
+///
+/// The validator turns this into a diagnostic, naming the declaration and the width;
+/// the compiler treats every variant as "not this operand form", because validation
+/// has already refused the ones that are wrong.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WordBitError {
+    /// The text is not a bit-of-word operand at all.
+    NotABit,
+    /// The word is not declared: no typed variable and no marker word.
+    Unknown,
+    /// The array element is outside the declaration.
+    Element { elements: u16, declared: String },
+    /// The bit is outside the word's width.
+    Bit { width: u8, declared: String },
+    /// The word's type has no addressable bits.
+    NoBits { declared: String },
+}
+
+impl WordBitError {
+    /// The sentence a diagnostic carries. It names the declaration and, where there
+    /// is one, the bound that was exceeded.
+    pub fn message(&self, text: &str) -> String {
+        match self {
+            Self::NotABit => format!("`{text}` is not a bit of a declared word"),
+            Self::Unknown => format!("`{text}` names no declared word"),
+            Self::Element { elements, declared } => format!(
+                "`{text}` indexes {declared}, which has {elements} element{}",
+                if *elements == 1 { "" } else { "s" }
+            ),
+            Self::Bit { width, declared } => format!(
+                "`{text}` is bit {} of {declared}, which has {width} bits",
+                text.rsplit_once('.').map(|(_, bit)| bit).unwrap_or("?"),
+            ),
+            Self::NoBits { declared } => {
+                format!("`{text}` is a bit of {declared}, and that type has no bits to address")
+            }
+        }
+    }
+}
+
+/// Resolve a bit-of-word operand: the bank slot the element lives in, and the bit.
+///
+/// A declared variable's element and width come from its declaration, so an index
+/// past the addressable bits of the type is refused rather than read from the next
+/// slot. A marker word is the bank's own word, sixteen bits wide.
+pub fn word_bit(text: &str, vars: &[WordVar]) -> Result<(u16, u8), WordBitError> {
+    let Some(operand) = WordBit::parse(text) else {
+        return Err(WordBitError::NotABit);
+    };
+    if let Some(slot) = crate::profile::resolve::marker_word_slot(&operand.word) {
+        if operand.element.is_some() {
+            return Err(WordBitError::Element {
+                elements: 1,
+                declared: format!("marker word {}", operand.word),
+            });
+        }
+        if operand.bit >= 16 {
+            return Err(WordBitError::Bit {
+                width: 16,
+                declared: format!("marker word {}", operand.word),
+            });
+        }
+        return Ok((slot, operand.bit));
+    }
+    let lower = operand.word.to_ascii_lowercase();
+    let Some(var) = vars
+        .iter()
+        .find(|var| var.name.to_ascii_lowercase() == lower)
+    else {
+        return Err(WordBitError::Unknown);
+    };
+    let Some(width) = var.ty.bit_width() else {
+        return Err(WordBitError::NoBits {
+            declared: format!("`{}` ({})", var.name, var.ty.label()),
+        });
+    };
+    let elements = var.ty.elements();
+    let element = operand.element.unwrap_or(0);
+    if element >= u32::from(elements) {
+        return Err(WordBitError::Element {
+            elements,
+            declared: format!("`{}` ({})", var.name, var.ty.label()),
+        });
+    }
+    if operand.bit >= width {
+        return Err(WordBitError::Bit {
+            width,
+            declared: format!("`{}` ({})", var.name, var.ty.label()),
+        });
+    }
+    Ok((var.slot + element as u16, operand.bit))
+}
+
 /// The project's word bank: its layout, its declared word and float points, and its
 /// typed variables, in ABI order.
 ///
@@ -635,6 +737,89 @@ mod tests {
                 ("more", layout.dint_base() + 4, "DINT".to_string()),
             ],
             "each region fills in declaration order, and an array owns its length"
+        );
+    }
+
+    #[test]
+    fn a_bit_of_a_word_resolves_against_its_declaration() {
+        use super::{word_bit, WordBitError};
+
+        let mut project = Project::new("bits");
+        project.vars = vec![
+            VarDecl::typed(
+                "bits",
+                VarType::Array {
+                    base: Box::new(VarType::Int),
+                    len: 2,
+                },
+            ),
+            VarDecl::typed("total", VarType::Dint),
+            VarDecl::typed("level", VarType::Real),
+            VarDecl::new("flag"),
+        ];
+        let bank = word_points(&project);
+        let vars = &bank.vars;
+        let int = bank.layout.int_base();
+
+        // The element moves the slot and the bit stays inside the word.
+        assert_eq!(word_bit("bits[0].0", vars), Ok((int, 0)));
+        assert_eq!(word_bit("bits[1].15", vars), Ok((int + 1, 15)));
+        assert_eq!(
+            word_bit("total.31", vars),
+            Ok((bank.layout.dint_base(), 31))
+        );
+        assert_eq!(
+            word_bit("bits.7", vars),
+            Ok((int, 7)),
+            "no element means the first one"
+        );
+
+        // A declaration's own width is the bound, and the sentence says which.
+        assert_eq!(
+            word_bit("bits[0].16", vars),
+            Err(WordBitError::Bit {
+                width: 16,
+                declared: "`bits` (INT[2])".to_string()
+            })
+        );
+        assert_eq!(
+            word_bit("total.32", vars),
+            Err(WordBitError::Bit {
+                width: 32,
+                declared: "`total` (DINT)".to_string()
+            })
+        );
+        assert_eq!(
+            word_bit("bits[2].0", vars),
+            Err(WordBitError::Element {
+                elements: 2,
+                declared: "`bits` (INT[2])".to_string()
+            })
+        );
+        // A REAL's 32 bits are a value, and a BOOL has no word at all.
+        assert_eq!(
+            word_bit("level.0", vars),
+            Err(WordBitError::NoBits {
+                declared: "`level` (REAL)".to_string()
+            })
+        );
+        assert_eq!(
+            word_bit("flag.0", vars),
+            Err(WordBitError::Unknown),
+            "a bit variable owns no slot, so nothing declares that word"
+        );
+        assert_eq!(word_bit("nope.0", vars), Err(WordBitError::Unknown));
+        assert_eq!(word_bit("bits", vars), Err(WordBitError::NotABit));
+
+        // A marker word is the bank's own word, sixteen bits wide.
+        let marker = crate::profile::resolve::marker_word(3);
+        assert_eq!(word_bit(&format!("{marker}.15"), vars), Ok((3, 15)));
+        assert_eq!(
+            word_bit(&format!("{marker}.16"), vars),
+            Err(WordBitError::Bit {
+                width: 16,
+                declared: format!("marker word {marker}")
+            })
         );
     }
 

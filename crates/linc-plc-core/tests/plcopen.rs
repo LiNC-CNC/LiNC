@@ -286,6 +286,81 @@ fn declared_types_are_read_and_carried() {
     assert_eq!(compiled.program.words.times, 1);
 }
 
+/// A bit of a word keeps its shape through the import: the word is spelled the way
+/// its declaration is, the bit stays a number, and a marker word keeps the profile's
+/// spelling. A bit *address* is still sanitised the way it always was.
+#[test]
+fn a_bit_of_a_word_keeps_its_operand_shape() {
+    let xml = r#"<?xml version="1.0"?>
+<project>
+  <contentHeader name="bits"/>
+  <types><pous><pou name="P" pouType="program">
+    <interface><localVars>
+      <variable name="Bits"><type><array><baseElementType><INT/></baseElementType><dimension lower="0" upper="0"/></array></type></variable>
+    </localVars>
+    <inputVars>
+      <variable name="Start"><type><BOOL/></type></variable>
+      <variable name="%I0.0"><type><BOOL/></type></variable>
+    </inputVars>
+    <outputVars>
+      <variable name="Y"><type><BOOL/></type></variable>
+      <variable name="Z"><type><BOOL/></type></variable>
+    </outputVars></interface>
+    <body><LD>
+      <leftPowerRail localId="1"/>
+      <rightPowerRail localId="2"/>
+      <contact localId="3"><connectionPointIn><connection refLocalId="1"/></connectionPointIn><variable>Start</variable></contact>
+      <coil localId="4" storage="set"><connectionPointIn><connection refLocalId="3"/></connectionPointIn><variable>Bits[0].3</variable></coil>
+      <contact localId="5"><connectionPointIn><connection refLocalId="1"/></connectionPointIn><variable>Bits[0].3</variable></contact>
+      <coil localId="6"><connectionPointIn><connection refLocalId="5"/></connectionPointIn><variable>Y</variable></coil>
+      <contact localId="7"><connectionPointIn><connection refLocalId="1"/></connectionPointIn><variable>%I0.0</variable></contact>
+      <coil localId="8"><connectionPointIn><connection refLocalId="7"/></connectionPointIn><variable>Z</variable></coil>
+    </LD></body>
+  </pou></pous></types>
+</project>"#;
+    let project = imported(xml);
+    let rungs = &project.all_pous()[0].sections[0].rungs;
+    assert_eq!(
+        rungs[0].coil().var,
+        "bits[0].3",
+        "the word is spelled the way its declaration is, and the bit stays a number"
+    );
+    use linc_plc_core::model::Logic as L;
+    assert_eq!(
+        rungs[1].logic,
+        L::Contact {
+            var: "bits[0].3".into(),
+            negated: false
+        }
+    );
+    assert_eq!(
+        rungs[2].logic,
+        L::Contact {
+            var: "n__i0_0".into(),
+            negated: false
+        },
+        "a bit address is still a symbol name, not a bit of a word"
+    );
+    assert_eq!(
+        project.vars.len(),
+        1,
+        "a bit of a word declares its word, not the operand"
+    );
+
+    // It resolves and runs: element 0 of `bits`, bit 3.
+    let compiled = compile(&project).expect("a bit of a word compiles");
+    let mut vm = Vm::new(&compiled);
+    // `Start` and the `%I0.0` input are both true: the one sets the bit, the other
+    // drives the coil fed by the bit address.
+    vm.scan(&[true, true]);
+    assert_eq!(
+        vm.word(compiled.program.words.int_base()),
+        1 << 3,
+        "the coil set bit 3 of the word"
+    );
+    assert_eq!(vm.outputs().last(), Some(&true), "and the contact read it");
+}
+
 #[test]
 fn a_type_with_no_width_is_refused_by_name() {
     let xml = r#"<?xml version="1.0"?>

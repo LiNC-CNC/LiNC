@@ -644,6 +644,11 @@ fn operand_text(variable: &Element) -> Option<String> {
     Some(operand_spelling(&raw))
 }
 
+/// A bit of a word keeps its shape: `Bits[0].0` names bit 0 of element 0 of `Bits`,
+/// so the *word* is what a declaration has to match and the bit stays a number. The
+/// word is spelled the way its declaration is, and a marker word keeps the profile's
+/// own spelling.
+///
 /// A block member keeps its dot: `TON0.Q` names a member of an instance, not a
 /// symbol, and [`operand_name`] would flatten it into `ton0_q`. The instance part
 /// is uppercase because that is how the profile spells a block, and the member is
@@ -653,6 +658,22 @@ fn operand_text(variable: &Element) -> Option<String> {
 /// after the dot there is a number, not a member.
 pub fn operand_spelling(raw: &str) -> String {
     let raw = raw.trim();
+    if let Some(operand) = crate::model::WordBit::parse(raw) {
+        if crate::profile::resolve::marker_word_slot(&operand.word).is_some() {
+            // The marker word's spelling is the profile's, and this form is one.
+            return raw.to_string();
+        }
+        if !operand.word.starts_with('%') {
+            // No `%` prefix means a declared name, which the interface spells the way
+            // `operand_name` does. A `%`-prefixed word is an address, and the address
+            // path below owns those.
+            let word = operand_name(&operand.word);
+            return match operand.element {
+                Some(element) => format!("{word}[{element}].{}", operand.bit),
+                None => format!("{word}.{}", operand.bit),
+            };
+        }
+    }
     if let Some((base, member)) = raw.split_once('.') {
         let instance = !base.is_empty()
             && base.chars().any(|character| character.is_ascii_digit())

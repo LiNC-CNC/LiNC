@@ -611,6 +611,114 @@ fn a_typed_load_reads_the_declared_width() {
     );
 }
 
+/// A coil on a bit of a declared word writes that bit and leaves the word's other
+/// bits alone, and a contact on a bit reads it — which is what `Bits[0].0` means in a
+/// program.
+#[test]
+fn a_bit_of_a_word_is_written_and_read_alone() {
+    use linc_plc_core::model::{Coil, Rung, Section, VarDecl, VarType};
+
+    let mut project = Project::new("bits");
+    project.io = vec![
+        linc_plc_core::IoPoint::new("go", linc_plc_core::IoDirection::In),
+        linc_plc_core::IoPoint::new("y", linc_plc_core::IoDirection::Out),
+    ];
+    project.vars = vec![VarDecl::typed(
+        "bits",
+        VarType::Array {
+            base: Box::new(VarType::Int),
+            len: 1,
+        },
+    )];
+    project.pous = vec![linc_plc_core::model::Pou {
+        name: "MAIN".into(),
+        language: linc_plc_core::PouLanguage::Ld,
+        sections: vec![Section {
+            name: "main".into(),
+            rungs: vec![
+                // A set coil and a reset coil on two bits of the same word.
+                Rung::new(
+                    Logic::contact("go", false),
+                    Coil::new("bits[0].0", CoilKind::Set),
+                ),
+                Rung::new(
+                    Logic::contact("go", true),
+                    Coil::new("bits[0].1", CoilKind::Reset),
+                ),
+                // A contact on the bit that was just set.
+                Rung::new(
+                    Logic::contact("bits[0].0", false),
+                    Coil::new("y", CoilKind::Normal),
+                ),
+            ],
+        }],
+        ..linc_plc_core::model::Pou::new("MAIN", linc_plc_core::PouLanguage::Ld)
+    }];
+    let compiled = compile(&project).expect("a bit of a word compiles");
+    let slot = compiled.program.words.int_base();
+    let mut vm = Vm::new(&compiled);
+
+    // Every bit that is not addressed keeps the value it had.
+    vm.set_word(slot, 0x00F0);
+    vm.scan(&[true]);
+    assert_eq!(vm.word(slot), 0x00F1, "bit 0 set, bits 4..7 untouched");
+    assert_eq!(
+        vm.outputs(),
+        &[true],
+        "a contact reads the bit it was set to"
+    );
+
+    vm.set_word(slot, 0x00F3);
+    vm.scan(&[false]);
+    assert_eq!(
+        vm.word(slot),
+        0x00F1,
+        "a reset coil clears bit 1 and only bit 1"
+    );
+    assert_eq!(
+        vm.outputs(),
+        &[true],
+        "bit 0 was never reset, so the contact still reads it"
+    );
+}
+
+/// Latching a bit of a word is the two writes a word bit has, and a word bit is a
+/// bit operand and not a word one.
+#[test]
+fn a_marker_words_bit_is_an_operand_too() {
+    use linc_plc_core::model::{Coil, Rung, Section};
+
+    let mut project = Project::new("marker-bit");
+    project.io = vec![
+        linc_plc_core::IoPoint::new("go", linc_plc_core::IoDirection::In),
+        linc_plc_core::IoPoint::new("y", linc_plc_core::IoDirection::Out),
+    ];
+    let marker = linc_plc_core::profile::resolve::marker_word(3);
+    project.pous = vec![linc_plc_core::model::Pou {
+        name: "MAIN".into(),
+        language: linc_plc_core::PouLanguage::Ld,
+        sections: vec![Section {
+            name: "main".into(),
+            rungs: vec![
+                Rung::new(
+                    Logic::contact("go", false),
+                    Coil::new(format!("{marker}.5"), CoilKind::Set),
+                ),
+                Rung::new(
+                    Logic::contact(&format!("{marker}.5"), false),
+                    Coil::new("y", CoilKind::Normal),
+                ),
+            ],
+        }],
+        ..linc_plc_core::model::Pou::new("MAIN", linc_plc_core::PouLanguage::Ld)
+    }];
+    let compiled = compile(&project).expect("a marker word's bit compiles");
+    let mut vm = Vm::new(&compiled);
+    vm.scan(&[true]);
+    assert_eq!(vm.word(3), 1 << 5, "bit 5 of marker word 3");
+    assert_eq!(vm.outputs(), &[true], "and a contact reads it back");
+}
+
 /// `.TT` is the timing bit: enabled this scan and not yet done. It is **not**
 /// `ET < PT`, which is also true of a timer that has just been reset and is idle —
 /// one scan of difference, and a trace records it.

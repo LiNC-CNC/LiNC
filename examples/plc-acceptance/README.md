@@ -54,17 +54,19 @@ converted, so a conversion is never mistaken for a pass.
 A file listed as blocked but converted is executed by the test anyway and must be
 shown *not* to pass. That is what stops the count from going green by accident.
 
-Today: six convert, six run. `silo` matches all 200 scans, including rung 4's two
+Today: seven convert, seven run. `silo` matches all 200 scans, including rung 4's two
 coils on parallel branches — the importer turns such a rung into one rung per coil
 and the scan evaluates them in order, so a `Vec<Coil>` model turned out not to be
 needed. Four converted files each hold a timer on a rung with no coil, which the
 importer emits instead of dropping. `traffic-lights` is the largest: six timers
-chained through `.DN` contacts. `timer-counter` is the one that exercises `.TT`.
+chained through `.DN` contacts. `timer-counter` is the one that exercises `.TT`, and
+`start-stop` is the one that writes a bit of a word.
 
-The six that remain are named in the manifest, and the reason has changed: the
-converter and the importer both accept declared types now, so no file is refused for
-its *types* any more. Each one stops at the construct behind the type. This table is
-what the manifest diff records, and what the next step has to answer:
+The five that remain are named in the manifest, and the reason has changed twice: the
+converter and the importer both accept declared types, and a bit of a declared word is
+an operand, so no file is refused for its *types* or its bit-of-word tags any more.
+Each one stops at the construct behind them. This table is what the manifest diff
+records, and what the next step has to answer:
 
 | file | the type it declares | the construct that stops it |
 | --- | --- | --- |
@@ -72,13 +74,38 @@ what the manifest diff records, and what the next step has to answer:
 | `silo-function-block` | `FillStation` | the same, for `FillStation` |
 | `traffic-lights-routines` | `DINT`, `DINT[6]`, `TIMER` | three programs and two `JSR` calls |
 | `recipes-data-type-ld` | `Recipe[3]`, `DINT`, `TIMER` | `MOV`: a word write has no PLCopen form yet |
-| `start-stop` | `INT[1]` | two coils in series on one branch, which a rung cannot hold |
 | `two-tanks-cascade` | `REAL`, `PID` twice | `SCP`, a scale instruction, then `PID` |
 
-Behind each of those, the type work is what the file needs next: `Bits[0].0` in
-`start-stop` is a bit of a word, `Recipes[Sel].FillTime` in `recipes` is a member of
-an array element, and `Durations[Phase]` in `traffic-lights-routines` is an array
-indexed by a variable.
+Behind two of those, the type work is what the file needs next:
+`Recipes[Sel].FillTime` in `recipes` is a member of an array element, and
+`Durations[Phase]` in `traffic-lights-routines` is an array indexed by a variable.
+
+### A bit of a word
+
+`Bits[0].0` is bit 0 of the first element of `Bits`. It is an operand, not a value: a
+contact reads the bit and a coil writes it, and the word around it keeps its other
+bits. The form is parsed in one place (`model::WordBit::parse`), resolved in one place
+(`profile::layout::word_bit`), and the declaration decides both bounds — the element
+count and the type's width — so bit 16 of an `INT` is refused with the variable and
+the width in the sentence, not read out of the next slot. A marker word's bit is the
+same form, and a marker word is sixteen bits wide whatever the slot is.
+
+`start-stop` needed two more things before its bit-of-word tag could run, and both were
+converter faults rather than model limits:
+
+* two coils in series on one branch. A rung ends in one coil, so the converter now
+  emits one rung per coil, each with the series that reaches it — which is exactly the
+  power the coil sees in ladder. The file's two coils are compared at scans 21 and 31,
+  so the split is checked by the trace and not only by the count.
+* the one-shot's memory. `ONS,tag` is a one-shot whose memory is `tag`, so the
+  converter now writes the tag with the pulse instead of dropping it. That write is
+  what puts `Bits[0].0` in a running program. The importer splits the two consumers of
+  the block into two rungs and gives each its own `R_TRIG`; the two see the same input
+  on the same scan, so their outputs are the same pulse, which is why the split is
+  faithful.
+
+A known limit: an edge contact on a bit of a word is refused by name. It would need a
+previous-value slot of its own, and nothing in the corpus asks for one yet.
 
 ### Declared types, and the gate they were hiding
 

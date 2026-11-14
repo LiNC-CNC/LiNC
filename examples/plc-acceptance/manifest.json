@@ -87,11 +87,11 @@
    "name": "start-stop",
    "pous": 1,
    "rungs": 6,
-   "converted": false,
-   "blocker": "converter: two coils in series on one branch: a LiNC rung ends in one coil",
+   "converted": true,
+   "blocker": null,
    "stimulus": true,
    "trace": true,
-   "runs": false
+   "runs": true
   },
   {
    "name": "timer-counter",

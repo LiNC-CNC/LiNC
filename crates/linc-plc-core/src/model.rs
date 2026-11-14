@@ -418,6 +418,30 @@ impl VarType {
         *self == Self::Bool
     }
 
+    /// How many elements the declaration has: an array's length, otherwise one.
+    pub fn elements(&self) -> u16 {
+        match self {
+            Self::Array { base, len } => base
+                .elements()
+                .saturating_mul(u16::try_from(*len).unwrap_or(u16::MAX)),
+            _ => 1,
+        }
+    }
+
+    /// How many bits one element of this type has, when a program may address them.
+    ///
+    /// `None` for a bit variable (it has no word to address into), a `REAL` (its
+    /// 32 bits are a value, not a field of flags) and a structured type. `TIME` is
+    /// a 32-bit count of milliseconds, so its bits are addressable like a `DINT`.
+    pub fn bit_width(&self) -> Option<u8> {
+        match self {
+            Self::Int => Some(16),
+            Self::Dint | Self::Time => Some(32),
+            Self::Array { base, .. } => base.bit_width(),
+            Self::Bool | Self::Real | Self::Derived(_) => None,
+        }
+    }
+
     /// A type this build can name but has no storage for: a structured type, or an
     /// array of one.
     pub fn is_structured(&self) -> bool {
@@ -426,6 +450,57 @@ impl VarType {
             Self::Array { base, .. } => base.is_structured(),
             _ => false,
         }
+    }
+}
+
+/// One bit inside a declared word: `Bits[0].0` in a project, a marker word's bit in
+/// an address.
+///
+/// The form is an operand, not a value: a contact reads the bit and a coil writes
+/// it, while the word around it keeps its other bits. The spelling is parsed in one
+/// place so the compiler, the validator and the editor cannot disagree about where
+/// the bit is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WordBit {
+    /// The word the bit lives in: a declared variable's name, or a marker word's
+    /// own spelling, which the profile owns.
+    pub word: String,
+    /// The array element the bit belongs to, when the operand names one.
+    pub element: Option<u32>,
+    /// The bit within the word, counted from its least significant end.
+    pub bit: u8,
+}
+
+impl WordBit {
+    /// Read one operand's spelling: `word.bit`, `word[element].bit`, or a marker
+    /// word followed by its bit.
+    ///
+    /// `None` means the text is not this form. The bit index fits a byte here and
+    /// is checked against the declaration's width where the declaration is known.
+    pub fn parse(text: &str) -> Option<Self> {
+        let text = text.trim();
+        let (word, bit) = text.rsplit_once('.')?;
+        let bit = bit.trim().parse::<u8>().ok()?;
+        let word = word.trim();
+        if word.is_empty() {
+            return None;
+        }
+        let (word, element) = match word.strip_suffix(']') {
+            Some(head) => {
+                let (name, index) = head.rsplit_once('[')?;
+                let element = index.trim().parse::<u32>().ok()?;
+                (name.trim(), Some(element))
+            }
+            None => (word, None),
+        };
+        if word.is_empty() || word.starts_with(|c: char| c.is_ascii_digit()) {
+            return None;
+        }
+        Some(Self {
+            word: word.to_string(),
+            element,
+            bit,
+        })
     }
 }
 

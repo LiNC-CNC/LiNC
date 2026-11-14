@@ -690,6 +690,112 @@ fn a_type_error_names_the_variable_and_the_expected_type() {
     assert!(errors.is_empty(), "{errors:?}");
 }
 
+/// A bit of a word is a bit operand, and its index is checked against the
+/// declaration: an index past the width names the variable and the width it has.
+#[test]
+fn a_bit_of_a_word_is_checked_against_its_declaration() {
+    use linc_plc_core::model::VarType;
+
+    let typed = || {
+        let mut project = ld_project();
+        project.vars = vec![
+            VarDecl::new("run"),
+            VarDecl::typed(
+                "bits",
+                VarType::Array {
+                    base: Box::new(VarType::Int),
+                    len: 1,
+                },
+            ),
+        ];
+        project
+    };
+    let contact = |var: &str| {
+        Rung::new(
+            Logic::Contact {
+                var: var.into(),
+                negated: false,
+            },
+            Coil::new("y", CoilKind::Normal),
+        )
+    };
+
+    // Bit 0 of the first element is a bit operand: no error at all.
+    let mut project = typed();
+    project.pous[0].sections[0].rungs[0] = contact("bits[0].0");
+    assert!(codes(&project).is_empty(), "{:?}", messages(&project));
+
+    // A coil on a bit of a word is a write to that bit, so it is a declared target.
+    let mut project = typed();
+    project.pous[0].sections[0].rungs[0] = Rung::new(
+        Logic::Const { value: true },
+        Coil::new("bits[0].3", CoilKind::Normal),
+    );
+    assert!(codes(&project).is_empty(), "{:?}", messages(&project));
+
+    // Bit 16 of an INT: the message names the variable and its width.
+    let mut project = typed();
+    project.pous[0].sections[0].rungs[0] = contact("bits[0].16");
+    let text = messages(&project).join("\n");
+    assert!(
+        text.contains("`bits[0].16` is bit 16 of `bits` (INT[1]), which has 16 bits"),
+        "{text}"
+    );
+    assert!(codes(&project).contains(&"word_bit".to_string()), "{text}");
+
+    // An element past the array: the message names the count.
+    let mut project = typed();
+    project.pous[0].sections[0].rungs[0] = contact("bits[1].0");
+    let text = messages(&project).join("\n");
+    assert!(
+        text.contains("`bits[1].0` indexes `bits` (INT[1]), which has 1 element"),
+        "{text}"
+    );
+
+    // A REAL has no bits to address; a BOOL has no word.
+    let mut project = ld_project();
+    project.vars = vec![VarDecl::new("run"), VarDecl::typed("level", VarType::Real)];
+    project.pous[0].sections[0].rungs[0] = contact("level.0");
+    let text = messages(&project).join("\n");
+    assert!(text.contains("that type has no bits to address"), "{text}");
+    let mut project = ld_project();
+    project.pous[0].sections[0].rungs[0] = contact("run.0");
+    let text = messages(&project).join("\n");
+    assert!(text.contains("`run.0` (BOOL)"), "{text}");
+
+    // A bit of a word is not a word: the compare refuses it in the other direction.
+    let mut project = typed();
+    project.pous[0].sections[0].rungs[0] = Rung::new(
+        Logic::Compare {
+            operator: "EQ".into(),
+            left: "bits[0].0".into(),
+            right: "1".into(),
+        },
+        Coil::new("y", CoilKind::Normal),
+    );
+    let text = messages(&project).join("\n");
+    assert!(
+        text.contains("`bits[0].0` is one bit of a word and cannot be used as a word value"),
+        "{text}"
+    );
+
+    // An edge contact keeps its previous value in a bit-image slot, and a bit of a
+    // word has none: refused rather than watching the wrong bit.
+    let mut project = typed();
+    project.pous[0].sections[0].rungs[0] = Rung::new(
+        Logic::Edge {
+            var: "bits[0].0".into(),
+            rising: true,
+        },
+        Coil::new("y", CoilKind::Normal),
+    );
+    let text = messages(&project).join("\n");
+    assert!(
+        text.contains("an edge contact on `bits[0].0` has no form yet"),
+        "{text}"
+    );
+}
+
 /// A structured declaration is readable and refused: this build has no storage for
 /// it, and the refusal says which variable and which type.
 #[test]

@@ -35,6 +35,9 @@ pub struct Ctx<'a> {
     /// Declared variables and their types, by lowercased name: what a contact may
     /// not read and a word operand may.
     pub var_types: &'a HashMap<String, crate::model::VarType>,
+    /// The typed declarations that own bank slots: what a bit-of-word operand
+    /// (`Bits[0].0`) resolves its element and its width against.
+    pub word_vars: &'a [crate::profile::layout::WordVar],
     /// Every POU name, uppercased: what a call may name.
     pub pou_names: &'a HashSet<String>,
     /// The rungs of the section this instruction is in: what a jump may name.
@@ -504,12 +507,29 @@ fn check_logic(logic: &Logic, ctx: &Ctx) -> Vec<Diagnostic> {
         }
         Logic::Contact { var, .. } | Logic::Edge { var, .. } => {
             io_kind(var, true, &format!("{path}.var"), ctx, &mut diagnostics);
-            if !ctx.known.contains(&var.to_ascii_lowercase())
+            // A bit of a word is an operand in its own right; the two refusals that
+            // are not about the word's declaration fall through to "not declared".
+            let undeclared = matches!(
+                ctx.word_bit(var),
+                Err(crate::profile::layout::WordBitError::NotABit)
+                    | Err(crate::profile::layout::WordBitError::Unknown)
+            );
+            if undeclared
+                && !ctx.known.contains(&var.to_ascii_lowercase())
                 && ctx.profile.bit_member(var).is_none()
             {
                 diagnostics.push(Diagnostic::error(
                     "unknown_symbol",
                     format!("contact `{var}` is not declared"),
+                    format!("{path}.var"),
+                ));
+            }
+            // An edge contact keeps its previous value in a bit-image slot, and a bit
+            // of a word has none: refusing is cheaper than watching the wrong bit.
+            if matches!(logic, Logic::Edge { .. }) && ctx.word_bit(var).is_ok() {
+                diagnostics.push(Diagnostic::error(
+                    "edge_unsupported",
+                    format!("an edge contact on `{var}` has no form yet; use a plain contact"),
                     format!("{path}.var"),
                 ));
             }
@@ -949,8 +969,53 @@ fn check_fbd_line(line: &FbdLine, index: usize, ctx: &Ctx) -> Vec<Diagnostic> {
 /// `io_kind`: a declared point used on the wrong side of the model. A bit point
 /// has no word slot and a word point has no bit slot, so accepting the name
 /// would silently address the wrong image; validation refuses it instead.
+impl Ctx<'_> {
+    /// A bit of a declared word, or why the text is not one.
+    fn word_bit(&self, text: &str) -> Result<(u16, u8), crate::profile::layout::WordBitError> {
+        crate::profile::layout::word_bit(text, self.word_vars)
+    }
+}
+
 fn io_kind(name: &str, want_bit: bool, path: &str, ctx: &Ctx, diagnostics: &mut Vec<Diagnostic>) {
     let name = name.trim();
+    // `Bits[0].0` and `%MW3.5` are bits of a word: a bit operand, never a word one.
+    // The declaration decides the element and the width, so an index past either is
+    // refused here rather than read from the next slot.
+    match ctx.word_bit(name) {
+        Ok(_) => {
+            if !want_bit {
+                diagnostics.push(Diagnostic::error(
+                    "word_bit",
+                    format!("`{name}` is one bit of a word and cannot be used as a word value"),
+                    path,
+                ));
+            }
+            return;
+        }
+        Err(error) => {
+            use crate::profile::layout::WordBitError;
+            if !matches!(error, WordBitError::NotABit) {
+                // A word this build cannot address into, or an index past the bound:
+                // the sentence names the declaration and the width.
+                let message = match error {
+                    WordBitError::Unknown => match crate::model::WordBit::parse(name)
+                        .and_then(|operand| ctx.var_types.get(&operand.word.to_ascii_lowercase()))
+                    {
+                        // The word is declared, but as a bit: it has no bits to
+                        // address into, and saying "not declared" would be false.
+                        Some(ty) if ty.is_bool() => WordBitError::NoBits {
+                            declared: format!("`{name}` (BOOL)"),
+                        }
+                        .message(name),
+                        _ => error.message(name),
+                    },
+                    other => other.message(name),
+                };
+                diagnostics.push(Diagnostic::error("word_bit", message, path));
+                return;
+            }
+        }
+    }
     // A declared variable is typed too, and the type decides which side it may be
     // used on: a contact reads a BOOL, a word operand reads INT, DINT, REAL or TIME.
     // The message names the variable and the type it was declared with.

@@ -305,6 +305,27 @@ impl Vm {
                     let raw = self.words.get(slot as usize).copied().unwrap_or(0);
                     push_word(&mut word_stack, &mut word_depth, ty.load(raw));
                 }
+                // One bit of a bank word. A read is the bit; a write leaves the
+                // word's other bits as they were, which is what makes a coil on
+                // `Bits[0].0` a write to one bit and not to the word.
+                Op::WordBit { slot, bit } => {
+                    let word = self.words.get(slot as usize).copied().unwrap_or(0);
+                    push(&mut stack, &mut depth, (word >> bit) & 1 == 1);
+                }
+                Op::StoreWordBit { slot, bit } => {
+                    let value = pop(&stack, &mut depth);
+                    self.set_word_bit(slot, bit, value);
+                }
+                Op::SetWordBit { slot, bit } => {
+                    if pop(&stack, &mut depth) {
+                        self.set_word_bit(slot, bit, true);
+                    }
+                }
+                Op::ResetWordBit { slot, bit } => {
+                    if pop(&stack, &mut depth) {
+                        self.set_word_bit(slot, bit, false);
+                    }
+                }
                 Op::StoreTyped { slot, ty } => {
                     let value = pop_word(&word_stack, &mut word_depth);
                     if let Some(cell) = self.words.get_mut(slot as usize) {
@@ -741,6 +762,20 @@ impl Vm {
     /// the next execution, so a written preset holds until that block runs
     /// again. A preset *sourced from a word* is the way to make the ladder's
     /// value authoritative.
+    /// Write one bit of a bank word, keeping the others. The `s32` bit pattern is
+    /// the word's value, so a 16-bit variable's upper half is left as the store path
+    /// left it.
+    fn set_word_bit(&mut self, slot: u16, bit: u8, value: bool) {
+        if let Some(cell) = self.words.get_mut(slot as usize) {
+            let mask = 1i32 << bit;
+            if value {
+                *cell |= mask;
+            } else {
+                *cell &= !mask;
+            }
+        }
+    }
+
     fn write_word(&mut self, target: WordOperand, value: i32) {
         match target {
             WordOperand::Word(index) | WordOperand::Slot(index) => self.set_word(index, value),

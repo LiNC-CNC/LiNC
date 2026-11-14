@@ -24,6 +24,71 @@ fn base_project() -> Project {
     project
 }
 
+/// One operand's spelling for a bit of a word: the word, the element when it names
+/// one, and the bit. Anything that is not that form is not this operand.
+#[test]
+fn a_bit_of_a_word_operand_parses_in_one_place() {
+    use linc_plc_core::model::WordBit;
+
+    assert_eq!(
+        WordBit::parse("Bits[0].0"),
+        Some(WordBit {
+            word: "Bits".into(),
+            element: Some(0),
+            bit: 0
+        })
+    );
+    assert_eq!(
+        WordBit::parse("durations[5].31"),
+        Some(WordBit {
+            word: "durations".into(),
+            element: Some(5),
+            bit: 31
+        })
+    );
+    assert_eq!(
+        WordBit::parse("count.15"),
+        Some(WordBit {
+            word: "count".into(),
+            element: None,
+            bit: 15
+        })
+    );
+    // A marker word's spelling is the profile's, and the operand form is the same.
+    let marker = format!("{}.9", linc_plc_core::profile::resolve::marker_word(3));
+    assert_eq!(
+        WordBit::parse(&marker),
+        Some(WordBit {
+            word: linc_plc_core::profile::resolve::marker_word(3),
+            element: None,
+            bit: 9
+        })
+    );
+
+    // Not this operand form: a block member, a bare name, an element without a bit,
+    // an element with no bit index, a bit that does not fit a byte.
+    for text in [
+        "TON0.Q",
+        "Bits",
+        "Bits[0]",
+        "Bits[0].",
+        "Bits.x",
+        "Bits[0].300",
+    ] {
+        assert_eq!(WordBit::parse(text), None, "{text}");
+    }
+    // A bit *address* has the same shape (`%I0.0`), and parses; it is not a declared
+    // word, so the resolver refuses it as one rather than guessing.
+    assert_eq!(
+        WordBit::parse("%I0.0"),
+        Some(WordBit {
+            word: "%I0".into(),
+            element: None,
+            bit: 0
+        })
+    );
+}
+
 /// A version-1 project has no `ty` key on its variables: it decodes to `Bool`, and a
 /// `Bool` is not written back, so the text a project serialises to is unchanged and
 /// its `project_hash` does not move. The shipped config is the witness.

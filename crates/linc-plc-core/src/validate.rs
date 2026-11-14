@@ -39,6 +39,7 @@ struct Facts<'a> {
     word_slots: &'a HashMap<String, u16>,
     io_kinds: &'a HashMap<&'a str, IoKind>,
     var_types: &'a HashMap<String, VarType>,
+    word_vars: &'a [crate::profile::layout::WordVar],
     pou_names: &'a HashSet<String>,
     section_rungs: &'a [Rung],
     labels: &'a HashSet<String>,
@@ -54,6 +55,7 @@ impl Facts<'_> {
             word_slots: self.word_slots,
             io_kinds: self.io_kinds,
             var_types: self.var_types,
+            word_vars: self.word_vars,
             pou_names: self.pou_names,
             section_rungs: self.section_rungs,
             labels: self.labels,
@@ -217,6 +219,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     word_slots: &word_slots,
                     io_kinds: &io_kinds,
                     var_types: &var_types,
+                    word_vars: &bank.vars,
                     pou_names: &pou_names,
                     section_rungs: &[],
                     labels: &labels,
@@ -255,6 +258,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     word_slots: &word_slots,
                     io_kinds: &io_kinds,
                     var_types: &var_types,
+                    word_vars: &bank.vars,
                     pou_names: &pou_names,
                     section_rungs: &[],
                     labels: &HashSet::new(),
@@ -475,6 +479,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             word_slots: &word_slots,
             io_kinds: &io_kinds,
             var_types: &var_types,
+            word_vars: &bank.vars,
             pou_names: &pou_names,
             section_rungs: &section.rungs,
             labels: &no_labels,
@@ -622,7 +627,15 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             if linked_continuation {
                 continue;
             }
-            match symbols.get(rung.coil().var.as_str()) {
+            // A coil on a bit of a declared word writes that bit: it is a declared
+            // target, checked against the word's declaration by the profile's rule
+            // (which also reports an index past the bound).
+            let class = symbols.get(rung.coil().var.as_str()).copied().or_else(|| {
+                crate::profile::layout::word_bit(rung.coil().var.as_str(), &bank.vars)
+                    .ok()
+                    .map(|_| SymbolClass::Var)
+            });
+            match class {
                 None => diagnostics.push(Diagnostic::error(
                     "unknown_symbol",
                     format!("coil target `{}` is not declared", rung.coil().var),

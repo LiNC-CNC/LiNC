@@ -64,6 +64,9 @@ struct Lookup {
     /// no entry is a raw 32-bit word: a marker word, a HAL point, or a dialect's
     /// own address.
     word_types: HashMap<u16, crate::profile::layout::WordType>,
+    /// The typed declarations, so a bit-of-word operand (`Bits[0].0`) resolves its
+    /// element and its width against the same declaration the bank laid out.
+    word_vars: Vec<crate::profile::layout::WordVar>,
 }
 
 impl Lookup {
@@ -75,6 +78,7 @@ impl Lookup {
             bit_ci: HashMap::new(),
             word: HashMap::new(),
             word_types: HashMap::new(),
+            word_vars: Vec::new(),
         }
     }
 
@@ -114,6 +118,13 @@ impl Lookup {
     /// The type a slot was declared with, if it has one.
     fn slot_type(&self, slot: u16) -> Option<crate::profile::layout::WordType> {
         self.word_types.get(&slot).copied()
+    }
+
+    /// A bit of a declared word: the slot its element lives in, and the bit. `None`
+    /// when the text is not that form or the declaration refuses it — validation
+    /// has already reported the refusal, so the compiler only needs the address.
+    fn word_bit(&self, text: &str) -> Option<(u16, u8)> {
+        crate::profile::layout::word_bit(text, &self.word_vars).ok()
     }
 }
 
@@ -327,6 +338,27 @@ pub enum Op {
         slot: u16,
         ty: crate::profile::layout::WordType,
     },
+    /// Push one bit of a bank word on the bit stack: `Bits[0].0`, or a marker
+    /// word's bit.
+    WordBit {
+        slot: u16,
+        bit: u8,
+    },
+    /// Pop a bit and write it into the word, leaving the other bits as they were.
+    StoreWordBit {
+        slot: u16,
+        bit: u8,
+    },
+    /// Pop power and set the bit while it is true (`OTL` on a word bit).
+    SetWordBit {
+        slot: u16,
+        bit: u8,
+    },
+    /// Pop power and clear the bit while it is true (`OTU` on a word bit).
+    ResetWordBit {
+        slot: u16,
+        bit: u8,
+    },
     /// Push the block's `Q` on the bit stack.
     FbQ(u16),
     /// Push the block's timing bit: enabled this scan and not yet done.
@@ -521,8 +553,9 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         }
     }
     // Typed declarations: their name addresses the first slot, and every element of
-    // an array carries the same type, so an indexed element (a later step) reads the
-    // same width as the name does today.
+    // an array carries the same type, so an indexed element reads the same width as
+    // the name does.
+    lookup.word_vars = bank.vars.clone();
     for var in &bank.vars {
         intern(
             &mut symbols,
@@ -1261,10 +1294,7 @@ fn lower_cells(
         match cell {
             crate::grid::Cell::Wire | crate::grid::Cell::Link => continue,
             crate::grid::Cell::Contact { var, negated } => {
-                match lookup.profile.bit_member(var) {
-                    Some((instance, member)) => push_member(ops, lookup, instance, member),
-                    None => ops.push(Op::Push(lookup.bit(var.as_str()).unwrap_or(0))),
-                }
+                push_bit_read(ops, lookup, var);
                 if *negated {
                     ops.push(Op::Not);
                 }
@@ -1525,6 +1555,21 @@ fn push_block(
     }
 }
 
+/// Push one declared bit: a bit-image slot, a block member, or a bit of a word.
+///
+/// The three forms are one operand space to the program — `%I0.0`, `TON0.Q`,
+/// `Bits[0].0` — so a contact, an edge or a coil asks this rather than each spelling
+/// its own question.
+fn push_bit_read(ops: &mut Vec<Op>, lookup: &Lookup, var: &str) {
+    match lookup.profile.bit_member(var) {
+        Some((instance, member)) => push_member(ops, lookup, instance, member),
+        None => match lookup.word_bit(var) {
+            Some((slot, bit)) => ops.push(Op::WordBit { slot, bit }),
+            None => ops.push(Op::Push(lookup.bit(var).unwrap_or(0))),
+        },
+    }
+}
+
 /// Push one block member's value: `Q` from the block's state, and empty/full as
 /// the compares the compiler bakes from the profile's numbers.
 fn push_member(
@@ -1768,11 +1813,23 @@ fn store_coil(ops: &mut Vec<Op>, lookup: &Lookup, coil: &crate::model::Coil) {
             return;
         }
     }
-    let index = lookup.bit(coil.var.as_str()).unwrap_or(0);
     let kind = coil.kind;
     if kind == CoilKind::Negated {
         ops.push(Op::Not);
     }
+    // A coil on a bit of a declared word writes that bit and leaves the word's other
+    // bits alone; the three coil kinds are the three bit writes.
+    if let Some((slot, bit)) = lookup.word_bit(coil.var.as_str()) {
+        ops.push(match kind {
+            CoilKind::Normal | CoilKind::Negated => Op::StoreWordBit { slot, bit },
+            CoilKind::Set => Op::SetWordBit { slot, bit },
+            CoilKind::Reset => Op::ResetWordBit { slot, bit },
+            // The guard at the top of this function returned for these.
+            CoilKind::Jump | CoilKind::Call | CoilKind::Compute => return,
+        });
+        return;
+    }
+    let index = lookup.bit(coil.var.as_str()).unwrap_or(0);
     ops.push(match kind {
         CoilKind::Normal | CoilKind::Negated => Op::Store(index),
         CoilKind::Set => Op::Set(index),
@@ -1786,10 +1843,7 @@ fn lower_logic(logic: &Logic, lookup: &Lookup, edges: &mut u16, ops: &mut Vec<Op
     match logic {
         Logic::Const { value } => ops.push(Op::PushConst(*value)),
         Logic::Contact { var, negated } => {
-            match lookup.profile.bit_member(var) {
-                Some((instance, member)) => push_member(ops, lookup, instance, member),
-                None => ops.push(Op::Push(lookup.bit(var.as_str()).unwrap_or(0))),
-            }
+            push_bit_read(ops, lookup, var);
             if *negated {
                 ops.push(Op::Not);
             }
