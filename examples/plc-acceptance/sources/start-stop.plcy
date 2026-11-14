@@ -1,0 +1,52 @@
+{
+  "format": "plcyard",
+  "version": 1,
+  "profile": "plcyard",
+  "programs": [
+    {
+      "number": 2,
+      "kind": "LAD",
+      "title": "Main",
+      "language": "LD",
+      "rungs": [
+        {
+          "text": "XIC,%I0.1 BST,1 XIC,%I0.0 NXB,1 XIC,%Q0.0 BND,1 OTE,%Q0.0",
+          "comment": "Start/stop with seal-in. Start: NO on %I0.0. Stop: NC on %I0.1, so it is examined with XIC (not pressed = 1; a broken wire also stops). The %Q0.0 contact holds the motor."
+        },
+        {
+          "text": "XIC,%Q0.0 OTE,%Q0.1",
+          "comment": "Running light while the motor is on."
+        },
+        {
+          "text": "XIO,%Q0.0 OTE,%Q0.2",
+          "comment": "Stopped light while the motor is off."
+        },
+        {
+          "text": "BST,1 XIC,%I0.2 XIC,%I0.3 NXB,1 XIC,%I0.4 XIO,%I0.5 BST,2 XIC,%I0.6 NXB,2 XIC,%I0.7 BND,2 BND,1 OTE,%Q0.4 OTE,%Q0.5",
+          "comment": "Combined logic: (I2 AND I3) OR (I4 AND NOT I5 AND (I6 OR I7)) turns on %Q0.4 and %Q0.5."
+        },
+        {
+          "text": "XIC,%I1.0 ONS,Bits[0].0 OTL,%Q1.0",
+          "comment": "Rising edge of %I1.0 latches %Q1.0."
+        },
+        {
+          "text": "XIC,%I1.1 OTU,%Q1.0",
+          "comment": "%I1.1 unlatches %Q1.0."
+        }
+      ],
+      "end_comment": ""
+    }
+  ],
+  "tags": {
+    "Bits": {
+      "type": "INT[1]"
+    }
+  },
+  "symbols": {
+    "%I0.0": "Start (NO)",
+    "%I0.1": "Stop (NC)",
+    "%Q0.0": "Motor",
+    "%Q0.1": "Running",
+    "%Q0.2": "Stopped"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "motor-starters-function-block",
+  "scan_ms": 10,
+  "scans": 500,
+  "outputs": [
+    "%Q0.0",
+    "%Q0.1",
+    "%Q0.2",
+    "%Q0.3"
+  ],
+  "fault": null,
+  "changes": [
+    {
+      "scan": 1,
+      "v": {
+        "%Q0.0": "1"
+      }
+    },
+    {
+      "scan": 301,
+      "v": {
+        "%Q0.1": "1"
+      }
+    }
+  ]
+}

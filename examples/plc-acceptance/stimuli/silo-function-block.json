@@ -1,0 +1,15 @@
+{
+  "name": "silo-function-block",
+  "source": "silo-function-block.plcy",
+  "scan_ms": 10,
+  "scans": 300,
+  "note": "One FB instance called once per scan with formal parameters. Start with a box present, run the fill, then report Full so the conveyor takes the box away.",
+  "held": {
+    "%I0.1": true,
+    "%I0.3": true
+  },
+  "inputs": {
+    "%I0.0": [[0, true], [2, false]],
+    "%I0.4": [[100, true]]
+  }
+}

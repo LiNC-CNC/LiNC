@@ -1,0 +1,23 @@
+{
+  "name": "two-tanks-cascade",
+  "scan_ms": 10,
+  "scans": 200,
+  "outputs": [
+    "%Q0.2"
+  ],
+  "fault": null,
+  "changes": [
+    {
+      "scan": 51,
+      "v": {
+        "%Q0.2": "1"
+      }
+    },
+    {
+      "scan": 151,
+      "v": {
+        "%Q0.2": "0"
+      }
+    }
+  ]
+}

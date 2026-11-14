@@ -1,0 +1,67 @@
+{
+  "format": "plcyard",
+  "version": 1,
+  "profile": "plcyard",
+  "programs": [
+    {
+      "number": 2,
+      "kind": "LAD",
+      "title": "Main",
+      "language": "LD",
+      "rungs": [
+        {
+          "text": "CALL,Pump1,Start:=%I0.0,Stop:=%I0.1,Run=>%Q0.0,Ready=>%Q0.1",
+          "comment": "Same block, two instances: each keeps its own data."
+        },
+        {
+          "text": "CALL,Pump2,Start:=%I0.2,Stop:=%I0.3,Run=>%Q0.2,Ready=>%Q0.3",
+          "comment": ""
+        }
+      ],
+      "end_comment": ""
+    },
+    {
+      "number": 3,
+      "kind": "FB",
+      "title": "MotorStarter",
+      "language": "LD",
+      "interface": {
+        "Input": {
+          "Start": "BOOL",
+          "Stop": "BOOL"
+        },
+        "Output": {
+          "Run": "BOOL",
+          "Ready": "BOOL"
+        },
+        "Static": {
+          "Delay": "TIMER"
+        }
+      },
+      "rungs": [
+        {
+          "text": "BST,1 XIC,#Start NXB,1 XIC,#Run BND,1 XIO,#Stop OTE,#Run",
+          "comment": "Seal-in start / stop."
+        },
+        {
+          "text": "XIC,#Run TON,#Delay,T#3s",
+          "comment": "Ready three seconds after starting."
+        },
+        {
+          "text": "XIC,#Delay.Q OTE,#Ready",
+          "comment": ""
+        }
+      ],
+      "end_comment": ""
+    }
+  ],
+  "tags": {
+    "Pump1": {
+      "type": "MotorStarter"
+    },
+    "Pump2": {
+      "type": "MotorStarter"
+    }
+  },
+  "symbols": {}
+}

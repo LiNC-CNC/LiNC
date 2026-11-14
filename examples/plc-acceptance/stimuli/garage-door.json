@@ -1,0 +1,17 @@
+{
+  "name": "garage-door",
+  "source": "garage-door.plcy",
+  "scan_ms": 10,
+  "scans": 1200,
+  "note": "Open, hold to the up limit, close, break the beam mid-travel to latch Reverse, run back up, reset at the limit. Also exercises the free-running 1 s BLINK timer with a compare, and a 10 s TOF that must expire inside the window.",
+  "held": {
+    "%I0.2": true,
+    "%I0.5": true
+  },
+  "inputs": {
+    "%I0.0": [[0, true], [2, false]],
+    "%I0.3": [[60, true], [62, false], [140, true], [142, false]],
+    "%I0.1": [[80, true], [82, false]],
+    "%I0.5": [[100, false], [110, true]]
+  }
+}

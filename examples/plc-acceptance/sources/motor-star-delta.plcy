@@ -1,0 +1,62 @@
+{
+  "format": "plcyard",
+  "version": 1,
+  "profile": "plcyard",
+  "programs": [
+    {
+      "number": 2,
+      "kind": "LAD",
+      "title": "Main",
+      "language": "LD",
+      "rungs": [
+        {
+          "text": "BST,1 XIC,%I0.0 XIO,%I0.1 XIC,%I0.4 NXB,1 XIC,%Q0.0 BND,1 XIC,%I0.2 XIC,%I0.3 XIO,%Q0.1 OTE,%Q0.0",
+          "comment": "Forward: press Forward with the motor stopped; seal in. Stop (NC) or the overload relay drops it; never with KM2."
+        },
+        {
+          "text": "BST,1 XIC,%I0.1 XIO,%I0.0 XIC,%I0.4 NXB,1 XIC,%Q0.1 BND,1 XIC,%I0.2 XIC,%I0.3 XIO,%Q0.0 OTE,%Q0.1",
+          "comment": "Reverse: the same, interlocked with KM1. Waiting for Motor stopped means no reversing while it still turns."
+        },
+        {
+          "text": "BST,1 XIC,%Q0.0 NXB,1 XIC,%Q0.1 BND,1 TON,StarTime,T#4s",
+          "comment": "Star time: 4 s from the start."
+        },
+        {
+          "text": "BST,1 XIC,%Q0.0 NXB,1 XIC,%Q0.1 BND,1 XIO,StarTime.DN XIO,%Q0.3 OTE,%Q0.2",
+          "comment": "Start in star: a third of the current."
+        },
+        {
+          "text": "BST,1 XIC,%Q0.0 NXB,1 XIC,%Q0.1 BND,1 XIC,StarTime.DN XIO,%Q0.2 OTE,%Q0.3",
+          "comment": "Then delta, never together with star."
+        },
+        {
+          "text": "BST,1 XIC,%Q0.0 NXB,1 XIC,%Q0.1 BND,1 OTE,%Q0.4",
+          "comment": "Run lamp."
+        },
+        {
+          "text": "XIO,%I0.3 OTE,%Q0.5",
+          "comment": "Fault lamp while the overload relay is tripped."
+        }
+      ],
+      "end_comment": ""
+    }
+  ],
+  "tags": {
+    "StarTime": {
+      "type": "TIMER"
+    }
+  },
+  "symbols": {
+    "%I0.0": "Forward (PB)",
+    "%I0.1": "Reverse (PB)",
+    "%I0.2": "Stop (NC, PB)",
+    "%I0.3": "Overload relay OK",
+    "%I0.4": "Motor stopped",
+    "%Q0.0": "KM1 forward",
+    "%Q0.1": "KM2 reverse",
+    "%Q0.2": "KM3 star",
+    "%Q0.3": "KM4 delta",
+    "%Q0.4": "Run lamp",
+    "%Q0.5": "Fault lamp"
+  }
+}

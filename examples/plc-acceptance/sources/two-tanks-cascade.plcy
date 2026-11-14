@@ -1,0 +1,65 @@
+{
+  "format": "plcyard",
+  "version": 1,
+  "profile": "plcyard",
+  "programs": [
+    {
+      "number": 2,
+      "kind": "LAD",
+      "title": "Main",
+      "language": "LD",
+      "rungs": [
+        {
+          "text": "SCP,%IW68,0,27648,0,100,Setpoint",
+          "comment": "Setpoint of tank 2 from the knob, in %."
+        },
+        {
+          "text": "MOV,16589,%QW66",
+          "comment": "Transfer valve fixed at 60 %."
+        },
+        {
+          "text": "PID,Outer,%IW66,OuterOut,Setpoint",
+          "comment": "Master loop: tank 2 level. Its output (in %) is the setpoint of the inner loop."
+        },
+        {
+          "text": "PID,Inner,%IW64,%QW64,?,?,Outer",
+          "comment": "Slave loop: tank 1 level drives the inlet valve; its setpoint comes from Outer."
+        },
+        {
+          "text": "BST,1 XIC,%I0.2 NXB,1 XIC,%I0.3 BND,1 OTE,%Q0.2",
+          "comment": "Alarm on either high level switch."
+        }
+      ],
+      "end_comment": ""
+    }
+  ],
+  "tags": {
+    "Setpoint": {
+      "type": "REAL"
+    },
+    "OuterOut": {
+      "type": "REAL"
+    },
+    "Outer": {
+      "type": "PID",
+      "value": {
+        "KP": 2.0,
+        "KI": 0.05,
+        "MAXI": 27648.0
+      }
+    },
+    "Inner": {
+      "type": "PID",
+      "value": {
+        "KP": 4.0,
+        "KI": 0.2,
+        "MAXI": 27648.0,
+        "MAXCV": 27648.0
+      }
+    }
+  },
+  "symbols": {
+    "Outer": "Tank 2 level loop (master)",
+    "Inner": "Tank 1 level loop (slave)"
+  }
+}

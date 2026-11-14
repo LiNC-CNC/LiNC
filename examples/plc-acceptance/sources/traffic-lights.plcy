@@ -1,0 +1,70 @@
+{
+  "format": "plcyard",
+  "version": 1,
+  "profile": "plcyard",
+  "programs": [
+    {
+      "number": 2,
+      "kind": "LAD",
+      "title": "Main",
+      "language": "LD",
+      "rungs": [
+        {
+          "text": "XIO,Timers[5].DN TON,Timers[0],6000",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Timers[0].DN TON,Timers[1],2000",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Timers[1].DN TON,Timers[2],1000",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Timers[2].DN TON,Timers[3],6000",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Timers[3].DN TON,Timers[4],2000",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Timers[4].DN TON,Timers[5],1000",
+          "comment": ""
+        },
+        {
+          "text": "XIO,Timers[0].DN OTE,%Q0.2",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Timers[0].DN XIO,Timers[1].DN OTE,%Q0.1",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Timers[1].DN OTE,%Q0.0",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Timers[2].DN XIO,Timers[3].DN OTE,%Q0.6",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Timers[3].DN XIO,Timers[4].DN OTE,%Q0.5",
+          "comment": ""
+        },
+        {
+          "text": "BST,1 XIO,Timers[2].DN NXB,1 XIC,Timers[4].DN BND,1 OTE,%Q0.4",
+          "comment": ""
+        }
+      ],
+      "end_comment": ""
+    }
+  ],
+  "tags": {
+    "Timers": {
+      "type": "TIMER[6]"
+    }
+  },
+  "symbols": {}
+}

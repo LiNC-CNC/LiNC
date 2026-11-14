@@ -1,0 +1,22 @@
+{
+  "name": "recipes-data-type-ld",
+  "source": "recipes-data-type-ld.plcy",
+  "scan_ms": 10,
+  "scans": 700,
+  "note": "Recipe 1 selected by %I0.1, started by %I0.0: fill 4 s, then mix 2 s, both read from Recipes[Sel].FillTime / .MixTime, so the timings only come out right if indexed struct access works. Busy drops when the mix timer is done.",
+  "held": {
+    "%I0.1": true
+  },
+  "inputs": {
+    "%I0.0": [
+      [
+        0,
+        true
+      ],
+      [
+        2,
+        false
+      ]
+    ]
+  }
+}

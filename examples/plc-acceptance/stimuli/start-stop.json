@@ -1,0 +1,17 @@
+{
+  "name": "start-stop",
+  "source": "start-stop.plcy",
+  "scan_ms": 10,
+  "scans": 160,
+  "note": "Plain start/stop, then the nested branch that drives two coils, then a one-shot edge (ONS) latching %Q1.0 and a reset of it. The one-shot and the bit-of-word operand have no TC6 LD form.",
+  "held": {
+    "%I0.1": true
+  },
+  "inputs": {
+    "%I0.0": [[0, true], [2, false]],
+    "%I0.2": [[20, true], [30, false]],
+    "%I0.3": [[20, true], [40, false]],
+    "%I1.0": [[60, true], [62, false]],
+    "%I1.1": [[100, true], [102, false]]
+  }
+}

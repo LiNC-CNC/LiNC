@@ -1,0 +1,11 @@
+{
+  "name": "two-tanks-cascade",
+  "source": "two-tanks-cascade.plcy",
+  "scan_ms": 10,
+  "scans": 200,
+  "note": "Two PID loops with an SCP scaling block and a MOV, feeding an analogue output. Only the high-level alarm on %I0.3 is observable as a bit; the loops themselves are analogue.",
+  "held": {},
+  "inputs": {
+    "%I0.3": [[50, true], [150, false]]
+  }
+}

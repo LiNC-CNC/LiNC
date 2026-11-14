@@ -1,0 +1,54 @@
+{
+  "format": "plcyard",
+  "version": 1,
+  "profile": "plcyard",
+  "programs": [
+    {
+      "number": 2,
+      "kind": "LAD",
+      "title": "Main",
+      "language": "LD",
+      "rungs": [
+        {
+          "text": "XIC,%I0.0 XIO,Timers[1].DN TON,Timers[0],3000",
+          "comment": "Blinker: with %I0.0 closed, Timers[0] times 3 s and Timers[1] another 2 s; Timers[1].DN restarts the cycle."
+        },
+        {
+          "text": "XIC,Timers[0].DN TON,Timers[1],2000",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Timers[0].TT OTE,%Q0.0",
+          "comment": "Lamp on while Timers[0] is timing."
+        },
+        {
+          "text": "XIC,Timers[0].DN CTU,Counters[0],5",
+          "comment": "Counts complete cycles."
+        },
+        {
+          "text": "XIC,Counters[0].DN OTE,%Q0.1",
+          "comment": "After 5 cycles %Q0.1 turns on."
+        },
+        {
+          "text": "XIC,%I0.1 RES,Counters[0]",
+          "comment": "%I0.1 resets the counter."
+        }
+      ],
+      "end_comment": ""
+    }
+  ],
+  "tags": {
+    "Counters": {
+      "type": "COUNTER[1]"
+    },
+    "Timers": {
+      "type": "TIMER[2]"
+    }
+  },
+  "symbols": {
+    "%I0.0": "Enable",
+    "%I0.1": "Reset count",
+    "%Q0.0": "Lamp",
+    "%Q0.1": "Five cycles"
+  }
+}

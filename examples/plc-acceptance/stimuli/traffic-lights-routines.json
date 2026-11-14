@@ -1,0 +1,9 @@
+{
+  "name": "traffic-lights-routines",
+  "source": "traffic-lights-routines.plcy",
+  "scan_ms": 10,
+  "scans": 1850,
+  "note": "Free running. The phase counter and a DINT array of durations live in one routine and the lamps are set in another, called by JSR.",
+  "held": {},
+  "inputs": {}
+}

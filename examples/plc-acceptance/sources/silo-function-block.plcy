@@ -1,0 +1,83 @@
+{
+  "format": "plcyard",
+  "version": 1,
+  "profile": "plcyard",
+  "programs": [
+    {
+      "number": 2,
+      "kind": "LAD",
+      "title": "Main",
+      "language": "LD",
+      "rungs": [
+        {
+          "text": "CALL,Station,Start:=%I0.0,Stop:=%I0.1,BoxThere:=%I0.3,Full:=%I0.4,Conveyor=>%Q0.0,Fill=>%Q0.1,RunLamp=>%Q0.2,FullLamp=>%Q0.4",
+          "comment": "The main routine calls the filling station once per scan, on its instance."
+        },
+        {
+          "text": "XIC,Station.Filling OTE,%Q0.3",
+          "comment": "Fill lamp straight from the instance data."
+        }
+      ],
+      "end_comment": ""
+    },
+    {
+      "number": 3,
+      "kind": "FB",
+      "title": "FillStation",
+      "language": "LD",
+      "interface": {
+        "Input": {
+          "Start": "BOOL",
+          "Stop": "BOOL",
+          "BoxThere": "BOOL",
+          "Full": "BOOL"
+        },
+        "Output": {
+          "Conveyor": "BOOL",
+          "Fill": "BOOL",
+          "RunLamp": "BOOL",
+          "FullLamp": "BOOL"
+        },
+        "Static": {
+          "Running": "BOOL",
+          "Filling": "BOOL"
+        }
+      },
+      "rungs": [
+        {
+          "text": "BST,1 XIC,#Start NXB,1 XIC,#Running BND,1 XIC,#Stop OTE,#Running",
+          "comment": "Start / stop with seal-in (Stop is NC)."
+        },
+        {
+          "text": "XIC,#Running XIC,#BoxThere XIO,#Full OTE,#Filling",
+          "comment": "Fill while a box is under the hopper and not full."
+        },
+        {
+          "text": "XIC,#Running BST,1 XIO,#BoxThere NXB,1 XIC,#Full BND,1 OTE,#Conveyor",
+          "comment": "Move on when there is no box, or it is full."
+        },
+        {
+          "text": "XIC,#Filling OTE,#Fill",
+          "comment": ""
+        },
+        {
+          "text": "XIC,#Running OTE,#RunLamp",
+          "comment": ""
+        },
+        {
+          "text": "XIC,#BoxThere XIC,#Full OTE,#FullLamp",
+          "comment": ""
+        }
+      ],
+      "end_comment": ""
+    }
+  ],
+  "tags": {
+    "Station": {
+      "type": "FillStation"
+    }
+  },
+  "symbols": {
+    "Station": "Instance of the filling station block"
+  }
+}

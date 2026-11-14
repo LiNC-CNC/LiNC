@@ -1,0 +1,60 @@
+{
+  "format": "plcyard",
+  "version": 1,
+  "profile": "plcyard",
+  "programs": [
+    {
+      "number": 2,
+      "kind": "LAD",
+      "title": "Main",
+      "language": "LD",
+      "rungs": [
+        {
+          "text": "XIC,%Q0.1 XIO,%I0.5 OTL,Reverse",
+          "comment": "Something broke the beam while closing: go back up."
+        },
+        {
+          "text": "XIC,%I0.3 OTU,Reverse",
+          "comment": ""
+        },
+        {
+          "text": "BST,1 XIC,%I0.0 NXB,1 XIC,%Q0.0 NXB,1 XIC,Reverse BND,1 XIC,%I0.2 XIO,%I0.3 XIO,%Q0.1 OTE,%Q0.0",
+          "comment": "Up: Open (or still opening, or reversing) until the open limit; Stop (NC) halts."
+        },
+        {
+          "text": "BST,1 XIC,%I0.1 NXB,1 XIC,%Q0.1 BND,1 XIC,%I0.2 XIC,%I0.5 XIO,%I0.4 XIO,%Q0.0 XIO,Reverse OTE,%Q0.1",
+          "comment": "Down: Close (or still closing) until the closed limit, only while the photo-eye is clear."
+        },
+        {
+          "text": "XIO,Blink.DN TON,Blink,1000",
+          "comment": "One-second cycle for the warning light."
+        },
+        {
+          "text": "BST,1 XIC,%Q0.0 NXB,1 XIC,%Q0.1 BND,1 LES,Blink.ACC,500 OTE,%Q0.2",
+          "comment": "Warning light flashes while the door moves."
+        },
+        {
+          "text": "BST,1 XIC,%Q0.0 NXB,1 XIC,%Q0.1 BND,1 TOF,Courtesy,T#10s OTE,%Q0.3",
+          "comment": "Courtesy light stays on 10 s after the door stops."
+        }
+      ],
+      "end_comment": ""
+    }
+  ],
+  "tags": {
+    "Reverse": {
+      "type": "BOOL"
+    },
+    "Blink": {
+      "type": "TIMER"
+    },
+    "Courtesy": {
+      "type": "TIMER"
+    }
+  },
+  "symbols": {
+    "%I0.0": "Open (PB)",
+    "%I0.1": "Close (PB)",
+    "%I0.2": "Stop (NC, PB)"
+  }
+}

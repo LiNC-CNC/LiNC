@@ -1,0 +1,101 @@
+{
+  "format": "plcyard",
+  "version": 1,
+  "profile": "plcyard",
+  "programs": [
+    {
+      "number": 2,
+      "kind": "LAD",
+      "title": "MainRoutine",
+      "language": "LD",
+      "rungs": [
+        {
+          "text": "JSR,Sequence",
+          "comment": "The main routine only calls the others."
+        },
+        {
+          "text": "JSR,Lights",
+          "comment": ""
+        }
+      ],
+      "end_comment": ""
+    },
+    {
+      "number": 3,
+      "kind": "SBR",
+      "title": "Sequence",
+      "language": "LD",
+      "rungs": [
+        {
+          "text": "TON,StepTimer,Durations[Phase]",
+          "comment": "Six phases: green A, amber A, all red, green B, amber B, all red. One timer measures each phase; its preset comes from the Durations array."
+        },
+        {
+          "text": "XIC,StepTimer.DN BST,1 MOV,0,StepTimer.ACC NXB,1 ADD,Phase,1,Phase BND,1",
+          "comment": "start timing the next phase right away"
+        },
+        {
+          "text": "GRT,Phase,5 MOV,0,Phase",
+          "comment": ""
+        }
+      ],
+      "end_comment": ""
+    },
+    {
+      "number": 4,
+      "kind": "SBR",
+      "title": "Lights",
+      "language": "LD",
+      "rungs": [
+        {
+          "text": "EQU,Phase,0 OTE,%Q0.2",
+          "comment": "Road A: green in phase 0, amber in 1, red otherwise."
+        },
+        {
+          "text": "EQU,Phase,1 OTE,%Q0.1",
+          "comment": ""
+        },
+        {
+          "text": "GEQ,Phase,2 OTE,%Q0.0",
+          "comment": ""
+        },
+        {
+          "text": "EQU,Phase,3 OTE,%Q0.6",
+          "comment": "Road B: green in phase 3, amber in 4, red otherwise."
+        },
+        {
+          "text": "EQU,Phase,4 OTE,%Q0.5",
+          "comment": ""
+        },
+        {
+          "text": "BST,1 LES,Phase,3 NXB,1 EQU,Phase,5 BND,1 OTE,%Q0.4",
+          "comment": ""
+        }
+      ],
+      "end_comment": ""
+    }
+  ],
+  "tags": {
+    "Phase": {
+      "type": "DINT"
+    },
+    "StepTimer": {
+      "type": "TIMER"
+    },
+    "Durations": {
+      "type": "DINT[6]",
+      "value": [
+        6000,
+        2000,
+        1000,
+        6000,
+        2000,
+        1000
+      ]
+    }
+  },
+  "symbols": {
+    "Phase": "Step of the light sequence (0-5)",
+    "Durations": "Length of each phase in ms"
+  }
+}

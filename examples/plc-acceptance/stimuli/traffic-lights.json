@@ -1,0 +1,9 @@
+{
+  "name": "traffic-lights",
+  "source": "traffic-lights.plcy",
+  "scan_ms": 10,
+  "scans": 1850,
+  "note": "Free running, no inputs. Six chained timers make one 18 s cycle; 1850 scans covers a full cycle and back to the start.",
+  "held": {},
+  "inputs": {}
+}

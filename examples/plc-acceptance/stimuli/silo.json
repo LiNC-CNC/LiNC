@@ -1,0 +1,15 @@
+{
+  "name": "silo",
+  "source": "silo.plcy",
+  "scan_ms": 10,
+  "scans": 200,
+  "note": "Start and seal in, fill until the high switch, then drain and refill. Rung 4 ends in two coils on parallel branches, which the current rung model cannot hold.",
+  "held": {
+    "%I0.1": true
+  },
+  "inputs": {
+    "%I0.0": [[0, true], [2, false]],
+    "%I0.3": [[50, true], [120, false]],
+    "%I0.4": [[120, true], [140, false]]
+  }
+}

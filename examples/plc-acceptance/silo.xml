@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://www.plcopen.org/xml/tc6_0201">
+<fileHeader company="converted" product="plcy2plcopen" version="1"/>
+<contentHeader name="silo"/>
+<types><dataTypes/></types>
+<instances><configurations/></instances>
+<addData/>
+<pous><pou name="MAIN" pouType="program">
+<interface><inputVars><variable name="%I0.1"><type><BOOL/></type></variable><variable name="%I0.0"><type><BOOL/></type></variable><variable name="%I0.3"><type><BOOL/></type></variable><variable name="%I0.4"><type><BOOL/></type></variable></inputVars><outputVars><variable name="%Q0.2"><type><BOOL/></type></variable><variable name="%Q0.4"><type><BOOL/></type></variable><variable name="%Q0.0"><type><BOOL/></type></variable><variable name="%Q0.1"><type><BOOL/></type></variable><variable name="%Q0.3"><type><BOOL/></type></variable></outputVars></interface>
+<body><LD>
+<leftPowerRail localId="0"/>
+<contact localId="1"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.1</variable></contact>
+<contact localId="2"><connectionPointIn><connection refLocalId="1"/></connectionPointIn><variable>%I0.0</variable></contact>
+<contact localId="3"><connectionPointIn><connection refLocalId="1"/></connectionPointIn><variable>%Q0.2</variable></contact>
+<coil localId="4" storage="none"><connectionPointIn><connection refLocalId="2"/><connection refLocalId="3"/></connectionPointIn><variable>%Q0.2</variable></coil>
+<contact localId="5"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.2</variable></contact>
+<contact localId="6" negated="true"><connectionPointIn><connection refLocalId="5"/></connectionPointIn><variable>%I0.3</variable></contact>
+<contact localId="7"><connectionPointIn><connection refLocalId="5"/></connectionPointIn><variable>%Q0.4</variable></contact>
+<coil localId="8" storage="none"><connectionPointIn><connection refLocalId="6"/><connection refLocalId="7"/></connectionPointIn><variable>%Q0.0</variable></coil>
+<contact localId="9"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.4</variable></contact>
+<contact localId="10"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.4</variable></contact>
+<contact localId="11"><connectionPointIn><connection refLocalId="9"/><connection refLocalId="10"/></connectionPointIn><variable>%I0.3</variable></contact>
+<coil localId="12" storage="none"><connectionPointIn><connection refLocalId="11"/></connectionPointIn><variable>%Q0.4</variable></coil>
+<contact localId="13"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.2</variable></contact>
+<contact localId="14"><connectionPointIn><connection refLocalId="13"/></connectionPointIn><variable>%I0.3</variable></contact>
+<contact localId="15" negated="true"><connectionPointIn><connection refLocalId="14"/></connectionPointIn><variable>%Q0.4</variable></contact>
+<coil localId="16" storage="none"><connectionPointIn><connection refLocalId="15"/></connectionPointIn><variable>%Q0.1</variable></coil>
+<coil localId="17" storage="none"><connectionPointIn><connection refLocalId="15"/></connectionPointIn><variable>%Q0.3</variable></coil>
+<rightPowerRail localId="9999"/>
+</LD></body></pou></pous></project>

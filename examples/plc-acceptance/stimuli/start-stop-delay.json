@@ -1,0 +1,14 @@
+{
+  "name": "start-stop-delay",
+  "source": "start-stop-delay.plcy",
+  "scan_ms": 10,
+  "scans": 320,
+  "note": "Start latches the motor; the 2 s TON fires while it runs; Stop drops it. The timer rung has a block and no coil, so an importer that walks back from coils loses it.",
+  "held": {
+    "%I0.1": true
+  },
+  "inputs": {
+    "%I0.0": [[0, true], [2, false]],
+    "%I0.1": [[260, false], [263, true]]
+  }
+}

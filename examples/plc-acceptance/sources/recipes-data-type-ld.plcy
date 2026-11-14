@@ -1,0 +1,102 @@
+{
+  "format": "plcyard",
+  "version": 1,
+  "profile": "plcyard",
+  "programs": [
+    {
+      "number": 2,
+      "kind": "LAD",
+      "title": "MainRoutine",
+      "language": "LD",
+      "rungs": [
+        {
+          "text": "MOV,0,Sel",
+          "comment": "Switch 1 or 2 picks recipe 1 or 2 (0 otherwise); button 0 starts the batch."
+        },
+        {
+          "text": "XIC,%I0.1 MOV,1,Sel",
+          "comment": ""
+        },
+        {
+          "text": "XIC,%I0.2 MOV,2,Sel",
+          "comment": ""
+        },
+        {
+          "text": "XIC,%I0.0 XIO,Busy OTL,Busy",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Busy TON,Fill,Recipes[Sel].FillTime",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Fill.DN TON,Mix,Recipes[Sel].MixTime",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Mix.DN OTU,Busy",
+          "comment": ""
+        },
+        {
+          "text": "XIC,Busy XIO,Fill.DN OTE,%Q0.0",
+          "comment": "filling valve"
+        },
+        {
+          "text": "XIC,Fill.DN XIO,Mix.DN OTE,%Q0.1",
+          "comment": "mixer"
+        },
+        {
+          "text": "XIC,%I0.1 OTE,%Q0.2",
+          "comment": "recipe lamps"
+        },
+        {
+          "text": "XIC,%I0.2 OTE,%Q0.3",
+          "comment": ""
+        }
+      ],
+      "end_comment": ""
+    }
+  ],
+  "tags": {
+    "Recipes": {
+      "type": "Recipe[3]",
+      "value": [
+        {
+          "FillTime": 2000,
+          "MixTime": 3000
+        },
+        {
+          "FillTime": 4000,
+          "MixTime": 2000
+        },
+        {
+          "FillTime": 1000,
+          "MixTime": 6000
+        }
+      ]
+    },
+    "Sel": {
+      "type": "DINT"
+    },
+    "Busy": {
+      "type": "BOOL"
+    },
+    "Fill": {
+      "type": "TIMER"
+    },
+    "Mix": {
+      "type": "TIMER"
+    }
+  },
+  "types": {
+    "Recipe": {
+      "FillTime": "DINT",
+      "MixTime": "DINT",
+      "Lamp": "DINT"
+    }
+  },
+  "symbols": {
+    "Recipes": "Fill and mix times (ms) of each recipe",
+    "Sel": "Recipe in use"
+  }
+}

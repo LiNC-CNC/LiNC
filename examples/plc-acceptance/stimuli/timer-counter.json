@@ -1,0 +1,30 @@
+{
+  "name": "timer-counter",
+  "source": "timer-counter.plcy",
+  "scan_ms": 10,
+  "scans": 2600,
+  "note": "Two timers chained 3 s into 2 s; each cycle pulses the counter, and the counter reaches its preset of 5 after about 2500 scans, when %Q0.1 comes on. Timers[0].TT (timing) is a different condition from .DN (done). Reset by %I0.1.",
+  "held": {},
+  "inputs": {
+    "%I0.0": [
+      [
+        0,
+        true
+      ],
+      [
+        2500,
+        false
+      ]
+    ],
+    "%I0.1": [
+      [
+        2550,
+        true
+      ],
+      [
+        2552,
+        false
+      ]
+    ]
+  }
+}

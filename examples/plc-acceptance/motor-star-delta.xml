@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://www.plcopen.org/xml/tc6_0201">
+<fileHeader company="converted" product="plcy2plcopen" version="1"/>
+<contentHeader name="motor-star-delta"/>
+<types><dataTypes/></types>
+<instances><configurations/></instances>
+<addData/>
+<pous><pou name="MAIN" pouType="program">
+<interface><inputVars><variable name="%I0.0"><type><BOOL/></type></variable><variable name="%I0.1"><type><BOOL/></type></variable><variable name="%I0.4"><type><BOOL/></type></variable><variable name="%I0.2"><type><BOOL/></type></variable><variable name="%I0.3"><type><BOOL/></type></variable></inputVars><outputVars><variable name="%Q0.0"><type><BOOL/></type></variable><variable name="%Q0.1"><type><BOOL/></type></variable><variable name="%Q0.3"><type><BOOL/></type></variable><variable name="%Q0.2"><type><BOOL/></type></variable><variable name="%Q0.4"><type><BOOL/></type></variable><variable name="%Q0.5"><type><BOOL/></type></variable></outputVars></interface>
+<body><LD>
+<leftPowerRail localId="0"/>
+<contact localId="1"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.0</variable></contact>
+<contact localId="2" negated="true"><connectionPointIn><connection refLocalId="1"/></connectionPointIn><variable>%I0.1</variable></contact>
+<contact localId="3"><connectionPointIn><connection refLocalId="2"/></connectionPointIn><variable>%I0.4</variable></contact>
+<contact localId="4"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
+<contact localId="5"><connectionPointIn><connection refLocalId="3"/><connection refLocalId="4"/></connectionPointIn><variable>%I0.2</variable></contact>
+<contact localId="6"><connectionPointIn><connection refLocalId="5"/></connectionPointIn><variable>%I0.3</variable></contact>
+<contact localId="7" negated="true"><connectionPointIn><connection refLocalId="6"/></connectionPointIn><variable>%Q0.1</variable></contact>
+<coil localId="8" storage="none"><connectionPointIn><connection refLocalId="7"/></connectionPointIn><variable>%Q0.0</variable></coil>
+<contact localId="9"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.1</variable></contact>
+<contact localId="10" negated="true"><connectionPointIn><connection refLocalId="9"/></connectionPointIn><variable>%I0.0</variable></contact>
+<contact localId="11"><connectionPointIn><connection refLocalId="10"/></connectionPointIn><variable>%I0.4</variable></contact>
+<contact localId="12"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
+<contact localId="13"><connectionPointIn><connection refLocalId="11"/><connection refLocalId="12"/></connectionPointIn><variable>%I0.2</variable></contact>
+<contact localId="14"><connectionPointIn><connection refLocalId="13"/></connectionPointIn><variable>%I0.3</variable></contact>
+<contact localId="15" negated="true"><connectionPointIn><connection refLocalId="14"/></connectionPointIn><variable>%Q0.0</variable></contact>
+<coil localId="16" storage="none"><connectionPointIn><connection refLocalId="15"/></connectionPointIn><variable>%Q0.1</variable></coil>
+<contact localId="17"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
+<contact localId="18"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
+<block localId="19" typeName="TON"><connectionPointIn><connection refLocalId="17"/><connection refLocalId="18"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#4s</expression></variable></inputVariables></block>
+<contact localId="20"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
+<contact localId="21"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
+<contact localId="22" negated="true"><connectionPointIn><connection refLocalId="20"/><connection refLocalId="21"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<contact localId="23" negated="true"><connectionPointIn><connection refLocalId="22"/></connectionPointIn><variable>%Q0.3</variable></contact>
+<coil localId="24" storage="none"><connectionPointIn><connection refLocalId="23"/></connectionPointIn><variable>%Q0.2</variable></coil>
+<contact localId="25"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
+<contact localId="26"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
+<contact localId="27"><connectionPointIn><connection refLocalId="25"/><connection refLocalId="26"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<contact localId="28" negated="true"><connectionPointIn><connection refLocalId="27"/></connectionPointIn><variable>%Q0.2</variable></contact>
+<coil localId="29" storage="none"><connectionPointIn><connection refLocalId="28"/></connectionPointIn><variable>%Q0.3</variable></coil>
+<contact localId="30"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
+<contact localId="31"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
+<coil localId="32" storage="none"><connectionPointIn><connection refLocalId="30"/><connection refLocalId="31"/></connectionPointIn><variable>%Q0.4</variable></coil>
+<contact localId="33" negated="true"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.3</variable></contact>
+<coil localId="34" storage="none"><connectionPointIn><connection refLocalId="33"/></connectionPointIn><variable>%Q0.5</variable></coil>
+<rightPowerRail localId="9999"/>
+</LD></body></pou></pous></project>

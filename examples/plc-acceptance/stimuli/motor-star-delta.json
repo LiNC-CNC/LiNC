@@ -1,0 +1,17 @@
+{
+  "name": "motor-star-delta",
+  "source": "motor-star-delta.plcy",
+  "scan_ms": 10,
+  "scans": 900,
+  "note": "Forward, star for 4 s to delta, overload trip mid-run, reset, then reverse. Star and delta must never overlap.",
+  "held": {
+    "%I0.2": true,
+    "%I0.3": true,
+    "%I0.4": true
+  },
+  "inputs": {
+    "%I0.0": [[0, true], [2, false]],
+    "%I0.3": [[600, false], [620, true]],
+    "%I0.1": [[700, true], [702, false]]
+  }
+}

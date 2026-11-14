@@ -1,0 +1,34 @@
+{
+  "format": "plcyard",
+  "version": 1,
+  "profile": "plcyard",
+  "programs": [
+    {
+      "number": 2,
+      "kind": "LAD",
+      "title": "Main",
+      "language": "LD",
+      "rungs": [
+        {
+          "text": "XIC,%I0.1 BST,1 XIC,%I0.0 NXB,1 XIC,%Q0.2 BND,1 OTE,%Q0.2",
+          "comment": ""
+        },
+        {
+          "text": "XIC,%Q0.2 BST,1 XIO,%I0.3 NXB,1 XIC,%Q0.4 BND,1 OTE,%Q0.0",
+          "comment": ""
+        },
+        {
+          "text": "BST,1 XIC,%I0.4 NXB,1 XIC,%Q0.4 BND,1 XIC,%I0.3 OTE,%Q0.4",
+          "comment": ""
+        },
+        {
+          "text": "XIC,%Q0.2 XIC,%I0.3 XIO,%Q0.4 BST,1 OTE,%Q0.1 NXB,1 OTE,%Q0.3 BND,1",
+          "comment": ""
+        }
+      ],
+      "end_comment": ""
+    }
+  ],
+  "tags": {},
+  "symbols": {}
+}

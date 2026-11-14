@@ -1,0 +1,23 @@
+{
+  "name": "motor-starters-function-block",
+  "source": "motor-starters-function-block.plcy",
+  "scan_ms": 10,
+  "scans": 500,
+  "note": "Two instances of one user FB, called with formal parameters. Note the sample wires Stop as XIO (normally open), the opposite of silo-function-block, so %I0.1 is held FALSE. Pump 1 runs, its 3 s delay sets Ready. Pump 2 is never started, so its Ready must stay off.",
+  "held": {
+    "%I0.1": false,
+    "%I0.3": false
+  },
+  "inputs": {
+    "%I0.0": [
+      [
+        0,
+        true
+      ],
+      [
+        2,
+        false
+      ]
+    ]
+  }
+}
