@@ -7,6 +7,7 @@
 
 use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Ui, Vec2};
 use linc_plc_core::grid::{Cell, POSITIONS};
+use linc_plc_core::profile::spec::Shape;
 use linc_plc_core::{Coil, CoilKind, PouLanguage, Rung};
 
 use crate::screens::plc::{Action, CompareEdit, ComputeEdit, PlcPage, PlcUi, RAIL_GROUP_GAP};
@@ -1499,7 +1500,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
     }
     struct Item {
         group: &'static str,
-        symbol: CellSymbol,
+        face: Face<'static>,
         label: &'static str,
         chord: &'static str,
         act: Act,
@@ -1537,7 +1538,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
             };
             items.push(Item {
                 group: "COIL",
-                symbol: CellSymbol::Coil(kind),
+                face: Face::coil(kind),
                 label,
                 chord,
                 act: Act::Coil(kind),
@@ -1545,10 +1546,23 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
         }
         let _ = var;
     } else {
-        for (symbol, label, chord, cell) in [
-            (CellSymbol::Wire, "Wire", "-", Cell::Wire),
+        for (face, label, chord, cell) in [
             (
-                CellSymbol::Contact,
+                Face {
+                    shape: Shape::Contact,
+                    glyph: "",
+                    rows: &[],
+                },
+                "Wire",
+                "-",
+                Cell::Wire,
+            ),
+            (
+                Face {
+                    shape: Shape::Contact,
+                    glyph: "",
+                    rows: &[],
+                },
                 "Contact",
                 "C",
                 Cell::Contact {
@@ -1557,7 +1571,11 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 },
             ),
             (
-                CellSymbol::ContactNc,
+                Face {
+                    shape: Shape::ContactNc,
+                    glyph: "",
+                    rows: &[],
+                },
                 "Negated contact",
                 "X",
                 Cell::Contact {
@@ -1565,11 +1583,20 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     negated: true,
                 },
             ),
-            (CellSymbol::Link, "Link", "V", Cell::Link),
+            (
+                Face {
+                    shape: Shape::Contact,
+                    glyph: "",
+                    rows: &[],
+                },
+                "Link",
+                "V",
+                Cell::Link,
+            ),
         ] {
             items.push(Item {
                 group: "CONTACTS",
-                symbol,
+                face,
                 label,
                 chord,
                 act: Act::Cell(cell),
@@ -1582,28 +1609,37 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
             ("CTU", "K", "CTU", "CTU0", "10"),
             ("CTD", "D", "CTD", "CTD0", "10"),
         ] {
+            let cell = Cell::Block {
+                block: block.to_string(),
+                instance: instance.to_string(),
+                preset: preset.to_string(),
+            };
             items.push(Item {
                 group: "BOXES",
-                symbol: CellSymbol::Block,
+                face: Face::from_cell(&cell),
                 label,
                 chord,
-                act: Act::Cell(Cell::Block {
-                    block: block.to_string(),
-                    instance: instance.to_string(),
-                    preset: preset.to_string(),
-                }),
+                act: Act::Cell(cell),
             });
         }
         items.push(Item {
             group: "EXPRESSIONS",
-            symbol: CellSymbol::Compare,
+            face: Face {
+                shape: Shape::Small,
+                glyph: "",
+                rows: &[],
+            },
             label: "Compare",
             chord: "G",
             act: Act::Compare,
         });
         items.push(Item {
             group: "EXPRESSIONS",
-            symbol: CellSymbol::Compute,
+            face: Face {
+                shape: Shape::Small,
+                glyph: ":=",
+                rows: &[],
+            },
             label: "Compute",
             chord: "M",
             act: Act::Compute,
@@ -1673,11 +1709,12 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 );
                 let clip = egui::Rect::from_center_size(centre, egui::vec2(34.0, 18.0));
                 let painter = ui.painter().with_clip_rect(clip);
-                draw_cell_symbol(
+                let ink = if selected { theme::FG } else { theme::MUTED };
+                draw_face(
                     &painter,
                     symbol_rect,
-                    item.symbol,
-                    if selected { theme::FG } else { theme::MUTED },
+                    &item.face,
+                    Style::new(ink, theme::C4, State::Off),
                 );
                 ui.painter().text(
                     egui::pos2(rect.left() + 44.0, rect.center().y),
@@ -3173,12 +3210,80 @@ pub fn grid_rung(
     // A labelled rung needs the same upper band a commented one has, so the
     // label has somewhere to sit.
     let banded = commented || !label.is_empty();
+    // A row holding a block grows to make room for its label band; a symbol-only
+    // row keeps `CELL_HEIGHT`.
+    let rows = cells
+        .iter()
+        .filter_map(|cell| match cell {
+            Cell::Block { block, .. } => {
+                linc_plc_core::profile::spec::spec(block).map(|spec| spec.pins.0.len().max(1))
+            }
+            _ => None,
+        })
+        .max()
+        .unwrap_or(1);
+    let strip_height = row_height(rows);
     let strip = ui.horizontal(|ui| {
         // Zero spacing: neighbouring cells share one conductor with no joint.
         ui.spacing_mut().item_spacing.x = 0.0;
+        let mut spans_right = false;
         for position in 0..POSITIONS {
+            if spans_right {
+                // The block already drew this position: it is the block's value
+                // column, not a cell of its own.
+                spans_right = false;
+                continue;
+            }
             let cell = cells.get(position).cloned().unwrap_or(Cell::Wire);
             let label = grid_cell_label(plc, &cell);
+            let live = live_at(plc, &local, position, &cell);
+            // A block's rows: pin names from the instruction table, values
+            // formatted here, because the renderer positions text and never
+            // formats a number.
+            let (glyph, pins_in, pins_out) = match &cell {
+                Cell::Block { block, .. } => match linc_plc_core::profile::spec::spec(block) {
+                    Some(spec) => (spec.mnemonic, spec.pins.0, spec.pins.1),
+                    None => ("", &[][..], &[][..]),
+                },
+                _ => ("", &[][..], &[][..]),
+            };
+            let values: Vec<(String, String)> = match &cell {
+                Cell::Block {
+                    instance, preset, ..
+                } if !pins_in.is_empty() => pins_in
+                    .iter()
+                    .zip(pins_out.iter())
+                    .map(|(pin, out)| pin_values(plc, instance, preset, pin, out))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            let rows_slice: Vec<Row<'_>> = (0..values.len())
+                .map(|index| Row {
+                    ins: pins_in.get(index).copied().filter(|name| !name.is_empty()),
+                    out: pins_out.get(index).copied().filter(|name| !name.is_empty()),
+                    value_in: values
+                        .get(index)
+                        .map(|(value, _)| value.as_str())
+                        .filter(|value| !value.is_empty()),
+                    value_out: values
+                        .get(index)
+                        .map(|(_, value)| value.as_str())
+                        .filter(|value| !value.is_empty()),
+                    // A TRUE Boolean pin lights its name; only the power row's
+                    // pair is derived from the rung's own state.
+                    lit: index == 0 && matches!(live, Some(true)),
+                })
+                .collect();
+            let face = if rows_slice.is_empty() {
+                Face::from_cell(&cell)
+            } else {
+                Face {
+                    shape: Shape::Block,
+                    glyph,
+                    rows: &rows_slice,
+                }
+            };
+            let wide = matches!(cell, Cell::Block { .. });
             let rect = cell_box(
                 plc,
                 ui,
@@ -3187,16 +3292,17 @@ pub fn grid_rung(
                 position,
                 &label,
                 matches!(cell, Cell::Wire),
-                cell_symbol(&cell),
+                &face,
                 LABEL_Y,
-                local
-                    .as_ref()
-                    .and_then(|(values, _)| values.get(position).copied().flatten())
-                    .or_else(|| cell_active(plc, &cell)),
+                Vec2::new(if wide { SPAN } else { CELL_WIDTH }, strip_height),
+                live,
             );
-            if plc.cell_cursor == Some((section, rung_index, position)) {
+            if plc.cell_cursor == Some((section, rung_index, position))
+                || (wide && plc.cell_cursor == Some((section, rung_index, position + 1)))
+            {
                 *cursor_rect = Some(rect);
             }
+            spans_right = wide;
         }
         let coil = plc.operand_label(&rung.coil().var);
         let coil_rect = cell_box(
@@ -3207,8 +3313,9 @@ pub fn grid_rung(
             POSITIONS,
             &coil,
             rung.coil().var.is_empty(),
-            CellSymbol::Coil(rung.coil().kind),
+            &Face::coil(rung.coil().kind),
             LABEL_Y,
+            Vec2::new(CELL_WIDTH, strip_height),
             // A compute rung writes through its cell, so its coil slot is unused
             // and must not light up from a variable of the same name.
             if let Some((_, coil)) = &local {
@@ -3256,42 +3363,135 @@ pub fn grid_rung(
     ui.add_space(ROW_GAP);
 }
 
-/// The graphical element a cell stands for. The ladder draws IEC symbols, not
-/// text: a contact is two bars, a coil a rounded loop, a link a junction, and so
-/// on. The operand name is drawn beside the symbol, never instead of it.
+/// How an element is painted. Weight and colour both come from `State`, so a call
+/// site cannot remember one and forget the other, and never by shape: three states
+/// have one outline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CellSymbol {
-    Wire,
-    Link,
-    /// Normally open contact.
-    Contact,
-    /// Normally closed contact: the bars plus a slash.
-    ContactNc,
-    /// Rising or falling edge contact.
-    Edge(bool),
-    /// Coil: normal, set or reset.
-    Coil(CoilKind),
-    Block,
-    Compare,
-    Compute,
+pub(crate) enum State {
+    /// The snapshot cannot answer for this element, so it is neither on nor off.
+    /// Drawing it as `Off` would be a claim the program has not made.
+    Unknown,
+    Off,
+    On,
 }
 
-/// Map a cell to the symbol the grid draws.
-pub fn cell_symbol(cell: &Cell) -> CellSymbol {
-    match cell {
-        Cell::Wire => CellSymbol::Wire,
-        Cell::Link => CellSymbol::Link,
-        Cell::Contact { negated, .. } => {
-            if *negated {
-                CellSymbol::ContactNc
-            } else {
-                CellSymbol::Contact
-            }
+/// A stroke's weight and colour, both derived from the state.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Style {
+    ink: Color32,
+    accent: Color32,
+    state: State,
+}
+
+impl Style {
+    pub fn new(ink: Color32, accent: Color32, state: State) -> Self {
+        Self { ink, accent, state }
+    }
+
+    /// Outline, bars, arcs. Dimmed when the state is unknown, so an element the
+    /// snapshot cannot answer for is not painted as an off one.
+    fn body(&self, s: f32) -> Stroke {
+        let width = if matches!(self.state, State::On) {
+            2.2
+        } else {
+            1.6
+        };
+        Stroke::new(width * s, self.ink())
+    }
+
+    /// The ink for this state: `Unknown` is dimmed, not a claim of off.
+    fn ink(&self) -> Color32 {
+        match self.state {
+            State::Unknown => self.ink.gamma_multiply(0.55),
+            _ => self.ink,
         }
-        Cell::Edge { rising, .. } => CellSymbol::Edge(*rising),
-        Cell::Block { .. } => CellSymbol::Block,
-        Cell::Compare { .. } | Cell::Expr { .. } => CellSymbol::Compare,
-        Cell::Compute { .. } => CellSymbol::Compute,
+    }
+
+    /// The conductor. Dimmed when the state is unknown: the wire is there, what
+    /// flows through it is not known.
+    fn lead(&self, s: f32) -> Stroke {
+        let width = if matches!(self.state, State::On) {
+            1.6
+        } else {
+            1.2
+        };
+        Stroke::new(width * s, self.ink())
+    }
+}
+
+/// One row of a block body. Row 0 is the power row, and the only row that carries
+/// conductor. Names come from the instruction table; values arrive already
+/// formatted, because the renderer positions text and never formats a number.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Row<'a> {
+    /// The input pin's name, inside the body on the left.
+    pub ins: Option<&'a str>,
+    /// The output pin's name, inside the body on the right.
+    pub out: Option<&'a str>,
+    /// The input value, outside the body, right-aligned.
+    pub value_in: Option<&'a str>,
+    /// The output value, outside the body, left-aligned.
+    pub value_out: Option<&'a str>,
+    /// This row's Boolean pins are TRUE, so their names light.
+    pub lit: bool,
+}
+
+/// What to draw for one cell: a shape from the table, a glyph, and the block rows.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Face<'a> {
+    pub shape: Shape,
+    pub glyph: &'a str,
+    pub rows: &'a [Row<'a>],
+}
+
+impl<'a> Face<'a> {
+    /// The one cell-to-symbol mapping. The shape comes from the instruction table,
+    /// never from matching a `Cell` variant here, so deleting `CellSymbol` cannot
+    /// leave two mappings to drift.
+    pub fn from_cell(cell: &Cell) -> Face<'static> {
+        let (shape, glyph) = match cell {
+            Cell::Contact { negated, .. } => (
+                if *negated {
+                    Shape::ContactNc
+                } else {
+                    Shape::Contact
+                },
+                "",
+            ),
+            Cell::Edge { rising, .. } => (Shape::Contact, if *rising { "P" } else { "N" }),
+            Cell::Block { block, .. } => (
+                Shape::Block,
+                linc_plc_core::profile::spec::spec(block)
+                    .map(|spec| spec.mnemonic)
+                    .unwrap_or(""),
+            ),
+            Cell::Compare { .. } | Cell::Expr { .. } => (Shape::Small, ""),
+            Cell::Compute { .. } => (Shape::Small, ":="),
+            Cell::Wire | Cell::Link => (Shape::Contact, ""),
+        };
+        Face {
+            shape,
+            glyph,
+            rows: &[],
+        }
+    }
+
+    /// A coil's letter is its glyph; a negated coil's glyph is the slash.
+    pub fn coil(kind: CoilKind) -> Face<'static> {
+        let glyph = match kind {
+            CoilKind::Set => "S",
+            CoilKind::Reset => "R",
+            CoilKind::Jump => "J",
+            CoilKind::Call => "C",
+            CoilKind::Compute => "=",
+            CoilKind::Negated => "/",
+            CoilKind::Normal => "",
+        };
+        Face {
+            shape: Shape::Coil,
+            glyph,
+            rows: &[],
+        }
     }
 }
 
@@ -3320,6 +3520,10 @@ pub const SLASH: f32 = BAR_HALF;
 /// The letter on an edge contact sits on the conductor, between the bars: above
 /// the bars it reads as a separate annotation.
 pub const EDGE_LETTER_Y: f32 = CONDUCTOR_Y;
+/// The room a label needs above a block body before the row has to grow. A
+/// symbol-only row is `CELL_HEIGHT` tall; a row holding a block grows by whatever
+/// the body needs beyond that, and `CELL_HEIGHT` itself never changes.
+pub const LABEL_BAND: f32 = 12.0;
 /// Where a cell's operand name, rung label and comment sit. The conductor is
 /// centred, so this band shares the space above the bars with them.
 pub const LABEL_Y: f32 = 8.0;
@@ -3459,278 +3663,202 @@ fn coil_slash(cx: f32, y: f32, s: f32) -> [egui::Pos2; 2] {
     ]
 }
 
-pub(crate) fn draw_cell_symbol(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    symbol: CellSymbol,
-    color: Color32,
-) {
-    // D5: the one scale factor. Every dimension below is multiplied by it, so a
-    // resized cell, a zoom or a denser view cannot leave a pixel literal behind.
+/// The row baselines of a block body, top to bottom, in the body's coordinates.
+/// Row 0 sits on the conductor; each row after it is one pitch lower.
+fn block_row_y(body: egui::Rect, row: usize, s: f32) -> f32 {
+    body.center().y + ROW_PITCH * row as f32 * s
+}
+
+/// The height a strip needs when it holds a block of `rows` rows: the body, plus
+/// the label band it needs above it. `CELL_HEIGHT` itself does not change — only
+/// the stride between rows does, so a symbol-only row keeps its size.
+fn row_height(rows: usize) -> f32 {
+    CELL_HEIGHT.max(block_height(rows) + 2.0 * LABEL_BAND)
+}
+
+/// One strip's conductor, `CONDUCTOR_Y` above the strip's bottom edge.
+fn conductor_y(rect: egui::Rect) -> f32 {
+    rect.bottom() - (CELL_HEIGHT - CONDUCTOR_Y)
+}
+
+pub(crate) fn draw_wire(painter: &egui::Painter, rect: egui::Rect, style: Style) {
     let s = rect.height() / CELL_HEIGHT;
-    let line = Stroke::new(1.6 * s, color);
-    let thin = Stroke::new(1.2 * s, color);
-    let y = rect.top() + CONDUCTOR_Y * s;
+    let y = conductor_y(rect);
+    painter.line_segment(
+        [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+        style.lead(s),
+    );
+}
+
+pub(crate) fn draw_link(painter: &egui::Painter, rect: egui::Rect, style: Style) {
+    let s = rect.height() / CELL_HEIGHT;
+    let y = conductor_y(rect);
     let cx = rect.center().x;
-    // Every element's leads run to the strip edges, so neighbouring cells share
-    // one unbroken conductor with no visible joint.
+    painter.line_segment(
+        [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+        style.lead(s),
+    );
+    // The junction reaches the branch row's conductor exactly.
+    painter.line_segment(
+        [
+            egui::pos2(cx, y),
+            egui::pos2(cx, rect.bottom() + CELL_HEIGHT / 2.0),
+        ],
+        style.lead(s),
+    );
+}
+
+/// Draw one symbol. Rung furniture and the symbol are here; the operand label is
+/// `grid_cell_label`'s, and `glyph` is symbol furniture only.
+pub(crate) fn draw_face(painter: &egui::Painter, rect: egui::Rect, face: &Face<'_>, style: Style) {
+    let s = rect.height() / CELL_HEIGHT;
+    let y = conductor_y(rect);
+    let cx = rect.center().x;
     let left = rect.left();
     let right = rect.right();
-    match symbol {
-        CellSymbol::Wire => {
-            painter.line_segment([egui::pos2(left, y), egui::pos2(right, y)], thin);
-        }
-        CellSymbol::Link => {
-            painter.line_segment([egui::pos2(left, y), egui::pos2(right, y)], thin);
-            // The junction reaches the branch row's conductor exactly.
-            painter.line_segment([egui::pos2(cx, y), egui::pos2(cx, y + ROW_STRIDE)], line);
-        }
-        CellSymbol::Contact | CellSymbol::ContactNc | CellSymbol::Edge(_) => {
+    let lead = style.lead(s);
+    match face.shape {
+        Shape::Contact | Shape::ContactNc => {
             let bar = BAR_HALF * s;
-            painter.line_segment([egui::pos2(left, y), egui::pos2(cx - bar, y)], thin);
-            painter.line_segment([egui::pos2(cx + bar, y), egui::pos2(right, y)], thin);
+            painter.line_segment([egui::pos2(left, y), egui::pos2(cx - bar, y)], lead);
+            painter.line_segment([egui::pos2(cx + bar, y), egui::pos2(right, y)], lead);
             for segment in contact_bars(cx, y, s) {
-                painter.line_segment(segment, line);
+                painter.line_segment(segment, style.body(s));
             }
-            if symbol == CellSymbol::ContactNc {
-                painter.line_segment(contact_slash(cx, y, s), line);
+            if face.shape == Shape::ContactNc {
+                painter.line_segment(contact_slash(cx, y, s), style.body(s));
             }
-            if let CellSymbol::Edge(rising) = symbol {
-                // The letter sits between the bars; an arrow over the bar read as
-                // a stray plus sign at this size.
+            if !face.glyph.is_empty() {
                 painter.text(
                     edge_letter_at(cx, y, s),
                     Align2::CENTER_CENTER,
-                    if rising { "P" } else { "N" },
+                    face.glyph,
                     FontId::monospace(8.0 * s),
-                    color,
+                    style.ink,
                 );
             }
         }
-        CellSymbol::Coil(kind) => {
-            // A coil is two arcs: a half circle above the conductor and one below,
-            // meeting where the leads do.
+        Shape::Coil => {
             let radius = COIL_R * s;
-            painter.line_segment([egui::pos2(left, y), egui::pos2(cx - radius, y)], thin);
-            painter.line_segment([egui::pos2(cx + radius, y), egui::pos2(right, y)], thin);
+            painter.line_segment([egui::pos2(left, y), egui::pos2(cx - radius, y)], lead);
+            painter.line_segment([egui::pos2(cx + radius, y), egui::pos2(right, y)], lead);
             let (upper, lower) = coil_arcs(cx, y, s);
-            painter.add(egui::Shape::line(upper, line));
-            painter.add(egui::Shape::line(lower, line));
-            match kind {
-                CoilKind::Set
-                | CoilKind::Reset
-                | CoilKind::Jump
-                | CoilKind::Call
-                | CoilKind::Compute => {
-                    let letter = match kind {
-                        CoilKind::Set => "S",
-                        CoilKind::Reset => "R",
-                        CoilKind::Jump => "J",
-                        CoilKind::Call => "C",
-                        _ => "=",
-                    };
-                    painter.text(
-                        coil_letter_at(cx, y),
-                        Align2::CENTER_CENTER,
-                        letter,
-                        FontId::monospace(8.5 * s),
-                        color,
-                    );
-                }
-                CoilKind::Negated => {
-                    painter.line_segment(coil_slash(cx, y, s), line);
-                }
-                CoilKind::Normal => {}
+            painter.add(egui::Shape::line(upper, style.body(s)));
+            painter.add(egui::Shape::line(lower, style.body(s)));
+            if face.glyph == "/" {
+                painter.line_segment(coil_slash(cx, y, s), style.body(s));
+            } else if !face.glyph.is_empty() {
+                painter.text(
+                    coil_letter_at(cx, y),
+                    Align2::CENTER_CENTER,
+                    face.glyph,
+                    FontId::monospace(8.5 * s),
+                    style.ink,
+                );
             }
         }
-        CellSymbol::Block | CellSymbol::Compare | CellSymbol::Compute => {
-            let body = egui::Rect::from_min_max(
-                egui::pos2(cx - 16.0, y - 9.0),
-                egui::pos2(cx + 16.0, y + 9.0),
+        Shape::Small => {
+            let body = egui::Rect::from_center_size(
+                egui::pos2(cx, y),
+                egui::vec2(SMALL_W * s, SMALL_H * s),
             );
-            painter.rect_stroke(body, 0.0, line, egui::StrokeKind::Middle);
-            painter.line_segment([egui::pos2(left, y), egui::pos2(body.left(), y)], thin);
-            painter.line_segment([egui::pos2(body.right(), y), egui::pos2(right, y)], thin);
-            if symbol == CellSymbol::Compute {
+            painter.rect_stroke(body, SMALL_R * s, style.body(s), egui::StrokeKind::Middle);
+            painter.line_segment([egui::pos2(left, y), egui::pos2(body.left(), y)], lead);
+            painter.line_segment([egui::pos2(body.right(), y), egui::pos2(right, y)], lead);
+            if !face.glyph.is_empty() {
                 painter.text(
                     body.center(),
                     Align2::CENTER_CENTER,
-                    ":=",
-                    FontId::monospace(9.0),
-                    color,
+                    face.glyph,
+                    FontId::monospace(9.0 * s),
+                    style.ink,
                 );
             }
         }
+        Shape::Block => draw_block(painter, rect, face, style, s),
     }
 }
 
-/// §III.4's arithmetic: the geometry is a set of derived constants, and these are
-/// the assertions that keep them from drifting apart. They cost microseconds, so
-/// they are the primary guard; a golden image is the second layer.
-#[cfg(test)]
-mod geometry_tests {
-    use super::*;
+/// A block's two leads: the only horizontal lines the body has. Both are on the
+/// power row; every other row is a value row and draws no line at all, because a
+/// stub there would invent a connection that does not exist.
+fn block_leads(rect: egui::Rect, body: egui::Rect, s: f32) -> [[egui::Pos2; 2]; 2] {
+    let y = conductor_y(rect);
+    let _ = s;
+    [
+        [egui::pos2(rect.left(), y), egui::pos2(body.left(), y)],
+        [egui::pos2(body.right(), y), egui::pos2(rect.right(), y)],
+    ]
+}
 
-    /// Rule 6: the conductor is centred, so the row gap is symmetric.
-    #[test]
-    fn the_conductor_is_centred() {
-        assert_eq!(CONDUCTOR_Y, CELL_HEIGHT / 2.0);
+fn draw_block(painter: &egui::Painter, rect: egui::Rect, face: &Face<'_>, style: Style, s: f32) {
+    let y = conductor_y(rect);
+    let cx = rect.center().x;
+    let rows = face.rows.len().max(1);
+    let body = egui::Rect::from_center_size(
+        egui::pos2(cx, y),
+        egui::vec2(BLOCK_W * s, block_height(rows) * s),
+    );
+    // The power row is the only row with conductor: the block is in series, so the
+    // wire runs from the span's edges to the body on both sides.
+    let lead = style.lead(s);
+    for segment in block_leads(rect, body, s) {
+        painter.line_segment(segment, lead);
     }
-
-    /// Rule 4: the NC slash spans the bars and no further.
-    #[test]
-    fn the_nc_slash_spans_the_bars() {
-        assert_eq!(SLASH, BAR_HALF);
-    }
-
-    /// Rule 1: a half circle, so the lead meets the arc's end and does not cross it.
-    #[test]
-    fn the_coil_is_a_half_circle() {
-        assert_eq!(COIL_SPAN, std::f32::consts::PI);
-        assert_eq!(COIL_LEAD_X, COIL_R);
-    }
-
-    /// Rule 5: the body fits its cell and the leads have somewhere to go.
-    #[test]
-    fn the_body_fits_its_cell() {
-        assert!(BLOCK_W + 2.0 * LEAD <= CELL_WIDTH);
-        for rows in 1..=3 {
-            assert!(
-                block_height(rows) + 2.0 * BLOCK_LEAD_V <= CELL_HEIGHT,
-                "a {rows}-row body must fit the cell"
-            );
-        }
-    }
-
-    /// The corners are soft, not a button: 4 of 38.
-    #[test]
-    fn the_corners_are_soft_not_button_round() {
-        assert!(BLOCK_R >= 3.0);
-        assert!(BLOCK_R * 6.0 <= BLOCK_W);
-    }
-
-    /// The type text fits inside the body, so no block can be drawn nameless.
-    #[test]
-    fn the_type_text_fits_inside_the_body() {
-        assert!(TITLE_PX + INNER_PAD <= BLOCK_W / 2.0);
-    }
-
-    /// The two-position span is exactly consumed: no value clipped, no cell left.
-    #[test]
-    fn the_span_is_exactly_two_positions() {
-        assert_eq!(2.0 * (PAD_GAP + VALUE_W + MARGIN) + BLOCK_W, SPAN);
-        assert_eq!(SPAN, 2.0 * CELL_WIDTH);
-    }
-
-    /// Rule 4: the slash ends on the bars. Longer leaves the wire visibly crossing
-    /// the circle of a coil and makes an NC contact look like a struck-through one.
-    #[test]
-    fn the_nc_slash_ends_on_the_bars() {
-        let (cx, y) = (100.0, 200.0);
-        let [start, end] = contact_slash(cx, y, 1.0);
-        assert_eq!(start.x, cx - BAR_HALF);
-        assert_eq!(end.x, cx + BAR_HALF);
-        // 45 degrees, and the ends meet the bars' own ends.
-        assert_eq!(start.y, y + BAR_HALF_HEIGHT);
-        assert_eq!(end.y, y - BAR_HALF_HEIGHT);
-        assert_eq!(BAR_HALF, BAR_HALF_HEIGHT);
-    }
-
-    /// Rule 3: a `P` or `N` sits in the gap, on the conductor. The bars' tops are
-    /// the ceiling, so the letter is inside the symbol rather than above it.
-    #[test]
-    fn the_edge_letter_sits_between_the_bars() {
-        let (cx, y) = (100.0, 200.0);
-        let letter = edge_letter_at(cx, y, 1.0);
-        assert_eq!(letter.x, cx);
-        assert_eq!(letter.y, y);
-        assert!(y - letter.y < BAR_HALF_HEIGHT, "inside the bars' height");
-    }
-
-    /// The bars stand `2 * BAR_HALF` apart and are symmetric about the conductor.
-    #[test]
-    fn the_bars_are_symmetric_about_the_conductor() {
-        let (cx, y) = (100.0, 200.0);
-        let [left, right] = contact_bars(cx, y, 1.0);
-        assert_eq!(right[0].x - left[0].x, 2.0 * BAR_HALF);
-        assert_eq!(left[0].y - y, -(right[1].y - y));
-        assert_eq!(left[0].y, y - BAR_HALF_HEIGHT);
-    }
-
-    /// D5: every dimension follows the cell's scale, so a resized strip is the
-    /// same picture, not a misplaced one.
-    #[test]
-    fn the_symbol_scales_with_the_cell() {
-        let [left, _] = contact_bars(100.0, 200.0, 2.0);
-        assert_eq!(left[0].x, 100.0 - 2.0 * BAR_HALF);
-        let [start, end] = contact_slash(100.0, 200.0, 2.0);
-        assert_eq!(end.x - start.x, 4.0 * SLASH);
-        assert_eq!(edge_letter_at(100.0, 200.0, 2.0).x, 100.0);
-    }
-
-    /// Rule 1: the coil's leads end exactly on its arcs. Both arcs' ends lie on the
-    /// conductor, so the lead meets an arc end and the strokes cannot cross.
-    #[test]
-    fn the_coil_arcs_end_on_the_conductor() {
-        let (cx, y) = (100.0, 200.0);
-        let (upper, lower) = coil_arcs(cx, y, 1.0);
-        assert_eq!(upper.first().copied(), Some(egui::pos2(cx - COIL_R, y)));
-        assert_eq!(upper.last().copied(), Some(egui::pos2(cx + COIL_R, y)));
-        assert_eq!(lower.first().copied(), Some(egui::pos2(cx + COIL_R, y)));
-        assert_eq!(lower.last().copied(), Some(egui::pos2(cx - COIL_R, y)));
-        assert_eq!(COIL_R, COIL_LEAD_X, "the lead ends where the arc starts");
-    }
-
-    /// Two half circles, one on each side of the conductor: neither arc strays past
-    /// the conductor line except where it meets it.
-    #[test]
-    fn each_coil_arc_is_a_half_circle() {
-        let (cx, y) = (100.0, 200.0);
-        let (upper, lower) = coil_arcs(cx, y, 1.0);
-        for point in &upper {
-            assert!(point.y <= y + 0.01, "{point:?} is below the conductor");
-        }
-        for point in &lower {
-            assert!(point.y >= y - 0.01, "{point:?} is above the conductor");
-        }
-        // The topmost point is one radius above the conductor, and likewise below.
-        let top = upper.iter().fold(y, |low, point| low.min(point.y));
-        let bottom = lower.iter().fold(y, |high, point| high.max(point.y));
-        assert!((y - top - COIL_R).abs() < 0.01);
-        assert!((bottom - y - COIL_R).abs() < 0.01);
-    }
-
-    /// Rule 2: the letter is inside the loop, between the arcs, not outside-left.
-    #[test]
-    fn the_coil_letter_is_inside_the_loop() {
-        let (cx, y) = (100.0, 200.0);
-        let letter = coil_letter_at(cx, y);
-        assert_eq!(letter, egui::pos2(cx, y));
-        assert!(
-            (letter.x - cx).abs() < COIL_R && (letter.y - y).abs() < COIL_R,
-            "the letter is inside the coil's radius"
+    painter.rect_stroke(body, BLOCK_R * s, style.body(s), egui::StrokeKind::Middle);
+    if !face.glyph.is_empty() {
+        // The type text is the block's own name, not its instance: the instance is
+        // in the label above the span.
+        painter.text(
+            egui::pos2(cx, y - 10.0 * s),
+            Align2::CENTER_CENTER,
+            face.glyph,
+            FontId::monospace(TITLE_PX * s),
+            style.ink,
         );
     }
-
-    /// A negated coil's slash is inside the arc gap, not floating past the coil.
-    #[test]
-    fn the_negated_coil_slash_is_inside() {
-        let (cx, y) = (100.0, 200.0);
-        let [start, end] = coil_slash(cx, y, 1.0);
-        for point in [start, end] {
-            assert!((point.x - cx).abs() < COIL_R);
-            assert!((point.y - y).abs() < COIL_R);
+    let name_size = FontId::monospace(TITLE_PX * s);
+    let value_size = FontId::monospace(TITLE_PX * s);
+    for (index, row) in face.rows.iter().enumerate() {
+        let ry = block_row_y(body, index, s);
+        let pin_ink = if row.lit { style.accent } else { theme::MUTED };
+        if let Some(name) = row.ins {
+            painter.text(
+                egui::pos2(body.left() + INNER_PAD * s, ry),
+                Align2::LEFT_CENTER,
+                name,
+                name_size.clone(),
+                pin_ink,
+            );
         }
-    }
-
-    /// The body grows a row at a time, and no block is padded with an empty row.
-    #[test]
-    fn a_body_grows_a_row_at_a_time() {
-        assert_eq!(block_height(1), 23.0);
-        assert_eq!(block_height(2), 32.0);
-        assert_eq!(block_height(3), 41.0);
-        for rows in 1..=3 {
-            assert_eq!(block_height(rows), 18.0 + 9.0 * (rows as f32 - 1.0) + 5.0);
+        if let Some(name) = row.out {
+            painter.text(
+                egui::pos2(body.right() - INNER_PAD * s, ry),
+                Align2::RIGHT_CENTER,
+                name,
+                name_size.clone(),
+                pin_ink,
+            );
+        }
+        // Values sit outside the body, on their own row, and no line is drawn to
+        // them: a stub there would invent a connection that does not exist.
+        if let Some(value) = row.value_in {
+            painter.text(
+                egui::pos2(body.left() - PAD_GAP * s, ry),
+                Align2::RIGHT_CENTER,
+                value,
+                value_size.clone(),
+                style.ink,
+            );
+        }
+        if let Some(value) = row.value_out {
+            painter.text(
+                egui::pos2(body.right() + PAD_GAP * s, ry),
+                Align2::LEFT_CENTER,
+                value,
+                value_size.clone(),
+                style.ink,
+            );
         }
     }
 }
@@ -3763,6 +3891,60 @@ pub fn cell_active(plc: &PlcUi, cell: &Cell) -> Option<bool> {
     }
 }
 
+/// The element's live state from the preview when one is held, otherwise from the
+/// snapshot.
+fn live_at(
+    plc: &PlcUi,
+    local: &Option<(Vec<Option<bool>>, Option<bool>)>,
+    position: usize,
+    cell: &Cell,
+) -> Option<bool> {
+    local
+        .as_ref()
+        .and_then(|(values, _)| values.get(position).copied().flatten())
+        .or_else(|| cell_active(plc, cell))
+}
+
+/// A block pin's value, formatted for display. The UI decides what a value means;
+/// the renderer only positions the string.
+///
+/// Only TIME and INT pins carry text. A Boolean pin shows nothing — its name lights
+/// instead — and an operand the snapshot cannot answer for shows `-`, never `0`, so
+/// an unanswered pin never reads as a value.
+fn pin_values(plc: &PlcUi, instance: &str, preset: &str, pin: &str, out: &str) -> (String, String) {
+    let member = |name: &str| plc.word_value(&format!("{instance}.{name}"));
+    let mut left = String::new();
+    let mut right = String::new();
+    match pin {
+        "PT" | "PV" => left = display_preset(preset),
+        _ => {}
+    }
+    match out {
+        "ET" | "CV" => right = member(out).map(display_ms).unwrap_or_else(|| "-".into()),
+        _ => {}
+    }
+    (left, right)
+}
+
+/// `T#2400ms` and `2400` both read as a time on the face, because a timer's preset
+/// is a time whichever way the cell spells it.
+fn display_preset(preset: &str) -> String {
+    let timer = preset.trim_start().to_ascii_uppercase().starts_with("T#");
+    match linc_plc_core::profile::resolve::parse_preset(preset, timer) {
+        Some(value) if timer => display_ms(value),
+        _ => preset.to_string(),
+    }
+}
+
+/// Seconds with one decimal, `T#` dropped: `4s`, `2.4s`.
+fn display_ms(value: i32) -> String {
+    if value % 1000 == 0 {
+        format!("{}s", value / 1000)
+    } else {
+        format!("{:.1}s", value as f32 / 1000.0)
+    }
+}
+
 fn cell_box(
     plc: &PlcUi,
     ui: &mut Ui,
@@ -3771,11 +3953,11 @@ fn cell_box(
     position: usize,
     label: &str,
     quiet: bool,
-    symbol: CellSymbol,
+    face: &Face<'_>,
     name_y: f32,
+    size: Vec2,
     live: Option<bool>,
 ) -> egui::Rect {
-    let size = Vec2::new(CELL_WIDTH, CELL_HEIGHT);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let selected = plc.cell_cursor == Some((section, rung, position));
     let painter = ui.painter();
@@ -3792,9 +3974,15 @@ fn cell_box(
     } else {
         theme::FG
     };
+    let state = match live {
+        Some(true) => State::On,
+        Some(false) => State::Off,
+        None => State::Unknown,
+    };
+    let style = Style::new(color, theme::C4, state);
     if selected {
         let tick = Stroke::new(1.6, theme::ACCENT);
-        let y = rect.top() + CONDUCTOR_Y;
+        let y = conductor_y(rect);
         painter.line_segment(
             [
                 egui::pos2(rect.left() + 1.0, y - 13.0),
@@ -3810,7 +3998,13 @@ fn cell_box(
             tick,
         );
     }
-    draw_cell_symbol(painter, rect, symbol, color);
+    // The symbol area is the bottom `CELL_HEIGHT` of the strip: a row grows upwards
+    // for a block's label band, and the symbol keeps its size.
+    let symbol_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.left(), rect.bottom() - CELL_HEIGHT),
+        egui::vec2(rect.width(), CELL_HEIGHT),
+    );
+    draw_face(painter, symbol_rect, face, style);
     if !label.is_empty() {
         // Fit the operand inside the cell: expressions such as `MW2:=MW1+5` and
         // long coil names were clipped at the strip edges. The font shrinks to fit
@@ -3911,74 +4105,45 @@ fn cell_label(cell: &Cell) -> String {
 mod symbol_tests {
     use super::*;
 
-    /// The grid draws IEC symbols, so every element the manual has maps to a
-    /// distinct shape rather than to a text label.
+    /// D3: the shape comes from the table, never from matching a cell variant in the
+    /// renderer. This is the regression that keeps that true now `CellSymbol` is
+    /// gone: one mapping, `Face::from_cell`, and the tests that read it.
     #[test]
-    fn every_element_maps_to_its_own_symbol() {
-        assert_eq!(cell_symbol(&Cell::Wire), CellSymbol::Wire);
-        assert_eq!(cell_symbol(&Cell::Link), CellSymbol::Link);
-        assert_eq!(
-            cell_symbol(&Cell::Contact {
-                var: "a".into(),
-                negated: false
-            }),
-            CellSymbol::Contact
-        );
-        assert_eq!(
-            cell_symbol(&Cell::Contact {
-                var: "a".into(),
-                negated: true
-            }),
-            CellSymbol::ContactNc
-        );
-        assert_eq!(
-            cell_symbol(&Cell::Edge {
-                var: "a".into(),
-                rising: true
-            }),
-            CellSymbol::Edge(true)
-        );
-        assert_eq!(
-            cell_symbol(&Cell::Edge {
-                var: "a".into(),
-                rising: false
-            }),
-            CellSymbol::Edge(false)
-        );
-        assert_eq!(
-            cell_symbol(&Cell::Block {
-                block: "TON".into(),
-                instance: "TON0".into(),
-                preset: "T#1s".into()
-            }),
-            CellSymbol::Block
-        );
-        assert_eq!(
-            cell_symbol(&Cell::Compare {
-                op: "GT".into(),
-                left: "MW1".into(),
-                right: "5".into()
-            }),
-            CellSymbol::Compare
-        );
-        assert_eq!(
-            cell_symbol(&Cell::Compute {
-                op: "ADD".into(),
-                target: "MW2".into(),
-                left: "MW1".into(),
-                right: "5".into()
-            }),
-            CellSymbol::Compute
-        );
-        // The three coil kinds each draw differently.
-        assert_ne!(
-            CellSymbol::Coil(CoilKind::Set),
-            CellSymbol::Coil(CoilKind::Reset)
-        );
-        assert_ne!(
-            CellSymbol::Coil(CoilKind::Normal),
-            CellSymbol::Coil(CoilKind::Set)
-        );
+    fn face_from_cell_yields_the_table_shape() {
+        let block = Face::from_cell(&Cell::Block {
+            block: "TON".to_string(),
+            instance: "TON0".to_string(),
+            preset: "T#1s".to_string(),
+        });
+        assert_eq!(block.shape, Shape::Block);
+        assert_eq!(block.glyph, "TON", "the type name, not the instance");
+
+        let nc = Face::from_cell(&Cell::Contact {
+            var: "a".to_string(),
+            negated: true,
+        });
+        assert_eq!(nc.shape, Shape::ContactNc);
+        let no = Face::from_cell(&Cell::Contact {
+            var: "a".to_string(),
+            negated: false,
+        });
+        assert_eq!(no.shape, Shape::Contact);
+
+        let compute = Face::from_cell(&Cell::Compute {
+            op: "ADD".to_string(),
+            target: "MW2".to_string(),
+            left: "MW1".to_string(),
+            right: "5".to_string(),
+        });
+        assert_eq!(compute.shape, Shape::Small);
+        assert_eq!(compute.glyph, ":=");
+
+        let edge = Face::from_cell(&Cell::Edge {
+            var: "a".to_string(),
+            rising: true,
+        });
+        assert_eq!(edge.shape, Shape::Contact);
+        assert_eq!(edge.glyph, "P", "the letter is inside the gap");
     }
 
     /// A cell keeps room for its operand name beside the symbol.
@@ -4824,5 +4989,243 @@ mod compute_window_tests {
             .map(|choice| choice.value)
             .collect();
         assert!(values.iter().any(|value| value == "T#250ms"));
+    }
+}
+#[cfg(test)]
+mod block_face_tests {
+    use super::*;
+    use linc_plc_core::profile::spec::spec;
+
+    /// A `TON` is a named two-row body: `IN`/`PT` on the left, `Q`/`ET` on the right.
+    #[test]
+    fn a_timer_body_is_named_and_two_rows_tall() {
+        let row = spec("TON").expect("the table has TON");
+        assert_eq!(row.pins.0, &["IN", "PT"]);
+        assert_eq!(row.pins.1, &["Q", "ET"]);
+        assert_eq!(block_height(2), 32.0);
+        assert_eq!(row.shape, Shape::Block);
+        assert_eq!(row.mnemonic, "TON");
+    }
+
+    /// A `CTU` is three rows, and its reset row has an input and no output, so the
+    /// right side gets no name and no value — only the body's edge.
+    #[test]
+    fn a_counter_body_is_three_rows_tall_with_a_blank_right_side() {
+        let row = spec("CTU").expect("the table has CTU");
+        assert_eq!(block_height(3), 41.0);
+        assert_eq!(row.pins.0, &["CU", "R", "PV"]);
+        assert_eq!(row.pins.1[1], "", "the reset row has no output pin");
+    }
+
+    /// Only the power row carries conductor: the two leads are horizontal and both
+    /// sit on it, so no value row has a stub.
+    #[test]
+    fn a_block_draws_one_line_per_side_and_both_on_the_power_row() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(SPAN, CELL_HEIGHT));
+        let body = egui::Rect::from_center_size(
+            egui::pos2(rect.center().x, conductor_y(rect)),
+            egui::vec2(BLOCK_W, block_height(3)),
+        );
+        let leads = block_leads(rect, body, 1.0);
+        assert_eq!(leads.len(), 2);
+        for segment in leads {
+            assert_eq!(segment[0].y, segment[1].y, "a lead is horizontal");
+            assert_eq!(segment[0].y, rect.top() + CONDUCTOR_Y);
+        }
+        // One on each side of the body.
+        assert_eq!(leads[0][1].x, body.left());
+        assert_eq!(leads[1][0].x, body.right());
+    }
+
+    /// A row grows only for a body that needs the label band, and `CELL_HEIGHT`
+    /// itself never changes: only the stride between rows does.
+    #[test]
+    fn a_block_row_grows_only_for_the_label_band() {
+        assert_eq!(CELL_HEIGHT, 50.0);
+        assert_eq!(row_height(1), 50.0, "a one-row body fits the cell");
+        assert_eq!(row_height(2), 56.0);
+        assert_eq!(row_height(3), 65.0);
+        for rows in 1..=3 {
+            assert!(row_height(rows) >= block_height(rows) + 2.0 * LABEL_BAND);
+        }
+    }
+
+    /// D8: `Unknown` is visibly not `Off`, and `On` differs in both weight and
+    /// colour from either.
+    #[test]
+    fn unknown_is_visibly_not_off() {
+        let ink = Color32::from_rgb(0x20, 0x30, 0x40);
+        let accent = Color32::from_rgb(0x4d, 0xa3, 0xff);
+        let unknown = Style::new(ink, accent, State::Unknown).body(1.0);
+        let off = Style::new(ink, accent, State::Off).body(1.0);
+        let on = Style::new(ink, accent, State::On).body(1.0);
+        assert_ne!(unknown.color, off.color, "unknown is dimmed, not off");
+        assert_eq!(unknown.width, off.width, "weight does not claim a state");
+        assert_ne!(on.width, off.width);
+        assert_eq!(on.color, off.color, "the state's colour is the ink");
+    }
+
+    /// Three states, one shape: `body` and `lead` change weight and colour only.
+    #[test]
+    fn the_state_never_changes_the_shape() {
+        let ink = Color32::from_rgb(0x20, 0x30, 0x40);
+        let accent = Color32::from_rgb(0x4d, 0xa3, 0xff);
+        for state in [State::Unknown, State::Off, State::On] {
+            let style = Style::new(ink, accent, state);
+            assert!(style.body(1.0).width >= 1.6);
+            assert!(style.lead(1.0).width >= 1.2);
+        }
+    }
+
+    /// D5: weight scales with the cell, so a zoomed strip keeps its proportions.
+    #[test]
+    fn weight_scales_with_the_cell() {
+        let ink = Color32::from_rgb(0x20, 0x30, 0x40);
+        let style = Style::new(ink, ink, State::Off);
+        assert_eq!(style.body(2.0).width, 2.0 * style.body(1.0).width);
+        assert_eq!(style.lead(2.0).width, 2.0 * style.lead(1.0).width);
+    }
+
+    /// The three states, and the wire and link painters, exist because the pin
+    /// values and the conductor are drawn separately from any instruction.
+    #[test]
+    fn a_pin_value_reads_as_a_time_and_an_unset_one_as_a_dash() {
+        assert_eq!(display_ms(4_000), "4s");
+        assert_eq!(display_ms(2_400), "2.4s");
+        // A sub-second preset rounds to the column's one decimal: `T#250ms` reads
+        // `0.2s`. The width is fixed so a counting value does not jitter.
+        assert_eq!(display_preset("T#250ms"), "0.2s");
+        assert_eq!(display_preset("T#1s"), "1s");
+        assert_eq!(display_preset("10"), "10");
+    }
+}
+#[cfg(test)]
+mod golden_tests {
+    use super::*;
+
+    /// The picture a row draws, as text: every shape, its points and its stroke.
+    ///
+    /// This is the second layer, not the first. It answers "did the picture change",
+    /// never "is the geometry right" — the arithmetic tests in `geometry_tests` and
+    /// `block_face_tests` answer that. Reviewers rubber-stamp golden diffs, so a
+    /// failure here means: look at what moved, decide whether it was meant, and only
+    /// then re-record.
+    fn digest(cells: Vec<Cell>, coil: Coil) -> String {
+        let plc = PlcUi::default();
+        let rung = Rung {
+            cells,
+            ..Rung::new(linc_plc_core::model::Logic::Const { value: true }, coil)
+        };
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(640.0, 96.0),
+            )),
+            ..Default::default()
+        };
+        let output = ctx.run_ui(input, |ui| {
+            let mut actions = Vec::new();
+            let mut cursor = None;
+            grid_rung(&plc, ui, 0, 0, &rung, &mut actions, &mut cursor);
+        });
+        let mut output = output;
+        output.textures_delta.clear();
+        let mut lines = Vec::new();
+        for clipped in &output.shapes {
+            describe(&clipped.shape, &mut lines);
+        }
+        lines.join("\n")
+    }
+
+    fn point(x: f32, y: f32) -> String {
+        format!("({x:.2},{y:.2})")
+    }
+
+    fn describe(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::LineSegment { points, stroke } => out.push(format!(
+                "line {} {} w={:.2}",
+                point(points[0].x, points[0].y),
+                point(points[1].x, points[1].y),
+                stroke.width
+            )),
+            egui::Shape::Path(path) => {
+                let points: Vec<String> = path.points.iter().map(|p| point(p.x, p.y)).collect();
+                out.push(format!(
+                    "path {} w={:.2} {}",
+                    points.len(),
+                    path.stroke.width,
+                    points.join(" ")
+                ));
+            }
+            egui::Shape::Rect(rect) => out.push(format!(
+                "rect {} {} w={:.2} r={:.2}",
+                point(rect.rect.left(), rect.rect.top()),
+                point(rect.rect.right(), rect.rect.bottom()),
+                rect.stroke.width,
+                rect.corner_radius.nw
+            )),
+            egui::Shape::Text(text) => out.push(format!(
+                "text {:?} at {}",
+                text.galley.text(),
+                point(text.pos.x, text.pos.y)
+            )),
+            other => out.push(format!("{other:?}").chars().take(24).collect()),
+        }
+    }
+
+    const GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/plc-ton-row.txt");
+
+    fn check(drawn: String) {
+        if std::env::var("UPDATE_GOLDEN").is_ok() {
+            std::fs::write(GOLDEN, &drawn).expect("the golden file is writable");
+            return;
+        }
+        let golden = std::fs::read_to_string(GOLDEN)
+            .expect("tests/golden/plc-ton-row.txt is committed; re-record with UPDATE_GOLDEN=1");
+        assert_eq!(
+            drawn, golden,
+            "the rendered row changed; if that was intended, re-record with UPDATE_GOLDEN=1"
+        );
+    }
+
+    /// A `TON` row: the body, its two rows and the values outside it.
+    #[test]
+    fn the_timer_row_is_the_picture_we_agreed_to() {
+        let cells = vec![
+            Cell::Contact {
+                var: "start".into(),
+                negated: false,
+            },
+            Cell::Block {
+                block: "TON".into(),
+                instance: "TON0".into(),
+                preset: "T#2s".into(),
+            },
+            Cell::Wire,
+        ];
+        check(digest(
+            cells,
+            Coil::new("lamp", linc_plc_core::model::CoilKind::Normal),
+        ));
+    }
+
+    /// A coil row: two half circles, the letter inside, and the negation slash.
+    #[test]
+    fn the_coil_row_is_the_picture_we_agreed_to() {
+        let cells = vec![Cell::Contact {
+            var: "a".into(),
+            negated: true,
+        }];
+        let drawn = digest(cells, Coil::new("y", linc_plc_core::model::CoilKind::Set));
+        if std::env::var("UPDATE_GOLDEN").is_ok() {
+            let path = GOLDEN.replace("plc-ton-row", "plc-coil-row");
+            std::fs::write(path, &drawn).expect("the golden file is writable");
+            return;
+        }
+        let path = GOLDEN.replace("plc-ton-row", "plc-coil-row");
+        let golden = std::fs::read_to_string(&path).expect("the coil golden is committed");
+        assert_eq!(drawn, golden, "the rendered coil changed");
     }
 }
