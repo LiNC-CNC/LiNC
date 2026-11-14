@@ -462,6 +462,24 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         format!("{rung_path}.cells[{cell_index}]"),
                     ));
                 }
+                if let crate::grid::Cell::Block { .. } = cell {
+                    // A block occupies two positions: its own cell and the cell to
+                    // its right, where its pins' values are drawn outside the body.
+                    // A block with nothing to its right would have its values
+                    // clipped; a block against a symbol would draw that symbol under
+                    // its values. So the neighbour must be a wire, or the row must
+                    // end there.
+                    let last = cell_index + 1 == crate::grid::POSITIONS;
+                    let neighbour = rung.cells.get(cell_index + 1);
+                    if last || matches!(neighbour, Some(neighbour) if !matches!(neighbour, crate::grid::Cell::Wire))
+                    {
+                        diagnostics.push(Diagnostic::error(
+                            "block_span",
+                            "a block occupies two positions: its own cell and the wire to its right",
+                            format!("{rung_path}.cells[{cell_index}]"),
+                        ));
+                    }
+                }
                 if matches!(cell, crate::grid::Cell::Link) && rung_index + 1 == section.rungs.len()
                 {
                     diagnostics.push(Diagnostic::error(

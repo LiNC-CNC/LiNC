@@ -323,11 +323,16 @@ pub fn tree_rows(logic: &Logic) -> Option<Vec<Vec<Cell>>> {
             block,
             instance,
             preset,
-        } => Some(vec![vec![Cell::Block {
-            block: block.clone(),
-            instance: instance.clone(),
-            preset: preset.clone(),
-        }]]),
+        } => Some(vec![vec![
+            // A block occupies two positions, so the wire to its right is part of
+            // its footprint: the editor draws its pin values there.
+            Cell::Block {
+                block: block.clone(),
+                instance: instance.clone(),
+                preset: preset.clone(),
+            },
+            Cell::Wire,
+        ]]),
         Logic::Compare {
             operator,
             left,

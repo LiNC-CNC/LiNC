@@ -671,7 +671,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "T",
-        pins: (&[], &[]),
+        pins: (&["IN", "PT"], &["Q", "ET"]),
         il: IlForm::None,
     },
     Spec {
@@ -682,7 +682,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "T",
-        pins: (&[], &[]),
+        pins: (&["IN", "PT"], &["Q", "ET"]),
         il: IlForm::None,
     },
     Spec {
@@ -693,7 +693,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "T",
-        pins: (&[], &[]),
+        pins: (&["IN", "PT"], &["Q", "ET"]),
         il: IlForm::None,
     },
     Spec {
@@ -704,7 +704,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "C",
-        pins: (&[], &[]),
+        pins: (&["CU", "R", "PV"], &["Q", "", "CV"]),
         il: IlForm::None,
     },
     Spec {
@@ -715,7 +715,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "C",
-        pins: (&[], &[]),
+        pins: (&["CD", "LD", "PV"], &["Q", "", "CV"]),
         il: IlForm::None,
     },
     Spec {
@@ -726,7 +726,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "S",
-        pins: (&[], &[]),
+        pins: (&["S1", "R"], &["Q1", ""]),
         il: IlForm::None,
     },
     Spec {
@@ -737,7 +737,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Block,
         letter: "R",
-        pins: (&[], &[]),
+        pins: (&["S", "R1"], &["Q1", ""]),
         il: IlForm::None,
     },
     Spec {
@@ -748,7 +748,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "P",
-        pins: (&[], &[]),
+        pins: (&["CLK"], &["Q"]),
         il: IlForm::None,
     },
     Spec {
@@ -759,7 +759,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "P",
-        pins: (&[], &[]),
+        pins: (&["CLK"], &["Q"]),
         il: IlForm::None,
     },
     Spec {
@@ -770,7 +770,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "N",
-        pins: (&[], &[]),
+        pins: (&["CLK"], &["Q"]),
         il: IlForm::None,
     },
     Spec {
@@ -781,7 +781,7 @@ pub const SPECS: &[Spec] = &[
         output: false,
         shape: Small,
         letter: "N",
-        pins: (&[], &[]),
+        pins: (&["CLK"], &["Q"]),
         il: IlForm::None,
     },
 ];
