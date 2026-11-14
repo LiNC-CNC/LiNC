@@ -16,6 +16,12 @@ License: GPL-2.0-or-later
  .
  On Debian systems the full text of the GNU General Public License version 2 is
  in /usr/share/common-licenses/GPL-2.
+Comment: LiNC's own files are available under GPL-2.0-or-later, but the source
+ package as a whole is distributed under GPL-3.0: it contains
+ subroutines/probe_basic/*, which ships the GPLv3 text (see that stanza and
+ subroutines/probe_basic/SOURCE.md), and taking a GPL-2.0-or-later work to
+ GPLv3 is what the "or later" permits. Both readings of the upstream grant are
+ compatible with that; the subtree's own licence is not relicensed here.
 
 Files: crates/linc-view/src/hershey.rs
 Copyright: 2005, 2006 Chris Radek

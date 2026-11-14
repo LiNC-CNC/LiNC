@@ -134,7 +134,7 @@ coils, series/parallel branches, multiple sections, constants, a 32-bit word ban
 with `word` and `float` I/O points, validation, local offline editing, download,
 start/stop, live monitoring and forcing.
 
-Not yet: SFC, `.clp`, Modbus, true hot
+Not yet: SFC, Modbus, true hot
 swap, and a servo-thread realtime component. Timers, counters, compare/compute
 and a PLCopen XML import exist (see **Import**). The scan is userspace (1–5 ms target, soft
 realtime); do not use it for encoder phasing or step timing.

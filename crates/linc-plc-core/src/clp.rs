@@ -10,8 +10,10 @@
 //! elements occupy a footprint whose "alive" cell is the top-right corner, and a
 //! vertical `ConnectedWithTop` bit joins a cell to the row above.
 //!
-//! Read §2 of `docs/PLC-PORT-HANDOFF.md` before changing the mapping. The four
-//! facts that are easy to get wrong:
+//! Read Appendix A of `docs/PLC-PORT-HANDOFF.md` (the refusal codes, as shipped)
+//! and the `.clp import` section of `docs/plc.md` (the operator-facing
+//! description) before changing the mapping. The four facts that are easy to
+//! get wrong:
 //!
 //! - rung order is the `NextRung` chain, never the file numbering;
 //! - a counter's `done` is equality while LiNC's `CTU.Q` is `>=`, so `done` is
