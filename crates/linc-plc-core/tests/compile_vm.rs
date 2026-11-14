@@ -2373,3 +2373,406 @@ fn a_jump_coil_on_a_compute_row_is_refused() {
         "{diagnostics:?}"
     );
 }
+
+// --- item 5: expressions in compare and compute -----------------------------
+
+fn expr_rung(text: &str, coil: Coil) -> Rung {
+    Rung {
+        label: String::new(),
+        cells: vec![linc_plc_core::grid::Cell::Expr {
+            text: text.to_string(),
+        }],
+        comment: String::new(),
+        logic: Logic::Const { value: true },
+        coil,
+    }
+}
+
+fn expr_project(rungs: Vec<Rung>, outputs: &[&str]) -> Project {
+    project_with(
+        outputs
+            .iter()
+            .map(|name| IoPoint::new(*name, IoDirection::Out))
+            .collect(),
+        Vec::new(),
+        vec![section("main", rungs)],
+    )
+}
+
+/// `MW1<2*MW2`: a condition over arithmetic, with `*` above `<`.
+#[test]
+fn an_expression_compare_is_arithmetic_with_precedence() {
+    let project = expr_project(
+        vec![expr_rung("MW1<2*MW2", Coil::new("y", CoilKind::Normal))],
+        &["y"],
+    );
+    let compiled = compile(&project).expect("the expression compiles");
+    assert!(
+        compiled.program.ops.contains(&Op::Mul),
+        "`*` lowered: {:?}",
+        compiled.program.ops
+    );
+    let mut vm = Vm::new(&compiled);
+    vm.set_word(1, 3);
+    vm.set_word(2, 2);
+    vm.scan(&[]);
+    assert_eq!(vm.outputs(), &[true], "3 < 2*2");
+    vm.set_word(2, 1);
+    vm.scan(&[]);
+    assert_eq!(vm.outputs(), &[false], "3 < 2 is false");
+}
+
+/// `ABS(MW0)=1` for `MW0 = -1`, and not for 2.
+#[test]
+fn an_expression_abs_is_the_magnitude() {
+    let project = expr_project(
+        vec![expr_rung("ABS(MW0)=1", Coil::new("y", CoilKind::Normal))],
+        &["y"],
+    );
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.set_word(0, -1);
+    vm.scan(&[]);
+    assert_eq!(vm.outputs(), &[true], "ABS(-1) = 1");
+    vm.set_word(0, 1);
+    vm.scan(&[]);
+    assert_eq!(vm.outputs(), &[true]);
+    vm.set_word(0, 2);
+    vm.scan(&[]);
+    assert_eq!(vm.outputs(), &[false], "ABS(2) is not 1");
+}
+
+/// `MINI` clamps at the upper bound and `MAXI` at the lower one.
+#[test]
+fn mini_and_maxi_clamp() {
+    let project = expr_project(
+        vec![
+            Rung {
+                label: String::new(),
+                cells: Vec::new(),
+                comment: String::new(),
+                logic: Logic::Const { value: true },
+                coil: Coil::compute("MW1=MINI(MW0,5)"),
+            },
+            Rung {
+                label: String::new(),
+                cells: Vec::new(),
+                comment: String::new(),
+                logic: Logic::Const { value: true },
+                coil: Coil::compute("MW2=MAXI(MW0,0)"),
+            },
+        ],
+        &[],
+    );
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.set_word(0, 7);
+    vm.scan(&[]);
+    assert_eq!(vm.word(1), 5, "MINI(7,5) = 5");
+    assert_eq!(vm.word(2), 7);
+    vm.set_word(0, -3);
+    vm.scan(&[]);
+    assert_eq!(vm.word(1), -3);
+    assert_eq!(vm.word(2), 0, "MAXI(-3,0) = 0");
+}
+
+/// `,` is ClassicLadder's AND between comparison groups.
+#[test]
+fn a_comma_is_an_and_between_comparisons() {
+    let project = expr_project(
+        vec![expr_rung("MW0>1,MW1<3", Coil::new("y", CoilKind::Normal))],
+        &["y"],
+    );
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    for (a, b, wanted) in [(2, 2, true), (1, 2, false), (2, 3, false)] {
+        vm.set_word(0, a);
+        vm.set_word(1, b);
+        vm.scan(&[]);
+        assert_eq!(vm.outputs(), &[wanted], "MW0={a}, MW1={b}");
+    }
+}
+
+/// `MW3=MW0*2+5` from a compute coil, which writes only while its rung passes.
+#[test]
+fn a_compute_coil_writes_an_expression_and_follows_its_rung() {
+    let project = project_with(
+        vec![IoPoint::new("go", IoDirection::In)],
+        Vec::new(),
+        vec![section(
+            "main",
+            vec![Rung {
+                label: String::new(),
+                cells: vec![linc_plc_core::grid::Cell::Contact {
+                    var: "go".to_string(),
+                    negated: false,
+                }],
+                comment: String::new(),
+                logic: Logic::Const { value: true },
+                coil: Coil::compute("MW3=MW0*2+5"),
+            }],
+        )],
+    );
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.set_word(0, 4);
+    vm.scan(&[false]);
+    assert_eq!(vm.word(3), 0, "an unpowered compute coil writes nothing");
+    vm.scan(&[true]);
+    assert_eq!(vm.word(3), 13, "4*2+5");
+}
+
+/// The parser bounds its own recursion, because it walks the text before any
+/// diagnostic could be produced.
+#[test]
+fn a_deeply_nested_expression_is_refused() {
+    let nested = format!("{}MW0{}", "(".repeat(40), ")".repeat(40));
+    let project = expr_project(
+        vec![expr_rung(&format!("{nested}=1"), Coil::new("y", CoilKind::Normal))],
+        &["y"],
+    );
+    let diagnostics = validate(&project);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|item| item.code == "expr_depth" && item.message.contains("32")),
+        "{diagnostics:?}"
+    );
+}
+
+/// An unbalanced parenthesis is a syntax error with the byte offset of the `(`.
+#[test]
+fn an_unbalanced_parenthesis_is_refused_with_an_offset() {
+    let project = expr_project(
+        vec![expr_rung("(MW0>1", Coil::new("y", CoilKind::Normal))],
+        &["y"],
+    );
+    let diagnostics = validate(&project);
+    let error = diagnostics
+        .iter()
+        .find(|item| item.code == "expr_syntax")
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert!(error.message.contains("never closed"), "{}", error.message);
+    assert!(error.message.contains("byte"), "{}", error.message);
+}
+
+/// `/0` and `%0` yield 0, like the IL operators they lower to.
+#[test]
+fn division_and_modulo_by_zero_yield_zero() {
+    for (index, text) in ["MW1=MW0/0", "MW2=MW0%0"].into_iter().enumerate() {
+        let project = expr_project(
+            vec![Rung {
+                label: String::new(),
+                cells: Vec::new(),
+                comment: String::new(),
+                logic: Logic::Const { value: true },
+                coil: Coil::compute(text),
+            }],
+            &[],
+        );
+        let mut vm = Vm::new(&compile(&project).expect("compile"));
+        vm.set_word(0, 7);
+        vm.scan(&[]);
+        let slot = index as u16 + 1;
+        assert_eq!(vm.word(slot), 0, "{text}");
+    }
+}
+
+/// Every expression refusal has its own code, and names what it refused.
+#[test]
+fn a_bad_expression_is_refused_with_its_own_code() {
+    for (text, code, named) in [
+        ("NOPE>1", "expr_operand", Some("NOPE")),
+        ("MW0&1", "expr_operand", Some("&")),
+        ("FROB(MW0)>1", "expr_function", Some("FROB")),
+        ("ABS(1,2)>1", "expr_function", Some("ABS")),
+        ("MW0+1", "expr_operand", None),
+    ] {
+        let project = expr_project(
+            vec![expr_rung(text, Coil::new("y", CoilKind::Normal))],
+            &["y"],
+        );
+        let diagnostics = validate(&project);
+        let error = diagnostics
+            .iter()
+            .find(|item| item.code == code)
+            .unwrap_or_else(|| panic!("{text}: {diagnostics:?}"));
+        if let Some(named) = named {
+            assert!(error.message.contains(named), "{text}: {}", error.message);
+        }
+        assert!(error.message.contains("byte"), "{text}: {}", error.message);
+    }
+}
+
+/// `expr` belongs to a compute coil: an empty one, a stray one, and an
+/// assignment to a bit are all refused rather than ignored.
+#[test]
+fn a_compute_coil_refuses_a_missing_or_misplaced_expression() {
+    let mut missing = expr_rung("", Coil::new("", CoilKind::Compute));
+    missing.cells = Vec::new();
+    let missing = expr_project(vec![missing], &[]);
+    assert!(
+        codes(&validate(&missing)).contains(&"coil_expr".to_string()),
+        "{:?}",
+        validate(&missing)
+    );
+
+    let mut stray = Coil::new("y", CoilKind::Normal);
+    stray.expr = Some("MW0=1".to_string());
+    let stray = expr_project(vec![expr_rung("MW0>1", stray)], &["y"]);
+    assert!(
+        codes(&validate(&stray)).contains(&"coil_expr".to_string()),
+        "{:?}",
+        validate(&stray)
+    );
+
+    let project = project_with(
+        vec![
+            IoPoint::new("q3", IoDirection::Out),
+            IoPoint::new("y", IoDirection::Out),
+        ],
+        Vec::new(),
+        vec![section(
+            "main",
+            vec![Rung {
+                label: String::new(),
+                cells: Vec::new(),
+                comment: String::new(),
+                logic: Logic::Const { value: true },
+                coil: Coil::compute("q3=1"),
+            }],
+        )],
+    );
+    let diagnostics = validate(&project);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|item| item.code == "expr_operand" && item.message.contains("q3")),
+        "{diagnostics:?}"
+    );
+}
+
+/// A compare as a rung's first cell leaves exactly one bit: the comparison is
+/// the power, and a seed `true` would sit on the stack for the rest of the scan.
+#[test]
+fn a_compare_first_rung_leaves_no_spare_bit() {
+    let project = expr_project(
+        vec![Rung {
+            label: String::new(),
+            cells: vec![linc_plc_core::grid::Cell::Compare {
+                op: "EQ".to_string(),
+                left: "MW0".to_string(),
+                right: "0".to_string(),
+            }],
+            comment: String::new(),
+            logic: Logic::Const { value: true },
+            coil: Coil::new("y", CoilKind::Normal),
+        }],
+        &["y"],
+    );
+    let compiled = compile(&project).expect("compile");
+    assert!(
+        !compiled.program.ops.contains(&Op::PushConst(true)),
+        "unexpected seed: {:?}",
+        compiled.program.ops
+    );
+    let mut vm = Vm::new(&compiled);
+    vm.scan(&[]);
+    assert_eq!(vm.outputs(), &[true]);
+}
+
+/// The tree form of an expression lowers through the same path as a grid cell.
+#[test]
+fn a_tree_expression_lowers_like_a_grid_cell() {
+    let project = project_with(
+        vec![IoPoint::new("y", IoDirection::Out)],
+        Vec::new(),
+        vec![section(
+            "main",
+            vec![Rung::new(
+                Logic::Expr {
+                    text: "MW0<2*MW1".to_string(),
+                },
+                Coil::new("y", CoilKind::Normal),
+            )],
+        )],
+    );
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.set_word(0, 3);
+    vm.set_word(1, 2);
+    vm.scan(&[]);
+    assert_eq!(vm.outputs(), &[true], "3 < 4");
+}
+
+/// The operators the acceptance list does not exercise: `^` (right-associative,
+/// above unary minus), `MOY`/`AVG`, and the boolean operators.
+#[test]
+fn the_remaining_grammar_lowers() {
+    let compute = |target: &str, text: &str| Rung {
+        label: String::new(),
+        cells: Vec::new(),
+        comment: String::new(),
+        logic: Logic::Const { value: true },
+        coil: Coil::compute(format!("{target}={text}")),
+    };
+    let project = expr_project(
+        vec![
+            compute("MW1", "MOY(MW0,10)"),
+            compute("MW2", "AVG(MW0,10)"),
+            compute("MW3", "2^3*5"),
+            compute("MW4", "-MW0^2"),
+            compute("MW5", "2^3^2"),
+        ],
+        &[],
+    );
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.set_word(0, 4);
+    vm.scan(&[]);
+    assert_eq!(vm.word(1), 7, "(4+10)/2");
+    assert_eq!(vm.word(2), 7, "AVG is MOY");
+    assert_eq!(vm.word(3), 40, "2^3*5");
+    assert_eq!(vm.word(4), -16, "-(4^2): ^ binds above unary minus");
+    assert_eq!(vm.word(5), 512, "2^(3^2): ^ is right-associative");
+
+    for (text, first, second, wanted) in [
+        ("MW0>1|MW1>1", 0, 2, true),
+        ("MW0>1|MW1>1", 0, 0, false),
+        ("MW0>1&MW1>1", 2, 2, true),
+        ("MW0>1&MW1>1", 2, 0, false),
+        ("NOT (MW0>1)", 1, 0, true),
+        ("NOT (MW0>1)", 2, 0, false),
+        ("MW0<>1", 0, 0, true),
+        ("MW0<=1", 1, 0, true),
+        ("MW0>=1", 0, 0, false),
+    ] {
+        let project = expr_project(
+            vec![expr_rung(text, Coil::new("y", CoilKind::Normal))],
+            &["y"],
+        );
+        let mut vm = Vm::new(&compile(&project).expect("compile"));
+        vm.set_word(0, first);
+        vm.set_word(1, second);
+        vm.scan(&[]);
+        assert_eq!(vm.outputs(), &[wanted], "{text} at MW0={first}, MW1={second}");
+    }
+}
+
+/// The op limit is separate from the nesting limit: a flat chain of terms is
+/// shallow but lowers to more operations than the stack budget allows.
+#[test]
+fn an_expression_with_too_many_operations_is_refused() {
+    let terms = vec!["MW0"; 300].join("+");
+    let project = expr_project(
+        vec![Rung {
+            label: String::new(),
+            cells: Vec::new(),
+            comment: String::new(),
+            logic: Logic::Const { value: true },
+            coil: Coil::compute(format!("MW1={terms}")),
+        }],
+        &[],
+    );
+    let diagnostics = validate(&project);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|item| item.code == "expr_depth" && item.message.contains("512")),
+        "{diagnostics:?}"
+    );
+}

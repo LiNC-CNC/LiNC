@@ -366,6 +366,12 @@ pub enum Logic {
         var: String,
         negated: bool,
     },
+    /// A free-text boolean expression, the tree form of `Cell::Expr`. The text
+    /// is the ClassicLadder operand spelling after import (`MW1<2*MW2`), parsed
+    /// by `crate::expr`.
+    Expr {
+        text: String,
+    },
     Series {
         items: Vec<Logic>,
     },
@@ -378,6 +384,11 @@ pub enum Logic {
 pub struct Coil {
     pub var: String,
     pub kind: CoilKind,
+    /// A compute coil's assignment text (`MW3=MW1*2+5`). Only `CoilKind::Compute`
+    /// reads it; validation refuses the field on any other kind rather than
+    /// ignoring it.
+    #[serde(default)]
+    pub expr: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -394,6 +405,9 @@ pub enum CoilKind {
     /// `-[C]-`: call the POU named by `coil.var` and return. The callee is
     /// inlined, so a call has no locals and no stack frame.
     Call,
+    /// `-[=]-`: evaluate `coil.expr` as `target = value` and write it, while the
+    /// rung passes. `coil.var` is unused; the target is inside the expression.
+    Compute,
 }
 
 impl Project {
@@ -569,10 +583,12 @@ impl Rung {
     }
 
     pub fn is_comment_row(&self) -> bool {
-        // A jump or call coil is an instruction even with no operand: an empty
-        // one is an error the validator must see, not a comment.
-        !matches!(self.coil.kind, CoilKind::Jump | CoilKind::Call)
-            && self.coil.var.trim().is_empty()
+        // A jump, call or compute coil is an instruction even with no operand:
+        // an empty one is an error the validator must see, not a comment.
+        !matches!(
+            self.coil.kind,
+            CoilKind::Jump | CoilKind::Call | CoilKind::Compute
+        ) && self.coil.var.trim().is_empty()
             && self
                 .cells
                 .iter()
@@ -612,6 +628,16 @@ impl Coil {
         Self {
             var: var.into(),
             kind,
+            expr: None,
+        }
+    }
+
+    /// A compute coil: the assignment text is the operand.
+    pub fn compute(expr: impl Into<String>) -> Self {
+        Self {
+            var: String::new(),
+            kind: CoilKind::Compute,
+            expr: Some(expr.into()),
         }
     }
 }

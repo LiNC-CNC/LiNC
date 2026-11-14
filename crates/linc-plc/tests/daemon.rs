@@ -330,6 +330,7 @@ fn load_rejects_a_changed_io_map() {
         Coil {
             var: name,
             kind: CoilKind::Normal,
+            expr: None,
         },
     ));
     changed.sections.push(section);

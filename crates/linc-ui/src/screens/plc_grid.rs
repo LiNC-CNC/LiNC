@@ -338,7 +338,8 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                     CoilKind::Reset => CoilKind::Negated,
                     CoilKind::Negated => CoilKind::Jump,
                     CoilKind::Jump => CoilKind::Call,
-                    CoilKind::Call => CoilKind::Normal,
+                    CoilKind::Call => CoilKind::Compute,
+                    CoilKind::Compute => CoilKind::Normal,
                 };
                 actions.push(Action::SetCoil {
                     section: cursor.0,
@@ -1532,6 +1533,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 CoilKind::Negated => "N",
                 CoilKind::Jump => "J",
                 CoilKind::Call => "",
+                CoilKind::Compute => "",
             };
             items.push(Item {
                 group: "COIL",
@@ -3104,6 +3106,11 @@ fn preview_scan(plc: &PlcUi, cells: &[Cell]) -> (Vec<Option<bool>>, Option<bool>
                 power = power && bit;
                 Some(power)
             }
+            // The preview evaluates contacts and compares from the frame's
+            // snapshot. An expression needs the compiler's stack, so the cell
+            // stays neutral and the preview power carries on unchanged rather
+            // than guessing which way it would go.
+            Cell::Expr { .. } => None,
             Cell::Compare { op, left, right } => {
                 let result = match (plc.word_value(left), plc.word_value(right)) {
                     (Some(a), Some(b)) => match op.to_ascii_uppercase().as_str() {
@@ -3278,7 +3285,7 @@ pub fn cell_symbol(cell: &Cell) -> CellSymbol {
         }
         Cell::Edge { rising, .. } => CellSymbol::Edge(*rising),
         Cell::Block { .. } => CellSymbol::Block,
-        Cell::Compare { .. } => CellSymbol::Compare,
+        Cell::Compare { .. } | Cell::Expr { .. } => CellSymbol::Compare,
         Cell::Compute { .. } => CellSymbol::Compute,
     }
 }
@@ -3372,12 +3379,17 @@ pub(crate) fn draw_cell_symbol(
             painter.add(egui::Shape::line(left_arc, line));
             painter.add(egui::Shape::line(right_arc, line));
             match kind {
-                CoilKind::Set | CoilKind::Reset | CoilKind::Jump | CoilKind::Call => {
+                CoilKind::Set
+                | CoilKind::Reset
+                | CoilKind::Jump
+                | CoilKind::Call
+                | CoilKind::Compute => {
                     let letter = match kind {
                         CoilKind::Set => "S",
                         CoilKind::Reset => "R",
                         CoilKind::Jump => "J",
-                        _ => "C",
+                        CoilKind::Call => "C",
+                        _ => "=",
                     };
                     painter.text(
                         egui::pos2(cx - radius - 5.0, y - 9.0),
@@ -3427,6 +3439,9 @@ pub fn cell_active(plc: &PlcUi, cell: &Cell) -> Option<bool> {
     match cell {
         Cell::Contact { var, negated } => plc.bit_value(var).map(|value| value != *negated),
         Cell::Edge { var, .. } => plc.bit_value(var),
+        // No local evaluator for a free-text expression: the cell stays neutral
+        // instead of showing a guess.
+        Cell::Expr { .. } => None,
         Cell::Compare { op, left, right } => {
             let a = plc.word_value(left)?;
             let b = plc.word_value(right)?;
@@ -3564,6 +3579,7 @@ fn cell_label(cell: &Cell) -> String {
             };
             format!("{left}{symbol}{right}")
         }
+        Cell::Expr { text } => text.clone(),
         Cell::Compute {
             op,
             target,

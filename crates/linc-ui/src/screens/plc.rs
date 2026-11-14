@@ -523,6 +523,7 @@ pub fn add_rung(project: &mut Project, section: usize, after: Option<usize>) -> 
             coil: Coil {
                 var: output,
                 kind: CoilKind::Normal,
+                expr: None,
             },
         },
     );
@@ -564,6 +565,7 @@ pub fn coil_label(kind: CoilKind) -> &'static str {
         CoilKind::Reset => "(R)",
         CoilKind::Jump => "J",
         CoilKind::Call => "C",
+        CoilKind::Compute => "(=)",
     }
 }
 
@@ -6717,9 +6719,9 @@ fn paint_logic(
                     .line_segment([pos2(right_rail, *first), pos2(right_rail, *last)], wire);
             }
         }
-        Logic::Block { .. } | Logic::Edge { .. } | Logic::Compare { .. } => {
-            // Blocks, edges and compares are drawn as a named box; the tree
-            // canvas is only a fallback for rungs the grid cannot show.
+        Logic::Block { .. } | Logic::Edge { .. } | Logic::Compare { .. } | Logic::Expr { .. } => {
+            // Blocks, edges, compares and expressions are drawn as a named box;
+            // the tree canvas is only a fallback for rungs the grid cannot show.
             let label = match logic {
                 Logic::Block {
                     block, instance, ..
@@ -6738,6 +6740,7 @@ fn paint_logic(
                     left,
                     right,
                 } => format!("{left}{operator}{right}"),
+                Logic::Expr { text } => text.clone(),
                 _ => String::new(),
             };
             let live = plc.live_value(label.as_str()).unwrap_or(false);
@@ -6854,6 +6857,7 @@ fn property_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
         Some(Logic::Block { .. }) => "BLOCK",
         Some(Logic::Edge { .. }) => "EDGE",
         Some(Logic::Compare { .. }) => "COMPARE",
+        Some(Logic::Expr { .. }) => "EXPRESSION",
         None => "RUNG",
     };
     let rung_label = rung_at(&plc.project, &node)

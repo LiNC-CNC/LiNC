@@ -157,6 +157,13 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         .filter(|point| point.kind != IoKind::Bit)
         .map(|point| point.name.to_ascii_lowercase())
         .collect();
+    // The expression resolver reads the same name -> slot map the compiler
+    // binds, so a name one accepts is a name the other can resolve.
+    let (_, word_points) = crate::compile::word_points(project);
+    let word_slots: HashMap<String, u16> = word_points
+        .iter()
+        .map(|(name, slot, _, _)| (name.to_ascii_lowercase(), *slot))
+        .collect();
     let layout = crate::compile::WordLayout::new(
         count_points(project, IoDirection::In, IoKind::Word),
         count_points(project, IoDirection::Out, IoKind::Word),
@@ -865,6 +872,14 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                             ));
                         }
                     }
+                } else if let crate::grid::Cell::Expr { text } = cell {
+                    check_expression(
+                        text,
+                        false,
+                        &format!("{rung_path}.cells[{cell_index}]"),
+                        &word_slots,
+                        &mut diagnostics,
+                    );
                 } else if let Some(operand) = cell.operand() {
                     check_io_kind(
                         operand,
@@ -897,6 +912,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     &logic_path,
                     &symbols,
                     &io_kinds,
+                    &word_slots,
                     &mut diagnostics,
                 );
             }
@@ -905,6 +921,50 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 continue;
             }
             let coil_path = format!("{rung_path}.coil.var");
+            // `expr` is a compute coil's operand. On any other kind it would be
+            // silently ignored, so it is refused instead.
+            if rung.coil.kind != crate::model::CoilKind::Compute && rung.coil.expr.is_some() {
+                diagnostics.push(Diagnostic::error(
+                    "coil_expr",
+                    format!(
+                        "`expr` belongs to a compute coil; `{}` does not read it",
+                        rung.coil.var
+                    ),
+                    format!("{rung_path}.coil.expr"),
+                ));
+            }
+            // A compute coil writes through its expression: its slot is unused,
+            // and its text is the whole operand.
+            if rung.coil.kind == crate::model::CoilKind::Compute {
+                if rung
+                    .cells
+                    .iter()
+                    .any(|cell| matches!(cell, crate::grid::Cell::Compute { .. }))
+                {
+                    // A compute cell ends the rung before the coil, so the
+                    // assignment would never run.
+                    diagnostics.push(Diagnostic::error(
+                        "cell_compute",
+                        "a rung cannot carry both a compute cell and a compute coil",
+                        &coil_path,
+                    ));
+                }
+                match rung.coil.expr.as_deref() {
+                    Some(text) => check_expression(
+                        text,
+                        true,
+                        &format!("{rung_path}.coil.expr"),
+                        &word_slots,
+                        &mut diagnostics,
+                    ),
+                    None => diagnostics.push(Diagnostic::error(
+                        "coil_expr",
+                        "a compute coil needs an expression: `target = value`",
+                        format!("{rung_path}.coil.expr"),
+                    )),
+                }
+                continue;
+            }
             // A jump or call coil's operand is a label or a POU name, not a
             // writable bit, so it leaves the bit-coil rules alone.
             if matches!(
@@ -1091,6 +1151,29 @@ fn kind_label(kind: IoKind) -> &'static str {
 fn word_operand_known(text: &str, word_symbols: &HashSet<String>) -> bool {
     crate::compile::word_operand_value(text).is_some()
         || word_symbols.contains(&text.trim().to_ascii_lowercase())
+}
+
+/// Check one expression, mapping the parser's refusal to a diagnostic with its
+/// own code and the byte offset of the offending token.
+fn check_expression(
+    text: &str,
+    assignment: bool,
+    path: &str,
+    word_slots: &HashMap<String, u16>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let result = if assignment {
+        crate::expr::lower_assignment(text, word_slots).map(|_| ())
+    } else {
+        crate::expr::lower_bit(text, word_slots).map(|_| ())
+    };
+    if let Err(error) = result {
+        diagnostics.push(Diagnostic::error(
+            error.code(),
+            format!("{} (at byte {})", error.message, error.offset),
+            path,
+        ));
+    }
 }
 
 /// Check a jump or call coil: a jump needs a label in its own section, a call
@@ -1398,10 +1481,20 @@ fn check_logic(
     path: &str,
     symbols: &HashMap<&str, SymbolClass>,
     io_kinds: &HashMap<&str, IoKind>,
+    word_slots: &HashMap<String, u16>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match logic {
         Logic::Const { .. } => {}
+        Logic::Expr { text } => {
+            check_expression(
+                text,
+                false,
+                &format!("{path}.text"),
+                word_slots,
+                diagnostics,
+            );
+        }
         Logic::Contact { var, .. } | Logic::Edge { var, .. } => {
             check_io_kind(var, true, io_kinds, format!("{path}.var"), diagnostics);
             if !symbols.contains_key(var.as_str()) {
@@ -1455,10 +1548,26 @@ fn check_logic(
             }
         }
         Logic::Series { items } => {
-            check_items(items, path, true, symbols, io_kinds, diagnostics);
+            check_items(
+                items,
+                path,
+                true,
+                symbols,
+                io_kinds,
+                word_slots,
+                diagnostics,
+            );
         }
         Logic::Parallel { items } => {
-            check_items(items, path, false, symbols, io_kinds, diagnostics);
+            check_items(
+                items,
+                path,
+                false,
+                symbols,
+                io_kinds,
+                word_slots,
+                diagnostics,
+            );
         }
     }
 }
@@ -1469,6 +1578,7 @@ fn check_items(
     series: bool,
     symbols: &HashMap<&str, SymbolClass>,
     io_kinds: &HashMap<&str, IoKind>,
+    word_slots: &HashMap<String, u16>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if items.is_empty() {
@@ -1492,6 +1602,7 @@ fn check_items(
             &format!("{path}.items[{index}]"),
             symbols,
             io_kinds,
+            word_slots,
             diagnostics,
         );
     }

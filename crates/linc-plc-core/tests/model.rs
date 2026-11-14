@@ -281,3 +281,29 @@ fn migrating_a_tree_rung_keeps_its_label() {
         .collect::<Vec<_>>();
     assert!(labels.iter().any(|label| label == "LOOP"), "{labels:?}");
 }
+
+/// The expression fields are additive too: a compute coil's text, an
+/// expression cell and a tree expression all round-trip, and an old file that
+/// has none of them still decodes.
+#[test]
+fn expression_fields_are_additive() {
+    let mut project = Project::example();
+    project.sections[0].rungs[0].cells = vec![linc_plc_core::grid::Cell::Expr {
+        text: "MW1<2*MW2".to_string(),
+    }];
+    project.sections[0].rungs[1].coil = Coil::compute("MW3=MW0*2+5");
+
+    let json = serde_json::to_string(&project).expect("json");
+    assert!(json.contains("MW1<2*MW2"), "{json}");
+    assert!(json.contains("\"kind\":\"compute\""), "{json}");
+    let back: Project = serde_json::from_str(&json).expect("decode");
+    assert_eq!(back, project);
+
+    // A compute coil's `expr` and a normal coil without one.
+    let coil: Coil = serde_json::from_str(r#"{"var":"","kind":"compute","expr":"MW3=1"}"#)
+        .expect("compute coil");
+    assert_eq!(coil.expr.as_deref(), Some("MW3=1"));
+    let plain: Coil =
+        serde_json::from_str(r#"{"var":"run","kind":"normal"}"#).expect("old coil");
+    assert_eq!(plain.expr, None);
+}

@@ -136,6 +136,11 @@ impl Lookup {
             .or_else(|| self.word.get(&name.to_ascii_lowercase()))
             .copied()
     }
+
+    /// The declared word names and slots, for the expression resolver.
+    fn words(&self) -> &HashMap<String, u16> {
+        &self.word
+    }
 }
 
 /// Standard function blocks, four instances each, as ZX-PLC numbers them.
@@ -268,6 +273,16 @@ pub enum Op {
     Mul,
     Div,
     Mod,
+    /// Pop two words, push the smaller of the two.
+    Min,
+    /// Pop two words, push the larger of the two.
+    Max,
+    /// Pop a word, push its magnitude. `i32::MIN` stays `i32::MIN`, like the
+    /// rest of the word arithmetic, which wraps.
+    Abs,
+    /// Pop the exponent, then the base, and push the base raised to it. A
+    /// negative exponent yields 0; the result wraps at 32 bits.
+    Pow,
     /// Pop two words and push the boolean result on the bit stack.
     CmpGt,
     CmpGe,
@@ -312,6 +327,9 @@ pub enum Op {
         left: WordOperand,
         right: WordOperand,
     },
+    /// Pop a word and write it to `target`. This is the free-text assignment's
+    /// store: the value is already on the word stack.
+    StoreTarget(WordOperand),
     /// Continue at `target` in the instruction list.
     Jump(u16),
     /// Pop the result bit and jump to `target` when it equals `when`:
@@ -428,97 +446,35 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         );
     }
 
-    // Word points second: their index is a slot of `words`, assigned by
-    // `WordLayout` in the ABI order (word in, word out, float in, float out).
-    let words = WordLayout::new(
-        count_points(project, IoDirection::In, IoKind::Word),
-        count_points(project, IoDirection::Out, IoKind::Word),
-        count_points(project, IoDirection::In, IoKind::Float),
-        count_points(project, IoDirection::Out, IoKind::Float),
-    );
-    for (offset, point) in project
-        .io
-        .iter()
-        .filter(|point| point.direction == IoDirection::In && point.kind == IoKind::Word)
-        .enumerate()
-    {
-        let slot = words.iw_base() + offset as u16;
+    // Word points second: their index is their slot in the bank. `word_points`
+    // owns the slot arithmetic, so validation and the expression resolver name
+    // the same slot the compiler binds.
+    let (words, word_points) = word_points(project);
+    for (name, slot, kind, direction) in &word_points {
+        let symbol_kind = match direction {
+            IoDirection::In => SymbolKind::Input,
+            IoDirection::Out => SymbolKind::Output,
+        };
         intern(
             &mut symbols,
             &mut lookup,
-            &point.name,
-            SymbolKind::Input,
+            name,
+            symbol_kind,
             false,
             Bank::Word,
-            Some(slot),
+            Some(*slot),
         );
-        word_inputs.push(Binding {
-            name: point.name.clone(),
-            index: slot,
-        });
-    }
-    for (offset, point) in project
-        .io
-        .iter()
-        .filter(|point| point.direction == IoDirection::Out && point.kind == IoKind::Word)
-        .enumerate()
-    {
-        let slot = words.qw_base() + offset as u16;
-        intern(
-            &mut symbols,
-            &mut lookup,
-            &point.name,
-            SymbolKind::Output,
-            false,
-            Bank::Word,
-            Some(slot),
-        );
-        word_outputs.push(Binding {
-            name: point.name.clone(),
-            index: slot,
-        });
-    }
-    for (offset, point) in project
-        .io
-        .iter()
-        .filter(|point| point.direction == IoDirection::In && point.kind == IoKind::Float)
-        .enumerate()
-    {
-        let slot = words.fi_base() + offset as u16;
-        intern(
-            &mut symbols,
-            &mut lookup,
-            &point.name,
-            SymbolKind::Input,
-            false,
-            Bank::Word,
-            Some(slot),
-        );
-        float_inputs.push(Binding {
-            name: point.name.clone(),
-            index: slot,
-        });
-    }
-    for (offset, point) in project
-        .io
-        .iter()
-        .filter(|point| point.direction == IoDirection::Out && point.kind == IoKind::Float)
-        .enumerate()
-    {
-        let slot = words.fo_base() + offset as u16;
-        intern(
-            &mut symbols,
-            &mut lookup,
-            &point.name,
-            SymbolKind::Output,
-            false,
-            Bank::Word,
-            Some(slot),
-        );
-        float_outputs.push(Binding {
-            name: point.name.clone(),
-            index: slot,
-        });
+        let binding = Binding {
+            name: name.clone(),
+            index: *slot,
+        };
+        match (direction, kind) {
+            (IoDirection::In, IoKind::Word) => word_inputs.push(binding),
+            (IoDirection::Out, IoKind::Word) => word_outputs.push(binding),
+            (IoDirection::In, IoKind::Float) => float_inputs.push(binding),
+            (IoDirection::Out, IoKind::Float) => float_outputs.push(binding),
+            _ => {}
+        }
     }
 
     let mut ops = Vec::new();
@@ -599,6 +555,38 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         hash: project_hash(project),
         warnings,
     })
+}
+
+/// The project's word bank: its region layout and every declared word or float
+/// point with the slot it owns, in ABI order.
+///
+/// Compile builds the symbol table and the HAL bindings from this list, and
+/// validation resolves expression operands through it, so a slot and a name can
+/// never differ between the two.
+pub fn word_points(project: &Project) -> (WordLayout, Vec<(String, u16, IoKind, IoDirection)>) {
+    let words = WordLayout::new(
+        count_points(project, IoDirection::In, IoKind::Word),
+        count_points(project, IoDirection::Out, IoKind::Word),
+        count_points(project, IoDirection::In, IoKind::Float),
+        count_points(project, IoDirection::Out, IoKind::Float),
+    );
+    let mut points = Vec::with_capacity((words.iw + words.qw + words.fi + words.fo) as usize);
+    let mut push = |direction: IoDirection, kind: IoKind, base: u16| {
+        for (offset, point) in project
+            .io
+            .iter()
+            .filter(|point| point.direction == direction && point.kind == kind)
+            .enumerate()
+        {
+            points.push((point.name.clone(), base + offset as u16, kind, direction));
+        }
+    };
+    // The order is the ABI; see `WordLayout`.
+    push(IoDirection::In, IoKind::Word, words.iw_base());
+    push(IoDirection::Out, IoKind::Word, words.qw_base());
+    push(IoDirection::In, IoKind::Float, words.fi_base());
+    push(IoDirection::Out, IoKind::Float, words.fo_base());
+    (words, points)
 }
 
 /// Number of I/O points of one direction and declared kind.
@@ -1286,9 +1274,6 @@ fn lower_cells(
                 else {
                     continue;
                 };
-                if !has_power {
-                    ops.push(Op::PushConst(true));
-                }
                 emit_word(ops, left);
                 emit_word(ops, right);
                 match compare_op(op) {
@@ -1329,6 +1314,19 @@ fn lower_cells(
                 });
                 // A compute coil ends the rung: there is no coil output.
                 return true;
+            }
+            crate::grid::Cell::Expr { text } => {
+                // Validation refused a bad expression, so a false bit keeps the
+                // rung from passing on text the compiler could not read.
+                match crate::expr::lower_bit(text, lookup.words()) {
+                    Ok(expression) => ops.extend(expression),
+                    Err(_) => ops.push(Op::PushConst(false)),
+                }
+                if has_power {
+                    ops.push(Op::And);
+                }
+                has_power = true;
+                continue;
             }
             // Validation refuses these until their semantics exist.
             crate::grid::Cell::Edge { var, rising } => {
@@ -1641,13 +1639,36 @@ fn lower_coil(
                 *target = after;
             }
         }
+        CoilKind::Compute => {
+            // The assignment runs only while the rung passes, like any coil.
+            // Validation refused an empty or unreadable text, so a failed
+            // resolve writes nothing instead of guessing a target.
+            let skip = ops.len();
+            ops.push(Op::JumpIf {
+                target: 0,
+                when: false,
+            });
+            if let Some(text) = coil.expr.as_deref() {
+                if let Ok((target, value)) = crate::expr::lower_assignment(text, lookup.words()) {
+                    ops.extend(value);
+                    ops.push(Op::StoreTarget(target));
+                }
+            }
+            let after = ops.len() as u16;
+            if let Op::JumpIf { target, .. } = &mut ops[skip] {
+                *target = after;
+            }
+        }
         _ => store_coil(ops, lookup, coil),
     }
 }
 
 fn store_coil(ops: &mut Vec<Op>, lookup: &Lookup, coil: &crate::model::Coil) {
     // `lower_coil` routes these before they get here.
-    if matches!(coil.kind, CoilKind::Jump | CoilKind::Call) {
+    if matches!(
+        coil.kind,
+        CoilKind::Jump | CoilKind::Call | CoilKind::Compute
+    ) {
         return;
     }
     // `CTU0.R` and `CTD0.LD` are coils on a counter, not on a bit.
@@ -1675,8 +1696,8 @@ fn store_coil(ops: &mut Vec<Op>, lookup: &Lookup, coil: &crate::model::Coil) {
         CoilKind::Normal | CoilKind::Negated => Op::Store(index),
         CoilKind::Set => Op::Set(index),
         CoilKind::Reset => Op::Reset(index),
-        // The guard at the top of this function returned for both.
-        CoilKind::Jump | CoilKind::Call => return,
+        // The guard at the top of this function returned for these.
+        CoilKind::Jump | CoilKind::Call | CoilKind::Compute => return,
     });
 }
 
@@ -1689,6 +1710,11 @@ fn lower_logic(logic: &Logic, lookup: &Lookup, edges: &mut u16, ops: &mut Vec<Op
                 ops.push(Op::Not);
             }
         }
+        Logic::Expr { text } => match crate::expr::lower_bit(text, lookup.words()) {
+            Ok(expression) => ops.extend(expression),
+            // Validation refused it; a false bit is the safe stand-in.
+            Err(_) => ops.push(Op::PushConst(false)),
+        },
         Logic::Edge { var, rising } => {
             let slot = *edges;
             *edges = edges.saturating_add(1);

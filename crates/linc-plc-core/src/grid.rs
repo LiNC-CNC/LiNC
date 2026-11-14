@@ -54,6 +54,9 @@ pub enum Cell {
         left: String,
         right: String,
     },
+    /// `-[>]-` over a free-text expression, the grid form of `Logic::Expr`.
+    /// The text leaves a condition: it passes power when it evaluates true.
+    Expr { text: String },
 }
 
 impl Cell {
@@ -64,6 +67,7 @@ impl Cell {
             Self::Block { instance, .. } => Some(instance),
             Self::Compare { left, .. } => Some(left),
             Self::Compute { target, .. } => Some(target),
+            Self::Expr { text } => Some(text),
             Self::Wire | Self::Link => None,
         }
     }
@@ -74,6 +78,7 @@ impl Cell {
             Self::Edge { .. }
             | Self::Compare { .. }
             | Self::Compute { .. }
+            | Self::Expr { .. }
             | Self::Wire
             | Self::Contact { .. }
             | Self::Link
@@ -105,7 +110,8 @@ pub fn lower_row(cells: &[Cell]) -> Logic {
             Cell::Edge { .. }
             | Cell::Block { .. }
             | Cell::Compare { .. }
-            | Cell::Compute { .. } => {}
+            | Cell::Compute { .. }
+            | Cell::Expr { .. } => {}
         }
     }
     if items.is_empty() {
@@ -308,6 +314,7 @@ pub fn tree_rows(logic: &Logic) -> Option<Vec<Vec<Cell>>> {
             var: var.clone(),
             negated: *negated,
         }]]),
+        Logic::Expr { text } => Some(vec![vec![Cell::Expr { text: text.clone() }]]),
         Logic::Edge { var, rising } => Some(vec![vec![Cell::Edge {
             var: var.clone(),
             rising: *rising,
@@ -395,6 +402,7 @@ pub fn migrate_section(section: &mut crate::model::Section) {
                 Logic::Const { value: true },
                 crate::model::Coil {
                     var: String::new(),
+                    expr: None,
                     kind: crate::model::CoilKind::Normal,
                 },
             );

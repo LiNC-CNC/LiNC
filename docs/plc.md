@@ -240,6 +240,50 @@ label is `rung_label_missing`, two rungs with one label is
 `jump_target_missing`, and a call to a POU the project does not declare is
 `call_target_missing`. A call cycle — ladder, IL, or a mix — is `cal_cycle`.
 
+## Expressions
+
+A compare cell (`Cell::Expr`) and a compute coil (`CoilKind::Compute` with
+`Coil.expr`) hold free text instead of a structured operator, which is how
+ClassicLadder's compare and operate blocks are written. A compare expression is
+a condition: it passes power while it is true. A compute coil's text is an
+assignment, `target=value`, and it writes only while its rung passes.
+
+The grammar is ClassicLadder's. Precedence, low to high:
+
+| level | operators |
+| --- | --- |
+| 0 | `,` — AND between comparison groups |
+| 1 | `\|` |
+| 2 | `&` |
+| 3 | `=`, `<>`, `<`, `<=`, `>`, `>=` (`=` is comparison; never `==`) |
+| 4 | `+`, `-` |
+| 5 | `*`, `/`, `%` |
+| 6 | unary `-`, `+`, `NOT` |
+| 7 | `^`, right-associative |
+| 8 | number, `MWn`, a declared word point, `TON0.ET`/`TON0.PT`, `CTU0.CV`/`CTU0.PV`, `( … )`, `ABS(x)`, `MINI(a,b)`, `MAXI(a,b)`, `MOY(a,b)` / `AVG(a,b)` |
+
+Operands are the project's own names, not `%` addresses: a word or float point
+appears by the name it was declared with, and an imported `%IW1` has already
+become `iw1`. There is no implicit `IW0`-style region addressing, because a
+second operand namespace used by one construct would be a trap.
+
+Details worth stating:
+
+- `TON0.ET` is the elapsed time and `TON0.PT` the preset; `CTU0.CV` and
+  `CTU0.PV` are the count and its preset.
+- `/` and `%` by zero yield 0, matching the IL operators. `^` returns 0 for a
+  negative exponent, and the result wraps at 32 bits like all word arithmetic.
+  `MOY`/`AVG` is `(a+b)/2`, truncated toward zero.
+- `NOT` binds tighter than a comparison, so write `NOT (MW0>1)`. `NOT MW0>1`
+  is refused: it would negate a number.
+- An assignment writes a word. `q3=1` is refused with `expr_operand`, because a
+  bit target is not representable; write a compare into the bit's coil instead.
+- One expression may nest 32 levels and lower to 512 operations.
+
+Refusals carry the byte offset of the offending token and one of four codes:
+`expr_syntax`, `expr_operand`, `expr_function`, `expr_depth`. A coil whose
+`expr` is missing, or present on a kind that does not read it, is `coil_expr`.
+
 ## Retained values
 
 Variables declared `retain` and the marker words `MW0..MW15` can survive a daemon

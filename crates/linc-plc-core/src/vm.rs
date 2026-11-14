@@ -318,6 +318,25 @@ impl Vm {
                         left.wrapping_rem(right)
                     }
                 }),
+                Op::Min => bin_word(&mut word_stack, &mut word_depth, |left, right| {
+                    left.min(right)
+                }),
+                Op::Max => bin_word(&mut word_stack, &mut word_depth, |left, right| {
+                    left.max(right)
+                }),
+                Op::Abs => {
+                    let value = pop_word(&word_stack, &mut word_depth);
+                    push_word(&mut word_stack, &mut word_depth, value.wrapping_abs());
+                }
+                Op::Pow => bin_word(&mut word_stack, &mut word_depth, |base, exponent| {
+                    // A negative exponent has no integer result; 0 keeps the
+                    // scan deterministic instead of raising a fault.
+                    if exponent < 0 {
+                        0
+                    } else {
+                        base.wrapping_pow(exponent as u32)
+                    }
+                }),
                 Op::CmpGt => cmp_word(
                     &mut stack,
                     &mut depth,
@@ -458,6 +477,10 @@ impl Vm {
                         };
                         self.write_word(target, result);
                     }
+                }
+                Op::StoreTarget(target) => {
+                    let value = pop_word(&word_stack, &mut word_depth);
+                    self.write_word(target, value);
                 }
                 Op::FbQ(instance) => {
                     let value = self

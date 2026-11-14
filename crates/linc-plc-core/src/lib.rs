@@ -11,6 +11,7 @@
 #![forbid(unsafe_code)]
 
 pub mod compile;
+pub mod expr;
 pub mod grid;
 pub mod il;
 pub mod model;
