@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://www.plcopen.org/xml/tc6_0201">
+<fileHeader company="converted" product="plcy2plcopen" version="1"/>
+<contentHeader name="timer-counter"/>
+<types><dataTypes/></types>
+<instances><configurations/></instances>
+<addData/>
+<pous><pou name="MAIN" pouType="program">
+<interface><inputVars><variable name="%I0.0"><type><BOOL/></type></variable><variable name="%I0.1"><type><BOOL/></type></variable></inputVars><outputVars><variable name="%Q0.0"><type><BOOL/></type></variable><variable name="%Q0.1"><type><BOOL/></type></variable></outputVars></interface>
+<body><LD>
+<leftPowerRail localId="0"/>
+<contact localId="10"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.0</variable></contact>
+<contact localId="11" negated="true"><connectionPointIn><connection refLocalId="10"/></connectionPointIn><variable>TON1.Q</variable></contact>
+<block localId="12" typeName="TON"><connectionPointIn><connection refLocalId="11"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#3000ms</expression></variable></inputVariables></block>
+<contact localId="13"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<block localId="14" typeName="TON"><connectionPointIn><connection refLocalId="13"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#2000ms</expression></variable></inputVariables></block>
+<block localId="15" typeName="LT"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>TON0.ET</expression></variable><variable formalParameter="IN"><expression>TON0.PT</expression></variable></inputVariables></block>
+<coil localId="16" storage="none"><connectionPointIn><connection refLocalId="15"/></connectionPointIn><variable>%Q0.0</variable></coil>
+<contact localId="17"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<block localId="18" typeName="CTU"><connectionPointIn><connection refLocalId="17"/></connectionPointIn><inputVariables><variable formalParameter="PV"><expression>5</expression></variable></inputVariables></block>
+<contact localId="19"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>CTU0.Q</variable></contact>
+<coil localId="20" storage="none"><connectionPointIn><connection refLocalId="19"/></connectionPointIn><variable>%Q0.1</variable></coil>
+<contact localId="21"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.1</variable></contact>
+<coil localId="22" storage="reset"><connectionPointIn><connection refLocalId="21"/></connectionPointIn><variable>CTU0.R</variable></coil>
+<rightPowerRail localId="9999"/>
+</LD></body></pou></pous></project>

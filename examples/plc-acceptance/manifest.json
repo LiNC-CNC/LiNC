@@ -1,138 +1,138 @@
 {
-  "source": "third-party ladder samples, GPL-3.0-or-later",
-  "provenance": "see README.md; samples are redistributed verbatim under sources/",
-  "licence": "GPL-3.0-or-later",
-  "scan_ms": 10,
-  "totals": {
-    "sampled": 41,
-    "ladder": 12,
-    "excluded": {
-      "fbd-ld-mixed": 3,
-      "fbd-only": 7,
-      "st-only": 19
-    }
+ "source": "third-party ladder samples, GPL-3.0-or-later",
+ "provenance": "see README.md; samples are redistributed verbatim under sources/",
+ "licence": "GPL-3.0-or-later",
+ "scan_ms": 10,
+ "totals": {
+  "sampled": 41,
+  "ladder": 12,
+  "excluded": {
+   "fbd-ld-mixed": 3,
+   "fbd-only": 7,
+   "st-only": 19
+  }
+ },
+ "files": [
+  {
+   "name": "garage-door",
+   "pous": 1,
+   "rungs": 7,
+   "converted": true,
+   "blocker": null,
+   "stimulus": true,
+   "trace": true,
+   "runs": true
   },
-  "files": [
-    {
-      "name": "garage-door",
-      "pous": 1,
-      "rungs": 7,
-      "converted": true,
-      "blocker": null,
-      "stimulus": true,
-      "trace": true,
-      "runs": true
-    },
-    {
-      "name": "motor-star-delta",
-      "pous": 1,
-      "rungs": 7,
-      "converted": true,
-      "blocker": null,
-      "stimulus": true,
-      "trace": true,
-      "runs": true
-    },
-    {
-      "name": "motor-starters-function-block",
-      "pous": 2,
-      "rungs": 5,
-      "converted": false,
-      "blocker": "tag types: MotorStarter",
-      "stimulus": true,
-      "trace": true,
-      "runs": false
-    },
-    {
-      "name": "recipes-data-type-ld",
-      "pous": 1,
-      "rungs": 11,
-      "converted": false,
-      "blocker": "tag types: DINT,Recipe[3],TIMER",
-      "stimulus": true,
-      "trace": true,
-      "runs": false
-    },
-    {
-      "name": "silo-function-block",
-      "pous": 2,
-      "rungs": 8,
-      "converted": false,
-      "blocker": "tag types: FillStation",
-      "stimulus": true,
-      "trace": true,
-      "runs": false
-    },
-    {
-      "name": "silo",
-      "pous": 1,
-      "rungs": 4,
-      "converted": true,
-      "blocker": null,
-      "stimulus": true,
-      "trace": true,
-      "runs": true
-    },
-    {
-      "name": "start-stop-delay",
-      "pous": 1,
-      "rungs": 5,
-      "converted": true,
-      "blocker": null,
-      "stimulus": true,
-      "trace": true,
-      "runs": true
-    },
-    {
-      "name": "start-stop",
-      "pous": 1,
-      "rungs": 6,
-      "converted": false,
-      "blocker": "tag types: INT[1]",
-      "stimulus": true,
-      "trace": true,
-      "runs": false
-    },
-    {
-      "name": "timer-counter",
-      "pous": 1,
-      "rungs": 6,
-      "converted": false,
-      "blocker": "rung 2: timer member '.TT' is timing, not done; LiNC has no timing member",
-      "stimulus": true,
-      "trace": true,
-      "runs": false
-    },
-    {
-      "name": "traffic-lights-routines",
-      "pous": 3,
-      "rungs": 11,
-      "converted": false,
-      "blocker": "tag types: DINT,DINT[6],TIMER",
-      "stimulus": true,
-      "trace": true,
-      "runs": false
-    },
-    {
-      "name": "traffic-lights",
-      "pous": 1,
-      "rungs": 12,
-      "converted": true,
-      "blocker": null,
-      "stimulus": true,
-      "trace": true,
-      "runs": true
-    },
-    {
-      "name": "two-tanks-cascade",
-      "pous": 1,
-      "rungs": 5,
-      "converted": false,
-      "blocker": "tag types: PID,REAL",
-      "stimulus": true,
-      "trace": true,
-      "runs": false
-    }
-  ],
-  "note": "converted: the converter produced <name>.xml. runs: LiNC imports it and matches its trace after every scan. A converted file that does not run is blocked by a named LiNC-side cause, not by the conversion."
+  {
+   "name": "motor-star-delta",
+   "pous": 1,
+   "rungs": 7,
+   "converted": true,
+   "blocker": null,
+   "stimulus": true,
+   "trace": true,
+   "runs": true
+  },
+  {
+   "name": "motor-starters-function-block",
+   "pous": 2,
+   "rungs": 5,
+   "converted": false,
+   "blocker": "tag types: MotorStarter",
+   "stimulus": true,
+   "trace": true,
+   "runs": false
+  },
+  {
+   "name": "recipes-data-type-ld",
+   "pous": 1,
+   "rungs": 11,
+   "converted": false,
+   "blocker": "tag types: DINT,Recipe[3],TIMER",
+   "stimulus": true,
+   "trace": true,
+   "runs": false
+  },
+  {
+   "name": "silo-function-block",
+   "pous": 2,
+   "rungs": 8,
+   "converted": false,
+   "blocker": "tag types: FillStation",
+   "stimulus": true,
+   "trace": true,
+   "runs": false
+  },
+  {
+   "name": "silo",
+   "pous": 1,
+   "rungs": 4,
+   "converted": true,
+   "blocker": null,
+   "stimulus": true,
+   "trace": true,
+   "runs": true
+  },
+  {
+   "name": "start-stop-delay",
+   "pous": 1,
+   "rungs": 5,
+   "converted": true,
+   "blocker": null,
+   "stimulus": true,
+   "trace": true,
+   "runs": true
+  },
+  {
+   "name": "start-stop",
+   "pous": 1,
+   "rungs": 6,
+   "converted": false,
+   "blocker": "tag types: INT[1]",
+   "stimulus": true,
+   "trace": true,
+   "runs": false
+  },
+  {
+   "name": "timer-counter",
+   "pous": 1,
+   "rungs": 6,
+   "converted": true,
+   "blocker": "one-scan offset at scan 503: `.TT` reads true at 502 (the chained TON1 reports done a scan before the reference engine does); trace disagrees by one scan",
+   "stimulus": true,
+   "trace": true,
+   "runs": false
+  },
+  {
+   "name": "traffic-lights-routines",
+   "pous": 3,
+   "rungs": 11,
+   "converted": false,
+   "blocker": "tag types: DINT,DINT[6],TIMER",
+   "stimulus": true,
+   "trace": true,
+   "runs": false
+  },
+  {
+   "name": "traffic-lights",
+   "pous": 1,
+   "rungs": 12,
+   "converted": true,
+   "blocker": null,
+   "stimulus": true,
+   "trace": true,
+   "runs": true
+  },
+  {
+   "name": "two-tanks-cascade",
+   "pous": 1,
+   "rungs": 5,
+   "converted": false,
+   "blocker": "tag types: PID,REAL",
+   "stimulus": true,
+   "trace": true,
+   "runs": false
+  }
+ ],
+ "note": "converted: the converter produced <name>.xml. runs: LiNC imports it and matches its trace after every scan. A converted file that does not run is blocked by a named LiNC-side cause, not by the conversion."
 }

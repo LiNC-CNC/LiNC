@@ -6,42 +6,42 @@
 <instances><configurations/></instances>
 <addData/>
 <pous><pou name="MAIN" pouType="program">
-<interface><inputVars><variable name="%I0.0"><type><BOOL/></type></variable><variable name="%I0.1"><type><BOOL/></type></variable><variable name="%I0.4"><type><BOOL/></type></variable><variable name="%I0.2"><type><BOOL/></type></variable><variable name="%I0.3"><type><BOOL/></type></variable></inputVars><outputVars><variable name="%Q0.0"><type><BOOL/></type></variable><variable name="%Q0.1"><type><BOOL/></type></variable><variable name="%Q0.3"><type><BOOL/></type></variable><variable name="%Q0.2"><type><BOOL/></type></variable><variable name="%Q0.4"><type><BOOL/></type></variable><variable name="%Q0.5"><type><BOOL/></type></variable></outputVars></interface>
+<interface><inputVars><variable name="%I0.0"><type><BOOL/></type></variable><variable name="%I0.1"><type><BOOL/></type></variable><variable name="%I0.2"><type><BOOL/></type></variable><variable name="%I0.3"><type><BOOL/></type></variable><variable name="%I0.4"><type><BOOL/></type></variable></inputVars><outputVars><variable name="%Q0.0"><type><BOOL/></type></variable><variable name="%Q0.1"><type><BOOL/></type></variable><variable name="%Q0.2"><type><BOOL/></type></variable><variable name="%Q0.3"><type><BOOL/></type></variable><variable name="%Q0.4"><type><BOOL/></type></variable><variable name="%Q0.5"><type><BOOL/></type></variable></outputVars></interface>
 <body><LD>
 <leftPowerRail localId="0"/>
-<contact localId="1"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.0</variable></contact>
-<contact localId="2" negated="true"><connectionPointIn><connection refLocalId="1"/></connectionPointIn><variable>%I0.1</variable></contact>
-<contact localId="3"><connectionPointIn><connection refLocalId="2"/></connectionPointIn><variable>%I0.4</variable></contact>
-<contact localId="4"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
-<contact localId="5"><connectionPointIn><connection refLocalId="3"/><connection refLocalId="4"/></connectionPointIn><variable>%I0.2</variable></contact>
-<contact localId="6"><connectionPointIn><connection refLocalId="5"/></connectionPointIn><variable>%I0.3</variable></contact>
-<contact localId="7" negated="true"><connectionPointIn><connection refLocalId="6"/></connectionPointIn><variable>%Q0.1</variable></contact>
-<coil localId="8" storage="none"><connectionPointIn><connection refLocalId="7"/></connectionPointIn><variable>%Q0.0</variable></coil>
-<contact localId="9"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.1</variable></contact>
-<contact localId="10" negated="true"><connectionPointIn><connection refLocalId="9"/></connectionPointIn><variable>%I0.0</variable></contact>
-<contact localId="11"><connectionPointIn><connection refLocalId="10"/></connectionPointIn><variable>%I0.4</variable></contact>
-<contact localId="12"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
-<contact localId="13"><connectionPointIn><connection refLocalId="11"/><connection refLocalId="12"/></connectionPointIn><variable>%I0.2</variable></contact>
-<contact localId="14"><connectionPointIn><connection refLocalId="13"/></connectionPointIn><variable>%I0.3</variable></contact>
-<contact localId="15" negated="true"><connectionPointIn><connection refLocalId="14"/></connectionPointIn><variable>%Q0.0</variable></contact>
-<coil localId="16" storage="none"><connectionPointIn><connection refLocalId="15"/></connectionPointIn><variable>%Q0.1</variable></coil>
-<contact localId="17"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
-<contact localId="18"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
-<block localId="19" typeName="TON"><connectionPointIn><connection refLocalId="17"/><connection refLocalId="18"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#4s</expression></variable></inputVariables></block>
-<contact localId="20"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
+<contact localId="10"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.0</variable></contact>
+<contact localId="11" negated="true"><connectionPointIn><connection refLocalId="10"/></connectionPointIn><variable>%I0.1</variable></contact>
+<contact localId="12"><connectionPointIn><connection refLocalId="11"/></connectionPointIn><variable>%I0.4</variable></contact>
+<contact localId="13"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
+<contact localId="14"><connectionPointIn><connection refLocalId="12"/><connection refLocalId="13"/></connectionPointIn><variable>%I0.2</variable></contact>
+<contact localId="15"><connectionPointIn><connection refLocalId="14"/></connectionPointIn><variable>%I0.3</variable></contact>
+<contact localId="16" negated="true"><connectionPointIn><connection refLocalId="15"/></connectionPointIn><variable>%Q0.1</variable></contact>
+<coil localId="17" storage="none"><connectionPointIn><connection refLocalId="16"/></connectionPointIn><variable>%Q0.0</variable></coil>
+<contact localId="18"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.1</variable></contact>
+<contact localId="19" negated="true"><connectionPointIn><connection refLocalId="18"/></connectionPointIn><variable>%I0.0</variable></contact>
+<contact localId="20"><connectionPointIn><connection refLocalId="19"/></connectionPointIn><variable>%I0.4</variable></contact>
 <contact localId="21"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
-<contact localId="22" negated="true"><connectionPointIn><connection refLocalId="20"/><connection refLocalId="21"/></connectionPointIn><variable>TON0.Q</variable></contact>
-<contact localId="23" negated="true"><connectionPointIn><connection refLocalId="22"/></connectionPointIn><variable>%Q0.3</variable></contact>
-<coil localId="24" storage="none"><connectionPointIn><connection refLocalId="23"/></connectionPointIn><variable>%Q0.2</variable></coil>
-<contact localId="25"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
-<contact localId="26"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
-<contact localId="27"><connectionPointIn><connection refLocalId="25"/><connection refLocalId="26"/></connectionPointIn><variable>TON0.Q</variable></contact>
-<contact localId="28" negated="true"><connectionPointIn><connection refLocalId="27"/></connectionPointIn><variable>%Q0.2</variable></contact>
-<coil localId="29" storage="none"><connectionPointIn><connection refLocalId="28"/></connectionPointIn><variable>%Q0.3</variable></coil>
-<contact localId="30"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
-<contact localId="31"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
-<coil localId="32" storage="none"><connectionPointIn><connection refLocalId="30"/><connection refLocalId="31"/></connectionPointIn><variable>%Q0.4</variable></coil>
-<contact localId="33" negated="true"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.3</variable></contact>
-<coil localId="34" storage="none"><connectionPointIn><connection refLocalId="33"/></connectionPointIn><variable>%Q0.5</variable></coil>
+<contact localId="22"><connectionPointIn><connection refLocalId="20"/><connection refLocalId="21"/></connectionPointIn><variable>%I0.2</variable></contact>
+<contact localId="23"><connectionPointIn><connection refLocalId="22"/></connectionPointIn><variable>%I0.3</variable></contact>
+<contact localId="24" negated="true"><connectionPointIn><connection refLocalId="23"/></connectionPointIn><variable>%Q0.0</variable></contact>
+<coil localId="25" storage="none"><connectionPointIn><connection refLocalId="24"/></connectionPointIn><variable>%Q0.1</variable></coil>
+<contact localId="26"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
+<contact localId="27"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
+<block localId="28" typeName="TON"><connectionPointIn><connection refLocalId="26"/><connection refLocalId="27"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#4s</expression></variable></inputVariables></block>
+<contact localId="29"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
+<contact localId="30"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
+<contact localId="31" negated="true"><connectionPointIn><connection refLocalId="29"/><connection refLocalId="30"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<contact localId="32" negated="true"><connectionPointIn><connection refLocalId="31"/></connectionPointIn><variable>%Q0.3</variable></contact>
+<coil localId="33" storage="none"><connectionPointIn><connection refLocalId="32"/></connectionPointIn><variable>%Q0.2</variable></coil>
+<contact localId="34"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
+<contact localId="35"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
+<contact localId="36"><connectionPointIn><connection refLocalId="34"/><connection refLocalId="35"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<contact localId="37" negated="true"><connectionPointIn><connection refLocalId="36"/></connectionPointIn><variable>%Q0.2</variable></contact>
+<coil localId="38" storage="none"><connectionPointIn><connection refLocalId="37"/></connectionPointIn><variable>%Q0.3</variable></coil>
+<contact localId="39"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.0</variable></contact>
+<contact localId="40"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%Q0.1</variable></contact>
+<coil localId="41" storage="none"><connectionPointIn><connection refLocalId="39"/><connection refLocalId="40"/></connectionPointIn><variable>%Q0.4</variable></coil>
+<contact localId="42" negated="true"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.3</variable></contact>
+<coil localId="43" storage="none"><connectionPointIn><connection refLocalId="42"/></connectionPointIn><variable>%Q0.5</variable></coil>
 <rightPowerRail localId="9999"/>
 </LD></body></pou></pous></project>

@@ -9,17 +9,17 @@
 <interface><inputVars><variable name="%I0.0"><type><BOOL/></type></variable><variable name="%I0.1"><type><BOOL/></type></variable></inputVars><outputVars><variable name="%Q0.0"><type><BOOL/></type></variable><variable name="%Q0.1"><type><BOOL/></type></variable><variable name="%Q0.2"><type><BOOL/></type></variable></outputVars><localVars><variable name="Motor"><type><BOOL/></type></variable></localVars></interface>
 <body><LD>
 <leftPowerRail localId="0"/>
-<contact localId="1"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.0</variable></contact>
-<contact localId="2"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Motor</variable></contact>
-<contact localId="3"><connectionPointIn><connection refLocalId="1"/><connection refLocalId="2"/></connectionPointIn><variable>%I0.1</variable></contact>
-<coil localId="4" storage="none"><connectionPointIn><connection refLocalId="3"/></connectionPointIn><variable>Motor</variable></coil>
-<contact localId="5"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Motor</variable></contact>
-<coil localId="6" storage="none"><connectionPointIn><connection refLocalId="5"/></connectionPointIn><variable>%Q0.0</variable></coil>
-<contact localId="7"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Motor</variable></contact>
-<block localId="8" typeName="TON"><connectionPointIn><connection refLocalId="7"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#2s</expression></variable></inputVariables></block>
-<contact localId="9"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
-<coil localId="10" storage="none"><connectionPointIn><connection refLocalId="9"/></connectionPointIn><variable>%Q0.1</variable></coil>
-<contact localId="11" negated="true"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Motor</variable></contact>
-<coil localId="12" storage="none"><connectionPointIn><connection refLocalId="11"/></connectionPointIn><variable>%Q0.2</variable></coil>
+<contact localId="10"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>%I0.0</variable></contact>
+<contact localId="11"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Motor</variable></contact>
+<contact localId="12"><connectionPointIn><connection refLocalId="10"/><connection refLocalId="11"/></connectionPointIn><variable>%I0.1</variable></contact>
+<coil localId="13" storage="none"><connectionPointIn><connection refLocalId="12"/></connectionPointIn><variable>Motor</variable></coil>
+<contact localId="14"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Motor</variable></contact>
+<coil localId="15" storage="none"><connectionPointIn><connection refLocalId="14"/></connectionPointIn><variable>%Q0.0</variable></coil>
+<contact localId="16"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Motor</variable></contact>
+<block localId="17" typeName="TON"><connectionPointIn><connection refLocalId="16"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#2s</expression></variable></inputVariables></block>
+<contact localId="18"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<coil localId="19" storage="none"><connectionPointIn><connection refLocalId="18"/></connectionPointIn><variable>%Q0.1</variable></coil>
+<contact localId="20" negated="true"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Motor</variable></contact>
+<coil localId="21" storage="none"><connectionPointIn><connection refLocalId="20"/></connectionPointIn><variable>%Q0.2</variable></coil>
 <rightPowerRail localId="9999"/>
 </LD></body></pou></pous></project>
