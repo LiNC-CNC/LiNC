@@ -10,6 +10,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod clp;
 pub mod compile;
 pub mod expr;
 pub mod grid;

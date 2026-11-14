@@ -890,7 +890,8 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     );
                     let known = symbols
                         .keys()
-                        .any(|name| name.eq_ignore_ascii_case(operand));
+                        .any(|name| name.eq_ignore_ascii_case(operand))
+                        || crate::compile::q_instance(operand).is_some();
                     if !known {
                         diagnostics.push(Diagnostic::error(
                             "cell_operand",
@@ -1497,7 +1498,7 @@ fn check_logic(
         }
         Logic::Contact { var, .. } | Logic::Edge { var, .. } => {
             check_io_kind(var, true, io_kinds, format!("{path}.var"), diagnostics);
-            if !symbols.contains_key(var.as_str()) {
+            if !symbols.contains_key(var.as_str()) && crate::compile::q_instance(var).is_none() {
                 diagnostics.push(Diagnostic::error(
                     "unknown_symbol",
                     format!("contact `{var}` is not declared"),

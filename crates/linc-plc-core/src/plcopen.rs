@@ -53,11 +53,13 @@ impl Element {
     }
 }
 
-/// The model accepts `^[a-z][a-z0-9_-]{0,31}$`, while PLCopen names are any
-/// identifier, usually capitalised. Import lowercases and replaces the rest, so
-/// `Motor` becomes `motor`; a collision then shows up as `duplicate_symbol`
-/// rather than as a silent merge.
-fn operand_name(raw: &str) -> String {
+/// The model accepts `^[a-z][a-z0-9_-]{0,31}$`, while an imported name may be
+/// anything. Lowercase it and replace the rest, so `Motor` becomes `motor`; a
+/// collision then shows up as `duplicate_symbol` rather than as a silent merge.
+/// The house rule for an imported identifier: lowercase, `_` for anything the
+/// model's name pattern rejects, `n_` when it would start with a digit, 32
+/// characters at most. `clp` uses it too, so the two importers sanitise alike.
+pub(crate) fn operand_name(raw: &str) -> String {
     let mut name = String::with_capacity(raw.len());
     for character in raw.trim().chars() {
         if character.is_ascii_alphanumeric() || character == '_' || character == '-' {

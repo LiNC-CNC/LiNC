@@ -162,6 +162,64 @@ feeding a coil), `plcopen_unreachable` (an element with no rail) and
 `plcopen_cycle` (a connection loop). The result is then run through
 `validate()`, so ordinary model rules such as `duplicate_coil` apply as well.
 
+## .clp import (ClassicLadder)
+
+`linc_plc_core::clp::import` reads a ClassicLadder project: a `.clp` container
+(the plain-text concatenation of the project's parameter files) or an unpacked
+project directory, which `LoadProjectFiles` accepts too. `clp::import_path`
+picks the shape from the path. Import is read-only and all-or-nothing, like the
+PLCopen one: a construct with no faithful LiNC equivalent returns diagnostics and
+no project.
+
+| ClassicLadder | model |
+| --- | --- |
+| `ELE_INPUT` / `ELE_INPUT_NOT` | `Cell::Contact`, NO / NC |
+| `ELE_RISING_INPUT` / `ELE_FALLING_INPUT` | `Cell::Edge` |
+| `ELE_CONNECTION` | `Cell::Wire` |
+| `ELE_OUTPUT`, `_NOT`, `_SET`, `_RESET` | `Coil` normal / negated / set / reset |
+| `ELE_OUTPUT_JUMP` | `CoilKind::Jump`, targeting the labelled rung its rung number names |
+| `ELE_OUTPUT_CALL` | `CoilKind::Call`, naming the subroutine section's POU |
+| `ELE_COMPAR` | `Cell::Expr` from `arithmetic_expressions.csv` |
+| `ELE_OUTPUT_OPERATE` | `CoilKind::Compute` with `Coil.expr` |
+| `ELE_TIMER_IEC` | `Cell::Block` TON / TOF / TP, preset from `timers_iec.csv` |
+| `ELE_COUNTER` | `CTU` or `CTD`, per the wiring rules below |
+| `%B`, `%I`, `%Q` | a variable, an input, an output |
+| `%W`, `%IW`, `%QW`, `%IF`, `%QF` | `MWn`, a word or float point |
+| `%TMn.Q`, `%TMn.P`, `%TMn.V` | `TONn.Q`, `TONn.PT`, `TONn.ET` |
+| `%Cn.D`, `%Cn.E`, `%Cn.F`, `%Cn.P`, `%Cn.V` | `done` as a compare, `empty`/`full` refused, `CTUn.PV`, `CTUn.CV` |
+
+`sections.csv` becomes one POU per section; a subroutine section is named after
+its number, which a call coil names. Rung order is the `#NEXTRUNG` chain from
+`FirstRung`, never the file numbering, and `#LABEL` becomes the label a jump
+targets. `symbols.csv` renames variables through the same rule the PLCopen
+importer uses, and a collision is refused rather than merged.
+
+A counter is one element with four input rows and three output rows, so one rung
+file can become several LiNC rungs: the counting block, the preset-load and
+reset rungs in the order `CalcTypeCounter` applies them, then a rung for the
+cells that read `done`. `done` is equality in ClassicLadder while `CTU.Q` is
+`>=`, so it is synthesised as an equality compare against the counter's preset
+and `Q` is never used. A counter rung has no coil, so it ends in a compute coil
+that writes `CV` back to itself: the block's output is consumed and nothing
+observable is written.
+
+Refusals name the rung or member and the construct: `clp_container`,
+`clp_member`, `clp_version`, `clp_rung_syntax`, `clp_indexed`,
+`clp_counter_bidirectional`, `clp_counter_instances`, `clp_counter_reset`,
+`clp_counter_overflow`, `clp_counter_preset_load`, `clp_legacy_timer`,
+`clp_branch`, `clp_rung_chain`, `clp_sfc`, `clp_modbus`, `clp_expression`, plus
+`clp_variable` (a variable the model cannot hold, such as `%W20` or an error
+bit), `clp_timer_instances` (a fifth timer of one kind), `clp_timer_contact` (an
+edge contact on a timer's done; plain and negated ones read `TONn.Q`) and
+`clp_counter_edge` (an edge on a counter's done). `clp_counter_wrap` is the one
+warning: a counter preset above 9,999, where ClassicLadder wraps and LiNC
+saturates.
+
+Not imported, by refusal: legacy timers and monostables, a branch other than one
+link to the row below, a rung whose line is not drawn contiguously (a gap stops
+ClassicLadder's power where LiNC's wire conducts), and a section named `MAIN`
+(LiNC would treat every other POU as an uncalled routine).
+
 ## Scan semantics
 
 The VM keeps two images. At scan start it copies `prev` to `next`, writes the

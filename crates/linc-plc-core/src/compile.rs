@@ -1240,8 +1240,10 @@ fn lower_cells(
         match cell {
             crate::grid::Cell::Wire | crate::grid::Cell::Link => continue,
             crate::grid::Cell::Contact { var, negated } => {
-                let index = lookup.bit(var.as_str()).unwrap_or(0);
-                ops.push(Op::Push(index));
+                match q_instance(var) {
+                    Some(instance) => ops.push(Op::FbQ(instance)),
+                    None => ops.push(Op::Push(lookup.bit(var.as_str()).unwrap_or(0))),
+                }
                 if *negated {
                     ops.push(Op::Not);
                 }
@@ -1453,6 +1455,18 @@ pub fn word_operand_value(text: &str) -> Option<WordOperand> {
         return Some(WordOperand::Const(parse_preset(text, true)?));
     }
     text.parse::<i32>().ok().map(WordOperand::Const)
+}
+
+/// The block instance a `<instance>.Q` bit operand names. A timer's done output
+/// is not a bank slot, so a ladder contact on `TON0.Q` reads the block's `Q`
+/// through `Op::FbQ` instead of a symbol.
+pub fn q_instance(name: &str) -> Option<u16> {
+    let text = name.trim();
+    let rest = text
+        .strip_suffix(".Q")
+        .or_else(|| text.strip_suffix(".q"))?;
+    let (_, instance, _) = parse_block(rest, rest, "")?;
+    Some(instance)
 }
 
 /// Resolve a word operand in a context that has the symbol table: `MWn`, a
@@ -1705,7 +1719,10 @@ fn lower_logic(logic: &Logic, lookup: &Lookup, edges: &mut u16, ops: &mut Vec<Op
     match logic {
         Logic::Const { value } => ops.push(Op::PushConst(*value)),
         Logic::Contact { var, negated } => {
-            ops.push(Op::Push(lookup.bit(var.as_str()).unwrap_or(0)));
+            match q_instance(var) {
+                Some(instance) => ops.push(Op::FbQ(instance)),
+                None => ops.push(Op::Push(lookup.bit(var.as_str()).unwrap_or(0))),
+            }
             if *negated {
                 ops.push(Op::Not);
             }
