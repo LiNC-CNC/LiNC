@@ -170,6 +170,7 @@
       "name": "main",
       "rungs": [
         {
+          "label": "",
           "comment": "Seal in: start picks the seal up, stop breaks it.",
           "logic": {
             "op": "series",
@@ -198,7 +199,8 @@
           },
           "coil": {
             "var": "run",
-            "kind": "normal"
+            "kind": "normal",
+            "expr": null
           },
           "cells": [
             {
@@ -235,6 +237,7 @@
           ]
         },
         {
+          "label": "",
           "comment": "branch of seal",
           "logic": {
             "op": "const",
@@ -242,7 +245,8 @@
           },
           "coil": {
             "var": "",
-            "kind": "normal"
+            "kind": "normal",
+            "expr": null
           },
           "cells": [
             {
@@ -277,6 +281,7 @@
           ]
         },
         {
+          "label": "",
           "comment": "The seal drives the run output.",
           "logic": {
             "op": "contact",
@@ -285,7 +290,8 @@
           },
           "coil": {
             "var": "fan",
-            "kind": "normal"
+            "kind": "normal",
+            "expr": null
           },
           "cells": [
             {
@@ -323,6 +329,7 @@
           ]
         },
         {
+          "label": "",
           "comment": "",
           "logic": {
             "op": "contact",
@@ -331,7 +338,8 @@
           },
           "coil": {
             "var": "alarm",
-            "kind": "reset"
+            "kind": "reset",
+            "expr": null
           },
           "cells": [
             {
@@ -366,6 +374,7 @@
           ]
         },
         {
+          "label": "",
           "comment": "Stopping while running latches the alarm.",
           "logic": {
             "op": "series",
@@ -384,7 +393,8 @@
           },
           "coil": {
             "var": "alarm",
-            "kind": "set"
+            "kind": "set",
+            "expr": null
           },
           "cells": [
             {
@@ -419,6 +429,7 @@
           ]
         },
         {
+          "label": "",
           "comment": "",
           "logic": {
             "op": "contact",
@@ -427,7 +438,8 @@
           },
           "coil": {
             "var": "blink_a",
-            "kind": "normal"
+            "kind": "normal",
+            "expr": null
           },
           "cells": [
             {
@@ -467,6 +479,7 @@
           ]
         },
         {
+          "label": "",
           "comment": "",
           "logic": {
             "op": "contact",
@@ -475,7 +488,8 @@
           },
           "coil": {
             "var": "blink_b",
-            "kind": "normal"
+            "kind": "normal",
+            "expr": null
           },
           "cells": [
             {
@@ -515,6 +529,7 @@
           ]
         },
         {
+          "label": "",
           "comment": "",
           "logic": {
             "op": "contact",
@@ -523,7 +538,8 @@
           },
           "coil": {
             "var": "lamp",
-            "kind": "normal"
+            "kind": "normal",
+            "expr": null
           },
           "cells": [
             {
@@ -559,6 +575,7 @@
           ]
         },
         {
+          "label": "",
           "comment": "",
           "logic": {
             "op": "contact",
@@ -567,7 +584,8 @@
           },
           "coil": {
             "var": "run",
-            "kind": "normal"
+            "kind": "normal",
+            "expr": null
           },
           "cells": [
             {
@@ -604,6 +622,7 @@
           ]
         },
         {
+          "label": "",
           "comment": "",
           "logic": {
             "op": "contact",
@@ -612,7 +631,8 @@
           },
           "coil": {
             "var": "run",
-            "kind": "normal"
+            "kind": "normal",
+            "expr": null
           },
           "cells": [
             {
@@ -649,6 +669,7 @@
           ]
         },
         {
+          "label": "",
           "comment": "",
           "logic": {
             "op": "contact",
@@ -657,7 +678,8 @@
           },
           "coil": {
             "var": "seal",
-            "kind": "normal"
+            "kind": "normal",
+            "expr": null
           },
           "cells": [
             {
@@ -705,6 +727,7 @@
           "name": "main",
           "rungs": [
             {
+              "label": "",
               "comment": "Seal in: start picks the seal up, stop breaks it.",
               "logic": {
                 "op": "series",
@@ -733,7 +756,8 @@
               },
               "coil": {
                 "var": "run",
-                "kind": "normal"
+                "kind": "normal",
+                "expr": null
               },
               "cells": [
                 {
@@ -770,6 +794,7 @@
               ]
             },
             {
+              "label": "",
               "comment": "branch of seal",
               "logic": {
                 "op": "const",
@@ -777,7 +802,8 @@
               },
               "coil": {
                 "var": "",
-                "kind": "normal"
+                "kind": "normal",
+                "expr": null
               },
               "cells": [
                 {
@@ -812,6 +838,7 @@
               ]
             },
             {
+              "label": "",
               "comment": "The seal drives the run output.",
               "logic": {
                 "op": "contact",
@@ -820,7 +847,8 @@
               },
               "coil": {
                 "var": "fan",
-                "kind": "normal"
+                "kind": "normal",
+                "expr": null
               },
               "cells": [
                 {
@@ -858,6 +886,7 @@
               ]
             },
             {
+              "label": "",
               "comment": "",
               "logic": {
                 "op": "contact",
@@ -866,7 +895,8 @@
               },
               "coil": {
                 "var": "alarm",
-                "kind": "reset"
+                "kind": "reset",
+                "expr": null
               },
               "cells": [
                 {
@@ -901,6 +931,7 @@
               ]
             },
             {
+              "label": "",
               "comment": "Stopping while running latches the alarm.",
               "logic": {
                 "op": "series",
@@ -919,7 +950,8 @@
               },
               "coil": {
                 "var": "alarm",
-                "kind": "set"
+                "kind": "set",
+                "expr": null
               },
               "cells": [
                 {
@@ -954,6 +986,7 @@
               ]
             },
             {
+              "label": "",
               "comment": "",
               "logic": {
                 "op": "contact",
@@ -962,7 +995,8 @@
               },
               "coil": {
                 "var": "blink_a",
-                "kind": "normal"
+                "kind": "normal",
+                "expr": null
               },
               "cells": [
                 {
@@ -1002,6 +1036,7 @@
               ]
             },
             {
+              "label": "",
               "comment": "",
               "logic": {
                 "op": "contact",
@@ -1010,7 +1045,8 @@
               },
               "coil": {
                 "var": "blink_b",
-                "kind": "normal"
+                "kind": "normal",
+                "expr": null
               },
               "cells": [
                 {
@@ -1050,6 +1086,7 @@
               ]
             },
             {
+              "label": "",
               "comment": "",
               "logic": {
                 "op": "contact",
@@ -1058,7 +1095,8 @@
               },
               "coil": {
                 "var": "lamp",
-                "kind": "normal"
+                "kind": "normal",
+                "expr": null
               },
               "cells": [
                 {
@@ -1094,6 +1132,7 @@
               ]
             },
             {
+              "label": "",
               "comment": "",
               "logic": {
                 "op": "contact",
@@ -1102,7 +1141,8 @@
               },
               "coil": {
                 "var": "run",
-                "kind": "normal"
+                "kind": "normal",
+                "expr": null
               },
               "cells": [
                 {
@@ -1139,6 +1179,7 @@
               ]
             },
             {
+              "label": "",
               "comment": "",
               "logic": {
                 "op": "contact",
@@ -1147,7 +1188,8 @@
               },
               "coil": {
                 "var": "run",
-                "kind": "normal"
+                "kind": "normal",
+                "expr": null
               },
               "cells": [
                 {
@@ -1184,6 +1226,7 @@
               ]
             },
             {
+              "label": "",
               "comment": "",
               "logic": {
                 "op": "contact",
@@ -1192,7 +1235,8 @@
               },
               "coil": {
                 "var": "seal",
-                "kind": "normal"
+                "kind": "normal",
+                "expr": null
               },
               "cells": [
                 {
