@@ -10,7 +10,7 @@ use linc_plc_core::protocol::{Response, RunState, StateSnapshot};
 use linc_plc_core::timing::ScanTiming;
 use linc_plc_core::Vm;
 
-use crate::hal::Hal;
+use crate::device::{Device, IoImage, Status};
 use crate::{Command, Shared};
 
 /// The daemon's own state machine. Kept separate from
@@ -85,8 +85,11 @@ pub(crate) struct Daemon {
     trend_window: u32,
     trend_stride: u32,
     trend_tick: u32,
-    /// When the previous scan ran; timers advance by the real delta.
-    last_scan: Option<Instant>,
+    /// When the previous scan ran, on the device's clock; timers advance by the
+    /// delta the device reports.
+    last_clock: Option<Duration>,
+    /// One scan's field I/O, reused so the loop allocates nothing per scan.
+    io: IoImage,
 }
 
 impl Daemon {
@@ -94,6 +97,7 @@ impl Daemon {
         project: PathBuf,
         retain_path: Option<PathBuf>,
         retain_flush: Duration,
+        io: IoImage,
     ) -> Self {
         Self {
             project,
@@ -118,15 +122,16 @@ impl Daemon {
             trend_window: 20_000,
             trend_stride: 1,
             trend_tick: 0,
-            last_scan: None,
+            last_clock: None,
+            io,
         }
     }
 
     /// Apply commands at the top of each scan, then scan, then publish. Runs
     /// until the shared shutdown flag is set.
-    pub(crate) fn run(
+    pub(crate) fn run<D: Device>(
         &mut self,
-        hal: &Hal,
+        device: &mut D,
         shared: &Shared,
         commands: &Receiver<Command>,
         period: Duration,
@@ -141,18 +146,18 @@ impl Daemon {
             let started = Instant::now();
             self.timing.wake(started);
             while let Ok(command) = commands.try_recv() {
-                self.apply(command, hal, shared);
+                self.apply(command, device, shared);
             }
 
             self.flush_retained(false);
             if self.phase == Phase::Running {
-                if let Err(message) = self.execute(hal, shared) {
-                    self.fail(message, hal, shared);
+                if let Err(message) = self.execute(device, shared) {
+                    self.fail(message, device, shared);
                 }
-            } else if let Err(error) = hal.drive_outputs_false() {
+            } else if let Err(error) = device.safe() {
                 self.fail(
                     format!("cannot drive the outputs false: {error}"),
-                    hal,
+                    device,
                     shared,
                 );
             }
@@ -174,10 +179,7 @@ impl Daemon {
             } else {
                 false
             };
-            let _ = hal.ctl().set_alive(self.alive);
-            let _ = hal.ctl().set_scan_count(self.scan_count as i32);
-            let _ = hal.ctl().set_scan_time_us(self.scan_time_us as i32);
-            let _ = hal.ctl().set_overruns(self.overruns as i32);
+            let _ = device.set_status(self.status());
 
             // Scan time is the body; the schedule moves one interval, and the
             // sleep aims at the anchored expectation rather than at "now".
@@ -202,7 +204,7 @@ impl Daemon {
         self.publish(shared);
     }
 
-    fn apply(&mut self, command: Command, hal: &Hal, shared: &Shared) {
+    fn apply<D: Device>(&mut self, command: Command, device: &mut D, shared: &Shared) {
         match command {
             Command::Load {
                 compiled,
@@ -236,9 +238,8 @@ impl Daemon {
                 self.phase = Phase::Loaded;
                 self.fault = None;
                 self.alive = false;
-                let _ = hal.ctl().set_alive(false);
-                let _ = hal.ctl().set_fault(false);
-                let _ = hal.drive_outputs_false();
+                let _ = device.set_status(self.status());
+                let _ = device.safe();
                 self.publish(shared);
                 answer(
                     reply,
@@ -255,7 +256,7 @@ impl Daemon {
                 watch,
                 reply,
             } => {
-                self.reload(*compiled, warnings, watch, hal, shared, reply);
+                self.reload(*compiled, warnings, watch, device, shared, reply);
             }
 
             Command::Start { reply } => {
@@ -271,7 +272,7 @@ impl Daemon {
                 }
                 self.phase = Phase::Running;
                 self.fault = None;
-                let _ = hal.ctl().set_fault(false);
+                let _ = device.set_status(self.status());
                 self.publish(shared);
                 answer(reply, Response::State(self.snapshot()));
             }
@@ -290,11 +291,11 @@ impl Daemon {
                     return;
                 }
                 self.phase = Phase::Loaded;
-                let failed = self.execute(hal, shared).err();
+                let failed = self.execute(device, shared).err();
                 self.alive = false;
-                let _ = hal.ctl().set_alive(false);
+                let _ = device.set_status(self.status());
                 if let Some(message) = failed {
-                    self.fail(message, hal, shared);
+                    self.fail(message, device, shared);
                 }
                 self.publish(shared);
                 answer(reply, Response::State(self.snapshot()));
@@ -309,7 +310,7 @@ impl Daemon {
                 if self.phase == Phase::Running {
                     self.phase = Phase::Loaded;
                 }
-                let _ = hal.drive_outputs_false();
+                let _ = device.safe();
                 self.publish(shared);
                 answer(reply, Response::State(self.snapshot()));
             }
@@ -324,9 +325,9 @@ impl Daemon {
                     );
                     return;
                 }
-                if let Err(error) = hal.drive_outputs_false() {
+                if let Err(error) = device.safe() {
                     let message = format!("cannot drive the outputs false: {error}");
-                    self.fail(message.clone(), hal, shared);
+                    self.fail(message.clone(), device, shared);
                     answer(
                         reply,
                         Response::Error {
@@ -345,8 +346,7 @@ impl Daemon {
                 self.phase = Phase::Loaded;
                 self.fault = None;
                 self.alive = false;
-                let _ = hal.ctl().set_alive(false);
-                let _ = hal.ctl().set_fault(false);
+                let _ = device.set_status(self.status());
                 // A stop is a safe point: the values a run produced are worth
                 // keeping even if the process goes away next.
                 self.flush_retained(true);
@@ -503,12 +503,12 @@ impl Daemon {
     /// keeps its last output values because nothing drives them, the phase is
     /// preserved so a running ladder keeps running, and a force follows its
     /// *name* so a renumbered slot never inherits one.
-    fn reload(
+    fn reload<D: Device>(
         &mut self,
         compiled: linc_plc_core::Compiled,
         warnings: Vec<linc_plc_core::Diagnostic>,
         watch: Vec<String>,
-        hal: &Hal,
+        device: &mut D,
         shared: &Shared,
         reply: Sender<Response>,
     ) {
@@ -582,7 +582,7 @@ impl Daemon {
                     "reload removed the output binding(s) {}; the pin map is frozen",
                     names.join(", ")
                 );
-                self.fail(message.clone(), hal, shared);
+                self.fail(message.clone(), device, shared);
                 answer(
                     reply,
                     Response::Error {
@@ -608,26 +608,25 @@ impl Daemon {
 
     /// One ladder scan: read the bound inputs, run the program, write the
     /// bound outputs.
-    fn execute(&mut self, hal: &Hal, shared: &Shared) -> Result<(), String> {
+    fn execute<D: Device>(&mut self, device: &mut D, shared: &Shared) -> Result<(), String> {
         self.expire_forces();
         let retain_hash = self.hash.clone();
         let retain_wanted = self.retain_path.is_some();
         let Some(vm) = self.vm.as_mut() else {
             return Err("no program is loaded".to_string());
         };
-        let bits = hal.read_inputs().map_err(|error| error.to_string())?;
-        // The word and float inputs are read in bank order; the VM writes them
-        // into their regions before the ops pass, so a rung sees this scan's
-        // field value. A float pin arrives as its integer view (`f64 as i32`).
-        let words = hal.read_word_inputs().map_err(|error| error.to_string())?;
-        let floats = hal.read_float_inputs().map_err(|error| error.to_string())?;
-        // Timers add the real scan delta, not a fixed tick. The cap keeps a
-        // stalled thread from jumping a timer past its preset in one scan.
+        device
+            .read(&mut self.io)
+            .map_err(|error| error.to_string())?;
+        // Timers add the scan delta the device reports, not a fixed tick. The
+        // cap keeps a stalled thread from jumping a timer past its preset in
+        // one scan; a scripted device reports exactly what the test stepped.
+        let now = device.now();
         let dt_ms = self
-            .last_scan
-            .map(|last| last.elapsed().as_millis().min(1000) as u16)
+            .last_clock
+            .map(|last| now.saturating_sub(last).as_millis().min(1000) as u16)
             .unwrap_or(20);
-        self.last_scan = Some(Instant::now());
+        self.last_clock = Some(now);
         // A forced word is what the program reads, and it holds against the
         // program's own writes: the loop runs before and after the scan.
         for force in &self.word_forces {
@@ -635,11 +634,14 @@ impl Daemon {
                 vm.set_word(index, force.value);
             }
         }
+        // The word and float inputs are in bank order; the VM writes them into
+        // their regions before the ops pass, so a rung sees this scan's field
+        // value. A float pin arrives as its integer view (`f64 as i32`).
         vm.scan_with_io(
             linc_plc_core::vm::IoFrame {
-                bits: &bits,
-                words: &words,
-                floats: &floats,
+                bits: &self.io.input_bits,
+                words: &self.io.input_words,
+                floats: &self.io.input_floats,
             },
             dt_ms.max(1),
         );
@@ -703,12 +705,23 @@ impl Daemon {
                 self.retain_dirty = Some(blob);
             }
         }
-        hal.write_outputs(vm.outputs())
-            .map_err(|error| error.to_string())?;
-        hal.write_word_outputs(vm.word_outputs())
-            .map_err(|error| error.to_string())?;
-        hal.write_float_outputs(vm.float_outputs())
-            .map_err(|error| error.to_string())
+        // The image carries the scan's results to the device, and the device
+        // advances by the same delta the timers just saw.
+        self.io.take_outputs(vm);
+        device.write(&self.io).map_err(|error| error.to_string())?;
+        device.step(Duration::from_millis(u64::from(dt_ms.max(1))));
+        Ok(())
+    }
+
+    /// The host state a device publishes: the heartbeat, the counters, the fault.
+    pub(crate) fn status(&self) -> Status {
+        Status {
+            alive: self.alive,
+            fault: self.fault.is_some(),
+            scan_count: self.scan_count,
+            scan_time_us: self.scan_time_us,
+            overruns: self.overruns,
+        }
     }
 
     /// Drop forces whose ttl ran out. [`linc_plc_core::Vm`] clears all forces
@@ -739,16 +752,15 @@ impl Daemon {
 
     /// A HAL failure or an internal error: fault, drop the outputs, keep the
     /// socket serving so the UI can show what happened.
-    fn fail(&mut self, message: String, hal: &Hal, shared: &Shared) {
+    fn fail<D: Device>(&mut self, message: String, device: &mut D, shared: &Shared) {
         if self.phase != Phase::Fault {
             log::error!("linc-plc: fault: {message}");
         }
         self.phase = Phase::Fault;
         self.fault = Some(message);
         self.alive = false;
-        let _ = hal.ctl().set_alive(false);
-        let _ = hal.ctl().set_fault(true);
-        let _ = hal.drive_outputs_false();
+        let _ = device.set_status(self.status());
+        let _ = device.safe();
         self.publish(shared);
     }
 

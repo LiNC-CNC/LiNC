@@ -8,8 +8,9 @@
 //!
 //! # Threading
 //!
-//! The main thread owns the HAL component, every pin and the scan loop; no
-//! other thread touches HAL. One listener thread accepts connections and
+//! The main thread owns the device and the scan loop; no other thread touches
+//! either. The field is [`HalDevice`], and [`Device`] is the seam that lets the
+//! same loop run on a scripted [`TestDevice`] with no HAL component at all. One listener thread accepts connections and
 //! handles them sequentially — one UI client is enough — and forwards state
 //! changes to the scan loop over an `mpsc` channel with a reply channel. The
 //! daemon compiles and validates projects on the socket thread, because that
@@ -55,6 +56,7 @@
 //! heartbeat stops. This daemon is not a safety function.
 
 mod daemon;
+mod device;
 mod hal;
 mod server;
 
@@ -70,6 +72,8 @@ use std::time::Duration;
 use linc_plc_core::protocol::{RunState, StateSnapshot, TrendData};
 use linc_plc_core::{Compiled, Diagnostic, Project, Severity, Vm};
 use thiserror::Error;
+
+pub use device::{Device, IoImage, Status, TestDevice};
 
 /// Everything the daemon needs to start.
 #[derive(Debug, Clone)]
@@ -270,29 +274,50 @@ pub(crate) struct Shared {
 /// Run the daemon until `shutdown` is set. See the crate documentation for the
 /// threading model, the state machine and the failure behaviour.
 pub fn run(config: Config, shutdown: Arc<AtomicBool>) -> Result<(), Error> {
+    let io_map = startup_io_map(&config.project);
+    let listener = server::bind(&config.socket)?;
+    let socket_file = SocketFile {
+        path: config.socket.clone(),
+    };
+    // The field itself. A HAL failure here is a startup error, before any pin
+    // has been published, exactly as it always was.
+    let device = hal::HalDevice::new(&config, &io_map)?;
+    serve(config, shutdown, io_map, listener, socket_file, device)
+}
+
+/// Run the daemon against a device of the caller's choosing.
+///
+/// This is the seam M5 opened: the whole path — socket, state machine, scan
+/// loop, publishing, retention — runs on any [`Device`], so a test drives the
+/// daemon with [`TestDevice`] and never touches HAL. A plant model is the same
+/// call with a different argument.
+pub fn run_with_device<D: Device>(
+    config: Config,
+    shutdown: Arc<AtomicBool>,
+    device: D,
+) -> Result<(), Error> {
+    let io_map = startup_io_map(&config.project);
+    let listener = server::bind(&config.socket)?;
+    let socket_file = SocketFile {
+        path: config.socket.clone(),
+    };
+    serve(config, shutdown, io_map, listener, socket_file, device)
+}
+
+/// The shared tail: bind nothing, own the device, run the loop, leave safe.
+fn serve<D: Device>(
+    config: Config,
+    shutdown: Arc<AtomicBool>,
+    io_map: IoMap,
+    listener: std::os::unix::net::UnixListener,
+    socket_file: SocketFile,
+    mut device: D,
+) -> Result<(), Error> {
     log::info!(
         "linc-plc: starting, project {}, socket {}",
         config.project.display(),
         config.socket.display()
     );
-
-    let startup = startup_compiled(&config.project);
-    let io_map = match &startup {
-        Some(compiled) => IoMap::from_compiled(compiled),
-        None => {
-            log::warn!(
-                "linc-plc: no usable ladder project at startup; no HAL I/O pins are bound, and a \
-                 Load with I/O bindings will be refused until the daemon is restarted with one"
-            );
-            IoMap::default()
-        }
-    };
-
-    let listener = server::bind(&config.socket)?;
-    let socket_file = SocketFile {
-        path: config.socket.clone(),
-    };
-    let machine = hal::Hal::new(&config, &io_map)?;
 
     let (commands, receiver) = mpsc::channel();
     let shared = Arc::new(Shared {
@@ -313,7 +338,7 @@ pub fn run(config: Config, shutdown: Arc<AtomicBool>) -> Result<(), Error> {
             forced: Vec::new(),
         })),
         shutdown: Arc::clone(&shutdown),
-        io_map,
+        io_map: io_map.clone(),
         project: config.project.clone(),
         no_hal: config.no_hal,
         allow_force: config.allow_force,
@@ -329,26 +354,53 @@ pub fn run(config: Config, shutdown: Arc<AtomicBool>) -> Result<(), Error> {
         config.project.clone(),
         config.retain_file.clone(),
         Duration::from_secs(config.retain_flush_s.max(1)),
+        device::IoImage::for_map(&io_map),
     );
     daemon.run(
-        &machine,
+        &mut device,
         &shared,
         &receiver,
         Duration::from_micros(config.scan_us.max(1)),
     );
 
-    // Leave the plant safe before the listener goes away, then stop the socket
-    // thread and unregister the component.
-    machine.force_safe();
+    // Leave the plant safe before the listener goes away: every output false,
+    // the heartbeat off and the fault raised. Failures are logged, not
+    // propagated — the daemon is leaving.
+    if let Err(error) = device.safe() {
+        log::error!("linc-plc: cannot drive the outputs false on exit: {error}");
+    }
+    let mut status = daemon.status();
+    status.alive = false;
+    status.fault = true;
+    if let Err(error) = device.set_status(status) {
+        log::error!("linc-plc: cannot raise the fault pin on exit: {error}");
+    }
     daemon.mark_stopped(&shared);
     shutdown.store(true, Ordering::SeqCst);
     if let Err(error) = server.join() {
         log::warn!("linc-plc: socket thread ended abnormally: {error:?}");
     }
-    drop(machine);
+    drop(device);
     drop(socket_file);
     log::info!("linc-plc: stopped");
     Ok(())
+}
+
+/// The pin map the startup project binds.
+///
+/// Its only job is to define the map, so a project that does not compile leaves
+/// an empty map — reported here, refused later by `io_map_locked`.
+fn startup_io_map(path: &Path) -> IoMap {
+    match startup_compiled(path) {
+        Some(compiled) => IoMap::from_compiled(&compiled),
+        None => {
+            log::warn!(
+                "linc-plc: no usable ladder project at startup; no HAL I/O pins are bound, and a \
+                 Load with I/O bindings will be refused until the daemon is restarted with one"
+            );
+            IoMap::default()
+        }
+    }
 }
 
 /// Compile the project named on the command line. Its only job is to define

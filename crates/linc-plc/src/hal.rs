@@ -3,9 +3,15 @@
 //! Only the daemon's main thread touches these values. Pins are created from
 //! the project's I/O bindings — the map is frozen at startup — plus the five
 //! control outputs, all before `hal_ready()`.
+//!
+//! [`HalDevice`] is the [`Device`] impl: the field itself. It owns the component,
+//! so dropping it unregisters the component and publishes the pins' last values.
+
+use std::time::{Duration, Instant};
 
 use linc_hal::{HalComponent, HalPin};
 
+use crate::device::{Device, IoImage, Status};
 use crate::{Config, Error, IoMap};
 
 /// The HAL type of a bound pin. The variant, not a cast, decides how the pin's
@@ -195,7 +201,7 @@ impl Ctl {
 
 /// The component, its I/O pins and the control pins. Dropping this unregisters
 /// the component (`hal_exit`).
-pub(crate) struct Hal {
+pub(crate) struct HalDevice {
     /// Owns the component: the pins are pointers into its shared memory, so it
     /// must outlive them even though nothing reads this field.
     _component: Option<HalComponent>,
@@ -209,9 +215,12 @@ pub(crate) struct Hal {
     float_inputs: Vec<Slot>,
     float_outputs: Vec<Slot>,
     ctl: Ctl,
+    /// When the device was created: the daemon measures scan deltas from here,
+    /// so a scripted device can make timers reproducible.
+    started: Instant,
 }
 
-impl Hal {
+impl HalDevice {
     pub(crate) fn new(config: &Config, map: &IoMap) -> Result<Self, Error> {
         if config.no_hal {
             log::info!("linc-plc: HAL disabled; no component and no pins");
@@ -224,6 +233,7 @@ impl Hal {
                 float_inputs: off_slots(&map.float_inputs),
                 float_outputs: off_slots(&map.float_outputs),
                 ctl: Ctl::default(),
+                started: Instant::now(),
             });
         }
 
@@ -295,76 +305,8 @@ impl Hal {
             float_inputs,
             float_outputs,
             ctl,
+            started: Instant::now(),
         })
-    }
-
-    /// Read every ladder input, in the compiled input order.
-    pub(crate) fn read_inputs(&self) -> Result<Vec<bool>, Error> {
-        self.inputs
-            .iter()
-            .map(Slot::read_bit)
-            .collect::<Result<Vec<bool>, Error>>()
-    }
-
-    /// Read every word input, in word-bank order. The VM writes these into the
-    /// bank before the ops pass, so a rung sees the field value this scan.
-    pub(crate) fn read_word_inputs(&self) -> Result<Vec<i32>, Error> {
-        self.word_inputs
-            .iter()
-            .map(Slot::read_s32)
-            .collect::<Result<Vec<i32>, Error>>()
-    }
-
-    /// Read every float input as its integer view. `f64 as i32` truncates toward
-    /// zero and saturates, so `%IF0 = 2.7` reads as 2 and an out-of-range pin
-    /// clamps rather than wrapping.
-    pub(crate) fn read_float_inputs(&self) -> Result<Vec<i32>, Error> {
-        self.float_inputs
-            .iter()
-            .map(Slot::read_float_as_i32)
-            .collect::<Result<Vec<i32>, Error>>()
-    }
-
-    /// Write every ladder output, in the compiled output order.
-    pub(crate) fn write_outputs(&self, values: &[bool]) -> Result<(), Error> {
-        if values.len() != self.outputs.len() {
-            return Err(Error::Layout {
-                expected: self.outputs.len(),
-                got: values.len(),
-            });
-        }
-        for (slot, value) in self.outputs.iter().zip(values) {
-            slot.write_bit(*value)?;
-        }
-        Ok(())
-    }
-
-    /// Write every word output, in word-bank order.
-    pub(crate) fn write_word_outputs(&self, values: &[i32]) -> Result<(), Error> {
-        if values.len() != self.word_outputs.len() {
-            return Err(Error::Layout {
-                expected: self.word_outputs.len(),
-                got: values.len(),
-            });
-        }
-        for (slot, value) in self.word_outputs.iter().zip(values) {
-            slot.write_s32(*value)?;
-        }
-        Ok(())
-    }
-
-    /// Write every float output, converting the bank's integer view to `f64`.
-    pub(crate) fn write_float_outputs(&self, values: &[i32]) -> Result<(), Error> {
-        if values.len() != self.float_outputs.len() {
-            return Err(Error::Layout {
-                expected: self.float_outputs.len(),
-                got: values.len(),
-            });
-        }
-        for (slot, value) in self.float_outputs.iter().zip(values) {
-            slot.write_float_from_i32(*value)?;
-        }
-        Ok(())
     }
 
     /// Drive every ladder output — bit, word and float — to its zero value. Used
@@ -382,30 +324,108 @@ impl Hal {
         }
         Ok(())
     }
+}
 
-    pub(crate) fn ctl(&self) -> &Ctl {
-        &self.ctl
+/// The field, behind [`Device`]. Every method is the HAL access the daemon used
+/// to make directly; `read` and `write` fill and consume the image so a scan
+/// needs no per-pin call from the loop.
+impl Device for HalDevice {
+    fn read(&mut self, image: &mut IoImage) -> Result<(), Error> {
+        for (slot, value) in self.inputs.iter().zip(image.input_bits.iter_mut()) {
+            *value = slot.read_bit()?;
+        }
+        for (slot, value) in self.word_inputs.iter().zip(image.input_words.iter_mut()) {
+            *value = slot.read_s32()?;
+        }
+        for (slot, value) in self.float_inputs.iter().zip(image.input_floats.iter_mut()) {
+            *value = slot.read_float_as_i32()?;
+        }
+        Ok(())
     }
 
-    /// Last act before the component is unregistered: heartbeat off, outputs
-    /// false, fault on. Failures here are logged, not propagated — the daemon is
-    /// leaving.
-    pub(crate) fn force_safe(&self) {
-        if let Err(error) = self.ctl.set_alive(false) {
-            log::error!("linc-plc: cannot stop the heartbeat on exit: {error}");
+    fn write(&mut self, image: &IoImage) -> Result<(), Error> {
+        if image.output_bits.len() != self.outputs.len() {
+            return Err(Error::Layout {
+                expected: self.outputs.len(),
+                got: image.output_bits.len(),
+            });
         }
-        if let Err(error) = self.drive_outputs_false() {
-            log::error!("linc-plc: cannot drive the outputs false on exit: {error}");
+        if image.output_words.len() != self.word_outputs.len() {
+            return Err(Error::Layout {
+                expected: self.word_outputs.len(),
+                got: image.output_words.len(),
+            });
         }
-        if let Err(error) = self.ctl.set_fault(true) {
-            log::error!("linc-plc: cannot raise the fault pin on exit: {error}");
+        if image.output_floats.len() != self.float_outputs.len() {
+            return Err(Error::Layout {
+                expected: self.float_outputs.len(),
+                got: image.output_floats.len(),
+            });
         }
+        for (slot, value) in self.outputs.iter().zip(&image.output_bits) {
+            slot.write_bit(*value)?;
+        }
+        for (slot, value) in self.word_outputs.iter().zip(&image.output_words) {
+            slot.write_s32(*value)?;
+        }
+        for (slot, value) in self.float_outputs.iter().zip(&image.output_floats) {
+            slot.write_float_from_i32(*value)?;
+        }
+        Ok(())
+    }
+
+    fn now(&self) -> Duration {
+        self.started.elapsed()
+    }
+
+    fn step(&mut self, _dt: Duration) {
+        // The field is real: time passes on its own and nothing is stepped.
+    }
+
+    fn safe(&mut self) -> Result<(), Error> {
+        self.drive_outputs_false()
+    }
+
+    fn set_status(&mut self, status: Status) -> Result<(), Error> {
+        self.ctl.set_alive(status.alive)?;
+        self.ctl.set_scan_count(status.scan_count as i32)?;
+        self.ctl.set_scan_time_us(status.scan_time_us as i32)?;
+        self.ctl.set_overruns(status.overruns as i32)?;
+        self.ctl.set_fault(status.fault)?;
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{float_to_i32, i32_to_float};
+
+    /// M5's acceptance, as a property of the code: the field is one impl of the
+    /// seam, and the loop that scans never names it. If the scan loop learned
+    /// about `HalDevice` again, the test device would stop being a proof.
+    #[test]
+    fn the_field_is_one_impl_of_the_seam_and_the_loop_does_not_name_it() {
+        let hal = include_str!("hal.rs");
+        assert!(
+            hal.contains("impl Device for HalDevice"),
+            "the HAL path must be a `Device` impl"
+        );
+        let daemon = include_str!("daemon.rs");
+        assert!(
+            !daemon.contains("HalDevice") && !daemon.contains("linc_hal"),
+            "the scan loop must talk to the trait, never to the field"
+        );
+        let lib = include_str!("lib.rs");
+        let body = lib
+            .split("pub fn run_with_device")
+            .nth(1)
+            .expect("run_with_device exists");
+        let body = &body[..body.find("\n}\n").expect("it has a body")];
+        assert!(
+            !body.contains("HalDevice") && !body.contains("hal_init"),
+            "the test entry point must not build the field"
+        );
+    }
 
     #[test]
     fn a_float_pin_truncates_toward_zero_on_the_way_in() {

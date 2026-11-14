@@ -1,5 +1,10 @@
-//! Integration tests: run the daemon in-process with `--no-hal` and drive it
+//! Integration tests: run the daemon in-process on a [`TestDevice`] and drive it
 //! with the blocking client, exactly as the UI does.
+//!
+//! M5's acceptance lives here: the whole daemon path — socket, state machine,
+//! scan loop, publishing — runs on a scripted device, so no HAL component is
+//! created and `hal_init` is never called. The field itself is `HalDevice`; the
+//! test only needs what the seam exposes.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -9,7 +14,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use linc_plc::Config;
+use linc_plc::{Config, TestDevice};
 use linc_plc_client::Client;
 use linc_plc_core::protocol::{Request, Response, StateSnapshot, PROTOCOL_VERSION};
 use linc_plc_core::{
@@ -23,6 +28,8 @@ struct Harness {
     project: PathBuf,
     shutdown: Arc<AtomicBool>,
     thread: Option<JoinHandle<Result<(), linc_plc::Error>>>,
+    /// The scripted field: inputs the tests set, outputs the ladder drives.
+    device: TestDevice,
 }
 
 impl Harness {
@@ -31,7 +38,12 @@ impl Harness {
     }
 
     fn start_with(project: &Project, allow_force: bool, retain: Option<PathBuf>) -> Self {
-        Self::start_in(project, allow_force, retain, tempfile::tempdir().expect("temp dir"))
+        Self::start_in(
+            project,
+            allow_force,
+            retain,
+            tempfile::tempdir().expect("temp dir"),
+        )
     }
 
     fn start_in(
@@ -56,7 +68,9 @@ impl Harness {
             retain_flush_s: 1,
         };
         let flag = Arc::clone(&shutdown);
-        let thread = thread::spawn(move || linc_plc::run(config, flag));
+        let device = TestDevice::new();
+        let field = device.clone();
+        let thread = thread::spawn(move || linc_plc::run_with_device(config, flag, field));
 
         let mut harness = Self {
             directory,
@@ -64,6 +78,7 @@ impl Harness {
             project: project_path,
             shutdown,
             thread: Some(thread),
+            device,
         };
         harness.wait_for_socket();
         harness
@@ -506,7 +521,10 @@ fn the_trend_ring_samples_the_watch_list_every_scan() {
     let mut data = None;
     for _ in 0..40 {
         std::thread::sleep(Duration::from_millis(25));
-        if let Response::Trend(trend) = client.call(&Request::Trend { window_ms: 20_000 }).expect("trend") {
+        if let Response::Trend(trend) = client
+            .call(&Request::Trend { window_ms: 20_000 })
+            .expect("trend")
+        {
             if trend.samples.len() >= 4 {
                 data = Some(trend);
                 break;
@@ -672,7 +690,11 @@ fn retained_values_survive_a_daemon_restart() {
 fn step_is_exactly_one_scan_and_pauses() {
     let mut harness = Harness::start(&Project::example(), false);
     let mut client = harness.client();
-    client.call(&Request::Hello { protocol: PROTOCOL_VERSION }).expect("hello");
+    client
+        .call(&Request::Hello {
+            protocol: PROTOCOL_VERSION,
+        })
+        .expect("hello");
     client
         .call(&Request::Load {
             project: Project::example(),
@@ -684,7 +706,11 @@ fn step_is_exactly_one_scan_and_pauses() {
     // The first step pauses a running ladder, so the exactness is measured from
     // the paused state onwards, where the scheduler cannot add scans.
     let paused = expect_state(client.call(&Request::Step).expect("step"));
-    assert_eq!(state_name(&paused), "loaded", "a step leaves the ladder paused");
+    assert_eq!(
+        state_name(&paused),
+        "loaded",
+        "a step leaves the ladder paused"
+    );
     assert!(!paused.alive, "a paused ladder has no heartbeat");
 
     let first = expect_state(client.call(&Request::Step).expect("step"));
@@ -694,7 +720,11 @@ fn step_is_exactly_one_scan_and_pauses() {
         "one press is one scan, no more"
     );
     let second = expect_state(client.call(&Request::Step).expect("step"));
-    assert_eq!(second.scan_count, first.scan_count + 1, "and the next is too");
+    assert_eq!(
+        second.scan_count,
+        first.scan_count + 1,
+        "and the next is too"
+    );
 
     // The pause holds: scans stop climbing on their own.
     thread::sleep(Duration::from_millis(120));
@@ -711,7 +741,11 @@ fn step_is_exactly_one_scan_and_pauses() {
 fn reset_clears_data_and_forces() {
     let mut harness = Harness::start(&Project::example(), true);
     let mut client = harness.client();
-    client.call(&Request::Hello { protocol: PROTOCOL_VERSION }).expect("hello");
+    client
+        .call(&Request::Hello {
+            protocol: PROTOCOL_VERSION,
+        })
+        .expect("hello");
     client
         .call(&Request::Load {
             project: Project::example(),
@@ -728,16 +762,17 @@ fn reset_clears_data_and_forces() {
         .expect("force");
 
     let reset = expect_state(client.call(&Request::ResetData).expect("reset"));
-    assert_eq!(state_name(&reset), "loaded", "reset leaves the ladder paused");
+    assert_eq!(
+        state_name(&reset),
+        "loaded",
+        "reset leaves the ladder paused"
+    );
     assert!(reset.forced.is_empty(), "the forces are cleared");
     assert!(
         reset.vars.iter().all(|var| !var.value),
         "every value is back to false after a reset"
     );
-    assert!(
-        !reset.alive,
-        "a reset ladder does not keep a heartbeat"
-    );
+    assert!(!reset.alive, "a reset ladder does not keep a heartbeat");
 }
 
 /// A forced marker word holds even when the program writes the slot every
@@ -782,7 +817,11 @@ fn a_forced_word_holds_against_the_program_and_releases() {
             .find(|word| word.name == name)
             .map(|word| word.value)
     };
-    assert_eq!(word(&running, "MW2"), Some(7), "the program writes the slot");
+    assert_eq!(
+        word(&running, "MW2"),
+        Some(7),
+        "the program writes the slot"
+    );
 
     let forced = expect_state(
         client
@@ -947,7 +986,11 @@ fn a_reload_while_running_keeps_the_outputs_and_the_phase() {
             "running",
             "the reload did not stop the ladder"
         );
-        assert_eq!(snapshot.output_image, vec![true], "the output never dropped");
+        assert_eq!(
+            snapshot.output_image,
+            vec![true],
+            "the output never dropped"
+        );
         samples += 1;
         thread::sleep(Duration::from_millis(5));
     }
@@ -980,16 +1023,18 @@ fn a_reload_while_loaded_stays_loaded() {
     let loaded = expect_state(client.call(&Request::Snapshot).expect("snapshot"));
     assert_eq!(state_name(&loaded), "loaded");
 
-    let reply = client
-        .call(&Request::Reload { project })
-        .expect("reload");
+    let reply = client.call(&Request::Reload { project }).expect("reload");
     assert!(
         matches!(reply, Response::Loaded { .. }),
         "{}",
         describe(&reply)
     );
     let after = expect_state(client.call(&Request::Snapshot).expect("snapshot"));
-    assert_eq!(state_name(&after), "loaded", "a reload does not start the ladder");
+    assert_eq!(
+        state_name(&after),
+        "loaded",
+        "a reload does not start the ladder"
+    );
     client.call(&Request::Shutdown).expect("shutdown");
     harness.finish();
 }
@@ -1015,7 +1060,11 @@ fn a_reload_with_different_bindings_is_refused() {
 
     let mut other = project;
     other.io.push(IoPoint::new("lamp", IoDirection::Out));
-    let (code, message) = expect_error(client.call(&Request::Reload { project: other }).expect("reload"));
+    let (code, message) = expect_error(
+        client
+            .call(&Request::Reload { project: other })
+            .expect("reload"),
+    );
     assert_eq!(code, "io_map_locked", "{message}");
     client.call(&Request::Shutdown).expect("shutdown");
     harness.finish();
@@ -1160,7 +1209,9 @@ fn a_retained_value_survives_a_reload() {
         })
         .expect("unforce");
     let reply = client
-        .call(&Request::Reload { project: project.clone() })
+        .call(&Request::Reload {
+            project: project.clone(),
+        })
         .expect("reload");
     assert!(
         matches!(reply, Response::Loaded { .. }),
@@ -1181,6 +1232,113 @@ fn a_retained_value_survives_a_reload() {
         );
         thread::sleep(Duration::from_millis(20));
     }
+    client.call(&Request::Shutdown).expect("shutdown");
+    harness.finish();
+}
+
+/// One input bit straight to one output bit: `in -> lamp`.
+fn pass_through_project() -> Project {
+    let mut project = Project::new("test-device");
+    project.io = vec![
+        IoPoint::new("in", IoDirection::In),
+        IoPoint::new("lamp", IoDirection::Out),
+    ];
+    project.pous = vec![linc_plc_core::Pou {
+        sections: vec![Section {
+            name: "main".into(),
+            rungs: vec![Rung::new(
+                Logic::Contact {
+                    var: "in".to_string(),
+                    negated: false,
+                },
+                Coil::new("lamp", CoilKind::Normal),
+            )],
+        }],
+        ..linc_plc_core::Pou::new("MAIN", linc_plc_core::PouLanguage::Ld)
+    }];
+    project
+}
+
+/// Wait until the device has seen a scan whose output equals `wanted`.
+fn wait_for_output(harness: &Harness, client: &mut Client, wanted: bool) -> Duration {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let _ = expect_state(client.call(&Request::Snapshot).expect("snapshot"));
+        if harness.device.outputs() == vec![wanted] {
+            return harness.device.clock();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the device never saw lamp = {wanted}; outputs are {:?} after {} writes",
+            harness.device.outputs(),
+            harness.device.writes()
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// M5's acceptance: the daemon runs on a scripted device with no HAL, and the
+/// route from a field input to a driven output is exercised end to end.
+#[test]
+fn the_daemon_runs_on_a_test_device_with_no_hal() {
+    let mut harness = Harness::start(&pass_through_project(), false);
+    let mut client = harness.client();
+
+    // Load, then start: the ladder needs a program before it scans.
+    let reply = client
+        .call(&Request::Load {
+            project: pass_through_project(),
+        })
+        .expect("load");
+    assert!(
+        matches!(reply, Response::Loaded { .. }),
+        "{}",
+        describe(&reply)
+    );
+    let reply = client.call(&Request::Start {}).expect("start");
+    assert!(matches!(reply, Response::State(_)), "{}", describe(&reply));
+
+    // The device starts with nothing scripted: every input reads false.
+    wait_for_output(&harness, &mut client, false);
+    assert!(
+        harness.device.reads() > 0 && harness.device.writes() > 0,
+        "the daemon pulled the image {} time(s) and wrote it {} time(s)",
+        harness.device.reads(),
+        harness.device.writes()
+    );
+
+    // The field presents a true input, and the ladder drives the output.
+    harness.device.script_bits(&[true]);
+    wait_for_output(&harness, &mut client, true);
+
+    // Drop it again: the output follows on a later scan.
+    harness.device.script_bits(&[false]);
+    wait_for_output(&harness, &mut client, false);
+
+    // The daemon stepped the device's clock, so timers saw real deltas.
+    let steps = harness.device.steps();
+    assert!(
+        steps.len() > 1 && steps.iter().all(|dt| *dt >= Duration::from_millis(1)),
+        "the device was stepped {steps:?}"
+    );
+
+    // Stop drives every output safe, on the device, with no HAL to ask.
+    let before = harness.device.safes();
+    client.call(&Request::Stop {}).expect("stop");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while harness.device.safes() == before {
+        assert!(
+            Instant::now() < deadline,
+            "stop never drove the outputs safe"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(harness.device.outputs(), vec![false]);
+    assert!(
+        !harness.device.status().alive,
+        "the heartbeat is held false on Stop"
+    );
+
     client.call(&Request::Shutdown).expect("shutdown");
     harness.finish();
 }
