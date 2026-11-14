@@ -23,9 +23,11 @@ use linc_plc_core::{compile, plcopen, validate, Severity, Vm};
 /// The files that run and match their trace today: §III.8 rule 4's count. A
 /// constant, so raising it is a visible diff and a file that starts passing is
 /// noticed rather than quietly counted.
-const CONVERTIBLE: [&str; 8] = [
+const CONVERTIBLE: [&str; 10] = [
     "garage-door",
     "motor-star-delta",
+    "motor-starters-function-block",
+    "silo-function-block",
     "silo",
     "start-stop-delay",
     "start-stop",

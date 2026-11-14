@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://www.plcopen.org/xml/tc6_0201">
+<fileHeader company="converted" product="plcy2plcopen" version="1"/>
+<contentHeader name="silo-function-block"/>
+<types><dataTypes/></types>
+<instances><configurations/></instances>
+<addData/>
+<pous><pou name="MAIN" pouType="program">
+<interface><inputVars><variable name="%I0.0"><type><BOOL/></type></variable><variable name="%I0.1"><type><BOOL/></type></variable><variable name="%I0.3"><type><BOOL/></type></variable><variable name="%I0.4"><type><BOOL/></type></variable></inputVars><outputVars><variable name="%Q0.0"><type><BOOL/></type></variable><variable name="%Q0.1"><type><BOOL/></type></variable><variable name="%Q0.2"><type><BOOL/></type></variable><variable name="%Q0.3"><type><BOOL/></type></variable><variable name="%Q0.4"><type><BOOL/></type></variable></outputVars><localVars><variable name="Station"><type><derived name="FillStation"/></type></variable></localVars></interface>
+<body><LD>
+<leftPowerRail localId="0"/>
+<coil localId="10" storage="call"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>STATION</variable><inputVariables><variable formalParameter="START"><expression>%I0.0</expression></variable><variable formalParameter="STOP"><expression>%I0.1</expression></variable><variable formalParameter="BOXTHERE"><expression>%I0.3</expression></variable><variable formalParameter="FULL"><expression>%I0.4</expression></variable></inputVariables><outputVariables><variable formalParameter="CONVEYOR"><expression>%Q0.0</expression></variable><variable formalParameter="FILL"><expression>%Q0.1</expression></variable><variable formalParameter="RUNLAMP"><expression>%Q0.2</expression></variable><variable formalParameter="FULLLAMP"><expression>%Q0.4</expression></variable></outputVariables></coil>
+<contact localId="11"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Station.Filling</variable></contact>
+<coil localId="12" storage="none"><connectionPointIn><connection refLocalId="11"/></connectionPointIn><variable>%Q0.3</variable></coil>
+<rightPowerRail localId="9999"/>
+</LD></body></pou><pou name="FILLSTATION" pouType="functionBlock">
+<interface><inputVars><variable name="Start"><type><BOOL/></type></variable><variable name="Stop"><type><BOOL/></type></variable><variable name="BoxThere"><type><BOOL/></type></variable><variable name="Full"><type><BOOL/></type></variable></inputVars><outputVars><variable name="Conveyor"><type><BOOL/></type></variable><variable name="Fill"><type><BOOL/></type></variable><variable name="RunLamp"><type><BOOL/></type></variable><variable name="FullLamp"><type><BOOL/></type></variable></outputVars><localVars><variable name="Running"><type><BOOL/></type></variable><variable name="Filling"><type><BOOL/></type></variable></localVars></interface>
+<body><LD>
+<leftPowerRail localId="0"/>
+<contact localId="10"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Start</variable></contact>
+<contact localId="11"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Running</variable></contact>
+<contact localId="12"><connectionPointIn><connection refLocalId="10"/><connection refLocalId="11"/></connectionPointIn><variable>Stop</variable></contact>
+<coil localId="13" storage="none"><connectionPointIn><connection refLocalId="12"/></connectionPointIn><variable>Running</variable></coil>
+<contact localId="14"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Running</variable></contact>
+<contact localId="15"><connectionPointIn><connection refLocalId="14"/></connectionPointIn><variable>BoxThere</variable></contact>
+<contact localId="16" negated="true"><connectionPointIn><connection refLocalId="15"/></connectionPointIn><variable>Full</variable></contact>
+<coil localId="17" storage="none"><connectionPointIn><connection refLocalId="16"/></connectionPointIn><variable>Filling</variable></coil>
+<contact localId="18"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Running</variable></contact>
+<contact localId="19" negated="true"><connectionPointIn><connection refLocalId="18"/></connectionPointIn><variable>BoxThere</variable></contact>
+<contact localId="20"><connectionPointIn><connection refLocalId="18"/></connectionPointIn><variable>Full</variable></contact>
+<coil localId="21" storage="none"><connectionPointIn><connection refLocalId="19"/><connection refLocalId="20"/></connectionPointIn><variable>Conveyor</variable></coil>
+<contact localId="22"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Filling</variable></contact>
+<coil localId="23" storage="none"><connectionPointIn><connection refLocalId="22"/></connectionPointIn><variable>Fill</variable></coil>
+<contact localId="24"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Running</variable></contact>
+<coil localId="25" storage="none"><connectionPointIn><connection refLocalId="24"/></connectionPointIn><variable>RunLamp</variable></coil>
+<contact localId="26"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>BoxThere</variable></contact>
+<contact localId="27"><connectionPointIn><connection refLocalId="26"/></connectionPointIn><variable>Full</variable></contact>
+<coil localId="28" storage="none"><connectionPointIn><connection refLocalId="27"/></connectionPointIn><variable>FullLamp</variable></coil>
+<rightPowerRail localId="9999"/>
+</LD></body></pou></pous></project>

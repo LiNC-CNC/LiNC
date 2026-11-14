@@ -406,6 +406,7 @@ pub fn migrate_section(section: &mut crate::model::Section) {
             let mut branch = crate::model::Rung::new(
                 Logic::Const { value: true },
                 crate::model::Coil {
+                    args: Vec::new(),
                     var: String::new(),
                     expr: None,
                     kind: crate::model::CoilKind::Normal,

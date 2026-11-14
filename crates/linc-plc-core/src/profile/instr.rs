@@ -38,6 +38,11 @@ pub struct Ctx<'a> {
     /// The typed declarations that own bank slots: what a bit-of-word operand
     /// (`Bits[0].0`) resolves its element and its width against.
     pub word_vars: &'a [crate::profile::layout::WordVar],
+    /// Declared instances, lowercased name to the function block's upper-cased name:
+    /// what a call may target, and what its pins must exist on.
+    pub instances: &'a HashMap<String, String>,
+    /// Each function block's own variables, by upper-cased POU name.
+    pub fb_vars: &'a HashMap<String, &'a [crate::model::VarDecl]>,
     /// Every POU name, uppercased: what a call may name.
     pub pou_names: &'a HashSet<String>,
     /// The rungs of the section this instruction is in: what a jump may name.
@@ -75,6 +80,8 @@ pub enum Instr<'a> {
         var: &'a str,
         /// The rung also draws a compute cell, so it leaves no power bit.
         compute_cell: bool,
+        /// The pins a call binds, which a jump has none of.
+        args: &'a [crate::model::CallArg],
     },
     Coil {
         var: &'a str,
@@ -127,7 +134,8 @@ pub fn check_instruction(instr: &Instr, ctx: &Ctx) -> Vec<Diagnostic> {
             kind,
             var,
             compute_cell,
-        } => check_label_coil(*kind, var, *compute_cell, ctx),
+            args,
+        } => check_label_coil(*kind, var, *compute_cell, args, ctx),
         Instr::Coil { var } => check_coil(var, ctx).diagnostics,
         Instr::Fbd { block } => check_fbd_block(block, ctx),
         Instr::FbdLine { line, index } => check_fbd_line(line, *index, ctx),
@@ -646,8 +654,15 @@ fn check_compute_coil(expr: Option<&str>, compute_cell: bool, ctx: &Ctx) -> Vec<
     diagnostics
 }
 
-fn check_label_coil(kind: CoilKind, var: &str, compute_cell: bool, ctx: &Ctx) -> Vec<Diagnostic> {
+fn check_label_coil(
+    kind: CoilKind,
+    var: &str,
+    compute_cell: bool,
+    args: &[crate::model::CallArg],
+    ctx: &Ctx,
+) -> Vec<Diagnostic> {
     let path = format!("{}.coil.var", ctx.path);
+    let path = path.as_str();
     if compute_cell {
         // A compute cell consumes the power bit and pushes nothing, so the coil
         // after it would test garbage.
@@ -691,20 +706,34 @@ fn check_label_coil(kind: CoilKind, var: &str, compute_cell: bool, ctx: &Ctx) ->
         }
         CoilKind::Call => {
             if target.is_empty() {
-                vec![Diagnostic::error(
+                return vec![Diagnostic::error(
                     "call_target_missing",
                     "a call coil needs the name of the POU to call",
                     path,
-                )]
-            } else if !ctx.pou_names.contains(&target.to_ascii_uppercase()) {
-                vec![Diagnostic::error(
-                    "call_target_missing",
-                    format!("'{target}' is not a POU in this project"),
-                    path,
-                )]
-            } else {
-                Vec::new()
+                )];
             }
+            // A call names a POU, or an instance of a function block. An instance is
+            // the one with data, and its pins are its block's interface.
+            let upper = target.to_ascii_uppercase();
+            let block = if ctx.pou_names.contains(&upper)
+                && !ctx.instances.contains_key(&target.to_ascii_lowercase())
+            {
+                Some(upper)
+            } else if let Some(block) = ctx.instances.get(&target.to_ascii_lowercase()) {
+                Some(block.clone())
+            } else if ctx.pou_names.contains(&upper) {
+                Some(upper)
+            } else {
+                None
+            };
+            let Some(block) = block else {
+                return vec![Diagnostic::error(
+                    "call_target_missing",
+                    format!("'{target}' is not a POU and not an instance of one"),
+                    path,
+                )];
+            };
+            check_call_args(block.as_str(), args, path, ctx)
         }
         _ => Vec::new(),
     }
@@ -748,6 +777,86 @@ fn check_preset(text: &str, timer: bool, ctx: &Ctx) -> Result<(), String> {
         // scan, so there is nothing static to refuse.
         None => Ok(()),
     }
+}
+
+/// A call's pins: every pin the call binds must exist on the function block, with the
+/// direction the argument was written in, and the operand it binds must be something
+/// this project declares.
+///
+/// A POU that is not a function block has no pins, so an argument on it is refused.
+fn check_call_args(
+    block: &str,
+    args: &[crate::model::CallArg],
+    path: &str,
+    ctx: &Ctx,
+) -> Vec<Diagnostic> {
+    if args.is_empty() {
+        return Vec::new();
+    }
+    let Some(fields) = ctx.fb_vars.get(block) else {
+        return vec![Diagnostic::error(
+            "call_arg",
+            format!("'{block}' has no pins, so the call cannot bind one"),
+            path,
+        )];
+    };
+    let mut diagnostics = Vec::new();
+    for argument in args {
+        let pin = fields
+            .iter()
+            .find(|field| field.name.eq_ignore_ascii_case(&argument.pin));
+        let Some(pin) = pin else {
+            diagnostics.push(Diagnostic::error(
+                "call_arg",
+                format!("'{block}' has no pin '{}'", argument.pin),
+                path,
+            ));
+            continue;
+        };
+        let wanted = if argument.out {
+            Some(crate::model::IoDirection::Out)
+        } else {
+            Some(crate::model::IoDirection::In)
+        };
+        if pin.direction.is_some() && pin.direction != wanted {
+            diagnostics.push(Diagnostic::error(
+                "call_arg",
+                format!(
+                    "'{}' is {} on '{block}', so it is bound with `{}`",
+                    argument.pin,
+                    if pin.direction == Some(crate::model::IoDirection::In) {
+                        "an input"
+                    } else {
+                        "an output"
+                    },
+                    if pin.direction == Some(crate::model::IoDirection::In) {
+                        ":="
+                    } else {
+                        "=>"
+                    }
+                ),
+                path,
+            ));
+            continue;
+        }
+        // What the pin is bound to has to be an operand this project declares. A
+        // word pin binds a word; the corpus's pins are bits.
+        if !ctx.known.contains(&argument.var.to_ascii_lowercase())
+            && !ctx.known.contains(&argument.pin.to_ascii_lowercase())
+            && crate::profile::resolve::marker_word_slot(&argument.var).is_none()
+            && argument.var.parse::<i32>().is_err()
+        {
+            diagnostics.push(Diagnostic::error(
+                "call_arg",
+                format!(
+                    "'{}' is bound to '{}', which is not declared",
+                    argument.pin, argument.var
+                ),
+                path,
+            ));
+        }
+    }
+    diagnostics
 }
 
 /// A bit coil's target: the operand side, and the counter-member rule. A

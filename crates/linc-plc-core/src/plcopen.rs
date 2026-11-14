@@ -244,8 +244,14 @@ pub fn import(xml: &str) -> Result<Project, Vec<Diagnostic>> {
                 pou.name = "MAIN".to_string();
                 seen_main = true;
             }
-            project.io.extend(io);
-            project.vars.extend(vars);
+            if pou.kind == crate::model::PouKind::FunctionBlock {
+                // A block's interface is the block's: its instances each get their
+                // own copy, so nothing here becomes a project variable.
+                pou.vars = vars;
+            } else {
+                project.io.extend(io);
+                project.vars.extend(vars);
+            }
             pous.push(pou);
         }
     }
@@ -278,8 +284,21 @@ fn import_pou(
     let mut io = Vec::new();
     let mut vars = Vec::new();
 
+    let function_block = element
+        .attribute("pouType")
+        .is_some_and(|kind| kind.eq_ignore_ascii_case("functionBlock"));
+    if function_block {
+        pou.kind = crate::model::PouKind::FunctionBlock;
+    }
     if let Some(interface) = element.child("interface") {
-        import_interface(interface, path, &mut io, &mut vars, diagnostics);
+        import_interface_of(
+            interface,
+            path,
+            &mut io,
+            &mut vars,
+            function_block,
+            diagnostics,
+        );
     }
     if let Some(documentation) = element.child("documentation") {
         pou.comment = plain_text(documentation);
@@ -311,7 +330,15 @@ fn import_pou(
         return None;
     };
 
-    match import_ld(ld, path, &mut pou, instances) {
+    // A variable whose type names a function block is an instance: its fields are
+    // operands (`Station.Filling`), so the body import has to know which names are
+    // instances and not flattened into a single identifier.
+    let instances_declared: HashSet<String> = vars
+        .iter()
+        .filter(|var| matches!(var.ty, crate::model::VarType::Derived(_)))
+        .map(|var| var.name.to_ascii_lowercase())
+        .collect();
+    match import_ld(ld, path, &mut pou, instances, &instances_declared) {
         Ok(()) => Some((pou, io, vars)),
         Err(more) => {
             diagnostics.extend(more);
@@ -325,6 +352,19 @@ fn import_interface(
     path: &str,
     io: &mut Vec<IoPoint>,
     vars: &mut Vec<VarDecl>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    import_interface_of(interface, path, io, vars, false, diagnostics)
+}
+
+/// Read one `<interface>`. A function block's variables are its own — its pins and
+/// its private state — so they are declarations with a direction, never HAL points.
+fn import_interface_of(
+    interface: &Element,
+    path: &str,
+    io: &mut Vec<IoPoint>,
+    vars: &mut Vec<VarDecl>,
+    function_block: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for section in &interface.children {
@@ -359,6 +399,14 @@ fn import_interface(
                 continue;
             };
             let name = operand_name(name);
+            if function_block {
+                // A pin is a declaration with a direction; an internal has neither.
+                vars.push(VarDecl {
+                    direction,
+                    ..VarDecl::typed(name, ty)
+                });
+                continue;
+            }
             match direction {
                 Some(direction) => {
                     // A point's kind decides its HAL pin: a bit is a coil's
@@ -522,6 +570,7 @@ fn import_ld(
     path: &str,
     pou: &mut Pou,
     instances: &mut HashMap<crate::profile::spec::FbName, u16>,
+    declared: &HashSet<String>,
 ) -> Result<(), Vec<Diagnostic>> {
     let mut diagnostics = Vec::new();
     let mut order = Vec::new();
@@ -609,6 +658,7 @@ fn import_ld(
                 &right_rails,
                 &mut visiting,
                 instances,
+                declared,
                 &path,
                 &mut diagnostics,
             ) {
@@ -671,7 +721,7 @@ fn import_ld(
                     ));
                     continue;
                 };
-                let Some(operand) = operand_text(variable) else {
+                let Some(operand) = operand_text_of(variable, declared) else {
                     diagnostics.push(error(
                         "plcopen_unsupported_element",
                         "a <coil> names no operand",
@@ -690,6 +740,7 @@ fn import_ld(
             &right_rails,
             &mut visiting,
             instances,
+            declared,
             &format!("{path}.body.LD.coil[{index}]"),
             &mut diagnostics,
         ) {
@@ -698,6 +749,9 @@ fn import_ld(
         };
         let mut coil = Coil::new(operand, kind);
         coil.expr = assignment;
+        if kind == CoilKind::Call {
+            coil.args = call_args(coil_element);
+        }
         let mut rung = Rung::new(logic, coil);
         if let Some(documentation) = coil_element.child("documentation") {
             rung.comment = plain_text(documentation);
@@ -715,6 +769,10 @@ fn import_ld(
 /// `<variable>` may carry the name as text (the usual LD form) or as an
 /// `@name`; both are the same operand.
 fn operand_text(variable: &Element) -> Option<String> {
+    operand_text_of(variable, &HashSet::new())
+}
+
+fn operand_text_of(variable: &Element, instances: &HashSet<String>) -> Option<String> {
     let raw = match variable.attribute("name") {
         Some(name) => name.to_string(),
         None => variable.text.trim().to_string(),
@@ -722,7 +780,7 @@ fn operand_text(variable: &Element) -> Option<String> {
     if raw.is_empty() {
         return None;
     }
-    Some(operand_spelling(&raw))
+    Some(operand_spelling_of(&raw, instances))
 }
 
 /// A bit of a word keeps its shape: `Bits[0].0` names bit 0 of element 0 of `Bits`,
@@ -738,7 +796,24 @@ fn operand_text(variable: &Element) -> Option<String> {
 /// Anything else goes through [`operand_name`], including a `%Q0.0` tag: the part
 /// after the dot there is a number, not a member.
 pub fn operand_spelling(raw: &str) -> String {
+    operand_spelling_of(raw, &HashSet::new())
+}
+
+/// `operand_spelling`, knowing which names are declared instances: `Station.Filling`
+/// is a field of instance `Station`, so it keeps its dot and its spelling the way a
+/// block member does.
+pub fn operand_spelling_of(raw: &str, instances: &HashSet<String>) -> String {
     let raw = raw.trim();
+    if let Some((base, field)) = raw.split_once('.') {
+        if !field.is_empty()
+            && field
+                .chars()
+                .all(|character| character.is_ascii_alphabetic())
+            && instances.contains(&base.to_ascii_lowercase())
+        {
+            return format!("{}.{}", operand_name(base), field.to_ascii_lowercase());
+        }
+    }
     // An array element read, `Durations[Phase]`: the array and the index are both
     // declared names, so both are spelled the way their declarations are and the
     // bracket stays. A literal index stays a number.
@@ -792,6 +867,36 @@ fn array_index_spelling(index: &str) -> String {
     operand_name(index)
 }
 
+/// The pins one call binds: `<inputVariables>` are written before the body runs and
+/// `<outputVariables>` are read after it.
+fn call_args(coil: &Element) -> Vec<crate::model::CallArg> {
+    let mut args = Vec::new();
+    for (section, out) in [("inputVariables", false), ("outputVariables", true)] {
+        let Some(inputs) = coil.child(section) else {
+            continue;
+        };
+        for variable in inputs.children_named("variable") {
+            let Some(pin) = variable.attribute("formalParameter") else {
+                continue;
+            };
+            // The bound operand is an expression so a bit address and a name are
+            // spelled the same way here.
+            let Some(value) = variable
+                .child("expression")
+                .map(|expression| operand_spelling(&plain_text(expression)))
+            else {
+                continue;
+            };
+            args.push(crate::model::CallArg {
+                pin: operand_name(pin),
+                var: value,
+                out,
+            });
+        }
+    }
+    args
+}
+
 fn coil_kind(coil: &Element) -> CoilKind {
     let negated = coil
         .attribute("negated")
@@ -818,6 +923,7 @@ fn resolve_input(
     right_rails: &HashSet<String>,
     visiting: &mut HashSet<String>,
     instances: &mut HashMap<crate::profile::spec::FbName, u16>,
+    declared: &HashSet<String>,
     path: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Logic, ()> {
@@ -865,7 +971,7 @@ fn resolve_input(
             return Err(());
         }
         let built = match source.name.as_str() {
-            "contact" => build_contact(source, path, diagnostics),
+            "contact" => build_contact(source, path, declared, diagnostics),
             "coil" => {
                 diagnostics.push(error(
                     "plcopen_multi_coil",
@@ -907,6 +1013,7 @@ fn resolve_input(
             right_rails,
             visiting,
             instances,
+            declared,
             path,
             diagnostics,
         )?;
@@ -943,6 +1050,7 @@ fn connection_refs(element: &Element) -> Vec<String> {
 fn build_contact(
     contact: &Element,
     path: &str,
+    declared: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Logic, ()> {
     let Some(variable) = contact.child("variable") else {
@@ -953,7 +1061,7 @@ fn build_contact(
         ));
         return Err(());
     };
-    let Some(operand) = operand_text(variable) else {
+    let Some(operand) = operand_text_of(variable, declared) else {
         diagnostics.push(error(
             "plcopen_unsupported_element",
             "a <contact> names no operand",

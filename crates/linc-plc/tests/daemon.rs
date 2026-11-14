@@ -346,6 +346,7 @@ fn load_rejects_a_changed_io_map() {
             var: name,
             kind: CoilKind::Normal,
             expr: None,
+            args: Vec::new(),
         },
     ));
     changed.sections.push(section);

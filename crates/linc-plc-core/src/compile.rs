@@ -70,6 +70,17 @@ struct Lookup {
     /// The declared arrays, by lowercased name: an element read (`Durations[Phase]`)
     /// needs the first slot and the element count.
     arrays: HashMap<String, ArraySlot>,
+    /// A function block instance's variables: (instance, variable) to the bit slot it
+    /// owns. Two instances of one block have two sets, which is the whole point of an
+    /// instance.
+    fb_slots: HashMap<(String, String), u16>,
+    /// Each instance's block-instance base, so the two copies of a body drive two
+    /// timers instead of one: site index times the number of instances the body
+    /// declares.
+    fb_block_base: HashMap<String, u16>,
+    /// The function block an instance is of, by instance name: a call on `pump1`
+    /// runs `MotorStarter`'s body.
+    fb_type: HashMap<String, String>,
 }
 
 /// A declared array as an operand sees it: the first element's slot and how many
@@ -91,6 +102,9 @@ impl Lookup {
             word_types: HashMap::new(),
             word_vars: Vec::new(),
             arrays: HashMap::new(),
+            fb_slots: HashMap::new(),
+            fb_block_base: HashMap::new(),
+            fb_type: HashMap::new(),
         }
     }
 
@@ -132,6 +146,23 @@ impl Lookup {
         self.word_types.get(&slot).copied()
     }
 
+    /// One instance's variable: its bit slot, or `None` when the name is not one of
+    /// the instance's.
+    fn instance_slot(&self, instance: &str, var: &str) -> Option<u16> {
+        self.fb_slots
+            .get(&(instance.to_ascii_lowercase(), var.to_ascii_lowercase()))
+            .copied()
+    }
+
+    /// The global block index for the instance this lowering pass is in. Outside a
+    /// function block body the declared index is the global one.
+    fn block_index(&self, site: Option<&str>, index: u16) -> u16 {
+        match site.and_then(|site| self.fb_block_base.get(site)) {
+            Some(base) => base.saturating_add(index),
+            None => index,
+        }
+    }
+
     /// A declared array, by any spelling of its name.
     fn array(&self, name: &str) -> Option<ArraySlot> {
         self.arrays
@@ -145,6 +176,25 @@ impl Lookup {
     /// has already reported the refusal, so the compiler only needs the address.
     fn word_bit(&self, text: &str) -> Option<(u16, u8)> {
         crate::profile::layout::word_bit(text, &self.word_vars).ok()
+    }
+}
+
+/// One lowering pass: the project's lookup, plus the function-block instance whose
+/// body is being lowered.
+///
+/// An instance's variables are its own (`#Start` is instance `pump1`'s `start`), so
+/// the body is lowered once per call site with that site in hand. `Deref` keeps every
+/// existing operand resolution reading the project's tables.
+struct Lowering<'a> {
+    lookup: &'a Lookup,
+    site: Option<&'a str>,
+}
+
+impl std::ops::Deref for Lowering<'_> {
+    type Target = Lookup;
+
+    fn deref(&self) -> &Lookup {
+        self.lookup
     }
 }
 
@@ -548,6 +598,11 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         });
     }
     for var in &project.vars {
+        // Only a bit variable owns a bit: a word variable lives in the bank, and an
+        // instance is the set of its block's variables, not a bit of its own.
+        if !var.ty.is_bool() {
+            continue;
+        }
         intern(
             &mut symbols,
             &mut lookup,
@@ -593,6 +648,56 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
     // Typed declarations: their name addresses the first slot, and every element of
     // an array carries the same type, so an indexed element reads the same width as
     // the name does.
+    // Function-block instances: a project variable whose type names a block owns one
+    // bit per BOOL variable of that block, and the settings it needs to be lowered.
+    let declared_pous = project.all_pous();
+    let fb_blocks: Vec<&crate::model::Pou> = declared_pous
+        .iter()
+        .filter(|pou| pou.kind == crate::model::PouKind::FunctionBlock)
+        .collect();
+    let mut site_index = 0u16;
+    for var in &project.vars {
+        let crate::model::VarType::Derived(block) = &var.ty else {
+            continue;
+        };
+        let Some(block_pou) = fb_blocks
+            .iter()
+            .find(|pou| pou.name.eq_ignore_ascii_case(block))
+        else {
+            continue;
+        };
+        let site = var.name.to_ascii_lowercase();
+        let mut span = 0u16;
+        for field in &block_pou.vars {
+            let index = intern(
+                &mut symbols,
+                &mut lookup,
+                &format!("{site}.{}", field.name),
+                SymbolKind::Var,
+                false,
+                Bank::Bit,
+                None,
+            );
+            lookup
+                .fb_slots
+                .insert((site.clone(), field.name.to_ascii_lowercase()), index);
+        }
+        // How many block instances the body declares, of any kind: the next site's
+        // copies start after them.
+        for section in &block_pou.sections {
+            for rung in &section.rungs {
+                span = span.max(block_span_in(&rung.logic, 0));
+            }
+        }
+        lookup
+            .fb_block_base
+            .insert(site.clone(), site_index.saturating_mul(span.max(1)));
+        lookup
+            .fb_type
+            .insert(site.clone(), block_pou.name.to_ascii_uppercase());
+        site_index = site_index.saturating_add(1);
+    }
+
     lookup.word_vars = bank.vars.clone();
     for var in &bank.vars {
         // The name addresses element 0, and the declaration says how many follow.
@@ -660,13 +765,33 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         .iter()
         .find(|pou| pou.name.eq_ignore_ascii_case("MAIN"));
     match main {
-        Some(main) => lower_pou(main, &by_name, &lookup, &mut ops, &mut edges, 0),
+        Some(main) => lower_pou(
+            main,
+            &by_name,
+            &Lowering {
+                lookup: &lookup,
+                site: None,
+            },
+            &mut ops,
+            &mut edges,
+            0,
+        ),
         None => {
             for pou in &pous {
                 if called.contains(&pou.name.to_ascii_uppercase()) {
                     continue;
                 }
-                lower_pou(pou, &by_name, &lookup, &mut ops, &mut edges, 0);
+                lower_pou(
+                    pou,
+                    &by_name,
+                    &Lowering {
+                        lookup: &lookup,
+                        site: None,
+                    },
+                    &mut ops,
+                    &mut edges,
+                    0,
+                );
             }
         }
     }
@@ -703,6 +828,23 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         hash: project_hash(project),
         warnings,
     })
+}
+
+/// The highest block-instance number a tree declares, plus one: how far a site's
+/// copies have to be shifted to not collide with the next one's.
+fn block_span_in(logic: &Logic, seen: u16) -> u16 {
+    match logic {
+        Logic::Block { instance, .. } => {
+            let declared = crate::profile::resolve::parse_block(instance, instance, "")
+                .map(|(_, index, _)| index)
+                .unwrap_or(0);
+            seen.max(declared.saturating_add(1))
+        }
+        Logic::Series { items } | Logic::Parallel { items } => items
+            .iter()
+            .fold(seen, |seen, item| block_span_in(item, seen)),
+        _ => seen,
+    }
 }
 
 /// The initial word values a project declares, by bank slot: element `n` of a
@@ -781,7 +923,7 @@ fn patch_jump(ops: &mut [Op], at: usize, target: u16) {
 fn lower_pou(
     pou: &crate::model::Pou,
     pous: &HashMap<String, &crate::model::Pou>,
-    lookup: &Lookup,
+    lookup: &Lowering<'_>,
     ops: &mut Vec<Op>,
     edges: &mut u16,
     depth: u8,
@@ -966,7 +1108,7 @@ fn push_bit_operand(operand: &str, lookup: &Lookup, ops: &mut Vec<Op>) {
 fn lower_fbd_line(
     lines: &[crate::model::FbdLine],
     index: usize,
-    lookup: &Lookup,
+    lookup: &Lowering<'_>,
     ops: &mut Vec<Op>,
 ) {
     let Some(line) = lines.get(index) else {
@@ -988,7 +1130,7 @@ fn lower_fbd_line(
 /// Lower a drawn grid. Blocks are evaluated in reading order (row, then
 /// column), which is the order the editor enforces: a block may only take its
 /// input from something to its left or above.
-fn lower_fbd_grid(grid: &crate::model::FbdGrid, lookup: &Lookup, ops: &mut Vec<Op>) {
+fn lower_fbd_grid(grid: &crate::model::FbdGrid, lookup: &Lowering<'_>, ops: &mut Vec<Op>) {
     let mut order = grid
         .blocks
         .iter()
@@ -1026,7 +1168,7 @@ fn split_negation(operand: &str) -> (bool, &str) {
 fn lower_fbd_grid_block(
     grid: &crate::model::FbdGrid,
     index: usize,
-    lookup: &Lookup,
+    lookup: &Lowering<'_>,
     ops: &mut Vec<Op>,
 ) {
     let Some(block) = grid.blocks.get(index) else {
@@ -1169,7 +1311,7 @@ fn lower_fbd_grid_bit(
     input: &str,
     grid: &crate::model::FbdGrid,
     index: usize,
-    lookup: &Lookup,
+    lookup: &Lowering<'_>,
     ops: &mut Vec<Op>,
     depth: u8,
 ) {
@@ -1207,7 +1349,7 @@ fn lower_fbd_grid_bit(
 fn lower_fbd_block(
     lines: &[crate::model::FbdLine],
     index: usize,
-    lookup: &Lookup,
+    lookup: &Lowering<'_>,
     ops: &mut Vec<Op>,
     depth: u8,
 ) {
@@ -1310,7 +1452,7 @@ fn lower_fbd_bit(
     input: &str,
     lines: &[crate::model::FbdLine],
     index: usize,
-    lookup: &Lookup,
+    lookup: &Lowering<'_>,
     ops: &mut Vec<Op>,
     depth: u8,
 ) {
@@ -1349,7 +1491,7 @@ fn lower_fbd_bit(
 /// element is a true rung.
 fn lower_cells(
     cells: &[crate::grid::Cell],
-    lookup: &Lookup,
+    lookup: &Lowering<'_>,
     ops: &mut Vec<Op>,
     edges: &mut u16,
 ) -> bool {
@@ -1468,7 +1610,7 @@ fn lower_cells(
 fn lower_grid_rung(
     run: &[Vec<crate::grid::Cell>],
     index: usize,
-    lookup: &Lookup,
+    lookup: &Lowering<'_>,
     ops: &mut Vec<Op>,
     edges: &mut u16,
 ) -> (usize, bool) {
@@ -1599,7 +1741,7 @@ fn collect_presets(project: &Project, lookup: &mut Lookup) {
 /// everything else is the shared block op.
 fn push_block(
     ops: &mut Vec<Op>,
-    lookup: &Lookup,
+    lookup: &Lowering<'_>,
     kind: FbKind,
     instance: u16,
     preset: PresetSource,
@@ -1624,21 +1766,45 @@ fn push_block(
 /// The three forms are one operand space to the program — `%I0.0`, `TON0.Q`,
 /// `Bits[0].0` — so a contact, an edge or a coil asks this rather than each spelling
 /// its own question.
-fn push_bit_read(ops: &mut Vec<Op>, lookup: &Lookup, var: &str) {
+fn push_bit_read(ops: &mut Vec<Op>, lookup: &Lowering<'_>, var: &str) {
     match lookup.profile.bit_member(var) {
-        Some((instance, member)) => push_member(ops, lookup, instance, member),
+        // A body's block member reads the site's copy: `#Delay.Q` is this instance's
+        // timer, not the first one the program happens to declare.
+        Some((instance, member)) => push_member(
+            ops,
+            lookup,
+            lookup.block_index(lookup.site, instance),
+            member,
+        ),
         None => match lookup.word_bit(var) {
             Some((slot, bit)) => ops.push(Op::WordBit { slot, bit }),
-            None => ops.push(Op::Push(lookup.bit(var).unwrap_or(0))),
+            None => ops.push(Op::Push(resolve_bit(lookup, var).unwrap_or(0))),
         },
     }
+}
+
+/// The bit slot one operand names. A function block's body reads its own instance's
+/// variables (`#Start` is this instance's `start`), a program reads an instance's
+/// field (`Station.Filling`), and everything else is a project bit.
+fn resolve_bit(lookup: &Lowering<'_>, var: &str) -> Option<u16> {
+    if let Some(site) = lookup.site {
+        if let Some(slot) = lookup.instance_slot(site, var) {
+            return Some(slot);
+        }
+    }
+    if let Some((instance, field)) = var.split_once('.') {
+        if let Some(slot) = lookup.instance_slot(instance, field) {
+            return Some(slot);
+        }
+    }
+    lookup.bit(var)
 }
 
 /// Push one block member's value: `Q` from the block's state, and empty/full as
 /// the compares the compiler bakes from the profile's numbers.
 fn push_member(
     ops: &mut Vec<Op>,
-    lookup: &Lookup,
+    lookup: &Lowering<'_>,
     instance: u16,
     member: crate::profile::BitMember,
 ) {
@@ -1778,10 +1944,11 @@ fn block_of(
     block: &str,
     instance: &str,
     preset: &str,
-    lookup: &Lookup,
+    lookup: &Lowering<'_>,
 ) -> Option<(FbKind, u16, PresetSource)> {
     let (kind, index, _) = parse_block(block, instance, "")?;
     let source = resolve_preset(preset, kind.is_timer(), lookup).unwrap_or(PresetSource::Const(0));
+    let index = lookup.block_index(lookup.site, index);
     Some((kind, index, source))
 }
 
@@ -1824,7 +1991,7 @@ fn record_label(labels: &mut HashMap<String, usize>, label: &str, at: usize) {
 /// a store leaves it.
 fn lower_coil(
     ops: &mut Vec<Op>,
-    lookup: &Lookup,
+    lookup: &Lowering<'_>,
     pous: &HashMap<String, &crate::model::Pou>,
     coil: &crate::model::Coil,
     jumps: &mut Vec<(usize, String)>,
@@ -1848,8 +2015,46 @@ fn lower_coil(
                 target: 0,
                 when: false,
             });
-            if let Some(callee) = pous.get(&coil.var.trim().to_ascii_uppercase()) {
-                lower_pou(callee, pous, lookup, ops, edges, depth + 1);
+            let site = coil.var.trim().to_ascii_lowercase();
+            // An input pin is written into the instance's variable before the body
+            // runs, and an output is read out of it afterwards. The pins are the
+            // block's, so an instance's two calls do not share them.
+            for argument in coil.args.iter().filter(|argument| !argument.out) {
+                let (Some(pin), Some(source)) = (
+                    lookup.instance_slot(&site, &argument.pin),
+                    resolve_bit(lookup, &argument.var),
+                ) else {
+                    continue;
+                };
+                ops.push(Op::Push(source));
+                ops.push(Op::Store(pin));
+            }
+            let callee = pous
+                .get(&coil.var.trim().to_ascii_uppercase())
+                .copied()
+                .or_else(|| {
+                    lookup
+                        .fb_type
+                        .get(&site)
+                        .and_then(|block| pous.get(block))
+                        .copied()
+                });
+            if let Some(callee) = callee {
+                let inside = Lowering {
+                    lookup: lookup.lookup,
+                    site: Some(&site),
+                };
+                lower_pou(callee, pous, &inside, ops, edges, depth + 1);
+            }
+            for argument in coil.args.iter().filter(|argument| argument.out) {
+                let (Some(pin), Some(target)) = (
+                    lookup.instance_slot(&site, &argument.pin),
+                    resolve_bit(lookup, &argument.var),
+                ) else {
+                    continue;
+                };
+                ops.push(Op::Push(pin));
+                ops.push(Op::Store(target));
             }
             let after = ops.len() as u16;
             if let Op::JumpIf { target, .. } = &mut ops[skip] {
@@ -1889,7 +2094,7 @@ fn lower_coil(
     }
 }
 
-fn store_coil(ops: &mut Vec<Op>, lookup: &Lookup, coil: &crate::model::Coil) {
+fn store_coil(ops: &mut Vec<Op>, lookup: &Lowering<'_>, coil: &crate::model::Coil) {
     // `lower_coil` routes these before they get here.
     if matches!(
         coil.kind,
@@ -1902,6 +2107,7 @@ fn store_coil(ops: &mut Vec<Op>, lookup: &Lookup, coil: &crate::model::Coil) {
     if let Some((instance, member)) = lookup.profile.bit_member(&coil.var) {
         if member.is_writable() {
             use crate::profile::BitMember;
+            let instance = lookup.block_index(lookup.site, instance);
             ops.push(match member {
                 BitMember::Reset => Op::FbReset(instance),
                 BitMember::Load => Op::FbLoad {
@@ -1939,7 +2145,7 @@ fn store_coil(ops: &mut Vec<Op>, lookup: &Lookup, coil: &crate::model::Coil) {
         });
         return;
     }
-    let index = lookup.bit(coil.var.as_str()).unwrap_or(0);
+    let index = resolve_bit(lookup, coil.var.as_str()).unwrap_or(0);
     ops.push(match kind {
         CoilKind::Normal | CoilKind::Negated => Op::Store(index),
         CoilKind::Set => Op::Set(index),
@@ -1949,7 +2155,7 @@ fn store_coil(ops: &mut Vec<Op>, lookup: &Lookup, coil: &crate::model::Coil) {
     });
 }
 
-fn lower_logic(logic: &Logic, lookup: &Lookup, edges: &mut u16, ops: &mut Vec<Op>) {
+fn lower_logic(logic: &Logic, lookup: &Lowering<'_>, edges: &mut u16, ops: &mut Vec<Op>) {
     match logic {
         Logic::Const { value } => ops.push(Op::PushConst(*value)),
         Logic::Contact { var, negated } => {

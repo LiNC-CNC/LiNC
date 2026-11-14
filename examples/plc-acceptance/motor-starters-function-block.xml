@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://www.plcopen.org/xml/tc6_0201">
+<fileHeader company="converted" product="plcy2plcopen" version="1"/>
+<contentHeader name="motor-starters-function-block"/>
+<types><dataTypes/></types>
+<instances><configurations/></instances>
+<addData/>
+<pous><pou name="MAIN" pouType="program">
+<interface><inputVars><variable name="%I0.0"><type><BOOL/></type></variable><variable name="%I0.1"><type><BOOL/></type></variable><variable name="%I0.2"><type><BOOL/></type></variable><variable name="%I0.3"><type><BOOL/></type></variable></inputVars><outputVars><variable name="%Q0.0"><type><BOOL/></type></variable><variable name="%Q0.1"><type><BOOL/></type></variable><variable name="%Q0.2"><type><BOOL/></type></variable><variable name="%Q0.3"><type><BOOL/></type></variable></outputVars><localVars><variable name="Pump1"><type><derived name="MotorStarter"/></type></variable><variable name="Pump2"><type><derived name="MotorStarter"/></type></variable></localVars></interface>
+<body><LD>
+<leftPowerRail localId="0"/>
+<coil localId="10" storage="call"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>PUMP1</variable><inputVariables><variable formalParameter="START"><expression>%I0.0</expression></variable><variable formalParameter="STOP"><expression>%I0.1</expression></variable></inputVariables><outputVariables><variable formalParameter="RUN"><expression>%Q0.0</expression></variable><variable formalParameter="READY"><expression>%Q0.1</expression></variable></outputVariables></coil>
+<coil localId="11" storage="call"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>PUMP2</variable><inputVariables><variable formalParameter="START"><expression>%I0.2</expression></variable><variable formalParameter="STOP"><expression>%I0.3</expression></variable></inputVariables><outputVariables><variable formalParameter="RUN"><expression>%Q0.2</expression></variable><variable formalParameter="READY"><expression>%Q0.3</expression></variable></outputVariables></coil>
+<rightPowerRail localId="9999"/>
+</LD></body></pou><pou name="MOTORSTARTER" pouType="functionBlock">
+<interface><inputVars><variable name="Start"><type><BOOL/></type></variable><variable name="Stop"><type><BOOL/></type></variable></inputVars><outputVars><variable name="Run"><type><BOOL/></type></variable><variable name="Ready"><type><BOOL/></type></variable></outputVars></interface>
+<body><LD>
+<leftPowerRail localId="0"/>
+<contact localId="10"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Start</variable></contact>
+<contact localId="11"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Run</variable></contact>
+<contact localId="12" negated="true"><connectionPointIn><connection refLocalId="10"/><connection refLocalId="11"/></connectionPointIn><variable>Stop</variable></contact>
+<coil localId="13" storage="none"><connectionPointIn><connection refLocalId="12"/></connectionPointIn><variable>Run</variable></coil>
+<contact localId="14"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Run</variable></contact>
+<block localId="15" typeName="TON"><connectionPointIn><connection refLocalId="14"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>T#3s</expression></variable></inputVariables></block>
+<contact localId="16"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<coil localId="17" storage="none"><connectionPointIn><connection refLocalId="16"/></connectionPointIn><variable>Ready</variable></coil>
+<rightPowerRail localId="9999"/>
+</LD></body></pou></pous></project>

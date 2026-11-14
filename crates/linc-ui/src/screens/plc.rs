@@ -527,6 +527,7 @@ pub fn add_rung(project: &mut Project, section: usize, after: Option<usize>) -> 
                 var: output,
                 kind: CoilKind::Normal,
                 expr: None,
+                args: Vec::new(),
             }),
         },
     );
@@ -2145,6 +2146,7 @@ impl PlcUi {
                         init: Vec::new(),
                         retain: false,
                         comment: String::new(),
+                        direction: None,
                     });
                 }
             }

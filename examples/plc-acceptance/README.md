@@ -54,27 +54,43 @@ converted, so a conversion is never mistaken for a pass.
 A file listed as blocked but converted is executed by the test anyway and must be
 shown *not* to pass. That is what stops the count from going green by accident.
 
-Today: eight convert, eight run. `silo` matches all 200 scans, including rung 4's two
+Today: ten convert, ten run. `silo` matches all 200 scans, including rung 4's two
 coils on parallel branches — the importer turns such a rung into one rung per coil
 and the scan evaluates them in order, so a `Vec<Coil>` model turned out not to be
 needed. Four converted files each hold a timer on a rung with no coil, which the
 importer emits instead of dropping. `traffic-lights` is the largest: six timers
 chained through `.DN` contacts. `timer-counter` is the one that exercises `.TT`,
-`start-stop` is the one that writes a bit of a word, and `traffic-lights-routines` is
+`start-stop` is the one that writes a bit of a word, `traffic-lights-routines` is
 three routines in one file, called by name, with a timer whose preset is an array
-element.
+element, and the two `-function-block` files are user function blocks: two instances
+of one body, called with their pins bound.
 
-The four that remain are named in the manifest, and the reason has changed each time a
-gate lifted: the importer accepts declared types, a bit of a declared word is an
-operand, several routines import, a call names its POU, and a word write is a compute
-coil. Each file now stops at the construct behind those:
+The two that remain are named in the manifest:
 
 | file | the type it declares | the construct that stops it |
 | --- | --- | --- |
-| `motor-starters-function-block` | `MotorStarter` twice | the file also declares a function block body, which is a type with its own data |
-| `silo-function-block` | `FillStation` | the same, for `FillStation` |
 | `recipes-data-type-ld` | `Recipe[3]`, `DINT`, `TIMER` | `Recipes[Sel].FillTime`: a member of an array element |
 | `two-tanks-cascade` | `REAL`, `PID` twice | `SCP`, a scale instruction, then `PID` |
+
+### Instances, and why two callers do not share one
+
+A `<pou pouType="functionBlock">` is a type: its interface is its own, and a project
+variable whose type names it — `Pump1: MotorStarter` — is an *instance*. The compiler
+runs the body once per call, with the instance's variables and its own copy of every
+block the body declares, so `Pump1`'s ready lamp can be on while `Pump2`'s is off. That
+is the test that matters, and it is the one that failed the first time: the contact
+on `TON0.Q` read the declared timer instead of the site's copy, so both pumps shared
+one delay.
+
+Nothing is renamed at run time. A body's `#Start` is resolved when the body is
+compiled — against the instance the call names — and the two runs of that body produce
+two different slots from the same tree. A call binds its pins around the body: an input
+is written into the instance's variable before the body runs, an output is read out of
+it afterwards. An instance's field is an operand in a program that declares it, so
+`Station.Filling` is a contact like any other.
+
+A function block's variables are BOOLs for now; a word pin would need a slot per
+instance in the word bank, and the corpus's blocks are all bits.
 
 ### Routines, calls, and writes that are not coils
 

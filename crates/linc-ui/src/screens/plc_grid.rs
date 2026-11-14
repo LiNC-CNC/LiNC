@@ -4569,6 +4569,7 @@ mod compare_window_tests {
             init: Vec::new(),
             retain: false,
             comment: String::new(),
+            direction: None,
         });
         let names: Vec<String> = coil_choices(&plc, 0, 0)
             .into_iter()

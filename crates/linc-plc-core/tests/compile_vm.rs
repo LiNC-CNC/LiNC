@@ -719,6 +719,126 @@ fn a_marker_words_bit_is_an_operand_too() {
     assert_eq!(vm.outputs(), &[true], "and a contact reads it back");
 }
 
+/// Two instances of one function block have two sets of variables and two timers:
+/// Pump1's ready is on while Pump2's stays off. A single instance register would pass
+/// the first half of this and fail the second.
+#[test]
+fn two_instances_of_one_block_keep_their_own_state() {
+    use linc_plc_core::model::{
+        CallArg, Coil, IoPoint, Pou, PouKind, Rung, Section, VarDecl, VarType,
+    };
+
+    let mut project = Project::new("instances");
+    project.io = vec![
+        IoPoint::new("start1", linc_plc_core::IoDirection::In),
+        IoPoint::new("start2", linc_plc_core::IoDirection::In),
+        IoPoint::new("ready1", linc_plc_core::IoDirection::Out),
+        IoPoint::new("ready2", linc_plc_core::IoDirection::Out),
+    ];
+    project.vars = vec![
+        VarDecl::typed("pump1", VarType::Derived("Starter".into())),
+        VarDecl::typed("pump2", VarType::Derived("Starter".into())),
+    ];
+
+    // The block: `Start OR Run` latches `Run`, and a timer on it drives `Ready`.
+    let mut block = Pou::new("STARTER", linc_plc_core::PouLanguage::Ld);
+    block.kind = PouKind::FunctionBlock;
+    block.vars = vec![
+        VarDecl {
+            direction: Some(linc_plc_core::IoDirection::In),
+            ..VarDecl::new("start")
+        },
+        VarDecl {
+            direction: Some(linc_plc_core::IoDirection::Out),
+            ..VarDecl::new("run")
+        },
+        VarDecl {
+            direction: Some(linc_plc_core::IoDirection::Out),
+            ..VarDecl::new("ready")
+        },
+    ];
+    block.sections = vec![Section {
+        name: "starter".into(),
+        rungs: vec![
+            Rung::new(
+                Logic::Parallel {
+                    items: vec![Logic::contact("start", false), Logic::contact("run", false)],
+                },
+                Coil::new("run", CoilKind::Normal),
+            ),
+            Rung::without_coil(Logic::Series {
+                items: vec![
+                    Logic::contact("run", false),
+                    Logic::Block {
+                        block: "TON".into(),
+                        instance: "TON0".into(),
+                        preset: "T#100ms".into(),
+                    },
+                ],
+            }),
+            Rung::new(
+                Logic::Contact {
+                    var: "TON0.Q".into(),
+                    negated: false,
+                },
+                Coil::new("ready", CoilKind::Normal),
+            ),
+        ],
+    }];
+
+    let call = |instance: &str, start: &str, ready: &str| {
+        let mut coil = Coil::new(instance, CoilKind::Call);
+        coil.args = vec![
+            CallArg {
+                pin: "start".into(),
+                var: start.into(),
+                out: false,
+            },
+            CallArg {
+                pin: "ready".into(),
+                var: ready.into(),
+                out: true,
+            },
+        ];
+        Rung::new(Logic::Const { value: true }, coil)
+    };
+    // Only Pump1 starts, and Pump2 is called too: its body must stay idle.
+    let mut main = Pou::new("MAIN", linc_plc_core::PouLanguage::Ld);
+    main.sections = vec![Section {
+        name: "main".into(),
+        rungs: vec![
+            call("pump1", "start1", "ready1"),
+            call("pump2", "start2", "ready2"),
+        ],
+    }];
+    project.pous = vec![main, block];
+
+    let compiled = compile(&project).expect("two instances compile");
+    let mut vm = Vm::new(&compiled);
+    for _ in 0..12 {
+        vm.scan_with_dt(&[true, false], 10);
+    }
+    assert_eq!(
+        vm.outputs(),
+        &[true, false],
+        "Pump1 is ready and Pump2 was never started"
+    );
+    // The instance variables are two sets: the block's copies hold different values.
+    let values: Vec<(String, bool)> = vm
+        .snapshot()
+        .into_iter()
+        .filter(|var| var.name.starts_with("pump"))
+        .map(|var| (var.name, var.value))
+        .collect();
+    assert!(
+        values.contains(&("pump1.ready".to_string(), true))
+            && values.contains(&("pump2.ready".to_string(), false))
+            && values.contains(&("pump1.run".to_string(), true))
+            && values.contains(&("pump2.run".to_string(), false)),
+        "the two copies of the body hold their own values: {values:?}"
+    );
+}
+
 /// A TON holds its elapsed time while it reports done. A program that writes `ET`
 /// itself on the done scan (the reference corpus does: `MOV,0,StepTimer.ACC`) sees
 /// one scan where the timer still reports done and does not count, and only then

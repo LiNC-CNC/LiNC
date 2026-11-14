@@ -37,11 +37,11 @@
    "name": "motor-starters-function-block",
    "pous": 2,
    "rungs": 5,
-   "converted": false,
-   "blocker": "converter: the file also declares a function block body (MotorStarter); a user FB has no form yet",
+   "converted": true,
+   "blocker": null,
    "stimulus": true,
    "trace": true,
-   "runs": false
+   "runs": true
   },
   {
    "name": "recipes-data-type-ld",
@@ -57,11 +57,11 @@
    "name": "silo-function-block",
    "pous": 2,
    "rungs": 8,
-   "converted": false,
-   "blocker": "converter: the file also declares a function block body (FillStation); a user FB has no form yet",
+   "converted": true,
+   "blocker": null,
    "stimulus": true,
    "trace": true,
-   "runs": false
+   "runs": true
   },
   {
    "name": "silo",

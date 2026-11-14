@@ -75,6 +75,14 @@ pub struct Pou {
     pub name: String,
     #[serde(default)]
     pub language: PouLanguage,
+    /// A function block, or the program that runs on its own. A function block's
+    /// body runs once per instance, with `vars` as its formal parameters.
+    #[serde(default)]
+    pub kind: PouKind,
+    /// The POU's own variables: a function block's formal parameters (`#Start`) and
+    /// its private state. A program's variables are the project's, so this is empty.
+    #[serde(default)]
+    pub vars: Vec<VarDecl>,
     #[serde(default)]
     pub comment: String,
     /// Ladder body, used when `language` is `ld`.
@@ -93,6 +101,31 @@ pub struct Pou {
     /// still uses `fbd`.
     #[serde(default)]
     pub fbd_grid: Option<FbdGrid>,
+}
+
+/// What a POU is: the entry program, or a type a program instantiates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PouKind {
+    #[default]
+    Program,
+    /// A function block: a body whose variables belong to each instance, and which
+    /// a `CALL` runs with its pins bound.
+    FunctionBlock,
+}
+
+/// One argument of a call: a formal parameter and the operand bound to it.
+///
+/// An input is written before the body runs and an output after it, so the same
+/// struct carries both and the direction is the pin's, not the operand's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallArg {
+    pub pin: String,
+    pub var: String,
+    /// `true` for `=>`, which reads the pin after the body; `false` for `:=`, which
+    /// writes it before.
+    #[serde(default)]
+    pub out: bool,
 }
 
 /// The IEC 61131-3 languages a POU can be written in.
@@ -120,6 +153,8 @@ impl Pou {
         Self {
             name: name.into(),
             language,
+            kind: PouKind::Program,
+            vars: Vec::new(),
             comment: String::new(),
             sections: Vec::new(),
             il: Vec::new(),
@@ -363,6 +398,10 @@ pub struct VarDecl {
     pub retain: bool,
     #[serde(default)]
     pub comment: String,
+    /// A function block's pin direction: an input, an output, or an internal when it
+    /// is absent. A program's variables are all internal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction: Option<IoDirection>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -633,6 +672,11 @@ pub struct Coil {
     /// ignoring it.
     #[serde(default)]
     pub expr: Option<String>,
+    /// The pins a call binds: inputs written before the body runs, outputs read
+    /// after it. Only `CoilKind::Call` reads it, and it is empty for a call that
+    /// binds nothing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<CallArg>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -679,6 +723,8 @@ impl Project {
             vec![Pou {
                 name: "MAIN".to_string(),
                 language: PouLanguage::Ld,
+                kind: PouKind::Program,
+                vars: Vec::new(),
                 comment: self.description.clone(),
                 sections: self.sections.clone(),
                 il: Vec::new(),
@@ -806,6 +852,7 @@ impl VarDecl {
             init: Vec::new(),
             retain: false,
             comment: String::new(),
+            direction: None,
         }
     }
 
@@ -834,6 +881,7 @@ static BLANK_COIL: Coil = Coil {
     var: String::new(),
     kind: CoilKind::Normal,
     expr: None,
+    args: Vec::new(),
 };
 
 impl Rung {
@@ -935,6 +983,7 @@ impl Coil {
             var: var.into(),
             kind,
             expr: None,
+            args: Vec::new(),
         }
     }
 
@@ -944,6 +993,7 @@ impl Coil {
             var: String::new(),
             kind: CoilKind::Compute,
             expr: Some(expr.into()),
+            args: Vec::new(),
         }
     }
 }

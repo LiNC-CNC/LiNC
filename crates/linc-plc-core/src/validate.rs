@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::il::{parse_line, IlLine};
 use crate::model::{
-    FbdGrid, IoDirection, IoKind, Logic, PouLanguage, Project, Rung, Section, VarType,
+    FbdGrid, IoDirection, IoKind, Logic, PouLanguage, Project, Rung, Section, VarDecl, VarType,
 };
 use crate::profile::instr::{Ctx, Instr};
 use crate::profile::Profile;
@@ -40,6 +40,8 @@ struct Facts<'a> {
     io_kinds: &'a HashMap<&'a str, IoKind>,
     var_types: &'a HashMap<String, VarType>,
     word_vars: &'a [crate::profile::layout::WordVar],
+    instances: &'a HashMap<String, String>,
+    fb_vars: &'a HashMap<String, &'a [VarDecl]>,
     pou_names: &'a HashSet<String>,
     section_rungs: &'a [Rung],
     labels: &'a HashSet<String>,
@@ -56,6 +58,8 @@ impl Facts<'_> {
             io_kinds: self.io_kinds,
             var_types: self.var_types,
             word_vars: self.word_vars,
+            instances: self.instances,
+            fb_vars: self.fb_vars,
             pou_names: self.pou_names,
             section_rungs: self.section_rungs,
             labels: self.labels,
@@ -136,12 +140,25 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     for point in &project.io {
         io_kinds.insert(point.name.as_str(), point.kind);
     }
+    // Every POU, once: a function block names the type of its instances, so the
+    // declarations are read with the blocks in hand.
+    let pous = project.all_pous();
     // The declared types, by lowercased name: an operand's type decides which side
     // of the program it may be used on, and a structured declaration has no storage.
     let mut var_types: HashMap<String, VarType> = HashMap::with_capacity(project.vars.len());
     for (index, var) in project.vars.iter().enumerate() {
         var_types.insert(var.name.to_ascii_lowercase(), var.ty.clone());
-        if var.ty.is_structured() {
+        // A derived type that names one of the project's function blocks is an
+        // *instance*: it has data, one set per instance. Any other derived type is a
+        // structure this build cannot lay out.
+        let is_instance = match &var.ty {
+            VarType::Derived(name) => pous.iter().any(|pou| {
+                pou.kind == crate::model::PouKind::FunctionBlock
+                    && pou.name.eq_ignore_ascii_case(name)
+            }),
+            _ => false,
+        };
+        if var.ty.is_structured() && !is_instance {
             diagnostics.push(Diagnostic::error(
                 "var_type",
                 format!(
@@ -181,7 +198,6 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         ));
     }
 
-    let pous = project.all_pous();
     let pou_names: HashSet<String> = pous
         .iter()
         .map(|pou| pou.name.to_ascii_uppercase())
@@ -192,6 +208,25 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         .map(|point| point.name.to_ascii_lowercase())
         .chain(project.vars.iter().map(|var| var.name.to_ascii_lowercase()))
         .collect();
+    // A function block is a POU with its own variables, and a project variable whose
+    // type names one is an *instance* of it: its fields are operands in the programs
+    // that declare it.
+    let fb_vars: HashMap<String, &[VarDecl]> = pous
+        .iter()
+        .filter(|pou| pou.kind == crate::model::PouKind::FunctionBlock)
+        .map(|pou| (pou.name.to_ascii_uppercase(), pou.vars.as_slice()))
+        .collect();
+    let instances: HashMap<String, String> = project
+        .vars
+        .iter()
+        .filter_map(|var| match &var.ty {
+            VarType::Derived(name) if fb_vars.contains_key(&name.to_ascii_uppercase()) => {
+                Some((var.name.to_ascii_lowercase(), name.to_ascii_uppercase()))
+            }
+            _ => None,
+        })
+        .collect();
+
     for (index, pou) in pous.iter().enumerate() {
         match pou.language {
             PouLanguage::Ld => {}
@@ -220,6 +255,8 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     io_kinds: &io_kinds,
                     var_types: &var_types,
                     word_vars: &bank.vars,
+                    instances: &instances,
+                    fb_vars: &fb_vars,
                     pou_names: &pou_names,
                     section_rungs: &[],
                     labels: &labels,
@@ -259,6 +296,8 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                     io_kinds: &io_kinds,
                     var_types: &var_types,
                     word_vars: &bank.vars,
+                    instances: &instances,
+                    fb_vars: &fb_vars,
                     pou_names: &pou_names,
                     section_rungs: &[],
                     labels: &HashSet::new(),
@@ -303,6 +342,24 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 "POU name must not be empty",
                 format!("pous[{index}].name"),
             ));
+        }
+        // An instance's variables are bits today: a word pin would need a slot per
+        // instance in the bank, which is a later step.
+        if pou.kind == crate::model::PouKind::FunctionBlock {
+            for (var_index, var) in pou.vars.iter().enumerate() {
+                if !var.ty.is_bool() {
+                    diagnostics.push(Diagnostic::error(
+                        "fb_var_type",
+                        format!(
+                            "function block '{}' declares '{}' as {}; a block's variable is a BOOL for now",
+                            pou.name,
+                            var.name,
+                            var.ty.label()
+                        ),
+                        format!("pous[{index}].vars[{var_index}].ty"),
+                    ));
+                }
+            }
         }
     }
     // A call cycle is an error: inlining would stop at the depth guard and the
@@ -359,6 +416,10 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             if name == main.name.to_ascii_uppercase() {
                 continue;
             }
+            if pou.kind == crate::model::PouKind::FunctionBlock {
+                // A function block runs where it is instantiated, not on its own.
+                continue;
+            }
             let reached = calls
                 .get(&main.name.to_ascii_uppercase())
                 .map(|targets| targets.iter().any(|target| target == &name))
@@ -384,7 +445,31 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         }
     }
 
-    let sections: Vec<&Section> = pous.iter().flat_map(|pou| pou.sections.iter()).collect();
+    // What a body may name: the project's symbols, its own variables when it is a
+    // function block, and every instance's fields.
+    let mut per_pou_known: Vec<HashSet<String>> = Vec::with_capacity(pous.len());
+    for pou in &pous {
+        let mut known_here = known.clone();
+        for var in &pou.vars {
+            known_here.insert(var.name.to_ascii_lowercase());
+        }
+        for (instance, fb) in &instances {
+            if let Some(fields) = fb_vars.get(fb) {
+                for field in *fields {
+                    known_here.insert(format!("{instance}.{}", field.name.to_ascii_lowercase()));
+                }
+            }
+        }
+        per_pou_known.push(known_here);
+    }
+
+    let mut sections: Vec<(&Section, &HashSet<String>)> = Vec::new();
+    for (index, pou) in pous.iter().enumerate() {
+        let known_here = per_pou_known.get(index).unwrap_or(&known);
+        for section in &pou.sections {
+            sections.push((section, known_here));
+        }
+    }
 
     let edge_contacts = pous
         .iter()
@@ -423,7 +508,10 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         ));
     }
 
-    let rung_count: usize = sections.iter().map(|section| section.rungs.len()).sum();
+    let rung_count: usize = sections
+        .iter()
+        .map(|(section, _)| section.rungs.len())
+        .sum();
     if rung_count > MAX_RUNGS {
         diagnostics.push(Diagnostic::error(
             "too_large",
@@ -433,7 +521,9 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
     }
 
     let mut section_names: HashSet<&str> = HashSet::with_capacity(sections.len());
-    for (section_index, section) in sections.iter().enumerate() {
+    // A function block owns its variables, so its body's operands resolve against
+    // its own interface and the instance fields of the project.
+    for (section_index, (section, known)) in sections.iter().enumerate() {
         let section_path = format!("sections[{section_index}]");
         if section.name.trim().is_empty() {
             diagnostics.push(Diagnostic::error(
@@ -475,11 +565,13 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         let no_labels: HashSet<String> = HashSet::new();
         let facts = Facts {
             profile,
-            known: &known,
+            known,
             word_slots: &word_slots,
             io_kinds: &io_kinds,
             var_types: &var_types,
             word_vars: &bank.vars,
+            instances: &instances,
+            fb_vars: &fb_vars,
             pou_names: &pou_names,
             section_rungs: &section.rungs,
             labels: &no_labels,
@@ -594,6 +686,7 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                         kind: rung.coil().kind,
                         var: &rung.coil().var,
                         compute_cell,
+                        args: &rung.coil().args,
                     },
                     &ctx,
                 ));
@@ -630,11 +723,20 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             // A coil on a bit of a declared word writes that bit: it is a declared
             // target, checked against the word's declaration by the profile's rule
             // (which also reports an index past the bound).
-            let class = symbols.get(rung.coil().var.as_str()).copied().or_else(|| {
-                crate::profile::layout::word_bit(rung.coil().var.as_str(), &bank.vars)
-                    .ok()
-                    .map(|_| SymbolClass::Var)
-            });
+            let class = symbols
+                .get(rung.coil().var.as_str())
+                .copied()
+                // A function block's body writes its own variables.
+                .or_else(|| {
+                    known
+                        .contains(&rung.coil().var.to_ascii_lowercase())
+                        .then_some(SymbolClass::Var)
+                })
+                .or_else(|| {
+                    crate::profile::layout::word_bit(rung.coil().var.as_str(), &bank.vars)
+                        .ok()
+                        .map(|_| SymbolClass::Var)
+                });
             match class {
                 None => diagnostics.push(Diagnostic::error(
                     "unknown_symbol",

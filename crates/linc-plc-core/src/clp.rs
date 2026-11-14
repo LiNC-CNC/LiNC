@@ -801,6 +801,8 @@ fn import_members(members: &Members) -> Result<Project, Vec<Diagnostic>> {
             out.extend(mapped);
         }
         pous.push(Pou {
+            kind: crate::model::PouKind::Program,
+            vars: Vec::new(),
             name: pou_names[&position].clone(),
             language: PouLanguage::Ld,
             comment: String::new(),
